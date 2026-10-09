@@ -16,6 +16,7 @@
   .deal-note { margin: .1rem 0 .3rem; font-size: .85rem; }
   .deal-claude { margin-top: .4rem; }
   .deal-claude button { width: auto; margin: 0; padding: .35rem .85rem; font-size: .875rem; }
+  .deal-comp-box { margin: .4rem 0 0; } .deal-comp-box summary { font-size: .9rem; }
   table.deal-comp td.num { text-align: right; white-space: nowrap; }
   table.deal-comp tr.this td { font-weight: 700; background: var(--pico-card-sectioning-background-color); }
 </style>
@@ -60,7 +61,8 @@
   {% if not (compact and h and h.screen_relevant is not none) %}
     {% with q=res.asked_query or '', hit=(h.id if h else '') %}{% include "_deal_claude.html" %}{% endwith %}
   {% endif %}
-  {% if not compact and c.closest %}
+  {% if c.closest %}
+    {% if compact %}<details class="deal-comp-box" open><summary>{{ _("Comparable ads") }} ({{ c.closest|length }})</summary>{% endif %}
     <table class="deal-comp stack">
       <thead><tr><th>{{ _("Comparable ads") }}</th><th>{{ _("Location") }}</th><th class="num">{{ _("Price") }}</th></tr></thead>
       <tbody>
@@ -74,6 +76,7 @@
       {% if not ns.done %}<tr class="this"><td>→ {{ _("this ad") }}</td><td></td><td class="num">{{ ad.price|eur }}</td></tr>{% endif %}
       </tbody>
     </table>
+    {% if compact %}</details>{% endif %}
   {% endif %}
 </section>
 {% endif %}

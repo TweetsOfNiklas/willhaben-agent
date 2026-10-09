@@ -302,6 +302,8 @@ def test_viewer_has_lazy_price_section(app_client):
     assert "deal-track" in frag and "10 comparable ads" in frag and "fair" in frag
     assert 'href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html" target="_blank" rel="noopener"' in frag
     assert "New from € 139 on Geizhals" in frag and "Ask Claude" in frag
+    assert '<details class="deal-comp-box" open>' in frag and "Comparable ads" in frag   # list in the viewer too
+    assert "this ad" in frag
     assert app_client.fake.calls == []
     app_client.get(f"/hits/ad/{AD_ID}/deal")                     # reopening: no new requests
     assert app_client.calls == {"search": 1, "detail": 1}
