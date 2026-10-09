@@ -12,8 +12,8 @@
 <article>
   <header>{{ _("Setup") }}</header>
   <ul>
-    {% if not session_status.started %}<li>{{ _("Browser is not running.") }} {{ session_status.error or '' }} <a href="/session">{{ _("Start") }}</a></li>
-    {% elif not session_status.logged_in %}<li>{{ _("Not logged in to willhaben: chats and reactivation are inactive.") }} <a href="/session">{{ _("Log in now") }}</a></li>{% endif %}
+    {% if not session_status.started %}<li>{{ _("Browser is not running.") }} {{ session_status.error or '' }} <a href="/settings#willhaben">{{ _("Start") }}</a></li>
+    {% elif not session_status.logged_in %}<li>{{ _("Not logged in to willhaben: chats and reactivation are inactive.") }} <a href="/settings#willhaben">{{ _("Log in now") }}</a></li>{% endif %}
     {% if not llm_ok %}<li>{{ _("Claude is not signed in.") }} <a href="/settings#claude">{{ _("Sign in now") }}</a></li>{% endif %}
   </ul>
 </article>

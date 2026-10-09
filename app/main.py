@@ -758,41 +758,50 @@ async def ad_batch_image(batch_id: int, idx: int):
 
 # ------------------------------------------------------------------ session / capture
 @app.get("/session", response_class=HTMLResponse)
+def _session_back(next_url: str | None, msg: str | None = None) -> RedirectResponse:
+    """Back to where a session form was posted from (/session or Settings → willhaben account), with a message."""
+    url = next_url if next_url and next_url.startswith("/") and not next_url.startswith("//") else "/session"
+    path, _, frag = url.partition("#")
+    if msg:
+        path += ("&" if "?" in path else "?") + "msg=" + quote(msg, safe="")
+    return back(path + (f"#{frag}" if frag else ""))
+
+
 async def session_page(request: Request, msg: str | None = None):
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
     return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),
-                  label_form=label_fill.active())
+                  label_form=label_fill.active(), session_next="/session")
 
 
 @app.post("/session/start")
-async def session_start():
+async def session_start(next: str = Form("/session")):
     sess = get_session()
     if not sess.started:
         await sess.start()
-    return back("/session")
+    return _session_back(next)
 
 
 @app.post("/session/login")
-async def session_login():
+async def session_login(next: str = Form("/session")):
     try:
         await get_session().open_login()
     except SessionUnavailable as e:
-        return back(f"/session?msg={e}")
-    return back(f"/session?msg={quote(t('Login page opened in the browser window'), safe='')}")
+        return _session_back(next, str(e))
+    return _session_back(next, t('Login page opened in the browser window'))
 
 
 @app.post("/session/check")
-async def session_check():
+async def session_check(next: str = Form("/session")):
     ok = await get_session().check_login() if get_session().started else False
-    return back(f"/session?msg={quote(t('Logged in') if ok else t('Not logged in'), safe='')}")
+    return _session_back(next, t('Logged in') if ok else t('Not logged in'))
 
 
 @app.post("/session/open")
-async def session_open(url: str = Form(...)):
+async def session_open(url: str = Form(...), next: str = Form("/session")):
     if not url.startswith("https://www.willhaben.at/"):
-        return back(f"/session?msg={quote(t('Only willhaben.at URLs'), safe='')}")
+        return _session_back(next, t('Only willhaben.at URLs'))
     await get_session().open_url(url)
-    return back("/session")
+    return _session_back(next)
 
 
 @app.get("/session/screenshot.png")
@@ -825,18 +834,18 @@ async def session_input(payload: dict[str, Any]):
 
 
 @app.post("/session/capture/start")
-async def capture_start(label: str = Form("capture")):
+async def capture_start(label: str = Form("capture"), next: str = Form("/session")):
     try:
         get_session().start_capture(label.strip() or "capture")
     except SessionUnavailable as e:
-        return back(f"/session?msg={e}")
-    return back(f"/session?msg={quote(t('Recording in progress'), safe='')}")
+        return _session_back(next, str(e))
+    return _session_back(next, t('Recording in progress'))
 
 
 @app.post("/session/capture/stop")
-async def capture_stop():
+async def capture_stop(next: str = Form("/session")):
     path = await get_session().stop_capture()
-    return back(f"/session?msg={quote(t('Saved: {name}', name=path.name if path else '–'), safe='')}")
+    return _session_back(next, t('Saved: {name}', name=path.name if path else '–'))
 
 
 @app.get("/session/captures/{name}")
@@ -858,7 +867,9 @@ async def settings_page(request: Request, msg: str | None = None):
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
-                  ship=shipping.config(), ship_carriers=shipping.CARRIERS)
+                  ship=shipping.config(), ship_carriers=shipping.CARRIERS,
+                  captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
+                  label_form=label_fill.active(), session_next="/settings#willhaben")
 
 
 async def _gcal_ctx() -> dict[str, Any]:

@@ -60,15 +60,7 @@
     <section id="willhaben">
       <h4>{{ _("willhaben account") }}</h4>
       <p class="lead">{{ _("The app works in its own browser with your willhaben login.") }}</p>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-        <span>{% if session_status.logged_in %}<span class="badge ok">{{ _("logged in") }}</span>
-            {% if session_status.user %} {{ _("as") }} <strong>{{ session_status.user.nickname or session_status.user.email }}</strong>{% endif %}
-          {% elif not session_status.started %}<span class="badge muted">{{ _("browser off") }}</span>
-          {% else %}<span class="badge">{{ _("not logged in") }}</span>{% endif %}
-          <small class="muted">· {{ _("checked {t}", t=session_status.last_check|ago) }}</small></span>
-        <a href="/session" role="button" class="{{ 'secondary' if session_status.logged_in else '' }}" style="margin:0">
-          {{ _("Manage session") if session_status.logged_in else _("Log in to willhaben") }}</a>
-      </div>
+      {% include "_session_panel.html" %}
     </section>
 
     <section id="claude">

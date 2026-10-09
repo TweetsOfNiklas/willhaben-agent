@@ -2,7 +2,7 @@
 {% block content %}
 <h3>{{ _("Chats") }}</h3>
 {% if not session_status.logged_in %}
-<p class="msg">{{ _("Not logged in to willhaben.") }} <a href="/session">{{ _("Log in now") }}</a></p>
+<p class="msg">{{ _("Not logged in to willhaben.") }} <a href="/settings#willhaben">{{ _("Log in now") }}</a></p>
 {% endif %}
 {% set live = session_status.chat_live or {} %}
 <p><small>{{ _("Live connection to the willhaben chat:") }}

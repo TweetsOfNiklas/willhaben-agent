@@ -35,7 +35,7 @@
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="6" class="muted">{{ _("No own ads yet") }}{% if not session_status.logged_in %} – {{ _("first") }} <a href="/session">{{ _("log in to willhaben") }}</a>{% endif %}.</td></tr>
+  <tr><td colspan="6" class="muted">{{ _("No own ads yet") }}{% if not session_status.logged_in %} – {{ _("first") }} <a href="/settings#willhaben">{{ _("log in to willhaben") }}</a>{% endif %}.</td></tr>
   {% endfor %}
   </tbody>
 </table>
