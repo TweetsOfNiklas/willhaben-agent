@@ -25,6 +25,8 @@
     <div class="body">
       <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}">{{ h.heading }}</a>
       <div class="price">{{ h.price_display or (h.price|eur) }}{% if h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span>{% endif %}</div>
+      {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}<div class="meta" title="{{ _('Scam check (rules, no AI)') }}">⚠️
+        {% for f in scam_w %}<span class="badge"{% if f.severity == 'warn' %} style="background:#f08c00"{% endif %}>{{ f.label }}</span> {% endfor %}</div>{% endif %}
       {% if h.screen_relevant is not none %}<div class="meta" title="{{ h.screen_reason or '' }}">🤖
         {% if h.screen_relevant %}<span class="badge {{ 'ok' if h.screen_deal in ('great', 'good') else 'muted' }}">{{ deal_label(h.screen_deal) }}</span>
         {% else %}<span class="badge">{{ _("wrong item") }}</span>{% endif %} {{ (h.screen_reason or '')[:90] }}</div>{% endif %}

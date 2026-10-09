@@ -1,0 +1,21 @@
+{
+ "Bank details in the text": "Bankdaten im Text",
+ "Brand-new luxury item at a fraction of the price": "Neue Markenware zum Bruchteil des Preises",
+ "Courier delivery at a very low price": "Kurierversand zu sehr niedrigem Preis",
+ "Dealer ad, text says private sale": "Händleranzeige, Text sagt Privatverkauf",
+ "E-mail address in the text": "E-Mail-Adresse im Text",
+ "Foreign bank account (IBAN {cc})": "Ausländisches Konto (IBAN {cc})",
+ "Foreign phone number (+{cc})": "Ausländische Telefonnummer (+{cc})",
+ "Listed as private, text sounds like a dealer": "Als privat eingestellt, Text klingt nach Händler",
+ "Mentions WhatsApp/Telegram": "Erwähnt WhatsApp/Telegram",
+ "Payment in crypto": "Zahlung in Kryptowährung",
+ "Payment via {what}": "Zahlung über {what}",
+ "Phone number in the text": "Telefonnummer im Text",
+ "Prepayment only, no pickup": "Nur Vorauskasse, keine Abholung",
+ "Price only {pct} % of the usual {median} €": "Preis nur {pct} % vom Üblichen ({median} €)",
+ "Price {pct} % of the usual {median} €": "Preis {pct} % vom Üblichen ({median} €)",
+ "Scam check (rules, no AI)": "Betrugs-Check (Regeln, keine KI)",
+ "Seller abroad, delivery by courier": "Verkäufer im Ausland, Lieferung per Kurier",
+ "Shipping only, at a very low price": "Nur Versand, zu sehr niedrigem Preis",
+ "Wants contact outside willhaben": "Will Kontakt außerhalb von willhaben"
+}

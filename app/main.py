@@ -34,6 +34,7 @@ from app.services import ad_batch, ad_creator, chats, my_ads, screening
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import health
 from app.services import min_price as min_price_svc
+from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -153,6 +154,7 @@ def _eur(v: float | None) -> str:
 
 templates.env.filters.update(local=_local, ago=_ago, eur=_eur)
 templates.env.globals.update(deal_label=screening.deal_label)   # Claude verdict on hit cards
+templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, wh_limiter=willhaben_limiter,
                              wh_budget=lambda: get_settings().requests_per_hour)

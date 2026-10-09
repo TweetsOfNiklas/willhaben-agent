@@ -60,6 +60,7 @@ class Hit(SQLModel, table=True):
     screen_deal: str | None = None       # great | good | fair | overpriced | unknown
     screen_reason: str | None = None
     screen_at: datetime | None = None
+    scam_flags: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # app/services/scam.py
 
 
 class Conversation(SQLModel, table=True):

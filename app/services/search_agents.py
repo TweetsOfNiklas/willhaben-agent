@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from sqlmodel import select
 
 from app.config import get_settings
 from app.db import Hit, SearchAgent, session, utcnow
 from app.i18n import t
-from app.services import screening
+from app.services import scam, screening
 from app.services.notify import notify
 from app.willhaben.parse import AdSummary, describe_search, to_webapi_url
 from app.willhaben.public import WillhabenError, get_public
@@ -83,6 +84,7 @@ async def run_agent(agent_id: int) -> RunResult:
         agent = db.get(SearchAgent, agent_id)
         res.baseline = not agent.baseline_done
         existing = {h.ad_id: h for h in db.exec(select(Hit).where(Hit.agent_id == agent_id))}
+        scam_ctx = _scam_context(existing.values(), page.ads)
         for ad in page.ads:
             if not ad.ad_id:
                 continue
@@ -91,6 +93,7 @@ async def run_agent(agent_id: int) -> RunResult:
                 hit = Hit(agent_id=agent_id, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
                           state="seen" if res.baseline else "new")
                 _apply(hit, ad)
+                hit.scam_flags = scam.flags(hit, scam_ctx) or None   # before screening, which sees them too
                 db.add(hit)
                 existing[ad.ad_id] = hit
                 if not res.baseline:
@@ -101,6 +104,7 @@ async def run_agent(agent_id: int) -> RunResult:
             if prev_price is not None and ad.price is not None and ad.price < prev_price:
                 hit.price_dropped_at = utcnow()
                 hit.old_price = prev_price
+                hit.scam_flags = scam.flags(hit, scam_ctx) or None   # a new price can be a new red flag
                 if hit.state != "ignored":
                     res.price_drops.append(hit)
             if ad.is_bumped and prev_published and ad.published_at and ad.published_at > prev_published:
@@ -127,20 +131,21 @@ async def run_agent(agent_id: int) -> RunResult:
         pushed = set(good[:MAX_PUSH_PER_RUN])
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
-                await notify("hit", f"{name}: {h.price_display or ''}".strip(" :"), _hit_text(h),
+                await notify("hit", _scam_prefix(h) + f"{name}: {h.price_display or ''}".strip(" :"), _hit_text(h),
                              url=h.url, image=h.image_url, push=h.id in pushed,
                              data={"agent": name, "ad_id": h.ad_id, "price": h.price, "location": h.location,
-                                   **_screen_data(h)})
+                                   **_screen_data(h), **_scam_data(h)})
         if len(good) > MAX_PUSH_PER_RUN:
             await notify("hit", name, t("+{n} more new hits", n=len(good) - MAX_PUSH_PER_RUN),
                          data={"agent": name, "count": len(good)})
     if notify_drops:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
-            await notify("price_drop", t("{name}: price dropped", name=name),
-                         f"{h.heading}: {h.old_price:g} → {h.price:g} €" + _screen_line(h), url=h.url, image=h.image_url,
+            await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=name),
+                         f"{h.heading}: {h.old_price:g} → {h.price:g} €" + _scam_line(h) + _screen_line(h),
+                         url=h.url, image=h.image_url,
                          push=screening.passes(agent, h),
                          data={"agent": name, "ad_id": h.ad_id, "price": h.price, "old_price": h.old_price,
-                               **_screen_data(h)})
+                               **_screen_data(h), **_scam_data(h)})
     return res
 
 
@@ -150,7 +155,7 @@ def _screen_line(h: Hit) -> str:
 
 
 def _hit_text(h: Hit) -> str:
-    return f"{h.heading} ({h.location or '?'})" + _screen_line(h)
+    return f"{h.heading} ({h.location or '?'})" + _scam_line(h) + _screen_line(h)
 
 
 def _screen_data(h: Hit) -> dict:
@@ -158,3 +163,28 @@ def _screen_data(h: Hit) -> dict:
     if h.screen_relevant is None:
         return {}
     return {"screen_relevant": h.screen_relevant, "screen_deal": h.screen_deal, "screen_reason": h.screen_reason}
+
+
+def _scam_context(hits, ads) -> dict:
+    """Agent price median for the scam check: recent stored hits plus this page (newest price per ad)."""
+    since = (utcnow() - timedelta(days=scam.CONTEXT_DAYS)).replace(tzinfo=None)   # SQLite gives naive UTC
+    prices = {h.ad_id: h.price for h in hits if h.screen_relevant is not False
+              and (h.first_seen_at is None or h.first_seen_at.replace(tzinfo=None) >= since)}
+    rejected = {h.ad_id for h in hits if h.screen_relevant is False}
+    prices.update({a.ad_id: a.price for a in ads if a.ad_id and a.ad_id not in rejected})
+    return scam.median_context(list(prices.values()))
+
+
+def _scam_prefix(h: Hit) -> str:
+    return "⚠️ " if scam.warnings(h.scam_flags) else ""
+
+
+def _scam_line(h: Hit) -> str:
+    top = scam.headline(h.scam_flags)
+    return f"\n⚠️ {top}" if top else ""
+
+
+def _scam_data(h: Hit) -> dict:
+    """Scam flag codes in the HA event (warn/high only), so automations can filter on them."""
+    w = scam.warnings(h.scam_flags)
+    return {"scam_flags": [f["code"] for f in w], "scam_level": scam.level(w)} if w else {}
