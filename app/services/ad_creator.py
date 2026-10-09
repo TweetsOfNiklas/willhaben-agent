@@ -107,7 +107,22 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
         db.refresh(d)
     if ((gh or {}).get("match") or {}).get("specs"):
         d = await reconcile_with_geizhals(d.id)
+        d = attach_specs_if_wanted(d.id)
     return d
+
+
+def auto_specs() -> bool:
+    """Setting: always attach the Geizhals spec sheet to the description when a product was found."""
+    return get_setting("geizhals_auto_specs") == "1"
+
+
+def attach_specs_if_wanted(draft_id: int, force: bool = False) -> AdDraft:
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    block = geizhals.spec_block((d.geizhals or {}).get("match"))
+    if not block or not (force or auto_specs()) or block in (d.description or ""):
+        return d
+    return update_draft(draft_id, description=f"{(d.description or '').rstrip()}\n\n{block}")
 
 
 def update_draft(draft_id: int, **fields: Any) -> AdDraft:
@@ -161,13 +176,17 @@ async def choose_geizhals(draft_id: int, url: str) -> AdDraft:
     with session() as db:
         d = db.get(AdDraft, draft_id)
         gh = dict(d.geizhals or {"query": d.product_query, "candidates": []})
+        old_block = geizhals.spec_block(gh.get("match"))
+        had_block = bool(old_block) and old_block in (d.description or "")
+        if had_block:                      # the sheet of the previous product goes; the new one replaces it
+            d.description = (d.description or "").replace(old_block, "").rstrip()
         gh["match"] = asdict(prod)
         gh.pop("error", None)
         d.geizhals = gh
         db.add(d)
         db.commit()
         db.refresh(d)
-    return d
+    return attach_specs_if_wanted(draft_id, force=had_block)
 
 
 async def search_geizhals(draft_id: int, query: str) -> AdDraft:

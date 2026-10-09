@@ -376,6 +376,13 @@
       <label>{{ _("Rules for replies and listings") }}
         <textarea name="reply_rules" form="general" rows="10">{{ values.reply_rules }}</textarea></label>
       <button type="submit" form="general" formaction="/settings#rules">{{ _("Save") }}</button>
+      <form method="post" action="/settings/listings" style="margin-top:1.2rem">
+        <label><input type="checkbox" role="switch" name="geizhals_auto_specs" onchange="this.form.submit()"
+          {% if geizhals_auto_specs %}checked{% endif %}>
+          {{ _("Always add the Geizhals spec sheet to new listings when the product is found") }}</label>
+        <small class="muted">{{ _("Otherwise you tick it per draft. The sheet is the manufacturer data from Geizhals, appended below the description.") }}</small>
+        <noscript><button class="secondary">{{ _("Save") }}</button></noscript>
+      </form>
     </section>
 
     <section id="chats">

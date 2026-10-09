@@ -1105,6 +1105,7 @@ async def settings_page(request: Request, msg: str | None = None):
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
+                  geizhals_auto_specs=ad_creator.auto_specs(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel())
 
@@ -1374,6 +1375,12 @@ async def settings_shipping(request: Request):
     shipping.save_carriers([str(c) for c in f.getlist("carrier")])
     set_setting("ship_detect", "1" if f.get("detect") else "0")
     return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+
+
+@app.post("/settings/listings")
+async def settings_listings(geizhals_auto_specs: str | None = Form(None)):
+    set_setting("geizhals_auto_specs", "1" if geizhals_auto_specs else "0")
+    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#rules")
 
 
 @app.post("/settings/shipping/login/{carrier}")
