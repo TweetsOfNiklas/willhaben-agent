@@ -11,6 +11,8 @@ It runs on your own server, from your home internet connection, and you control 
 - **Create ads quickly**: drop in notes and photos and Claude writes the title, description and category. You also get
   a price suggestion from comparable listings and the product's spec sheet from Geizhals. Upload photos of several
   items at once and Claude sorts them into one draft per item.
+- **Price check**: paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
+  green-to-red bar against comparable listings, the Geizhals new price and, on click, Claude's verdict. Also in the hit viewer.
 - **Your ads**: imported from your account, with a reminder before they expire.
 - **Notifications** through Home Assistant: events plus phone pushes with action buttons
   (send / revise with Claude / discard).

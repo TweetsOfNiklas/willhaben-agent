@@ -1777,3 +1777,7 @@ async def api_convert(url: str):
         return {"webapi_url": to_webapi_url(url)}
     except InvalidSearchUrl as e:
         raise HTTPException(400, str(e)) from e
+
+
+from app import deals_web  # noqa: E402  Preischeck tab (/deals) + price section of the ad viewer
+deals_web.install(app, templates)
