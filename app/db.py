@@ -192,7 +192,7 @@ class AdBatch(SQLModel, table=True):
 
 
 class DealCheck(SQLModel, table=True):
-    """Price check of one ad (Preischeck page / ad viewer): last analysis and Claude's verdict, one row per ad."""
+    """Price check of one ad (Produktsuche tab / ad viewer): last analysis and Claude's verdict, one row per ad."""
     ad_id: str = Field(primary_key=True)
     title: str | None = None
     price: float | None = None
@@ -203,6 +203,26 @@ class DealCheck(SQLModel, table=True):
     result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # deals.analyze() output
     claude: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {deal, reason, model, at}
     checked_at: datetime | None = Field(default_factory=utcnow, index=True)
+
+
+class ProductSearch(SQLModel, table=True):
+    """Claude product search (Produktsuche tab): description -> planned willhaben searches -> ranked offers."""
+    id: int | None = Field(default=None, primary_key=True)
+    description: str = ""
+    settings: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {depth, unusual, categories, sort}
+    status: str = "planning"            # planning | searching | ranking | done | error
+    plan: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))       # summary, max_price, criteria, queries
+    queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # per query: found, error
+    results: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # ranked offers
+    progress: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {done, total}
+    requests: int | None = None         # willhaben searches this run sent
+    candidates: int | None = None
+    note: str | None = None             # Claude's overall remark
+    warning: str | None = None          # e.g. stopped early after a willhaben block
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class TelegramAction(SQLModel, table=True):

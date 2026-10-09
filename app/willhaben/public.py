@@ -37,7 +37,10 @@ class WillhabenError(RuntimeError):
 
 
 class Blocked(WillhabenError):
-    """403/429: willhaben is throttling or blocking this IP."""
+    """403/429: willhaben is throttling or blocking this IP. `sent` is True when willhaben answered
+    (the request went out), False when the shared limiter refused it before sending."""
+
+    sent = False
 
 
 class RateLimiter:
@@ -165,7 +168,9 @@ class PublicClient:
         if r.status_code in (403, 429):
             self.new_anonymous_session()        # don't keep presenting the visitor that just got blocked
             delay = self.limiter.penalize()
-            raise Blocked(t("willhaben responded {status}; pausing {s}s", status=r.status_code, s=f"{delay:.0f}"))
+            blocked = Blocked(t("willhaben responded {status}; pausing {s}s", status=r.status_code, s=f"{delay:.0f}"))
+            blocked.sent = True
+            raise blocked
         self.limiter.reward()
         if cache_s and r.status_code in (200, 404):
             now = time.monotonic()

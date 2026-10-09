@@ -1,0 +1,21 @@
+{# "Recent searches" list; the finished search's polled fragment re-sends it out of band (ps_oob) so status and buttons refresh. #}
+<div id="ps-recent-box"{% if ps_oob %} hx-swap-oob="true"{% endif %}>
+{% if ps_recent %}
+  <details class="ps-recent" {% if not ps %}open{% endif %}>
+    <summary><strong>{{ _("Recent searches") }}</strong></summary>
+    <table class="stack">
+      <tbody>
+      {% for s in ps_recent %}
+        <tr>
+          <td><a href="/deals?search={{ s.id }}#ps-result">{{ s.description|truncate(90) }}</a></td>
+          <td><small>{% if ps_is_running(s) %}⏳ {{ _("running") }}{% elif s.status == 'done' %}{{ _("{n} offers", n=(s.results or [])|length) }}{% else %}⚠️ {{ _("failed") }}{% endif %}</small></td>
+          <td><small class="muted">{{ (s.started_at or s.created_at)|ago }}</small></td>
+          <td>{% if not ps_is_running(s) %}<form method="post" action="/deals/search/{{ s.id }}/rerun" style="margin:0">
+                <button type="submit" class="secondary outline ps-small" {% if ps_running %}disabled{% endif %}>↻ {{ _("Run again") }}</button></form>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+{% endif %}
+</div>

@@ -1,6 +1,45 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>{{ _("Price check") }}</h3>
+<h3>{{ _("Product search") }}</h3>
+{% if ps_msg %}<p class="ps-warn">{{ ps_msg }}</p>{% endif %}
+<form method="post" action="/deals/search" class="ps-form">
+  <label for="ps-desc"><strong>{{ _("What are you looking for?") }}</strong></label>
+  <textarea id="ps-desc" name="description" rows="3" maxlength="2000" required
+            placeholder="{{ _('Describe what you need: item, size, budget, condition, where you can pick it up – e.g. a quiet dishwasher, 60 cm wide, up to € 300, pickup around Vienna, no dealers') }}"></textarea>
+  <div class="ps-opts">
+    <label title="{{ _('Misspellings, nicknames, abbreviations, German/English and older model names, generic descriptions – where deals hide') }}">
+      <input type="checkbox" role="switch" name="unusual" value="1"> {{ _("Extended: unusual names") }}</label>
+    <label title="{{ _('Mis-categorised listings, bundles and lots that contain the item, neighbouring categories') }}">
+      <input type="checkbox" role="switch" name="categories" value="1"> {{ _("Extended: other categories") }}</label>
+    <label>{{ _("Depth") }}
+      <select name="depth" id="ps-depth">
+        <option value="normal" data-n="{{ ps_depths.normal }}">{{ _("Normal (≈{n} searches)", n=ps_depths.normal) }}</option>
+        <option value="thorough" data-n="{{ ps_depths.thorough }}">{{ _("Thorough (≈{n})", n=ps_depths.thorough) }}</option>
+        <option value="deep" data-n="{{ ps_depths.deep }}">{{ _("Deep (≈{n})", n=ps_depths.deep) }}</option>
+      </select></label>
+    <label>{{ _("Order") }}
+      <select name="sort">
+        <option value="relevance">{{ _("Relevance") }}</option>
+        <option value="newest">{{ _("Newest first") }}</option>
+      </select></label>
+  </div>
+  <p class="ps-est"><small class="muted">{{ _("Costs up to") }} <strong id="ps-n">{{ ps_depths.normal }}</strong>
+    {{ _("willhaben requests (one per search; {used} of {budget} used in the last hour)", used=wh_limiter().last_hour, budget=wh_budget()) }}
+    · {{ _("Claude is called {n} times (plan + ranking).", n=ps_claude_calls) }}</small></p>
+  <button type="submit" id="ps-submit" {% if ps_running %}disabled title="{{ _('A product search is still running – wait for it to finish.') }}"{% endif %}>🔎 {{ _("Search") }}</button>
+</form>
+<script>
+  (() => {
+    const sel = document.getElementById('ps-depth'), out = document.getElementById('ps-n');
+    sel.addEventListener('change', () => { out.textContent = sel.selectedOptions[0].dataset.n; });
+  })();
+</script>
+
+<div id="ps-result">{% if ps %}{% include "_product_search.html" %}{% endif %}</div>
+
+{% include "_product_search_recent.html" %}
+
+<h4 style="margin-top:1.5rem">{{ _("Check a single ad's price") }}</h4>
 <form method="get" action="/deals" class="builder-search" role="search">
   <input type="search" name="q" value="{{ q }}" required aria-label="{{ _('willhaben link, ad id or search text') }}"
          placeholder="{{ _('willhaben link, ad id or search text, e.g. iPhone 13 128GB') }}">
@@ -91,5 +130,25 @@
   .card .actions [role=button] { flex: 1 1 auto; padding: .42rem .9rem; font-size: .875rem; text-align: center; }
   .adv-info form.builder-search input { font-size: .9rem; }
   .adv-info form.builder-search button { padding: .42rem .9rem; font-size: .875rem; }
+  .ps-form textarea { margin-bottom: .5rem; }
+  .ps-opts { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; align-items: center; }
+  .ps-opts label { margin: 0; display: flex; align-items: center; gap: .4rem; }
+  .ps-opts select { width: auto; margin: 0; padding-top: .3rem; padding-bottom: .3rem; }
+  .ps-est { margin: .5rem 0; }
+  .ps-form button[type=submit] { width: auto; }
+  .ps { margin-top: 1rem; }
+  .ps-head { margin-bottom: .6rem; } .ps-desc { margin: .3rem 0 0; font-style: italic; }
+  .ps-warn { padding: .5rem .7rem; border-left: 3px solid #f08c00; background: var(--pico-card-sectioning-background-color); }
+  .ps-fit { display: inline-block; padding: .05rem .5rem; border-radius: 1em; font-size: .75rem; font-weight: 700; color: #fff; }
+  .ps-fit.hi { background: #2f9e44; } .ps-fit.mid { background: #e8a600; color: #222; } .ps-fit.lo { background: var(--pico-muted-color); }
+  .ps-bar { position: relative; margin: .15rem .2rem .1rem; }
+  .ps-bar .deal-track { height: .45rem; border-radius: .3rem; background: linear-gradient(90deg, #2f9e44 0%, #94c11f 28%, #f5c400 50%, #f76707 75%, #e5484d 100%); }
+  .ps-bar .deal-needle { position: absolute; top: -.2rem; width: 4px; height: .85rem; margin-left: -2px; border-radius: 2px;
+                         background: var(--pico-color); box-shadow: 0 0 0 2px var(--pico-background-color); }
+  .ps-reason { margin: .2rem 0; font-size: .85rem; }
+  .ps-card .actions { flex-wrap: wrap; }
+  .ps-wh { padding: 0 .7rem .5rem; }
+  .ps-queries { margin-top: 1rem; }
+  .ps-foot form { margin: 0; } .ps-foot button, .ps-small { width: auto; margin: 0; padding: .3rem .8rem; font-size: .85rem; }
 </style>
 {% endblock %}

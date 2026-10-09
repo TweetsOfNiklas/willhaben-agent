@@ -48,6 +48,7 @@ PURPOSES = {
     "chat": ("llm_model_chat", _("Chat replies"), _("reply drafts for willhaben messages")),
     "ads": ("llm_model_ads", _("Creating listings"), _("title, description and category from notes and photos")),
     "screen": ("llm_model_screen", _("Screening search hits"), _("right item? good deal? – runs for every new hit, a fast model is enough")),
+    "search": ("llm_model_search", _("Product search"), _("plans willhaben searches from your description and picks the best offers – two calls per search")),
 }
 
 

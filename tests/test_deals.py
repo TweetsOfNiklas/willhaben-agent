@@ -327,7 +327,7 @@ def test_viewer_keeps_screening_and_uses_agent_keyword(app_client, wh):
 
 def test_deals_pages_and_claude_on_post(app_client):
     page = app_client.get("/deals")
-    assert page.status_code == 200 and "Price check" in page.text and "up to 4 willhaben/Geizhals requests" in page.text
+    assert page.status_code == 200 and "Product search" in page.text and "up to 4 willhaben/Geizhals requests" in page.text
     assert 'href="/deals"' in page.text                          # nav tab
 
     r = app_client.get("/deals", params={"q": f"https://www.willhaben.at/iad/kaufen-und-verkaufen/d/bosch-{AD_ID}/"},
@@ -357,7 +357,7 @@ def test_deals_page_german(app_client):
     from app.db import set_setting
     set_setting("ui_lang", "de")
     page = app_client.get("/deals").text
-    assert "Preischeck" in page and "Claude wird nur auf Klick gefragt" in page
+    assert "Produktsuche" in page and "Claude wird nur auf Klick gefragt" in page
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
     assert "Neu ab € 139 auf Geizhals" in frag and "vergleichbare Anzeigen" in frag
 
