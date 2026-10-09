@@ -319,6 +319,8 @@ def _auto_ad(conv: Conversation) -> MyAd | None:
         return None
     with session() as db:
         ad = db.get(MyAd, conv.ad_id)
+    if ad and "sold" in (ad.sale_status, ad.status):
+        return None   # sold: no automatic answers to further buyers (the sold workflow offers a polite "sold" draft)
     return ad if ad and ad.auto_reply else None
 
 

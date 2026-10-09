@@ -14,6 +14,17 @@
       <small class="muted">{{ _("Role: {role}", role={'seller': _('I am selling'), 'buyer': _('I am buying')}.get(conv.role, _('unknown'))) }}</small>
     </article>
     {% endif %}
+    {% if conv.role == 'seller' and conv.ad_id %}
+    <article id="sale">
+      {% if sale %}<p><span class="badge {{ 'ok' if sale.is_buyer else 'muted' }}">{{ _("sold") if sale.kind == 'sold' else _("reserved") }}</span>
+        <small class="muted">{% if sale.is_buyer %}{{ _("to this buyer") }}{% elif sale.kind == 'sold' %}{{ _("No automatic answers in this chat any more.") }}{% endif %}</small></p>{% endif %}
+      <div class="row-actions">
+        <a role="button" class="secondary outline" href="/sold/{{ conv.ad_id }}?kind=sold&buyer={{ conv.id }}">{{ _("Sold to {name}", name=conv.partner_name or _('unknown')) }}</a>
+        <a role="button" class="secondary outline" href="/sold/{{ conv.ad_id }}?kind=reserved&buyer={{ conv.id }}">{{ _("Reserved for {name}", name=conv.partner_name or _('unknown')) }}</a>
+      </div>
+      <small class="muted">{{ _("Next page: mark it on willhaben, tell the other buyers, switch off automatic answers – each step only on your click.") }}</small>
+    </article>
+    {% endif %}
     {% if gcal_on %}
     <article id="meetup">
       {% if meetup and meetup.event_id %}

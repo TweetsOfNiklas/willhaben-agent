@@ -87,6 +87,7 @@ Response: `rowsFound`, `rowsReturned`, `advertSummaryList.advertSummary[]`. Each
 | Send reply | REST: ? — sent via the chat WebSocket instead, see below | V (WebSocket) |
 | My ads (list, status) | no JSON call: `GET /iad/myprofile/myadverts` (HTML) → `__NEXT_DATA__.props.pageProps.initialUserAdsList.verticalList[].advertDetails[]` with `id`, `description` (title), `startDate`, `endDate`, `advertStatus{id,description}`, `advertEditStatusActionsList` | V |
 | Extend / reactivate ad | ? | ? |
+| Mark sold / reserved / unreserve | `PUT /webapi/<serviceName><relativePath>` of the ad's my-adverts links `setAdSold` / `markAdReserved` / `removeMarkAdReserved`, no body; sold reason first via `/webapi/iad/soldreasons?adId=` (see below) | V (bundle), needs live verification |
 | Create ad (categories, attributes, image upload, publish) | entry point `/iad/anzeigenaufgabe` ("Anzeige aufgeben", place an ad) | ? |
 
 Conversation list fields according to willmehr: `conversations[]` or `data[]` with `id`/`conversationId`,
@@ -124,3 +125,30 @@ No REST call: the web app sends via the chat WebSocket `wss://chat-realtime-web.
 - Deep link to a conversation: `/iad/myprofile/chat/<conversation_id>` (Next route `[[...slug]]`).
 
 The app verifies every sent message via `GET chat-api/v1/conversations/{id}/messages` (`client_message_id`).
+
+## Mark as sold / reserved (from the my-adverts bundle, 2026-10-09)
+
+Read in the public `/bbx-adin` chunk `pages/iad/myprofile/myadverts` (buildId `1058731-20d7e775`), helper module
+60775 and the shared fetch wrapper 43396 (browser base `/webapi`, `Accept: application/json`, `X-WH-Client`, CSRF
+header on non-GET). **V** (bundle) — **needs live verification** (no call made yet; response shapes unseen).
+
+- The actions are context links of each ad in the my-adverts list:
+  `advertEditStatusActionsList.contextLinkList.contextLink[] = {id, serviceName, relativePath, uri}`. The page calls
+  `fetch("/webapi/" + serviceName + relativePath)`, so the path is taken from the link, never built by hand.
+  Link ids (enum in chunk 1730): `1` edit, `2` deactivate, `3` delete, `4` activate, `6` republish,
+  `setAdSold`, `markAdReserved`, `removeMarkAdReserved`, `changeDeliveryOptions`, bulk ids.
+- **Sold** ("Auf verkauft setzen"): `PUT /webapi/<svc><setAdSold.relativePath>` (seen: `/bap/sold/{id}`), no body.
+  Before it, only when the ad has a non-empty `deleteReasonQueryParameter`, the dialog loads
+  `GET /webapi/iad/soldreasons?adId={id}` → `{soldReasons: [{soldReasonId, description, playAnimation}], header,
+  actionHeader, acceptButtonText, footer, banner}`; a reason is a required field and is posted first:
+  `POST /webapi/iad/soldreasons?adId={id}` with `{"soldReasonId": "<id as string>"}` (the radio value).
+  Irreversible: "Auf verkauft gesetzte Anzeigen können nicht wieder aktiviert oder neu veröffentlicht werden." No undo link.
+- **Reserved** ("Als reserviert markieren"): `PUT /webapi/<svc><markAdReserved.relativePath>` (seen:
+  `/bap/updatesalesinfo/{id}/5`), no body. **Undo**: same with `removeMarkAdReserved`. Reserved ads have
+  `advertStatus.id == "reserved"` (badge with `advertStatus.description`).
+- Status enums in the bundle: `advertStatus.id` ∈ sold, passive, active, expired, deactivated, deleted, rented,
+  given_away, reserved; `statusId` = main×10 + sub (main 12 = SOLD).
+- The ad editor JSON (`GET /webapi/iad/bap/{id}`) has only `selfLinkActivate`/`selfLinkDelete`/`selfLinkSave`/…, no sold link.
+
+Used by `app/willhaben/sales.py` (always after a click + confirm on `/sold/{ad_id}`).
+

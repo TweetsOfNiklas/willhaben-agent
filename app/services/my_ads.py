@@ -176,7 +176,7 @@ async def import_from_account() -> set[str]:
             previous = row.status
             row.heading = ad.heading or row.heading
             row.url, row.image_url = ad.url, ad.image_url or row.image_url
-            row.status = ad.status if ad.status in ("active", "expired") else ad.status_label or ad.status
+            row.status = ad.status if ad.status in ("active", "expired", "sold", "reserved") else ad.status_label or ad.status
             row.published_at, row.end_date = ad.start or row.published_at, ad.end or row.end_date
             row.last_checked_at, row.last_error = utcnow(), None
             db.add(row)
@@ -207,7 +207,9 @@ async def check(ad_id: str) -> MyAd | None:
         if row is None:
             return None
         previous = row.status
-        if detail is None:
+        if previous == "sold":
+            pass            # sold on willhaben: the public page only says "gone", keep the better status
+        elif detail is None:
             row.status = "expired"
         else:
             row.status = "active" if detail.status == "active" else "expired"

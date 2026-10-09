@@ -1,0 +1,214 @@
+""""Sold" / "Reserved" workflow for an own ad (page /sold/{ad_id}, reached from the chat page and My ads).
+
+Three independent steps, each one optional and each one only on an explicit click (+ confirm in the browser):
+  1. willhaben: mark the ad as sold or reserved (app/willhaben/sales.py; needs live verification), undo "reserved"
+  2. the other buyers: polite "already sold" / "reserved" reply drafts for the other conversations about the ad,
+     sent only via chats.send_draft after "Send selected" (+ confirm)
+  3. here: automatic answers off for the ad (instructions kept) and the local sale status set
+     (MyAd.sale_status; a sold ad never gets automatic answers again, see chats._auto_ad)
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+from sqlmodel import col, select
+
+from app.db import Conversation, Draft, Message, MyAd, session, utcnow
+from app.i18n import t
+from app.services import chats
+from app.willhaben import sales
+from app.willhaben.session import get_session
+
+log = logging.getLogger(__name__)
+
+KINDS = ("sold", "reserved")
+NOTICE_INTENTS = {"sold": "sold_notice", "reserved": "reserved_notice"}
+
+# German on purpose: these texts go to buyers (editable before sending)
+NOTICE_TEXT = {
+    "sold": "Hallo{name}, danke für dein Interesse! Der Artikel ist leider schon verkauft. Liebe Grüße",
+    "reserved": ("Hallo{name}, danke für dein Interesse! Der Artikel ist gerade reserviert. "
+                 "Falls es nicht klappt, melde ich mich bei dir. Liebe Grüße"),
+}
+# German on purpose: hint for Claude (chats.draft_reply) when the owner wants a written-out answer
+NOTICE_HINT = {
+    "sold": ("Der Artikel ist bereits an jemand anderen verkauft. Sag kurz und freundlich ab und bedank dich für das "
+             "Interesse. Keine Fragen stellen, nichts anderes anbieten."),
+    "reserved": ("Der Artikel ist gerade für jemand anderen reserviert. Sag das kurz und freundlich und biete an, "
+                 "dich zu melden, falls es nicht klappt. Keine Fragen stellen."),
+}
+
+
+def kind_of(value: str | None) -> str:
+    return value if value in KINDS else "sold"
+
+
+def notice_text(kind: str, partner: str | None) -> str:
+    name = (partner or "").strip()
+    return NOTICE_TEXT[kind_of(kind)].format(name=f" {name}" if name else "")
+
+
+def ad_row(ad_id: str) -> MyAd | None:
+    with session() as db:
+        return db.get(MyAd, ad_id)
+
+
+def seller_conversations(ad_id: str) -> list[Conversation]:
+    with session() as db:
+        return list(db.exec(select(Conversation).where(Conversation.ad_id == ad_id, Conversation.role == "seller")
+                            .order_by(col(Conversation.last_message_at).desc().nulls_last())))
+
+
+def title_of(ad_id: str) -> str:
+    ad = ad_row(ad_id)
+    if ad and ad.heading:
+        return ad.heading
+    conv = next(iter(seller_conversations(ad_id)), None)
+    return (conv.ad_title if conv else None) or ad_id
+
+
+@dataclass
+class Other:
+    conv: Conversation
+    last_in: str | None          # the buyer's latest message
+    informed: bool               # a sold/reserved notice was already sent in this chat
+    draft: Draft | None          # open notice draft, if any
+
+
+def others(ad_id: str, buyer: str | None) -> list[Other]:
+    """The other buyers' conversations about this ad (everyone except the buyer it was sold/reserved to)."""
+    out = []
+    with session() as db:
+        for conv in seller_conversations(ad_id):
+            if conv.id == buyer:
+                continue
+            msgs = list(db.exec(select(Message).where(Message.conversation_id == conv.id, Message.direction == "in")
+                                .order_by(col(Message.created_at).desc().nulls_last()).limit(1)))
+            notices = list(db.exec(select(Draft).where(Draft.conversation_id == conv.id,
+                                                       col(Draft.intent).in_(list(NOTICE_INTENTS.values())))
+                                   .order_by(col(Draft.created_at).desc())))
+            out.append(Other(conv=conv, last_in=msgs[0].text if msgs else conv.last_message_text,
+                             informed=any(d.status == "sent" for d in notices),
+                             draft=next((d for d in notices if d.status == "draft"), None)))
+    return out
+
+
+# ------------------------------------------------------------------ step 1: willhaben (writes, after confirm)
+async def on_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: str | None = None) -> str:
+    """Mark sold / reserved (or remove "reserved") on willhaben. Raises sales.ReasonRequired, NotOffered, ..."""
+    s = get_session()
+    if kind_of(kind) == "sold":
+        if undo:
+            raise sales.NotOffered(t('willhaben cannot undo "sold".'))
+        await sales.mark_sold(s, ad_id, reason_id)
+        status, msg = "sold", t("Marked as sold on willhaben")
+    else:
+        await sales.mark_reserved(s, ad_id, on=not undo)
+        status, msg = ("active", t("Reservation removed on willhaben")) if undo else ("reserved", t("Marked as reserved on willhaben"))
+    with session() as db:
+        row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
+        row.status, row.last_action, row.last_error = status, msg, None
+        db.add(row)
+        db.commit()
+    return msg
+
+
+# ------------------------------------------------------------------ step 2: notices to the other buyers
+async def prepare_notices(ad_id: str, kind: str, conversation_ids: list[str], *, buyer: str | None = None,
+                          use_claude: bool = False) -> tuple[int, list[str]]:
+    """One notice draft per chosen conversation (replacing an unsent one). Nothing is sent here."""
+    kind = kind_of(kind)
+    allowed = {o.conv.id: o for o in others(ad_id, buyer)}
+    made, errors = 0, []
+    for cid in conversation_ids:
+        o = allowed.get(cid)
+        if o is None:
+            continue                     # not a conversation about this ad (or the buyer's own)
+        if o.draft is not None:
+            chats.discard_draft(o.draft.id)
+        if use_claude:
+            try:
+                d = await chats.draft_reply(cid, hint=NOTICE_HINT[kind])
+            except Exception as e:  # noqa: BLE001 - one failed draft must not stop the others
+                errors.append(f"{o.conv.partner_name or cid}: {e}")
+                continue
+            with session() as db:
+                row = db.get(Draft, d.id)
+                row.intent = NOTICE_INTENTS[kind]
+                db.add(row)
+                db.commit()
+        else:
+            with session() as db:
+                db.add(Draft(conversation_id=cid, text=notice_text(kind, o.conv.partner_name),
+                             intent=NOTICE_INTENTS[kind], model="template"))
+                db.commit()
+        made += 1
+    return made, errors
+
+
+async def send_notices(ad_id: str, items: list[tuple[int, str]]) -> tuple[int, list[str]]:
+    """Send the chosen notice drafts through the normal send path (chats.send_draft), one after another."""
+    convs = {c.id: c for c in seller_conversations(ad_id)}
+    sent, errors = 0, []
+    for draft_id, text in items:
+        with session() as db:
+            d = db.get(Draft, draft_id)
+        if d is None or d.status != "draft" or d.conversation_id not in convs or d.intent not in NOTICE_INTENTS.values():
+            continue
+        try:
+            await chats.send_draft(draft_id, text)
+            sent += 1
+        except Exception as e:  # noqa: BLE001 - report per chat, keep going
+            errors.append(f"{convs[d.conversation_id].partner_name or d.conversation_id}: {e}")
+    return sent, errors
+
+
+def discard_notices(ad_id: str, draft_ids: list[int]) -> int:
+    convs = {c.id for c in seller_conversations(ad_id)}
+    n = 0
+    for draft_id in draft_ids:
+        with session() as db:
+            d = db.get(Draft, draft_id)
+        if d and d.status == "draft" and d.conversation_id in convs and d.intent in NOTICE_INTENTS.values():
+            chats.discard_draft(draft_id)
+            n += 1
+    return n
+
+
+# ------------------------------------------------------------------ step 3: local state
+def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True) -> MyAd:
+    """Automatic answers off (instructions kept) and the sale status on the ad."""
+    kind = kind_of(kind)
+    with session() as db:
+        row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
+        if auto_off:
+            row.auto_reply = False
+        row.sale_status, row.sale_conversation_id, row.sale_at = kind, buyer or None, utcnow()
+        row.last_action = t("Sold") if kind == "sold" else t("Reserved")
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def reset(ad_id: str) -> None:
+    """The deal fell through: forget the local sale status (willhaben is not touched)."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row:
+            row.sale_status = row.sale_conversation_id = row.sale_at = None
+            db.add(row)
+            db.commit()
+
+
+def state_for(conv: Conversation) -> dict[str, Any] | None:
+    """Sale info for the chat page: kind, and whether this chat is the buyer's."""
+    if not conv.ad_id:
+        return None
+    ad = ad_row(conv.ad_id)
+    if ad is None or not (ad.sale_status or ad.status in KINDS):
+        return None
+    kind = ad.sale_status or ad.status
+    return {"kind": kind, "buyer": ad.sale_conversation_id, "is_buyer": ad.sale_conversation_id == conv.id}
