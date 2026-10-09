@@ -68,8 +68,8 @@
   <h4 id="drafts">{{ _("Review and publish drafts") }}</h4>
   <p class="progress-line"><progress value="{{ n_pub + n_disc }}" max="{{ dl|length }}" style="flex:1;min-width:10rem;margin:0"></progress>
     <span><strong>{{ n_pub }}</strong> {{ _("of {total} published", total=dl|length) }}{% if n_disc %}, {{ _("{n} discarded", n=n_disc) }}{% endif %}</span></p>
-  <p><small class="muted">{{ _("Publishing directly is not possible yet (the willhaben “place an ad” flow has not been recorded).") }}
-    {{ _("The quick way: open “Insert on willhaben”, copy title/description/price with ⧉, upload the photos from the ZIP, then click “Is published” here.") }}</small></p>
+  <p><small class="muted">{{ _("To publish: click “Prepare for willhaben” on a draft, check the category and the required fields, then “Publish on willhaben” – the free ad goes live right away.") }}
+    {{ _("The manual way still works: “Insert manually”, copy the fields with ⧉, photos from the ZIP, then “Is published”.") }}</small></p>
   {% for g in b.groups if g.draft_id and drafts.get(g.draft_id) %}
     {% with d = drafts[g.draft_id], saved = False %}{% include "_batch_draft.html" %}{% endwith %}
   {% endfor %}

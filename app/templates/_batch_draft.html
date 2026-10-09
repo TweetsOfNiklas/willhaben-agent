@@ -87,7 +87,7 @@
         {% if plan.options is defined %}<input name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}"
           title="{{ _('Wrong categories? Search with your own term') }}">{% endif %}
         <button class="small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>
-      <a href="{{ insert_url }}" target="_blank" rel="noopener" role="button" class="small" data-publish>{{ _("Insert on willhaben") }} ↗</a>
+      <a href="{{ insert_url }}" target="_blank" rel="noopener" role="button" class="secondary outline small" data-publish>{{ _("Insert manually") }} ↗</a>
       <form hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
         <input type="hidden" name="status" value="published"><button class="secondary small">✓ {{ _("Is published") }}</button></form>
       <form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
