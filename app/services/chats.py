@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlmodel import col, select
@@ -31,6 +31,21 @@ def _account() -> AccountClient:
     return AccountClient(get_session())
 
 
+def sync_window() -> tuple[int, datetime | None]:
+    """Settings chat_sync_limit (N latest conversations, 1-50) and chat_sync_since (cutoff date, local midnight)."""
+    try:
+        limit = min(max(int(get_setting("chat_sync_limit") or 10), 1), 50)
+    except ValueError:
+        limit = 10
+    since = None
+    if raw := (get_setting("chat_sync_since") or "").strip():
+        try:
+            since = datetime.strptime(raw, "%Y-%m-%d").astimezone()   # naive -> local midnight
+        except ValueError:
+            pass
+    return limit, since
+
+
 async def sync(force: bool = False) -> dict[str, Any]:
     sess = get_session()
     if not sess.started:
@@ -38,10 +53,14 @@ async def sync(force: bool = False) -> dict[str, Any]:
     if not sess.logged_in and not await sess.check_login():
         return {"skipped": t("not logged in")}
     acct = _account()
+    limit, since = sync_window()
     try:
-        convs = await acct.conversations(limit=50)
+        convs = await acct.conversations(limit=limit)
     except NotLoggedIn:
         return {"skipped": t("Session expired")}
+    convs = sorted(convs, key=lambda c: _aware(c.last_at) if c.last_at else datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:limit]
+    if since is not None:
+        convs = [c for c in convs if c.last_at is None or _aware(c.last_at) >= since]
 
     changed: list[str] = []
     incoming: list[Conversation] = []

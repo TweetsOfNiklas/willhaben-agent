@@ -52,5 +52,7 @@
  "e.g. shorter, more convincing title, mention that the battery is new": "z. B. kürzer, überzeugenderer Titel, erwähnen, dass der Akku neu ist",
  "Revise": "Überarbeiten",
  "Claude sees the text above, the ad's photos and your rules. Nothing is saved until you click “Save on willhaben”. Takes 10–60 seconds.": "Claude sieht den Text oben, die Fotos der Anzeige und deine Regeln. Gespeichert wird erst mit „Auf willhaben speichern“. Dauert 10–60 Sekunden.",
- "Claude could not revise the ad: {error}": "Claude konnte die Anzeige nicht überarbeiten: {error}"
+ "Claude could not revise the ad: {error}": "Claude konnte die Anzeige nicht überarbeiten: {error}",
+ "Show sold ads ({n})": "Verkaufte Anzeigen zeigen ({n})",
+ "Apply": "Anwenden"
 }

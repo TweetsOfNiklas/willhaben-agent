@@ -338,6 +338,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     ),
     "auto_draft": "0",
     "notify_messages": "1",
+    "chat_sync_limit": "10",    # sync only the N latest conversations
+    "chat_sync_since": "",      # YYYY-MM-DD: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",
     "auto_reply_rules": (
         "- Automatisch nur einfache Fragen beantworten: ob der Artikel noch da ist, Abholung/Versand, Zustand laut Inserat.\n"

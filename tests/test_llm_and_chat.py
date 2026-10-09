@@ -150,3 +150,16 @@ def test_default_models_per_purpose():
     set_setting("llm_model_chat", "claude-haiku-5-5")
     assert model_for("chat") == "claude-haiku-5-5"
     set_setting("llm_model_chat", "")
+
+
+def test_chat_sync_window():
+    from app.db import set_setting
+    from app.services.chats import sync_window
+    assert sync_window() == (10, None)                 # defaults: 10 latest, no cutoff
+    set_setting("chat_sync_limit", "500")
+    set_setting("chat_sync_since", "2026-09-01")
+    limit, since = sync_window()
+    assert limit == 50 and since.date().isoformat() == "2026-09-01" and since.tzinfo is not None
+    set_setting("chat_sync_limit", "x")
+    set_setting("chat_sync_since", "garbage")
+    assert sync_window() == (10, None)

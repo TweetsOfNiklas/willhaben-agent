@@ -392,6 +392,13 @@
         {{ _("Automatically create a reply draft for new messages (never sent automatically)") }}</label>
       <label><input type="checkbox" name="notify_messages" form="general" {% if values.notify_messages == '1' %}checked{% endif %}>
         {{ _("Notify me about new messages") }}</label>
+      <div class="grid">
+        <label>{{ _("Sync the latest conversations") }}
+          <input type="number" name="chat_sync_limit" form="general" min="1" max="50" value="{{ values.chat_sync_limit or 10 }}"></label>
+        <label>{{ _("Only conversations active since") }}
+          <input type="date" name="chat_sync_since" form="general" value="{{ values.chat_sync_since or '' }}">
+          <small class="muted">{{ _("Empty: no cutoff. Older conversations are left out of the sync.") }}</small></label>
+      </div>
       <label>{{ _("Push notifications via") }}
         <select name="push_channel" form="general">
           {% for v, label in [('auto', _('Automatic: Telegram if linked, otherwise Home Assistant')), ('ha', _('Home Assistant only')),

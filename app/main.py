@@ -7,7 +7,7 @@ import logging
 import re
 import secrets
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any
@@ -507,7 +507,7 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 @app.get("/myads", response_class=HTMLResponse)
-async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False):
+async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False, show_sold: bool = False):
     with session() as db:
         empty = db.exec(select(MyAd).limit(1)).first() is None
     if empty and get_session().logged_in:
@@ -519,8 +519,14 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
         rows = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).asc().nulls_last())))
     hidden = [a for a in rows if a.hidden]
     ads = rows if show_hidden else [a for a in rows if not a.hidden]
+    # sold ads go to the bottom (stable sort keeps the expiry order) and are hidden unless asked for
+    is_sold = lambda a: a.status == "sold" or a.sale_status == "sold"  # noqa: E731
+    ads.sort(key=is_sold)
+    sold_count = sum(map(is_sold, ads))
+    if not show_sold:
+        ads = [a for a in ads if not is_sold(a)]
     return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
-                  hidden_count=len(hidden), show_hidden=show_hidden)
+                  hidden_count=len(hidden), show_hidden=show_hidden, sold_count=sold_count, show_sold=show_sold)
 
 
 @app.post("/myads/check")
@@ -1170,7 +1176,7 @@ async def capture_download(name: str):
 # ------------------------------------------------------------------ settings
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, msg: str | None = None):
-    keys = ["reply_rules", "auto_draft", "notify_messages", "push_channel", "expiry_warn_days", "auto_reply_rules", "send_verified",
+    keys = ["reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     return render(request, "settings.html", values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(), models=MODELS,
@@ -1215,6 +1221,7 @@ async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01
 @app.post("/settings")
 async def settings_save(reply_rules: str = Form(""), auto_draft: str | None = Form(None),
                         notify_messages: str | None = Form(None), expiry_warn_days: int = Form(3),
+                        chat_sync_limit: int = Form(10), chat_sync_since: str = Form(""),
                         push_channel: str = Form(""),
                         auto_reply_rules: str = Form(""), reply_humanize: str | None = Form(None),
                         reply_delay_min_s: int = Form(40), reply_delay_max_s: int = Form(180),
@@ -1223,6 +1230,11 @@ async def settings_save(reply_rules: str = Form(""), auto_draft: str | None = Fo
     set_setting("auto_reply_rules", auto_reply_rules.strip())
     set_setting("auto_draft", "1" if auto_draft else "0")
     set_setting("notify_messages", "1" if notify_messages else "0")
+    set_setting("chat_sync_limit", str(min(max(1, chat_sync_limit), 50)))
+    try:
+        set_setting("chat_sync_since", date.fromisoformat(chat_sync_since.strip()).isoformat() if chat_sync_since.strip() else "")
+    except ValueError:
+        pass
     if push_channel in PUSH_CHANNELS:
         set_setting("push_channel", push_channel)
     set_setting("expiry_warn_days", str(max(0, expiry_warn_days)))

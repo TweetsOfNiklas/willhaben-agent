@@ -18,6 +18,12 @@
   <button type="submit" class="secondary outline" formaction="/myads/bulk/deactivate" data-act="deactivate" disabled>{{ _("Deactivate") }}</button>
   <button type="submit" class="btn-danger" formaction="/myads/bulk/delete" data-act="delete" disabled>🗑 {{ _("Delete") }}</button>
 </form>
+<form method="get" action="/myads" style="margin:0 0 .6rem">
+  {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+  <label style="margin:0"><input type="checkbox" name="show_sold" value="1" {% if show_sold %}checked{% endif %} onchange="this.form.submit()">
+    <small>{{ _("Show sold ads ({n})", n=sold_count) }}</small></label>
+  <noscript><button class="secondary">{{ _("Apply") }}</button></noscript>
+</form>
 <table class="stack">
   <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Expires") }}</th><th title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">{{ _("Auto-renew") }}</th><th></th></tr></thead>
   <tbody>
@@ -113,5 +119,5 @@
   update();
 })();
 </script>
-{% if hidden_count %}<p><small class="muted"><a href="/myads{{ '' if show_hidden else '?show_hidden=1' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a></small></p>{% endif %}
+{% if hidden_count %}<p><small class="muted"><a href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_sold=1' if show_sold else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a></small></p>{% endif %}
 {% endblock %}
