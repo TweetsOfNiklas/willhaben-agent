@@ -351,7 +351,7 @@ def test_batch_card_picker_and_inline_category(client, wh):  # noqa: F811
     d = _draft()
     wh.suggest = {"categories": []}
     card = client.post(f"/ad-drafts/{d.id}/inline/prepare", data={"category_query": "xyz"}).text
-    assert "willhaben suggests no category" in card and "Choose another category" in card
+    assert "willhaben suggests no category" not in card and "Choose another category" in card
     assert f'data-pick="/ad-drafts/{d.id}/inline/category"' in card and f'data-target="#draft-{d.id}"' in card
     assert "/inline/publish" in card and 'name="handover"' not in card               # nothing to publish yet
 

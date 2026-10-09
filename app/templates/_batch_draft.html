@@ -73,9 +73,6 @@
     {% else %}
       <form hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/prepare" hx-target="#draft-{{ d.id }}"
             hx-swap="outerHTML" hx-disabled-elt="find button" class="bdraft-cat">
-        {% if plan.options is defined and not plan.options %}<small class="muted">{{ _("willhaben suggests no category for this title.") }}</small>{% endif %}
-        {% if plan.options is defined %}<input name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}"
-          title="{{ _('Wrong categories? Search with your own term') }}">{% endif %}
         <button class="small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>
       <form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
         <input type="hidden" name="status" value="discarded"><button class="secondary outline small">{{ _("Discard") }}</button></form>
