@@ -362,7 +362,8 @@ async def category_choices(query: str, category_url: str | None = None) -> dict[
     if nav is None:
         return {"error": None, "values": [], "selected": []}
     return {"error": None,
-            "values": [{"label": v.label, "url": v.url, "hits": v.hits} for v in nav.values],
+            "values": sorted(({"label": v.label, "url": v.url, "hits": v.hits} for v in nav.values),
+                             key=lambda v: -(v["hits"] or 0)),           # where the term really occurs first
             "selected": [{"label": v.label, "reset_url": v.url} for v in nav.selected]}
 
 
