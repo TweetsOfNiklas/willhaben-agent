@@ -1784,3 +1784,5 @@ async def api_convert(url: str):
 
 from app import deals_web  # noqa: E402  Preischeck tab (/deals) + price section of the ad viewer
 deals_web.install(app, templates)
+from app import bugreport_routes  # noqa: E402  footer "Report a bug" (/bugreport), log ring buffer, unhandled-error log
+bugreport_routes.install(app)

@@ -76,6 +76,15 @@ Every variable is optional. Values set in the dashboard win over the environment
 See `.env.example` for all of them. Host-specific compose additions (extra networks, proxy settings) belong in
 a `compose.override.yaml`. Compose merges it automatically, and it is git-ignored.
 
+### Reporting a bug
+
+The footer link **Report a bug** opens a page where you describe what happened and click **Create report**. The app
+builds an anonymised report from its own state: version, connection states, counts, recent warnings and errors
+(with tracebacks) and, optionally, harmless settings. Tokens, passwords, e-mail addresses, phone numbers, IP addresses,
+your server's host names, people's names, chat messages and ad titles are removed, and ids become placeholders such
+as `ad#1`. Creating it costs no willhaben or Claude request, and the app never sends it anywhere: copy it or download
+it as `.txt`/`.json` and share it yourself. Read it before sharing.
+
 ## Home Assistant
 
 The app fires events on the HA event bus: `willhaben_hit`, `willhaben_price_drop`, `willhaben_message`,

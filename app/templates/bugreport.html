@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Report a bug") }} · willhaben Agent{% endblock %}
+{% block content %}
+<h3>{{ _("Report a bug") }}</h3>
+<p class="muted">{{ _("Creates an anonymised report with the app version, connection states, counts and recent warnings and errors. It is made here on your server, costs no willhaben or Claude request, and is never sent anywhere: you decide whether to copy or download it and share it.") }}</p>
+
+<form method="post" action="/bugreport">
+  <label>{{ _("What happened?") }}
+    <textarea name="description" rows="4" placeholder="{{ _('What did you do, what did you expect, what happened instead?') }}">{{ description }}</textarea>
+  </label>
+  <fieldset>
+    <label><input type="checkbox" name="include_info" value="1" {% if include_info %}checked{% endif %}> {{ _("Include INFO log lines (more detail, longer report)") }}</label>
+    <label><input type="checkbox" name="include_settings" value="1" {% if include_settings %}checked{% endif %}> {{ _("Include settings (harmless values only, everything else as set/empty)") }}</label>
+  </fieldset>
+  <button type="submit">{{ _("Create report") }}</button>
+</form>
+
+<p><small class="muted">{{ _("Removed or replaced before you see it:") }}
+  {% for r in removed %}{{ _(r) }}{% if not loop.last %}; {% endif %}{% endfor %}.
+  {{ _("Nothing is uploaded, e-mailed or sent by the app.") }}</small></p>
+
+{% if report %}
+<article>
+  <header class="row-actions" style="justify-content:space-between">
+    <span>{{ _("Preview") }}</span>
+    <span class="row-actions">
+      <button type="button" class="secondary" id="br-copy">{{ _("Copy") }}</button>
+      <a role="button" class="secondary outline" href="/bugreport/{{ token }}.txt" download>{{ _("Download (.txt)") }}</a>
+      <a role="button" class="secondary outline" href="/bugreport/{{ token }}.json" download>{{ _("Download (.json)") }}</a>
+    </span>
+  </header>
+  <pre id="br-text" style="max-height:60vh; overflow:auto; white-space:pre-wrap; word-break:break-word; font-size:.8rem; margin:0">{{ report }}</pre>
+  <small class="muted" id="br-copied" hidden>{{ _("Copied to the clipboard.") }}</small>
+</article>
+<script>
+(() => {
+  const btn = document.getElementById('br-copy'), pre = document.getElementById('br-text'), done = document.getElementById('br-copied');
+  btn.addEventListener('click', async () => {
+    const text = pre.textContent;
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {           // plain http on the LAN: no clipboard API, fall back to a selection copy
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+      ta.select(); try { document.execCommand('copy'); } catch (e2) {} ta.remove();
+    }
+    done.hidden = false;
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
