@@ -195,7 +195,7 @@ async def test_delete_unlinks_draft_and_publish_restarts_after_409(account, monk
 
     calls = []
 
-    async def fake_publish(sess, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None):
+    async def fake_publish(sess, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None, **_kw):
         calls.append(existing_ad_id)
         if existing_ad_id:
             raise RuntimeError("POST /webapi/iad/products/privates/atz/u/carts: HTTP 409 ")
@@ -227,7 +227,7 @@ async def test_publish_409_never_duplicates_a_live_ad(account, monkeypatch):
         db.commit()
     calls = []
 
-    async def fake_publish(sess, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None):
+    async def fake_publish(sess, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None, **_kw):
         calls.append(existing_ad_id)
         raise RuntimeError("POST /webapi/iad/products/privates/atz/u/carts: HTTP 409 ")
 
