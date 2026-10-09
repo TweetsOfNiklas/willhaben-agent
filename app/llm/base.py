@@ -43,7 +43,7 @@ MODELS = [
 ]
 
 
-# What a model is used for -> settings key. Unset keys fall back to llm_model, then LLM_MODEL.
+# What a model is used for -> settings key. Unset keys fall back to PURPOSE_DEFAULTS, then llm_model / LLM_MODEL.
 PURPOSES = {
     "chat": ("llm_model_chat", _("Chat replies"), _("reply drafts for willhaben messages")),
     "ads": ("llm_model_ads", _("Creating listings"), _("title, description and category from notes and photos")),
@@ -52,12 +52,22 @@ PURPOSES = {
 }
 
 
+# Opus only where quality matters most (writing listings); everything else runs on Sonnet by default.
+PURPOSE_DEFAULTS = {
+    "ads": "claude-opus-5-5",
+    "chat": "claude-sonnet-5-5",
+    "screen": "claude-sonnet-5-5",
+    "search": "claude-sonnet-5-5",
+}
+
+
 def model_for(purpose: str | None) -> str:
     from app.config import get_settings
     from app.db import get_setting
 
     key = PURPOSES[purpose][0] if purpose in PURPOSES else None
-    return (key and get_setting(key)) or get_setting("llm_model") or get_settings().llm_model
+    return ((key and get_setting(key)) or PURPOSE_DEFAULTS.get(purpose or "")
+            or get_setting("llm_model") or get_settings().llm_model)
 
 
 class LLMBackend(Protocol):

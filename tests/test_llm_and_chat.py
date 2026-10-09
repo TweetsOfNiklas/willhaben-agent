@@ -136,3 +136,17 @@ def test_upsert_rekeys_fallback_ids():
         db.commit()
         rows = sorted((m.ext_id, m.direction) for m in db.exec(select(Message)))
     assert rows == [("m1", "unknown"), ("m2", "in"), ("m3", "in")]
+
+
+def test_default_models_per_purpose():
+    """Opus only for listings by default; a choice in Settings still wins."""
+    from app.db import set_setting
+    from app.llm.base import PURPOSES, model_for
+
+    for p in PURPOSES:
+        set_setting(PURPOSES[p][0], "")
+    assert model_for("ads") == "claude-opus-5-5"
+    assert {model_for(p) for p in ("chat", "screen", "search")} == {"claude-sonnet-5-5"}
+    set_setting("llm_model_chat", "claude-haiku-5-5")
+    assert model_for("chat") == "claude-haiku-5-5"
+    set_setting("llm_model_chat", "")
