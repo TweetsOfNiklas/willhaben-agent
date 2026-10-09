@@ -1,0 +1,14 @@
+{
+ "This search has no planned willhaben searches yet.": "Diese Suche hat noch keine geplanten willhaben-Suchen.",
+ "search {i}/{n} failed: {error}": "Suche {i}/{n} fehlgeschlagen: {error}",
+ "remaining searches skipped: {k}": "übrige Suchen übersprungen: {k}",
+ "Search agent #{id} exists → open": "Suchagent #{id} existiert → öffnen",
+ "Create a search agent from this search": "Suchagent aus dieser Suche anlegen",
+ "{n} willhaben searches per check": "{n} willhaben-Suchen pro Prüfung",
+ "Let Claude screen new hits": "Neue Treffer von Claude prüfen lassen",
+ "The agent keeps running these {n} searches; new ads are filtered by budget and exclusions in code and, if enabled, checked by Claude before they notify you. Planning costs no further Claude call.": "Der Agent führt diese {n} Suchen laufend aus; neue Anzeigen werden im Code nach Budget und Ausschlüssen gefiltert und, falls aktiviert, von Claude geprüft, bevor sie dich benachrichtigen. Die Planung kostet keinen weiteren Claude-Aufruf.",
+ "{n} searches: {keywords}": "{n} Suchen: {keywords}",
+ "Searches from product search #{id}": "Suchen aus Produktsuche #{id}",
+ "Searches": "Suchen",
+ "from {price}": "ab {price}"
+}

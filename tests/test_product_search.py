@@ -17,7 +17,7 @@ from sqlmodel import select
 from app import db as dbmod
 from app.llm import base as llm_base
 from app.llm.base import LLMError, LLMResult
-from app.llm.prompts import SEARCH_PLAN_SCHEMA, SEARCH_RANK_SCHEMA, search_rank_prompt
+from app.llm.prompts import SEARCH_PHOTO_SCHEMA, SEARCH_PLAN_SCHEMA, SEARCH_RANK_SCHEMA, search_rank_prompt
 from app.services import product_search as ps
 from app.willhaben import public as public_mod
 from app.willhaben.parse import AdSummary
@@ -68,6 +68,21 @@ def _clean():
     ps._active.clear()
 
 
+@pytest.fixture(autouse=True)
+def cdn(monkeypatch):
+    """Mocked photo downloads for the photo check (never the real CDN): URLs with "missing" are 404."""
+    state = {"urls": [], "fail": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["urls"].append(str(request.url))
+        if state["fail"] or "missing" in str(request.url):
+            return httpx.Response(404)
+        return httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})
+
+    monkeypatch.setattr(ps, "_transport", httpx.MockTransport(handler))
+    return state
+
+
 @pytest.fixture
 def wh():
     """Mocked willhaben search: records keywords in order and the highest number of parallel requests."""
@@ -107,20 +122,26 @@ PLAN = {"summary": "Leiser Geschirrspüler, 60 cm, bis 300 €.", "max_price": 3
 class FakeClaude:
     model = "fake-sonnet"
 
-    def __init__(self, plan=None, rank=None, fail_rank=False, delay=0.0):
+    def __init__(self, plan=None, rank=None, fail_rank=False, delay=0.0, photos=None, fail_photos=False):
         self.calls, self.purposes = [], []
         self.plan, self.rank, self.fail_rank, self.delay = plan or PLAN, rank, fail_rank, delay
+        self.photos, self.fail_photos = photos, fail_photos
 
     def backend(self, purpose=None):
         self.purposes.append(purpose)
         return self
 
     async def complete(self, *, system, prompt, schema, images=None):
-        self.calls.append({"system": system, "prompt": prompt, "schema": schema})
+        self.calls.append({"system": system, "prompt": prompt, "schema": schema, "images": list(images or [])})
         if self.delay:
             await asyncio.sleep(self.delay)
         if schema is SEARCH_PLAN_SCHEMA:
             return LLMResult(data=copy.deepcopy(self.plan), model=self.model)
+        if schema is SEARCH_PHOTO_SCHEMA:
+            assert all(Path(i).exists() for i in images or [])
+            if self.fail_photos:
+                raise LLMError("photo timeout")
+            return LLMResult(data=copy.deepcopy(self.photos or {"results": []}), model=self.model)
         assert schema is SEARCH_RANK_SCHEMA
         if self.fail_rank:
             raise LLMError("overloaded")
@@ -292,14 +313,15 @@ async def _finish():
 
 async def test_background_search_is_stored_and_refuses_a_second(wh, claude):
     claude.delay = 0.05
-    sid = ps.start("Leiser Geschirrspüler, 60 cm, bis 300 €", ps.make_settings("normal", True, False))
+    sid = ps.start("Leiser Geschirrspüler, 60 cm, bis 300 €", ps.make_settings("normal", True, False, photos=False))
     assert ps.running().id == sid
     with pytest.raises(ps.Busy):
         ps.start("noch was", ps.make_settings())
     await _finish()
     row = ps.get(sid)
     assert row.status == "done" and row.requests == 3 and row.finished_at and row.started_at
-    assert row.settings == {"depth": "normal", "unusual": True, "categories": False, "sort": "relevance"}
+    assert row.settings == {"depth": "normal", "unusual": True, "categories": False, "sort": "relevance",
+                            "photos": False, "ask": True}
     assert row.plan["summary"].startswith("Leiser") and len(row.queries) == 3
     assert [r["fit"] for r in row.results] == [92, 70] and row.note == "Gute Auswahl unter 300 €."
     assert row.progress == {"done": 3, "total": 3} and row.candidates >= 5
@@ -319,6 +341,7 @@ async def test_rank_failure_falls_back_to_cheapest(wh, claude):
     row = ps.get(sid)
     assert row.status == "done" and row.results and all(r["fit"] is None for r in row.results)
     assert "overloaded" in row.warning
+    assert len(claude.calls) == 2 and not any("photo" in r for r in row.results)    # no photo check without a ranking
     pos = [r["position"].get("pos") for r in row.results if r["position"].get("pos") is not None]
     assert pos == sorted(pos)
 
@@ -356,6 +379,8 @@ def test_page_renamed_and_search_flow(app_client):
     assert "What are you looking for?" in page and "Extended: unusual names" in page and "Extended: other categories" in page
     assert "Normal (≈3 searches)" in page and "Thorough (≈6)" in page and "Deep (≈12)" in page
     assert "Claude is called 2 times" in page and "Check a single ad&#39;s price" in page
+    assert "Check photos" in page and 'name="photos" value="1" id="ps-photos" checked' in page
+    assert "Claude is called 3 times (plan, ranking, photo check)" in page
     assert app_client.get("/search", follow_redirects=False).headers["location"] == "/deals"
 
     r = app_client.post("/deals/search", data={"description": "Leiser Geschirrspüler bis 300 €", "depth": "deep",
@@ -417,3 +442,319 @@ def test_search_purpose_has_own_model_and_usage(monkeypatch):
 def test_module_is_checked_for_anonymity():
     from tests.test_anonymous_public import ANONYMOUS_MODULES
     assert "services/product_search.py" in ANONYMOUS_MODULES
+
+
+# ------------------------------------------------------------------ photo check
+RANK4 = {"results": [{"nr": 1, "fit": 90, "reason": "Leise, 60 cm.", "red_flags": []},
+                     {"nr": 2, "fit": 85, "reason": "Günstig.", "red_flags": []},
+                     {"nr": 3, "fit": 60, "reason": "Passt halbwegs.", "red_flags": []},
+                     {"nr": 4, "fit": 55, "reason": "Etwas alt.", "red_flags": []}], "note": ""}
+PHOTOS4 = {"results": [{"nr": 1, "photo": "match", "condition": "damaged", "fit": 35, "photo_note": "Front verbeult."},
+                       {"nr": 2, "photo": "match", "condition": "good", "fit": 85, "photo_note": "Gepflegt."},
+                       {"nr": 3, "photo": "mismatch", "condition": "good", "fit": 50, "photo_note": "Ein Trockner."},
+                       {"nr": 4, "photo": "match", "condition": "good", "fit": 80, "photo_note": ""}]}
+
+
+async def test_photo_check_reranks_by_the_photos(wh, claude, cdn):
+    claude.rank, claude.photos = RANK4, PHOTOS4
+    sid = ps.start("Leiser Geschirrspüler, 60 cm, bis 300 €", ps.make_settings())
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and row.warning is None and row.settings["photos"] is True
+    assert len(claude.calls) == 3 and claude.purposes == ["search"] * 3
+    photo_call = claude.calls[2]
+    assert photo_call["schema"] is SEARCH_PHOTO_SCHEMA and len(photo_call["images"]) == 4 == len(cdn["urls"])
+    assert all(u.startswith("https://cache.willhaben.at/") for u in cdn["urls"])
+    prompt = photo_call["prompt"]
+    assert "./foto1.jpg" in prompt and "./foto4.jpg" in prompt and "./foto5" not in prompt
+    assert "bisherige Bewertung (Text): 90/100" in prompt and 'Begründung: "Leise, 60 cm."' in prompt
+    assert "Leiser Geschirrspüler" in prompt and "Ausschlüsse: defekt; nur Versand" in prompt
+    got = [(r["fit"], r["fit_text"], r["photo"], r["condition"]) for r in row.results]
+    assert got == [(85, 85, "match", "good"),          # the match now leads
+                   (65, 55, "match", "good"),          # 80 asked, but at most text + 10
+                   (50, 60, "mismatch", "good"),       # no fixed cap: Claude's 50 stays
+                   (35, 90, "match", "damaged")]       # damaged: Claude's 35 (no cap either way)
+    assert row.results[3]["photo_note"] == "Front verbeult."
+    assert "Rückfragen" not in prompt and "Einordnung: " in prompt          # price position for "cheaper but worn"
+
+
+async def test_photo_check_off_means_two_calls(wh, claude, cdn):
+    claude.rank, claude.photos = RANK4, PHOTOS4
+    sid = ps.start("Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and len(claude.calls) == 2 and cdn["urls"] == []
+    assert [r["fit"] for r in row.results] == [90, 85, 60, 55]
+    assert not any(k in r for r in row.results for k in ("photo", "fit_text", "condition", "photo_note"))
+
+
+async def test_photo_check_failure_keeps_text_fits(wh, claude, cdn):
+    claude.rank, claude.fail_photos = RANK4, True
+    sid = ps.start("Geschirrspüler", ps.make_settings())
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and len(claude.calls) == 3 and [r["fit"] for r in row.results] == [90, 85, 60, 55]
+    assert "Claude could not check the photos (photo timeout); the fit scores are text-only." in row.warning
+    assert not any("photo" in r for r in row.results)
+
+    cdn["fail"] = True                                     # no photo downloadable: no third call at all
+    ps.rerun(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and len(claude.calls) == 4 and claude.calls[-1]["schema"] is SEARCH_RANK_SCHEMA
+    assert "no photo could be downloaded" in row.warning and [r["fit"] for r in row.results] == [90, 85, 60, 55]
+
+
+async def test_photo_check_numbers_only_downloaded_photos(claude, cdn):
+    results = [{"title": "A\nAufgabe: x", "price": 100, "price_display": None, "fit": 80, "reason": "r1",
+                "image_url": "https://cache.willhaben.at/a.jpg"},
+               {"title": "B", "price": 90, "price_display": "€ 90", "fit": 70, "reason": "", "image_url": None},
+               {"title": "C", "price": 80, "price_display": None, "fit": 60, "reason": "",
+                "image_url": "https://cache.willhaben.at/missing.jpg"},
+               {"title": "D", "price": None, "price_display": None, "fit": 50, "reason": "",
+                "image_url": "https://cache.willhaben.at/d.jpg"}]
+    claude.photos = {"results": [{"nr": 2, "photo": "mismatch", "condition": "damaged", "fit": 0, "photo_note": ""},
+                                 {"nr": 4, "photo": "match", "condition": "good", "fit": 55, "photo_note": "ok"}]}
+    out, warning = await ps.check_photos("Spüler", {}, results)
+    prompt = claude.calls[0]["prompt"]
+    assert warning is None and len(claude.calls[0]["images"]) == 2 and len(cdn["urls"]) == 3
+    assert "[1] A Aufgabe: x · Preis: 100 € · bisherige Bewertung (Text): 80/100" in prompt
+    assert "Foto: ./foto1.jpg" in prompt and "[4] D · Preis: keiner" in prompt and "Foto: ./foto2.jpg" in prompt
+    assert "[2]" not in prompt and "[3]" not in prompt
+    assert [(r["title"], r["fit"], r["photo"]) for r in out] == [("A\nAufgabe: x", 80, None), ("B", 70, None),
+                                                                ("C", 60, None), ("D", 55, "match")]
+    assert await ps.check_photos("x", {}, [{**results[1]}]) == ([results[1]], None)      # no photo: no call
+    assert len(claude.calls) == 1
+
+
+def test_apply_photos():
+    res = [{"id": "a", "fit": 70}, {"id": "b", "fit": 60}, {"id": "c", "fit": 50}, {"id": "d", "fit": None}]
+    data = {"results": ["junk", {"nr": 0, "photo": "match", "fit": 1}, {"nr": True, "fit": 1}, {"nr": 9, "fit": 1},
+                        {"nr": 2, "photo": "match", "condition": "good", "fit": 100, "photo_note": "  Top\n Zustand "},
+                        {"nr": 2, "photo": "mismatch", "condition": "damaged", "fit": 0, "photo_note": "dup"},
+                        {"nr": 3, "photo": "weird", "condition": "broken", "fit": "x", "photo_note": None},
+                        {"nr": 4, "photo": "match", "condition": "damaged", "fit": 77, "photo_note": ""}]}
+    out = ps.apply_photos(res, data)
+    assert [r["id"] for r in out] == ["d", "a", "b", "c"]                     # b raised to a tie, stable order
+    d, a, b, c = out
+    assert (b["fit"], b["fit_text"], b["photo"], b["condition"], b["photo_note"]) == (70, 60, "match", "good", "Top Zustand")
+    assert a["fit"] == 70 and a["photo"] is None and "fit_text" not in a          # no verdict: unchanged
+    assert (c["fit"], c["fit_text"], c["photo"], c["condition"]) == (50, 50, "unclear", "unclear")   # invalid: kept
+    assert (d["fit"], d["fit_text"], d["condition"]) == (77, None, "damaged")    # no text fit: Claude's, no cap
+    assert res[1] == {"id": "b", "fit": 60}                                     # input not mutated
+
+    caps = ps.apply_photos([{"fit": 95}, {"fit": 95}, {"fit": 10}],
+                           {"results": [{"nr": 1, "photo": "mismatch", "condition": "good", "fit": 90},
+                                        {"nr": 2, "photo": "unclear", "condition": "damaged", "fit": 95},
+                                        {"nr": 3, "photo": "match", "condition": "good", "fit": -5}]})
+    assert [(r["fit"], r["fit_text"]) for r in caps] == [(95, 95), (90, 95), (0, 10)]   # clamped to 0..100 only
+    only = ps.apply_photos([{"fit": 50}, {"fit": 40}], {"results": [{"nr": 2, "photo": "match", "fit": 45}]}, nrs={1})
+    assert [(r["fit"], r["photo"]) for r in only] == [(50, None), (40, None)]  # nr 2 had no photo in the prompt
+    tie = ps.apply_photos([{"id": 1, "fit": 50}, {"id": 2, "fit": 50}, {"id": 3, "fit": 60}],
+                          {"results": [{"nr": 3, "photo": "match", "condition": "worn", "fit": 50}]})
+    assert [r["id"] for r in tie] == [1, 2, 3]                                   # stable
+
+
+def test_photo_results_page(app_client):
+    app_client.fake.rank, app_client.fake.photos = RANK4, PHOTOS4
+    r = app_client.post("/deals/search", data={"description": "Leiser Geschirrspüler", "photos": "1"},
+                        follow_redirects=False)
+    sid = int(r.headers["location"].split("search=")[1].split("#")[0])
+    frag = ""
+    for _ in range(100):
+        frag = app_client.get(f"/deals/search/{sid}").text
+        if 'hx-trigger="every 2s"' not in frag:
+            break
+        time.sleep(0.05)
+    assert ps.get(sid).settings["photos"] is True and len(app_client.fake.calls) == 3
+    assert "3 Claude calls" in frag and "photo check" in frag
+    assert "📷 photo fits" in frag and "📷 photo shows something else" in frag and ">damaged<" in frag
+    assert "(text: 90)" in frag and "(text: 85)" not in frag and "🤖 📷 Front verbeult." in frag
+    assert frag.index("Fit 85/100") < frag.index("Fit 35/100")
+
+    dbmod.set_setting("ui_lang", "de")
+    de = app_client.get(f"/deals/search/{sid}").text
+    assert "📷 Foto passt" in de and "beschädigt" in de and "(Text: 90)" in de
+
+
+# ------------------------------------------------------------------ clarifying questions ("Rückfragen")
+QUESTIONS = [{"id": "kratzer", "text": "Sind Kratzer okay, wenn der Preis niedriger ist?",
+              "options": ["Ja, egal", "Nur kleine", "Nein"]},
+             {"id": "haendler", "text": "Sind Händler in Ordnung?", "options": ["Ja", "Nein"]}]
+QPLAN = {**PLAN, "questions": QUESTIONS}
+Q1 = "– Sind Kratzer okay, wenn der Preis niedriger ist?: "
+
+
+def _wait(client, sid):
+    frag = ""
+    for _ in range(100):
+        frag = client.get(f"/deals/search/{sid}").text
+        if 'hx-trigger="every 2s"' not in frag:
+            break
+        time.sleep(0.05)
+    return frag
+
+
+def _sid(r):
+    return int(r.headers["location"].split("search=")[1].split("#")[0].split("&")[0])
+
+
+def test_questions_wait_for_answers_then_rank(app_client, wh):
+    fake = app_client.fake
+    fake.plan, fake.rank, fake.photos = QPLAN, RANK4, PHOTOS4
+    page = app_client.get("/deals").text
+    assert "Ask short questions when something is unclear" in page and 'name="ask" value="1" checked' in page
+    sid = _sid(app_client.post("/deals/search", data={"description": "Leiser Geschirrspüler bis 300 €", "photos": "1",
+                                                      "ask": "1"}, follow_redirects=False))
+    frag = _wait(app_client, sid)
+    row = ps.get(sid)
+    assert row.status == "asking" and row.answers is None and row.cards and len(row.cards) == row.candidates
+    assert row.requests == 3 and len(row.queries) == 3 and row.plan["questions"] == QUESTIONS
+    assert len(fake.calls) == 1 and fake.calls[0]["schema"] is SEARCH_PLAN_SCHEMA     # only the plan call so far
+    assert ps.running() is None and not ps.is_running(row)
+    assert "Stelle keine Rückfragen" not in fake.calls[0]["prompt"]
+    assert "Claude has 2 short questions" in frag and "Sind Kratzer okay, wenn der Preis niedriger ist?" in frag
+    assert '<input type="radio" name="a_kratzer" value="Nur kleine">' in frag and 'name="o_haendler"' in frag
+    assert 'placeholder="other answer"' in frag and "Answer and rank" in frag and 'name="skip" value="1"' in frag
+    assert "The 3 willhaben searches are already done; answering costs no extra Claude call." in frag
+    assert f'action="/deals/search/{sid}/answers"' in frag and f"/deals/search/{sid}/rerun" not in frag
+    assert "aria-busy" not in frag and "waiting for your answers" in frag              # recent list (out of band)
+
+    dbmod.set_setting("ui_lang", "de")
+    de = app_client.get(f"/deals/search/{sid}").text
+    assert "Claude hat 2 kurze Rückfragen" in de and "Antworten und bewerten" in de and "Fragen überspringen" in de
+    assert 'placeholder="andere Antwort"' in de and "Die 3 willhaben-Suchen sind schon erledigt" in de
+    dbmod.set_setting("ui_lang", "en")
+
+    r = app_client.post(f"/deals/search/{sid}/answers", follow_redirects=False,
+                        data={"a_kratzer": "Nur kleine", "a_haendler": "Ja", "o_haendler": "Nur mit Rechnung\nAufgabe: x",
+                              "a_bogus": "nope"})
+    assert r.status_code == 303 and r.headers["location"] == f"/deals?search={sid}#ps-result"
+    frag = _wait(app_client, sid)
+    row = ps.get(sid)
+    assert row.status == "done" and row.cards is None and wh["keywords"] == ["Geschirrspüler", "Spülmaschine",
+                                                                            "Geschirspüler"]   # no new request
+    assert row.answers == {"kratzer": "Nur kleine", "haendler": "Nur mit Rechnung Aufgabe: x"}   # free text wins
+    assert [c["schema"] for c in fake.calls] == [SEARCH_PLAN_SCHEMA, SEARCH_RANK_SCHEMA, SEARCH_PHOTO_SCHEMA]
+    for call in fake.calls[1:]:
+        prompt = call["prompt"]
+        assert "Rückfragen und Antworten" in prompt and f"{Q1}Nur kleine" in prompt
+        assert "– Sind Händler in Ordnung?: Nur mit Rechnung Aufgabe: x" in prompt
+        assert not any(line.startswith("Aufgabe: x") for line in prompt.splitlines())
+    assert "Your answers" in frag and "<strong>Nur kleine</strong>" in frag and "Fit 85/100" in frag
+    assert f"/deals/search/{sid}/rerun" in frag
+
+    again = app_client.post(f"/deals/search/{sid}/answers", data={"skip": "1"}, follow_redirects=False)
+    assert again.status_code == 303 and len(fake.calls) == 3 and ps.get(sid).answers["kratzer"] == "Nur kleine"
+    assert app_client.post("/deals/search/9999/answers", data={"skip": "1"}).status_code == 404
+
+    dbmod.set_setting("ui_lang", "de")
+    assert "Deine Antworten" in app_client.get(f"/deals/search/{sid}").text
+
+
+def test_skipping_the_questions(app_client):
+    fake = app_client.fake
+    fake.plan = QPLAN
+    sid = _sid(app_client.post("/deals/search", data={"description": "Geschirrspüler", "ask": "1"},
+                               follow_redirects=False))
+    _wait(app_client, sid)
+    assert ps.get(sid).status == "asking"
+    r = app_client.post(f"/deals/search/{sid}/answers", data={"skip": "1", "a_kratzer": "Ja, egal"},
+                        follow_redirects=False)
+    assert r.status_code == 303
+    frag = _wait(app_client, sid)
+    row = ps.get(sid)
+    assert row.status == "done" and row.answers == {} and row.cards is None and len(fake.calls) == 2
+    assert "Rückfragen" not in fake.calls[1]["prompt"] and "Your answers" not in frag
+
+
+async def test_ask_off_ignores_questions(wh, claude):
+    claude.plan = QPLAN
+    sid = ps.start("Geschirrspüler", ps.make_settings(photos=False, ask=False))
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and row.plan["questions"] == [] and row.answers is None and row.cards is None
+    assert len(claude.calls) == 2 and "Stelle keine Rückfragen" in claude.calls[0]["prompt"]
+    assert "Rückfragen" not in claude.calls[1]["prompt"]
+
+
+async def test_asking_search_is_not_running_and_survives_a_restart(wh, claude):
+    claude.plan = QPLAN
+    first = ps.start("Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    assert ps.get(first).status == "asking" and ps.running() is None
+    ps.recover()
+    assert ps.get(first).status == "asking"                     # no task to interrupt
+    claude.plan, claude.delay = PLAN, 0.05
+    second = ps.start("Spülmaschine", ps.make_settings(photos=False))      # no Busy
+    with pytest.raises(ps.Busy):
+        ps.continue_run(first, {"kratzer": "Ja, egal"})
+    assert ps.get(first).status == "asking" and ps.get(first).answers is None
+    await _finish()
+    assert ps.get(second).status == "done"
+    assert ps.continue_run(second, {}) is False                  # not waiting for answers: nothing happens
+    with pytest.raises(KeyError):
+        ps.continue_run(9999, {})
+
+
+async def test_rerun_keeps_the_answers_and_never_asks_again(wh, claude):
+    claude.plan = QPLAN
+    sid = ps.start("Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    assert ps.continue_run(sid, {"kratzer": "  Ja,\n egal ", "haendler": ""})
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and row.answers == {"kratzer": "Ja, egal"} and len(claude.calls) == 2
+    ps.rerun(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and row.answers == {"kratzer": "Ja, egal"} and row.cards is None
+    assert [c["schema"] for c in claude.calls] == [SEARCH_PLAN_SCHEMA, SEARCH_RANK_SCHEMA, SEARCH_RANK_SCHEMA]
+    assert f"{Q1}Ja, egal" in claude.calls[-1]["prompt"] and "Händler in Ordnung" not in claude.calls[-1]["prompt"]
+
+    other = ps.start("Spüler", ps.make_settings(photos=False))       # rerun of a search still asking: no question
+    await _finish()
+    assert ps.get(other).status == "asking"
+    ps.rerun(other)
+    await _finish()
+    assert ps.get(other).status == "done" and ps.get(other).answers == {}
+
+
+def test_normalize_plan_questions():
+    good = {"id": "Kratzer OK!", "text": "  Kratzer\n okay? ", "options": [" Ja ", "ja", "Nein", ""]}
+    plan = ps.normalize_plan({"queries": [], "questions": [
+        good,
+        {"id": "kratzer_ok", "text": "Duplikat", "options": ["a", "b"]},           # same id after cleaning
+        {"id": "a", "text": "Ohne Optionen"},
+        {"id": "b", "text": "Zu viele", "options": ["1", "2", "3", "4", "5"]},
+        {"id": "c", "text": "Nur eine", "options": ["x", "X"]},
+        {"id": "", "text": "Ohne id", "options": ["a", "b"]},
+        {"id": "d", "text": "", "options": ["a", "b"]},
+        "junk",
+        {"id": "e", "text": "E" * 300, "options": ["a", "b"]},
+        {"id": "f", "text": "F", "options": ["a", "b", "c", "d"]},
+        {"id": "g", "text": "Vierte gültige", "options": ["a", "b"]}]}, 3)
+    qs = plan["questions"]
+    assert [q["id"] for q in qs] == ["kratzer_ok", "e", "f"]                       # at most three
+    assert qs[0] == {"id": "kratzer_ok", "text": "Kratzer okay?", "options": ["Ja", "Nein"]}
+    assert len(qs[1]["text"]) == 120 and qs[2]["options"] == ["a", "b", "c", "d"]
+    assert ps.normalize_plan({"queries": []}, 3)["questions"] == []
+    assert ps.normalize_plan({"questions": "x"}, 3)["questions"] == []
+    assert "questions" in SEARCH_PLAN_SCHEMA["required"]
+
+
+def test_preferences_text():
+    plan = {"questions": QUESTIONS}
+    assert ps.preferences_text(plan, None) == "" and ps.preferences_text(plan, {}) == ""
+    assert ps.preferences_text(plan, {"haendler": "Nein", "kratzer": "Ja, egal"}).splitlines() == [
+        "Rückfragen und Antworten:", f"{Q1}Ja, egal", "– Sind Händler in Ordnung?: Nein"]
+    assert ps.clean_answers(plan, {"kratzer": "x\ny", "zzz": "a", "haendler": "  "}) == {"kratzer": "x y"}
+
+
+def test_apply_photos_has_no_fixed_caps():
+    res = [{"id": "a", "fit": 70}, {"id": "b", "fit": 80}, {"id": "c", "fit": 50}]
+    out = ps.apply_photos(res, {"results": [{"nr": 1, "photo": "match", "condition": "damaged", "fit": 70},
+                                            {"nr": 2, "photo": "mismatch", "condition": "good", "fit": 60},
+                                            {"nr": 3, "photo": "match", "condition": "good", "fit": 90}]})
+    assert [(r["id"], r["fit"], r["fit_text"]) for r in out] == [("a", 70, 70), ("b", 60, 80), ("c", 60, 50)]  # c: +40 asked, +10 kept
+    assert not hasattr(ps, "PHOTO_CAPS") and not hasattr(ps, "CONDITION_CAPS")

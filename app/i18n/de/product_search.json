@@ -1,5 +1,5 @@
 {
- "plans willhaben searches from your description and picks the best offers – two calls per search": "plant willhaben-Suchen aus deiner Beschreibung und wählt die besten Angebote – zwei Aufrufe pro Suche",
+ "plans willhaben searches from your description and picks the best offers – two or three calls per search": "plant willhaben-Suchen aus deiner Beschreibung und wählt die besten Angebote – zwei oder drei Aufrufe pro Suche",
  "What are you looking for?": "Was suchst du?",
  "Describe what you need: item, size, budget, condition, where you can pick it up – e.g. a quiet dishwasher, 60 cm wide, up to € 300, pickup around Vienna, no dealers": "Beschreib, was du brauchst: Artikel, Größe, Budget, Zustand, wo du abholen kannst – z. B. leiser Geschirrspüler, 60 cm breit, bis € 300, Abholung rund um Wien, keine Händler",
  "Misspellings, nicknames, abbreviations, German/English and older model names, generic descriptions – where deals hide": "Tippfehler, Spitznamen, Abkürzungen, deutsche/englische und ältere Modellnamen, allgemeine Beschreibungen – dort verstecken sich die Schnäppchen",
@@ -50,7 +50,7 @@
  "Found": "Gefunden",
  "skipped": "übersprungen",
  "{n} ads, {k} new candidates": "{n} Anzeigen, {k} neue Kandidaten",
- "Runs the same searches again; only the ranking asks Claude.": "Führt dieselben Suchen noch einmal aus; nur die Auswahl fragt Claude.",
+ "Runs the same searches again; only the ranking and the photo check ask Claude.": "Führt dieselben Suchen noch einmal aus; nur Auswahl und Fotoprüfung fragen Claude.",
  "Describe what you are looking for.": "Beschreib, was du suchst.",
  "Hourly willhaben request limit almost used up: only {n} of {total} searches run.": "Stündliches willhaben-Anfragelimit fast aufgebraucht: nur {n} von {total} Suchen laufen.",
  "willhaben paused the search ({error}): stopped after {n} searches, the offers found so far are ranked.": "willhaben hat die Suche gebremst ({error}): nach {n} Suchen abgebrochen, die bisher gefundenen Angebote werden bewertet.",

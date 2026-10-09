@@ -13,9 +13,12 @@ from fastapi import APIRouter, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from sqlmodel import select
+
+from app import scheduler
 from app.db import Hit, SearchAgent, session
 from app.i18n import t
-from app.services import deals, product_search
+from app.services import deals, product_search, search_agents
 from app.willhaben.parse import url_param
 from app.willhaben.public import WillhabenError, get_public
 
@@ -92,10 +95,24 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
     run = product_search.running()
     shown = product_search.get(search) if search else run
     notice = {"busy": t("A product search is still running – wait for it to finish."),
-              "empty": t("Describe what you are looking for.")}.get(msg or "")
+              "empty": t("Describe what you are looking for."),
+              "noplan": t("This search has no planned willhaben searches yet.")}.get(msg or "")
     return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": notice, "ps_oob": oob,
             "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
-            "ps_is_running": product_search.is_running}
+            "ps_is_running": product_search.is_running, "ps_answer_pairs": product_search.answer_pairs,
+            **_agent_ctx(shown)}
+
+
+def _agent_ctx(shown: Any) -> dict[str, Any]:
+    """"Search agent from this search": the existing agent, or the form's defaults."""
+    if shown is None or shown.id is None:
+        return {"ps_agent": None, "ps_agent_n": 0, "ps_agent_interval_min": 0, "ps_agent_name": ""}
+    with session() as db:
+        agent = db.exec(select(SearchAgent).where(SearchAgent.search_id == shown.id)
+                        .order_by(SearchAgent.id)).first()
+    n = len((shown.plan or {}).get("queries") or [])
+    return {"ps_agent": agent, "ps_agent_n": n, "ps_agent_interval_min": search_agents.default_interval_s(n) // 60,
+            "ps_agent_name": search_agents.agent_name(shown)}
 
 
 @router.get("/search")
@@ -105,10 +122,11 @@ async def search_alias():
 
 @router.post("/deals/search")
 async def product_search_start(description: str = Form(""), depth: str = Form("normal"), unusual: str = Form(""),
-                               categories: str = Form(""), sort: str = Form("relevance")):
+                               categories: str = Form(""), sort: str = Form("relevance"), photos: str = Form(""),
+                               ask: str = Form("")):
     if not description.strip():
         return RedirectResponse("/deals?msg=empty", status_code=303)
-    settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort)
+    settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask))
     try:
         sid = product_search.start(description, settings)
     except product_search.Busy:
@@ -126,6 +144,50 @@ async def product_search_rerun(search_id: int):
     except product_search.Busy:
         return RedirectResponse(f"/deals?search={search_id}&msg=busy", status_code=303)
     return RedirectResponse(f"/deals?search={search_id}#ps-result", status_code=303)
+
+
+@router.post("/deals/search/{search_id}/answers")
+async def product_search_answers(request: Request, search_id: int):
+    """Answers to the plan's questions (a_<id> = a chosen option, o_<id> = free text, which wins) or `skip`; the
+    search then goes on with the ranking and the photo check (no new willhaben request, no extra Claude call)."""
+    row = product_search.get(search_id)
+    if row is None:
+        raise HTTPException(404)
+    form = await request.form()
+    answers: dict[str, str] = {}
+    if not form.get("skip"):
+        for q in (row.plan or {}).get("questions") or []:
+            qid = q.get("id") if isinstance(q, dict) else None
+            if not qid:
+                continue
+            other, chosen = form.get(f"o_{qid}"), form.get(f"a_{qid}")
+            other = other.strip() if isinstance(other, str) else ""
+            chosen = chosen.strip() if isinstance(chosen, str) else ""
+            if other or chosen:
+                answers[qid] = other or chosen
+    try:
+        product_search.continue_run(search_id, answers)
+    except KeyError as e:
+        raise HTTPException(404) from e
+    except product_search.Busy:
+        return RedirectResponse(f"/deals?search={search_id}&msg=busy", status_code=303)
+    return RedirectResponse(f"/deals?search={search_id}#ps-result", status_code=303)
+
+
+@router.post("/deals/search/{search_id}/agent")
+async def product_search_agent(search_id: int, name: str = Form(""), interval_min: str = Form(""),
+                               screen_on: str | None = Form(None)):
+    """Search agent that keeps running this search's keyword searches (no further Claude planning call)."""
+    minutes = int(interval_min) if interval_min.strip().isdigit() else None
+    try:
+        agent = search_agents.create_agent_from_search(search_id, name or None, minutes * 60 if minutes else None,
+                                                       screen=bool(screen_on))
+    except KeyError as e:
+        raise HTTPException(404) from e
+    except ValueError:
+        return RedirectResponse(f"/deals?search={search_id}&msg=noplan#ps-result", status_code=303)
+    scheduler.schedule_agent(agent)
+    return RedirectResponse("/agents", status_code=303)
 
 
 @router.get("/deals/search/{search_id}", response_class=HTMLResponse)

@@ -11,6 +11,10 @@
       <input type="checkbox" role="switch" name="unusual" value="1"> {{ _("Extended: unusual names") }}</label>
     <label title="{{ _('Mis-categorised listings, bundles and lots that contain the item, neighbouring categories') }}">
       <input type="checkbox" role="switch" name="categories" value="1"> {{ _("Extended: other categories") }}</label>
+    <label title="{{ _('One more Claude call: looks at the photos of the best offers, catches damage, wrong variants and stock photos; the fit score includes it') }}">
+      <input type="checkbox" role="switch" name="photos" value="1" id="ps-photos" checked> {{ _("Check photos") }}</label>
+    <label title="{{ _('Claude may ask up to three short questions after planning, e.g. whether scratches are fine if the price is lower; answering costs no extra call. The willhaben searches already run while you answer.') }}">
+      <input type="checkbox" role="switch" name="ask" value="1" checked> {{ _("Ask short questions when something is unclear") }}</label>
     <label>{{ _("Depth") }}
       <select name="depth" id="ps-depth">
         <option value="normal" data-n="{{ ps_depths.normal }}">{{ _("Normal (≈{n} searches)", n=ps_depths.normal) }}</option>
@@ -25,13 +29,20 @@
   </div>
   <p class="ps-est"><small class="muted">{{ _("Costs up to") }} <strong id="ps-n">{{ ps_depths.normal }}</strong>
     {{ _("willhaben requests (one per search; {used} of {budget} used in the last hour)", used=wh_limiter().last_hour, budget=wh_budget()) }}
-    · {{ _("Claude is called {n} times (plan + ranking).", n=ps_claude_calls) }}</small></p>
+    · <span id="ps-calls-photos">{{ _("Claude is called {n} times (plan, ranking, photo check).", n=ps_claude_calls + 1) }}</span><span id="ps-calls-text" hidden>{{ _("Claude is called {n} times (plan + ranking).", n=ps_claude_calls) }}</span></small></p>
   <button type="submit" id="ps-submit" {% if ps_running %}disabled title="{{ _('A product search is still running – wait for it to finish.') }}"{% endif %}>🔎 {{ _("Search") }}</button>
 </form>
 <script>
   (() => {
     const sel = document.getElementById('ps-depth'), out = document.getElementById('ps-n');
     sel.addEventListener('change', () => { out.textContent = sel.selectedOptions[0].dataset.n; });
+    const photos = document.getElementById('ps-photos');
+    const calls = () => {
+      document.getElementById('ps-calls-photos').hidden = !photos.checked;
+      document.getElementById('ps-calls-text').hidden = photos.checked;
+    };
+    photos.addEventListener('change', calls);
+    calls();
   })();
 </script>
 
@@ -149,6 +160,13 @@
   .ps-card .actions { flex-wrap: wrap; }
   .ps-wh { padding: 0 .7rem .5rem; }
   .ps-queries { margin-top: 1rem; }
+  .ps-ask { padding: .7rem .9rem; border-left: 3px solid var(--pico-primary); background: var(--pico-card-sectioning-background-color); }
+  .ps-ask fieldset { margin: 0 0 .7rem; } .ps-ask legend { font-weight: 600; margin-bottom: .2rem; }
+  .ps-ask-opts { display: flex; flex-wrap: wrap; gap: .2rem 1.2rem; }
+  .ps-ask-opts label { margin: 0; display: flex; align-items: center; gap: .35rem; }
+  .ps-ask input[type=text] { margin: .3rem 0 0; padding-top: .3rem; padding-bottom: .3rem; max-width: 28rem; }
+  .ps-ask-actions { display: flex; flex-wrap: wrap; gap: .5rem; } .ps-ask-actions button { width: auto; margin: 0; }
+  .ps-ask p { margin: .3rem 0; }
   .ps-foot form { margin: 0; } .ps-foot button, .ps-small { width: auto; margin: 0; padding: .3rem .8rem; font-size: .85rem; }
 </style>
 {% endblock %}

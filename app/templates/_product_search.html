@@ -6,7 +6,7 @@
     <small class="muted">{{ (ps.started_at or ps.created_at)|ago }} ·
       {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}
       {% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}
-      {% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}</small>
+      {% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}{% if plan.questions %} · {{ _("questions") }}{% endif %}</small>
     <p class="ps-desc">„{{ ps.description }}“</p>
   </header>
   {% if live %}
@@ -14,11 +14,31 @@
     <p aria-busy="true">
       {% if ps.status == 'planning' %}{{ _("Claude is planning the searches …") }}
       {% elif ps.status == 'searching' %}{{ _("Searching willhaben: {done} of {total} searches done …", done=pr.done or 0, total=pr.total or 0) }}
+      {% elif ps.status == 'photos' %}{{ _("Claude is looking at the photos …") }}
       {% else %}{{ _("Claude is picking the best offers …") }}{% endif %}</p>
     <progress {% if ps.status == 'searching' and pr.total %}value="{{ pr.done or 0 }}" max="{{ pr.total }}"{% endif %}></progress>
+  {% elif ps.status == 'asking' %}
+    {% set qs = plan.questions or [] %}
+    <form method="post" action="/deals/search/{{ ps.id }}/answers" class="ps-ask" id="ps-ask-{{ ps.id }}">
+      <p><strong>❓ {% if qs|length == 1 %}{{ _("Claude has one short question") }}{% else %}{{ _("Claude has {n} short questions", n=qs|length) }}{% endif %}</strong></p>
+      {% for q in qs %}
+      <fieldset>
+        <legend>{{ q.text }}</legend>
+        <div class="ps-ask-opts">
+        {% for o in q.options %}<label><input type="radio" name="a_{{ q.id }}" value="{{ o }}"> {{ o }}</label>{% endfor %}
+        </div>
+        <input type="text" name="o_{{ q.id }}" maxlength="200" placeholder="{{ _('other answer') }}" aria-label="{{ q.text }} – {{ _('other answer') }}">
+      </fieldset>
+      {% endfor %}
+      <div class="ps-ask-actions">
+        <button type="submit">{{ _("Answer and rank") }}</button>
+        <button type="submit" name="skip" value="1" class="secondary">{{ _("Skip questions") }}</button>
+      </div>
+      <p><small class="muted">{{ _("The {k} willhaben searches are already done; answering costs no extra Claude call.", k=ps.requests or 0) }}</small></p>
+    </form>
   {% elif ps.status == 'error' %}
     <p class="ps-warn">⚠️ {{ ps.error or _("The search failed.") }}</p>
-  {% elif ps.status in ('planning', 'searching', 'ranking') %}
+  {% elif ps.status in ('planning', 'searching', 'ranking', 'photos') %}
     <p class="ps-warn">⚠️ {{ _("This search was interrupted.") }}</p>
   {% endif %}
 
@@ -29,18 +49,28 @@
       {% if plan.nice_to_have %}<br><small>➕ {{ plan.nice_to_have|join(" · ") }}</small>{% endif %}
       {% if plan.exclude %}<br><small>✖ {{ plan.exclude|join(" · ") }}</small>{% endif %}</p>
   {% endif %}
+  {% set pairs = ps_answer_pairs(plan, ps.answers) %}
+  {% if pairs %}
+    <p class="ps-plan ps-answers"><small><strong>{{ _("Your answers") }}:</strong>
+      {% for q, a in pairs %}{{ q }} <strong>{{ a }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}</small></p>
+  {% endif %}
 
   {% if not live and ps.status == 'done' %}
     {% if ps.warning %}<p class="ps-warn">⚠️ {{ ps.warning }}</p>{% endif %}
     {% if ps.note %}<p>🤖 {{ ps.note }}</p>{% endif %}
-    <p><small class="muted">{{ _("{n} willhaben searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=ps_claude_calls) }}</small></p>
+    <p><small class="muted">{{ _("{n} willhaben searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=ps_claude_calls + (1 if st.photos else 0)) }}</small></p>
     {% if ps.results %}
     <div class="grid-cards">
     {% for r in ps.results %}{% set p = r.position or {} %}
       <div class="card ps-card">
         <a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ r.ad_id }}">{% if r.image_url %}<img src="{{ r.image_url }}" loading="lazy" alt="">{% else %}<img alt="">{% endif %}</a>
         <div class="body">
-          {% if r.fit is not none %}<div><span class="ps-fit {{ 'hi' if r.fit >= 75 else 'mid' if r.fit >= 50 else 'lo' }}" title="{{ _('How well it fits your description (Claude)') }}">{{ _("Fit {n}/100", n=r.fit) }}</span></div>{% endif %}
+          {% if r.fit is not none or r.photo %}<div>
+            {% if r.fit is not none %}<span class="ps-fit {{ 'hi' if r.fit >= 75 else 'mid' if r.fit >= 50 else 'lo' }}" title="{{ _('How well it fits your description (Claude)') }}">{{ _("Fit {n}/100", n=r.fit) }}</span>
+              {% if r.fit_text is defined and r.fit_text is not none and r.fit_text != r.fit %}<small class="muted" title="{{ _('Fit from the ad text alone, before Claude looked at the photo') }}">({{ _("text: {n}", n=r.fit_text) }})</small>{% endif %}{% endif %}
+            {% if r.photo %}<span class="badge {{ {'match': 'ok', 'unclear': 'muted'}.get(r.photo, '') }}" title="{{ _('Claude looked at the photo') }}">📷 {{ {"match": _("photo fits"), "unclear": _("photo unclear"), "mismatch": _("photo shows something else")}[r.photo] }}</span>{% endif %}
+            {% if r.condition == 'worn' %}<span class="badge" style="background:#f08c00">{{ _("worn") }}</span>{% elif r.condition == 'damaged' %}<span class="badge">{{ _("damaged") }}</span>{% endif %}
+          </div>{% endif %}
           <a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ r.ad_id }}">{{ r.title }}</a>
           <div class="price">{{ r.price_display or (r.price|eur) }}
             {% if p.pos is not none %}<span class="deal-lvl lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}</div>
@@ -54,6 +84,7 @@
           <div class="meta">{% if r.location %}📍 {{ r.location }} · {% endif %}{% if r.is_private == false %}{{ _("dealer") }}{% elif r.is_private %}{{ _("private") }}{% endif %}
             {% if r.query %} · „{{ r.query }}“{% endif %}</div>
           {% if r.reason %}<p class="ps-reason">🤖 {{ r.reason }}</p>{% endif %}
+          {% if r.photo_note %}<p class="ps-reason">🤖 📷 {{ r.photo_note }}</p>{% endif %}
           {% set scam_w = scam_warnings(r.scam_flags) %}
           {% if r.red_flags or scam_w %}<div class="meta">⚠️
             {% for f in r.red_flags %}<span class="badge muted">{{ f }}</span> {% endfor %}
@@ -91,10 +122,32 @@
 
   {% if not live %}
   <footer class="ps-foot">
+    {% if ps.status != 'asking' %}
     <form method="post" action="/deals/search/{{ ps.id }}/rerun">
       <button type="submit" class="secondary outline" {% if ps_running %}disabled{% endif %}
-              title="{{ _('Runs the same searches again; only the ranking asks Claude.') }}">↻ {{ _("Run again") }}</button>
+              title="{{ _('Runs the same searches again; only the ranking and the photo check ask Claude.') }}">↻ {{ _("Run again") }}</button>
     </form>
+    {% endif %}
+    {% if ps.status == 'done' and plan.queries %}
+    {% if ps_agent %}
+      <p style="margin:.6rem 0 0"><small>🔔 <a href="/agents">{{ _("Search agent #{id} exists → open", id=ps_agent.id) }}</a></small></p>
+    {% else %}
+    <details class="ps-agent" style="margin:.6rem 0 0">
+      <summary><small>🔔 {{ _("Create a search agent from this search") }}</small></summary>
+      <form method="post" action="/deals/search/{{ ps.id }}/agent">
+        <label><small>{{ _("Name") }}</small>
+          <input name="name" value="{{ ps_agent_name }}" maxlength="120"></label>
+        <label><small>{{ _("Check every (minutes)") }}</small>
+          <input type="number" name="interval_min" value="{{ ps_agent_interval_min }}" min="1"
+                 aria-describedby="ps-agent-hint-{{ ps.id }}">
+          <small class="muted" id="ps-agent-hint-{{ ps.id }}">{{ _("{n} willhaben searches per check", n=ps_agent_n) }}</small></label>
+        <label><input type="checkbox" role="switch" name="screen_on" checked> {{ _("Let Claude screen new hits") }}</label>
+        <button type="submit">{{ _("Create search agent") }}</button>
+        <p style="margin:.4rem 0 0"><small class="muted">{{ _("The agent keeps running these {n} searches; new ads are filtered by budget and exclusions in code and, if enabled, checked by Claude before they notify you. Planning costs no further Claude call.", n=ps_agent_n) }}</small></p>
+      </form>
+    </details>
+    {% endif %}
+    {% endif %}
   </footer>
   {% if not ps_running %}<script>document.getElementById('ps-submit')?.removeAttribute('disabled');</script>{% endif %}
   {% endif %}

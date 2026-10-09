@@ -8,9 +8,9 @@
       {% for s in ps_recent %}
         <tr>
           <td><a href="/deals?search={{ s.id }}#ps-result">{{ s.description|truncate(90) }}</a></td>
-          <td><small>{% if ps_is_running(s) %}⏳ {{ _("running") }}{% elif s.status == 'done' %}{{ _("{n} offers", n=(s.results or [])|length) }}{% else %}⚠️ {{ _("failed") }}{% endif %}</small></td>
+          <td><small>{% if ps_is_running(s) %}⏳ {{ _("running") }}{% elif s.status == 'asking' %}❓ {{ _("waiting for your answers") }}{% elif s.status == 'done' %}{{ _("{n} offers", n=(s.results or [])|length) }}{% else %}⚠️ {{ _("failed") }}{% endif %}</small></td>
           <td><small class="muted">{{ (s.started_at or s.created_at)|ago }}</small></td>
-          <td>{% if not ps_is_running(s) %}<form method="post" action="/deals/search/{{ s.id }}/rerun" style="margin:0">
+          <td>{% if not ps_is_running(s) and s.status != 'asking' %}<form method="post" action="/deals/search/{{ s.id }}/rerun" style="margin:0">
                 <button type="submit" class="secondary outline ps-small" {% if ps_running %}disabled{% endif %}>↻ {{ _("Run again") }}</button></form>{% endif %}</td>
         </tr>
       {% endfor %}

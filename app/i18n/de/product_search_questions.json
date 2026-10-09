@@ -1,0 +1,13 @@
+{
+ "questions": "Rückfragen",
+ "Claude has one short question": "Claude hat eine kurze Rückfrage",
+ "Claude has {n} short questions": "Claude hat {n} kurze Rückfragen",
+ "other answer": "andere Antwort",
+ "Answer and rank": "Antworten und bewerten",
+ "Skip questions": "Fragen überspringen",
+ "The {k} willhaben searches are already done; answering costs no extra Claude call.": "Die {k} willhaben-Suchen sind schon erledigt; die Antworten kosten keinen zusätzlichen Claude-Aufruf.",
+ "Your answers": "Deine Antworten",
+ "waiting for your answers": "wartet auf deine Antworten",
+ "Ask short questions when something is unclear": "Bei Unklarem kurz nachfragen",
+ "Claude may ask up to three short questions after planning, e.g. whether scratches are fine if the price is lower; answering costs no extra call. The willhaben searches already run while you answer.": "Claude kann nach der Planung bis zu drei kurze Rückfragen stellen, z. B. ob Kratzer bei niedrigerem Preis in Ordnung sind; die Antworten kosten keinen zusätzlichen Aufruf. Die willhaben-Suchen laufen schon, während du antwortest."
+}
