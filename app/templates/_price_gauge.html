@@ -1,0 +1,34 @@
+{# Price gauge. Expects g = price_gauge.gauge(...) result (or None), basis = short text what was compared. #}
+{% if g %}
+<div class="pgauge">
+  <div class="pgauge-head">
+    <small class="muted">{{ _("Price comparison") }}</small>
+    <span class="badge pg-{{ g.verdict }}">{{ {'low': _('Low price'), 'fair': _('Fair price'), 'high': _('High price')}[g.verdict] }}</span>
+  </div>
+  <div class="pgauge-diff pg-{{ g.verdict }}-text">
+    {% if g.diff_pct < 0 %}{{ _("{n} % below the median", n=-g.diff_pct) }}{% elif g.diff_pct > 0 %}{{ _("{n} % above the median", n=g.diff_pct) }}{% else %}{{ _("exactly the median") }}{% endif %}
+    <small class="muted">({{ _("median {price}", price=g.median|eur) }})</small>
+  </div>
+  <div class="pgauge-bar" role="img" aria-label="{{ _('Price position among comparable ads') }}">
+    <span class="pg-band" style="left:{{ g.p25_pos }}%;width:{{ g.p75_pos - g.p25_pos }}%"></span>
+    <span class="pg-median" style="left:{{ g.median_pos }}%" title="{{ _('median') }}"></span>
+    <span class="pg-mark" style="left:{{ g.pos }}%" title="{{ g.price|eur }}"></span>
+  </div>
+  <div class="pgauge-scale"><small>{{ _("Low price") }}</small><small class="muted">{{ basis }}</small><small>{{ _("High price") }}</small></div>
+</div>
+<style>
+  .pgauge { margin: .6rem 0; }
+  .pgauge-head { display:flex; justify-content:space-between; align-items:center; gap:.5rem; }
+  .pgauge-diff { font-size:.9rem; margin:.15rem 0 .35rem; }
+  .pgauge-bar { position:relative; height:.55rem; border-radius:.3rem;
+    background: linear-gradient(90deg, #2f9e44 0%, #74b816 30%, #f59f00 60%, #e8590c 80%, #e03131 100%); opacity:.9; }
+  .pg-band { position:absolute; top:-1px; bottom:-1px; border:1px solid rgba(255,255,255,.65); border-radius:.3rem; }
+  .pg-median { position:absolute; top:-3px; width:2px; height:calc(100% + 6px); background:rgba(255,255,255,.85); transform:translateX(-1px); }
+  .pg-mark { position:absolute; top:-5px; width:8px; height:calc(100% + 10px); border-radius:3px; transform:translateX(-4px);
+    background: var(--pico-color, #fff); box-shadow: 0 0 0 2px var(--pico-background-color, #111); }
+  .pgauge-scale { display:flex; justify-content:space-between; margin-top:.25rem; gap:.5rem; }
+  .pgauge-scale small:first-child { color:#2f9e44; } .pgauge-scale small:last-child { color:#e03131; }
+  .badge.pg-low { background:#2f9e44; } .badge.pg-fair { background:#f59f00; } .badge.pg-high { background:#e03131; }
+  .pg-low-text { color:#2f9e44; } .pg-high-text { color:#e03131; }
+</style>
+{% endif %}

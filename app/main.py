@@ -157,6 +157,9 @@ def _eur(v: float | None) -> str:
 
 
 templates.env.filters.update(local=_local, ago=_ago, eur=_eur)
+from app.services.price_gauge import gauge as _price_gauge  # noqa: E402
+
+templates.env.globals.update(price_gauge=_price_gauge)
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -363,7 +366,12 @@ async def hit_ad_detail(request: Request, ad_id: str, hit: int | None = None):
         d = await get_public().get_detail(ad_id)
     except WillhabenError as e:
         error = str(e)
-    return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error})
+    g = None
+    if h and h.agent_id:                         # this hit's price among the agent's other hits (60 days)
+        from app.services.price_gauge import gauge
+        g = gauge(h.price or (d.price if d else None), screening._stats(h.agent_id, {h.id}))
+    return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
+                                                                   "price_g": g})
 
 
 @app.post("/hits/{hit_id}/state", response_class=HTMLResponse)

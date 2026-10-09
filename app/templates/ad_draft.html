@@ -100,6 +100,7 @@
       {% if st.count %}
         <p><strong>{{ _("Comparable prices") }}</strong> ({{ _("{n} ads for “{q}”", n=st.count, q=d.search_keywords) }}):<br>
           {{ _("Median") }} {{ st.median|eur }} · {{ _("middle 50 %") }} {{ st.p25|eur }} – {{ st.p75|eur }} · {{ _("range") }} {{ st.min|eur }} – {{ st.max|eur }}</p>
+        {% with g = price_gauge(d.price_suggestion, st), basis = _("{n} comparable ads", n=st.count) %}{% include "_price_gauge.html" %}{% endwith %}
       {% endif %}
       {% if st.llm_estimate %}<p><small class="muted">{{ _("Claude estimates {price}.", price=st.llm_estimate|eur) }}</small></p>{% endif %}
       {% if st.note %}<p><small><strong>{% if d.revisions %}{{ _("Note from Claude on the last revision:") }}{% else %}{{ _("Note from Claude:") }}{% endif %}</strong> {{ st.note }}</small></p>{% endif %}

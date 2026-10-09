@@ -35,6 +35,7 @@
           {% if match.name %}Geizhals: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.name[:50] }}</a>{% if match.price_from %}, {{ _("new from {price}", price=match.price_from|eur) }}{% endif %}{% endif %}
         </small></div>
       </div>
+      {% with g = price_gauge(d.price_suggestion, st), basis = _("{n} comparable ads", n=st.count or 0) %}{% include "_price_gauge.html" %}{% endwith %}
       {% if d.attributes %}<p><small class="muted">{% for a in d.attributes %}{{ a.name }}: {{ a.value }}{% if not loop.last %} · {% endif %}{% endfor %}</small></p>{% endif %}
       {% if st.note %}<p><small><strong>Claude:</strong> {{ st.note }}</small></p>{% endif %}
       <div class="row-actions">

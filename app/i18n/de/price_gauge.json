@@ -1,0 +1,14 @@
+{
+ "Price comparison": "Preisvergleich",
+ "Low price": "Niedriger Preis",
+ "Fair price": "Fairer Preis",
+ "High price": "Hoher Preis",
+ "{n} % below the median": "{n} % unter dem Median",
+ "{n} % above the median": "{n} % über dem Median",
+ "exactly the median": "genau der Median",
+ "median {price}": "Median {price}",
+ "Price position among comparable ads": "Preislage unter vergleichbaren Anzeigen",
+ "median": "Median",
+ "{n} hits of this search agent": "{n} Treffer dieses Suchagenten",
+ "{n} comparable ads": "{n} vergleichbare Anzeigen"
+}

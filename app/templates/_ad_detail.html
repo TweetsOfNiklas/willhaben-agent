@@ -19,6 +19,7 @@
     <h4>{{ d.heading }}</h4>
     <p class="adv-price">{{ d.price_display or (d.price|eur) }}
       {% if h and h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span>{% endif %}</p>
+    {% with g = price_g, basis = _("{n} hits of this search agent", n=price_g.count) if price_g else '' %}{% include "_price_gauge.html" %}{% endwith %}
     {% set scam_f = scam_for_viewer(d, h) %}{% if scam_f %}
     <p class="meta" title="{{ _('Scam check (rules, no AI)') }}">{{ '⚠️' if scam_f[0].severity != 'info' else 'ℹ️' }}
       {% for f in scam_f %}<span class="badge{{ ' muted' if f.severity == 'info' }}"{% if f.severity == 'warn' %} style="background:#f08c00"{% endif %}>{{ f.label }}</span> {% endfor %}</p>{% endif %}
