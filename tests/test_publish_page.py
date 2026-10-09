@@ -254,7 +254,7 @@ def _get(draft_id):
 def test_single_page_sections(client, wh):  # noqa: F811
     d = _draft()
     page = client.get(f"/new-ad/{d.id}").text
-    assert f'action="/new-ad/{d.id}/willhaben/prepare"' in page and "Insert manually" in page
+    assert f'action="/new-ad/{d.id}/willhaben/prepare"' in page and "Insert manually" not in page
     assert "/willhaben/publish" not in page
 
     r = client.post(f"/new-ad/{d.id}/willhaben/prepare", data={"category_query": ""}, follow_redirects=False)

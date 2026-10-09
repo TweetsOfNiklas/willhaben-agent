@@ -29,8 +29,6 @@
         <input name="price" id="price" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}"></label>
       <div class="row-actions">
         <button type="submit">{{ _("Save") }}</button>
-        <button type="button" class="secondary" onclick="navigator.clipboard.writeText(document.getElementById('title').value)">{{ _("Copy title") }}</button>
-        <button type="button" class="secondary" onclick="navigator.clipboard.writeText(document.getElementById('desc').value)">{{ _("Copy description") }}</button>
       </div>
     </form>
     <article>
@@ -91,8 +89,6 @@
         </script>
         {% endif %}
       {% endif %}
-      <p style="margin-top:var(--pico-spacing)"><a href="{{ insert_url }}" target="_blank" rel="noopener" role="button" class="secondary outline">{{ _("Insert manually") }} ↗</a>
-        <br><small class="muted">{{ _("Opens the willhaben form in a new tab – copy the title and description above with one click.") }}</small></p>
     </article>
   </section>
   <section>

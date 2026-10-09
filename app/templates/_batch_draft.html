@@ -1,4 +1,4 @@
-{# One finished draft inside a batch: edit, copy, publish. Swapped in place via htmx (outerHTML). #}
+{# One finished draft inside a batch: edit, publish. Swapped in place via htmx (outerHTML). #}
 {% set st = d.price_stats or {} %}
 {% set match = (d.geizhals or {}).get('match') or {} %}
 <article class="bdraft {{ d.status }}" id="draft-{{ d.id }}">
@@ -23,15 +23,12 @@
     </div>
     <form class="bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
       <label>{{ _("Title") }} <small class="muted"><span class="len">{{ (d.title or '')|length }}</span>/60</small>
-        <span class="copyrow"><input name="title" value="{{ d.title or '' }}" maxlength="80" data-len>
-          <button type="button" class="secondary outline" data-copy="title" title="{{ _("Copy title") }}">⧉</button></span></label>
+        <input name="title" value="{{ d.title or '' }}" maxlength="80" data-len></label>
       <label>{{ _("Description") }}
-        <span class="copyrow"><textarea name="description" rows="7">{{ d.description or '' }}</textarea>
-          <button type="button" class="secondary outline" data-copy="description" title="{{ _("Copy description") }}">⧉</button></span></label>
+        <textarea name="description" rows="7">{{ d.description or '' }}</textarea></label>
       <div class="grid">
         <label>{{ _("Price (€)") }}
-          <span class="copyrow"><input name="price" inputmode="decimal" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}">
-            <button type="button" class="secondary outline" data-copy="price" title="{{ _("Copy price") }}">⧉</button></span></label>
+          <input name="price" inputmode="decimal" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}"></label>
         <div><small class="muted">
           {% if st.count %}{{ _("Comparison ({n}): median {median}, middle {p25}–{p75}", n=st.count, median=st.median|eur, p25=st.p25|eur, p75=st.p75|eur) }}<br>{% endif %}
           {% if st.llm_estimate %}{{ _("Claude estimates {price}", price=st.llm_estimate|eur) }}<br>{% endif %}
@@ -80,9 +77,6 @@
         {% if plan.options is defined %}<input name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}"
           title="{{ _('Wrong categories? Search with your own term') }}">{% endif %}
         <button class="small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>
-      <a href="{{ insert_url }}" target="_blank" rel="noopener" role="button" class="secondary outline small" data-publish>{{ _("Insert manually") }} ↗</a>
-      <form hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
-        <input type="hidden" name="status" value="published"><button class="secondary small">✓ {{ _("Is published") }}</button></form>
       <form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
         <input type="hidden" name="status" value="discarded"><button class="secondary outline small">{{ _("Discard") }}</button></form>
     {% endif %}

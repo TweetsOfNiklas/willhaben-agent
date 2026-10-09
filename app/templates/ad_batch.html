@@ -21,8 +21,6 @@
   .bdraft-photos { display:flex; flex-wrap:wrap; gap:.3rem; align-content:flex-start; }
   .bdraft-photos img { width:82px; height:82px; object-fit:cover; border-radius:.3rem; display:block; }
   .bdraft-photos a:first-child img { width:170px; height:130px; }
-  .copyrow { display:flex; gap:.3rem; align-items:flex-start; } .copyrow > input, .copyrow > textarea { flex:1; margin-bottom:.4rem; }
-  .copyrow button { width:auto; margin:0; padding:.35rem .6rem; }
   .bdraft .small, .bdraft footer button { width:auto; padding:.3rem .8rem; font-size:.85em; margin:0; }
   .bdraft-refine { display:flex; gap:.4rem; margin:.4rem 0 0; } .bdraft-refine input { flex:1; margin:0; }
   .bdraft footer { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
@@ -68,8 +66,7 @@
   <h4 id="drafts">{{ _("Review and publish drafts") }}</h4>
   <p class="progress-line"><progress value="{{ n_pub + n_disc }}" max="{{ dl|length }}" style="flex:1;min-width:10rem;margin:0"></progress>
     <span><strong>{{ n_pub }}</strong> {{ _("of {total} published", total=dl|length) }}{% if n_disc %}, {{ _("{n} discarded", n=n_disc) }}{% endif %}</span></p>
-  <p><small class="muted">{{ _("To publish: click “Prepare for willhaben” on a draft, check the category and the required fields, then “Publish on willhaben” – the free ad goes live right away.") }}
-    {{ _("The manual way still works: “Insert manually”, copy the fields with ⧉, photos from the ZIP, then “Is published”.") }}</small></p>
+  <p><small class="muted">{{ _("To publish: click “Prepare for willhaben” on a draft, check the category and the required fields, then “Publish on willhaben” – the free ad goes live right away.") }}</small></p>
   {% for g in b.groups if g.draft_id and drafts.get(g.draft_id) %}
     {% with d = drafts[g.draft_id], saved = False %}{% include "_batch_draft.html" %}{% endwith %}
   {% endfor %}
@@ -132,20 +129,7 @@
 
 <script>
 (() => {
-  // ---- draft cards: copy buttons (also over plain http), title length, unsaved-changes flag
-  const copy = async text => {
-    try { await navigator.clipboard.writeText(text); return; } catch (e) { /* not a secure context */ }
-    const t = document.createElement('textarea');
-    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
-    document.body.append(t); t.select(); document.execCommand('copy'); t.remove();
-  };
-  document.addEventListener('click', async e => {
-    const btn = e.target.closest('[data-copy]');
-    if (!btn) return;
-    const field = btn.closest('.bdraft').querySelector(`[name="${btn.dataset.copy}"]`);
-    await copy(field.value);
-    const old = btn.textContent; btn.textContent = '✓'; setTimeout(() => { btn.textContent = old; }, 1200);
-  });
+  // ---- draft cards: title length, unsaved-changes flag
   document.addEventListener('input', e => {
     const card = e.target.closest('.bdraft');
     if (!card || !e.target.closest('.bdraft-form')) return;
