@@ -49,6 +49,8 @@ _transport: httpx.AsyncBaseTransport | None = None   # tests inject a mock trans
 _tasks: set[asyncio.Task] = set()
 _pending: dict[int, tuple[str, str, float]] = {}     # ForceReply prompt message id -> (verb, ref, time)
 PENDING_TTL = 30 * 60
+# Last Bot API outcome that says something about the connection, read by app/services/health.py.
+api_health: dict[str, Any] = {"ok_at": None, "error_at": None, "error": None}
 
 
 def kinds() -> dict[str, str]:
@@ -165,14 +167,23 @@ async def api(method: str, _token: str | None = None, _timeout: float = 20, **pa
     if not tok:
         raise TelegramError("no bot token")
     body = {k: v for k, v in params.items() if v is not None}
-    async with httpx.AsyncClient(timeout=_timeout, transport=_transport) as c:
-        r = await c.post(f"{API}/bot{tok}/{method}", json=body)
+    try:
+        async with httpx.AsyncClient(timeout=_timeout, transport=_transport) as c:
+            r = await c.post(f"{API}/bot{tok}/{method}", json=body)
+    except httpx.HTTPError as e:
+        api_health.update(error_at=utcnow(), error=type(e).__name__)   # never str(e): it may hold the URL
+        raise
     try:
         data = r.json()
     except ValueError as e:
+        api_health.update(error_at=utcnow(), error=f"HTTP {r.status_code}")
         raise TelegramError(f"{method}: HTTP {r.status_code}") from e
     if not data.get("ok"):
+        # token revoked / bot deleted / second poller / Telegram down; a 400 (e.g. "not modified") says nothing
+        if r.status_code in (401, 403, 404, 409) or r.status_code >= 500:
+            api_health.update(error_at=utcnow(), error=f"{r.status_code} {data.get('description') or ''}"[:200])
         raise TelegramError(f"{method}: {data.get('description') or r.status_code}")
+    api_health["ok_at"] = utcnow()
     return data.get("result")
 
 
@@ -224,7 +235,7 @@ async def send(kind: str, title: str, message: str, *, url: str | None = None, i
                data: dict[str, Any] | None = None, actions: list[dict[str, Any]] | None = None,
                tag: str | None = None, fresh: bool = False) -> bool:
     """Post one notification to the linked chat. A known `tag` edits the earlier message instead (like HA)."""
-    if not active() or (kind != "test" and kind not in enabled_kinds()):
+    if not active() or (kind not in ("test", "health") and kind not in enabled_kinds()):   # health: watchdog
         return False
     text = f"<b>{_esc(title)}</b>\n{_esc(message)}"
     try:

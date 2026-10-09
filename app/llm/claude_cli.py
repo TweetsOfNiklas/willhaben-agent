@@ -18,7 +18,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.i18n import t
-from app.llm.base import LLMError, LLMResult, model_for
+from app.llm.base import LLMError, LLMResult, model_for, record_call
 from app.llm.claude_login import claude_token
 
 log = logging.getLogger(__name__)
@@ -60,6 +60,17 @@ class ClaudeCLI:
 
     async def complete(self, *, system: str, prompt: str, schema: dict[str, Any],
                        images: list[Path] | None = None) -> LLMResult:
+        # Thin wrapper: only records success/failure for the connection watchdog, behavior unchanged.
+        try:
+            result = await self._complete(system=system, prompt=prompt, schema=schema, images=images)
+        except LLMError as e:
+            record_call(False, str(e))
+            raise
+        record_call(True)
+        return result
+
+    async def _complete(self, *, system: str, prompt: str, schema: dict[str, Any],
+                        images: list[Path] | None = None) -> LLMResult:
         images = images or []
         with tempfile.TemporaryDirectory(prefix="wh-llm-") as tmp:
             names = []

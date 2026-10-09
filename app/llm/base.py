@@ -19,6 +19,16 @@ class LLMResult:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
+# Outcome of the most recent LLM call, read by the connection watchdog (app/services/health.py).
+last_call: dict[str, Any] = {"ok": None, "at": None, "error": None}
+
+
+def record_call(ok: bool, error: str | None = None) -> None:
+    from app.db import utcnow
+
+    last_call.update(ok=ok, at=utcnow(), error=None if ok else (error or "")[:300])
+
+
 def _(text: str) -> str:
     """Marks a label for translation; it is translated where it is shown (settings page)."""
     return text

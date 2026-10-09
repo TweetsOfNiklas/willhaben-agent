@@ -30,6 +30,8 @@ from app.i18n import t
 log = logging.getLogger(__name__)
 
 EVENT = "mobile_app_notification_action"
+# Websocket listener state, read by the connection watchdog (app/services/health.py).
+listener: dict[str, Any] = {"running": False, "connected": False, "error": None}
 _ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP)_(\d+)_([0-9a-f]{12})")
 
 
@@ -179,6 +181,7 @@ async def listen_forever() -> None:
     from app.services.ha_auth import ha_token, ha_url
 
     delay = 5
+    listener["running"] = True
     while True:
         base, token = ha_url(), ha_token()
         if not (base and token):
@@ -191,10 +194,12 @@ async def listen_forever() -> None:
                 await ws.send(json.dumps({"type": "auth", "access_token": token}))
                 if json.loads(await ws.recv()).get("type") != "auth_ok":
                     log.warning("HA push-button listener: auth failed")
+                    listener.update(connected=False, error="auth failed")
                     await asyncio.sleep(300)
                     continue
                 await ws.send(json.dumps({"id": 1, "type": "subscribe_events", "event_type": EVENT}))
                 log.info("HA push-button listener connected")
+                listener.update(connected=True, error=None)
                 delay = 5
                 async for raw in ws:
                     msg = json.loads(raw)
@@ -208,8 +213,11 @@ async def listen_forever() -> None:
                     except Exception:  # noqa: BLE001 - one bad event must not kill the listener
                         log.exception("push action failed")
         except asyncio.CancelledError:
+            listener.update(running=False, connected=False)
             raise
         except Exception as e:  # noqa: BLE001 - network, HA restart, token revoked
             log.info("HA push-button listener disconnected: %s (retry in %ss)", e, delay)
+            listener["error"] = str(e)[:200]
+        listener["connected"] = False
         await asyncio.sleep(delay)
         delay = min(delay * 2, 300)

@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from app.config import get_settings
 from app.db import SearchAgent, session, utcnow
-from app.services import chats, my_ads, quiet_hours
+from app.services import chats, health, my_ads, quiet_hours
 from app.services.search_agents import run_agent
 from app.willhaben.session import get_session
 
@@ -89,6 +89,9 @@ def start() -> None:
     scheduler.add_job(_chat_sync, IntervalTrigger(seconds=s.chat_poll_interval_s, jitter=30), id="chat-sync",
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=30))
+    scheduler.add_job(health.check, IntervalTrigger(seconds=health.CHECK_INTERVAL_S), id="health-check",
+                      replace_existing=True, max_instances=1, coalesce=True,
+                      next_run_time=datetime.now().astimezone() + timedelta(seconds=120))
     scheduler.add_job(my_ads.check_all, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.start()
