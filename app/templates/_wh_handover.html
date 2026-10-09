@@ -1,0 +1,25 @@
+{# "Übergabe" inside a willhaben publish form: pickup (default, live-tested) / shipping / both, PayLivery + parcel size.
+   Shipping NEEDS LIVE VERIFICATION (app/willhaben/insert.py set_delivery). Needs: plan. #}
+{% set sh = plan.shipping or {} %}
+{% set ho = sh.handover or 'pickup' %}
+<fieldset class="wh-handover" onchange="this.querySelector('.wh-ship').hidden = this.querySelector('[name=handover]:checked').value === 'pickup'">
+  <legend><small><strong>{{ _("Handover") }}</strong></small></legend>
+  <label><input type="radio" name="handover" value="pickup" {% if ho == 'pickup' %}checked{% endif %}> {{ _("Self pickup") }}</label>
+  <label><input type="radio" name="handover" value="shipping" {% if ho == 'shipping' %}checked{% endif %}> {{ _("Shipping") }}</label>
+  <label><input type="radio" name="handover" value="both" {% if ho == 'both' %}checked{% endif %}> {{ _("Self pickup or shipping") }}</label>
+  <div class="wh-ship" style="margin-left:1.6rem" {% if ho == 'pickup' %}hidden{% endif %}>
+    <label><input type="checkbox" name="paylivery" value="1" {% if sh.paylivery %}checked{% endif %}> {{ _("with PayLivery (buyer protection)") }}</label>
+    <div class="grid">
+      <label>{{ _("Parcel size") }}
+        <select name="parcel_size">
+          {% for s in parcel_sizes %}<option value="{{ s }}" {% if s == (sh.size or 'S') %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select></label>
+      <label>{{ _("Carrier") }}
+        <select name="parcel_carrier">
+          <option value="">{{ _("cheapest") }}</option>
+          {% for c in parcel_carriers %}<option value="{{ c }}" {% if c == sh.carrier %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select></label>
+    </div>
+    <small class="muted">{{ _("Parcel size and carrier only count with PayLivery; the buyer pays the shipping. Shipping has not been tested with willhaben yet – if a step fails, the ad stays an unpublished draft on willhaben.") }}</small>
+  </div>
+</fieldset>

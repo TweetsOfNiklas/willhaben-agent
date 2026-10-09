@@ -252,7 +252,7 @@ async def prepare_willhaben(draft_id: int, query: str | None = None) -> AdDraft:
     with session() as db:
         d = db.get(AdDraft, draft_id)
     sess = get_session()
-    form = await insert.load_form(sess)
+    form = await insert.cached_form(sess)
     raw, used = None, None
     for q in category_queries(d.title or d.input_text, d.product_query, d.search_keywords, query):
         raw, used = await insert.suggest_categories(sess, q), q
@@ -260,11 +260,76 @@ async def prepare_willhaben(draft_id: int, query: str | None = None) -> AdDraft:
             break
     plan = insert.build_plan(form, raw, condition=d.condition, attributes=d.attributes)
     plan["for_title"], plan["query"] = d.title, used
+    old = d.wh_plan or {}
+    have = {o["path"][-1]["code"] for o in plan["options"] if o.get("path")}
+    plan["options"] += [o for o in old.get("options") or [] if o.get("manual") and o["path"][-1]["code"] not in have]
+    if old.get("shipping"):
+        plan["shipping"] = old["shipping"]
     return update_draft(draft_id, wh_plan=plan, error=None)
 
 
-async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None = None):
-    """Publish the saved draft as free private ad: the chosen category option and field values from the form."""
+async def add_manual_category(draft_id: int, code: str) -> AdDraft:
+    """A category the user picked in "Choose another category": stored as option in wh_plan and pre-selected,
+    so publish_willhaben can use it like a suggested one."""
+    from app.willhaben import insert
+    from app.willhaben.session import get_session
+
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    form = await insert.cached_form(get_session())
+    opt = insert.manual_option(form, code, condition=d.condition, attributes=d.attributes)
+    if opt is None:
+        raise ValueError(t("This category cannot be chosen (not found or not a final category)"))
+    plan = dict(d.wh_plan or {})
+    if "location" not in plan:                   # picked before (or without) "Prepare for willhaben"
+        base = insert.build_plan(form, None, condition=d.condition, attributes=d.attributes)
+        plan.update(location=base["location"], contact=base["contact"], for_title=d.title)
+    options = list(plan.get("options") or [])
+    idx = next((i for i, o in enumerate(options) if o.get("path") and o["path"][-1]["code"] == code), None)
+    if idx is None:
+        options.append(opt)
+        idx = len(options) - 1
+    plan["options"], plan["selected"] = options, idx
+    return update_draft(draft_id, wh_plan=plan, error=None)
+
+
+def parse_shipping(form: Any) -> dict[str, Any]:
+    """Übergabe fields of the publish form → {"handover", "paylivery", "size", "carrier"}; default pickup.
+    Everything but pickup NEEDS LIVE VERIFICATION (insert.set_delivery)."""
+    from app.willhaben import insert
+
+    handover = str(form.get("handover") or "pickup")
+    if handover not in insert.HANDOVERS:
+        handover = "pickup"
+    if handover == "pickup":
+        return {"handover": "pickup"}
+    size = str(form.get("parcel_size") or "").upper()
+    carrier = str(form.get("parcel_carrier") or "")
+    return {"handover": handover, "paylivery": str(form.get("paylivery") or "").lower() in ("1", "true", "on", "yes"),
+            "size": size if size in insert.PARCEL_SIZES else None,
+            "carrier": carrier if carrier in insert.PAYLIVERY_CARRIERS else None}
+
+
+_publishing: set[int] = set()     # drafts with a publish in flight (double click, second tab)
+
+
+async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None = None,
+                            shipping: dict[str, Any] | None = None):
+    """Publish the saved draft as free private ad: the chosen category option and field values from the form.
+    shipping: parse_shipping() result; None = pickup only (the live-verified path)."""
+    from app.willhaben import insert
+
+    if draft_id in _publishing:
+        raise insert.InsertError("Wird gerade veröffentlicht – bitte warten")
+    _publishing.add(draft_id)
+    try:
+        return await _publish_willhaben(draft_id, option, values, stop_after, shipping)
+    finally:
+        _publishing.discard(draft_id)
+
+
+async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None,
+                             shipping: dict[str, Any] | None):
     from app.willhaben import insert
     from app.willhaben.session import get_session
 
@@ -287,10 +352,24 @@ async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], 
             raise insert.InsertError(f"Pflichtfeld „{f['label']}“ fehlt")
         attrs[f["code"]], labels[f["code"]] = (code, allowed[code]), f["label"]
 
+    shipping = shipping if shipping and shipping.get("handover") in insert.HANDOVERS else {"handover": "pickup"}
+    if shipping.get("paylivery") and not shipping.get("size"):
+        raise insert.InsertError("Bitte eine Paketgröße für PayLivery wählen")
+    if shipping != plan.get("shipping") or plan.get("selected") != option:   # remembered for the form
+        update_draft(draft_id, wh_plan={**plan, "shipping": shipping, "selected": option})
+
+    if d.wh_ad_id and plan.get("delivery_set") and shipping["handover"] == "pickup":
+        # A former attempt already set shipping/PayLivery options on this willhaben draft; saving it with pickup
+        # would not clear them (a reset call is unverified), so the user changes the handover on willhaben.
+        raise insert.InsertError("Versand wurde bei willhaben schon eingerichtet – Übergabe bitte direkt auf "
+                                 "willhaben ändern oder wieder Versand wählen")
+
     sess = get_session()
     form = await insert.load_form(sess)          # fresh template (contact, location, context links)
+    insert.remember_form(form)
     ad = insert.compose_ad(form.get("ad") or {}, heading=d.title, description=d.description,
-                           price=d.price_suggestion, path=chosen["path"], attrs=attrs, attr_labels=labels)
+                           price=d.price_suggestion, path=chosen["path"], attrs=attrs, attr_labels=labels,
+                           handover=shipping["handover"])
     photos = []
     for p in d.image_paths[:insert.MAX_PHOTOS]:
         path = Path(p)
@@ -300,9 +379,15 @@ async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], 
     def remember(wh_id: str) -> None:            # so a retry continues the same willhaben draft
         update_draft(draft_id, wh_ad_id=wh_id)
 
+    def delivery_set() -> None:                  # shipping options now live on the willhaben draft (see guard above)
+        with session() as db:
+            cur = dict(db.get(AdDraft, draft_id).wh_plan or {})
+        update_draft(draft_id, wh_plan={**cur, "delivery_set": True})
+
+    ship = shipping if shipping["handover"] != "pickup" else None
     try:
         res = await insert.publish(sess, ad, photos, existing_ad_id=d.wh_ad_id, on_presaved=remember,
-                                   stop_after=stop_after)
+                                   stop_after=stop_after, shipping=ship, on_delivery=delivery_set)
     except RuntimeError as e:
         # 409 on the reused willhaben draft: it was deleted (or finished) meanwhile -> start one fresh insertion
         if not d.wh_ad_id or "HTTP 409" not in str(e):
@@ -317,7 +402,8 @@ async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], 
                                      f"({old.status_label or old.status}) – nicht noch einmal angelegt") from e
         log.info("willhaben draft %s of ad draft %s is gone (%s); publishing as a new insertion", d.wh_ad_id, draft_id, e)
         update_draft(draft_id, wh_ad_id=None)
-        res = await insert.publish(sess, ad, photos, existing_ad_id=None, on_presaved=remember, stop_after=stop_after)
+        res = await insert.publish(sess, ad, photos, existing_ad_id=None, on_presaved=remember, stop_after=stop_after,
+                                   shipping=ship, on_delivery=delivery_set)
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)
