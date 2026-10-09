@@ -5,6 +5,7 @@ Verification status (see docs/willhaben-api.md):
              chat-api/v1/conversations/{id}/messages (first MESSAGE_CANDIDATES entry),
              my adverts (server-rendered in /iad/myprofile/myadverts __NEXT_DATA__)
   FROM BUNDLE send message (chat WebSocket send_message; confirmed per send via the REST history)
+  FROM BUNDLE mark sold / reserved (app/willhaben/sales.py, links from the my-adverts list; needs live verification)
   MISSING    reactivate, ad insertion -> need a request capture
 Unverified write endpoints are never guessed: they raise EndpointUnknown until captured.
 """
@@ -164,6 +165,7 @@ class OwnAdvert:
     url: str
     image_url: str | None
     actions: dict[str, dict[str, Any]] | None = None   # advertEditStatusActionsList link id -> link
+    reasons_query: bool = False   # non-empty deleteReasonQueryParameter: willhaben asks for a reason before "sold"
 
 
 # Link ids in an own ad's advertEditStatusActionsList (from the /bbx-adin myadverts bundle, 2026-10-09)
@@ -201,6 +203,7 @@ def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
                 actions={str(link.get("id")): link for link in
                          ((ad.get("advertEditStatusActionsList") or {}).get("contextLinkList") or {}).get("contextLink") or []
                          if link.get("relativePath")},
+                reasons_query=bool(ad.get("deleteReasonQueryParameter")),
             ))
     return out
 

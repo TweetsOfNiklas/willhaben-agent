@@ -30,7 +30,7 @@ from app.db import (
 from app.llm import usage as llm_usage
 from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
-from app.services import ad_batch, ad_creator, chats, my_ads, screening
+from app.services import ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import health
 from app.services import min_price as min_price_svc
@@ -413,6 +413,7 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     drafts = chats.drafts_of(conversation_id)
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
+                  sale=sold.state_for(conv),
                   gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort))
 
 
@@ -576,6 +577,77 @@ async def myads_delete(ad_id: str):
     except (EndpointUnknown, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
         return back(f"/myads?msg={quote(t('Deleting failed: {error}', error=e), safe='')}")
     return back(f"/myads?msg={quote(t('Deleted on willhaben'), safe='')}")
+
+
+# ------------------------------------------------------------------ sold / reserved workflow (app/services/sold.py)
+def _sold_url(ad_id: str, kind: str, buyer: str | None, msg: str | None = None, anchor: str = "") -> str:
+    q = f"kind={sold.kind_of(kind)}" + (f"&buyer={quote(buyer, safe='')}" if buyer else "")
+    return f"/sold/{quote(ad_id, safe='')}?{q}" + (f"&msg={quote(msg, safe='')}" if msg else "") + anchor
+
+
+@app.get("/sold/{ad_id}", response_class=HTMLResponse)
+async def sold_page(request: Request, ad_id: str, kind: str = "sold", buyer: str | None = None, msg: str | None = None):
+    return _sold_render(request, ad_id, kind, buyer, msg)
+
+
+def _sold_render(request: Request, ad_id: str, kind: str, buyer: str | None, msg: str | None,
+                 reasons: list | None = None) -> HTMLResponse:
+    kind = sold.kind_of(kind)
+    convs = sold.seller_conversations(ad_id)
+    buyer_conv = next((c for c in convs if c.id == buyer), None)
+    return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=sold.ad_row(ad_id), title=sold.title_of(ad_id),
+                  convs=convs, buyer=buyer_conv, others=sold.others(ad_id, buyer_conv.id if buyer_conv else None),
+                  reasons=reasons, msg=msg)
+
+
+@app.post("/sold/{ad_id}/willhaben", response_class=HTMLResponse)
+async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"), buyer: str = Form(""),
+                         undo: str = Form(""), reason_id: str = Form("")):
+    from app.willhaben import sales
+    try:
+        msg = await sold.on_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
+    except sales.ReasonRequired as e:   # nothing written yet: let the user pick willhaben's reason, then confirm again
+        return _sold_render(request, ad_id, kind, buyer or None, t("willhaben asks why the ad is sold. Pick a reason."),
+                            reasons=e.reasons)
+    except (sales.NotOffered, sales.SaleFailed, NotLoggedIn, SessionUnavailable, WillhabenError, ValueError) as e:
+        msg = t("Not changed on willhaben: {error}", error=e)
+    return back(_sold_url(ad_id, kind, buyer or None, msg, "#step1"))
+
+
+@app.post("/sold/{ad_id}/notices")
+async def sold_notices(request: Request, ad_id: str):
+    form = await request.form()
+    kind, buyer = str(form.get("kind") or "sold"), str(form.get("buyer") or "") or None
+    made, errors = await sold.prepare_notices(ad_id, kind, [str(x) for x in form.getlist("conv")], buyer=buyer,
+                                              use_claude=form.get("mode") == "claude")
+    msg = t("{n} drafts prepared – nothing sent yet", n=made) + ("\n" + "\n".join(errors) if errors else "")
+    return back(_sold_url(ad_id, kind, buyer, msg, "#step2"))
+
+
+@app.post("/sold/{ad_id}/notices/send")
+async def sold_notices_send(request: Request, ad_id: str):
+    form = await request.form()
+    kind, buyer = str(form.get("kind") or "sold"), str(form.get("buyer") or "") or None
+    ids = [int(x) for x in form.getlist("send") if str(x).isdigit()]
+    if form.get("action") == "discard":
+        msg = t("{n} drafts discarded", n=sold.discard_notices(ad_id, ids))
+    else:
+        sent, errors = await sold.send_notices(ad_id, [(i, str(form.get(f"text_{i}") or "")) for i in ids])
+        msg = t("{n} messages sent", n=sent) + ("\n" + "\n".join(errors) if errors else "")
+    return back(_sold_url(ad_id, kind, buyer, msg, "#step2"))
+
+
+@app.post("/sold/{ad_id}/finish")
+async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), auto_off: str | None = Form(None)):
+    sold.finish(ad_id, kind, buyer or None, auto_off=bool(auto_off))
+    msg = t("Saved: {status}", status=t("sold") if sold.kind_of(kind) == "sold" else t("reserved"))
+    return back(_sold_url(ad_id, kind, buyer or None, msg, "#step3"))
+
+
+@app.post("/sold/{ad_id}/reset")
+async def sold_reset(ad_id: str, kind: str = Form("sold"), buyer: str = Form("")):
+    sold.reset(ad_id)
+    return back(_sold_url(ad_id, kind, buyer or None, t("Sale status removed here (willhaben unchanged)"), "#step3"))
 
 
 # ------------------------------------------------------------------ new ad

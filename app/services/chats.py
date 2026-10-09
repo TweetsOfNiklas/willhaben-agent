@@ -323,6 +323,8 @@ def _auto_ad(conv: Conversation) -> MyAd | None:
         return None
     with session() as db:
         ad = db.get(MyAd, conv.ad_id)
+    if ad and "sold" in (ad.sale_status, ad.status):
+        return None   # sold: no automatic answers to further buyers (the sold workflow offers a polite "sold" draft)
     return ad if ad and ad.auto_reply else None
 
 
@@ -537,9 +539,15 @@ async def auto_reply(conversation_id: str, before_send=None) -> Draft | None:
             discard_draft(d.id)
             return None
         async with _send_lock:   # limits and checks count at the moment of sending, one send at a time
+            if not _still_auto(conversation_id):   # auto answers turned off / ad sold while "typing"
+                discard_draft(d.id)
+                return None
             blockers = _auto_blockers(conversation_id, d, messages_of(conversation_id))
             if not blockers:
                 return await _send_auto(conv, d, conversation_id, title)
+    if not blockers and not _still_auto(conversation_id):   # changed while Claude was drafting
+        discard_draft(d.id)
+        return None
     if not blockers:
         sent = await _send_auto(conv, d, conversation_id, title)
         if sent.status == "sent":
@@ -556,6 +564,13 @@ async def auto_reply(conversation_id: str, before_send=None) -> Draft | None:
 
 
 _send_lock = asyncio.Lock()
+
+
+def _still_auto(conversation_id: str) -> bool:
+    """Re-check right before an automatic send: the owner may have switched auto answers off or sold the ad."""
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+    return conv is not None and _auto_ad(conv) is not None
 
 
 def _set_status(draft_id: int, status: str) -> None:

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+{% set is_sold = kind == 'sold' %}
+<p>{% if buyer %}<a href="/chats/{{ buyer.id }}">← {{ _("Chat with {name}", name=buyer.partner_name or _('unknown')) }}</a> · {% endif %}<a href="/myads#ad-{{ ad_id }}">{{ _("My ads") }}</a></p>
+<h3>{% if is_sold %}{{ _("Sold") }}{% else %}{{ _("Reserved") }}{% endif %} · {{ title }}</h3>
+
+<form method="get" action="/sold/{{ ad_id }}" class="row-actions">
+  <select name="kind" aria-label="{{ _('What happened') }}" onchange="this.form.submit()" style="width:auto">
+    <option value="sold" {% if is_sold %}selected{% endif %}>{{ _("Sold") }}</option>
+    <option value="reserved" {% if not is_sold %}selected{% endif %}>{{ _("Reserved") }}</option>
+  </select>
+  <select name="buyer" aria-label="{{ _('Buyer') }}" onchange="this.form.submit()" style="width:auto">
+    <option value="">{{ _("Buyer: not from a chat") }}</option>
+    {% for c in convs %}<option value="{{ c.id }}" {% if buyer and buyer.id == c.id %}selected{% endif %}>{{ _("Buyer: {name}", name=c.partner_name or c.id) }}</option>{% endfor %}
+  </select>
+  <noscript><button class="secondary">{{ _("Show") }}</button></noscript>
+</form>
+<p><small class="muted">{{ _("Three steps, each one optional. Nothing happens without your click.") }}
+  {% if ad and ad.sale_status %}<span class="badge ok">{{ _("sold") if ad.sale_status == 'sold' else _("reserved") }}</span>{% endif %}
+  {% if ad and ad.status in ('sold', 'reserved') %}<span class="badge muted">{{ _("willhaben: {status}", status=_("sold") if ad.status == 'sold' else _("reserved")) }}</span>{% endif %}</small></p>
+
+<article id="step1">
+  <header><strong>1 · {{ _("On willhaben") }}</strong></header>
+  {% set hidden %}<input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}">{% endset %}
+  {% if is_sold %}
+  <form method="post" action="/sold/{{ ad_id }}/willhaben">
+    {{ hidden }}
+    {% if reasons %}
+    <fieldset>
+      <legend>{{ _("Reason (asked by willhaben)") }}</legend>
+      {% for r in reasons %}<label><input type="radio" name="reason_id" value="{{ r.id }}" required> {{ r.label }}</label>{% endfor %}
+    </fieldset>
+    {% endif %}
+    <div class="row-actions">
+      <button data-confirm="{{ _('Mark this ad as sold on willhaben now? willhaben cannot undo this.') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Mark as sold on willhaben") }}</button>
+    </div>
+    <small class="muted">{{ _('Like "Auf verkauft setzen" in My ads on willhaben. A sold ad cannot be activated again.') }}</small>
+  </form>
+  {% else %}
+  <form method="post" action="/sold/{{ ad_id }}/willhaben">
+    {{ hidden }}
+    <div class="row-actions">
+      <button data-confirm="{{ _('Mark this ad as reserved on willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Mark as reserved on willhaben") }}</button>
+      <button name="undo" value="1" class="secondary outline" data-confirm="{{ _('Remove the reserved mark on willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Remove reservation") }}</button>
+    </div>
+  </form>
+  {% endif %}
+  <p><small class="muted">{{ _("Not tested live yet: check the ad on willhaben afterwards.") }}</small></p>
+</article>
+
+<article id="step2">
+  <header><strong>2 · {{ _("Tell the other buyers") }}</strong></header>
+  {% set drafts = others | selectattr('draft') | list %}
+  {% if others %}
+  <form method="post" action="/sold/{{ ad_id }}/notices">
+    {{ hidden }}
+    {% if not buyer %}<p><small class="muted">{{ _("Pick the buyer above first, so they do not get this message too.") }}</small></p>{% endif %}
+    <table class="stack">
+      <tbody>
+      {% for o in others %}
+      <tr>
+        <td><label><input type="checkbox" name="conv" value="{{ o.conv.id }}" {% if buyer and not o.informed and not o.draft %}checked{% endif %}>
+          <a href="/chats/{{ o.conv.id }}">{{ o.conv.partner_name or _('unknown') }}</a></label></td>
+        <td><small class="muted">{{ (o.last_in or '')[:120] }}</small></td>
+        <td>{% if o.informed %}<span class="badge ok">{{ _("informed") }}</span>{% elif o.draft %}<span class="badge muted">{{ _("draft") }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="row-actions">
+      <button class="secondary" name="mode" value="template">{{ _("Prepare short drafts") }}</button>
+      <button class="secondary outline" name="mode" value="claude" onclick="this.setAttribute('aria-busy','true')">{{ _("Prepare drafts with Claude") }}</button>
+    </div>
+    <small class="muted">{{ _("Only drafts – you check them below before anything is sent.") }}</small>
+  </form>
+  {% else %}
+  <p class="muted">{{ _("No other conversations about this ad.") }}</p>
+  {% endif %}
+
+  {% if drafts %}
+  <form method="post" action="/sold/{{ ad_id }}/notices/send">
+    {{ hidden }}
+    {% for o in drafts %}
+    <label><input type="checkbox" name="send" value="{{ o.draft.id }}" checked> <strong>{{ o.conv.partner_name or _('unknown') }}</strong></label>
+    <textarea name="text_{{ o.draft.id }}" rows="3">{{ o.draft.text }}</textarea>
+    {% if o.draft.error %}<small style="color:#e5484d">{{ o.draft.error }}</small>{% endif %}
+    {% endfor %}
+    <div class="row-actions">
+      <button name="action" value="send" data-confirm="{{ _('Send the selected messages via willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Send selected") }}</button>
+      <button name="action" value="discard" class="contrast outline">{{ _("Discard selected") }}</button>
+    </div>
+  </form>
+  {% endif %}
+</article>
+
+<article id="step3">
+  <header><strong>3 · {{ _("Here in the app") }}</strong></header>
+  <form method="post" action="/sold/{{ ad_id }}/finish">
+    {{ hidden }}
+    <label><input type="checkbox" name="auto_off" value="1" checked> {{ _("Switch off automatic answers for this ad (instructions are kept)") }}</label>
+    <div class="row-actions">
+      <button class="secondary">{% if is_sold %}{{ _("Save as sold") }}{% else %}{{ _("Save as reserved") }}{% endif %}</button>
+      {% if ad and ad.sale_status %}<button class="contrast outline" formaction="/sold/{{ ad_id }}/reset">{{ _("Not sold after all") }}</button>{% endif %}
+    </div>
+    <small class="muted">{{ _("A sold ad never gets automatic answers again.") }}</small>
+  </form>
+</article>
+{% endblock %}
