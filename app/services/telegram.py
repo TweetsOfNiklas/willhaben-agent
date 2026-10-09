@@ -6,6 +6,7 @@ that sent `/start <code>` with the one-time code shown in Settings. Updates from
 Buttons carry a short random token (`t:<token>`, table TelegramAction) instead of the action itself:
   D_SEND / D_REPLY / D_REVISE / D_DISCARD  held-back answer -> ha_actions.handle (the one send path)
   D_CAL                                     agreed appointment -> Google Calendar (ha_actions.handle)
+  D_SHIP                                    address received -> fill the carrier's label form (ha_actions.handle)
   C_DRAFT / C_REPLY                         new chat message -> Claude draft / answer typed in Telegram
   F_UP / F_DOWN                             feedback on an automatic answer (👎 asks for a note)
   A_ON / A_OFF                              automatic answers for one own ad
@@ -61,6 +62,7 @@ def kinds() -> dict[str, str]:
         "ad_expiring": t("Own ads about to expire"),
         "ad_expired": t("Own ads expired"),
         "meetup": t("Appointments for the calendar"),
+        "shipping": t("Shipping addresses and labels"),
     }
 
 
@@ -199,7 +201,7 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
         parsed = ha_actions.parse_action(str(a.get("action") or ""))
         if parsed:
             verb, draft_id = parsed
-            icon = {"SEND": "✅ ", "REPLY": "↩️ ", "REVISE": "✍️ ", "DISCARD": "🗑 ", "CAL": "📅 "}.get(verb, "")
+            icon = {"SEND": "✅ ", "REPLY": "↩️ ", "REVISE": "✍️ ", "DISCARD": "🗑 ", "CAL": "📅 ", "SHIP": "📦 "}.get(verb, "")
             buttons.append(_button(icon + str(a.get("title") or verb), f"D_{verb}", str(draft_id)))
     conv, ad_id = data.get("conversation_id"), data.get("ad_id")
     if kind == "message" and conv:
@@ -412,7 +414,7 @@ async def _on_callback(cq: dict[str, Any]) -> None:
         return
     verb, ref = row.verb, row.ref
 
-    if verb in ("D_SEND", "D_DISCARD", "D_CAL"):
+    if verb in ("D_SEND", "D_DISCARD", "D_CAL", "D_SHIP"):
         await _answer(cq_id, "…")
         res = await ha_actions.handle({"action": ha_actions.action_id(verb[2:], int(ref))})
         if res is None:

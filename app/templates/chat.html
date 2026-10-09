@@ -42,6 +42,7 @@
       {% endif %}
     </article>
     {% endif %}
+    {% if ship_on %}{% include "_shipping.html" %}{% endif %}
     <form method="post" action="/chats/{{ conv.id }}/refresh" class="row-actions"><button class="secondary outline">↻ {{ _("Reload history") }}</button></form>
     <div class="chat">
       {% for m in messages %}

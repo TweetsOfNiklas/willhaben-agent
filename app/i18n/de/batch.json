@@ -1,4 +1,5 @@
 {
+ "Category search term, e.g. speaker": "Suchbegriff für die Kategorie, z. B. Lautsprecher",
  "Check categories again": "Kategorien neu abfragen",
  "Prepare for willhaben": "Für willhaben vorbereiten",
  "Publish on willhaben": "Auf willhaben veröffentlichen",
@@ -6,6 +7,8 @@
  "Publishing failed: {error}": "Veröffentlichen fehlgeschlagen: {error}",
  "Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.": "Dauert etwa eine halbe Minute: Fotos werden hochgeladen, dann wird die kostenlose Anzeige aktiviert. Kostenpflichtiges wird nie gebucht.",
  "View on willhaben": "Auf willhaben ansehen",
+ "Wrong categories? Search with your own term": "Falsche Kategorien? Mit eigenem Begriff suchen",
  "pickup": "Selbstabholung",
- "willhaben form not reachable: {error}": "willhaben-Formular nicht erreichbar: {error}"
+ "willhaben form not reachable: {error}": "willhaben-Formular nicht erreichbar: {error}",
+ "willhaben suggests no category for this title.": "willhaben schlägt für diesen Titel keine Kategorie vor."
 }

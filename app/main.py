@@ -30,7 +30,7 @@ from app.db import (
 from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import ad_batch, ad_creator, chats, my_ads, screening
-from app.services import gcal, geizhals, ha_auth, meetups, quiet_hours, telegram
+from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services.notify import PUSH_CHANNELS, notify
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -408,7 +408,14 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     drafts = chats.drafts_of(conversation_id)
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
-                  gcal_duration=gcal.config()["duration"])
+                  gcal_duration=gcal.config()["duration"], **_shipping_ctx(conversation_id, conv))
+
+
+def _shipping_ctx(conversation_id: str, conv: Conversation) -> dict[str, Any]:
+    s = shipping.open_for(conversation_id)
+    return {"shipment": s, "ship_options": shipping.quote(s.parcel) if s else [],
+            "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
+            "ship_sender_ok": shipping.sender_complete()}
 
 
 @app.post("/chats/{conversation_id}/refresh")
@@ -698,13 +705,14 @@ async def ad_draft_inline_status(request: Request, draft_id: int, status: str = 
 
 @app.post("/ad-drafts/{draft_id}/inline/prepare", response_class=HTMLResponse)
 async def ad_draft_inline_prepare(request: Request, draft_id: int, title: str | None = Form(None),
-                                  description: str | None = Form(None), price: str = Form("")):
+                                  description: str | None = Form(None), price: str = Form(""),
+                                  category_query: str = Form("")):
     """Read-only: ask willhaben's insertion form for categories and required fields of this draft."""
     _draft_or_404(draft_id)
     if title is not None and description is not None:
         ad_creator.save_fields(draft_id, title, description, price)
     try:
-        d = await ad_creator.prepare_willhaben(draft_id)
+        d = await ad_creator.prepare_willhaben(draft_id, category_query.strip() or None)
     except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
         d = ad_creator.update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
     return _draft_card(request, d)
@@ -752,7 +760,8 @@ async def ad_batch_image(batch_id: int, idx: int):
 @app.get("/session", response_class=HTMLResponse)
 async def session_page(request: Request, msg: str | None = None):
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
-    return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings())
+    return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),
+                  label_form=label_fill.active())
 
 
 @app.post("/session/start")
@@ -848,7 +857,8 @@ async def settings_page(request: Request, msg: str | None = None):
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
-                  tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx())
+                  tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
+                  ship=shipping.config(), ship_carriers=shipping.CARRIERS)
 
 
 async def _gcal_ctx() -> dict[str, Any]:
@@ -1095,6 +1105,106 @@ async def chat_calendar_find(conversation_id: str):
 async def chat_calendar_forget(conversation_id: str):
     meetups.forget(conversation_id)
     return back(f"/chats/{conversation_id}")
+
+
+# ------------------------------------------------------------------ shipping (parcel labels)
+def _chat_back(conversation_id: str, msg: str = "") -> RedirectResponse:
+    return back(f"/chats/{conversation_id}?msg={quote(msg, safe='')}#shipping")
+
+
+def _shipment_or_404(shipment_id: int):
+    s = shipping.get(shipment_id)
+    if s is None:
+        raise HTTPException(404)
+    return s
+
+
+@app.post("/settings/shipping")
+async def settings_shipping(request: Request):
+    f = await request.form()
+    shipping.save_sender({k: str(f.get(k) or "") for k in shipping.ADDRESS_FIELDS})
+    shipping.save_carriers([str(c) for c in f.getlist("carrier")])
+    set_setting("ship_detect", "1" if f.get("detect") else "0")
+    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+
+
+@app.post("/chats/{conversation_id}/shipping/detect")
+async def shipping_detect(conversation_id: str):
+    try:
+        s = await shipping.detect(conversation_id, force=True)
+    except (LLMError, shipping.ShippingError) as e:
+        return _chat_back(conversation_id, str(e))
+    return _chat_back(conversation_id, "" if s and s.recipient else t("No complete address in this chat yet – enter it by hand"))
+
+
+@app.post("/shipments/{shipment_id}")
+async def shipment_save(request: Request, shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    f = await request.form()
+    addr = shipping.clean_address({k: str(f.get(k) or "") for k in shipping.ADDRESS_FIELDS})
+    if addr:
+        shipping.update(shipment_id, recipient=addr)
+    try:
+        shipping.set_parcel(shipment_id, {k: f.get(k) for k in ("length_cm", "width_cm", "height_cm", "weight_kg", "contents")})
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Changes saved") if addr else t("Address incomplete: name, street, postcode and city are needed"))
+
+
+@app.post("/shipments/{shipment_id}/option")
+async def shipment_option(shipment_id: int, key: str = Form(...)):
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.choose(shipment_id, key)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id)
+
+
+@app.post("/shipments/{shipment_id}/label")
+async def shipment_label(shipment_id: int, key: str = Form("")):
+    s = _shipment_or_404(shipment_id)
+    try:
+        if key:
+            shipping.choose(shipment_id, key)
+        msg = await label_fill.start(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return back(f"/session?msg={quote(msg, safe='')}")
+
+
+@app.get("/shipments/{shipment_id}/back")
+async def shipment_back(shipment_id: int):
+    return _chat_back(_shipment_or_404(shipment_id).conversation_id)
+
+
+@app.post("/session/label-fill")
+async def session_label_fill():
+    try:
+        msg = await label_fill.fill_current()
+    except shipping.ShippingError as e:
+        msg = str(e)
+    return back(f"/session?msg={quote(msg, safe='')}")
+
+
+@app.post("/shipments/{shipment_id}/status")
+async def shipment_status(shipment_id: int, status: str = Form(...), tracking: str = Form("")):
+    s = _shipment_or_404(shipment_id)
+    if status not in ("draft", "labelled", "sent", "discarded"):
+        raise HTTPException(400)
+    shipping.update(shipment_id, status=status, tracking=tracking.strip() or s.tracking)
+    return _chat_back(s.conversation_id)
+
+
+@app.get("/shipments/{shipment_id}/label.pdf")
+async def shipment_label_file(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    if not s.label_path:
+        raise HTTPException(404)
+    p = get_settings().data_dir / "labels" / Path(s.label_path).name
+    if not p.exists():
+        raise HTTPException(404)
+    return FileResponse(p, filename=p.name)
 
 
 # ------------------------------------------------------------------ telegram

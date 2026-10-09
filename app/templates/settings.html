@@ -41,6 +41,8 @@
       {% if ha.ok %}<span class="badge ok">✓</span>{% elif ha_source %}<span class="badge">!</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
     <a href="#telegram">Telegram
       {% if tg.linked and tg.enabled %}<span class="badge ok">✓</span>{% elif tg.configured %}<span class="badge">!</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
+    <a href="#shipping">{{ _("Shipping") }}
+      {% if ship.sender.name and ship.sender.zip %}<span class="badge ok">✓</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
     <a href="#calendar">Google Calendar
       {% if gcal.connected and not gcal_error %}<span class="badge ok">✓</span>{% elif gcal.client %}<span class="badge">!</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
     <small>{{ _("Behavior") }}</small>
@@ -299,6 +301,39 @@
           {% endif %}
         </ol>
       {% endif %}
+    </section>
+
+    <section id="shipping">
+      <h4>{{ _("Shipping") }}</h4>
+      <p class="lead">{{ _("When a buyer sends an address, the app prepares the parcel, compares prices and fills in the carrier's label form for you.") }}</p>
+      <form method="post" action="/settings/shipping">
+        <fieldset><legend><small>{{ _("Sender (you)") }}</small></legend>
+          <div class="grid">
+            <label>{{ _("Name") }} <input name="name" value="{{ ship.sender.name }}" autocomplete="name"></label>
+            <label>{{ _("Phone") }} <input name="phone" value="{{ ship.sender.phone }}" autocomplete="tel"></label>
+          </div>
+          <div class="grid">
+            <label>{{ _("Street") }} <input name="street" value="{{ ship.sender.street }}" autocomplete="address-line1"></label>
+            <label>{{ _("No.") }} <input name="house_no" value="{{ ship.sender.house_no }}"></label>
+            <label>{{ _("Stair/door") }} <input name="extra" value="{{ ship.sender.extra }}"></label>
+          </div>
+          <div class="grid">
+            <label>{{ _("Postcode") }} <input name="zip" value="{{ ship.sender.zip }}" inputmode="numeric" maxlength="4" autocomplete="postal-code"></label>
+            <label>{{ _("City") }} <input name="city" value="{{ ship.sender.city }}" autocomplete="address-level2"></label>
+            <label>{{ _("E-mail") }} <input name="email" type="email" value="{{ ship.sender.email }}" autocomplete="email"></label>
+          </div>
+        </fieldset>
+        <fieldset><legend><small>{{ _("Compare these carriers") }}</small></legend>
+          {% for key, c in ship_carriers.items() %}
+            <label><input type="checkbox" name="carrier" value="{{ key }}" {% if key in ship.carriers %}checked{% endif %}>
+              <strong>{{ c.name }}</strong> <small class="muted">· {{ c.dropoff }} · {{ _("login:") }} {{ c.login }}</small></label>
+          {% endfor %}
+        </fieldset>
+        <label><input type="checkbox" role="switch" name="detect" {% if ship.detect %}checked{% endif %}>
+          {{ _("Notice addresses in chats automatically and offer a label") }}</label>
+        <button>{{ _("Save") }}</button>
+      </form>
+      <p><small class="muted">{{ _("Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size, you check and pay. Log in there once if the carrier asks; the browser remembers it. The app never presses “buy” or “pay”.") }}</small></p>
     </section>
 
     <section id="rules">

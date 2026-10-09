@@ -22,6 +22,15 @@
 </article>
 
 {% if session_status.started %}
+  {% if label_form %}
+  <article id="label-form" style="border-left:4px solid var(--brand)">
+    <form method="post" action="/session/label-fill" class="row-actions" style="margin:0;align-items:center">
+      <span>📦 {{ _("Label form for this chat's parcel. After each step (“Weiter”), let the app fill the next page.") }}</span>
+      <button style="width:auto" onclick="this.setAttribute('aria-busy','true')">{{ _("Fill this page") }}</button>
+      <a href="/shipments/{{ label_form.shipment_id }}/back" class="secondary">{{ _("Back to the chat") }}</a>
+    </form>
+  </article>
+  {% endif %}
   <article id="remote">
     <header>{{ _("Browser window") }}
       <small class="muted">· {{ _("click into the picture and type, paste with Ctrl+V") }}</small></header>

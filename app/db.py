@@ -122,6 +122,24 @@ class MyAd(SQLModel, table=True):
     last_error: str | None = None
     auto_reply: bool | None = None                 # answer buyers of this ad automatically
     auto_reply_instructions: str | None = None     # ad-specific facts/limits for those answers
+    parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # confirmed size/weight for shipping
+
+
+class Shipment(SQLModel, table=True):
+    """A parcel to a buyer: address from the chat, size/weight, chosen carrier option, label."""
+    id: int | None = Field(default=None, primary_key=True)
+    conversation_id: str = Field(foreign_key="conversation.id", index=True)
+    ad_id: str | None = None
+    status: str = "draft"            # draft | labelled | sent | discarded
+    recipient: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # name, street, house_no, extra, zip, city, phone, email
+    parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))     # length/width/height cm, weight_kg, contents, source
+    option: str | None = None        # tariff key, e.g. "gls:S:shop"
+    price: float | None = None
+    label_path: str | None = None    # file in DATA_DIR/labels
+    tracking: str | None = None
+    note: str | None = None          # Claude's remark (missing data, oddities)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class AdDraft(SQLModel, table=True):

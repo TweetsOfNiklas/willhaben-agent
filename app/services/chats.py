@@ -18,7 +18,7 @@ from app.db import Conversation, Draft, Message, MyAd, get_setting, session, set
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules, reply_prompt
-from app.services import feedback, gcal, humanize, meetups, telegram
+from app.services import feedback, gcal, humanize, meetups, shipping, telegram
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -74,6 +74,10 @@ async def sync(force: bool = False) -> dict[str, Any]:
 
     notify_on = get_setting("notify_messages") == "1"
     for row in incoming:
+        try:
+            await shipping.on_incoming(row)    # buyer sent an address? -> parcel + label offer (background)
+        except Exception as e:  # noqa: BLE001 - never block the chat sync
+            log.warning("shipping check failed for %s: %s", row.id, e)
         if _auto_ad(row) is not None:
             continue   # auto reply on: process_pending_auto pushes "answered" or "approve?" instead of the raw message
         if notify_on:

@@ -231,7 +231,20 @@ def undo_revision(draft_id: int) -> AdDraft:
 
 
 # ------------------------------------------------------------------ publish on willhaben (direct, per click)
-async def prepare_willhaben(draft_id: int) -> AdDraft:
+def category_queries(title: str, product_query: str | None, search_keywords: str | None,
+                     user_query: str | None = None) -> list[str]:
+    """What to ask willhaben's category suggestion, best first. Long titles often get no suggestion at all,
+    and the short search keywords alone can point somewhere odd (live: "Keyboards" for a speaker)."""
+    words = [w.strip(",;:·-") for w in (title or "").split()]
+    cands = [user_query, title, " ".join(words[:4]), " ".join(words[:3]), product_query, search_keywords]
+    out: dict[str, str] = {}
+    for q in cands:
+        if q and q.strip():
+            out.setdefault(q.strip()[:80].lower(), q.strip()[:80])    # same query in other case: ask once
+    return list(out.values())
+
+
+async def prepare_willhaben(draft_id: int, query: str | None = None) -> AdDraft:
     """Read-only: category suggestions and required fields from willhaben's own form, stored for review."""
     from app.willhaben import insert
     from app.willhaben.session import get_session
@@ -240,14 +253,13 @@ async def prepare_willhaben(draft_id: int) -> AdDraft:
         d = db.get(AdDraft, draft_id)
     sess = get_session()
     form = await insert.load_form(sess)
-    raw = None
-    # willhaben suggests nothing for some long titles: retry with the shorter search words / product name
-    for query in dict.fromkeys(q.strip()[:80] for q in (d.title or d.input_text, d.search_keywords, d.product_query) if q and q.strip()):
-        raw = await insert.suggest_categories(sess, query)
+    raw, used = None, None
+    for q in category_queries(d.title or d.input_text, d.product_query, d.search_keywords, query):
+        raw, used = await insert.suggest_categories(sess, q), q
         if insert.suggestion_paths(raw):
             break
     plan = insert.build_plan(form, raw, condition=d.condition, attributes=d.attributes)
-    plan["for_title"] = d.title
+    plan["for_title"], plan["query"] = d.title, used
     return update_draft(draft_id, wh_plan=plan, error=None)
 
 

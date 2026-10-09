@@ -8,6 +8,7 @@ websocket subscription to that event (long-lived token from ha_auth) and acts on
   WH_REVISE_<draft>_<sig>    "Revise with Claude": typed text is an instruction, a corrected draft comes as new push
   WH_DISCARD_<draft>_<sig>   drop the draft
   WH_CAL_<draft>_<sig>       add the appointment the (sent) answer agreed to Google Calendar
+  WH_SHIP_<shipment>_<sig>   open the carrier's label form and fill it (the user pays in the remote view)
 
 <sig> is an HMAC over verb+draft with a secret in DATA_DIR, so no other event source can make the app
 send. A draft is only acted on while it is still a draft, so a second tap does nothing.
@@ -29,7 +30,7 @@ from app.i18n import t
 log = logging.getLogger(__name__)
 
 EVENT = "mobile_app_notification_action"
-_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL)_(\d+)_([0-9a-f]{12})")
+_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP)_(\d+)_([0-9a-f]{12})")
 
 
 def _secret() -> bytes:
@@ -71,6 +72,14 @@ def draft_actions(draft_id: int, can_send: bool) -> list[dict[str, Any]]:
     return actions
 
 
+def ship_tag(shipment_id: int) -> str:
+    return f"wh-ship-{shipment_id}"
+
+
+def ship_actions(shipment_id: int) -> list[dict[str, Any]]:
+    return [{"action": action_id("SHIP", shipment_id), "title": t("Create label")}]
+
+
 def meetup_tag(draft_id: int) -> str:
     return f"wh-meetup-{draft_id}"
 
@@ -100,6 +109,8 @@ async def handle(event_data: dict[str, Any]) -> str | None:
     if not parsed:
         return None
     verb, draft_id = parsed
+    if verb == "SHIP":
+        return await _start_label(draft_id)      # the id is a shipment id here
     if verb == "CAL":
         return await _add_meetup(draft_id)
     with session() as db:
@@ -124,6 +135,25 @@ async def handle(event_data: dict[str, Any]) -> str | None:
         return f"error: {e}"
     await notify("auto_reply", t("Sent"), text[:200], tag=tag_for(draft_id))
     return "sent"
+
+
+async def _start_label(shipment_id: int) -> str | None:
+    from app.services import label_fill, shipping
+    from app.services.notify import clear_push, notify
+
+    s = shipping.get(shipment_id)
+    if s is None or s.status != "draft":
+        return None
+    await clear_push(ship_tag(shipment_id))
+    url = f"{get_settings().public_url.rstrip('/')}/session"
+    try:
+        msg = await label_fill.start(shipment_id)
+    except Exception as e:  # noqa: BLE001 - report every failure back to the phone
+        await notify("shipping", t("Label form failed"), str(e)[:200],
+                     url=f"{get_settings().public_url.rstrip('/')}/chats/{s.conversation_id}#shipping")
+        return f"error: {e}"
+    await notify("shipping", t("Label form is ready – check and pay"), msg[:200], url=url)
+    return "label form"
 
 
 async def _add_meetup(draft_id: int) -> str | None:

@@ -1,0 +1,90 @@
+{# Shipping card on the chat page: buyer address, parcel size, price comparison, label via the carrier's site. #}
+<article id="shipping">
+  <header>📦 {{ _("Shipping") }}
+    {% if shipment %}<span class="badge {{ 'ok' if shipment.status in ('labelled', 'sent') else 'muted' }}">{{ {'draft': _('to prepare'), 'labelled': _('label created'), 'sent': _('sent')}.get(shipment.status, shipment.status) }}</span>{% endif %}
+  </header>
+  {% if not ship_sender_ok %}
+    <p><small>{{ _("Your sender address is missing:") }} <a href="/settings#shipping">{{ _("Settings → Shipping") }}</a></small></p>
+  {% endif %}
+  {% if not shipment %}
+    <form method="post" action="/chats/{{ conv.id }}/shipping/detect" hx-disabled-elt="find button">
+      <button class="secondary outline" style="width:auto">{{ _("Prepare parcel from this chat") }}</button>
+      <small class="muted">{{ _("Claude takes the buyer's address from the chat and estimates size and weight. When a buyer sends an address, this happens by itself.") }}</small>
+    </form>
+  {% else %}
+    {% set r = shipment.recipient or {} %}{% set p = shipment.parcel or {} %}
+    {% if shipment.note %}<p><small>💡 {{ shipment.note }}</small></p>{% endif %}
+    <details {% if not r or not p or shipment.status == 'draft' and (not r.name or not p.weight_kg) %}open{% endif %}>
+      <summary><small>{{ r.name or _('Address missing') }}{% if r.city %}, {{ r.zip }} {{ r.city }}{% endif %}
+        · {% if p.length_cm %}{{ p.length_cm }}×{{ p.width_cm }}×{{ p.height_cm }} cm, {{ p.weight_kg }} kg
+          {% if p.source == 'claude' %}<span class="badge muted">{{ _("estimated") }}</span>{% endif %}{% else %}{{ _("size missing") }}{% endif %}</small></summary>
+      <form method="post" action="/shipments/{{ shipment.id }}">
+        <div class="grid">
+          <label>{{ _("Name") }} <input name="name" value="{{ r.name or '' }}" autocomplete="off"></label>
+          <label>{{ _("Phone") }} <input name="phone" value="{{ r.phone or '' }}" autocomplete="off"></label>
+        </div>
+        <div class="grid">
+          <label>{{ _("Street") }} <input name="street" value="{{ r.street or '' }}" autocomplete="off"></label>
+          <label>{{ _("No.") }} <input name="house_no" value="{{ r.house_no or '' }}" autocomplete="off"></label>
+          <label>{{ _("Stair/door") }} <input name="extra" value="{{ r.extra or '' }}" autocomplete="off"></label>
+        </div>
+        <div class="grid">
+          <label>{{ _("Postcode") }} <input name="zip" value="{{ r.zip or '' }}" inputmode="numeric" maxlength="4" autocomplete="off"></label>
+          <label>{{ _("City") }} <input name="city" value="{{ r.city or '' }}" autocomplete="off"></label>
+          <label>{{ _("E-mail") }} <input name="email" value="{{ r.email or '' }}" autocomplete="off"></label>
+        </div>
+        <div class="grid">
+          <label>{{ _("Length (cm)") }} <input type="number" name="length_cm" value="{{ p.length_cm or '' }}" min="1" max="300"></label>
+          <label>{{ _("Width (cm)") }} <input type="number" name="width_cm" value="{{ p.width_cm or '' }}" min="1" max="300"></label>
+          <label>{{ _("Height (cm)") }} <input type="number" name="height_cm" value="{{ p.height_cm or '' }}" min="1" max="300"></label>
+          <label>{{ _("Weight (kg)") }} <input type="number" name="weight_kg" value="{{ p.weight_kg or '' }}" min="0.1" max="40" step="0.1"></label>
+        </div>
+        <input type="hidden" name="contents" value="{{ p.contents or '' }}">
+        <button class="secondary">{{ _("Save") }}</button>
+        <small class="muted">{{ _("Size and weight are remembered for this ad.") }}</small>
+      </form>
+    </details>
+
+    {% if ship_options %}
+    <table class="striped">
+      <tbody>
+      {% for o in ship_options %}
+        <tr {% if ship_option and o.key == ship_option.key %}style="font-weight:600"{% endif %}>
+          <td>{{ o.label() }}{% if loop.first %} <span class="badge ok">{{ _("cheapest") }}</span>{% endif %}
+            <br><small class="muted">{{ o.note or ship_carriers[o.carrier].dropoff }}</small></td>
+          <td style="white-space:nowrap">{{ o.price|eur }}</td>
+          <td style="text-align:right">
+            {% if shipment.status == 'draft' and o.online %}
+              <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
+                <input type="hidden" name="key" value="{{ o.key }}">
+                <button class="{{ '' if loop.first else 'secondary outline' }}" style="width:auto;padding:.2rem .7rem;margin:0"
+                  {% if not ship_sender_ok or not r.name %}disabled{% endif %}
+                  onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button>
+              </form>
+            {% elif not o.online %}<small class="muted">{{ _("at the counter") }}</small>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p><small class="muted">{{ _("Published prices for online labels within Austria; the carrier's checkout shows the binding price. “→ Shop”: delivered to a parcel shop near the buyer.") }}</small></p>
+    {% elif p.length_cm %}
+      <p><small>{{ _("No enabled carrier takes a parcel this size or weight.") }}</small></p>
+    {% endif %}
+
+    <div class="row-actions">
+      {% if shipment.label_path %}<a role="button" class="secondary" href="/shipments/{{ shipment.id }}/label.pdf" target="_blank">📄 {{ _("Label") }}</a>{% endif %}
+      {% if shipment.status in ('draft', 'labelled') %}
+        <form method="post" action="/shipments/{{ shipment.id }}/status" class="row-actions" style="margin:0">
+          <input type="hidden" name="status" value="sent">
+          <input name="tracking" placeholder="{{ _('Tracking number (optional)') }}" value="{{ shipment.tracking or '' }}" style="margin:0">
+          <button class="secondary outline" style="width:auto">{{ _("Sent") }}</button>
+        </form>
+      {% elif shipment.tracking %}<small>{{ _("Tracking:") }} <code>{{ shipment.tracking }}</code></small>{% endif %}
+      <form method="post" action="/shipments/{{ shipment.id }}/status" style="margin:0">
+        <input type="hidden" name="status" value="discarded">
+        <button class="contrast outline" style="width:auto">{{ _("Discard") }}</button>
+      </form>
+    </div>
+  {% endif %}
+</article>

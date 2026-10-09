@@ -178,3 +178,13 @@ def test_batch_card_renders_willhaben_plan(client):  # noqa: F811
                        ad_creator.update_draft(d.id)).body.decode()
     assert 'name="o0_Zustand"' in html and '<option value="gebraucht" selected>Gebraucht</option>' in html
     assert "Audio › Mobile Lautsprecher" in html and "/inline/publish" in html
+
+
+def test_category_queries_order():
+    from app.services.ad_creator import category_queries
+
+    q = category_queries("Logitech Rechargeable Speaker S715i, schwarz, iPod-Dock", "Logitech S715i", "logitech s715i",
+                         user_query="Lautsprecher")
+    assert q == ["Lautsprecher", "Logitech Rechargeable Speaker S715i, schwarz, iPod-Dock",
+                 "Logitech Rechargeable Speaker S715i", "Logitech Rechargeable Speaker", "Logitech S715i"]
+    assert category_queries("Rad", None, "rad") == ["Rad"]
