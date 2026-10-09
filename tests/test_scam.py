@@ -210,8 +210,8 @@ def test_works_for_detail_objects():
 def test_screening_prompt_gets_the_flags():
     p = screen_prompt(agent_name="Rennrad", brief="", stats=None, language="Deutsch", hits=[
         {"nr": 1, "title": "Rennrad", "price": "€ 250", "location": "Wien", "private": True, "description": "x",
-         "photo": None, "scam": ["Preis nur 28 % vom Üblichen (900 €)"]}])
-    assert "Betrugs-Warnhinweise (Regelprüfung): Preis nur 28 % vom Üblichen (900 €)" in p
+         "photo": None, "scam_flags": ["Preis nur 28 % vom Üblichen (900 €)"]}])
+    assert "Preis nur 28 % vom Üblichen (900 €)" in p        # root-f9's hook prints the labels as a hint
 
 
 # --- integration: run_agent stores flags and warns in the push ------------------------------------------------
@@ -350,3 +350,18 @@ def test_scam_context_leaves_out_rejected_page_ads():
     ads = [NS(ad_id=f"10000007{i:02d}", price=20.0) for i in range(8)] + [NS(ad_id="1000000800", price=950.0)]
     ctx = _scam_context(hits, ads)
     assert ctx["count"] == 9 and ctx["median"] == 900.0
+
+
+
+def test_high_flag_marks_scam_suspect_issue():
+    from app.db import Hit
+    from app.services.search_agents import _mark_scam_issue
+
+    h = Hit(agent_id=1, ad_id="1000000001", heading="x", url="u", screen_issues=["dealer"],
+            scam_flags=[{"code": "money_transfer", "label": "MoneyGram", "severity": "high"}])
+    _mark_scam_issue(h)
+    assert h.screen_issues == ["dealer", "scam_suspect"]
+    h2 = Hit(agent_id=1, ad_id="1000000002", heading="x", url="u",
+             scam_flags=[{"code": "phone", "label": "Telefon", "severity": "info"}])
+    _mark_scam_issue(h2)
+    assert not h2.screen_issues

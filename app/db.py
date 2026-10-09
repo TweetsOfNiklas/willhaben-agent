@@ -32,6 +32,7 @@ class SearchAgent(SQLModel, table=True):
     screen: bool | None = None          # let Claude check new hits before they push
     screen_brief: str | None = None     # what exactly the owner is looking for (for the screening)
     screen_min: str | None = None       # match | fair | good: lowest result that still pushes
+    screen_hide: str | None = None      # comma list of screening issues that keep a hit from pushing; None = defaults, "-" = none
 
 
 class Hit(SQLModel, table=True):
@@ -59,6 +60,7 @@ class Hit(SQLModel, table=True):
     screen_relevant: bool | None = None  # Claude: the item searched for? None = not screened
     screen_deal: str | None = None       # great | good | fair | overpriced | unknown
     screen_reason: str | None = None
+    screen_issues: list[str] | None = Field(default=None, sa_column=Column(JSON))  # predefined reasons (screening.ISSUES)
     screen_at: datetime | None = None
     scam_flags: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # app/services/scam.py
 

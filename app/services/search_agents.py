@@ -94,6 +94,7 @@ async def run_agent(agent_id: int) -> RunResult:
                           state="seen" if res.baseline else "new")
                 _apply(hit, ad)
                 hit.scam_flags = scam.flags(hit, scam_ctx) or None   # before screening, which sees them too
+                _mark_scam_issue(hit)
                 db.add(hit)
                 existing[ad.ad_id] = hit
                 if not res.baseline:
@@ -105,6 +106,7 @@ async def run_agent(agent_id: int) -> RunResult:
                 hit.price_dropped_at = utcnow()
                 hit.old_price = prev_price
                 hit.scam_flags = scam.flags(hit, scam_ctx) or None   # a new price can be a new red flag
+                _mark_scam_issue(hit)
                 if hit.state != "ignored":
                     res.price_drops.append(hit)
             if ad.is_bumped and prev_published and ad.published_at and ad.published_at > prev_published:
@@ -162,7 +164,8 @@ def _screen_data(h: Hit) -> dict:
     """Screening result in the HA event, so automations can filter on it too."""
     if h.screen_relevant is None:
         return {}
-    return {"screen_relevant": h.screen_relevant, "screen_deal": h.screen_deal, "screen_reason": h.screen_reason}
+    return {"screen_relevant": h.screen_relevant, "screen_deal": h.screen_deal, "screen_reason": h.screen_reason,
+            "screen_issues": h.screen_issues or []}
 
 
 def _scam_context(hits, ads) -> dict:
@@ -173,6 +176,12 @@ def _scam_context(hits, ads) -> dict:
     rejected = {h.ad_id for h in hits if h.screen_relevant is False}
     prices.update({a.ad_id: a.price for a in ads if a.ad_id and a.ad_id not in rejected})
     return scam.median_context(list(prices.values()))
+
+
+def _mark_scam_issue(h: Hit) -> None:
+    """A severe rule-based flag counts as screening reason "scam_suspect" (also for agents without screening)."""
+    if scam.level(h.scam_flags) == "high":
+        h.screen_issues = list(dict.fromkeys([*(h.screen_issues or []), "scam_suspect"]))
 
 
 def _scam_prefix(h: Hit) -> str:

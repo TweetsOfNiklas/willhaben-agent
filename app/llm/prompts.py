@@ -342,6 +342,13 @@ bevor sie eine Benachrichtigung bekommt. Für jeden Treffer entscheidest du:
   great = deutlich unter dem üblichen Gebrauchtpreis, good = günstig, fair = marktüblich,
   overpriced = zu teuer, unknown = nicht einschätzbar (kein Preis, "VB" ohne Zahl, zu wenig Angaben).
   Nutze die mitgelieferten Vergleichspreise dieses Suchagenten und dein Wissen über Neu- und Gebrauchtpreise.
+- issues: alle zutreffenden Gründe aus der festen Liste (leer, wenn nichts dagegen spricht):
+  wrong_product (anderes Produkt/Modell), accessory_only (nur Zubehör/Ersatzteil), wrong_variant (falsche Größe,
+  Variante, Farbe laut Beschreibung), defective (defekt/beschädigt, obwohl nicht gesucht), search_or_swap (Suche- oder
+  Tauschanzeige), incomplete (wesentliche Teile fehlen), bundle_only (nur im Paket mit anderem), too_far (nur wenn die
+  Beschreibung eine Gegend/Entfernung vorgibt und der Ort deutlich außerhalb liegt), scam_suspect (Betrugsanzeichen:
+  unrealistisch billig, Vorauskasse/Kurier/WhatsApp-Wechsel, kopierte Fotos), too_expensive (deal = overpriced),
+  price_unclear (deal = unknown). "Händler" setzt die App selbst, nicht du.
 - reason: in der angegebenen Sprache, 1 bis 3 Sätze (max. 400 Zeichen): zuerst das Urteil in einem kurzen Satz
   (der steht in der Benachrichtigung), dann die Begründung: Vergleich mit Neu- und üblichem Gebrauchtpreis,
   Zustand, Auffälligkeiten (fehlendes Zubehör, unklare Angaben, Betrugsanzeichen).
@@ -360,9 +367,12 @@ SCREEN_SCHEMA: dict[str, Any] = {
                     "nr": {"type": "integer"},
                     "relevant": {"type": "boolean"},
                     "deal": {"type": "string", "enum": ["great", "good", "fair", "overpriced", "unknown"]},
+                    "issues": {"type": "array", "items": {"type": "string", "enum": [
+                        "wrong_product", "accessory_only", "wrong_variant", "defective", "search_or_swap",
+                        "incomplete", "bundle_only", "too_far", "scam_suspect", "too_expensive", "price_unclear"]}},
                     "reason": {"type": "string"},
                 },
-                "required": ["nr", "relevant", "deal", "reason"],
+                "required": ["nr", "relevant", "deal", "issues", "reason"],
                 "additionalProperties": False,
             },
         },
@@ -387,7 +397,7 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
                      + (f" · Foto: ./{h['photo']}" if h.get("photo") else ""))
         if h.get("description"):
             lines.append(f"    {h['description'][:400]}")
-        if h.get("scam"):  # rule-based scam check (app/services/scam.py)
-            lines.append(f"    Betrugs-Warnhinweise (Regelprüfung): {'; '.join(h['scam'])}")
+        if h.get("scam_flags"):   # cheap heuristic hints, if available
+            lines.append(f"    Auffälligkeiten (automatisch erkannt): {', '.join(h['scam_flags'])}")
     lines += ["", f"Sprache für reason: {language}", "Aufgabe: Bewerte jeden Treffer (nr wie oben)."]
     return "\n".join(lines)

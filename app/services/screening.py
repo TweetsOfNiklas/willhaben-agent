@@ -16,6 +16,7 @@ import httpx
 from sqlmodel import col, select
 
 from app.db import Hit, SearchAgent, session, utcnow
+from app.services import scam
 from app.i18n import LANGS, background_lang, t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import SCREEN_SCHEMA, SCREEN_SYSTEM, screen_prompt
@@ -41,12 +42,50 @@ def deal_label(deal: str | None) -> str:
             "overpriced": t("too expensive"), "unknown": t("price unclear")}.get(deal or "", "")
 
 
+# Predefined reasons Claude picks from (several per hit). The price ones only label: the deal threshold filters price.
+ISSUES = ["wrong_product", "accessory_only", "wrong_variant", "defective", "search_or_swap", "incomplete",
+          "bundle_only", "dealer", "too_far", "scam_suspect", "too_expensive", "price_unclear"]
+PRICE_ISSUES = {"too_expensive", "price_unclear"}
+HIDEABLE = [i for i in ISSUES if i not in PRICE_ISSUES]
+DEFAULT_HIDE = ["wrong_product", "accessory_only", "wrong_variant", "search_or_swap", "scam_suspect"]
+
+
+def issue_labels() -> dict[str, str]:
+    return {"wrong_product": t("wrong product"), "accessory_only": t("accessory / spare part only"),
+            "wrong_variant": t("wrong size or variant"), "defective": t("defective / damaged"),
+            "search_or_swap": t("search or swap ad"), "incomplete": t("incomplete, parts missing"),
+            "bundle_only": t("only as a bundle"), "dealer": t("dealer"), "too_far": t("too far away"),
+            "scam_suspect": t("suspected scam"), "too_expensive": t("too expensive"),
+            "price_unclear": t("price unclear")}
+
+
+def hide_set(agent: SearchAgent) -> set[str]:
+    """Reasons that keep a hit of this agent from pushing (None = defaults, "-" = none)."""
+    if agent.screen_hide is None:
+        return set(DEFAULT_HIDE)
+    return {i for i in agent.screen_hide.split(",") if i in HIDEABLE}
+
+
+def verdict_labels(hit: Hit) -> list[str]:
+    """Badges for a screened hit: the price verdict if it is the item, then every named reason."""
+    if hit.screen_relevant is None:
+        return []
+    names = issue_labels()
+    reasons = [names[i] for i in (hit.screen_issues or []) if i in names and i not in PRICE_ISSUES]
+    if hit.screen_relevant:
+        return [deal_label(hit.screen_deal)] + reasons
+    return reasons or [t("wrong item")]          # hits screened before reasons existed
+
+
 def passes(agent: SearchAgent, hit: Hit) -> bool:
     """Should this hit push? Unscreened hits (screening off, failed, not yet run) always do."""
     if not agent.screen or hit.screen_relevant is None:
         return True
-    if not hit.screen_relevant:
+    issues = set(hit.screen_issues or [])
+    if issues & hide_set(agent):
         return False
+    if not hit.screen_relevant and not (issues - PRICE_ISSUES):
+        return False                           # not the item and no reason the user chose to allow
     return DEAL_RANK.get(hit.screen_deal or "unknown", 1) >= MIN_RANK.get(agent.screen_min or "match", 0)
 
 
@@ -54,7 +93,7 @@ def summary(hit: Hit) -> str:
     """One line for the push text, e.g. "🤖 good price – 30 % under the usual used price"."""
     if hit.screen_relevant is None:
         return ""
-    head = deal_label(hit.screen_deal) if hit.screen_relevant else t("wrong item")
+    head = " · ".join(verdict_labels(hit))
     return f"🤖 {head}: {short_reason(hit.screen_reason)}" if hit.screen_reason else f"🤖 {head}"
 
 
@@ -110,7 +149,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                 images.append(img)
             items.append({"nr": nr, "title": h.heading, "price": h.price_display or (f"{h.price:g} €" if h.price else None),
                           "location": h.location, "private": h.is_private, "description": h.body,
-                          "scam": [f.get("label") for f in h.scam_flags or [] if f.get("severity") in ("warn", "high")],
+                          "scam_flags": [f.get("label") for f in h.scam_flags or [] if f.get("severity") in ("warn", "high")],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...
                           "photo": f"foto{len(images)}{img.suffix}" if img else None})
         prompt = screen_prompt(agent_name=agent.name, brief=agent.screen_brief or "", hits=items, stats=stats,
@@ -132,6 +171,13 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
             row.screen_relevant = bool(r.get("relevant"))
             row.screen_deal = r.get("deal") if r.get("deal") in DEAL_RANK else "unknown"
             row.screen_reason = (r.get("reason") or "").strip()[:1500] or None   # full text for the ad viewer
+            if isinstance(r.get("issues"), list):
+                issues = [i for i in r["issues"] if i in ISSUES and i != "dealer"]
+                if row.is_private is False:      # willhaben says so; Claude does not have to guess
+                    issues.append("dealer")
+                if scam.level(row.scam_flags) == "high":   # the rule-based scam check counts like Claude's verdict
+                    issues.append("scam_suspect")
+                row.screen_issues = list(dict.fromkeys(issues))
             row.screen_at = utcnow()
             db.add(row)
             judged += 1
@@ -140,4 +186,5 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         with session() as db:
             fresh = db.get(Hit, h.id)
         h.screen_relevant, h.screen_deal, h.screen_reason = fresh.screen_relevant, fresh.screen_deal, fresh.screen_reason
+        h.screen_issues = fresh.screen_issues
     return judged

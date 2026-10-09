@@ -70,7 +70,7 @@
             <input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
           <label><input type="checkbox" name="notify_on" {% if a.notify %}checked{% endif %}> {{ _("Notify") }}</label>
           <label><input type="checkbox" name="drops_on" {% if a.notify_price_drops %}checked{% endif %}> {{ _("Report price drops") }}</label>
-          {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min %}{% include "_screen_fields.html" %}{% endwith %}
+          {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}
           <div style="display:flex;gap:.4rem">
             <button>{{ _("Save") }}</button>
             <button class="contrast outline" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete") }}</button>
