@@ -311,6 +311,14 @@ def mark_paid(shipment_id: int, via: str, amount: float | None = None) -> Shipme
     return update(shipment_id, paid_at=utcnow(), paid_via=via, paid_amount=amount)
 
 
+async def after_paid(shipment_id: int) -> None:
+    """Payment arrived: ask the user to approve the label purchase, or buy automatically when the settings allow it.
+
+    Implemented by the approval stage; callers (chat page, push buttons, PayLivery notices) await it after `mark_paid`.
+    """
+    log.info("payment for shipment %s recorded (approval not built yet)", shipment_id)
+
+
 def unmark_paid(shipment_id: int) -> Shipment:
     return update(shipment_id, paid_at=None, paid_via=None, paid_amount=None)
 
