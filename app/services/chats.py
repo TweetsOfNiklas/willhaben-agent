@@ -17,8 +17,8 @@ from sqlmodel import col, select
 from app.db import Conversation, Draft, Message, MyAd, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
-from app.llm.prompts import AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules, reply_prompt
-from app.services import feedback, gcal, humanize, meetups, shipping, telegram
+from app.llm.prompts import AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules, price_floor, reply_prompt
+from app.services import feedback, gcal, humanize, meetups, min_price, shipping, telegram
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -233,12 +233,16 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
     else:
         msgs_t = [(m.direction, m.created_at, m.text) for m in msgs]
     rules = get_setting("reply_rules")
+    with session() as db:
+        ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
+    floor = ad.min_price if ad and conv.role == "seller" else None
+    asking = (conv.ad_context or {}).get("price")
     if auto:
-        with session() as db:
-            ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
-        rules = f"{rules}\n\n{auto_rules(get_setting('auto_reply_rules'), ad.auto_reply_instructions if ad else None)}"
+        rules = f"{rules}\n\n{auto_rules(get_setting('auto_reply_rules'), ad.auto_reply_instructions if ad else None, floor, asking)}"
         if lessons := feedback.prompt_block():     # the owner's 👎 notes on earlier automatic answers
             rules = f"{rules}\n\n{lessons}"
+    elif floor is not None:                       # manual drafts of my own ad: same negotiation range
+        rules = f"{rules}\n\n{price_floor(floor, asking)}"
     cal = gcal.config()
     availability = await gcal.availability_text() if (cal["in_auto"] if auto else cal["in_drafts"]) else None
     prompt = reply_prompt(role=conv.role, ad=conv.ad_context, partner=conv.partner_name, messages=msgs_t,
@@ -337,6 +341,10 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
         why.append(t("Answer contains placeholders"))
     if not d.text.strip():
         why.append(t("empty answer"))
+    with session() as db:                 # price floor of the own ad, checked in code (app/services/min_price.py)
+        conv = db.get(Conversation, conv_id)
+        ad = db.get(MyAd, conv.ad_id) if conv and conv.ad_id else None
+    why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text)
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":
         why.append(t("last message is not from the other person"))

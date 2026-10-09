@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from sqlmodel import select
 
@@ -49,11 +50,17 @@ def set_auto_renew(ad_id: str, on: bool) -> None:
             db.commit()
 
 
-def set_auto_reply(ad_id: str, on: bool, instructions: str) -> None:
+_KEEP: Any = object()
+
+
+def set_auto_reply(ad_id: str, on: bool, instructions: str, min_price: float | None = _KEEP) -> None:
+    """Overwrites the instructions; `min_price` only changes when passed (None clears the floor)."""
     with session() as db:
         row = db.get(MyAd, ad_id)
         if row:
             row.auto_reply, row.auto_reply_instructions = on, instructions.replace("\r\n", "\n").strip() or None
+            if min_price is not _KEEP:
+                row.min_price = min_price
             db.add(row)
             db.commit()
 

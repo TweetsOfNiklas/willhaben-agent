@@ -32,6 +32,7 @@ from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import ad_batch, ad_creator, chats, my_ads, screening
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
+from app.services import min_price as min_price_svc
 from app.services.notify import PUSH_CHANNELS, notify
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -496,8 +497,13 @@ async def myads_auto(ad_id: str, on: str = Form("0")):
 
 
 @app.post("/myads/{ad_id}/auto-reply")
-async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions: str = Form("")):
-    my_ads.set_auto_reply(ad_id, bool(on), instructions)
+async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions: str = Form(""),
+                           min_price: str = Form("")):
+    try:
+        floor = min_price_svc.parse_form(min_price)     # empty = no floor
+    except ValueError:
+        return back(f"/myads?msg={quote(t('Minimum price must be a number, e.g. 25 or 25,50'), safe='')}#ad-{ad_id}")
+    my_ads.set_auto_reply(ad_id, bool(on), instructions, floor)
     if on:  # answer buyers who are already waiting, in the background (Claude takes a few seconds)
         task = asyncio.create_task(chats.process_pending_auto(ad_id))
         _background.add(task)
@@ -758,7 +764,6 @@ async def ad_batch_image(batch_id: int, idx: int):
 
 
 # ------------------------------------------------------------------ session / capture
-@app.get("/session", response_class=HTMLResponse)
 def _session_back(next_url: str | None, msg: str | None = None) -> RedirectResponse:
     """Back to where a session form was posted from (/session or Settings → willhaben account), with a message."""
     url = next_url if next_url and next_url.startswith("/") and not next_url.startswith("//") else "/session"
@@ -768,6 +773,7 @@ def _session_back(next_url: str | None, msg: str | None = None) -> RedirectRespo
     return back(path + (f"#{frag}" if frag else ""))
 
 
+@app.get("/session", response_class=HTMLResponse)
 async def session_page(request: Request, msg: str | None = None):
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
     return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),

@@ -28,6 +28,9 @@
           <strong>{{ _("Answer buyers automatically") }}</strong>
           {% if a.auto_reply %}<span class="badge ok">{{ _("on") }}</span>{% endif %}</label>
         <textarea name="instructions" rows="2" placeholder="{{ _('Instruction for this ad, e.g.: Fixed price €20. Power supply included, battery lasts about 4 h. Pickup in Vienna 15 in the evening, shipping €5 extra.') }}">{{ a.auto_reply_instructions or '' }}</textarea>
+        <label>{{ _("Minimum (€)") }}
+          <input type="text" inputmode="decimal" name="min_price" value="{{ '%g'|format(a.min_price) if a.min_price is not none else '' }}" placeholder="{{ _('none') }}" style="max-width:9rem"
+                 title="{{ _('Automatic answers never agree to less. Leave empty: price talks stay with you.') }}"></label>
         <button class="secondary">{{ _("Save") }}</button>
         <small class="muted">{{ _("The general instruction also applies, see") }} <a href="/settings">{{ _("Settings") }}</a>.
           {{ _("Uncertain cases (price negotiation, open questions, suspected scam) end up as a draft, with a push via Home Assistant.") }}</small>

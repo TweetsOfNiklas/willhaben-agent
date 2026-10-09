@@ -284,11 +284,32 @@ AUTO_REPLY_SCHEMA: dict[str, Any] = {
 }
 
 
-def auto_rules(general: str, ad_instructions: str | None) -> str:
+def auto_rules(general: str, ad_instructions: str | None, min_price: float | None = None,
+               asking_price: str | None = None) -> str:
     parts = ["Regeln für automatische Antworten:", general.strip() or "(keine)"]
     if (ad_instructions or "").strip():
         parts += ["", "Anweisung speziell für diese Anzeige (verlässliche Fakten, haben Vorrang):", ad_instructions.strip()]
+    if min_price is not None:
+        parts += ["", price_floor(min_price, asking_price)]
     return "\n".join(parts)
+
+
+def _eur(v: float) -> str:
+    return f"{v:g} €" if v == int(v) else f"{v:.2f} €".replace(".", ",")
+
+
+def price_floor(min_price: float, asking_price: str | None) -> str:
+    """Negotiation range for one own ad; the code re-checks every automatic answer against the floor."""
+    floor = _eur(min_price)
+    return "\n".join([
+        f"Preisrahmen für diese Anzeige: Angebotspreis {asking_price or 'siehe Anzeige'}, Untergrenze {floor}.",
+        f"- Preisangebote ab {floor} darfst du annehmen oder mit einem Gegenangebot beantworten, auch automatisch "
+        "(auto_send), wenn sonst nichts dagegen spricht. Bleib dabei möglichst nahe am Angebotspreis.",
+        f"- Nie unter {floor} zusagen oder anbieten. Bietet jemand weniger, lehn freundlich ab und nenn höchstens {floor} "
+        "als niedrigsten Preis.",
+        "- Nenn im Text keinen Betrag unter der Untergrenze, auch nicht das Angebot des Partners wiederholen.",
+        "- Bei einer Zusage oder einem Gegenangebot den Preis in suggested_price setzen.",
+    ])
 
 
 MEETUP_SYSTEM = """\
