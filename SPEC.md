@@ -63,6 +63,13 @@ A self-hosted agent for **willhaben.at** (Austrian classifieds) for one private 
 Tests: `uv run pytest` (all green expected). The checked-in `.venv` is a Windows venv; on the server run tests in the image:
 `docker run --rm --entrypoint sh -v $PWD:/src -w /src -e UV_PROJECT_ENVIRONMENT=/tmp/venv willhaben-agent-willhaben-agent -c 'uv sync --frozen -q && uv run --no-sync pytest -q -p no:cacheprovider'`. Lint: `uvx ruff check app tests --select F,E9,B --ignore B008` clean.
 
+### Workflow rules (since 2026-10-09)
+
+- One commit per finished feature, only when `scripts/test.sh` is green (CI runs the same lint + tests on every push).
+- Several Claude sessions edit this repo in parallel: targeted edits in shared files, announce `docker compose up -d --build` to the others,
+  never commit someone else's half-finished work. Larger features are built on `feat/*` branches (git worktrees) and merged back one at a time.
+- Never commit `data/`, `.env`, `compose.override.yaml` or real personal data (test data: "Max Muster", ad ids 1000000001 …).
+
 ## 4. Repository map
 
 ```
