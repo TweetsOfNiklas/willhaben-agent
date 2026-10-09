@@ -364,5 +364,7 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
                      + (f" · Foto: ./{h['photo']}" if h.get("photo") else ""))
         if h.get("description"):
             lines.append(f"    {h['description'][:400]}")
+        if h.get("scam"):  # rule-based scam check (app/services/scam.py)
+            lines.append(f"    Betrugs-Warnhinweise (Regelprüfung): {'; '.join(h['scam'])}")
     lines += ["", f"Sprache für reason: {language}", "Aufgabe: Bewerte jeden Treffer (nr wie oben)."]
     return "\n".join(lines)

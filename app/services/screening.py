@@ -102,6 +102,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                 images.append(img)
             items.append({"nr": nr, "title": h.heading, "price": h.price_display or (f"{h.price:g} €" if h.price else None),
                           "location": h.location, "private": h.is_private, "description": h.body,
+                          "scam": [f.get("label") for f in h.scam_flags or [] if f.get("severity") in ("warn", "high")],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...
                           "photo": f"foto{len(images)}{img.suffix}" if img else None})
         prompt = screen_prompt(agent_name=agent.name, brief=agent.screen_brief or "", hits=items, stats=stats,
