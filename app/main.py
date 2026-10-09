@@ -32,6 +32,7 @@ from app.llm.claude_login import claude_token, forget_token, get_login, token_so
 from app.services import ad_batch, ad_creator, chats, my_ads, screening
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services.notify import PUSH_CHANNELS, notify
+from app import backup_routes
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben.account import EndpointUnknown, SendFailed
 from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with_params
@@ -81,6 +82,7 @@ async def lifespan(app: FastAPI):
 
 _background: set[asyncio.Task] = set()
 app = FastAPI(title="willhaben Agent", lifespan=lifespan)
+app.include_router(backup_routes.router)   # Settings → Backup
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -858,7 +860,7 @@ async def settings_page(request: Request, msg: str | None = None):
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
-                  ship=shipping.config(), ship_carriers=shipping.CARRIERS)
+                  ship=shipping.config(), ship_carriers=shipping.CARRIERS, backup=backup_routes.panel())
 
 
 async def _gcal_ctx() -> dict[str, Any]:
