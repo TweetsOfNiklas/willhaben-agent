@@ -192,7 +192,7 @@ class AdBatch(SQLModel, table=True):
 
 
 class DealCheck(SQLModel, table=True):
-    """Price check of one ad (Preischeck page / ad viewer): last analysis and Claude's verdict, one row per ad."""
+    """Price check of one ad (Produktsuche tab / ad viewer): last analysis and Claude's verdict, one row per ad."""
     ad_id: str = Field(primary_key=True)
     title: str | None = None
     price: float | None = None

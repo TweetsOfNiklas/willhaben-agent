@@ -96,6 +96,7 @@
               title="{{ _('Runs the same searches again; only the ranking asks Claude.') }}">↻ {{ _("Run again") }}</button>
     </form>
   </footer>
-  <script>document.getElementById('ps-submit')?.removeAttribute('disabled');</script>
+  {% if not ps_running %}<script>document.getElementById('ps-submit')?.removeAttribute('disabled');</script>{% endif %}
   {% endif %}
 </article>
+{% if ps_oob and not live %}{% include "_product_search_recent.html" %}{% endif %}

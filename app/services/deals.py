@@ -1,4 +1,4 @@
-"""Preischeck: is a willhaben ad cheap or expensive?
+"""Price check (Produktsuche tab, ad viewer): is a willhaben ad cheap or expensive?
 
 Three sources, all cached so reopening an ad costs nothing within the cache time:
 - comparables: ONE willhaben keyword search (rows 50, relevance) for a short query derived from the ad title,
@@ -235,7 +235,7 @@ def _wanted(title: str | None) -> bool:
 
 
 async def search_ads(query: str) -> dict[str, Any]:
-    """willhaben keyword search (rows 50, relevance), cached 1 h – the Preischeck list uses the same call."""
+    """willhaben keyword search (rows 50, relevance), cached 1 h – the price-check list on the Produktsuche tab uses the same call."""
     key = re.sub(r"\s+", " ", query.strip().lower())
     hit = _cached(_comparables, key, COMPARABLES_TTL_S)
     if hit:

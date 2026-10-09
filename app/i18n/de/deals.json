@@ -10,7 +10,7 @@
  "Comparable search failed: {error}": "Vergleichssuche fehlgeschlagen: {error}",
  "Not enough data: only {n} comparable ads and no Geizhals price.": "Zu wenig Daten: nur {n} vergleichbare Anzeigen und kein Geizhals-Preis.",
  "Checking the price …": "Preis wird geprüft …",
- "Price check failed: {error}": "Preischeck fehlgeschlagen: {error}",
+ "Price check failed: {error}": "Preisprüfung fehlgeschlagen: {error}",
  "Price": "Preis",
  "{n} comparable ads": "{n} vergleichbare Anzeigen",
  "Cheapest to most expensive comparable ad; marks at 25 %, median and 75 %.": "Von der günstigsten bis zur teuersten vergleichbaren Anzeige; Marken bei 25 %, Median und 75 %.",

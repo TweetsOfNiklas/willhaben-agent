@@ -80,11 +80,14 @@ async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str 
                                                                         "hit": hit})
 
 
-def _search_ctx(search: int | None = None, msg: str | None = None) -> dict[str, Any]:
-    """Template context of the product search part of the page."""
+def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = False) -> dict[str, Any]:
+    """Template context of the product search part of the page. `msg` is a short code from our own redirects;
+    unknown values show nothing (no attacker-chosen banner text via a crafted link)."""
     run = product_search.running()
     shown = product_search.get(search) if search else run
-    return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": msg,
+    notice = {"busy": t("A product search is still running – wait for it to finish."),
+              "empty": t("Describe what you are looking for.")}.get(msg or "")
+    return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": notice, "ps_oob": oob,
             "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
             "ps_is_running": product_search.is_running}
 
@@ -98,13 +101,13 @@ async def search_alias():
 async def product_search_start(description: str = Form(""), depth: str = Form("normal"), unusual: str = Form(""),
                                categories: str = Form(""), sort: str = Form("relevance")):
     if not description.strip():
-        return RedirectResponse("/deals?msg=" + quote(t("Describe what you are looking for."), safe=""), status_code=303)
+        return RedirectResponse("/deals?msg=empty", status_code=303)
     settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort)
     try:
         sid = product_search.start(description, settings)
-    except product_search.Busy as e:
+    except product_search.Busy:
         run = product_search.running()
-        return RedirectResponse(f"/deals?search={run.id if run else ''}&msg=" + quote(str(e), safe=""), status_code=303)
+        return RedirectResponse(f"/deals?search={run.id if run else ''}&msg=busy", status_code=303)
     return RedirectResponse(f"/deals?search={sid}#ps-result", status_code=303)
 
 
@@ -114,8 +117,8 @@ async def product_search_rerun(search_id: int):
         product_search.rerun(search_id)
     except KeyError as e:
         raise HTTPException(404) from e
-    except product_search.Busy as e:
-        return RedirectResponse(f"/deals?search={search_id}&msg=" + quote(str(e), safe=""), status_code=303)
+    except product_search.Busy:
+        return RedirectResponse(f"/deals?search={search_id}&msg=busy", status_code=303)
     return RedirectResponse(f"/deals?search={search_id}#ps-result", status_code=303)
 
 
@@ -124,7 +127,7 @@ async def product_search_status(request: Request, search_id: int):
     """The result block of one search; polled by htmx while the search runs."""
     if product_search.get(search_id) is None:
         raise HTTPException(404)
-    return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id))
+    return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id, oob=True))
 
 
 @router.get("/deals", response_class=HTMLResponse)
