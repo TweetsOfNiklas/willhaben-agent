@@ -48,13 +48,16 @@
           {% for flt, v in f.selected %}<a class="chip on" href="/agents/new?url={{ v.url|urlencode }}" title="{{ _('remove') }}">{{ v.label }} ✕</a>{% endfor %}
         {% endif %}
       </p>
-      <form method="post" action="/agents" class="grid">
+      <form method="post" action="/agents" class="agent-create">
         <input type="hidden" name="url" value="{{ f.url }}">
-        <label>{{ _("Name") }} <input name="name" value="{{ f.suggested_name() }}"></label>
-        <label>{{ _("Check every (minutes)") }}
-          <input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
-        <div style="grid-column:1/-1">{% with screen=False, brief='', minimum='match', hide=None %}{% include "_screen_fields.html" %}{% endwith %}</div>
-        <button type="submit" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>{{ _("Create search agent") }}</button>
+        {# name + interval side by side; screening and the button below, full width (a .grid form would squeeze every child into its own column) #}
+        <div class="grid">
+          <label>{{ _("Name") }} <input name="name" value="{{ f.suggested_name() }}"></label>
+          <label>{{ _("Check every (minutes)") }}
+            <input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+        </div>
+        {% with screen=False, brief='', minimum='match', hide=None %}{% include "_screen_fields.html" %}{% endwith %}
+        <button type="submit" style="width:auto" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>{{ _("Create search agent") }}</button>
       </form>
       <small class="muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}
         <a href="{{ f.url }}" target="_blank" rel="noopener">{{ _("View this search on willhaben") }}</a></small>
