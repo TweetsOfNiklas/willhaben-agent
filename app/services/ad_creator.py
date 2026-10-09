@@ -305,7 +305,7 @@ def parse_shipping(form: Any) -> dict[str, Any]:
         return {"handover": "pickup"}
     size = str(form.get("parcel_size") or "").upper()
     carrier = str(form.get("parcel_carrier") or "")
-    return {"handover": handover, "paylivery": bool(form.get("paylivery")),
+    return {"handover": handover, "paylivery": str(form.get("paylivery") or "").lower() in ("1", "true", "on", "yes"),
             "size": size if size in insert.PARCEL_SIZES else None,
             "carrier": carrier if carrier in insert.PAYLIVERY_CARRIERS else None}
 
@@ -358,6 +358,12 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     if shipping != plan.get("shipping") or plan.get("selected") != option:   # remembered for the form
         update_draft(draft_id, wh_plan={**plan, "shipping": shipping, "selected": option})
 
+    if d.wh_ad_id and plan.get("delivery_set") and shipping["handover"] == "pickup":
+        # A former attempt already set shipping/PayLivery options on this willhaben draft; saving it with pickup
+        # would not clear them (a reset call is unverified), so the user changes the handover on willhaben.
+        raise insert.InsertError("Versand wurde bei willhaben schon eingerichtet – Übergabe bitte direkt auf "
+                                 "willhaben ändern oder wieder Versand wählen")
+
     sess = get_session()
     form = await insert.load_form(sess)          # fresh template (contact, location, context links)
     insert.remember_form(form)
@@ -373,8 +379,13 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     def remember(wh_id: str) -> None:            # so a retry continues the same willhaben draft
         update_draft(draft_id, wh_ad_id=wh_id)
 
+    def delivery_set() -> None:                  # shipping options now live on the willhaben draft (see guard above)
+        with session() as db:
+            cur = dict(db.get(AdDraft, draft_id).wh_plan or {})
+        update_draft(draft_id, wh_plan={**cur, "delivery_set": True})
+
     res = await insert.publish(sess, ad, photos, existing_ad_id=d.wh_ad_id, on_presaved=remember, stop_after=stop_after,
-                               shipping=shipping if shipping["handover"] != "pickup" else None)
+                               shipping=shipping if shipping["handover"] != "pickup" else None, on_delivery=delivery_set)
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)

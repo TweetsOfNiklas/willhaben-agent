@@ -337,13 +337,15 @@ async def set_delivery(s: BrowserSession, ad: dict[str, Any], shipping: dict[str
 
 async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str, bytes, str]],
                   existing_ad_id: str | None = None, on_presaved=None, stop_after: str | None = None,
-                  shipping: dict[str, Any] | None = None) -> dict[str, Any]:
+                  shipping: dict[str, Any] | None = None, on_delivery=None) -> dict[str, Any]:
     """presave → photos → save → [delivery] → empty cart → checkout. Returns {ad_id, ad_uuid, url}.
 
     shipping {"handover": "pickup"|"shipping"|"both", "paylivery": bool, "size", "carrier"}: anything but pickup
     runs set_delivery() between save and cart (NEEDS LIVE VERIFICATION). None/pickup = the live-verified path.
     stop_after ("presave" | "photos" | "save" | "delivery" | "cart") returns {"stopped": step, ...} with the response
-    structures instead; everything before checkout stays a non-public willhaben draft."""
+    structures instead; everything before checkout stays a non-public willhaben draft.
+    on_delivery() is called once set_delivery() went through (a retry switching to pickup must not leave
+    PayLivery options behind, see ad_creator)."""
     trace: dict[str, Any] = {}
     if existing_ad_id:          # a former attempt already created the willhaben draft: continue with it
         base = await get_own_ad(s, existing_ad_id)
@@ -389,8 +391,15 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
         return {"stopped": "save", "ad_id": ad_id, "trace": trace}
 
     if shipping and shipping.get("handover") in ("shipping", "both"):
-        ad = {**ad, **{k: v for k, v in saved.items() if k in ("adId", "adUuid", "contextLinkList") and v}}
-        trace["delivery"] = await set_delivery(s, ad, shipping)
+        # Like the bundle's versandoptionen page (module 41117: {...e.ad, treeAttributes: …Uebergabe}), edit the ad
+        # willhaben holds after saving - not our composed template, which lacks the photo association and other
+        # server-side state a full-ad PUT bap/edit could wipe. NEEDS LIVE VERIFICATION.
+        base = await get_own_ad(s, ad_id)
+        if not isinstance(base, dict) or not base.get("adId"):
+            raise InsertError("Versand: gespeicherte Anzeige nicht lesbar – abgebrochen, nichts veröffentlicht")
+        trace["delivery"] = await set_delivery(s, base, shipping)
+        if on_delivery:
+            on_delivery()
     if stop_after == "delivery":
         return {"stopped": "delivery", "ad_id": ad_id, "trace": trace}
 

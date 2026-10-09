@@ -1540,6 +1540,9 @@ async def api_ad_draft_publish(draft_id: int, payload: dict[str, Any]):
     from app.willhaben.insert import STEPS, InsertError
 
     _draft_or_404(draft_id)
+    sh = payload.get("shipping")
+    if sh is not None and not isinstance(sh, dict):
+        raise HTTPException(400, "shipping must be an object")
     stop = payload.get("stop_after")
     if stop is not None and stop not in STEPS:
         raise HTTPException(400, f"stop_after must be one of {STEPS}")
@@ -1547,7 +1550,7 @@ async def api_ad_draft_publish(draft_id: int, payload: dict[str, Any]):
         await ad_creator.prepare_willhaben(draft_id)
     try:
         res = await ad_creator.publish_willhaben(draft_id, int(payload.get("option", 0)), payload.get("values") or {},
-                                                 stop_after=stop, shipping=ad_creator.parse_shipping(payload.get("shipping") or {}))
+                                                 stop_after=stop, shipping=ad_creator.parse_shipping(sh or {}))
     except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
         d = ad_creator.update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
         return JSONResponse({"ok": False, "error": str(e), "wh_ad_id": d.wh_ad_id}, status_code=502)

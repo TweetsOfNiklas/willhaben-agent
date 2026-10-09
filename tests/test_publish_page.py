@@ -39,6 +39,13 @@ OPTIONS = {"deliveryOptions": [
 ], "selectedDeliveryOptions": [], "autoSelectPayLivery": False}
 
 
+# what GET bap/{id} returns after saving: server-side state (photos) the composed template does not have
+SERVER_AD = {"adId": 123, "adUuid": "uuid-1", "heading": "Logitech S125i", "contextLinkList": LINKS,
+             "advertImageList": {"advertImage": [{"id": 77, "reference": "ref-01.jpg"}]},
+             "treeAttributes": [{"attributeNode": {"code": "Zustand"}, "selectedAttributeValueNodes": [{"code": "gebraucht"}]},
+                                {"attributeNode": {"code": "Uebergabe"}, "selectedAttributeValueNodes": [{"code": "PICKUP"}]}]}
+
+
 class FakeSession:
     def __init__(self, options=None, total_price=0):
         self.calls, self.options, self.total = [], options if options is not None else OPTIONS, total_price
@@ -49,6 +56,8 @@ class FakeSession:
             return {"adId": 123, "adUuid": "uuid-1", "contextLinkList": LINKS, "productId": 67}
         if path.endswith("/bap/save"):
             return {"adId": body["adId"], "adUuid": body["adUuid"]}
+        if method == "GET" and path == "/webapi/iad/bap/123":      # the ad willhaben holds after saving
+            return {**SERVER_AD, "treeAttributes": list(SERVER_AD["treeAttributes"])}
         if path == "/webapi/iad/bap/edit":
             return {"adId": 123, "adUuid": "uuid-1", "contextLinkList": {"contextLink": LINKS["contextLink"] + [P2PP]}}
         if path == "/webapi/p2p-aggregator/restapi/v2/p2pp/options/user/123":
@@ -85,18 +94,21 @@ async def test_paylivery_step_between_save_and_cart():
     res = await insert.publish(s, _ad("both"), [], shipping={"handover": "both", "paylivery": True, "size": "M"})
     steps = [(m, p) for m, p, *_ in s.calls]
     assert steps == [("POST", "/webapi/iad/bap/presave"), ("POST", "/webapi/iad/bap/save"),
-                     ("PUT", "/webapi/iad/bap/edit"),
+                     ("GET", "/webapi/iad/bap/123"), ("PUT", "/webapi/iad/bap/edit"),
                      ("GET", "/webapi/p2p-aggregator/restapi/v2/p2pp/options/user/123"),
                      ("PUT", "/webapi/p2p-aggregator/restapi/v2/p2pp/options/delivery"),
                      ("POST", "/webapi/iad/products/privates/atz/uuid-1/carts"),
                      ("PUT", "/webapi/iad/products/privates/carts/c9/items"),
                      ("POST", "/webapi/iad/products/privates/carts/c9/checkout")]
-    edit = s.calls[2][2]
+    edit = s.calls[3][2]
     assert _handover(edit) == [{"attributeNode": {"label": "Übergabe", "code": "Uebergabe"},
                                 "selectedAttributeValueNodes": [{"label": "Selbstabholung", "code": "PICKUP"},
                                                                 {"label": "Versand", "code": "Versand"}]}]
     assert edit["adId"] == 123 and edit["heading"] == "Logitech S125i"
-    assert s.calls[4][2] == {"adId": 123, "deliveryOptions": ["opt-m-dpd"]}      # cheapest M
+    # the edit body is willhaben's own ad (photos kept), only Uebergabe replaced
+    assert edit["advertImageList"] == SERVER_AD["advertImageList"] and "firstName" not in edit
+    assert [a["attributeNode"]["code"] for a in edit["treeAttributes"]] == ["Zustand", "Uebergabe"]
+    assert s.calls[5][2] == {"adId": 123, "deliveryOptions": ["opt-m-dpd"]}      # cheapest M
     assert _handover(s.calls[0][2])[0]["selectedAttributeValueNodes"][1]["code"] == "Versand"   # presave too
     assert res["trace"]["delivery"]["option"] == {"size": "M", "carrier": "dpd", "price": 5.9}
 
@@ -112,9 +124,9 @@ async def test_paylivery_carrier_choice_and_shipping_without_paylivery():
     await insert.publish(s, _ad("shipping"), [], shipping={"handover": "shipping", "paylivery": False})
     paths = [p for _, p, *_ in s.calls]
     assert not any("/options/user/" in p for p in paths)
-    assert s.calls[2][1] == "/webapi/iad/bap/edit"
-    assert _handover(s.calls[2][2])[0]["selectedAttributeValueNodes"] == [{"label": "Versand", "code": "Versand"}]
-    assert s.calls[3][2] == {"adId": 123, "deliveryOptions": []}
+    assert s.calls[3][1] == "/webapi/iad/bap/edit"
+    assert _handover(s.calls[3][2])[0]["selectedAttributeValueNodes"] == [{"label": "Versand", "code": "Versand"}]
+    assert s.calls[4][2] == {"adId": 123, "deliveryOptions": []}
     assert paths[-1].endswith("/checkout")
 
 
@@ -191,7 +203,7 @@ async def test_form_cache(monkeypatch):
 @pytest.fixture
 def wh(monkeypatch):
     """Fake logged-in willhaben for ad_creator: form, suggestions and a recording insert.publish."""
-    state = SimpleNamespace(published=[], suggest=SUGGEST, fail=None)
+    state = SimpleNamespace(published=[], suggest=SUGGEST, fail=None, fail_after_delivery=None)
 
     async def load(s):
         if state.fail:
@@ -201,9 +213,14 @@ def wh(monkeypatch):
     async def suggest(s, title):
         return state.suggest
 
-    async def publish(s, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None, shipping=None):
-        state.published.append({"ad": ad, "shipping": shipping})
+    async def publish(s, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None, shipping=None,
+                      on_delivery=None):
+        state.published.append({"ad": ad, "shipping": shipping, "existing": existing_ad_id})
         on_presaved("1000000001")
+        if shipping and on_delivery:
+            on_delivery()
+        if state.fail_after_delivery:
+            raise insert.InsertError(state.fail_after_delivery)
         return {"ad_id": "1000000001", "ad_uuid": "u", "url": "https://www.willhaben.at/iad/object?adId=1000000001"}
 
     async def no_import():
@@ -348,3 +365,53 @@ def test_batch_card_picker_and_inline_category(client, wh):  # noqa: F811
                                                                   "handover": "shipping"}).text
     assert "View on willhaben" in card
     assert wh.published[-1]["shipping"] == {"handover": "shipping", "paylivery": False, "size": None, "carrier": None}
+
+
+async def test_delivery_step_aborts_when_saved_ad_unreadable():
+    class NoAd(FakeSession):
+        async def api_json(self, method, path, body=None):
+            if method == "GET" and path == "/webapi/iad/bap/123":
+                self.calls.append((method, path, body))
+                return {}
+            return await super().api_json(method, path, body)
+    s = NoAd()
+    with pytest.raises(insert.InsertError, match="nicht lesbar"):
+        await insert.publish(s, _ad("shipping"), [], shipping={"handover": "shipping", "paylivery": False})
+    assert not any(p.endswith(("/edit", "/delivery", "/carts")) for _, p, *_ in s.calls)
+
+
+async def test_on_delivery_called_only_after_delivery_step():
+    hits = []
+    await insert.publish(FakeSession(), _ad("shipping"), [], shipping={"handover": "shipping", "paylivery": False},
+                         on_delivery=lambda: hits.append(1))
+    await insert.publish(FakeSession(), _ad(), [], on_delivery=lambda: hits.append(2))
+    assert hits == [1]
+
+
+async def test_retry_to_pickup_after_delivery_set_is_refused(wh):
+    d = _draft()
+    await ad_creator.prepare_willhaben(d.id)
+    wh.fail_after_delivery = "Warenkorb kaputt"
+    with pytest.raises(insert.InsertError, match="Warenkorb"):
+        await ad_creator.publish_willhaben(d.id, 0, {}, shipping={"handover": "shipping", "paylivery": True, "size": "S"})
+    assert _get(d.id).wh_plan["delivery_set"] is True and _get(d.id).wh_ad_id == "1000000001"
+    wh.fail_after_delivery = None
+    with pytest.raises(insert.InsertError, match="schon eingerichtet"):
+        await ad_creator.publish_willhaben(d.id, 0, {}, shipping={"handover": "pickup"})
+    assert len(wh.published) == 1
+    await ad_creator.publish_willhaben(d.id, 0, {}, shipping={"handover": "shipping", "paylivery": True, "size": "S"})
+    assert wh.published[-1]["existing"] == "1000000001" and _get(d.id).status == "published"
+
+
+def test_parse_shipping_paylivery_strings():
+    for v, want in (("false", False), ("0", False), ("", False), (None, False), ("on", True), ("1", True),
+                    (True, True), ("TRUE", True)):
+        assert ad_creator.parse_shipping({"handover": "shipping", "paylivery": v})["paylivery"] is want, v
+
+
+@pytest.mark.parametrize("shipping", ["pickup", ["shipping"], 3])
+def test_api_publish_rejects_non_object_shipping(client, wh, shipping):  # noqa: F811
+    d = _draft()
+    r = client.post(f"/api/ad-drafts/{d.id}/willhaben-publish", json={"shipping": shipping})
+    assert r.status_code == 400 and "shipping must be an object" in r.text
+    assert wh.published == []

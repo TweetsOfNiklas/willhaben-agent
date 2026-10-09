@@ -165,6 +165,9 @@ API module 54527, constants 76697/35688, form 45421. Nothing of this was sent to
 - The buyer pays the PayLivery shipping; the private seller confirms "nichtsteuerpflichtige Privatperson" (text only,
   no extra field in the calls).
 
+The page edits the ad it loaded from willhaben (`{...ad, treeAttributes}`), so the app first reads the saved ad
+(`GET /webapi/iad/bap/{id}`, keeps photos and other server state) and only replaces `Uebergabe`.
 The app (`insert.set_delivery`) does edit → options (only with PayLivery) → delivery PUT, skips the second identical
 edit, picks the option by parcel size (and carrier, else the cheapest) and stops before the cart if PayLivery onboarding
-is missing or no option matches. Pickup-only ads skip this step entirely (the live-verified path).
+is missing or no option matches. Pickup-only ads skip this step entirely (the live-verified path). A retry that switches a draft whose delivery
+options were already set back to pickup is refused (clearing them, e.g. `deliveryOptions: []`, is unverified).
