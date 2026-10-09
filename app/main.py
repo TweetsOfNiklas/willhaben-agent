@@ -565,6 +565,28 @@ async def myads_edit_page(request: Request, ad_id: str, msg: str | None = None):
     return render(request, "myad_edit.html", a=row, cur=cur, msg=msg)
 
 
+@app.post("/myads/{ad_id}/edit/ai", response_class=HTMLResponse)
+async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), description: str = Form(""),
+                        price: str = Form(""), instruction: str = Form("")):
+    """Claude's proposal goes back into the form, unsaved; the user checks it and saves to willhaben."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    if row is None:
+        raise HTTPException(404)
+    try:
+        value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
+    except ValueError:
+        value = None
+    cur = {"heading": heading, "description": description, "price": value}
+    try:
+        prop = await my_ads.ai_revise(ad_id, heading, description, value, instruction)
+    except LLMError as e:
+        return render(request, "myad_edit.html", a=row, cur=cur, instruction=instruction,
+                      msg=t("Claude could not revise the ad: {error}", error=e))
+    return render(request, "myad_edit.html", a=row, instruction=instruction, proposal=prop,
+                  cur={"heading": prop["heading"], "description": prop["description"], "price": value})
+
+
 @app.post("/myads/{ad_id}/edit")
 async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str = Form(...), price: str = Form("")):
     from app.willhaben.insert import InsertError

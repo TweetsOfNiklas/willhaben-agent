@@ -43,5 +43,14 @@
  "Saving failed: {error}": "Speichern fehlgeschlagen: {error}",
  "Saved on willhaben – status now: {status}": "Auf willhaben gespeichert – Status jetzt: {status}",
  "Title and description must not be empty": "Titel und Beschreibung dürfen nicht leer sein",
- "edited on willhaben {when}": "auf willhaben bearbeitet {when}"
+ "edited on willhaben {when}": "auf willhaben bearbeitet {when}",
+ "Claude's proposal – not saved yet": "Vorschlag von Claude – noch nicht gespeichert",
+ "Check the text below, change it if you like, then save on willhaben – or discard it.": "Prüf den Text unten, ändere ihn nach Belieben und speichere dann auf willhaben – oder verwirf ihn.",
+ "Discard proposal": "Vorschlag verwerfen",
+ "use": "übernehmen",
+ "Revise with Claude": "Mit Claude überarbeiten",
+ "e.g. shorter, more convincing title, mention that the battery is new": "z. B. kürzer, überzeugenderer Titel, erwähnen, dass der Akku neu ist",
+ "Revise": "Überarbeiten",
+ "Claude sees the text above, the ad's photos and your rules. Nothing is saved until you click “Save on willhaben”. Takes 10–60 seconds.": "Claude sieht den Text oben, die Fotos der Anzeige und deine Regeln. Gespeichert wird erst mit „Auf willhaben speichern“. Dauert 10–60 Sekunden.",
+ "Claude could not revise the ad: {error}": "Claude konnte die Anzeige nicht überarbeiten: {error}"
 }

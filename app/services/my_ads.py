@@ -152,6 +152,51 @@ async def load_for_edit(ad_id: str) -> dict[str, Any]:
             "price": ad.get("price")}
 
 
+async def ai_revise(ad_id: str, heading: str, description: str, price: float | None,
+                    instruction: str) -> dict[str, Any]:
+    """Claude revises title and description of a live ad by one instruction (nothing is saved).
+
+    Gets the current text from the edit form, the ad's photos (up to 4) and category from the public page.
+    Returns {heading, description, price_estimate, note} as a proposal for the form.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import httpx
+
+    from app.llm.base import get_backend
+    from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_refine_prompt
+
+    instruction = instruction.strip() or "Überarbeite das Inserat: klarer, verkaufsstärker, ehrlich."
+    detail = None
+    try:
+        detail = await get_public().get_detail(ad_id)
+    except WillhabenError as e:
+        log.info("ad %s detail for AI edit failed: %s", ad_id, e)
+    current = {"title": heading, "description": description,
+               "category_hint": " > ".join(getattr(detail, "category_path", None) or []),
+               "condition": "", "attributes": []}
+    with tempfile.TemporaryDirectory(prefix="wh-edit-") as tmp:
+        photos: list[Path] = []
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+            for i, url in enumerate((getattr(detail, "images", None) or [])[:4], 1):
+                try:
+                    r = await c.get(url)
+                except httpx.HTTPError:
+                    continue
+                if r.status_code == 200 and r.content and len(r.content) < 3 * 1024 * 1024:
+                    p = Path(tmp) / f"foto{i}.jpg"
+                    p.write_bytes(r.content)
+                    photos.append(p)
+        prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "", rules=get_setting("reply_rules"),
+                                  n_images=len(photos), current=current, specs=None, product_name=None,
+                                  instruction=instruction)
+        result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA, images=photos)
+    d = result.data
+    return {"heading": (d.get("title") or heading).strip()[:80], "description": (d.get("description") or description).strip(),
+            "price_estimate": d.get("price_estimate"), "note": (d.get("note") or "").strip()}
+
+
 async def edit(ad_id: str, heading: str, description: str, price: float | None) -> MyAd | None:
     """Save title/description/price on willhaben, then refresh the status (an edit may go to review)."""
     from app.willhaben import insert

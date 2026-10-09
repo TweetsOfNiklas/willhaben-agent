@@ -314,3 +314,38 @@ def test_edit_page_and_route(monkeypatch):
         r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "abc"},
                    follow_redirects=False)
         assert "/edit?msg=" in r.headers["location"]
+
+
+def test_ai_revision_fills_the_form_without_saving(monkeypatch):
+    from app.llm.base import LLMResult
+    from app.main import app
+
+    acct = _Editor()
+    monkeypatch.setattr(my_ads, "get_session", lambda: acct)
+
+    class Detail:
+        images, category_path = [], ["Audio", "Lautsprecher"]
+
+    async def fake_detail(ad_id):
+        return Detail()
+
+    class Backend:
+        prompts = []
+
+        async def complete(self, *, system, prompt, schema, images=None):
+            Backend.prompts.append(prompt)
+            return LLMResult(data={"title": "Kürzerer Titel", "description": "Neuer Text.", "price_estimate": 30,
+                                   "note": "Titel gekürzt."}, model="fake")
+
+    monkeypatch.setattr(my_ads, "get_public", lambda: type("P", (), {"get_detail": staticmethod(fake_detail)})())
+    monkeypatch.setattr("app.llm.base.get_backend", lambda *a: Backend())
+    with session() as db:
+        db.add(MyAd(ad_id="1000000001", heading="Alter Titel", url="https://www.willhaben.at/iad/object?adId=1000000001"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.post("/myads/1000000001/edit/ai", data={"heading": "Alter Titel", "description": "Alt", "price": "40",
+                                                         "instruction": "kürzer"}).text
+    assert 'value="Kürzerer Titel"' in page and "Neuer Text." in page and "Titel gekürzt." in page
+    assert 'value="40"' in page and "Claude estimates" in page                   # price stays, estimate offered
+    assert "kürzer" in Backend.prompts[0] and "Audio > Lautsprecher" in Backend.prompts[0]
+    assert acct.put_body is None                                                 # nothing saved on willhaben
