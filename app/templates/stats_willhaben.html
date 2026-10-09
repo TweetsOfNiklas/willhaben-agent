@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ _("willhaben requests") }} · willhaben Agent{% endblock %}
+{% block head %}
+<style>
+  .acc { --s-anonymous: #2a78d6; --s-account: #eb6834; --s-chat: #1baf7a; --s-blocked: #e5484d; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme=light]) .acc { --s-anonymous: #3987e5; --s-account: #d95926; --s-chat: #199e70; }
+  }
+  :root[data-theme=dark] .acc { --s-anonymous: #3987e5; --s-account: #d95926; --s-chat: #199e70; }
+  .acc-head { display:flex; flex-wrap:wrap; gap:.6rem 1rem; align-items:center; justify-content:space-between; margin-bottom:.6rem; }
+  .acc-head h3 { margin:0; }
+  .acc-range { display:inline-flex; border:1px solid var(--pico-muted-border-color); border-radius:var(--radius); overflow:hidden; }
+  .acc-range a { padding:.3rem .8rem; font-size:.9rem; color:var(--pico-color); }
+  .acc-range a + a { border-left:1px solid var(--pico-muted-border-color); }
+  .acc-range a[aria-current=true] { background:var(--brand); color:#fff; }
+  .acc-range a:hover { text-decoration:none; background:var(--pico-card-sectioning-background-color); }
+  .acc-range a[aria-current=true]:hover { background:var(--brand); }
+  .acc-chart svg { width:100%; height:auto; display:block; overflow:visible; }
+  .acc-chart text { fill: var(--pico-muted-color); font-size:11px; font-family: inherit; }
+  .acc-chart .grid { stroke: var(--pico-muted-border-color); stroke-width:1; }
+  .acc-chart .axis { stroke: var(--pico-muted-color); stroke-width:1; }
+  .acc-chart .budget { stroke: var(--pico-color); stroke-width:1.5; stroke-dasharray:5 4; opacity:.55; }
+  .acc-chart .seg-anonymous { fill: var(--s-anonymous); } .acc-chart .seg-account { fill: var(--s-account); }
+  .acc-chart .seg-chat { fill: var(--s-chat); }
+  .acc-chart .hit { fill: transparent; } .acc-chart g.bar:hover .hit { fill: var(--pico-muted-border-color); opacity:.45; }
+  .acc-chart .blk { fill: var(--s-blocked); }
+  .acc-legend { display:flex; flex-wrap:wrap; gap:.3rem 1.1rem; font-size:.875rem; margin:.4rem 0 0; padding:0; list-style:none; }
+  .acc-legend li { list-style:none; margin:0; display:inline-flex; align-items:center; gap:.35rem; }
+  .acc-legend .sw { width:.8rem; height:.8rem; border-radius:.2rem; display:inline-block; }
+  .acc-legend .ln { width:1.2rem; border-top:2px dashed var(--pico-color); opacity:.55; display:inline-block; }
+  .acc-tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:.8rem; margin:0 0 1rem; }
+  .acc-tiles article { margin:0; padding:.7rem .9rem; }
+  .acc-tiles .num { font-size:1.6rem; font-weight:700; line-height:1.15; }
+  .acc-tiles .lbl { color:var(--pico-muted-color); font-size:.85rem; }
+  .acc-tiles .bad .num { color: var(--s-blocked); }
+  .acc-totals { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; align-items:start; }
+  .acc-totals table { margin:0; } .acc-totals td:last-child, .acc-totals th:last-child { text-align:right; }
+  @media (max-width: 760px) { .acc-chart text { font-size:20px; } .acc-chart text.alt { display:none; } article.acc-chart { padding:.6rem; } }
+  tr.blocked td { color: var(--s-blocked); font-weight:600; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="acc">
+<div class="acc-head">
+  <h3>{{ _("willhaben requests") }}</h3>
+  <nav class="acc-range" aria-label="{{ _('Time range') }}">
+    {% for r in data.ranges %}<a href="/stats/willhaben?range={{ r }}" {% if r == data.range %}aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}
+  </nav>
+</div>
+
+<div class="acc-tiles">
+  <article><div class="num">{{ data.total }}</div><div class="lbl">{{ _("requests in this range") }}</div></article>
+  <article><div class="num">{{ data.last_hour }}{% if data.budget %}<small class="muted"> / {{ data.budget }}</small>{% endif %}</div>
+    <div class="lbl">{{ _("in the last hour") }}</div></article>
+  <article><div class="num">{{ data.peak.total if data.peak else 0 }}</div>
+    <div class="lbl">{% if data.peak %}{{ _("peak at {time}", time=data.peak.label) }}{% else %}{{ _("peak") }}{% endif %}</div></article>
+  <article class="{{ 'bad' if data.blocked else '' }}"><div class="num">{{ data.blocked }}</div><div class="lbl">{{ _("blocked (403/429)") }}</div></article>
+  <article><div class="num">{{ data.cached }}</div><div class="lbl">{{ _("from cache (no access)") }}</div></article>
+</div>
+
+{% if not data.total and not data.cached %}
+  <article><p>{{ _("No willhaben requests logged in this range yet.") }}</p>
+    <small class="muted">{{ _("Counting starts with this version; every request to willhaben is logged per minute from now on.") }}</small></article>
+{% else %}
+<article class="acc-chart">
+  <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" aria-label="{{ _('Stacked bar chart of willhaben requests per {m} min', m=(data.bucket_s // 60)) }}">
+    {% for tk in chart.yticks %}
+      <line class="grid" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ tk.y }}" y2="{{ tk.y }}"/>
+      <text x="{{ chart.x0 - 6 }}" y="{{ tk.y + 4 }}" text-anchor="end">{{ tk.label }}</text>
+    {% endfor %}
+    {% for b in chart.bars %}
+      <g class="bar"><title>{{ b.title }}</title>
+        <rect class="hit" x="{{ b.x }}" y="{{ b.hit_y }}" width="{{ b.w }}" height="{{ b.hit_h }}"/>
+        {% for s in b.segs %}<rect class="seg-{{ s.channel }}" x="{{ b.x }}" y="{{ s.y }}" width="{{ b.w }}" height="{{ s.h }}"/>{% endfor %}
+        {% if b.blocked %}<rect class="blk" x="{{ b.x }}" y="{{ chart.base_y + 2 }}" width="{{ b.w }}" height="3"/>{% endif %}
+      </g>
+    {% endfor %}
+    {% if chart.budget_y is not none %}
+      <line class="budget" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.budget_y }}" y2="{{ chart.budget_y }}"><title>{{ _("Budget pace: {n} per bar = {h} per hour", n=chart.budget, h=data.budget) }}</title></line>
+    {% endif %}
+    <line class="axis" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.base_y }}" y2="{{ chart.base_y }}"/>
+    {% for xl in chart.xlabels %}<text x="{{ chart.x0 if loop.first else xl.x }}" y="{{ chart.h - 6 }}" text-anchor="{{ 'start' if loop.first else 'middle' }}"{% if loop.index0 is odd %} class="alt"{% endif %}>{{ xl.label }}</text>{% endfor %}
+  </svg>
+  <ul class="acc-legend">
+    {% for ch in data.channels %}<li><span class="sw seg-{{ ch }}" style="background:var(--s-{{ ch }})"></span>{{ channel_label(ch) }}</li>{% endfor %}
+    {% if chart.budget_y is not none %}<li><span class="ln"></span>{{ _("budget pace ({n} per bar)", n=chart.budget) }}</li>{% endif %}
+    {% if data.blocked %}<li><span class="sw" style="background:var(--s-blocked)"></span>{{ _("blocked (403/429)") }}</li>{% endif %}
+  </ul>
+  <small class="muted">{{ _("One bar = {m} min, local time. Hover a bar for details.", m=(data.bucket_s // 60)) }}</small>
+</article>
+{% endif %}
+
+<div class="acc-totals">
+  <table>
+    <thead><tr><th>{{ _("Channel") }}</th><th>{{ _("Requests") }}</th></tr></thead>
+    <tbody>{% for ch, n in data.by_channel.items() %}<tr><td>{{ channel_label(ch) }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody>
+  </table>
+  <table>
+    <thead><tr><th>{{ _("Kind") }}</th><th>{{ _("Requests") }}</th></tr></thead>
+    <tbody>{% for k, n in data.by_kind.items() %}<tr><td>{{ kind_label(k) }}</td><td>{{ n }}</td></tr>
+      {% else %}<tr><td colspan="2" class="muted">–</td></tr>{% endfor %}</tbody>
+  </table>
+  <table>
+    <thead><tr><th>{{ _("Outcome") }}</th><th>{{ _("Count") }}</th></tr></thead>
+    <tbody>{% for o, n in data.by_outcome.items() %}<tr class="{{ 'blocked' if o == 'blocked' and n else '' }}"><td>{{ outcome_label(o) }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+
+{% if data.total or data.cached %}
+<details>
+  <summary>{{ _("Table view") }}</summary>
+  <table class="stack">
+    <thead><tr><th>{{ _("Time") }}</th>{% for ch in data.channels %}<th>{{ channel_label(ch) }}</th>{% endfor %}<th>{{ _("Total") }}</th><th>{{ _("blocked (403/429)") }}</th><th>{{ _("from cache (no access)") }}</th></tr></thead>
+    <tbody>{% for b in data.buckets|reverse if b.total or b.cached %}<tr><td>{{ b.label }}–{{ b.end_label }}</td>{% for ch in data.channels %}<td>{{ b[ch] }}</td>{% endfor %}<td>{{ b.total }}</td><td>{{ b.blocked }}</td><td>{{ b.cached }}</td></tr>{% endfor %}</tbody>
+  </table>
+</details>
+{% endif %}
+
+<p><small class="muted">
+  {{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }}
+  {{ _("Answers served from the app's short cache are listed separately and are not willhaben requests. Counts are kept for 8 days; times are local.") }}
+  <a href="/api/stats/willhaben?range={{ data.range }}">JSON</a>
+</small></p>
+</div>
+{% endblock %}

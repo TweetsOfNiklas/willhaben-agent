@@ -55,6 +55,11 @@ Settings → Language.
 ZIP, optionally encrypted with a passphrase, and restores such a file after a preview and a confirm click. The file
 contains your logins: keep it private.
 
+**willhaben requests:** the counter in the footer links to `/stats/willhaben`, a chart of every request the app
+sent to willhaben in the last 1 h / 6 h / 24 h / 7 days (anonymous searches vs. the logged-in account vs. live chat,
+blocked answers highlighted). Only counts per minute are stored (no addresses, ids or texts), for 8 days. Home
+Assistant can read the same numbers from `GET /api/stats/willhaben?range=24h`.
+
 That's it. Setting a dashboard password is strongly recommended, because the app can send messages in your name
 (`DASHBOARD_PASSWORD` in `.env`).
 

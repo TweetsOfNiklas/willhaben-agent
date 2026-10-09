@@ -15,6 +15,7 @@ import httpx
 
 from app.config import get_settings
 from app.i18n import t
+from app.willhaben import access_log
 from app.willhaben.parse import (
     AdDetail,
     SearchFilters,
@@ -147,21 +148,28 @@ class PublicClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def _get(self, url: str, *, json_api: bool, cache_s: float = 0) -> httpx.Response:
-        """GET through the shared limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same URL."""
+    async def _get(self, url: str, *, json_api: bool, cache_s: float = 0, kind: str | None = None) -> httpx.Response:
+        """GET through the shared limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same URL.
+
+        Every call is counted in the access log (channel anonymous; `kind` defaults to one derived from the path).
+        """
+        kind = kind or access_log.classify(url)
         key = f"{json_api}:{url}"
         hit = self._cache.get(key)
         # a 404 can turn into a live ad within minutes (freshly published or reactivated): keep it only briefly
         if cache_s and hit and time.monotonic() - hit[0] < (min(cache_s, NOT_FOUND_CACHE_S) if hit[1].status_code == 404 else cache_s):
+            access_log.record("anonymous", kind, "cached")
             return hit[1]
         headers = {"accept": "application/json", "x-wh-client": WEB_CLIENT} if json_api else {"accept": "text/html"}
         if time.monotonic() - self._jar_since > ANON_SESSION_S:
             self.new_anonymous_session()
         async with self.limiter:
-            try:
-                r = await self._client.get(url, headers=headers)
-            except httpx.HTTPError as e:
-                raise WillhabenError(t("Network error: {error}", error=e)) from e
+            with access_log.track("anonymous", kind) as tr:
+                try:
+                    r = await self._client.get(url, headers=headers)
+                except httpx.HTTPError as e:
+                    raise WillhabenError(t("Network error: {error}", error=e)) from e
+                tr.status = r.status_code
         if r.status_code in (403, 429):
             self.new_anonymous_session()        # don't keep presenting the visitor that just got blocked
             delay = self.limiter.penalize()
@@ -186,7 +194,7 @@ class PublicClient:
 
     async def search_filters(self, browser_url: str, rows: int = 6) -> SearchFilters:
         """Current search plus its available filters (willhaben "navigators") for the agent builder."""
-        r = await self._get(to_webapi_url(browser_url, rows=rows), json_api=True, cache_s=120)
+        r = await self._get(to_webapi_url(browser_url, rows=rows), json_api=True, cache_s=120, kind="filters")
         if r.status_code != 200:
             raise WillhabenError(t("Search returned HTTP {status}", status=r.status_code))
         try:

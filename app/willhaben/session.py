@@ -22,6 +22,7 @@ from typing import Any
 from app.config import get_settings
 from app.db import utcnow
 from app.i18n import t
+from app.willhaben import access_log
 from app.willhaben.public import WEB_CLIENT, Blocked, willhaben_limiter
 
 log = logging.getLogger(__name__)
@@ -102,9 +103,9 @@ class BrowserSession:
             self.ui_page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             self.api_page = await self.context.new_page()
             self.context.on("page", self._on_new_page)
-            await self.api_page.goto(PARK_URL, wait_until="domcontentloaded")
+            await self._goto(self.api_page, PARK_URL, wait_until="domcontentloaded")
             if self.ui_page.url in ("about:blank", ""):
-                await self.ui_page.goto(ORIGIN + "/", wait_until="domcontentloaded")
+                await self._goto(self.ui_page, ORIGIN + "/", wait_until="domcontentloaded")
             self.error = None
         except Exception as e:  # noqa: BLE001 - surface any launch problem in the dashboard
             self.error = t("Browser start failed: {error}", error=e)
@@ -126,6 +127,14 @@ class BrowserSession:
             raise SessionUnavailable(self.error or t("Browser session is not running"))
 
     # ---------------------------------------------------------------- API calls
+    @staticmethod
+    async def _goto(page, url: str, kind: str = "navigation", **kw: Any) -> Any:
+        """page.goto() of a willhaben page, counted in the access log (channel account)."""
+        with access_log.track("account", kind) as tr:
+            res = await page.goto(url, **kw)
+            tr.status = getattr(res, "status", None)
+        return res
+
     async def _csrf(self) -> str | None:
         for c in await self.context.cookies(ORIGIN):
             if c["name"] == "x-bbx-csrf-token":
@@ -134,7 +143,7 @@ class BrowserSession:
 
     async def _ensure_parked(self) -> None:
         if not self.api_page.url.startswith(ORIGIN):
-            await self.api_page.goto(PARK_URL, wait_until="domcontentloaded")
+            await self._goto(self.api_page, PARK_URL, wait_until="domcontentloaded")
 
     async def api(self, method: str, path: str, body: Any = None, accept: str = "application/json") -> ApiResponse:
         """Run fetch() for an `/webapi/...` path (or a page, with accept=text/html) inside the logged-in browser."""
@@ -150,13 +159,15 @@ class BrowserSession:
             payload = json.dumps(body)
         async with self.limiter:
             await self._ensure_parked()
-            res = await self.api_page.evaluate(
-                """async ({method, url, headers, payload}) => {
-                    const r = await fetch(url, {method, headers, body: payload, credentials: 'include'});
-                    return {status: r.status, text: await r.text(), url: r.url};
-                }""",
-                {"method": method, "url": url, "headers": headers, "payload": payload},
-            )
+            with access_log.track("account", access_log.classify(url)) as tr:
+                res = await self.api_page.evaluate(
+                    """async ({method, url, headers, payload}) => {
+                        const r = await fetch(url, {method, headers, body: payload, credentials: 'include'});
+                        return {status: r.status, text: await r.text(), url: r.url};
+                    }""",
+                    {"method": method, "url": url, "headers": headers, "payload": payload},
+                )
+                tr.status = res["status"]
         if res["status"] == 429:
             raise Blocked(t("willhaben responded {status}; pausing {s}s", status=429, s=f"{self.limiter.penalize():.0f}"))
         return ApiResponse(status=res["status"], text=res["text"], url=res["url"])
@@ -173,18 +184,20 @@ class BrowserSession:
             headers["x-bbx-csrf-token"] = csrf
         async with self.limiter:
             await self._ensure_parked()
-            res = await self.api_page.evaluate(
-                """async ({url, headers, field, filename, b64, mime}) => {
-                    const bin = atob(b64), bytes = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                    const fd = new FormData();
-                    fd.append(field, new Blob([bytes], {type: mime}), filename);
-                    const r = await fetch(url, {method: 'POST', headers, body: fd, credentials: 'include'});
-                    return {status: r.status, text: await r.text(), url: r.url};
-                }""",
-                {"url": url, "headers": headers, "field": field, "filename": filename,
-                 "b64": base64.b64encode(data).decode(), "mime": mime},
-            )
+            with access_log.track("account", "upload") as tr:
+                res = await self.api_page.evaluate(
+                    """async ({url, headers, field, filename, b64, mime}) => {
+                        const bin = atob(b64), bytes = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                        const fd = new FormData();
+                        fd.append(field, new Blob([bytes], {type: mime}), filename);
+                        const r = await fetch(url, {method: 'POST', headers, body: fd, credentials: 'include'});
+                        return {status: r.status, text: await r.text(), url: r.url};
+                    }""",
+                    {"url": url, "headers": headers, "field": field, "filename": filename,
+                     "b64": base64.b64encode(data).decode(), "mime": mime},
+                )
+                tr.status = res["status"]
         return ApiResponse(status=res["status"], text=res["text"], url=res["url"])
 
     async def ws_send(self, url: str, frames: list[dict[str, Any]], settle_ms: int = 1500) -> dict[str, Any]:
@@ -195,25 +208,28 @@ class BrowserSession:
         self._require()
         async with self.limiter:
             await self._ensure_parked()
-            return await self.api_page.evaluate(
-                """({url, frames, settle}) => new Promise((resolve) => {
-                    let sent = 0, done = false;
-                    const ws = new WebSocket(url);
-                    const finish = (status) => { if (done) return; done = true; clearTimeout(t);
-                                                 try { ws.close(); } catch (e) {} resolve({status, sent}); };
-                    const t = setTimeout(() => finish('timeout'), 15000 + frames.length * 1000);
-                    ws.onopen = async () => {
-                        for (const f of frames) {
-                            ws.send(JSON.stringify(f)); sent++;
-                            await new Promise(r => setTimeout(r, 250 + Math.random() * 650));
-                        }
-                        setTimeout(() => finish('ok'), settle);
-                    };
-                    ws.onerror = () => finish('ws_error');
-                    ws.onclose = () => finish(sent === frames.length ? 'ok' : 'closed');
-                })""",
-                {"url": url, "frames": frames, "settle": settle_ms},
-            )
+            with access_log.track("chat", "chat") as tr:
+                res = await self.api_page.evaluate(
+                    """({url, frames, settle}) => new Promise((resolve) => {
+                        let sent = 0, done = false;
+                        const ws = new WebSocket(url);
+                        const finish = (status) => { if (done) return; done = true; clearTimeout(t);
+                                                     try { ws.close(); } catch (e) {} resolve({status, sent}); };
+                        const t = setTimeout(() => finish('timeout'), 15000 + frames.length * 1000);
+                        ws.onopen = async () => {
+                            for (const f of frames) {
+                                ws.send(JSON.stringify(f)); sent++;
+                                await new Promise(r => setTimeout(r, 250 + Math.random() * 650));
+                            }
+                            setTimeout(() => finish('ok'), settle);
+                        };
+                        ws.onerror = () => finish('ws_error');
+                        ws.onclose = () => finish(sent === frames.length ? 'ok' : 'closed');
+                    })""",
+                    {"url": url, "frames": frames, "settle": settle_ms},
+                )
+                tr.outcome = access_log.ws_outcome(res.get("status") if isinstance(res, dict) else None)
+        return res
 
     async def ws_request(self, url: str, frame: dict[str, Any], request_id: str | None, *, req_type: str,
                          timeout_ms: int = 20000) -> dict[str, Any]:
@@ -226,25 +242,28 @@ class BrowserSession:
         self._require()
         async with self.limiter:
             await self._ensure_parked()
-            return await self.api_page.evaluate(
-                """({url, frame, rid, reqType, timeout}) => new Promise((resolve) => {
-                    let done = false, acked = false;
-                    const ws = new WebSocket(url);
-                    const finish = (r) => { if (done) return; done = true; clearTimeout(t);
-                                            try { ws.close(); } catch (e) {} resolve({...r, acked}); };
-                    const t = setTimeout(() => finish({status: 'timeout'}), timeout);
-                    ws.onopen = () => ws.send(JSON.stringify(frame));
-                    ws.onmessage = (e) => {
-                        let m; try { m = JSON.parse(e.data); } catch (_) { return; }
-                        if ((rid !== null && m.request_id !== rid) || m.req_type !== reqType) return;
-                        if (m.status === 'ack') { acked = true; return; }
-                        finish(m);
-                    };
-                    ws.onerror = () => finish({status: 'ws_error'});
-                    ws.onclose = (e) => finish({status: 'closed', code: e.code});
-                })""",
-                {"url": url, "frame": frame, "rid": request_id, "reqType": req_type, "timeout": timeout_ms},
-            )
+            with access_log.track("chat", "send" if req_type == "send_message" else "chat") as tr:
+                res = await self.api_page.evaluate(
+                    """({url, frame, rid, reqType, timeout}) => new Promise((resolve) => {
+                        let done = false, acked = false;
+                        const ws = new WebSocket(url);
+                        const finish = (r) => { if (done) return; done = true; clearTimeout(t);
+                                                try { ws.close(); } catch (e) {} resolve({...r, acked}); };
+                        const t = setTimeout(() => finish({status: 'timeout'}), timeout);
+                        ws.onopen = () => ws.send(JSON.stringify(frame));
+                        ws.onmessage = (e) => {
+                            let m; try { m = JSON.parse(e.data); } catch (_) { return; }
+                            if ((rid !== null && m.request_id !== rid) || m.req_type !== reqType) return;
+                            if (m.status === 'ack') { acked = true; return; }
+                            finish(m);
+                        };
+                        ws.onerror = () => finish({status: 'ws_error'});
+                        ws.onclose = (e) => finish({status: 'closed', code: e.code});
+                    })""",
+                    {"url": url, "frame": frame, "rid": request_id, "reqType": req_type, "timeout": timeout_ms},
+                )
+                tr.outcome = access_log.ws_outcome(res.get("status") if isinstance(res, dict) else None)
+        return res
 
     async def api_json(self, method: str, path: str, body: Any = None) -> Any:
         r = await self.api(method, path, body)
@@ -295,23 +314,26 @@ class BrowserSession:
         """
         self._require()
         try:
-            await self.api_page.goto(f"{ORIGIN}/webapi/sso/login?background-login", wait_until="load", timeout=20000)
+            await self._goto(self.api_page, f"{ORIGIN}/webapi/sso/login?background-login", "login", wait_until="load", timeout=20000)
             await self.api_page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:  # noqa: BLE001 - best effort
             pass
         finally:
-            await self.api_page.goto(PARK_URL, wait_until="domcontentloaded")
+            await self._goto(self.api_page, PARK_URL, wait_until="domcontentloaded")
         return await self._me() is not None
 
     async def open_login(self) -> None:
         self._require()
         await self.ui_page.bring_to_front()
-        await self.ui_page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        await self._goto(self.ui_page, LOGIN_URL, "login", wait_until="domcontentloaded")
 
     async def open_url(self, url: str) -> None:
         self._require()
         await self.ui_page.bring_to_front()
-        await self.ui_page.goto(url, wait_until="domcontentloaded")
+        if url.startswith(ORIGIN):
+            await self._goto(self.ui_page, url, wait_until="domcontentloaded")
+        else:
+            await self.ui_page.goto(url, wait_until="domcontentloaded")
 
     async def screenshot(self, fmt: str = "png") -> bytes:
         self._require()
@@ -397,7 +419,7 @@ class BrowserSession:
             self._creating_internal = False
             self.ui_page = ui
         await self.chat_page.expose_function("__whChat", self._on_chat_frame)
-        await self.chat_page.goto(PARK_URL, wait_until="domcontentloaded")
+        await self._goto(self.chat_page, PARK_URL, wait_until="domcontentloaded")
         await self.chat_page.evaluate(self._CHAT_JS, CHAT_WS)
         self.chat_live.update(state="connecting", since=utcnow())
 
@@ -410,6 +432,11 @@ class BrowserSession:
         self.chat_live["last_frame"] = now
         if "_state" in msg:
             state = "connected" if msg["_state"] == "open" else f"getrennt ({msg.get('code')})"
+            # access log: one count per (re)connect of the live socket; a close without an open = failed attempt
+            if state == "connected":
+                access_log.record("chat", "chat", "ok")
+            elif self.chat_live["state"] != "connected":
+                access_log.record("chat", "chat", "error")
             if state != self.chat_live["state"]:
                 log.info("live chat: %s", state)
                 self.chat_live.update(state=state, since=now)
