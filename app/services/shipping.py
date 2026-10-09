@@ -6,6 +6,13 @@ cheapest: …". On the chat page the user checks size/weight (remembered per ad)
 `label_fill` opens that carrier's online form in the remote browser and fills it. The user only pays.
 Carriers have no label API for private customers, so prices come from their published tariffs
 (app/services/shipping_tariffs.py).
+
+Status model (Shipment.status): draft -> awaiting -> buying -> labelled -> printed -> sent, plus failed and discarded.
+A label is only bought once the buyer has paid (`mark_paid`: by hand on the chat page or a push button, from a
+willhaben PayLivery notice, later from an e-mail or bank match). "I have paid" in the chat is only a hint
+(`claim_payment`) that asks the user to check. After payment the user approves the purchase on the chat page or the
+phone, or the settings allow it automatically under conditions. `label_buy` then buys the label in the browser and
+`printing` sends it to the label or normal printer.
 """
 from __future__ import annotations
 
@@ -286,6 +293,36 @@ async def detect(conversation_id: str, force: bool = False) -> Shipment | None:
             db.commit()
             db.refresh(s)
     return _auto_option(s)
+
+
+# ------------------------------------------------------------------ payment
+PAID_VIA = ("manual", "paylivery", "email", "bank")
+
+
+def mark_paid(shipment_id: int, via: str, amount: float | None = None) -> Shipment:
+    """The buyer has paid (source `via`). Idempotent: a second source does not overwrite the first."""
+    if via not in PAID_VIA:
+        raise ShippingError(t("unknown payment source"))
+    s = get(shipment_id)
+    if s is None:
+        raise ShippingError(t("Shipment not found"))
+    if s.paid_at:
+        return s
+    return update(shipment_id, paid_at=utcnow(), paid_via=via, paid_amount=amount)
+
+
+def unmark_paid(shipment_id: int) -> Shipment:
+    return update(shipment_id, paid_at=None, paid_via=None, paid_amount=None)
+
+
+def claim_payment(shipment_id: int) -> Shipment:
+    """The buyer says they have paid. Only a hint for the user; never unlocks the purchase."""
+    s = get(shipment_id)
+    if s is None:
+        raise ShippingError(t("Shipment not found"))
+    if s.payment_claimed_at or s.paid_at:
+        return s
+    return update(shipment_id, payment_claimed_at=utcnow())
 
 
 def looks_like_address(text: str | None) -> bool:

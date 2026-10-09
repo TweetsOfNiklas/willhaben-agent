@@ -110,7 +110,7 @@
     {% endif %}
 
     <div class="row-actions">
-      {% if shipment.label_path %}<a role="button" class="secondary" href="/shipments/{{ shipment.id }}/label.pdf" target="_blank">📄 {{ _("Label") }}</a>{% endif %}
+      {% if shipment.label_path %}<a role="button" class="secondary" href="/shipments/{{ shipment.id }}/label.pdf" target="_blank">📄 {{ _("Label") }}</a>{% include "_shipping_print.html" %}{% endif %}
       {% if shipment.status in ('draft', 'labelled') %}
         <form method="post" action="/shipments/{{ shipment.id }}/status" class="row-actions" style="margin:0">
           <input type="hidden" name="status" value="sent">

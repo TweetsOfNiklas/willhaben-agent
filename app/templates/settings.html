@@ -368,7 +368,11 @@
       {% endfor %}
       <p><small class="muted">{{ _("Leave the password empty to keep the saved one; clear the user name to remove a login.") }}</small></p>
       <p><small class="muted">{{ _("Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size, you check and pay. Log in there once if the carrier asks; the browser remembers it. The app never presses “buy” or “pay”.") }}</small></p>
+      {% include "_settings_ship_card.html" %}
+      {% include "_settings_ship_auto.html" %}
     </section>
+
+    {% include "_settings_printing.html" %}
 
     <section id="rules">
       <h4>{{ _("My rules") }}</h4>

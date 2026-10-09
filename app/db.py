@@ -139,14 +139,31 @@ class Shipment(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     conversation_id: str = Field(foreign_key="conversation.id", index=True)
     ad_id: str | None = None
-    status: str = "draft"            # draft | labelled | sent | discarded
+    # draft (address/parcel being prepared, not paid) | awaiting (paid, needs the user's go) | buying (label is being
+    # bought in the browser) | labelled | printed | sent | failed (buying/printing broke, see error) | discarded
+    status: str = "draft"
     recipient: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # name, street, house_no, extra, zip, city, phone, email
     parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))     # length/width/height cm, weight_kg, contents, source
     option: str | None = None        # tariff key, e.g. "gls:S:shop"
-    price: float | None = None
+    price: float | None = None       # published tariff price of the option
     label_path: str | None = None    # file in DATA_DIR/labels
     tracking: str | None = None
     note: str | None = None          # Claude's remark (missing data, oddities)
+    # --- payment (the label is only bought once the buyer has paid) ---
+    agreed_price: float | None = None          # price agreed in the chat (Claude reads it with the address)
+    paid_at: datetime | None = None
+    paid_via: str | None = None                # manual | paylivery | email | bank
+    paid_amount: float | None = None           # amount seen by an automatic source (None for manual)
+    payment_claimed_at: datetime | None = None # the buyer wrote "I have paid" (a hint, never a status)
+    # --- approval and purchase ---
+    approval: str | None = None                # pending | approved | auto | declined
+    approved_at: datetime | None = None
+    buy_log: list[Any] | None = Field(default=None, sa_column=Column(JSON))   # checkout steps [{step, url, action, note}]
+    paid_price: float | None = None            # what the carrier's checkout actually charged
+    error: str | None = None                   # last failure of buying/printing (status failed) or what the user must do
+    # --- printing ---
+    print_job: str | None = None               # printer job id/uri
+    printed_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

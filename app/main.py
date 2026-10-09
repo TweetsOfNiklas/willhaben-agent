@@ -34,7 +34,7 @@ from app.services import health, human_pace
 from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
-from app import backup_routes
+from app import backup_routes, label_buy_routes, printing_routes
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
@@ -92,6 +92,8 @@ async def lifespan(app: FastAPI):
 _background: set[asyncio.Task] = set()
 app = FastAPI(title="willhaben Agent", lifespan=lifespan)
 app.include_router(backup_routes.router)   # Settings → Backup
+app.include_router(label_buy_routes.router)   # Settings → Shipping → payment card, checkout
+app.include_router(printing_routes.router)    # Settings → Printers, print buttons
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -494,7 +496,7 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
             "fmt_dist": dropoff.fmt_dist,
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
-            "ship_all": shipping.all_options(s.parcel) if s else []}
+            "ship_all": shipping.all_options(s.parcel) if s else [], **printing_routes.shipment_panel(s)}
 
 
 @app.post("/chats/{conversation_id}/refresh")
@@ -1225,7 +1227,8 @@ async def settings_page(request: Request, msg: str | None = None):
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
-                  label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel())
+                  label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel(),
+                  **label_buy_routes.panel(), **printing_routes.panel())
 
 
 async def _gcal_ctx() -> dict[str, Any]:
