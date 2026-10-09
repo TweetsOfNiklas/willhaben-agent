@@ -64,7 +64,7 @@
     try {
       const r = await fetch(`/hits/ad/${encodeURIComponent(ad)}${hit ? '?hit=' + encodeURIComponent(hit) : ''}`);
       if (idx !== i) return;                         // user moved on meanwhile
-      if (r.ok) body.innerHTML = await r.text(); else body.replaceChildren(msg('msg', T.error.replace('{status}', r.status)));
+      if (r.ok) { body.innerHTML = await r.text(); if (window.htmx) htmx.process(body); } else body.replaceChildren(msg('msg', T.error.replace('{status}', r.status)));
     } catch (e) { body.replaceChildren(msg('msg', T.offline)); }
     dlg.querySelector('article').scrollTop = 0;
     if (hit) { const card = document.getElementById('hit-' + hit); if (card) card.classList.add('viewed'); }

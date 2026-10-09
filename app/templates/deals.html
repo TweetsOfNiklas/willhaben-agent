@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ _("Price check") }}</h3>
+<form method="get" action="/deals" class="builder-search" role="search">
+  <input type="search" name="q" value="{{ q }}" required aria-label="{{ _('willhaben link, ad id or search text') }}"
+         placeholder="{{ _('willhaben link, ad id or search text, e.g. iPhone 13 128GB') }}">
+  <button type="submit">{{ _("Check") }}</button>
+</form>
+<p><small class="muted">{{ _("Each check costs 1–3 willhaben/Geizhals requests (results are cached for an hour); Claude is only asked when you click.") }}</small></p>
+
+{% if res %}
+  {% set ad = res.ad %}
+  <article>
+    <div class="adv">
+      <div class="adv-gallery">
+        {% if ad.image %}<img class="adv-main" src="{{ ad.image }}" alt="">{% else %}<div class="adv-main adv-empty">{{ _("No photos") }}</div>{% endif %}
+      </div>
+      <div class="adv-info">
+        <h4>{{ ad.title }}</h4>
+        <p class="adv-price">{{ ad.price_display or (ad.price|eur) }}</p>
+        <p class="meta">{% if ad.location %}📍 {{ ad.location }}{% endif %}
+          {% if ad.category %}<br>{{ ad.category }}{% endif %}
+          {% if ad.is_private == false %}<br>{{ _("dealer") }}{% elif ad.is_private %}<br>{{ _("private") }}{% endif %}</p>
+        <div class="adv-actions">
+          <a href="{{ ad.url }}" target="_blank" rel="noopener" role="button" class="secondary outline">{{ _("Open on willhaben") }} ↗</a>
+        </div>
+        {% with error=None, compact=False, h=None %}{% include "_deal.html" %}{% endwith %}
+        <form method="get" action="/deals/ad/{{ ad.ad_id }}" class="builder-search">
+          <input type="text" name="q" value="{{ res.query }}" aria-label="{{ _('Compare with another search term') }}"
+                 title="{{ _('Compare with another search term') }}">
+          <button type="submit" class="secondary outline">{{ _("Compare again") }}</button>
+        </form>
+      </div>
+    </div>
+  </article>
+{% elif results is not none %}
+  <p>{{ _("{n} ads found for „{q}“", n=results|length, q=q) }}{% if spread %} ·
+    <small class="muted">{{ _("median {median}, middle half {p25}–{p75}", median=spread.median|eur, p25=spread.p25|eur, p75=spread.p75|eur) }}</small>{% endif %}</p>
+  <div class="grid-cards">
+  {% for a in results %}
+    <div class="card">
+      <a href="{{ a.url }}" target="_blank" data-ad="{{ a.ad_id }}">{% if a.image_url %}<img src="{{ a.image_url }}" loading="lazy" alt="">{% else %}<img alt="">{% endif %}</a>
+      <div class="body">
+        <a href="{{ a.url }}" target="_blank" data-ad="{{ a.ad_id }}">{{ a.title }}</a>
+        <div class="price">{{ a.price_display or (a.price|eur) }}
+          {% if a.level %}<span class="deal-lvl lvl-{{ a.level }}">{{ deal_level_label(a.level) }}</span>{% endif %}</div>
+        <div class="meta">{{ a.location or '' }}</div>
+      </div>
+      <div class="actions"><a role="button" class="outline" href="/deals/ad/{{ a.ad_id }}?q={{ quote(q) }}">{{ _("Check") }}</a></div>
+    </div>
+  {% else %}
+    <p class="muted">{{ _("No ads found.") }}</p>
+  {% endfor %}
+  </div>
+  {% if spread %}<p><small class="muted">{{ _("The badges compare each ad with the other results of this search.") }}</small></p>{% endif %}
+{% endif %}
+
+{% if recent %}
+  <h4 style="margin-top:1.5rem">{{ _("Recently checked") }}</h4>
+  <table class="stack">
+    <tbody>
+    {% for r in recent %}{% set pos = ((r.result or {}).get('position') or {}) %}
+      <tr>
+        <td><a href="/deals/ad/{{ r.ad_id }}">{{ r.title or r.ad_id }}</a></td>
+        <td>{{ r.price_display or (r.price|eur) }}</td>
+        <td>{% if pos.get('level') %}<span class="deal-lvl lvl-{{ pos.level }}">{{ deal_level_label(pos.level) }}</span>{% endif %}
+            {% if r.claude and r.claude.get('deal') %}<span class="badge {{ 'ok' if r.claude.deal in ('great', 'good') else 'muted' }}">🤖 {{ deal_label(r.claude.deal) }}</span>{% endif %}</td>
+        <td><small class="muted">{{ r.checked_at|ago }}</small></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+<style>
+  .deal-lvl { display: inline-block; padding: .05rem .55rem; border-radius: 1em; font-size: .78rem; font-weight: 600; color: #fff; line-height: 1.5; vertical-align: middle; }
+  .lvl-bargain { background: #2f9e44; } .lvl-cheap { background: #66a80f; } .lvl-fair { background: #e8a600; color: #222; }
+  .lvl-expensive { background: #f76707; } .lvl-very_expensive { background: #e5484d; }
+  .card .actions [role=button] { flex: 1 1 auto; padding: .42rem .9rem; font-size: .875rem; text-align: center; }
+  .adv-info form.builder-search input { font-size: .9rem; }
+  .adv-info form.builder-search button { padding: .42rem .9rem; font-size: .875rem; }
+</style>
+{% endblock %}

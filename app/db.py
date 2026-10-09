@@ -184,6 +184,20 @@ class AdBatch(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class DealCheck(SQLModel, table=True):
+    """Price check of one ad (Preischeck page / ad viewer): last analysis and Claude's verdict, one row per ad."""
+    ad_id: str = Field(primary_key=True)
+    title: str | None = None
+    price: float | None = None
+    price_display: str | None = None
+    image_url: str | None = None
+    url: str | None = None
+    query: str | None = None
+    result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # deals.analyze() output
+    claude: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {deal, reason, model, at}
+    checked_at: datetime | None = Field(default_factory=utcnow, index=True)
+
+
 class TelegramAction(SQLModel, table=True):
     """What a Telegram button does: callback_data is `t:<token>` (Telegram allows only 64 bytes)."""
     token: str = Field(primary_key=True)

@@ -1,0 +1,66 @@
+{# Price position of one ad: res = deals.analyze() result or None, compact = inside the ad viewer, h = Hit or None #}
+<style>
+  .deal { margin: .3rem 0 .7rem; }
+  .deal-head { margin: 0 0 .2rem; display: flex; flex-wrap: wrap; gap: .3rem .5rem; align-items: center; }
+  .deal-lvl { display: inline-block; padding: .05rem .55rem; border-radius: 1em; font-size: .8rem; font-weight: 600; color: #fff; line-height: 1.5; }
+  .lvl-bargain { background: #2f9e44; } .lvl-cheap { background: #66a80f; } .lvl-fair { background: #e8a600; color: #222; }
+  .lvl-expensive { background: #f76707; } .lvl-very_expensive { background: #e5484d; }
+  .deal-bar { position: relative; padding-top: 1.45rem; margin: 0 .2rem; }
+  .deal-track { height: .65rem; border-radius: .35rem; background: linear-gradient(90deg, #2f9e44 0%, #94c11f 28%, #f5c400 50%, #f76707 75%, #e5484d 100%); }
+  .deal-pin { position: absolute; top: 0; font-size: .85rem; font-weight: 700; white-space: nowrap; }
+  .deal-needle { position: absolute; top: 1.2rem; width: 4px; height: 1.15rem; margin-left: -2px; border-radius: 2px;
+                 background: var(--pico-color); box-shadow: 0 0 0 2px var(--pico-background-color); }
+  .deal-ticks { position: relative; height: 1.3rem; margin: 0 .2rem; font-size: .75rem; color: var(--pico-muted-color); }
+  .deal-ticks span { position: absolute; top: .15rem; transform: translateX(-50%); white-space: nowrap; }
+  .deal-ticks span::before { content: ""; position: absolute; left: 50%; top: -.55rem; width: 1px; height: .4rem; background: var(--pico-muted-color); }
+  .deal-note { margin: .1rem 0 .3rem; font-size: .85rem; }
+  .deal-claude { margin-top: .4rem; }
+  .deal-claude button { width: auto; margin: 0; padding: .35rem .85rem; font-size: .875rem; }
+  table.deal-comp td.num { text-align: right; white-space: nowrap; }
+  table.deal-comp tr.this td { font-weight: 700; background: var(--pico-card-sectioning-background-color); }
+</style>
+{% if error and not res %}
+  <p class="deal-note muted">{{ _("Price check failed: {error}", error=error) }}</p>
+{% elif res %}
+{% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set gh = res.geizhals %}{% set ad = res.ad or {} %}
+<section class="deal">
+  <p class="deal-head"><strong>💶 {{ _("Price") }}</strong>
+    {% if p.pos is not none %}<span class="deal-lvl lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}
+    {% if c.count %}<small class="muted">{{ _("{n} comparable ads", n=c.count) }}{% if c.query %} · „{{ c.query }}“{% endif %}</small>{% endif %}
+  </p>
+  {% if p.pos is not none %}
+    {% set pct = (p.pos * 100)|round(1) %}
+    <div class="deal-bar" role="img" aria-label="{{ deal_level_label(p.level) }}">
+      <span class="deal-pin" style="left: {{ pct }}%; transform: translateX(-{{ pct }}%)">{{ ad.price|eur }}</span>
+      <span class="deal-needle" style="left: {{ pct }}%"></span>
+      <div class="deal-track"></div>
+    </div>
+    <div class="deal-ticks">{% for pos, v in p.ticks %}<span style="left: {{ (pos * 100)|round(1) }}%">{{ v|eur }}</span>{% endfor %}</div>
+    <p class="deal-note muted">
+      {% if p.basis == 'comparables' %}{{ _("Cheapest to most expensive comparable ad; marks at 25 %, median and 75 %.") }}
+      {% else %}{{ _("Few comparable ads: estimated from the new price (used items usually sell for 40–70 %).") }}{% endif %}</p>
+    {% if p.suspicious %}<p class="deal-note">⚠️ {{ _("Unusually cheap – check condition, details and seller carefully.") }}</p>{% endif %}
+  {% else %}
+    <p class="deal-note muted">{{ deal_explain(res) }}</p>
+  {% endif %}
+  {% if gh %}<p class="deal-note"><a href="{{ gh.url }}" target="_blank" rel="noopener">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗</a></p>{% endif %}
+  {% if not (compact and h and h.screen_relevant is not none) %}
+    {% with q=res.asked_query or '', hit=(h.id if h else '') %}{% include "_deal_claude.html" %}{% endwith %}
+  {% endif %}
+  {% if not compact and c.closest %}
+    <table class="deal-comp stack">
+      <thead><tr><th>{{ _("Comparable ads") }}</th><th>{{ _("Location") }}</th><th class="num">{{ _("Price") }}</th></tr></thead>
+      <tbody>
+      {% set ns = namespace(done=ad.price is none or ad.price <= 0) %}
+      {% for a in c.closest %}
+        {% if not ns.done and a.price > ad.price %}{% set ns.done = true %}
+          <tr class="this"><td>→ {{ _("this ad") }}</td><td></td><td class="num">{{ ad.price|eur }}</td></tr>{% endif %}
+        <tr><td><a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}">{{ a.title }}</a></td>
+            <td><small class="muted">{{ a.location or '' }}</small></td><td class="num">{{ a.price|eur }}</td></tr>
+      {% endfor %}
+      {% if not ns.done %}<tr class="this"><td>→ {{ _("this ad") }}</td><td></td><td class="num">{{ ad.price|eur }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endif %}

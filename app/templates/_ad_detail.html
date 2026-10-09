@@ -26,6 +26,8 @@
       {% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}
       {% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}
     </p>
+    <div class="deal-slot" hx-get="/hits/ad/{{ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load" hx-swap="innerHTML">
+      <p><small class="muted" aria-busy="true">{{ _("Checking the price …") }}</small></p></div>
     {% if h and h.screen_relevant is not none %}
       <div class="adv-claude">
         <p><strong>🤖 {{ _("Claude's assessment") }}</strong>
