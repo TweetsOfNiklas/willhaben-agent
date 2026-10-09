@@ -13,9 +13,9 @@
   </article>
 </dialog>
 <style>
-  #ad-viewer { padding: 0; border: none; background: transparent; max-width: min(1100px, 96vw); width: 96vw; }
+  #ad-viewer { padding: 0; border: none; background: transparent; max-width: min(1280px, 96vw); width: 96vw; }
   #ad-viewer::backdrop { background: rgba(0, 0, 0, .55); }
-  #ad-viewer > article { margin: 0; max-height: 92vh; overflow: auto; }
+  #ad-viewer > article { margin: 0; max-height: 92vh; overflow: auto; width: 100%; max-width: none; }   /* Pico caps dialog articles at ~700px */
   #ad-viewer header { display: flex; align-items: center; gap: .5rem; position: sticky; top: 0; z-index: 1; }
   #ad-viewer header button { width: auto; margin: 0; padding: .15rem .7rem; }
   #ad-viewer .adv-close { margin-left: auto; }
