@@ -3,4 +3,11 @@
 {% if not embed %}<p><a href="/settings">← {{ _("Settings") }}</a></p>
 <h3>{{ _("willhaben account") }}</h3>{% endif %}
 {% include "_session_panel.html" %}
+<article id="label-buy">
+  <form method="post" action="/session/label-buy/step" class="row-actions" style="margin:0;align-items:center">
+    <input type="hidden" name="next" value="{{ session_next or '/session' }}">
+    <span><small class="muted">{{ _("Checkout step (if a purchase is running)") }}</small></span>
+    <button class="secondary outline" style="width:auto">{{ _("Run next step") }}</button>
+  </form>
+</article>
 {% endblock %}

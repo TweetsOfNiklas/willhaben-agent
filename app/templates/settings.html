@@ -45,6 +45,9 @@
       {% if ship.sender.name and ship.sender.zip %}<span class="badge ok">✓</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
     <a href="#calendar">Google Calendar
       {% if gcal.connected and not gcal_error %}<span class="badge ok">✓</span>{% elif gcal.client %}<span class="badge">!</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
+    <a href="#printers">{{ _("Printers") }}
+      {% if printing.printers.label.uri or printing.printers.normal.uri %}<span class="badge ok">✓</span>{% else %}<span class="badge muted">–</span>{% endif %}</a>
+    <a href="#paylivery">PayLivery</a>
     <small>{{ _("Behavior") }}</small>
     <a href="#rules">{{ _("My rules") }}</a>
     <a href="#chats">{{ _("Chats & auto-replies") }}
@@ -367,12 +370,13 @@
         </form>
       {% endfor %}
       <p><small class="muted">{{ _("Leave the password empty to keep the saved one; clear the user name to remove a login.") }}</small></p>
-      <p><small class="muted">{{ _("Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size, you check and pay. Log in there once if the carrier asks; the browser remembers it. The app never presses “buy” or “pay”.") }}</small></p>
+      <p><small class="muted">{{ _("Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size; you approve each purchase (or the rules below buy it). Log in there once if the carrier asks; the browser remembers it. The browser asks you when the carrier needs your confirmation.") }}</small></p>
       {% include "_settings_ship_card.html" %}
       {% include "_settings_ship_auto.html" %}
     </section>
 
     {% include "_settings_printing.html" %}
+    {% include "_settings_paylivery.html" %}
 
     <section id="rules">
       <h4>{{ _("My rules") }}</h4>

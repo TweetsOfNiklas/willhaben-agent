@@ -1,1 +1,15 @@
-{# _shipping_print: filled in by its agent (see the include in settings.html / _shipping.html) #}
+{# Print buttons next to the label: the printer set for the carrier first, the other printer as alternative #}
+<form method="post" action="/shipments/{{ shipment.id }}/print" class="row-actions" style="margin:0">
+  {% if print_choice == 'none' %}
+    <button class="secondary" name="which" value="label" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on label printer") }}</button>
+    <button class="secondary" name="which" value="normal" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on normal printer") }}</button>
+  {% else %}
+    <button name="which" value="auto" onclick="this.setAttribute('aria-busy','true')">{{ _("Print") }}</button>
+    {% if print_choice == 'label' %}
+      <button class="secondary outline" name="which" value="normal" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on normal printer") }}</button>
+    {% else %}
+      <button class="secondary outline" name="which" value="label" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on label printer") }}</button>
+    {% endif %}
+  {% endif %}
+</form>
+{% if shipment.printed_at %}<small class="muted">{{ _("printed {at} (job {job})", at=shipment.printed_at|local, job=(shipment.print_job or '').rsplit('#', 1)[-1] or '–') }}{% if print_state %} · {{ _("job state: {state}", state=print_state) }}{% endif %}</small>{% endif %}

@@ -18,7 +18,7 @@ from app.db import Conversation, Draft, Message, MyAd, get_setting, session, set
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules, price_floor, reply_prompt
-from app.services import feedback, gcal, humanize, meetups, min_price, shipping, telegram
+from app.services import feedback, gcal, humanize, meetups, min_price, paylivery, shipping, telegram
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -145,11 +145,12 @@ def _same_message(row: Message, text: str, created_at) -> bool:
 
 
 def _upsert_message(db, conversation_id: str, ext_id: str, direction: str, text: str, created_at,
-                    authoritative: bool = False) -> None:
+                    authoritative: bool = False, kind: str | None = None, params: dict | None = None) -> None:
     """Insert or update one message. `authoritative` = direction comes from the full history, not a guess.
 
     A row with the same text and time but another ext_id is the same message stored earlier under a
     fallback id (last-message preview, or before the real message_id was parsed): it is re-keyed.
+    `kind` marks willhaben notices (system | integration); `params` is their structured `parameters`.
     """
     exists = db.exec(select(Message).where(Message.conversation_id == conversation_id,
                                            Message.ext_id == ext_id)).first()
@@ -164,9 +165,15 @@ def _upsert_message(db, conversation_id: str, ext_id: str, direction: str, text:
         if direction != exists.direction and (authoritative or exists.direction == "unknown"):
             exists.direction = direction
             db.add(exists)
+        if kind is not None and exists.kind != kind:
+            exists.kind = kind
+            db.add(exists)
+        if params is not None and exists.params != params:
+            exists.params = params
+            db.add(exists)
         return
     db.add(Message(conversation_id=conversation_id, ext_id=ext_id, direction=direction,
-                   text=text, created_at=created_at))
+                   text=text, created_at=created_at, kind=kind, params=params))
 
 
 async def sync_messages(conversation_id: str) -> str:
@@ -181,7 +188,7 @@ async def sync_messages(conversation_id: str) -> str:
         if msgs is not None:
             for m in msgs:
                 _upsert_message(db, conversation_id, m.ext_id, m.direction, m.text, m.created_at,
-                                authoritative=True)
+                                authoritative=True, kind=m.kind, params=m.params)
             _drop_sent_placeholders(db, conversation_id)
             mode = "full"
         else:
@@ -194,14 +201,21 @@ async def sync_messages(conversation_id: str) -> str:
             conv.messages_synced_at = utcnow()
             db.add(conv)
         db.commit()
+        has_role = conv is not None and conv.role in ("seller", "buyer")
+    if has_role:
+        try:
+            await paylivery.scan(conversation_id, fresh=msgs)   # PayLivery notices: state for both roles, payment/label for sellers
+        except Exception as e:  # noqa: BLE001 - never block the chat sync
+            log.warning("PayLivery scan failed for %s: %s", conversation_id, e)
     return mode
 
 
 async def ensure_ad_context(conversation_id: str) -> Conversation | None:
     with session() as db:
         conv = db.get(Conversation, conversation_id)
-    if conv is None or not conv.ad_id or conv.ad_context:
-        return conv
+    ctx = conv.ad_context if conv else None
+    if conv is None or not conv.ad_id or (ctx and ("paylivery" in ctx or ctx.get("status") == "nicht mehr online")):
+        return conv                       # contexts stored before the PayLivery flags existed are fetched once more
     try:
         detail = await get_public().get_detail(conv.ad_id)
     except WillhabenError as e:

@@ -211,3 +211,92 @@ The app (`insert.set_delivery`) does edit → options (only with PayLivery) → 
 edit, picks the option by parcel size (and carrier, else the cheapest) and stops before the cart if PayLivery onboarding
 is missing or no option matches. Pickup-only ads skip this step entirely (the live-verified path). A retry that switches a draft whose delivery
 options were already set back to pickup is refused (clearing them, e.g. `deliveryOptions: []`, is unverified).
+
+### Chat system notices (PayLivery) – **unverified, no live recording yet**
+
+willhaben's own chat notices are messages with a `type` ending in `system_message` or `integration_message`; neither
+side wrote them. `parse_messages` (app/willhaben/account.py) tags them with `kind` "system" or "integration", collects
+every `http(s)` string inside the message object as `raw_links` and keeps the structured `parameters` as
+`ChatMessage.params` (stored as `Message.params`). The chat sync stores them with `Message.kind` set and direction
+"unknown"; the chat page shows them as a centred notice line.
+
+**State per chat** (`Conversation.paylivery`, app/services/paylivery.py): `role` (seller | buyer), `stage`, `amount`,
+`offer`, `deadline` (ISO), `tracking`, `label_url`, `updated_at`, `history` (newest 30: `at`, `stage`, `text`) and
+`applied` (ids of the notices already applied, newest 200; a notice is applied once, so a retried notice never adds
+history twice). A stage never goes back once the buyer has paid (`RANK`); "problem" and "cancelled" always apply, and
+offers may be sent again until payment.
+
+**Stage patterns** (`detect_stage`, most advanced first; matched on the text plus every string of `parameters`;
+a match preceded by "nicht", "kein…" or "un" is ignored):
+
+| stage | matches (examples, unverified) |
+|---|---|
+| problem | "Problem gemeldet", "Reklamation", "Streitfall" |
+| cancelled | "storniert", "abgebrochen", "zurückgezogen" |
+| paid_out | "ausgezahlt", "Auszahlung", "überwiesen" |
+| received | "Erhalt bestätigt", "Ware erhalten/angekommen" |
+| delivered | "zugestellt", "geliefert", "ausgeliefert" |
+| shipped | "verschickt", "versendet", "unterwegs", "abgeholt von" |
+| label_ready | "Etikett/Paketschein/Versandlabel … bereit/verfügbar/steht", or a label-like link with those words |
+| paid | "bezahlt", "Zahlung eingegangen/erhalten", "Kauf abgeschlossen" |
+| offer_declined | "Preisvorschlag … abgelehnt/abgesagt", "nicht angenommen" |
+| offer_accepted | "Preisvorschlag … angenommen/akzeptiert"; seller: "gekauft" (buy-now sale agreed) |
+| offer_sent / offer_received | "Preisvorschlag", "Vorschlag", "Angebot" (not "Angebote"); the words "gesendet" / "erhalten" decide, otherwise the role does (buyer: sent, seller: received) |
+
+Generic help text (e.g. "Dank QR-Code kannst du … versenden", "Das Versandetikett lässt sich …", the buy-now promo
+"Fixpreis-Angebote") matches nothing; `tests/test_paylivery_process.py` pins this.
+
+Amounts: "€ 12,34", "12,34 €", "EUR 12,34" or a numeric `amount`/`betrag`/`preis`/`summe` parameter (offers store the
+amount as `offer`). Deadlines: "bis 12.10." (year from the notice date, next year if the day has passed) and
+"innerhalb von 7 Tagen" (counted from the notice). Tracking numbers: after "Sendungsnummer", "Paketnummer" or
+"Tracking" (8–30 characters, at least one digit). Label links: https on willhaben, containing "label", "paketschein",
+"etikett", "qr" or ".pdf".
+
+**What runs from a notice**: every notice updates the state of its chat (both roles). For seller chats only, a paid
+notice marks the chat's shipment paid (`paid_via` "paylivery", amount from the text) and `shipping.after_paid` runs; a
+label link is fetched through the logged-in browser session and a response starting with `%PDF-` is saved as
+`DATA_DIR/labels/shipment-<id>-paylivery.pdf`. Buyer chats never create or mark a shipment. A push ("PayLivery: …") goes
+out only for a stage change of a notice from the last 3 days, and only if the setting is on.
+
+Unverified: the wording of the notices, which field carries the amount, the deadline and the label link, and whether
+the label URL is reachable with the browser session. The patterns are generous on purpose; a false match changes the
+state (fixable on the chat page only by a later notice) or records a payment that has to be corrected in the
+database (`shipping.unmark_paid`, no button yet). A notice that could not be applied to a shipment yet (no shipment,
+no PDF) is retried on the next sync until it is 14 days old; older ones are only marked as seen.
+
+**Actions** (chat page card, `POST /chats/{id}/paylivery/{action}`). Local, no willhaben call: `label` (fetch the
+notice's label link into the shipment) and `mark_shipped` (stage "shipped" in this app). willhaben actions, each run
+by `paylivery.run_action` in the app's browser window (`/session` is the remote view) with the API recording switched
+on (`start_capture("paylivery-<action>")`, stopped at the end, the file name is in the result message):
+
+| action | page | final button (the only commit click allowed for it) |
+|---|---|---|
+| accept | chat | annehmen / akzeptieren |
+| decline | chat | ablehnen |
+| receipt | chat | Erhalt bestätigen / bestätigen |
+| problem | chat | Problem melden |
+| offer | ad page | Preisvorschlag senden (amount typed by the app, never by Claude) |
+| buy | ad page | Sofort kaufen / Jetzt kaufen / Kaufen / Bezahlen / zahlungspflichtig |
+
+Each step: the visible fields and buttons are collected (passwords, card and bank fields are never offered), Claude
+answers with fills, one button to click and a status (continue | done | need_human | abort), at most 10 steps. Every
+click is checked: a commit button of another action, a deny-listed word (löschen, abmelden, registrieren, Konto,
+Bedingungen, Cookie consents …) or an unlabelled element is refused. Terms and consent checkboxes are never ticked, card
+fields are only handed to `label_buy.fill_card_fields` when that helper exists, and a payment check (3-D Secure, TAN,
+another website) stops the step: the page stays open in the remote view and the chat shows why. `done` counts as success
+only when this run pressed the action's commit button. Buying and offers need the setting "Allow purchases and offers as
+a buyer" and PayLivery on the ad; a buy-now purchase also needs the ad's buy-now flag (`advertDetails.p2ppOptions.
+buyNowInformationDto.isBuyNowAd`); PayLivery on the ad is `advertDetails.advertisingParameters.payliveryEnabled`
+(a list, "true"/"false"). Each purchase or offer asks for a confirmation in the browser.
+
+**Recording the real calls** (to replace the Claude-guided steps by fixed requests later): as the buyer, record
+"paylivery-buy" once through a purchase you can cancel before paying (or a test ad) and "paylivery-offer" through an
+offer; as the seller, record "paylivery-accept" and "paylivery-decline" through an offer. The label download and
+"receipt" are not app-recorded yet: record them by hand (Session → API recording, labels `paylivery-label` and
+`paylivery-receipt`). Send the capture files; each one has
+the request and response bodies of the willhaben calls that the action made, so the endpoints, request bodies and
+notice shapes can be written down here.
+
+To record a notice: Settings → willhaben account → Advanced → API recording with the label `chat`, then in the browser
+window open a conversation of a sold ad where willhaben shows the PayLivery notice. Stop the recording and add the
+notice's JSON shape (type, text, parameters, link fields) to this section.

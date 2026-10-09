@@ -53,11 +53,16 @@
       {% endif %}
     </article>
     {% endif %}
+    {% include "_paylivery.html" %}
     {% if ship_on %}{% include "_shipping.html" %}{% endif %}
     <form method="post" action="/chats/{{ conv.id }}/refresh" class="row-actions"><button class="secondary outline">↻ {{ _("Reload history") }}</button></form>
     <div class="chat">
       {% for m in messages %}
+        {% if m.kind %}
+        <p class="muted" style="text-align:center;font-size:.85em;margin:.4rem 0">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></p>
+        {% else %}
         <div class="bubble {{ m.direction }}">{{ m.text }}<small>{{ m.created_at|local }}</small></div>
+        {% endif %}
       {% else %}
         <p class="muted">{{ _("No history stored.") }}</p>
       {% endfor %}

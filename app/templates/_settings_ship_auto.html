@@ -1,1 +1,26 @@
-{# _settings_ship_auto: filled in by its agent (see the include in settings.html / _shipping.html) #}
+{# Automatic label purchase after payment: the rules. Used in the shipping section of settings.html. #}
+{% set a = ship.auto %}
+<h5 style="margin-top:1.5rem">{{ _("Automatic label purchase") }}</h5>
+<p><small class="muted">{{ _("Only after the buyer has paid and you have marked it. Nothing is bought unless every rule below holds; otherwise the chat asks you first.") }}</small></p>
+<form method="post" action="/settings/shipping/auto">
+  <label><input type="checkbox" role="switch" name="on" {% if a.on %}checked{% endif %}>
+    {{ _("Buy labels automatically when the rules are met") }}</label>
+  <div class="grid">
+    <label>{{ _("Max. label price (€)") }} <input type="number" name="max_price" value="{{ '%g'|format(a.max_price) }}" min="0" max="1000" step="0.5"></label>
+    <label>{{ _("Wait before buying (min, 0 = at once)") }} <input type="number" name="grace_min" value="{{ a.grace_min }}" min="0" max="120"></label>
+    <label>{{ _("Max. automatic purchases per day") }} <input type="number" name="daily" value="{{ a.daily }}" min="0" max="50"></label>
+  </div>
+  <label><input type="checkbox" name="need_sold" {% if a.need_sold %}checked{% endif %}>
+    {{ _("Only if the ad is marked as sold to this buyer") }}</label>
+  <label><input type="checkbox" name="need_parcel" {% if a.need_parcel %}checked{% endif %}>
+    {{ _("Only with a size you entered (not Claude's estimate)") }}</label>
+  <label><input type="checkbox" name="print" {% if a.print %}checked{% endif %}>
+    {{ _("Print the label after buying (if a printer is set up)") }}</label>
+  <fieldset>
+    <legend><small>{{ _("Carriers allowed for automatic buying") }}</small></legend>
+    {% for key, c in ship_carriers.items() %}
+      <label><input type="checkbox" name="auto_carrier" value="{{ key }}" {% if key in a.carriers %}checked{% endif %}> {{ c.name }}</label>
+    {% endfor %}
+  </fieldset>
+  <button class="secondary">{{ _("Save") }}</button>
+</form>

@@ -1,7 +1,27 @@
-{# Shipping card on the chat page: buyer address, parcel size, price comparison, label via the carrier's site. #}
+{# Shipping card on the chat page: buyer address, payment, approval, parcel size, price comparison, label. #}
+{% macro opt_action(o, primary, r) %}
+  {% if shipment.status == 'draft' and o.online %}
+    <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
+      <input type="hidden" name="key" value="{{ o.key }}">
+      <button class="{{ '' if primary else 'secondary outline' }}" style="width:auto;padding:.2rem .7rem;margin:0"
+        {% if not ship_sender_ok or not r.name %}disabled{% endif %}
+        onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button>
+    </form>
+  {% elif shipment.status == 'awaiting' and o.online and o.key != shipment.option %}
+    <form method="post" action="/shipments/{{ shipment.id }}/option" style="margin:0">
+      <input type="hidden" name="key" value="{{ o.key }}">
+      <button class="secondary outline" style="width:auto;padding:.2rem .7rem;margin:0">{{ _("Use") }}</button>
+    </form>
+  {% elif not o.online %}<small class="muted">{{ _("at the counter") }}</small>{% endif %}
+{% endmacro %}
 <article id="shipping">
   <header>📦 {{ _("Shipping") }}
-    {% if shipment %}<span class="badge {{ 'ok' if shipment.status in ('labelled', 'sent') else 'muted' }}">{{ {'draft': _('to prepare'), 'labelled': _('label created'), 'sent': _('sent')}.get(shipment.status, shipment.status) }}</span>{% endif %}
+    {% if shipment %}
+      {% set st = {'draft': _('to prepare'), 'awaiting': _('paid – your go needed'), 'buying': _('buying label'),
+                   'labelled': _('label created'), 'printed': _('printed'), 'sent': _('sent'), 'failed': _('failed'),
+                   'discarded': _('discarded')} %}
+      <span class="badge {{ ('ok' if shipment.status in ('labelled', 'printed', 'sent') else 'muted') if shipment.status != 'failed' else '' }}">{{ st.get(shipment.status, shipment.status) }}</span>
+    {% endif %}
   </header>
   {% if not ship_sender_ok %}
     <p><small>{{ _("Your sender address is missing:") }} <a href="/settings#shipping">{{ _("Settings → Shipping") }}</a></small></p>
@@ -45,6 +65,79 @@
       </form>
     </details>
 
+    {# payment: the label is only bought after the buyer has paid #}
+    {% set via = {'manual': _('by hand'), 'paylivery': _('willhaben PayLivery'), 'email': _('e-mail'), 'bank': _('bank')} %}
+    <div class="row-actions" style="margin:.4rem 0">
+      {% if shipment.paid_at %}
+        <span>✅ {{ _("Paid") }} <small class="muted">{{ shipment.paid_at|ago }} ({{ via.get(shipment.paid_via, shipment.paid_via) }})</small></span>
+        {% if shipment.status in ('draft', 'awaiting') %}
+          <form method="post" action="/shipments/{{ shipment.id }}/unpaid" style="margin:0">
+            <button class="link-button" style="background:none;border:0;padding:0;margin:0;width:auto;color:var(--pico-primary);text-decoration:underline;font-size:.85em">{{ _("undo") }}</button>
+          </form>
+        {% endif %}
+      {% elif shipment.status in ('draft', 'awaiting') %}
+        <form method="post" action="/shipments/{{ shipment.id }}/paid" style="margin:0" hx-disabled-elt="this">
+          <button class="secondary" style="width:auto">{{ _("Paid") }}</button>
+        </form>
+        <small class="muted">
+          {% if shipment.agreed_price %}{{ _("agreed price:") }} {{ shipment.agreed_price|eur }} · {% endif %}{{ _("not paid yet") }}</small>
+      {% endif %}
+      {% if shipment.payment_claimed_at and not shipment.paid_at %}
+        <small>💬 {{ _("The buyer writes that they have paid – check your account.") }}</small>
+      {% endif %}
+    </div>
+
+    {% if ship_ask and shipment.status == 'awaiting' %}
+      <div style="border:1px solid var(--pico-primary);border-radius:var(--pico-border-radius, .5rem);padding:.6rem .8rem;margin:.5rem 0">
+        <strong>{{ _("Paid – buy the label?") }}</strong>
+        <p style="margin:.2rem 0"><small>{% if ship_option %}{{ ship_option.label() }} · {{ ship_option.price|eur }} · {% endif %}{{ r.name }}, {{ r.zip }} {{ r.city }}</small></p>
+        {% if ship_blockers %}<p><small class="muted">{{ _("Not automatic because: {reasons}", reasons=ship_blockers|join(', ')) }}</small></p>{% endif %}
+        <div class="row-actions">
+          <form method="post" action="/shipments/{{ shipment.id }}/approve" style="margin:0">
+            <input type="hidden" name="print" value="1">
+            <button {% if not ship_sender_ok or not ship_option %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ _("Buy & print") }}</button>
+          </form>
+          <form method="post" action="/shipments/{{ shipment.id }}/approve" style="margin:0">
+            <input type="hidden" name="print" value="0">
+            <button class="secondary" {% if not ship_sender_ok or not ship_option %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ _("Buy only") }}</button>
+          </form>
+          <form method="post" action="/shipments/{{ shipment.id }}/decline" style="margin:0">
+            <button class="contrast outline">{{ _("Decline") }}</button>
+          </form>
+        </div>
+        <small class="muted">{{ _("Another option can be chosen in the table below.") }}</small>
+      </div>
+    {% elif shipment.status == 'awaiting' and shipment.approval == 'declined' %}
+      <p><small class="muted">{{ _("You declined buying this label. Choose another option, or create the label by hand.") }}</small></p>
+    {% endif %}
+
+    {% if shipment.approval == 'auto' and shipment.status == 'awaiting' and ship_grace_left is not none %}
+      <div class="row-actions">
+        <span>⏱ {{ _("Label will be bought in {n} min", n=ship_grace_left) }}</span>
+        <form method="post" action="/shipments/{{ shipment.id }}/cancel-auto" style="margin:0">
+          <button class="secondary outline">{{ _("Cancel") }}</button>
+        </form>
+      </div>
+    {% endif %}
+
+    {% if shipment.status == 'buying' %}
+      <p><small>⏳ {{ _("Buying the label on the carrier's website …") }}</small>{% if shipment.error %}<br><small class="muted">{{ shipment.error }}</small>{% endif %}</p>
+    {% elif shipment.status == 'failed' %}
+      <p><small>⚠️ {{ shipment.error or _("The label could not be bought.") }}</small></p>
+    {% endif %}
+    {% if shipment.status in ('buying', 'failed') %}
+      <div class="row-actions">
+        <form method="post" action="/shipments/{{ shipment.id }}/retry" style="margin:0">
+          <button onclick="this.setAttribute('aria-busy','true')">{{ _("Retry") }}</button>
+        </form>
+        {% if not shipment.label_path %}
+          <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
+            <button class="secondary outline">{{ _("Finish in browser") }}</button>
+          </form>
+        {% endif %}
+      </div>
+    {% endif %}
+
     {% if ship_options %}
     <p class="row-actions" style="margin:.3rem 0"><small>{{ _("Sort:") }}
       <a href="?sort=price#shipping" {% if ship_sort == 'price' %}aria-current="true" style="font-weight:600"{% endif %}>{{ _("cheapest") }}</a> ·
@@ -62,16 +155,7 @@
               {% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}
               {% if o.note %}<br>{{ o.note }}{% endif %}</small></td>
           <td style="white-space:nowrap">{{ o.price|eur }}</td>
-          <td style="text-align:right">
-            {% if shipment.status == 'draft' and o.online %}
-              <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
-                <input type="hidden" name="key" value="{{ o.key }}">
-                <button class="{{ '' if loop.first else 'secondary outline' }}" style="width:auto;padding:.2rem .7rem;margin:0"
-                  {% if not ship_sender_ok or not r.name %}disabled{% endif %}
-                  onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button>
-              </form>
-            {% elif not o.online %}<small class="muted">{{ _("at the counter") }}</small>{% endif %}
-          </td>
+          <td style="text-align:right">{{ opt_action(o, loop.first, r) }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -90,14 +174,7 @@
             <td style="white-space:nowrap">{{ o.price|eur }}</td>
             <td style="text-align:right">
               {% if not fits %}<small title="{{ misfit }}">{{ misfit }}</small>
-              {% elif shipment.status == 'draft' and o.online %}
-                <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
-                  <input type="hidden" name="key" value="{{ o.key }}">
-                  <button class="secondary outline" style="width:auto;padding:.2rem .7rem;margin:0"
-                    {% if not ship_sender_ok or not r.name %}disabled{% endif %}
-                    onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button>
-                </form>
-              {% elif not o.online %}<small class="muted">{{ _("at the counter") }}</small>{% endif %}
+              {% else %}{{ opt_action(o, false, r) }}{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -111,7 +188,7 @@
 
     <div class="row-actions">
       {% if shipment.label_path %}<a role="button" class="secondary" href="/shipments/{{ shipment.id }}/label.pdf" target="_blank">📄 {{ _("Label") }}</a>{% include "_shipping_print.html" %}{% endif %}
-      {% if shipment.status in ('draft', 'labelled') %}
+      {% if shipment.status != 'sent' %}
         <form method="post" action="/shipments/{{ shipment.id }}/status" class="row-actions" style="margin:0">
           <input type="hidden" name="status" value="sent">
           <input name="tracking" placeholder="{{ _('Tracking number (optional)') }}" value="{{ shipment.tracking or '' }}" style="margin:0">

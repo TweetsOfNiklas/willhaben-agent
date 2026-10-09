@@ -49,7 +49,6 @@
   "Compare these carriers": "Diese Paketdienste vergleichen",
   "login:": "Login:",
   "Notice addresses in chats automatically and offer a label": "Adressen in Chats automatisch erkennen und Paketschein anbieten",
-  "Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size, you check and pay. Log in there once if the carrier asks; the browser remembers it. The app never presses “buy” or “pay”.": "Paketscheine entstehen auf der Website des Paketdienstes im Fernbrowser: Die App füllt Absender, Empfänger und Größe aus, du prüfst und bezahlst. Verlangt der Paketdienst einen Login, einmal dort einloggen; der Browser merkt ihn sich. Die App drückt nie „Kaufen“ oder „Bezahlen“.",
   "No complete address in this chat yet – enter it by hand": "Noch keine vollständige Adresse in diesem Chat – bitte von Hand eintragen",
   "Address incomplete: name, street, postcode and city are needed": "Adresse unvollständig: Name, Straße, PLZ und Ort sind nötig",
   "Shipping addresses and labels": "Versandadressen und Paketscheine",

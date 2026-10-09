@@ -9,6 +9,10 @@ websocket subscription to that event (long-lived token from ha_auth) and acts on
   WH_DISCARD_<draft>_<sig>   drop the draft
   WH_CAL_<draft>_<sig>       add the appointment the (sent) answer agreed to Google Calendar
   WH_SHIP_<shipment>_<sig>   open the carrier's label form and fill it (the user pays in the remote view)
+  WH_PAID_<shipment>_<sig>   the buyer has paid (marked by hand) -> ask for the go, or buy by the automatic rules
+  WH_BUY_ / WH_BUYNP_        approve: buy the label and print it / buy only (shipment ids)
+  WH_DECL_ / WH_CANCEL_      decline the purchase / stop the automatic countdown (shipment ids)
+  WH_WAIT_                   "Not yet" on a buyer's payment remark: only clears the push
 
 <sig> is an HMAC over verb+draft with a secret in DATA_DIR, so no other event source can make the app
 send. A draft is only acted on while it is still a draft, so a second tap does nothing.
@@ -32,7 +36,8 @@ log = logging.getLogger(__name__)
 EVENT = "mobile_app_notification_action"
 # Websocket listener state, read by the connection watchdog (app/services/health.py).
 listener: dict[str, Any] = {"running": False, "connected": False, "error": None}
-_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP)_(\d+)_([0-9a-f]{12})")
+_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP|PAID|BUY|BUYNP|DECL|CANCEL|WAIT)_(\d+)_([0-9a-f]{12})")
+SHIPMENT_VERBS = ("PAID", "BUY", "BUYNP", "DECL", "CANCEL", "WAIT")
 
 
 def _secret() -> bytes:
@@ -82,6 +87,30 @@ def ship_actions(shipment_id: int) -> list[dict[str, Any]]:
     return [{"action": action_id("SHIP", shipment_id), "title": t("Create label")}]
 
 
+def _ship_button(verb: str, shipment_id: int, title: str) -> dict[str, Any]:
+    return {"action": action_id(verb, shipment_id), "title": title}
+
+
+def offer_actions(shipment_id: int, label: bool) -> list[dict[str, Any]]:
+    """"Address received – not paid yet": the payment mark, and the manual label form when it can be filled."""
+    acts = [_ship_button("PAID", shipment_id, t("Paid"))]
+    return acts + (ship_actions(shipment_id) if label else [])
+
+
+def claim_actions(shipment_id: int) -> list[dict[str, Any]]:
+    """The buyer wrote that they paid: mark it and ask for the label, or leave it."""
+    return [_ship_button("PAID", shipment_id, t("Paid, buy label")), _ship_button("WAIT", shipment_id, t("Not yet"))]
+
+
+def approval_actions(shipment_id: int) -> list[dict[str, Any]]:
+    return [_ship_button("BUY", shipment_id, t("Buy & print")), _ship_button("BUYNP", shipment_id, t("Buy only")),
+            _ship_button("DECL", shipment_id, t("Decline"))]
+
+
+def cancel_actions(shipment_id: int) -> list[dict[str, Any]]:
+    return [_ship_button("CANCEL", shipment_id, t("Cancel"))]
+
+
 def meetup_tag(draft_id: int) -> str:
     return f"wh-meetup-{draft_id}"
 
@@ -113,6 +142,8 @@ async def handle(event_data: dict[str, Any]) -> str | None:
     verb, draft_id = parsed
     if verb == "SHIP":
         return await _start_label(draft_id)      # the id is a shipment id here
+    if verb in SHIPMENT_VERBS:
+        return await _shipment_action(verb, draft_id)
     if verb == "CAL":
         return await _add_meetup(draft_id)
     with session() as db:
@@ -156,6 +187,39 @@ async def _start_label(shipment_id: int) -> str | None:
         return f"error: {e}"
     await notify("shipping", t("Label form is ready – check and pay"), msg[:200], url=url)
     return "label form"
+
+
+async def _shipment_action(verb: str, shipment_id: int) -> str | None:
+    """Payment and approval buttons of a shipment push (the id is a shipment id)."""
+    from app.services import shipping
+    from app.services.notify import clear_push, notify
+
+    s = shipping.get(shipment_id)
+    if s is None or s.status not in ("draft", "awaiting"):
+        return None                              # already handled
+    await clear_push(ship_tag(shipment_id))
+    if verb == "WAIT":
+        return "later"
+    done = {"PAID": s.paid_at is not None, "BUY": s.approval in ("approved", "buy_only"),
+            "BUYNP": s.approval in ("approved", "buy_only"), "DECL": s.approval == "declined",
+            "CANCEL": s.approval != "auto"}
+    if done.get(verb):
+        return None
+    try:
+        if verb == "PAID":
+            shipping.mark_paid(shipment_id, "manual")
+            await shipping.after_paid(shipment_id)
+        elif verb in ("BUY", "BUYNP"):
+            shipping.approve(shipment_id, print_after=verb == "BUY")
+        elif verb == "DECL":
+            shipping.decline(shipment_id)
+        else:
+            await shipping.cancel_auto(shipment_id)
+    except shipping.ShippingError as e:
+        await notify("shipping", t("Not possible"), str(e)[:200],
+                     url=f"{get_settings().public_url.rstrip('/')}/chats/{s.conversation_id}#shipping")
+        return f"error: {e}"
+    return verb.lower()
 
 
 async def _add_meetup(draft_id: int) -> str | None:

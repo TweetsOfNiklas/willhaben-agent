@@ -79,6 +79,8 @@ class Conversation(SQLModel, table=True):
     messages_synced_at: datetime | None = None
     # appointment agreed in this chat: {start (local ISO), minutes, location, summary, event_id?, event_link?}
     meetup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # PayLivery process of this chat (app/services/paylivery.py): role, stage, amounts, deadline, history, applied notices
+    paylivery: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
 
 
 class Message(SQLModel, table=True):
@@ -89,6 +91,8 @@ class Message(SQLModel, table=True):
     direction: str  # in | out | unknown
     text: str
     created_at: datetime | None = None
+    kind: str | None = None  # system | integration: willhaben's own notice (see app/services/paylivery.py); None = normal
+    params: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # willhaben's structured `parameters`
 
 
 class Draft(SQLModel, table=True):
@@ -156,7 +160,7 @@ class Shipment(SQLModel, table=True):
     paid_amount: float | None = None           # amount seen by an automatic source (None for manual)
     payment_claimed_at: datetime | None = None # the buyer wrote "I have paid" (a hint, never a status)
     # --- approval and purchase ---
-    approval: str | None = None                # pending | approved | auto | declined
+    approval: str | None = None                # pending | approved | buy_only | auto | declined
     approved_at: datetime | None = None
     buy_log: list[Any] | None = Field(default=None, sa_column=Column(JSON))   # checkout steps [{step, url, action, note}]
     paid_price: float | None = None            # what the carrier's checkout actually charged

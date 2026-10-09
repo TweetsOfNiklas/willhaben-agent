@@ -99,8 +99,9 @@ async def test_incoming_address_pushes_offer(chat, monkeypatch):
     for task in list(shipping._tasks):
         await task
     kind, title, message, kw = notes[-1]
-    assert kind == "shipping" and "Max" in title and "1150 Wien" in message
-    assert kw["actions"][0]["action"].startswith("WH_SHIP_")
+    assert kind == "shipping" and title == "Address received – not paid yet"
+    assert "Max Muster" in message and "1150 Wien" in message
+    assert [a["action"][:8] for a in kw["actions"]] == ["WH_PAID_", "WH_SHIP_"]
     conv.role = "buyer"                                              # only when I sell
     await shipping.on_incoming(conv)
     assert not shipping._tasks
