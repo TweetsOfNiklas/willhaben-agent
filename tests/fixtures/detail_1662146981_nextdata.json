@@ -1,0 +1,1551 @@
+{
+ "advertDetails": {
+  "id": "1662146981",
+  "uuid": "e169b896-50b7-5e4d-a82d-56e9d73f8eba",
+  "verticalId": 5,
+  "adTypeId": 67,
+  "productId": 67,
+  "parentAdId": null,
+  "description": "Fahrradhose Gr xs",
+  "startDate": "2026-10-09T10:26:53+0200",
+  "endDate": "2026-11-23T10:26:53+0100",
+  "publishedDate": "2026-10-09T10:27:04+0200",
+  "firstPublishedDate": "2026-10-09T10:27:04+0200",
+  "createdDate": "2026-10-09T10:26:50+0200",
+  "changedDate": "2026-10-09T10:27:04+0200",
+  "advertiserReferenceNumber": null,
+  "attributes": {
+   "attribute": [
+    {
+     "name": "DESCRIPTION",
+     "values": [
+      "Neuwertige Radhose von Newline Gr XS<br/><br/><br/>Versandkosten trägt der Käufer <br/><br/>Keine Rücknahme da Privatverkauf!"
+     ]
+    },
+    {
+     "name": "PRICE/AMOUNT",
+     "values": [
+      "0"
+     ]
+    },
+    {
+     "name": "PRICE",
+     "values": [
+      "0"
+     ]
+    },
+    {
+     "name": "PRICE_FOR_DISPLAY",
+     "values": [
+      "zu verschenken"
+     ]
+    },
+    {
+     "name": "AREA_ID",
+     "values": [
+      "109735"
+     ]
+    },
+    {
+     "name": "REGION_AREA_ID",
+     "values": [
+      "409"
+     ]
+    },
+    {
+     "name": "LOCATION/ADDRESS_2",
+     "values": [
+      "Pettenbach"
+     ]
+    },
+    {
+     "name": "LOCATION/ADDRESS_3",
+     "values": [
+      "Kirchdorf an der Krems"
+     ]
+    },
+    {
+     "name": "LOCATION/ADDRESS_4",
+     "values": [
+      "Oberösterreich"
+     ]
+    },
+    {
+     "name": "SHOW_MAP",
+     "values": [
+      "false"
+     ]
+    },
+    {
+     "name": "SHOW_SHADOWMAP",
+     "values": [
+      "false"
+     ]
+    },
+    {
+     "name": "ISPRIVATE",
+     "values": [
+      "1"
+     ]
+    },
+    {
+     "name": "DEALER",
+     "values": [
+      "0"
+     ]
+    },
+    {
+     "name": "ORG_TYPE",
+     "values": [
+      "2"
+     ]
+    }
+   ]
+  },
+  "advertImageList": {
+   "advertImage": [
+    {
+     "id": 1,
+     "name": null,
+     "selfLink": "https://api.willhaben.at/restapi/v2/atimage/1662146981/1",
+     "description": null,
+     "mainImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-862191882_hoved.jpg",
+     "thumbnailImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-862191882_thumb.jpg",
+     "referenceImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-862191882.jpg",
+     "similarImageSearchUrl": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=1662146981&imageId=1&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_-862191882.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "reference": "1/166/214/6981_-862191882.jpg"
+    },
+    {
+     "id": 2,
+     "name": null,
+     "selfLink": "https://api.willhaben.at/restapi/v2/atimage/1662146981/2",
+     "description": null,
+     "mainImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-1912995977_hoved.jpg",
+     "thumbnailImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-1912995977_thumb.jpg",
+     "referenceImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-1912995977.jpg",
+     "similarImageSearchUrl": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=1662146981&imageId=2&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_-1912995977.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "reference": "1/166/214/6981_-1912995977.jpg"
+    },
+    {
+     "id": 3,
+     "name": null,
+     "selfLink": "https://api.willhaben.at/restapi/v2/atimage/1662146981/3",
+     "description": null,
+     "mainImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-122184339_hoved.jpg",
+     "thumbnailImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-122184339_thumb.jpg",
+     "referenceImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_-122184339.jpg",
+     "similarImageSearchUrl": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=1662146981&imageId=3&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_-122184339.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "reference": "1/166/214/6981_-122184339.jpg"
+    },
+    {
+     "id": 4,
+     "name": null,
+     "selfLink": "https://api.willhaben.at/restapi/v2/atimage/1662146981/4",
+     "description": null,
+     "mainImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_1966052414_hoved.jpg",
+     "thumbnailImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_1966052414_thumb.jpg",
+     "referenceImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_1966052414.jpg",
+     "similarImageSearchUrl": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=1662146981&imageId=4&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_1966052414.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "reference": "1/166/214/6981_1966052414.jpg"
+    },
+    {
+     "id": 5,
+     "name": null,
+     "selfLink": "https://api.willhaben.at/restapi/v2/atimage/1662146981/5",
+     "description": null,
+     "mainImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_532853913_hoved.jpg",
+     "thumbnailImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_532853913_thumb.jpg",
+     "referenceImageUrl": "https://cache.willhaben.at/mmo/1/166/214/6981_532853913.jpg",
+     "similarImageSearchUrl": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=1662146981&imageId=5&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_532853913.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "reference": "1/166/214/6981_532853913.jpg"
+    }
+   ],
+   "floorPlans": []
+  },
+  "advertAttachmentList": {
+   "advertAttachment": []
+  },
+  "organisationDetails": {
+   "id": 10758884,
+   "uuid": "2f37312a-d858-50be-8893-59abc929c507",
+   "partnerId": "mp_10758884",
+   "description": "Organisation details",
+   "organisationDetailLinkList": {
+    "contextLink": [
+     {
+      "id": "seller.profile",
+      "description": "10758884",
+      "uri": "https://ad-search.willhaben.at/restapi/v2/sellerprofile/10758884/5/profile",
+      "selected": false,
+      "relativePath": "/sellerprofile/10758884/5/profile",
+      "serviceName": "ad-search"
+     },
+     {
+      "id": "organisation.furtherAds",
+      "description": "10758884",
+      "uri": "https://ad-search.willhaben.at/restapi/v2/search/atz/5/403?orgId=10758884",
+      "selected": false,
+      "relativePath": "/search/atz/5/403?orgId=10758884",
+      "serviceName": "ad-search"
+     }
+    ]
+   },
+   "orgName": null,
+   "orgPhone": null,
+   "orgEmail": "",
+   "orgLogoUrl": null,
+   "addressLines": {
+    "value": []
+   },
+   "postCode": null,
+   "country": null,
+   "countryId": -141,
+   "openingHours": {
+    "openingHoursByGroup": []
+   }
+  },
+  "sellerProfileUserData": {
+   "name": "Erika",
+   "registerDate": "2012-07-10T00:00:00+0200",
+   "location": null,
+   "street": "",
+   "district": null,
+   "orgUUID": null,
+   "pictureUrl": null,
+   "hasProfileImage": false,
+   "activeAdCount": 9,
+   "private": true
+  },
+  "advertAddressDetails": {
+   "addressLines": {
+    "value": [
+     "Pettenbach",
+     "Kirchdorf an der Krems",
+     "Oberösterreich"
+    ]
+   },
+   "postCode": "4643",
+   "postalName": "Pettenbach",
+   "country": "Österreich",
+   "province": "Oberösterreich",
+   "district": "Kirchdorf an der Krems",
+   "municipality": "Pettenbach"
+  },
+  "advertContactDetails": {
+   "contactDetail": [
+    {
+     "id": "address",
+     "contactDetailField": [
+      {
+       "id": "country",
+       "description": "Land",
+       "value": "Österreich"
+      },
+      {
+       "id": "postalName",
+       "description": "Adresse",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "municipality",
+       "description": "Gemeinde",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "postCode",
+       "description": "Postleitzahl",
+       "value": "4643"
+      },
+      {
+       "id": "state",
+       "description": "Bundesland",
+       "value": "Oberösterreich"
+      },
+      {
+       "id": "region",
+       "description": "Region",
+       "value": "Kirchdorf an der Krems"
+      },
+      {
+       "id": "countryId",
+       "description": "Länderkennzahl",
+       "value": "-141"
+      }
+     ]
+    },
+    {
+     "id": "contactName",
+     "contactDetailField": [
+      {
+       "id": "contactName",
+       "description": "Name",
+       "value": "Erika"
+      }
+     ]
+    },
+    {
+     "id": "contactFirstName",
+     "contactDetailField": [
+      {
+       "id": "contactFirstName",
+       "description": "Firstname",
+       "value": "Erika"
+      }
+     ]
+    },
+    {
+     "id": "address_contact",
+     "contactDetailField": [
+      {
+       "id": "country",
+       "description": "Land",
+       "value": "Österreich"
+      },
+      {
+       "id": "postalName",
+       "description": "Adresse",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "municipality",
+       "description": "Gemeinde",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "postCode",
+       "description": "Postleitzahl",
+       "value": "4643"
+      },
+      {
+       "id": "state",
+       "description": "Bundesland",
+       "value": "Oberösterreich"
+      },
+      {
+       "id": "region",
+       "description": "Region",
+       "value": "Kirchdorf an der Krems"
+      },
+      {
+       "id": "countryId",
+       "description": "Länderkennzahl",
+       "value": "-141"
+      }
+     ]
+    },
+    {
+     "id": "address_vcard",
+     "contactDetailField": [
+      {
+       "id": "country",
+       "description": "Land",
+       "value": "Österreich"
+      },
+      {
+       "id": "postalName",
+       "description": "Adresse",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "municipality",
+       "description": "Gemeinde",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "postCode",
+       "description": "Postleitzahl",
+       "value": "4643"
+      },
+      {
+       "id": "state",
+       "description": "Bundesland",
+       "value": "Oberösterreich"
+      },
+      {
+       "id": "region",
+       "description": "Region",
+       "value": "Kirchdorf an der Krems"
+      },
+      {
+       "id": "countryId",
+       "description": "Länderkennzahl",
+       "value": "-141"
+      }
+     ]
+    },
+    {
+     "id": "address_location",
+     "contactDetailField": [
+      {
+       "id": "country",
+       "description": "Land",
+       "value": "Österreich"
+      },
+      {
+       "id": "postalName",
+       "description": "Adresse",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "municipality",
+       "description": "Gemeinde",
+       "value": "Pettenbach"
+      },
+      {
+       "id": "postCode",
+       "description": "Postleitzahl",
+       "value": "4643"
+      },
+      {
+       "id": "state",
+       "description": "Bundesland",
+       "value": "Oberösterreich"
+      },
+      {
+       "id": "region",
+       "description": "Region",
+       "value": "Kirchdorf an der Krems"
+      },
+      {
+       "id": "countryId",
+       "description": "Länderkennzahl",
+       "value": "-141"
+      }
+     ]
+    }
+   ]
+  },
+  "contextLinkList": {
+   "contextLink": [
+    {
+     "id": "selfLink",
+     "description": "Identifies this entity",
+     "uri": "https://api.willhaben.at/restapi/v2/atverz/1662146981",
+     "selected": false,
+     "relativePath": "/atverz/1662146981",
+     "serviceName": "iad"
+    },
+    {
+     "id": "iadAdvertLink",
+     "description": "Ad link in iAd",
+     "uri": "https://www.willhaben.at/iad/object?adId=1662146981",
+     "selected": false,
+     "relativePath": "/iad/object?adId=1662146981",
+     "serviceName": "web_url"
+    },
+    {
+     "id": "reportAd",
+     "description": "Report this ad",
+     "uri": "https://api.willhaben.at/restapi/v2/dsa/reportad/1662146981/reasons",
+     "selected": false,
+     "relativePath": "/dsa/reportad/1662146981/reasons",
+     "serviceName": "iad"
+    },
+    {
+     "id": "adDetailLink",
+     "description": "Self reference to advert via ad detail component",
+     "uri": "https://publicapi.willhaben.at/atdetail/v1/1662146981",
+     "selected": false,
+     "relativePath": "/1662146981",
+     "serviceName": "addetail"
+    },
+    {
+     "id": "categoryTree",
+     "description": "categoryTree with attributes for adType 67",
+     "uri": "https://api.willhaben.at/restapi/v2/categorytree/67?adStatus=50",
+     "selected": false,
+     "relativePath": "/categorytree/67?adStatus=50",
+     "serviceName": "iad"
+    },
+    {
+     "id": "canonicalLink",
+     "description": "The canonical URL",
+     "uri": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/fahrradhose-gr-xs-1662146981/",
+     "selected": false,
+     "relativePath": "/iad/kaufen-und-verkaufen/d/fahrradhose-gr-xs-1662146981/",
+     "serviceName": "iad"
+    },
+    {
+     "id": "iadShareLink",
+     "description": "Share link in iAd",
+     "uri": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/fahrradhose-gr-xs-1662146981/",
+     "selected": false,
+     "relativePath": "/iad/kaufen-und-verkaufen/d/fahrradhose-gr-xs-1662146981/",
+     "serviceName": "web_url"
+    },
+    {
+     "id": "callTrackingLink",
+     "description": "Link to log an call event",
+     "uri": "https://api.willhaben.at/restapi/v2/logevent/ad/1662146981/call",
+     "selected": false,
+     "relativePath": "/logevent/ad/1662146981/call",
+     "serviceName": "iad"
+    },
+    {
+     "id": "logEventVirtualViewLinkClicked",
+     "description": "Event when 360 view is clicked",
+     "uri": "https://api.willhaben.at/restapi/v2/logevent/atz/1662146981/virtual-tour-link-clicked",
+     "selected": false,
+     "relativePath": "/logevent/atz/1662146981/virtual-tour-link-clicked",
+     "serviceName": "iad"
+    },
+    {
+     "id": "userProfileTrustSignals",
+     "description": "Trust Signals for the user profile",
+     "uri": "https://publicapi.willhaben.at/userprofile/trust-signals/10758884",
+     "selected": false,
+     "relativePath": "/trust-signals/10758884",
+     "serviceName": "userprofile"
+    },
+    {
+     "type": "similar-ads",
+     "displayText": "Weitere Anzeigen für dich",
+     "id": "similarAdsRecommendationUrl",
+     "description": "Url to load the similar ads recommendations",
+     "uri": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=1662146981&imageId=1&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_-862191882.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "selected": false,
+     "relativePath": "/imagesearch/atz?adId=1662146981&imageId=1&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F1%2F166%2F214%2F6981_-862191882.jpg&ATTRIBUTE_TREE=4529&FASHION_SIZE=4313&rows=30",
+     "serviceName": "ad-search"
+    },
+    {
+     "id": "logEventAdShared",
+     "description": "Event when ad is shared",
+     "uri": "https://api.willhaben.at/restapi/v2/logevent/atz/1662146981/ad-shared",
+     "selected": false,
+     "relativePath": "/logevent/atz/1662146981/ad-shared",
+     "serviceName": "iad"
+    },
+    {
+     "id": "logEventVirtualViewLinkClicked",
+     "description": "Event when 360Â° view is clicked",
+     "uri": "https://api.willhaben.at/restapi/v2/logevent/atz/1662146981/virtual-tour-link-clicked",
+     "selected": false,
+     "relativePath": "/logevent/atz/1662146981/virtual-tour-link-clicked",
+     "serviceName": "iad"
+    }
+   ]
+  },
+  "taggingData": {
+   "taggingNames": {
+    "nameValuePair": [
+     {
+      "name": "oewaMweb",
+      "value": "Service/Rubrikenmaerkte/Sonstiges/moewa/Alle/${page}/Sport_Sportgeraete/4525"
+     },
+     {
+      "name": "oewa",
+      "value": "Service/Rubrikenmaerkte/Sonstiges/Alle/${page}/Sport_Sportgeraete/4525"
+     },
+     {
+      "name": "xiti_SCV",
+      "value": "&x1=1&x5=4&x6=1662146981&x8=4&x9=4390&x10=4525&x11=4526&x12=4529"
+     },
+     {
+      "name": "googleAdContentUrl",
+      "value": "https://www.willhaben.at/iad/object?adId=1662146981"
+     }
+    ]
+   },
+   "tmsDataValues": {
+    "tmsData": {
+     "is_private": "true",
+     "ad_type": "Marktplatz",
+     "page_type": "Ad_View",
+     "region_level_label_1": "Austria",
+     "vertical_id": "5",
+     "vertical": "Marktplatz",
+     "source": "ResponsiveWeb",
+     "ad_title": "Fahrradhose Gr xs",
+     "num_pictures": "5",
+     "category_level_1": "Sport / Sportgeräte",
+     "region_level_id_2": "4",
+     "category_level_3": "Bekleidung Erwachsene",
+     "region_level_id_3": "409",
+     "category_level_2": "Fahrräder / Radsport",
+     "seller_name": "Erika",
+     "region_level_id_1": "-141",
+     "price": "0",
+     "product_id": "67",
+     "category_level_max": "4",
+     "seller_uuid": "2f37312a-d858-50be-8893-59abc929c507",
+     "region_level_2": "Oberösterreich",
+     "region_level_3": "Kirchdorf an der Krems",
+     "category_level_4": "Hosen",
+     "seller_id": "10758884",
+     "region_level_1": "AT",
+     "ad_type_id": "67",
+     "category_level_id_3": "4526",
+     "category_level_id_2": "4525",
+     "category_level_id_1": "4390",
+     "category_level_id_4": "4529",
+     "exact_price": "0.0",
+     "ad_id": "1662146981",
+     "post_code": "4643",
+     "event_name": "adview",
+     "publish_date": "2026-10-09T10:27:04.088Z"
+    }
+   },
+   "pulseData": {
+    "pulseEvents": [
+     {
+      "type": "CLASSIFIEDAD",
+      "id": 1662146981,
+      "contentId": 1662146981,
+      "adId": 1662146981,
+      "name": "Fahrradhose Gr xs",
+      "adType": "sell",
+      "publisherType": "private",
+      "currency": "EUR",
+      "location": {
+       "postalCode": "4643",
+       "addressLocality": "Kirchdorf an der Krems",
+       "addressRegion": "Oberösterreich",
+       "addressCountry": "AT"
+      },
+      "price": "0.0",
+      "priceAsNumber": 0,
+      "category": "Generalist > Sport / Sportgeräte > Fahrräder / Radsport > Bekleidung Erwachsene > Hosen",
+      "publisherUuid": "2f37312a-d858-50be-8893-59abc929c507",
+      "categories": [
+       {
+        "type": "MarketplaceCategory",
+        "localId": "sdrn:willhabenat:category:generalist:4529",
+        "localName": "Hosen",
+        "level": 4,
+        "name": "Hosen"
+       },
+       {
+        "type": "MarketplaceCategory",
+        "localId": "sdrn:willhabenat:category:generalist:4526",
+        "localName": "Bekleidung Erwachsene",
+        "level": 3,
+        "name": "Bekleidung Erwachsene"
+       },
+       {
+        "type": "MarketplaceCategory",
+        "localId": "sdrn:willhabenat:category:generalist:4525",
+        "localName": "Fahrräder / Radsport",
+        "level": 2,
+        "name": "Fahrräder / Radsport"
+       },
+       {
+        "type": "MarketplaceCategory",
+        "localId": "sdrn:willhabenat:category:generalist:4390",
+        "localName": "Sport / Sportgeräte",
+        "level": 1,
+        "name": "Sport / Sportgeräte"
+       },
+       {
+        "type": "MarketplaceCategory",
+        "localId": "sdrn:willhabenat:category:generalist:2",
+        "localName": "Generalist",
+        "level": 0,
+        "name": "Generalist"
+       }
+      ],
+      "publisher": {
+       "id": "sdrn:willhabenat:user:2f37312a-d858-50be-8893-59abc929c507",
+       "accountId": "2f37312a-d858-50be-8893-59abc929c507",
+       "type": "Account"
+      },
+      "adUuid": "e169b896-50b7-5e4d-a82d-56e9d73f8eba"
+     },
+     {
+      "type": "PHONECONTACT",
+      "id": 1662146981,
+      "name": "Erika",
+      "telephone": null
+     }
+    ]
+   },
+   "neustarTaggingData": {
+    "mainCategory": "sporting-goods",
+    "vertical": "marketplace",
+    "device": "mobile"
+   },
+   "segmentData": {
+    "ad_page_viewed": {
+     "event_name": "marketplace_ad_page_viewed",
+     "event_version": 2,
+     "properties": {
+      "ad_id": "e169b896-50b7-5e4d-a82d-56e9d73f8eba",
+      "legacy_ad_id": 1662146981,
+      "vertical": "marketplace",
+      "site_area": "marketplace",
+      "event_type": "page_view",
+      "page_name": "ad_page",
+      "ad_title": "Fahrradhose Gr xs",
+      "publication_date": "2026-10-09T08:27:04.088Z",
+      "publisher_type": "private",
+      "region_name": "Oberösterreich",
+      "ad_price": 0,
+      "currency": "EUR",
+      "category_level_1": "Sport / Sportgeräte",
+      "category_level_1_id": "4390",
+      "category_level_2": "Fahrräder / Radsport",
+      "category_level_2_id": "4525",
+      "category_level_3": "Bekleidung Erwachsene",
+      "category_level_4": "Hosen",
+      "category_max_depth": 4
+     }
+    },
+    "revealnumber_clicked": {
+     "event_name": "marketplace_revealnumber_clicked",
+     "event_version": 2,
+     "properties": {
+      "ad_id": "e169b896-50b7-5e4d-a82d-56e9d73f8eba",
+      "legacy_ad_id": 1662146981,
+      "vertical": "marketplace",
+      "site_area": "marketplace",
+      "event_type": "click",
+      "ad_title": "Fahrradhose Gr xs",
+      "publication_date": "2026-10-09T08:27:04.088Z",
+      "publisher_type": "private",
+      "region_name": "Oberösterreich",
+      "ad_price": 0,
+      "currency": "EUR",
+      "category_level_1": "Sport / Sportgeräte",
+      "category_level_1_id": "4390",
+      "category_level_2": "Fahrräder / Radsport",
+      "category_level_2_id": "4525",
+      "category_level_3": "Bekleidung Erwachsene",
+      "category_level_4": "Hosen",
+      "category_max_depth": 4,
+      "paylivery_enabled": false,
+      "condition": "Neuwertig",
+      "clothing_size": "XS",
+      "color": "Schwarz"
+     }
+    },
+    "callphone_clicked": {
+     "event_name": "marketplace_callphone_clicked",
+     "event_version": 2,
+     "properties": {
+      "ad_id": "e169b896-50b7-5e4d-a82d-56e9d73f8eba",
+      "legacy_ad_id": 1662146981,
+      "vertical": "marketplace",
+      "site_area": "marketplace",
+      "event_type": "click",
+      "ad_title": "Fahrradhose Gr xs",
+      "publication_date": "2026-10-09T08:27:04.088Z",
+      "publisher_type": "private",
+      "region_name": "Oberösterreich",
+      "ad_price": 0,
+      "currency": "EUR",
+      "category_level_1": "Sport / Sportgeräte",
+      "category_level_1_id": "4390",
+      "category_level_2": "Fahrräder / Radsport",
+      "category_level_2_id": "4525",
+      "category_level_3": "Bekleidung Erwachsene",
+      "category_level_4": "Hosen",
+      "category_max_depth": 4,
+      "paylivery_enabled": false,
+      "condition": "Neuwertig",
+      "clothing_size": "XS",
+      "color": "Schwarz"
+     }
+    },
+    "externallink_clicked": {
+     "event_name": "marketplace_externallink_clicked_mock",
+     "event_version": 1,
+     "properties": {}
+    },
+    "buynow_clicked": {
+     "event_name": "marketplace_buynow_clicked_mock",
+     "event_version": 1,
+     "properties": {}
+    },
+    "makeoffer_clicked": {
+     "event_name": "marketplace_makeoffer_clicked_mock",
+     "event_version": 1,
+     "properties": {}
+    },
+    "message_sent": {
+     "event_name": "marketplace_message_sent",
+     "event_version": 1,
+     "properties": {
+      "ad_id": "e169b896-50b7-5e4d-a82d-56e9d73f8eba",
+      "legacy_ad_id": 1662146981,
+      "vertical": "marketplace",
+      "site_area": "marketplace",
+      "event_type": "click",
+      "ad_title": "Fahrradhose Gr xs",
+      "publication_date": "2026-10-09T08:27:04.088Z",
+      "publisher_type": "private",
+      "region_name": "Oberösterreich",
+      "ad_price": 0,
+      "currency": "EUR",
+      "contact_medium": "message"
+     }
+    }
+   },
+   "qualtricsParameter": null
+  },
+  "advertisingParameters": {
+   "pagetype": [
+    "Anzeige"
+   ],
+   "adimageurl": [
+    "https://cache.willhaben.at/mmo/1/166/214/6981_-862191882.jpg"
+   ],
+   "city": [
+    "Pettenbach"
+   ],
+   "AdImage": [
+    "true"
+   ],
+   "description": [
+    "Neuwertige Radhose von Newline Gr XS Versandkosten traegt der Kaeufer Keine Ruecknahme da Privatverkauf"
+   ],
+   "vertical": [
+    "bap"
+   ],
+   "bap_level0": [
+    "Sport_Sportgeraete"
+   ],
+   "bap_level1": [
+    "Fahrraeder_Radsport"
+   ],
+   "bap_level2": [
+    "Bekleidung_Erwachsene"
+   ],
+   "bap_level3": [
+    "Hosen"
+   ],
+   "postcode_str": [
+    "4643"
+   ],
+   "price": [
+    "0"
+   ],
+   "willhabencode": [
+    "1662146981"
+   ],
+   "payliveryEnabled": [
+    "false"
+   ],
+   "state": [
+    "Oberoesterreich"
+   ],
+   "partnerid": [
+    "mp",
+    "10758884"
+   ],
+   "Geschlecht": [
+    "Weiblich"
+   ],
+   "heading": [
+    "Fahrradhose_Gr_xs"
+   ],
+   "postcode": [
+    "KeywordValue{value=4643}"
+   ],
+   "Groesse": [
+    "XS"
+   ],
+   "pt1": [
+    "1662146981"
+   ],
+   "orgid": [
+    "10758884"
+   ],
+   "pt5": [
+    "0.0"
+   ],
+   "Farbe": [
+    "Schwarz"
+   ],
+   "isAdSavedInFolder": [
+    "false"
+   ],
+   "district": [
+    "Kirchdorf_an_der_Krems"
+   ],
+   "Zustand": [
+    "Neuwertig"
+   ],
+   "device": [
+    "desktop"
+   ],
+   "dealer_2": [
+    "Privat"
+   ],
+   "Uebergabe": [
+    "Selbstabholung",
+    "Versand"
+   ]
+  },
+  "advertisingParametersV2": {
+   "pagetype": "Anzeige",
+   "adimageurl": "https://cache.willhaben.at/mmo/1/166/214/6981_-862191882.jpg",
+   "city": [
+    "Pettenbach"
+   ],
+   "heading": "Fahrradhose_Gr_xs",
+   "postcode": [
+    4643
+   ],
+   "vertical": "bap",
+   "bap_level0": "Sport_Sportgeraete",
+   "bap_level1": "Fahrraeder_Radsport",
+   "bap_level2": "Bekleidung_Erwachsene",
+   "bap_level3": "Hosen",
+   "orgid": 10758884,
+   "Farbe": [
+    "Schwarz"
+   ],
+   "price": 0,
+   "district": [
+    "Kirchdorf_an_der_Krems"
+   ],
+   "state": [
+    "Oberoesterreich"
+   ],
+   "device": "desktop",
+   "dealer_2": [
+    "Privat"
+   ]
+  },
+  "dmpParameters": {
+   "pagetype": "Anzeige",
+   "adimageurl": "https://cache.willhaben.at/mmo/1/166/214/6981_-862191882.jpg",
+   "city": [
+    "Pettenbach"
+   ],
+   "AdImage": true,
+   "description": "Neuwertige Radhose von Newline Gr XS Versandkosten traegt der Kaeufer Keine Ruecknahme da Privatverkauf",
+   "vertical": "bap",
+   "bap_level0": "Sport_Sportgeraete",
+   "bap_level1": "Fahrraeder_Radsport",
+   "bap_level2": "Bekleidung_Erwachsene",
+   "bap_level3": "Hosen",
+   "postcode_str": [
+    "4643"
+   ],
+   "price": 0,
+   "willhabencode": "1662146981",
+   "payliveryEnabled": false,
+   "state": [
+    "Oberoesterreich"
+   ],
+   "partnerid": [
+    "mp",
+    "10758884"
+   ],
+   "Geschlecht": [
+    "Weiblich"
+   ],
+   "heading": "Fahrradhose_Gr_xs",
+   "postcode": [
+    4643
+   ],
+   "Groesse": [
+    "XS"
+   ],
+   "pt1": "1662146981",
+   "orgid": 10758884,
+   "pt5": 0,
+   "Farbe": [
+    "Schwarz"
+   ],
+   "isAdSavedInFolder": false,
+   "district": [
+    "Kirchdorf_an_der_Krems"
+   ],
+   "Zustand": [
+    "Neuwertig"
+   ],
+   "device": "desktop",
+   "dealer_2": [
+    "Privat"
+   ],
+   "Uebergabe": [
+    "Selbstabholung",
+    "Versand"
+   ]
+  },
+  "dmpUserIdentities": {
+   "wh_uuid": "bf3ee3b8-6750-5a77-98f4-2dda1bf8b810"
+  },
+  "advertStatus": {
+   "id": "active",
+   "description": "aktiv",
+   "statusId": 50
+  },
+  "advertEditStatusActionsList": null,
+  "seoMetaData": {
+   "canonicalUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/fahrradhose-gr-xs-1662146981/",
+   "alternateUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/fahrradhose-gr-xs-1662146981/",
+   "title": "Fahrradhose Gr xs, € 0,- (4643 Pettenbach) - willhaben",
+   "keywords": "Fahrradhose Gr xs",
+   "description": "Fahrradhose Gr xs. 13.356.435 Angebote. Günstig kaufen und gratis inserieren auf willhaben - der größte Marktplatz Österreichs.",
+   "orgId": null
+  },
+  "premiumServiceBoxListResponseDto": {
+   "totalCount": 3,
+   "items": [
+    {
+     "id": 5000090,
+     "widgetLogo": "https://cache.willhaben.at/campaigns-v2/psb_76c4752f-2e51-5177-b431-f4978b94cab3.png",
+     "widgetLogoAltText": "Raiffeisen Bank International AG",
+     "title": "Einfach in Raten zahlen",
+     "subtitle": "Hol dir bis zu 7.000 EUR für alles, was du willst.",
+     "buttonText": "Jetzt beantragen",
+     "buttonLink": "https://secure.adnxs.com/clktrb?id=830356",
+     "customerName": "Raiffeisen Bank International AG",
+     "customerIndustry": "FINANCIAL",
+     "countPixel": "https://secure.adnxs.com/imptr?id=79944&t=2&ts=1791537445&gdpr=1&gdpr_consent=${GDPR_CONSENT_STRING}"
+    },
+    {
+     "id": 29,
+     "widgetLogo": "https://cache.willhaben.at/campaigns-v2/psb_ee7d3e27-a32a-5937-b817-ee8c5892ab3d.png",
+     "widgetLogoAltText": "Santander Consumer Bank GmbH",
+     "title": "Einfach in Raten bezahlen",
+     "subtitle": "Die schnelle Finanzierung für mehr Spaß am Sport",
+     "buttonText": "Wunschkredit anfragen",
+     "buttonLink": "https://secure.adnxs.com/clktrb?id=800394&redir=https://www.santanderconsumer.at/kredit?affiliate_id=843&wpt_id=e2e5ac66148d4aa72e679fef0298a0eda37172e6b34467f6474e0062940b39f6&pid=40109&utm_source=willhaben&utm_medium=affiliate&utm_campaign=Kredit&utm_content=sport&utm_term=widget&credit_amt=0&term=60",
+     "customerName": "Santander Consumer Bank GmbH",
+     "customerIndustry": "UNKNOWN",
+     "countPixel": "https://secure.adnxs.com/imptr?id=71740&t=2&ts=1791537445&gdpr=1&gdpr_consent=${GDPR_CONSENT_STRING}"
+    },
+    {
+     "id": 5000139,
+     "widgetLogo": "https://cache.willhaben.at/campaigns-v2/psb_8ae43944-5f74-5698-9cd8-e2e3093200a3.png",
+     "widgetLogoAltText": "Allianz Elementar Versicherungs-AG",
+     "title": "Unfallvorsorge entdecken",
+     "subtitle": "Schutz bei Unfällen in Haushalt, Freizeit & Sport",
+     "buttonText": "Unverbindlich anfragen",
+     "buttonLink": "https://secure.adnxs.com/clktrb?id=831526",
+     "customerName": "Allianz Elementar Versicherungs-AG",
+     "customerIndustry": "UNKNOWN",
+     "countPixel": "https://secure.adnxs.com/imptr?id=80281&t=2&ts=1791537445&gdpr=1&gdpr_consent=${GDPR_CONSENT_STRING}"
+    }
+   ]
+  },
+  "categoryTreeId": 4529,
+  "attributeInformation": [
+   {
+    "treeAttributeElement": {
+     "label": "Geschlecht",
+     "treeId": 2549,
+     "code": "GENDER",
+     "systemTags": [
+      "ShowAsBubbleNavigator"
+     ],
+     "sortOrder": 28
+    },
+    "values": [
+     {
+      "label": "Weiblich",
+      "treeId": 4310,
+      "code": "FEMININ",
+      "systemTags": [],
+      "childrenDisplayType": "TEXT",
+      "sortOrder": 6
+     }
+    ]
+   },
+   {
+    "treeAttributeElement": {
+     "label": "Größe",
+     "treeId": 4312,
+     "code": "CLOTHING_SIZE_SPORT",
+     "systemTags": [
+      "AttributeRecommendationPossible",
+      "ShownInSearchResultList",
+      "ARECAttributeRecommendationPossible",
+      "ShowAsBubbleNavigator",
+      "IsSizeAttribute",
+      "ImageSearchNavigator",
+      "FromLastAd"
+     ],
+     "sortOrder": 51
+    },
+    "values": [
+     {
+      "label": "bis XS",
+      "treeId": 4313,
+      "code": "XS",
+      "preText": "bis",
+      "systemTags": [],
+      "childrenDisplayType": "TEXT",
+      "middleText": "XS",
+      "sortOrder": 0
+     }
+    ]
+   },
+   {
+    "treeAttributeElement": {
+     "label": "Farbe",
+     "treeId": 3199,
+     "code": "COLOR",
+     "systemTags": [
+      "ImageBasedAttributeRecommendationPossible",
+      "ShowAsBubbleNavigator"
+     ],
+     "sortOrder": 100
+    },
+    "values": [
+     {
+      "label": "Schwarz",
+      "treeId": 3201,
+      "code": "BLACK",
+      "systemTags": [],
+      "images": {
+       "contextLink": [
+        {
+         "id": "png-normal",
+         "description": "Schwarz",
+         "uri": "https://cache.willhaben.at/static/categorytree/image/3201_schwarz_normal_5ba7b152dfd8066e25110aa377aa896af6550036.png",
+         "selected": false,
+         "relativePath": "/static/categorytree/image/3201_schwarz_normal_5ba7b152dfd8066e25110aa377aa896af6550036.png",
+         "serviceName": "iad"
+        },
+        {
+         "id": "svg-normal",
+         "description": "Schwarz",
+         "uri": "https://cache.willhaben.at/static/categorytree/image/3201_schwarz_normal_5ba7b152dfd8066e25110aa377aa896af6550036.svg",
+         "selected": false,
+         "relativePath": "/static/categorytree/image/3201_schwarz_normal_5ba7b152dfd8066e25110aa377aa896af6550036.svg",
+         "serviceName": "iad"
+        },
+        {
+         "id": "png-selected",
+         "description": "Schwarz",
+         "uri": "https://cache.willhaben.at/static/categorytree/image/3201_schwarz_selected_846cee1056c91cad42c30d234786690e9359b69d.png",
+         "selected": true,
+         "relativePath": "/static/categorytree/image/3201_schwarz_selected_846cee1056c91cad42c30d234786690e9359b69d.png",
+         "serviceName": "iad"
+        },
+        {
+         "id": "svg-selected",
+         "description": "Schwarz",
+         "uri": "https://cache.willhaben.at/static/categorytree/image/3201_schwarz_selected_846cee1056c91cad42c30d234786690e9359b69d.svg",
+         "selected": true,
+         "relativePath": "/static/categorytree/image/3201_schwarz_selected_846cee1056c91cad42c30d234786690e9359b69d.svg",
+         "serviceName": "iad"
+        }
+       ]
+      },
+      "childrenDisplayType": "TEXT",
+      "sortOrder": 1
+     }
+    ]
+   },
+   {
+    "treeAttributeElement": {
+     "label": "Zustand",
+     "treeId": 21,
+     "code": "Zustand",
+     "systemTags": [
+      "ShowAsBubbleNavigator",
+      "ImageSearchNavigator"
+     ],
+     "sortOrder": 167
+    },
+    "values": [
+     {
+      "label": "Neuwertig",
+      "treeId": 2546,
+      "code": "MintCondition",
+      "systemTags": [],
+      "childrenDisplayType": "TEXT",
+      "sortOrder": 1
+     }
+    ]
+   },
+   {
+    "treeAttributeElement": {
+     "label": "Übergabe",
+     "treeId": 2535,
+     "code": "Uebergabe",
+     "systemTags": [
+      "ImageSearchNavigator",
+      "FromLastAd"
+     ],
+     "sortOrder": 173
+    },
+    "values": [
+     {
+      "label": "Selbstabholung",
+      "treeId": 2536,
+      "code": "PICKUP",
+      "systemTags": [],
+      "childrenDisplayType": "TEXT",
+      "sortOrder": 0
+     },
+     {
+      "label": "Versand",
+      "treeId": 2537,
+      "code": "Versand",
+      "systemTags": [],
+      "childrenDisplayType": "TEXT",
+      "sortOrder": 1
+     }
+    ]
+   }
+  ],
+  "facebookTrackingData": {
+   "vertical": "Marktplatz",
+   "category1": "Sport / Sportgeräte",
+   "category2": "Fahrräder / Radsport"
+  },
+  "savedInFolder": false,
+  "chatEnabled": true,
+  "loginUUid": "2f37312a-d858-50be-8893-59abc929c507",
+  "tooltips": [
+   "NEW_SIMILARITY_SEARCH_CATEGORY"
+  ],
+  "categoryXmlCode": null,
+  "ownageTypeXmlCode": null,
+  "contactOption": {
+   "contactType": "MESSAGING",
+   "additionalInfo": null
+  },
+  "breadcrumbs": [
+   {
+    "displayName": "Startseite",
+    "seoUrl": "https://www.willhaben.at/iad"
+   },
+   {
+    "displayName": "Marktplatz",
+    "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/"
+   },
+   {
+    "displayName": "Sport / Sportgeräte",
+    "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/sport-sportgeraete-4390"
+   },
+   {
+    "displayName": "Fahrräder / Radsport",
+    "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrraeder-radsport-4525"
+   },
+   {
+    "displayName": "Fahrradbekleidung",
+    "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrraeder-radsport/fahrradbekleidung-4526"
+   },
+   {
+    "displayName": "Fahrradhosen",
+    "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrradbekleidung/fahrradhosen-4529"
+   }
+  ],
+  "inputSource": 11,
+  "equipmentList": {
+   "equipments": []
+  },
+  "contactSuggestions": {
+   "suggestions": []
+  },
+  "p2ppOptions": {
+   "deliveryOptions": [],
+   "parcelSizes": [],
+   "paymentOptions": [
+    {
+     "description": "Apple Pay",
+     "iconUrl": "https://cache.willhaben.at/img/delivery/apple_pay.svg"
+    },
+    {
+     "description": "Google Pay",
+     "iconUrl": "https://cache.willhaben.at/img/delivery/google_pay_v3.svg"
+    },
+    {
+     "description": "Mastercard",
+     "iconUrl": "https://cache.willhaben.at/img/delivery/mc_small_v2.png"
+    },
+    {
+     "description": "Visa",
+     "iconUrl": "https://cache.willhaben.at/img/delivery/visa_small_v2.png"
+    },
+    {
+     "description": "EPS",
+     "iconUrl": "https://cache.willhaben.at/img/delivery/eps_v2.png"
+    }
+   ],
+   "sellerOnboardingDTO": {
+    "page1": {
+     "headerIconUrlPng": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safedelivery.png",
+     "headerIconUrlSvg": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safedelivery.svg",
+     "title": "PayLivery – Versende jetzt einfach und sicher",
+     "description": "Wähle als nächstes Paketgröße und Versandanbieter. <b>Das Versandetikett erhältst du per E-Mail</b>, sobald jemand deinen Artikel bezahlt hat.<br/><br/><b>Die Versandkosten trägt der Käufer!</b>",
+     "buttonText": "Weiter"
+    },
+    "page2": {
+     "headerIconUrlPng": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safepayment.png",
+     "headerIconUrlSvg": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safepayment.svg",
+     "title": "PayLivery – Dein Geld ist sicher",
+     "description": "Der Käufer zahlt bequem online (zB. mit Kreditkarte) – <b>das Geld wird sicher hinterlegt.</b><br/><br/><b>Nach Zustellung</b> des Pakets erhältst du dein <b>Geld direkt auf dein Konto!</b>",
+     "buttonText": "Alles klar!",
+     "moreInfoText": "Wie funktioniert PayLivery?",
+     "moreInfoLink": "https://hilfe.willhaben.at/hc/de/articles/360011484279"
+    }
+   },
+   "howToPayLiveryDTO": {
+    "icon": "https://cache.willhaben.at/img/delivery/icon_PayLivery_circle.png",
+    "headline": "willhaben-PayLivery",
+    "subHeadline": "Unser eigenes Bezahl- und Versandservice",
+    "subline": "Erhöhe deine Verkaufschance und nutze PayLivery. Selbstabholung und eigener Versand sind auch mit PayLivery weiterhin möglich.",
+    "payLiveryAdvantageDTOList": [
+     {
+      "headline": "Schneller verkaufen",
+      "text": "Angebote, die auch PayLivery anbieten, werden öfter geklickt. Die Zahlung passiert in Echtzeit, ohne Verschicken des IBANs. Das Versandetikett lässt sich im Nu herunterladen und ausdrucken.",
+      "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_howto_sellfaster_Seller.png"
+     },
+     {
+      "headline": "Kostenlos und sicher",
+      "text": "Das Service ist für Verkäufer komplett kostenlos. Kosten für Versand trägt der Käufer. Deine Daten sind sicher und dein Paket automatisch bis € 510 versichert.",
+      "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_howto_savepayment_Seller.png"
+     }
+    ]
+   },
+   "buyNowInformationDto": {
+    "headline": "Sofort kaufen",
+    "badge": "NEU",
+    "hint": "— Kostenlos für dich",
+    "text": "Erhalte jetzt Fixpreis-Angebote ohne zu verhandeln. Du entscheidest weiterhin, ob du annimmst oder ablehnst.",
+    "link": "Mehr erfahren",
+    "url": "https://hilfe.willhaben.at/hc/de/articles/10116809082130",
+    "isBuyNowAd": true
+   },
+   "payLiveryInactiveDTO": {
+    "headline": "Warum soll ich willhaben-PayLivery nutzen?",
+    "modalHeadline": "Bist du dir sicher?",
+    "modalText": "Nutze zusätzlich Online-Zahlung und Versand mit <b>willhaben-PayLivery</b> und <b>erhöhe deine Verkaufschancen</b> - ohne zusätzliche Kosten!",
+    "selfShippingButtonLabel": "Nur eigenen Versand anbieten",
+    "selfShippingAndPayLiveryButtonLabel": "Eigenen Versand und PayLivery anbieten",
+    "payLiveryAdvantageDTOList": [
+     {
+      "headline": "Kein Drucker? Kein Problem!",
+      "text": "Dank QR-Code kannst du ab jetzt ganz ohne Drucker versenden.",
+      "iconUrl": "https://mint.willhaben.at/public/images/icon_paylivery_printer.png"
+     },
+     {
+      "headline": "Mehr Anfragen",
+      "text": "PayLivery-Anzeigen werden öfters geklickt.",
+      "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_sellfaster_Seller.png"
+     },
+     {
+      "headline": "Absolut kostenlos",
+      "text": "Der Käufer zahlt für Versicherung und Versand.",
+      "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_savemoney_Seller.png"
+     },
+     {
+      "headline": "Super bequem & sicher",
+      "text": "Kein lästiges Verschicken von IBAN und Adresse im Chat.",
+      "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_savepayment_Seller.png"
+     }
+    ]
+   },
+   "contextLinkList": null,
+   "attributes": {
+    "priceSummaryHeaderText": "Das Versandetikett wird dir nach dem Verkauf zum Ausdruck bereitgestellt.",
+    "headlineLink": "https://hilfe.willhaben.at/hc/de/categories/360002297680",
+    "labelTrackingNumber": "inkl. Sendungsverfolgung",
+    "infoTextModalFragile": "Nur mit dieser Zusatzoption haftet die Post bis € 510, sollte dein erschütterungsanfälliger oder zerbrechlicher Artikel während des Transports beschädigt werden.<br/><br/>Eine entsprechend gute, stoßfeste Verpackung des Artikels ist dennoch Voraussetzung.",
+    "questionmarkIconUrl": "https://cache.willhaben.at/img/icons/icon_questionmark.svg",
+    "oversizePackageSize": "max. Länge 200cm, max. 360cm Gurtmaß (= Länge + 2 x Breite + 2 x Höhe), jede Paketform",
+    "infoTextModalOversize": "Der Artikel ist Sperrgut und muss gesondert transportiert werden, da er nicht rechteckig ist oder größer als 100 x 60 x 60cm.",
+    "detailsAboutSize": "Details zu Größe und Preis deines Pakets",
+    "hintShippingLabel": "Das Versandetikett wird dir sofort nach dem Verkauf zum Ausdruck bereitgestellt.<br/>Den Versand zahlt automatisch der Käufer:",
+    "shippingCostNote": "Die Versandkosten zahlt automatisch der Käufer.",
+    "subHeadline": "Länge max. 1,75 m",
+    "onlinePaymentAndShippmentWithWillhaben": "Online Zahlung und Versand mit willhaben",
+    "learnMoreLink": "https://hilfe.willhaben.at/hc/de/articles/360011484279",
+    "headlineLinkText": "Wie funktioniert PayLivery?",
+    "headline": "Wähle Paketgröße und Versandanbieter, so kennt ein interessierter Käufer schon vorab die Versandkosten. Selbstabholung ist natürlich weiterhin möglich! Wie funktioniert PayLivery?",
+    "ownDelivery": "Ich möchte selbst versenden, ohne automatisches Versandetikett und Käuferschutz (nicht empfohlen).",
+    "maxLength": "Länge: max. 1m (Post) bzw. 1,75 m (dpd)",
+    "learnMoreLinkText": "Erfahre mehr über PayLivery",
+    "priceSummarySumText": "Den Versand zahlt automatisch der Käufer:"
+   }
+  },
+  "disposed": 0,
+  "publishInfo": null,
+  "upsellings": [],
+  "deleteReason": null,
+  "teaserAttributes": null,
+  "loginId": 10758884
+ },
+ "seoSearchTerms": [
+  {
+   "title": "Aktuelle Suchen",
+   "searchTerms": [
+    {
+     "id": 201053,
+     "url": "kaufen-und-verkaufen/l/skiny-bustier",
+     "name": "Skiny Bustier"
+    },
+    {
+     "id": 212792,
+     "url": "kaufen-und-verkaufen/l/silberkette-perle",
+     "name": "Silberkette Perle"
+    },
+    {
+     "id": 208137,
+     "url": "kaufen-und-verkaufen/l/makita-1414",
+     "name": "Makita 1414"
+    },
+    {
+     "id": 186921,
+     "url": "kaufen-und-verkaufen/l/razer-tournament",
+     "name": "Razer Tournament"
+    },
+    {
+     "id": 196988,
+     "url": "kaufen-und-verkaufen/l/kofferraum-licht",
+     "name": "Kofferraum Licht"
+    },
+    {
+     "id": 201941,
+     "url": "kaufen-und-verkaufen/l/filmkamera-eumig",
+     "name": "Filmkamera Eumig"
+    },
+    {
+     "id": 170118,
+     "url": "kaufen-und-verkaufen/l/addidas-sportschuhe",
+     "name": "Addidas Sportschuhe"
+    },
+    {
+     "id": 201440,
+     "url": "kaufen-und-verkaufen/l/zundmodul",
+     "name": "Zundmodul"
+    },
+    {
+     "id": 194153,
+     "url": "kaufen-und-verkaufen/l/schlauchschal-wolle",
+     "name": "Schlauchschal Wolle"
+    },
+    {
+     "id": 173210,
+     "url": "kaufen-und-verkaufen/l/ikea-toilettenpapierhalter",
+     "name": "IKEA Toilettenpapierhalter"
+    },
+    {
+     "id": 107052,
+     "url": "kaufen-und-verkaufen/l/terrassenreiniger",
+     "name": "Terrassenreiniger"
+    },
+    {
+     "id": 77835,
+     "url": "kaufen-und-verkaufen/l/holztruhe-holzkiste",
+     "name": "Holztruhe Holzkiste"
+    },
+    {
+     "id": 57984,
+     "url": "kaufen-und-verkaufen/l/halskette-gold-585",
+     "name": "Halskette Gold 585"
+    },
+    {
+     "id": 212802,
+     "url": "kaufen-und-verkaufen/l/sitzkissen-set",
+     "name": "Sitzkissen Set"
+    },
+    {
+     "id": 94050,
+     "url": "kaufen-und-verkaufen/l/prinzessinnen",
+     "name": "Prinzessinnen"
+    },
+    {
+     "id": 12072,
+     "url": "kaufen-und-verkaufen/l/betty-barclay",
+     "name": "Betty Barclay"
+    },
+    {
+     "id": 164982,
+     "url": "kaufen-und-verkaufen/l/shirt-petrol",
+     "name": "Shirt Petrol"
+    },
+    {
+     "id": 76248,
+     "url": "kaufen-und-verkaufen/l/signale-h0",
+     "name": "Signale H0"
+    },
+    {
+     "id": 179223,
+     "url": "kaufen-und-verkaufen/l/vorwerk-360",
+     "name": "Vorwerk 360"
+    },
+    {
+     "id": 72853,
+     "url": "kaufen-und-verkaufen/l/damen-stiefel-gr-39",
+     "name": "Damen Stiefel Gr 39"
+    },
+    {
+     "id": 196607,
+     "url": "kaufen-und-verkaufen/l/eagle-12",
+     "name": "Eagle 12"
+    },
+    {
+     "id": 170136,
+     "url": "kaufen-und-verkaufen/l/alufelgen-5x108-16",
+     "name": "Alufelgen 5X108 16"
+    },
+    {
+     "id": 163779,
+     "url": "kaufen-und-verkaufen/l/duplo-pferdestall",
+     "name": "Duplo Pferdestall"
+    },
+    {
+     "id": 128321,
+     "url": "kaufen-und-verkaufen/l/honda-cbr-600-pc-40",
+     "name": "Honda Cbr 600 PC 40"
+    },
+    {
+     "id": 166637,
+     "url": "kaufen-und-verkaufen/l/t5-licht",
+     "name": "T5 Licht"
+    },
+    {
+     "id": 160716,
+     "url": "kaufen-und-verkaufen/l/fahrrad-28-wien",
+     "name": "Fahrrad 28 Wien"
+    },
+    {
+     "id": 107809,
+     "url": "kaufen-und-verkaufen/l/vintage-plakat",
+     "name": "Vintage Plakat"
+    },
+    {
+     "id": 90076,
+     "url": "kaufen-und-verkaufen/l/sonic-generations",
+     "name": "Sonic Generations"
+    },
+    {
+     "id": 229594,
+     "url": "kaufen-und-verkaufen/l/jahrgang-2008",
+     "name": "Jahrgang 2008"
+    },
+    {
+     "id": 157416,
+     "url": "kaufen-und-verkaufen/l/original-19",
+     "name": "Original 19"
+    }
+   ]
+  }
+ ],
+ "hereApiKey": "REDACTED",
+ "storyblokPrivateContactBoxBannerBox": {
+  "_uid": "60d3ee6e-25d1-5cac-b5ae-dc7588d73a13",
+  "flex": {
+   "_uid": "36ab16e4-c46b-5a65-9d88-f58fb3293788",
+   "isFlex": false,
+   "plugin": "wh-flexbox-conditional",
+   "justifyContent": ""
+  },
+  "children": [],
+  "component": "box",
+  "previewlabel": "",
+  "paddingTopMobile": "0",
+  "paddingLeftMobile": "0",
+  "paddingTopDesktop": "0",
+  "paddingLeftDesktop": "0",
+  "paddingRightMobile": "0",
+  "paddingBottomMobile": "0",
+  "paddingRightDesktop": "0",
+  "paddingBottomDesktop": "0"
+ },
+ "sustainabilityDataItem": {
+  "categoryId": 4525,
+  "categoryName": "Fahrräder und Radsportartikel",
+  "co2e": "49.000",
+  "unit": "Tonnen"
+ }
+}

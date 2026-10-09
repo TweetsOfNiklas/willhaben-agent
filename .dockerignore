@@ -1,0 +1,18 @@
+# never bake personal state or secrets into the image
+data/
+.env
+.env.*
+!.env.example
+compose.override.yaml
+*.db
+
+.git/
+.github/
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+tests/
+docs/
+*.md

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="stats">
+  <a class="stat" href="/hits"><article><div class="num">{{ stats.new_hits }}</div><div class="label">{{ _("new hits") }}</div></article></a>
+  <a class="stat" href="/agents"><article><div class="num">{{ stats.agents }}</div><div class="label">{{ _("active search agents") }}</div></article></a>
+  <a class="stat" href="/chats"><article><div class="num">{{ stats.unread }}</div><div class="label">{{ _("unread messages") }}</div></article></a>
+  <a class="stat" href="/chats"><article><div class="num">{{ stats.open_drafts }}</div><div class="label">{{ _("open drafts") }}</div></article></a>
+  <a class="stat" href="/myads"><article><div class="num">{{ stats.myads }}</div><div class="label">{{ _("own ads") }}{% if stats.expired %} · <span class="badge">{{ _("{n} expired", n=stats.expired) }}</span>{% endif %}</div></article></a>
+</div>
+
+{% if not session_status.logged_in or not llm_ok %}
+<article>
+  <header>{{ _("Setup") }}</header>
+  <ul>
+    {% if not session_status.started %}<li>{{ _("Browser is not running.") }} {{ session_status.error or '' }} <a href="/session">{{ _("Start") }}</a></li>
+    {% elif not session_status.logged_in %}<li>{{ _("Not logged in to willhaben: chats and reactivation are inactive.") }} <a href="/session">{{ _("Log in now") }}</a></li>{% endif %}
+    {% if not llm_ok %}<li>{{ _("Claude is not signed in.") }} <a href="/settings#claude">{{ _("Sign in now") }}</a></li>{% endif %}
+  </ul>
+</article>
+{% endif %}
+
+<div class="grid">
+  <section>
+    <h4>{{ _("Latest hits") }}</h4>
+    {% for h in latest %}
+      <p><a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}">{{ h.heading }}</a><br><small class="muted">{{ h.price_display or (h.price|eur) }} · {{ h.location or '' }} · {{ h.published_at|ago }}</small></p>
+    {% else %}<p class="muted">{{ _("No new hits.") }}</p>{% endfor %}
+    <h4>{{ _("Expiring soon") }}</h4>
+    {% for a in soon %}
+      <p><a href="{{ a.url }}" target="_blank">{{ a.heading or a.ad_id }}</a><br><small class="muted">{{ _("ends {date} ({ago})", date=a.end_date|local, ago=a.end_date|ago) }}</small></p>
+    {% else %}<p class="muted">{{ _("No own ads recorded.") }}</p>{% endfor %}
+  </section>
+  <section>
+    <h4>{{ _("Activity") }}</h4>
+    {% set kinds = {'hit': ('🔎', _('New hit')), 'price_drop': ('📉', _('Price drop')), 'message': ('💬', _('New message')),
+                    'auto_reply': ('🤖', _('Answered automatically')), 'auto_reply_pending': ('📝', _('Reply waiting for you')),
+                    'ad_expiring': ('⏳', _('Ad expiring soon')), 'ad_expired': ('⌛', _('Ad expired')), 'test': ('✅', _('Test'))} %}
+    <table class="activity">
+      {% for e in events %}
+      {% set k = kinds.get(e.kind, ('•', e.kind)) %}
+      <tr><td><small>{{ e.ts|local }}</small></td><td title="{{ k[1] }}">{{ k[0] }}</td>
+          <td><small>{% if e.url %}<a href="{{ e.url }}" target="_blank">{{ e.message }}</a>{% else %}{{ e.message }}{% endif %}</small></td></tr>
+      {% else %}<tr><td class="muted">{{ _("Nothing has happened yet.") }}</td></tr>{% endfor %}
+    </table>
+  </section>
+</div>
+{% endblock %}

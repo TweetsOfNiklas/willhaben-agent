@@ -1,0 +1,7 @@
+{
+ "Answer like a human: read receipt first, then a random delay with typing time": "Wie ein Mensch antworten: zuerst als gelesen markieren, dann zufällige Verzögerung mit Tippzeit",
+ "Answer after at least (seconds)": "Antwort frühestens nach (Sekunden)",
+ "and at most (seconds)": "und spätestens nach (Sekunden)",
+ "Each answer gets its own random timing within this window, plus a few seconds per line of text. If the buyer writes again in the meantime, the answer is rewritten.": "Jede Antwort bekommt ihr eigenes zufälliges Timing in diesem Fenster, plus ein paar Sekunden pro Textzeile. Schreibt der Käufer zwischendurch noch etwas, wird die Antwort neu verfasst.",
+ "In ongoing chats (after my first reply): at least (seconds)": "In laufenden Chats (nach meiner ersten Antwort): frühestens nach (Sekunden)"
+}

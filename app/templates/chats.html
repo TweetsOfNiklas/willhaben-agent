@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ _("Chats") }}</h3>
+{% if not session_status.logged_in %}
+<p class="msg">{{ _("Not logged in to willhaben.") }} <a href="/session">{{ _("Log in now") }}</a></p>
+{% endif %}
+{% set live = session_status.chat_live or {} %}
+<p><small>{{ _("Live connection to the willhaben chat:") }}
+  {% if live.state == 'connected' %}<span class="badge ok">{{ _("connected") }}</span> {{ _("since {time} · new messages arrive instantly, without polling", time=live.since|local('%H:%M')) }}
+  {% elif live.state == 'off' %}<span class="badge muted">{{ _("off") }}</span>
+  {% else %}<span class="badge">{{ live.state }}</span> – {{ _("until then it polls every few minutes") }}{% endif %}</small></p>
+<form method="post" action="/chats/sync"><button>{{ _("Sync now") }}</button></form>
+<table class="stack">
+  <thead><tr><th>{{ _("Partner") }}</th><th>{{ _("Ad") }}</th><th>{{ _("Last message") }}</th><th></th></tr></thead>
+  <tbody>
+  {% for c in convs %}
+    <tr>
+      <td><a href="/chats/{{ c.id }}">{{ c.partner_name or _('unknown') }}</a>
+        {% if c.unread_count %}<span class="badge">{{ c.unread_count }}</span>{% endif %}
+        {% if c.id in open_drafts %}<span class="badge ok">{{ _("Draft") }}</span>{% endif %}</td>
+      <td>{{ c.ad_title or c.ad_id or '–' }}{% if c.role %}<br><small class="muted">{{ _('I am selling') if c.role == 'seller' else _('I am buying') }}</small>{% endif %}</td>
+      <td><small>{{ (c.last_message_text or '')[:120] }}</small><br><small class="muted">{{ c.last_message_at|ago }}</small></td>
+      <td><a href="/chats/{{ c.id }}" role="button" class="outline">{{ _("Open") }}</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">{{ _("No conversations synced yet.") }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

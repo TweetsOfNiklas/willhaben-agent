@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/new-ad">← {{ _("New ad") }}</a>{% if d.batch_id %} · <a href="/new-ad/batch/{{ d.batch_id }}">← {{ _("Batch #{id}", id=d.batch_id) }}</a>{% endif %}</p>
+<h3>{{ _("Ad draft #{id}", id=d.id) }}</h3>
+{% if d.error %}<p class="msg" style="border-color:#e5484d">{{ d.error }}</p>{% endif %}
+<div class="grid">
+  <section>
+    <form method="post" action="/new-ad/{{ d.id }}">
+      <label>{{ _("Title") }} <small class="muted">({{ (d.title or '')|length }}/60)</small>
+        <input name="title" id="title" value="{{ d.title or '' }}" maxlength="80"></label>
+      <label>{{ _("Description") }}
+        <textarea name="description" id="desc" rows="14">{{ d.description or '' }}</textarea></label>
+      {% if spec_block %}
+        <label style="margin-bottom:var(--pico-spacing)"><input type="checkbox" id="specs-on" {% if spec_block in (d.description or '') %}checked{% endif %}>
+          {{ _("Add the Geizhals spec sheet to the description") }} <small class="muted">({{ _("{n} entries", n=gh.match.specs|length) }})</small></label>
+        <template id="spec-block">{{ spec_block }}</template>
+        <script>
+          (() => {
+            const box = document.getElementById('specs-on'), desc = document.getElementById('desc');
+            const block = document.getElementById('spec-block').content.textContent;
+            box.addEventListener('change', () => {
+              const text = desc.value.replace(block, '').replace(/\s+$/, '');
+              desc.value = box.checked ? text + '\n\n' + block : text;
+            });
+          })();
+        </script>
+      {% endif %}
+      <label>{{ _("Price (€)") }}
+        <input name="price" id="price" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}"></label>
+      <div class="row-actions">
+        <button type="submit">{{ _("Save") }}</button>
+        <button type="button" class="secondary" onclick="navigator.clipboard.writeText(document.getElementById('title').value)">{{ _("Copy title") }}</button>
+        <button type="button" class="secondary" onclick="navigator.clipboard.writeText(document.getElementById('desc').value)">{{ _("Copy description") }}</button>
+      </div>
+    </form>
+    <article>
+      <form method="post" action="/new-ad/{{ d.id }}/refine">
+        <label>{{ _("Improve the listing") }}
+          <textarea name="instruction" rows="3" required
+            placeholder="{{ _("e.g. shorter and more factual · mention that the battery was new in 2024 · frame size in the title") }}"></textarea></label>
+        <div class="row-actions">
+          <button onclick="this.setAttribute('aria-busy','true')">{{ _("Revise with Claude") }}</button>
+        </div>
+        <small class="muted">{{ _("Save unsaved changes above first – Claude works with the saved version.") }}</small>
+      </form>
+      {% if d.revisions %}
+        <form method="post" action="/new-ad/{{ d.id }}/undo" style="margin-top:.5rem">
+          <button class="secondary outline">↶ {{ _("Undo: “{what}”", what=d.revisions[-1].instruction[:60]) }}</button>
+          <small class="muted">{{ _("{n} earlier version", n=1) if d.revisions|length == 1 else _("{n} earlier versions", n=d.revisions|length) }}</small>
+        </form>
+      {% endif %}
+    </article>
+    <p><a href="{{ insert_url }}" target="_blank" role="button" class="outline">{{ _("Insert on willhaben") }}</a>
+      <br><small class="muted">{{ _("Opens the willhaben form in a new tab – copy the title and description above with one click.") }}</small></p>
+  </section>
+  <section>
+    <article>
+      <p><strong>{{ _("Suggested category:") }}</strong> {{ d.category_hint or '–' }}<br>
+         <strong>{{ _("Condition:") }}</strong> {{ d.condition or '–' }}</p>
+      {% if d.attributes %}<ul>{% for a in d.attributes %}<li>{{ a.name }}: {{ a.value }}</li>{% endfor %}</ul>{% endif %}
+      {% set st = d.price_stats or {} %}
+      {% if st.count %}
+        <p><strong>{{ _("Comparable prices") }}</strong> ({{ _("{n} ads for “{q}”", n=st.count, q=d.search_keywords) }}):<br>
+          {{ _("Median") }} {{ st.median|eur }} · {{ _("middle 50 %") }} {{ st.p25|eur }} – {{ st.p75|eur }} · {{ _("range") }} {{ st.min|eur }} – {{ st.max|eur }}</p>
+      {% endif %}
+      {% if st.llm_estimate %}<p><small class="muted">{{ _("Claude estimates {price}.", price=st.llm_estimate|eur) }}</small></p>{% endif %}
+      {% if st.note %}<p><small><strong>{% if d.revisions %}{{ _("Note from Claude on the last revision:") }}{% else %}{{ _("Note from Claude:") }}{% endif %}</strong> {{ st.note }}</small></p>{% endif %}
+    </article>
+    <article id="geizhals">
+      <header>Geizhals</header>
+      {% if gh.match %}
+        <p><a href="{{ gh.match.url }}" target="_blank" rel="noopener"><strong>{{ gh.match.name }}</strong></a>
+          {% if gh.match.price_from %}<br>{{ _("New from") }} <strong>{{ gh.match.price_from|eur }}</strong>{% endif %}</p>
+        {% if gh.match.specs %}
+          <details><summary><small>{{ _("Spec sheet ({n})", n=gh.match.specs|length) }}</small></summary>
+            <dl class="specs">{% for k, v in gh.match.specs %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></details>
+          <form method="post" action="/new-ad/{{ d.id }}/reconcile" style="margin:.5rem 0">
+            <button class="secondary" onclick="this.setAttribute('aria-busy','true')">{{ _("Check text against the spec sheet") }}</button>
+            <small class="muted">{{ _("Claude fixes contradictions and removes “(bitte prüfen)” where the spec sheet confirms it.") }}</small>
+          </form>
+        {% else %}<p><small class="muted">{{ _("No spec sheet on the product page.") }}</small></p>{% endif %}
+        {% if not gh.match.price_from %}<p><small class="muted">{{ _("No current new price – the product is no longer sold.") }}</small></p>{% endif %}
+      {% elif gh.error %}<p><small style="color:#e5484d">{{ gh.error }}</small></p>
+      {% elif gh.query %}<p class="muted">{{ _("Nothing found for “{q}”.", q=gh.query) }}</p>
+      {% else %}<p class="muted">{{ _("No clear brand-name product recognized.") }}</p>{% endif %}
+      {% set others = (gh.candidates or [])|rejectattr('url', 'equalto', (gh.match or {}).get('url'))|list %}
+      {% if others %}
+        <form method="post" action="/new-ad/{{ d.id }}/geizhals" class="grid">
+          <select name="url">{% for c in others %}<option value="{{ c.url }}">{{ c.name }}{% if c.price %} – {{ c.price|eur }}{% endif %}</option>{% endfor %}</select>
+          <button class="secondary">{{ _("Use another match") }}</button>
+        </form>
+      {% endif %}
+      <form method="post" action="/new-ad/{{ d.id }}/geizhals" class="grid">
+        <input name="query" value="{{ gh.query or d.product_query or '' }}" placeholder="{{ _("Search for a product, e.g. Bosch GSR 18V-55") }}">
+        <button class="secondary">{{ _("Search") }}</button>
+      </form>
+    </article>
+    {% if d.image_paths %}
+    <div class="grid-cards">{% for p in d.image_paths %}<img src="/ad-drafts/{{ d.id }}/image/{{ loop.index0 }}" alt="" style="width:100%;height:120px;object-fit:cover">{% endfor %}</div>
+    {% endif %}
+    {% if d.comparables %}
+    <h5>{{ _("Comparable ads") }}</h5>
+    <ul>{% for c in d.comparables %}<li><a href="{{ c.url }}" target="_blank">{{ c.title }}</a> <small>{{ c.price_display or (c.price|eur) }} · {{ c.location or '' }}</small></li>{% endfor %}</ul>
+    {% endif %}
+    <details><summary>{{ _("Input") }}</summary><p style="white-space:pre-wrap">{{ d.input_text }}</p></details>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{
+ "Claude screening": "Prüfung durch Claude",
+ "Claude screens hits: {rule}": "Claude prüft Treffer: {rule}",
+ "Let Claude check new hits before notifying": "Neue Treffer vor der Benachrichtigung von Claude prüfen lassen",
+ "Notify for": "Benachrichtigen bei",
+ "Other hits still appear under Hits and fire the Home Assistant event, just without a push or Telegram message. The model is chosen in Settings → Claude.": "Andere Treffer erscheinen weiter unter Treffer und lösen das Home-Assistant-Event aus, nur ohne Push oder Telegram-Nachricht. Das Modell wählst du unter Einstellungen → Claude.",
+ "Screening search hits": "Suchtreffer prüfen",
+ "What exactly are you looking for?": "Was genau suchst du?",
+ "e.g. road bike, frame size 56–58, Shimano 105 or better, no e-bikes, no parts": "z. B. Rennrad, Rahmengröße 56–58, Shimano 105 oder besser, keine E-Bikes, keine Teile",
+ "every matching item": "jeder passende Artikel",
+ "fair price": "fairer Preis",
+ "good price": "guter Preis",
+ "on": "an",
+ "only fair or better prices": "nur faire oder bessere Preise",
+ "only good deals": "nur gute Angebote",
+ "price unclear": "Preis unklar",
+ "right item? good deal? – runs for every new hit, a fast model is enough": "richtiger Artikel? guter Preis? – läuft für jeden neuen Treffer, ein schnelles Modell reicht",
+ "too expensive": "zu teuer",
+ "top deal": "Top-Angebot",
+ "wrong item": "falscher Artikel"
+}

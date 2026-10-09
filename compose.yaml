@@ -1,0 +1,19 @@
+services:
+  willhaben-agent:
+    build: .
+    # or use the prebuilt image from GitHub Actions instead of building locally:
+    # image: ghcr.io/<owner>/willhaben-agent:latest
+    container_name: willhaben-agent
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false   # all settings are optional; setup happens in the dashboard
+    ports:
+      - "${DASHBOARD_PORT:-8000}:8000"   # dashboard + JSON API
+      - "${NOVNC_PORT:-6080}:6080"       # optional noVNC view of the login browser (set VNC_PASSWORD, LAN only)
+    volumes:
+      - ./data:/data  # SQLite, browser profile (= your willhaben login), uploads, captures
+    shm_size: "1gb"   # Chromium needs more than the 64 MB default
+    # Optional: if Home Assistant sits behind a reverse proxy this host cannot reach by its public name,
+    # set PROXY_VIA (proxy container name on a shared network) and PROXY_HOSTS (space-separated hostnames);
+    # the entrypoint then maps those hostnames to the proxy. Put such host-specific bits in compose.override.yaml.

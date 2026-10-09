@@ -1,0 +1,9 @@
+{
+ "Notify me about new messages": "Bei neuen Nachrichten benachrichtigen",
+ "Push notifications via": "Push-Benachrichtigungen per",
+ "Automatic: Telegram if linked, otherwise Home Assistant": "Automatisch: Telegram, wenn verbunden, sonst Home Assistant",
+ "Home Assistant only": "Nur Home Assistant",
+ "Telegram only": "Nur Telegram",
+ "Both (every push twice)": "Beide (jede Benachrichtigung doppelt)",
+ "Home Assistant events for automations are sent either way.": "Home-Assistant-Events für Automationen werden immer gesendet."
+}

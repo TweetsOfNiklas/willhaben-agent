@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ _("New search agent") }}</h3>
+
+<form method="get" action="/agents/new" class="builder-search">
+  <input type="hidden" name="url" value="{{ url }}">
+  <input type="search" name="keyword" value="{{ (f.keyword if f else url_param(url, 'keyword')) or '' }}"
+         placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus>
+  <button>{{ _("Search") }}</button>
+</form>
+
+
+{% if f %}
+<div class="builder">
+  <aside>
+    {% for label, filters in f.groups %}
+      {% for flt in filters %}
+        <details class="flt" {% if flt.selected or flt.kind in ('HIERARCHICAL', 'RANGE') or flt.id == 'state' %}open{% endif %}>
+          <summary>{{ flt.label }}{% if flt.selected %} <span class="badge ok">{{ flt.selected|length }}</span>{% endif %}</summary>
+          {% if flt.kind == 'RANGE' %}
+            <form method="get" action="/agents/new" class="range">
+              <input type="hidden" name="url" value="{{ url }}">
+              {% for p in flt.range_params %}
+                <input name="r_{{ p }}" inputmode="numeric" value="{{ url_param(f.url, p) or '' }}"
+                       placeholder="{{ _('from') if p.endswith('FROM') else _('to') }}">
+              {% endfor %}
+              <button class="secondary">{{ _("OK") }}</button>
+            </form>
+          {% else %}
+            {% for v in flt.selected %}
+              <a class="chip on" href="/agents/new?url={{ v.url|urlencode }}" title="{{ _('remove') }}">{{ v.label }} ✕</a>
+            {% endfor %}
+            {% if not flt.selected or flt.multi or flt.kind == 'HIERARCHICAL' %}
+              {% for v in flt.values %}
+                <a class="chip" href="/agents/new?url={{ v.url|urlencode }}">{{ v.label }}{% if v.hits is not none %} <small>{{ '{:,}'.format(v.hits).replace(',', '.') }}</small>{% endif %}</a>
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+        </details>
+      {% endfor %}
+    {% endfor %}
+  </aside>
+
+  <section>
+    <article class="create">
+      <p><strong>{{ _("{n} ads", n='{:,}'.format(f.rows_found).replace(',', '.')) }}</strong> {{ _("currently match") }}
+        {% if f.selected %}·
+          {% for flt, v in f.selected %}<a class="chip on" href="/agents/new?url={{ v.url|urlencode }}" title="{{ _('remove') }}">{{ v.label }} ✕</a>{% endfor %}
+        {% endif %}
+      </p>
+      <form method="post" action="/agents" class="grid">
+        <input type="hidden" name="url" value="{{ f.url }}">
+        <label>{{ _("Name") }} <input name="name" value="{{ f.suggested_name() }}"></label>
+        <label>{{ _("Check every (minutes)") }}
+          <input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+        <div style="grid-column:1/-1">{% with screen=False, brief='', minimum='match' %}{% include "_screen_fields.html" %}{% endwith %}</div>
+        <button type="submit" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>{{ _("Create search agent") }}</button>
+      </form>
+      <small class="muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}
+        <a href="{{ f.url }}" target="_blank" rel="noopener">{{ _("View this search on willhaben") }}</a></small>
+    </article>
+
+    <h6 class="muted">{{ _("Latest hits") }}</h6>
+    <div class="grid-cards">
+      {% for a in f.ads %}
+        <a class="card" href="{{ a.url }}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">
+          {% if a.image_url %}<img src="{{ a.image_url }}" alt="" loading="lazy">{% else %}<img alt="">{% endif %}
+          <div class="body">
+            <span>{{ a.heading }}</span>
+            <span class="price">{{ a.price_display or '–' }}{% if a.old_price %}<span class="old">{{ a.old_price|eur }}</span>{% endif %}</span>
+            <span class="meta">{{ a.location or '' }} · {{ a.published_at|ago }}</span>
+          </div>
+        </a>
+      {% else %}
+        <p class="muted">{{ _("No hits – loosen the filters.") }}</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,108 @@
+{# Ad viewer: any <a data-ad="<ad id>" [data-hit="<hit id>"]> opens here instead of on willhaben.
+   Ctrl/Cmd/Shift-click and middle-click keep the normal link. ← / → step through the ads on the page. #}
+<dialog id="ad-viewer" data-loading="{{ _('Loading ad …') }}" data-error="{{ _('Error {status}') }}"
+        data-offline="{{ _('Connection failed') }}">
+  <article>
+    <header>
+      <button type="button" class="adv-nav" data-step="-1" title="{{ _('Previous (←)') }}">‹</button>
+      <span class="adv-pos muted"></span>
+      <button type="button" class="adv-nav" data-step="1" title="{{ _('Next (→)') }}">›</button>
+      <button type="button" class="adv-close" aria-label="{{ _('Close') }}" title="{{ _('Close (Esc)') }}">✕</button>
+    </header>
+    <div class="adv-body"></div>
+  </article>
+</dialog>
+<style>
+  #ad-viewer { padding: 0; border: none; background: transparent; max-width: min(1100px, 96vw); width: 96vw; }
+  #ad-viewer::backdrop { background: rgba(0, 0, 0, .55); }
+  #ad-viewer > article { margin: 0; max-height: 92vh; overflow: auto; }
+  #ad-viewer header { display: flex; align-items: center; gap: .5rem; position: sticky; top: 0; z-index: 1; }
+  #ad-viewer header button { width: auto; margin: 0; padding: .15rem .7rem; }
+  #ad-viewer .adv-close { margin-left: auto; }
+  .adv { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 1.2rem; }
+  @media (max-width: 760px) { .adv { grid-template-columns: 1fr; } }
+  .adv-main { width: 100%; max-height: 60vh; object-fit: contain; background: #111; border-radius: .4rem; }
+  .adv-empty { display: grid; place-items: center; height: 240px; color: #aaa; }
+  .adv-thumbs { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+  .adv-thumbs img { width: 64px; height: 48px; object-fit: cover; border-radius: .25rem; cursor: pointer; opacity: .6; }
+  .adv-thumbs img.on, .adv-thumbs img:hover { opacity: 1; outline: 2px solid #13a3bc; }
+  .adv-info h4 { margin-bottom: .3rem; }
+  .adv-price { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; }
+  .adv-price .old { text-decoration: line-through; color: var(--pico-muted-color); font-size: .9rem; margin-left: .5rem; font-weight: 400; }
+  .adv-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0; }
+  .adv-actions button, .adv-actions [role=button] { width: auto; margin: 0; padding: .3rem .8rem; font-size: .9em; }
+  .adv-desc { white-space: pre-wrap; font-size: .92em; line-height: 1.45; }
+</style>
+<script>
+(() => {
+  const dlg = document.getElementById('ad-viewer');
+  if (!dlg || !dlg.showModal) return;
+  const body = dlg.querySelector('.adv-body'), pos = dlg.querySelector('.adv-pos'), T = dlg.dataset;
+  const msg = (cls, text) => { const p = document.createElement('p'); p.className = cls; p.textContent = text; return p; };
+  let list = [], idx = -1;
+
+  // One entry per ad, in page order (a card can have several links to the same ad).
+  const collect = () => {
+    const seen = new Set(), out = [];
+    document.querySelectorAll('a[data-ad]').forEach(a => {
+      if (!seen.has(a.dataset.ad)) { seen.add(a.dataset.ad); out.push({ad: a.dataset.ad, hit: a.dataset.hit || ''}); }
+    });
+    return out;
+  };
+
+  async function show(i) {
+    if (i < 0 || i >= list.length) return;
+    idx = i;
+    const {ad, hit} = list[i];
+    pos.textContent = list.length > 1 ? `${i + 1} / ${list.length}` : '';
+    body.replaceChildren(msg('', T.loading)); body.firstChild.setAttribute('aria-busy', 'true');
+    if (!dlg.open) dlg.showModal();
+    try {
+      const r = await fetch(`/hits/ad/${encodeURIComponent(ad)}${hit ? '?hit=' + encodeURIComponent(hit) : ''}`);
+      if (idx !== i) return;                         // user moved on meanwhile
+      if (r.ok) body.innerHTML = await r.text(); else body.replaceChildren(msg('msg', T.error.replace('{status}', r.status)));
+    } catch (e) { body.replaceChildren(msg('msg', T.offline)); }
+    dlg.querySelector('article').scrollTop = 0;
+    if (hit) { const card = document.getElementById('hit-' + hit); if (card) card.classList.add('viewed'); }
+  }
+
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[data-ad]');
+    if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    list = collect();
+    show(list.findIndex(x => x.ad === a.dataset.ad));
+  });
+
+  dlg.addEventListener('click', async e => {
+    if (e.target === dlg) return dlg.close();                       // click on the backdrop
+    const nav = e.target.closest('[data-step]');
+    if (nav) return show(idx + Number(nav.dataset.step));
+    if (e.target.closest('.adv-close')) return dlg.close();
+    const thumb = e.target.closest('.adv-thumbs img');
+    if (thumb) {
+      dlg.querySelector('.adv-main').src = thumb.dataset.full;
+      dlg.querySelectorAll('.adv-thumbs img').forEach(t => t.classList.toggle('on', t === thumb));
+      return;
+    }
+    const st = e.target.closest('button[data-state]');
+    if (st) {
+      st.setAttribute('aria-busy', 'true');
+      const fd = new FormData(); fd.append('state', st.dataset.state);
+      const r = await fetch(`/hits/${st.dataset.hit}/state`, {method: 'POST', body: fd, headers: {'HX-Request': 'true'}});
+      if (r.ok) {
+        const card = document.getElementById('hit-' + st.dataset.hit);
+        if (card) card.remove();                                    // gone from this view, like the card buttons
+        list.splice(idx, 1);
+        if (list.length) show(Math.min(idx, list.length - 1)); else dlg.close();
+      } else st.removeAttribute('aria-busy');
+    }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (!dlg.open) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
+  });
+})();
+</script>

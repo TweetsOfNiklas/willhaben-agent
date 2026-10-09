@@ -1,0 +1,13 @@
+{
+ "just now": "gerade eben",
+ "{t} ago": "vor {t}",
+ "in {t}": "in {t}",
+ "{n} s": "{n} s",
+ "{n} min": "{n} min",
+ "{n} h": "{n} h",
+ "{n} days": "{n} Tagen",
+ "Language": "Sprache",
+ "Automatic (browser)": "Automatisch (Browser)",
+ "by {author}": "von {author}",
+ "Error: {error}": "Fehler: {error}"
+}

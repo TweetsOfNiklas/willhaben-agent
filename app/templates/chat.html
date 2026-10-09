@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/chats">← {{ _("Chats") }}</a></p>
+<h3>{{ conv.partner_name or _('unknown') }} · {{ conv.ad_title or '' }}</h3>
+<div class="grid">
+  <section>
+    {% set ad = conv.ad_context or {} %}
+    {% if ad %}
+    <article>
+      <header><a href="{{ ad.url }}" target="_blank">{{ ad.title }}</a></header>
+      <p><strong>{{ ad.price or '' }}</strong> · {{ ad.location or '' }}<br><small class="muted">{{ ad.category or '' }} · {{ ad.status or '' }}</small></p>
+      {% if ad.images %}<img src="{{ ad.images[0] }}" alt="" style="max-height:180px">{% endif %}
+      <details><summary>{{ _("Description") }}</summary><p style="white-space:pre-wrap">{{ ad.description or '' }}</p></details>
+      <small class="muted">{{ _("Role: {role}", role={'seller': _('I am selling'), 'buyer': _('I am buying')}.get(conv.role, _('unknown'))) }}</small>
+    </article>
+    {% endif %}
+    {% if gcal_on %}
+    <article id="meetup">
+      {% if meetup and meetup.event_id %}
+        <p>📅 <strong>{{ _("In your calendar") }}</strong> · {{ meetup.start.replace('T', ' ') }}{% if meetup.location %} · {{ meetup.location }}{% endif %}
+          {% if meetup.event_link %}<a href="{{ meetup.event_link }}" target="_blank" rel="noopener">{{ _("Open") }} ↗</a>{% endif %}</p>
+        <form method="post" action="/chats/{{ conv.id }}/calendar/forget"><button class="secondary outline" style="width:auto;padding:.1rem .6rem;font-size:.85em">{{ _("New appointment") }}</button></form>
+      {% elif meetup %}
+        <header>📅 {{ _("Appointment in this chat") }}</header>
+        <form method="post" action="/chats/{{ conv.id }}/calendar">
+          <div class="grid">
+            <label>{{ _("When") }} <input type="datetime-local" name="start" value="{{ meetup.start }}" required></label>
+            <label>{{ _("Minutes") }} <input type="number" name="minutes" value="{{ meetup.minutes or gcal_duration }}" min="5" max="480" step="5"></label>
+          </div>
+          <label>{{ _("Where") }} <input name="location" value="{{ meetup.location or '' }}"></label>
+          <input type="hidden" name="summary" value="{{ meetup.summary or '' }}">
+          <div class="row-actions">
+            <button>{{ _("Add to calendar") }}</button>
+            {% if conv.meetup %}<button class="secondary outline" formaction="/chats/{{ conv.id }}/calendar/forget">{{ _("Not an appointment") }}</button>{% endif %}
+          </div>
+        </form>
+      {% else %}
+        <form method="post" action="/chats/{{ conv.id }}/calendar/find" hx-disabled-elt="find button">
+          <button class="secondary outline" style="width:auto">📅 {{ _("Find appointment in this chat") }}</button>
+          <small class="muted">{{ _("Claude reads the chat and fills in the calendar entry for you to check.") }}</small>
+        </form>
+      {% endif %}
+    </article>
+    {% endif %}
+    <form method="post" action="/chats/{{ conv.id }}/refresh" class="row-actions"><button class="secondary outline">↻ {{ _("Reload history") }}</button></form>
+    <div class="chat">
+      {% for m in messages %}
+        <div class="bubble {{ m.direction }}">{{ m.text }}<small>{{ m.created_at|local }}</small></div>
+      {% else %}
+        <p class="muted">{{ _("No history stored.") }}</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <article>
+      <form method="post" action="/chats/{{ conv.id }}/draft" hx-disabled-elt="find button">
+        <label>{{ _("Guidance for this answer (optional)") }}
+          <input name="hint" placeholder="{{ _('e.g. counter-offer €180, pickup Saturday from 10 am') }}">
+        </label>
+        <button type="submit">{{ _("Prepare answer with Claude") }}</button>
+        <small class="muted">{{ _("Takes 10–60 seconds.") }}</small>
+      </form>
+    </article>
+
+    {% for d in drafts if d.status != 'discarded' %}
+    <article>
+      <header>
+        {% if d.status == 'sent' %}<span class="badge ok">{{ _("sent {time}", time=d.sent_at|local) }}</span>{% else %}{{ _("Draft {time}", time=d.created_at|local) }}{% endif %}
+        <small class="muted">· {{ d.intent or '' }}{% if d.suggested_price %} · {{ _("Price {price}", price=d.suggested_price|eur) }}{% endif %}</small>
+        {% if d.auto %}<span class="badge {{ 'ok' if d.status == 'sent' else 'muted' }}">{{ _("automatic") }}</span>{% endif %}
+      </header>
+      {% if d.auto_reason %}<p><small class="muted">{{ _("Auto reply: {reason}", reason=d.auto_reason) }}</small></p>{% endif %}
+      {% if d.intent == 'scam_suspect' %}<p class="msg" style="border-color:#e5484d">{{ _("Caution: possible scam attempt.") }}</p>{% endif %}
+      {% if d.meetup and d.status in ('draft', 'pending') %}<p><small>📅 {{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}{% if gcal_on %} – {{ _("you can add it to your calendar after sending") }}{% endif %}</small></p>{% endif %}
+      {% if d.needs_info %}<ul>{% for n in d.needs_info %}<li><small>{% if n.startswith('Hinweis:') %}{{ _("Note:") }}{{ n[8:] }}{% else %}{{ n }}{% endif %}</small></li>{% endfor %}</ul>{% endif %}
+      {% if d.status == 'draft' %}
+      <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}">
+        <textarea name="text" rows="6" id="t{{ d.id }}">{{ d.text }}</textarea>
+        {% if d.error %}<small style="color:#e5484d">{{ d.error }}</small>{% endif %}
+        <div class="row-actions">
+          <button type="submit" data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Send") }}</button>
+          <button type="button" class="secondary" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ _("Copy") }}</button>
+          <button type="submit" class="secondary outline" formaction="/drafts/{{ d.id }}/mark-sent">{{ _("Sent manually") }}</button>
+          <button type="submit" class="contrast outline" formaction="/drafts/{{ d.id }}/discard">{{ _("Discard") }}</button>
+        </div>
+      </form>
+      {% else %}
+      <p style="white-space:pre-wrap">{{ d.text }}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+    <p><a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank">{{ _("Open chat on willhaben") }}</a></p>
+  </section>
+</div>
+{% endblock %}

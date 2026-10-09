@@ -1,0 +1,95 @@
+{# One finished draft inside a batch: edit, copy, publish. Swapped in place via htmx (outerHTML). #}
+{% set st = d.price_stats or {} %}
+{% set match = (d.geizhals or {}).get('match') or {} %}
+<article class="bdraft {{ d.status }}" id="draft-{{ d.id }}">
+  <header>
+    <strong>#{{ d.id }}</strong>
+    {% if d.status == 'published' %}<span class="badge ok">{{ _("published") }}</span>
+    {% elif d.status == 'discarded' %}<span class="badge muted">{{ _("discarded") }}</span>
+    {% elif d.error %}<span class="badge">{{ _("Error") }}</span>{% endif %}
+    <span class="muted">{{ d.category_hint or '' }}{% if d.condition %} · {{ d.condition }}{% endif %}</span>
+    <a href="/new-ad/{{ d.id }}" class="muted" style="margin-left:auto"><small>{{ _("Details, Geizhals, undo") }} →</small></a>
+  </header>
+  {% if d.error %}<p><small style="color:#e5484d">{{ d.error }}</small></p>{% endif %}
+  {% if d.status == 'discarded' %}
+    <p class="muted">{{ d.title or _('Untitled') }}</p>
+    <form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
+      <input type="hidden" name="status" value="draft"><button class="secondary outline small">{{ _("Restore") }}</button></form>
+  {% else %}
+  <div class="bdraft-body">
+    <div class="bdraft-photos">
+      {% for p in d.image_paths %}<a href="/ad-drafts/{{ d.id }}/image/{{ loop.index0 }}" target="_blank"><img src="/ad-drafts/{{ d.id }}/image/{{ loop.index0 }}" alt="" loading="lazy"></a>{% endfor %}
+      {% if d.image_paths %}<a href="/ad-drafts/{{ d.id }}/photos.zip" class="secondary" role="button" style="width:100%"><small>{{ _("Photos (.zip)") }}</small></a>{% endif %}
+    </div>
+    <form class="bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
+      <label>{{ _("Title") }} <small class="muted"><span class="len">{{ (d.title or '')|length }}</span>/60</small>
+        <span class="copyrow"><input name="title" value="{{ d.title or '' }}" maxlength="80" data-len>
+          <button type="button" class="secondary outline" data-copy="title" title="{{ _("Copy title") }}">⧉</button></span></label>
+      <label>{{ _("Description") }}
+        <span class="copyrow"><textarea name="description" rows="7">{{ d.description or '' }}</textarea>
+          <button type="button" class="secondary outline" data-copy="description" title="{{ _("Copy description") }}">⧉</button></span></label>
+      <div class="grid">
+        <label>{{ _("Price (€)") }}
+          <span class="copyrow"><input name="price" inputmode="decimal" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}">
+            <button type="button" class="secondary outline" data-copy="price" title="{{ _("Copy price") }}">⧉</button></span></label>
+        <div><small class="muted">
+          {% if st.count %}{{ _("Comparison ({n}): median {median}, middle {p25}–{p75}", n=st.count, median=st.median|eur, p25=st.p25|eur, p75=st.p75|eur) }}<br>{% endif %}
+          {% if st.llm_estimate %}{{ _("Claude estimates {price}", price=st.llm_estimate|eur) }}<br>{% endif %}
+          {% if match.name %}Geizhals: <a href="{{ match.url }}" target="_blank" rel="noopener">{{ match.name[:50] }}</a>{% if match.price_from %}, {{ _("new from {price}", price=match.price_from|eur) }}{% endif %}{% endif %}
+        </small></div>
+      </div>
+      {% if d.attributes %}<p><small class="muted">{% for a in d.attributes %}{{ a.name }}: {{ a.value }}{% if not loop.last %} · {% endif %}{% endfor %}</small></p>{% endif %}
+      {% if st.note %}<p><small><strong>Claude:</strong> {{ st.note }}</small></p>{% endif %}
+      <div class="row-actions">
+        <button type="submit" class="small">{{ _("Save") }}</button>
+        {% if saved %}<span class="muted"><small>{{ _("saved") }} ✓</small></span>{% endif %}
+      </div>
+    </form>
+  </div>
+  <form class="bdraft-refine" hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/refine" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML"
+        hx-disabled-elt="find button">
+    <input name="instruction" required placeholder="{{ _("Revise with Claude, e.g. “shorter”, “mention the new battery from 2024”") }}">
+    <button class="secondary small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Revise") }}</button>
+  </form>
+  {% set plan = d.wh_plan or {} %}
+  {% if d.status != 'published' and plan.options %}
+  <form class="bdraft-wh" hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/publish"
+        hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" hx-disabled-elt="find button"
+        hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}">
+    <p><strong>{{ _("Publish on willhaben") }}</strong>
+      <small class="muted">· {{ plan.location }}{% if plan.contact %} · {{ plan.contact }}{% endif %} · {{ _("pickup") }}</small></p>
+    {% for o in plan.options %}
+      <fieldset>
+        <label><input type="radio" name="option" value="{{ loop.index0 }}" {% if loop.first %}checked{% endif %}> {{ o.label }}</label>
+        {% set oi = loop.index0 %}
+        {% for f in o.fields %}
+          <label style="margin-left:1.6rem">{{ f.label }}
+            <select name="o{{ oi }}_{{ f.code }}">
+              <option value="">–</option>
+              {% for code, label in f['values'] %}<option value="{{ code }}" {% if code == f.selected %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select></label>
+        {% endfor %}
+      </fieldset>
+    {% endfor %}
+    <button class="small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Publish on willhaben") }}</button>
+    <small class="muted">{{ _("Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.") }}</small>
+  </form>
+  {% endif %}
+  <footer class="row-actions">
+    {% if d.status == 'published' %}
+      {% if d.wh_ad_id %}<a href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" rel="noopener" role="button" class="small">{{ _("View on willhaben") }} ↗</a>{% endif %}
+      <form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
+        <input type="hidden" name="status" value="draft"><button class="secondary outline small">{{ _("Not published after all") }}</button></form>
+    {% else %}
+      <form hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/prepare" hx-target="#draft-{{ d.id }}"
+            hx-swap="outerHTML" hx-disabled-elt="find button">
+        <button class="small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>
+      <a href="{{ insert_url }}" target="_blank" rel="noopener" role="button" class="small" data-publish>{{ _("Insert on willhaben") }} ↗</a>
+      <form hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
+        <input type="hidden" name="status" value="published"><button class="secondary small">✓ {{ _("Is published") }}</button></form>
+      <form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML">
+        <input type="hidden" name="status" value="discarded"><button class="secondary outline small">{{ _("Discard") }}</button></form>
+    {% endif %}
+  </footer>
+  {% endif %}
+</article>

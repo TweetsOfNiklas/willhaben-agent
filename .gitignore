@@ -1,0 +1,24 @@
+# local state: database, willhaben browser profile (= your login), tokens, uploads, captures with chat content
+data/
+.env
+compose.override.yaml
+*.db
+*.sqlite
+
+# python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

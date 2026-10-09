@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  .drop { display:block; position:relative; margin-bottom:1rem; }
+  .drop input[type=file] { position:absolute; width:1px; height:1px; opacity:0; }
+  .drop-hint { display:block; margin-top:.3rem; padding:1.4rem 1rem; text-align:center; cursor:pointer;
+               border:2px dashed var(--pico-muted-border-color); border-radius:.5rem; color: var(--pico-muted-color); }
+  .drop.over .drop-hint, .drop:focus-within .drop-hint { border-color:#13a3bc; color:#13a3bc; }
+  .drop.over .drop-hint { background: var(--pico-card-sectioning-background-color); }
+  .drop-preview { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.4rem; }
+  .drop-preview span { position:relative; }
+  .drop-preview img { width:76px; height:76px; object-fit:cover; border-radius:.3rem; display:block; }
+  .drop-preview button { position:absolute; top:2px; right:2px; width:auto; margin:0; padding:0 .35rem; line-height:1.3;
+                         font-size:.8em; border-radius:1rem; background:rgba(0,0,0,.6); border:none; }
+</style>
+{% endblock %}
+{% block content %}
+<h3>{{ _("New ad") }}</h3>
+<article>
+  <form method="post" action="/new-ad" enctype="multipart/form-data">
+    <label>{{ _("Notes about the item") }}
+      <textarea name="notes" rows="6" placeholder="{{ _("KTM mountain bike, frame M, 2019, new brake pads, small scratch on the top tube, pickup Vienna 15") }}"></textarea>
+    </label>
+    <label class="drop" data-max="8">{{ _("Photos (up to {n})", n=8) }}
+      <input type="file" name="photos" accept="image/*" multiple>
+      <span class="drop-hint">{{ _("Drag photos here or") }} <u>{{ _("choose them") }}</u> <span class="drop-count"></span></span>
+      <span class="drop-preview"></span>
+    </label>
+    <button type="submit" onclick="this.setAttribute('aria-busy','true')">{{ _("Create listing with Claude") }}</button>
+    <small class="muted">{{ _("Claude writes the title, description and a category suggestion. The price suggestion comes from comparable willhaben ads. Takes up to 2 minutes.") }}</small>
+  </form>
+</article>
+<article>
+  <header><strong>{{ _("Several items at once") }}</strong></header>
+  <form method="post" action="/new-ad/batch" enctype="multipart/form-data">
+    <label class="drop" data-max="{{ max_batch }}">{{ _("All photos, in any order (up to {n})", n=max_batch) }}
+      <input type="file" name="photos" accept="image/*" multiple required>
+      <span class="drop-hint">{{ _("Drag photos here or") }} <u>{{ _("choose them") }}</u> <span class="drop-count"></span></span>
+      <span class="drop-preview"></span>
+    </label>
+    <label>{{ _("Details for all items") }} <small class="muted">({{ _("optional") }})</small>
+      <textarea name="notes" rows="2" placeholder="{{ _("everything from the storage room, pickup Vienna 15, no shipping") }}"></textarea>
+    </label>
+    <button type="submit" onclick="this.setAttribute('aria-busy','true')">{{ _("Upload photos and let Claude sort them") }}</button>
+    <small class="muted">{{ _("Claude assigns the photos to items and recognizes what they are. Then you correct the groups, add comments and have a draft written for each group.") }}</small>
+  </form>
+  {% if batches %}
+  <ul>{% for b in batches %}
+    <li><a href="/new-ad/batch/{{ b.id }}">{{ _("Batch #{id}", id=b.id) }}</a> <small class="muted">{{ b.created_at|local }} · {{ _("{n} photos", n=b.image_paths|length) }} ·
+      {{ _("{n} items", n=b.groups|length) }} · {{ {'sorting': _('sorting'), 'review': _('ready for review'), 'creating': _('drafts being written'), 'error': _('error')}.get(b.status, b.status) }}</small></li>
+  {% endfor %}</ul>
+  {% endif %}
+</article>
+<h4>{{ _("Recent drafts") }}</h4>
+<ul>
+{% for d in drafts %}
+  <li><a href="/new-ad/{{ d.id }}">{{ d.title or (d.input_text[:60] ~ '…') }}</a> <small class="muted">{{ d.created_at|local }} · {{ {'draft': _('draft'), 'error': _('error'), 'published': _('published'), 'discarded': _('discarded')}.get(d.status, d.status) }}</small></li>
+{% else %}<li class="muted">{{ _("None.") }}</li>{% endfor %}
+</ul>
+<script>
+const T = {{ {"remove": _("Remove {name}"), "selected": _("· {n} selected"), "tooMany": _("At most {max} photos – the rest were left out.")}|tojson }};
+(() => {
+  // Drop zones: files from drag & drop and from the picker add up; thumbnails with × to remove one.
+  document.querySelectorAll('.drop').forEach(zone => {
+    const input = zone.querySelector('input[type=file]'), max = +zone.dataset.max;
+    const preview = zone.querySelector('.drop-preview'), count = zone.querySelector('.drop-count');
+    let files = [], urls = [];
+    const render = () => {
+      urls.forEach(URL.revokeObjectURL);
+      urls = files.map(f => URL.createObjectURL(f));
+      preview.replaceChildren(...files.map((f, i) => {
+        const tile = document.createElement('span'), img = document.createElement('img'), rm = document.createElement('button');
+        img.src = urls[i]; img.alt = f.name; img.title = f.name;
+        rm.type = 'button'; rm.textContent = '×'; rm.setAttribute('aria-label', T.remove.replace('{name}', f.name));
+        rm.addEventListener('click', e => { e.preventDefault(); files.splice(i, 1); sync(); });
+        tile.append(img, rm);
+        return tile;
+      }));
+      count.textContent = files.length ? T.selected.replace('{n}', files.length) : '';
+    };
+    const sync = () => {
+      const dt = new DataTransfer();
+      files.forEach(f => dt.items.add(f));
+      input.files = dt.files;
+      render();
+    };
+    const add = list => {
+      const before = files.length;
+      for (const f of list) {
+        if (f.type.startsWith('image/') && !files.some(g => g.name === f.name && g.size === f.size)) files.push(f);
+      }
+      if (files.length > max) {
+        files = files.slice(0, max);
+        count.textContent = '';
+        alert(T.tooMany.replace('{max}', max));
+      }
+      if (files.length !== before || list.length) sync();
+    };
+    input.addEventListener('change', () => add([...input.files]));
+    preview.addEventListener('click', e => e.preventDefault());   // inside the label: no file picker on thumbnail clicks
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('over'); }));
+    ['dragleave', 'dragend'].forEach(ev => zone.addEventListener(ev, e => {
+      if (!zone.contains(e.relatedTarget)) zone.classList.remove('over');
+    }));
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('over'); add([...e.dataTransfer.files]); });
+  });
+  // A photo dropped next to a zone would make the browser open it and leave the page.
+  ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => {
+    if (e.dataTransfer && [...e.dataTransfer.types].includes('Files') && !e.target.closest('.drop')) e.preventDefault();
+  }));
+})();
+</script>
+{% endblock %}

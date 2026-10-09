@@ -1,0 +1,41 @@
+{# Fragment for the ad viewer (_ad_panel.html). d = AdDetail or None, h = Hit or None #}
+{% if error %}
+  <p class="msg" style="border-color:#e5484d">{{ _("willhaben error: {error}", error=error) }}</p>
+{% elif not d %}
+  <p class="muted">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
+{% else %}
+<div class="adv">
+  <div class="adv-gallery">
+    {% if d.images %}
+      <img class="adv-main" src="{{ d.images[0] }}" alt="">
+      {% if d.images|length > 1 %}
+        <div class="adv-thumbs">
+          {% for img in d.images[:12] %}<img src="{{ img }}" alt="" loading="lazy" data-full="{{ img }}"{% if loop.first %} class="on"{% endif %}>{% endfor %}
+        </div>
+      {% endif %}
+    {% else %}<div class="adv-main adv-empty">{{ _("No photos") }}</div>{% endif %}
+  </div>
+  <div class="adv-info">
+    <h4>{{ d.heading }}</h4>
+    <p class="adv-price">{{ d.price_display or (d.price|eur) }}
+      {% if h and h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span>{% endif %}</p>
+    <p class="meta">
+      {% if d.location %}📍 {{ d.location }}<br>{% endif %}
+      {% if d.published_at %}{{ _("published {ago}", ago=d.published_at|ago) }}{% endif %}
+      {% if d.first_published_at and d.published_at and d.first_published_at < d.published_at %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}
+      {% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}
+      {% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}
+    </p>
+    <div class="adv-actions">
+      {% if h %}
+        {% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}
+          <button type="button" class="{{ '' if s == 'saved' else 'secondary outline' }}" data-state="{{ s }}" data-hit="{{ h.id }}"
+                  {% if h.state == s %}disabled{% endif %}>{{ '✓ ' if h.state == s }}{{ label }}</button>
+        {% endfor %}
+      {% endif %}
+      <a href="{{ d.url }}" target="_blank" rel="noopener" role="button" class="secondary outline">{{ _("Open on willhaben") }} ↗</a>
+    </div>
+    {% if d.description %}<div class="adv-desc">{{ d.description }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}

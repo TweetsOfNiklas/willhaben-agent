@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  .agents-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .agents-head h3 { margin:0; } .agents-head a[role=button] { margin:0; }
+  .agent-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1rem; }
+  .agent { margin:0; padding:0; overflow:hidden; display:flex; flex-direction:column; }
+  .agent .strip { display:grid; grid-template-columns: repeat(4, 1fr); gap:2px; height:110px; background: var(--pico-muted-border-color); }
+  .agent .strip img { width:100%; height:110px; object-fit:cover; display:block; }
+  .agent .strip .empty { grid-column: 1 / -1; display:grid; place-items:center; color: var(--pico-muted-color); font-size:.85em;
+                         background: var(--pico-card-sectioning-background-color); }
+  .agent .body { padding:.8rem 1rem; flex:1; display:flex; flex-direction:column; gap:.35rem; }
+  .agent .title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; }
+  .agent .title a { font-weight:700; text-decoration:none; }
+  .agent .facts { font-size:.9rem; color: var(--pico-muted-color); line-height:1.45; }
+  .agent .err { font-size:.9rem; color:#e5484d; }
+  .agent footer { margin:0; padding:.5rem 1rem .8rem; display:flex; gap:.35rem; flex-wrap:wrap; align-items:center;
+                  background:none; border-top:1px solid var(--pico-muted-border-color); }
+  .agent footer form { margin:0; } .agent footer button { padding:.42rem .9rem; font-size:.875rem; margin:0; width:auto; }
+  .agent footer { gap:.5rem; } .agent footer > a { font-size:.9rem; }
+  .agent details { margin:0; width:100%; } .agent details summary { font-size:.9rem; }
+  .agent details form { margin-top:.5rem; } .agent details input { margin-bottom:.4rem; }
+  .agent.paused { opacity:.7; }
+  .empty-state { text-align:center; padding:2.5rem 1rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="agents-head">
+  <h3>{{ _("Search agents") }}</h3>
+  <a href="/agents/new" role="button">+ {{ _("New search agent") }}</a>
+</div>
+
+{% if quiet and quiet.active and agents %}
+<p class="msg">🌙 {{ _("Quiet hours until {time}:", time=quiet.end.strftime('%H:%M')) }}
+  {{ _("search agents are paused.") if quiet_cfg.mode == 'pause' else _("search agents only check every {n} min.", n=quiet_cfg.interval_min) }}
+  <a href="/settings#quiet">{{ _("Change") }}</a></p>
+{% endif %}
+{% if agents %}
+<div class="agent-cards">
+  {% for a in agents %}
+  <article class="agent {{ '' if a.enabled else 'paused' }}">
+    <div class="strip">
+      {% for h in thumbs.get(a.id, []) %}<a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" title="{{ h.heading }}"><img src="{{ h.image_url }}" alt="{{ h.heading }}" loading="lazy"></a>
+      {% else %}<a class="empty" href="/hits?agent_id={{ a.id }}&state=all">{{ _("No hits yet") }}</a>{% endfor %}
+    </div>
+    <div class="body">
+      <div class="title">
+        <a href="/hits?agent_id={{ a.id }}&state=all">{{ a.name }}</a>
+        {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}"><span class="badge">{{ _("{n} new", n=counts.get(a.id)) }}</span></a>
+        {% elif not a.enabled %}<span class="badge muted">{{ _("paused") }}</span>{% endif %}
+      </div>
+      <div class="facts">
+        {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}
+        {% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
+        {% if a.last_rows_found is not none %}{{ _("{n} matching ads on willhaben", n='{:,}'.format(a.last_rows_found).replace(',', '.')) }}{% endif %}
+        {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
+        {% if a.screen %} · <span title="{{ a.screen_brief or '' }}">🤖 {{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</span>{% endif %}
+      </div>
+      {% if a.last_error %}<div class="err">{{ a.last_error }}</div>{% endif %}
+    </div>
+    <footer>
+      <form method="post" action="/agents/{{ a.id }}/run"><button onclick="this.setAttribute('aria-busy','true')">{{ _("Check now") }}</button></form>
+      <form method="post" action="/agents/{{ a.id }}/toggle"><button class="secondary">{{ _("Pause") if a.enabled else _("Resume") }}</button></form>
+      <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="secondary" style="font-size:.8em">{{ _("on willhaben") }} ↗</a>
+      <details>
+        <summary>{{ _("Edit") }}</summary>
+        <form method="post" action="/agents/{{ a.id }}/edit">
+          <input name="name" value="{{ a.name }}" aria-label="{{ _('Name') }}">
+          <label>{{ _("Check every (minutes)") }}
+            <input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+          <label><input type="checkbox" name="notify_on" {% if a.notify %}checked{% endif %}> {{ _("Notify") }}</label>
+          <label><input type="checkbox" name="drops_on" {% if a.notify_price_drops %}checked{% endif %}> {{ _("Report price drops") }}</label>
+          {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min %}{% include "_screen_fields.html" %}{% endwith %}
+          <div style="display:flex;gap:.4rem">
+            <button>{{ _("Save") }}</button>
+            <button class="contrast outline" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete") }}</button>
+          </div>
+        </form>
+      </details>
+    </footer>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<article class="empty-state">
+  <h4>{{ _("No search agents yet") }}</h4>
+  <p class="muted">{{ _("Type what you are looking for and click your filters together – the agent reports new ads and price drops faster than the willhaben emails.") }}</p>
+  <a href="/agents/new" role="button">{{ _("Create your first search agent") }}</a>
+</article>
+{% endif %}
+{% endblock %}
