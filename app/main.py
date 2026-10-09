@@ -499,16 +499,19 @@ async def myads_auto(ad_id: str, on: str = Form("0")):
 @app.post("/myads/{ad_id}/auto-reply")
 async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions: str = Form(""),
                            min_price: str = Form("")):
+    error = None
     try:
         floor = min_price_svc.parse_form(min_price)     # empty = no floor
-    except ValueError:
-        return back(f"/myads?msg={quote(t('Minimum price must be a number, e.g. 25 or 25,50'), safe='')}#ad-{ad_id}")
-    my_ads.set_auto_reply(ad_id, bool(on), instructions, floor)
+        my_ads.set_auto_reply(ad_id, bool(on), instructions, floor)
+    except ValueError:  # bad floor: still save on/off + instructions, keep the stored floor
+        error = t('Minimum price must be a number, e.g. 25 or 25,50')
+        my_ads.set_auto_reply(ad_id, bool(on), instructions)
     if on:  # answer buyers who are already waiting, in the background (Claude takes a few seconds)
         task = asyncio.create_task(chats.process_pending_auto(ad_id))
         _background.add(task)
         task.add_done_callback(_background.discard)
-    return back(f"/myads?msg={quote(t('Automatic replies on') if on else t('Automatic replies off'), safe='')}#ad-{ad_id}")
+    msg = error or (t('Automatic replies on') if on else t('Automatic replies off'))
+    return back(f"/myads?msg={quote(msg, safe='')}#ad-{ad_id}")
 
 
 @app.post("/myads/{ad_id}/delete")

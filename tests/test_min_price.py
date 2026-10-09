@@ -27,6 +27,15 @@ from app.services import chats, min_price
     ("10 € inkl. Versand", [10]),
     ("Versand ist dabei, 10 €", [10]),
     ("Porto: 5 €, Preis 12 €", [12]),
+    # qualified shipping word / bundle: total or item price, must count
+    ("Inkl. Versand 15 €", [15]),
+    ("Mit Versand 15 €", [15]),
+    ("Mit Versand: 15 €", [15]),
+    ("mit Versand wären 15 €", [15]),
+    ("Ohne Versand 15 €", [15]),
+    ("inkl. Versand nach Österreich sind 15 €", [15]),
+    ("Das ganze Paket kostet 15 €", [15]),
+    ("Paketpreis 15 €", [15]),
 ])
 def test_euro_amounts(text, amounts):
     assert min_price.euro_amounts(text) == amounts
@@ -52,6 +61,20 @@ def test_blockers():
     assert "Suggested price 15 €" in min_price.blockers(20, 15, "Passt so")[0]
     assert "Answer names 18 €" in min_price.blockers(20, None, "Ok, 18,- und er gehört dir")[0]
     assert "19,50 €" in min_price.blockers(20, None, "Ok, € 19.50")[0]
+
+
+@pytest.mark.parametrize("text", ["Gerne, inkl. Versand 15 €", "Mit Versand 15 €", "Ohne Versand 15 €",
+                                  "Paketpreis 15 €", "Das ganze Paket kostet 15 €"])
+def test_blockers_qualified_shipping(text):
+    assert min_price.blockers(30, None, text)                 # no suggested_price: the text guard alone must block
+
+
+@pytest.mark.parametrize("value", [25, 25.5, 12345.67, 12345.64, 0.5, 1000000, 1234567.89])
+def test_form_value_round_trip(value):
+    from app.main import templates
+    tpl = templates.env.from_string(
+        "{{ ('%.2f'|format(v)).rstrip('0').rstrip('.') if v is not none else '' }}")
+    assert min_price.parse_form(tpl.render(v=value)) == value
 
 
 # ------------------------------------------------------------------ prompt
@@ -170,7 +193,10 @@ def test_route_saves_min_price():
         assert "number" in r.text or r.status_code in (200, 303)
         with session() as db:
             ad = db.get(MyAd, "1000000002")
-        assert ad.min_price == 25.5 and ad.auto_reply_instructions == "Abholung Wien"   # junk -> nothing saved
+        assert ad.min_price == 25.5 and ad.auto_reply_instructions == "neu"   # junk floor: floor kept, rest saved
+
+        c.post("/myads/1000000002/auto-reply", data={"instructions": "neu", "min_price": "12345,67"})
+        assert 'value="12345.67"' in c.get("/myads").text     # no precision loss in the rendered value
 
         c.post("/myads/1000000002/auto-reply", data={"instructions": "x", "min_price": ""})  # emptied: floor cleared
         with session() as db:

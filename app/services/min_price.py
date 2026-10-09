@@ -24,10 +24,13 @@ _AMOUNT = re.compile(
 # "10 € inkl. Versand" or "Versand ist dabei, 10 €" still count:
 #   "Versand 5 €", "Versand kostet 4,50 €", "Porto: 5 €"      (shipping word, then only filler words)
 #   "20 € + 5 € Versand", "20 € zzgl. 5 € Porto"              (plus-sign/zzgl. before, shipping word right after)
+# but not when the shipping word is qualified ("inkl. Versand 15 €", "mit Versand wären 15 €", "Ohne Versand 15 €"):
+# that is the total or item price. "Paket" is not a shipping word here - on willhaben it usually means a bundle.
 _FILLER = r"(?:kostet|kosten|beträgt|betragen|wäre|wären|ist|sind|extra|zusätzlich|ca\.?|nochmal|innerhalb|österreich|nach)"
-_SHIPPING_BEFORE = re.compile(rf"\b(?:versand(?:kosten)?|porto|paket(?:preis)?)\s*[:=]?\s*(?:{_FILLER}\s*[:=]?\s*){{0,3}}$", re.I)
+_SHIPPING_BEFORE = re.compile(rf"\b(?:versand(?:kosten)?|porto)\s*[:=]?\s*(?:{_FILLER}\s*[:=]?\s*){{0,3}}$", re.I)
+_QUALIFIED = re.compile(r"\b(?:inkl\.?|inklusive|incl\.?|mit|ohne|samt|exkl\.?|exklusive)\s+(?:dem\s+|den\s+)?$", re.I)
 _PLUS_BEFORE = re.compile(r"(?:\+|\bplus|\bzzgl\.?|\bzuzüglich)\s*$", re.I)
-_SHIPPING_AFTER = re.compile(r"\s*(?:für\s+(?:den\s+|das\s+)?)?(?:versand|porto|paket)", re.I)
+_SHIPPING_AFTER = re.compile(r"\s*(?:für\s+(?:den\s+|das\s+)?)?(?:versand|porto)", re.I)
 
 
 def to_float(raw: str) -> float:
@@ -56,7 +59,10 @@ def euro_amounts(text: str) -> list[float]:
     out = []
     for m in _AMOUNT.finditer(text or ""):
         before, after = text[:m.start()], text[m.end():]
-        if _SHIPPING_BEFORE.search(before) or (_PLUS_BEFORE.search(before) and _SHIPPING_AFTER.match(after)):
+        ship = _SHIPPING_BEFORE.search(before)
+        if ship and _QUALIFIED.search(before[:ship.start()]):
+            ship = None                                   # "inkl./mit/ohne Versand 15 €" names the total / item price
+        if ship or (_PLUS_BEFORE.search(before) and _SHIPPING_AFTER.match(after)):
             continue
         out.append(to_float(m.group("a") or m.group("b")))
     return out
