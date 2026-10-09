@@ -688,6 +688,31 @@ async def myads_bulk(request: Request, action: str):
     return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}{keep}")
 
 
+@app.get("/myads/cleanup", response_class=HTMLResponse)
+async def myads_cleanup_page(request: Request):
+    try:
+        cands = await my_ads.cleanup_candidates()
+    except (NotLoggedIn, SessionUnavailable, WillhabenError, ValueError) as e:
+        return back(f"/myads?msg={quote(t('Could not load ads: {error}', error=e), safe='')}")
+    return render(request, "myads_cleanup.html", cands=cands)
+
+
+@app.post("/myads/cleanup")
+async def myads_cleanup(request: Request):
+    ids = [str(i) for i in (await request.form()).getlist("ids") if str(i).isdigit()]
+    if not ids:
+        return back(f"/myads?msg={quote(t('No ads selected'), safe='')}")
+    try:
+        res = await my_ads.cleanup(ids)
+    except (NotLoggedIn, SessionUnavailable, WillhabenError, RuntimeError, ValueError) as e:
+        return back(f"/myads?msg={quote(t('Failed: {error}', error=e), safe='')}")
+    lines = [t("Deleted on willhaben: {n}", n=len(res["done"]))]
+    if res["hidden"]:
+        lines.append(t("Only hidden here (willhaben offers no deleting): {n}", n=len(res["hidden"])))
+    lines += [f"✗ {title}: {err}" for title, err in res["failed"]]
+    return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}")
+
+
 @app.post("/myads/{ad_id}/hide")
 async def myads_hide(ad_id: str, hidden: str = Form("1")):
     my_ads.set_hidden(ad_id, hidden == "1")

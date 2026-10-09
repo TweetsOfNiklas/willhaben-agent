@@ -10,7 +10,7 @@ from sqlmodel import select
 from app.db import MyAd, get_setting, session, utcnow
 from app.i18n import t
 from app.services.notify import notify
-from app.willhaben.account import AccountClient, EndpointUnknown
+from app.willhaben.account import ACTION_DELETE, AccountClient, EndpointUnknown
 from app.willhaben.parse import extract_ad_id
 from app.willhaben.public import Blocked, WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
@@ -156,6 +156,51 @@ async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
     log.info("bulk %s: %d done (%d republished), %d failed", action, len(done), len(moved), len(failed))
     return {"done": [titles.get(i, i) for i in done], "republished": [titles.get(i, i) for i in moved],
             "failed": failed}
+
+
+async def cleanup_candidates() -> list[dict[str, Any]]:
+    """Old ads worth deleting on willhaben: offline without photos (cannot be put online again), sold or given
+    away, and the old copy of a republished ad. Never an active or reserved one.
+
+    Read from the live account list: the app keeps the last known photo, willhaben drops them from old ads.
+    """
+    ads = await AccountClient(get_session()).my_adverts()
+    with session() as db:
+        rows = {r.ad_id: r for r in db.exec(select(MyAd))}
+    out = []
+    for a in ads:
+        if a.status in ("active", "reserved"):
+            continue
+        row = rows.get(a.ad_id)
+        reasons = []
+        if row and row.replaced_by:
+            reasons.append(t("republished as {id}", id=row.replaced_by))
+        if a.status in ("sold", "given_away") or (row and is_sold(row)):
+            reasons.append(t("sold or given away"))
+        if not a.image_url:
+            reasons.append(t("no photo"))
+        if reasons:
+            out.append({"ad_id": a.ad_id, "heading": a.heading or a.ad_id, "url": a.url,
+                        "status": a.status_label or a.status, "reasons": reasons,
+                        "deletable": ACTION_DELETE in (a.actions or {})})
+    return out
+
+
+async def cleanup(ad_ids: list[str]) -> dict[str, Any]:
+    """Delete the picked candidates on willhaben; ones willhaben offers no deleting for are only hidden here.
+
+    The candidates are fetched again, so nothing outside them (an active ad, say) is ever deleted.
+    Returns bulk()'s result plus {"hidden": [titles]}.
+    """
+    cands = {c["ad_id"]: c for c in await cleanup_candidates()}
+    picked = [i for i in dict.fromkeys(ad_ids) if i in cands]
+    hide = [i for i in picked if not cands[i]["deletable"]]
+    for ad_id in hide:
+        set_hidden(ad_id, True)
+    delete = [i for i in picked if cands[i]["deletable"]]
+    res = await bulk("delete", delete) if delete else {"done": [], "failed": []}
+    res["hidden"] = [cands[i]["heading"] for i in hide]
+    return res
 
 
 async def load_for_edit(ad_id: str) -> dict[str, Any]:

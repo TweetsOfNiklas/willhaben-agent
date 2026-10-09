@@ -23,6 +23,7 @@
   <button type="submit" class="secondary outline" formaction="/myads/bulk/activate" data-act="activate" disabled>{{ _("Activate") }}</button>
   <button type="submit" class="secondary outline" formaction="/myads/bulk/deactivate" data-act="deactivate" disabled>{{ _("Deactivate") }}</button>
   <button type="submit" class="btn-danger" formaction="/myads/bulk/delete" data-act="delete" disabled>🗑 {{ _("Delete") }}</button>
+  <a href="/myads/cleanup" role="button" class="secondary outline" style="padding:.3rem .8rem">🧹 {{ _("Clean up…") }}</a>
 </form>
 <form method="get" action="/myads" class="bulkbar">
   {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
