@@ -29,17 +29,19 @@ def push_channel() -> str:
 
 async def notify(kind: str, title: str, message: str, *, url: str | None = None,
                  image: str | None = None, data: dict[str, Any] | None = None,
-                 actions: list[dict[str, Any]] | None = None, tag: str | None = None, push: bool = True) -> bool:
+                 actions: list[dict[str, Any]] | None = None, tag: str | None = None, push: bool = True,
+                 channel: str | None = None) -> bool:
     """Fire `willhaben_<kind>` on the HA event bus and, if configured, a push via notify.<service>.
 
     Always records the event in the dashboard log and, if linked, posts it to Telegram (with buttons).
-    Returns True if HA accepted the event.
+    Returns True if HA accepted the event. `channel` overrides the push channel setting (the connection
+    watchdog uses "both" when one channel is broken).
     """
     log_event(kind, f"{title}: {message}", url)
     from app.services import telegram
     from app.services.ha_auth import ha_token, ha_url, notify_service
 
-    channel = push_channel()
+    channel = channel if channel in ("ha", "telegram", "both") else push_channel()
     # push=False: log + HA event only (e.g. a hit the Claude screening rejected)
     if push and channel in ("telegram", "both"):
         await telegram.send(kind, title, message, url=url, image=image, data=data, actions=actions, tag=tag)

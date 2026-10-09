@@ -32,6 +32,7 @@ from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import ad_batch, ad_creator, chats, my_ads, screening
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
+from app.services import health
 from app.services import min_price as min_price_svc
 from app.services.notify import PUSH_CHANNELS, notify
 from app.services.search_agents import create_agent, run_agent
@@ -187,7 +188,7 @@ async def index(request: Request):
                             .order_by(MyAd.end_date).limit(5)))
         latest = list(db.exec(select(Hit).where(Hit.state == "new").order_by(col(Hit.first_seen_at).desc()).limit(8)))
     return render(request, "index.html", stats=stats, soon=soon, latest=latest, events=recent_events(20),
-                  llm_ok=bool(claude_token()))
+                  llm_ok=bool(claude_token()), health=health.collect())
 
 
 # ------------------------------------------------------------------ search agents

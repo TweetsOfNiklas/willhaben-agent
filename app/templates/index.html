@@ -8,6 +8,27 @@
   <a class="stat" href="/myads"><article><div class="num">{{ stats.myads }}</div><div class="label">{{ _("own ads") }}{% if stats.expired %} · <span class="badge">{{ _("{n} expired", n=stats.expired) }}</span>{% endif %}</div></article></a>
 </div>
 
+{% if health %}
+<style>
+  .conns { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap:.6rem; margin-bottom:1.5rem; }
+  .conns .conn { display:block; padding:.45rem .7rem; border-radius:var(--pico-border-radius); border-left:4px solid var(--pico-muted-color);
+                 background:var(--pico-card-background-color); box-shadow:var(--pico-card-box-shadow); text-decoration:none; color:inherit; }
+  .conns .conn.ok { border-left-color:#2f9e44; } .conns .conn.problem { border-left-color:#e5484d; }
+  .conns .conn small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>
+<h4>{{ _("Connections") }}</h4>
+<div class="conns" id="connections">
+  {% set marks = {'ok': '✓', 'problem': '!', 'off': '–', 'unknown': '?'} %}
+  {% for c in health %}
+  {% set state_label = {'ok': _('OK'), 'problem': _('Problem'), 'off': _('Off'), 'unknown': _('Unknown')}[c.state] %}
+  {% set inner %}<strong>{{ c.label }}</strong> <span class="badge {{ 'ok' if c.state == 'ok' else '' if c.state == 'problem' else 'muted' }}">{{ marks[c.state] }}</span>
+    <small class="muted">{{ c.reason }}</small>{% endset %}
+  {% if c.href %}<a href="{{ c.href }}" class="conn {{ c.state }}" data-health="{{ c.key }}" title="{{ state_label }}: {{ c.reason }}">{{ inner }}</a>
+  {% else %}<div class="conn {{ c.state }}" data-health="{{ c.key }}" title="{{ state_label }}: {{ c.reason }}">{{ inner }}</div>{% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if not session_status.logged_in or not llm_ok %}
 <article>
   <header>{{ _("Setup") }}</header>
@@ -34,7 +55,8 @@
     <h4>{{ _("Activity") }}</h4>
     {% set kinds = {'hit': ('🔎', _('New hit')), 'price_drop': ('📉', _('Price drop')), 'message': ('💬', _('New message')),
                     'auto_reply': ('🤖', _('Answered automatically')), 'auto_reply_pending': ('📝', _('Reply waiting for you')),
-                    'ad_expiring': ('⏳', _('Ad expiring soon')), 'ad_expired': ('⌛', _('Ad expired')), 'test': ('✅', _('Test'))} %}
+                    'ad_expiring': ('⏳', _('Ad expiring soon')), 'ad_expired': ('⌛', _('Ad expired')), 'test': ('✅', _('Test')),
+                    'health': ('🩺', _('Connections'))} %}
     <table class="activity">
       {% for e in events %}
       {% set k = kinds.get(e.kind, ('•', e.kind)) %}

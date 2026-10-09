@@ -19,7 +19,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.i18n import t
-from app.llm.base import LLMError, LLMResult, model_for
+from app.llm.base import LLMError, LLMResult, model_for, record_call
 from app.llm.claude_login import claude_token
 
 log = logging.getLogger(__name__)
@@ -70,8 +70,10 @@ class ClaudeCLI:
         except LLMError as e:
             usage.record(self.purpose, self.model, None, ok=False, error=str(e),
                          duration_ms=int((time.monotonic() - started) * 1000))
+            record_call(False, str(e))      # connection watchdog
             raise
         usage.record(self.purpose, res.model, res.raw, ok=True, duration_ms=res.duration_ms)
+        record_call(True)
         return res
 
     async def _complete(self, *, system: str, prompt: str, schema: dict[str, Any],
