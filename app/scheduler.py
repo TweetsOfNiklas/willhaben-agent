@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from app.config import get_settings
 from app.db import SearchAgent, session, utcnow
-from app.services import chats, health, my_ads, quiet_hours
+from app.services import chats, health, human_pace, my_ads, quiet_hours
 from app.services.search_agents import run_agent
 from app.willhaben.session import get_session
 
@@ -33,6 +33,9 @@ async def _run_agent_job(agent_id: int) -> None:
     if quiet_hours.should_skip(agent):
         log.debug("agent %s: quiet hours, skipped", agent_id)
         return
+    if human_pace.take_break():
+        log.info("agent %s: skipping this check (human-like break)", agent_id)
+        return
     await run_agent(agent_id)
 
 
@@ -44,10 +47,19 @@ def schedule_agent(agent: SearchAgent, run_soon: bool = True) -> None:
         return
     extra = {"next_run_time": datetime.now().astimezone() + timedelta(seconds=5)} if run_soon else {}
     # Note: passing next_run_time=None would add the job *paused* in APScheduler 3.
+    base, jitter = human_pace.trigger(agent.interval_s, get_settings().min_agent_interval_s)
     scheduler.add_job(
-        _run_agent_job, IntervalTrigger(seconds=agent.interval_s, jitter=min(60, agent.interval_s // 5)),
+        _run_agent_job, IntervalTrigger(seconds=base, jitter=jitter),
         args=[agent.id], id=job_id, replace_existing=True, max_instances=1, coalesce=True, **extra,
     )
+
+
+def reschedule_agents() -> None:
+    """After the human-pace settings changed: re-register every agent with the new timing."""
+    with session() as db:
+        agents = list(db.exec(select(SearchAgent)))
+    for a in agents:
+        schedule_agent(a, run_soon=False)
 
 
 def unschedule_agent(agent_id: int) -> None:

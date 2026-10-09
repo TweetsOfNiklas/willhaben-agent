@@ -32,7 +32,7 @@ from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
-from app.services import health
+from app.services import health, human_pace
 from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
@@ -1137,7 +1137,7 @@ async def settings_page(request: Request, msg: str | None = None):
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
-                  geizhals_auto_specs=ad_creator.auto_specs(),
+                  geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel())
 
@@ -1407,6 +1407,13 @@ async def settings_shipping(request: Request):
     shipping.save_carriers([str(c) for c in f.getlist("carrier")])
     set_setting("ship_detect", "1" if f.get("detect") else "0")
     return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+
+
+@app.post("/settings/human-pace")
+async def settings_human_pace(variance_pct: int = Form(30), breaks: str | None = Form(None)):
+    human_pace.save(variance_pct, bool(breaks))
+    scheduler.reschedule_agents()                # new timing applies from the next check on
+    return back(f"/settings?msg={quote(t('Search agents now check irregularly'), safe='')}#quiet")
 
 
 @app.post("/settings/listings")

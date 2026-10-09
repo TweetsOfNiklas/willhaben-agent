@@ -460,6 +460,15 @@
           {% if quiet %}{% if quiet.active %}{{ _("Active until {time}.", time=quiet.end.strftime('%H:%M')) }}{% else %}{{ _("Next quiet hours {start}–{end}.", start=quiet.start.strftime('%d.%m. %H:%M'), end=quiet.end.strftime('%H:%M')) }}{% endif %}{% endif %}
           {{ _("Start and end shift randomly by up to 20 minutes every night. “Check now” always works.") }}</small>
       </form>
+      <form method="post" action="/settings/human-pace" style="margin-top:1.4rem">
+        <h5>{{ _("Irregular checks") }}</h5>
+        <label>{{ _("Vary the search agent interval by (%)") }}
+          <input type="number" name="variance_pct" value="{{ human.variance_pct }}" min="0" max="80" step="5"></label>
+        <label><input type="checkbox" role="switch" name="breaks" {% if human.breaks %}checked{% endif %}>
+          {{ _("Take a break now and then (skip about one check in twelve)") }}</label>
+        <button class="secondary">{{ _("Save") }}</button>
+        <small class="muted">{{ _("Each check lands randomly around the agent's interval, so willhaben does not see a clockwork pattern; on average the interval stays the same. At 30 %, a 5-minute agent checks every 4¼ to 5¾ minutes.") }}</small>
+      </form>
     </section>
 
     <section id="language">

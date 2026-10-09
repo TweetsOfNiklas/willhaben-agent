@@ -1,0 +1,7 @@
+{
+ "Irregular checks": "Unregelmäßige Abfragen",
+ "Vary the search agent interval by (%)": "Intervall der Suchagenten schwanken lassen um (%)",
+ "Take a break now and then (skip about one check in twelve)": "Ab und zu Pause machen (etwa jede zwölfte Abfrage auslassen)",
+ "Each check lands randomly around the agent's interval, so willhaben does not see a clockwork pattern; on average the interval stays the same. At 30 %, a 5-minute agent checks every 4¼ to 5¾ minutes.": "Jede Abfrage fällt zufällig rund um das Intervall des Suchagenten, damit willhaben kein Uhrwerk-Muster sieht; im Schnitt bleibt das Intervall gleich. Bei 30 % fragt ein 5-Minuten-Agent alle 4¼ bis 5¾ Minuten ab.",
+ "Search agents now check irregularly": "Suchagenten fragen jetzt unregelmäßig ab"
+}
