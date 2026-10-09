@@ -16,6 +16,7 @@ import re
 import statistics
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ SEARCH_ROWS = 50
 COMPARABLES_TTL_S = 3600
 GEIZHALS_TTL_S = 6 * 3600
 RESULT_TTL_S = 3600
+GEIZHALS_FAIL_TTL_S = 900    # Geizhals blocking/down: don't retry on every open
 MIN_COMPARABLES = 5          # fewer -> Geizhals new price as anchor, or no position at all
 QUERY_WORDS = 3              # willhaben keyword search is AND: short queries find enough comparables
 CLOSEST = 10
@@ -61,12 +63,14 @@ _TOKEN_RE = re.compile(r"[\wÄÖÜäöüß][\w.+\-/ÄÖÜäöüß]*")
 _comparables: dict[str, tuple[float, dict[str, Any]]] = {}
 _geizhals: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _results: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_geizhals_fail: dict[str, tuple[float, None]] = {}
 
 
 def clear_cache() -> None:
     _comparables.clear()
     _geizhals.clear()
     _results.clear()
+    _geizhals_fail.clear()
 
 
 def _cached(store: dict, key, ttl: float):
@@ -76,12 +80,15 @@ def _cached(store: dict, key, ttl: float):
     return None
 
 
-def _put(store: dict, key, value) -> None:
+def _put(store: dict, key, value, ttl: float, at: float | None = None) -> None:
+    """Store a value; `at` (monotonic) backdates it, e.g. a DB revival keeps its original age."""
     now = time.monotonic()
     if len(store) > 300:
-        for k in [k for k, v in store.items() if now - v[0] > GEIZHALS_TTL_S]:
+        for k in [k for k, v in store.items() if now - v[0] > ttl]:
             store.pop(k, None)
-    store[key] = (now, value)
+        while len(store) > 300:                       # still full of fresh entries: drop the oldest
+            store.pop(min(store, key=lambda k: store[k][0]), None)
+    store[key] = (now if at is None else at, value)
 
 
 # ------------------------------------------------------------------ queries
@@ -127,13 +134,19 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     return " ".join(picked) if len(picked) >= 2 else None
 
 
+def _has_word(name: str, w: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(w)}(?!\w)", name) is not None
+
+
 def _matches(name: str, query: str) -> bool:
-    """Geizhals' first hit must really be this product: every model number and most words appear in its name."""
+    """Geizhals' first hit must really be this product: every model number (as a whole word, so "13" does not
+    match "113" or "230cm") and most words appear in its name."""
     n = name.lower()
     toks = [w.lower() for w in query.split() if len(w) >= 2]
-    if not toks or any(w not in n for w in toks if re.search(r"\d", w)):
+    found = [_has_word(n, w) if re.search(r"\d", w) else w in n for w in toks]
+    if not toks or not all(f for w, f in zip(toks, found, strict=True) if re.search(r"\d", w)):
         return False
-    return sum(1 for w in toks if w in n) / len(toks) >= 0.6
+    return sum(found) / len(toks) >= 0.6
 
 
 # ------------------------------------------------------------------ numbers
@@ -229,7 +242,7 @@ async def search_ads(query: str) -> dict[str, Any]:
         return hit[1]
     page = await get_public().search_keyword(query.strip(), rows=SEARCH_ROWS, sort=7)
     data = {"rows_found": page.rows_found, "ads": [a.as_dict() for a in page.ads]}
-    _put(_comparables, key, data)
+    _put(_comparables, key, data, COMPARABLES_TTL_S)
     return data
 
 
@@ -260,16 +273,19 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
     hit = _cached(_geizhals, key, GEIZHALS_TTL_S)
     if hit:
         return hit[1]
+    if _cached(_geizhals_fail, key, GEIZHALS_FAIL_TTL_S):
+        return None
     try:
         found = await geizhals.lookup(query)
     except geizhals.GeizhalsError as e:
         log.info("geizhals lookup failed for %r: %s", query, e)
-        return None                                   # not cached: may work next time
+        _put(_geizhals_fail, key, None, GEIZHALS_FAIL_TTL_S)   # short negative cache: retried after 15 min
+        return None
     m = (found or {}).get("match") or {}
     best = None
     if m.get("url") and m.get("price_from") and _matches(m.get("name") or "", query):
         best = {"name": m["name"], "url": m["url"], "price_from": m["price_from"]}
-    _put(_geizhals, key, best)
+    _put(_geizhals, key, best, GEIZHALS_TTL_S)
     return best
 
 
@@ -284,26 +300,42 @@ def _key(ad_id: str, query: str | None) -> tuple[str, str]:
     return str(ad_id), re.sub(r"\s+", " ", (query or "").strip().lower())
 
 
+def _claude_for(verdict: dict[str, Any] | None, price: float | None) -> dict[str, Any] | None:
+    """A stored verdict only counts for the price it was given for (the seller may have changed it since)."""
+    return verdict if verdict and verdict.get("deal") and verdict.get("price") == price else None
+
+
+def _ran_at(res: dict[str, Any]) -> datetime | None:
+    try:
+        at = datetime.fromisoformat(res["checked_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
 def cached(ad_id: str, query: str | None = None) -> dict[str, Any] | None:
-    """A fresh analysis from memory or the DealCheck table, without any request."""
+    """A fresh analysis from memory or the DealCheck table, without any request. Freshness counts from when the
+    analysis ran (result["checked_at"]), not from the last view (row.checked_at, only used for ordering)."""
     hit = _cached(_results, _key(ad_id, query), RESULT_TTL_S)
     if hit:
         return hit[1]
     with session() as db:
         row = db.get(DealCheck, str(ad_id))
-    if row and row.result and row.checked_at and _key(ad_id, row.result.get("asked_query"))[1] == _key(ad_id, query)[1]:
-        at = row.checked_at if row.checked_at.tzinfo else row.checked_at.replace(tzinfo=utcnow().tzinfo)
-        if (utcnow() - at).total_seconds() < RESULT_TTL_S:
-            res = {**row.result, "claude": row.claude or row.result.get("claude")}
-            _put(_results, _key(ad_id, query), res)
+    if row and row.result and _key(ad_id, row.result.get("asked_query"))[1] == _key(ad_id, query)[1]:
+        at = _ran_at(row.result)
+        age = (utcnow() - at).total_seconds() if at else RESULT_TTL_S
+        if 0 <= age < RESULT_TTL_S:
+            price = (row.result.get("ad") or {}).get("price")
+            res = {**row.result, "claude": _claude_for(row.claude or row.result.get("claude"), price)}
+            _put(_results, _key(ad_id, query), res, RESULT_TTL_S, at=time.monotonic() - age)
             return res
     return None
 
 
-def stored_claude(ad_id: str) -> dict[str, Any] | None:
+def stored_claude(ad_id: str, price: float | None) -> dict[str, Any] | None:
     with session() as db:
         row = db.get(DealCheck, str(ad_id))
-    return row.claude if row else None
+    return _claude_for(row.claude, price) if row else None
 
 
 async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = False,
@@ -311,6 +343,8 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
     """Price position of one ad. `query` overrides the comparable search; `fallback_query` (a search agent's
     keyword) is used only when the title gives none. Claude runs only with use_claude (explicit click)."""
     res = cached(ad.ad_id, query)
+    if res is not None and (res.get("ad") or {}).get("price") != ad.price:
+        res = None                                    # price changed since: re-position (searches are cached)
     if res is None:
         q = (query or "").strip() or query_from_title(ad.heading) or (fallback_query or "").strip()
         comp = await comparables(q, ad.ad_id, ad.price)
@@ -318,14 +352,16 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
         res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None,
                "comparables": comp, "geizhals": gh,
                "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None),
-               "claude": stored_claude(ad.ad_id), "checked_at": utcnow().isoformat()}
+               "claude": stored_claude(ad.ad_id, ad.price), "checked_at": utcnow().isoformat()}
         if not comp.get("error"):
-            _put(_results, _key(ad.ad_id, query), res)
-    if use_claude and not (res.get("claude") or {}).get("deal"):
+            _put(_results, _key(ad.ad_id, query), res, RESULT_TTL_S)
+    if use_claude and not _claude_for(res.get("claude"), ad.price):
         verdict = await ask_claude(ad, res)
         res = {**res, "claude": verdict}
         if "deal" in verdict:
-            _put(_results, _key(ad.ad_id, query), res)
+            at = _ran_at(res)
+            age = (utcnow() - at).total_seconds() if at else 0
+            _put(_results, _key(ad.ad_id, query), res, RESULT_TTL_S, at=time.monotonic() - max(0.0, age))
             save_claude(ad.ad_id, verdict)
     return res
 
@@ -435,7 +471,7 @@ async def ask_claude(ad: AdDetail, res: dict[str, Any]) -> dict[str, Any]:
             return {"error": str(e)}
     deal = out.data.get("deal")
     return {"deal": deal if deal in DEAL_ENUM else "unknown", "reason": (out.data.get("reason") or "").strip()[:1500],
-            "model": out.model, "at": utcnow().isoformat()}
+            "model": out.model, "at": utcnow().isoformat(), "price": ad.price}
 
 
 # ------------------------------------------------------------------ input parsing

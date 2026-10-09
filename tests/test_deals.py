@@ -1,5 +1,6 @@
 import copy
 import json
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -295,7 +296,7 @@ def app_client(wh, gh, monkeypatch):
 
 def test_viewer_has_lazy_price_section(app_client):
     page = app_client.get(f"/hits/ad/{AD_ID}").text
-    assert f'hx-get="/hits/ad/{AD_ID}/deal"' in page and 'hx-trigger="load"' in page
+    assert f'hx-get="/hits/ad/{AD_ID}/deal"' in page and 'hx-trigger="load delay:700ms"' in page
     assert app_client.calls["search"] == 0                       # opening the ad does not search yet
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
     assert "deal-track" in frag and "10 comparable ads" in frag and "fair" in frag
@@ -326,7 +327,7 @@ def test_viewer_keeps_screening_and_uses_agent_keyword(app_client, wh):
 
 def test_deals_pages_and_claude_on_post(app_client):
     page = app_client.get("/deals")
-    assert page.status_code == 200 and "Price check" in page.text and "1–3 willhaben/Geizhals requests" in page.text
+    assert page.status_code == 200 and "Price check" in page.text and "up to 4 willhaben/Geizhals requests" in page.text
     assert 'href="/deals"' in page.text                          # nav tab
 
     r = app_client.get("/deals", params={"q": f"https://www.willhaben.at/iad/kaufen-und-verkaufen/d/bosch-{AD_ID}/"},
@@ -358,3 +359,62 @@ def test_deals_page_german(app_client):
     assert "Preischeck" in page and "Claude wird nur auf Klick gefragt" in page
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
     assert "Neu ab € 139 auf Geizhals" in frag and "vergleichbare Anzeigen" in frag
+
+
+# ------------------------------------------------------------------ review fixes
+def test_matches_model_numbers_as_whole_words():
+    assert deals._matches("Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo", "Bosch GSR 18V-55")
+    assert not deals._matches("Apple iPhone 113 Pro", "Apple iPhone 13")
+    assert not deals._matches("Tisch 230cm Eiche", "Tisch 23 Eiche")
+
+
+async def test_geizhals_error_is_negatively_cached(wh, monkeypatch):
+    n = []
+
+    async def boom(q):
+        n.append(q)
+        raise geizhals.GeizhalsError("HTTP 429")
+    monkeypatch.setattr(deals.geizhals, "lookup", boom)
+    assert await deals.geizhals_match("Bosch GSR 18V-55") is None
+    assert await deals.geizhals_match("Bosch GSR 18V-55") is None
+    assert len(n) == 1
+    deals._geizhals_fail["bosch gsr 18v-55"] = (deals.time.monotonic() - deals.GEIZHALS_FAIL_TTL_S - 1, None)
+    await deals.geizhals_match("Bosch GSR 18V-55")
+    assert len(n) == 2
+
+
+async def test_viewing_does_not_extend_freshness(wh, monkeypatch):
+    async def no_gh(q):
+        return None
+    monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
+    res = await deals.analyze(_ad(100))
+    old = {**res, "checked_at": (dbmod.utcnow() - timedelta(seconds=deals.RESULT_TTL_S + 60)).isoformat()}
+    deals.remember(old)                                         # viewed just now, analysed over an hour ago
+    deals.clear_cache()
+    assert deals.cached(AD_ID) is None
+    fresh = {**res, "checked_at": (dbmod.utcnow() - timedelta(seconds=deals.RESULT_TTL_S - 60)).isoformat()}
+    deals.remember(fresh)
+    deals.clear_cache()
+    assert deals.cached(AD_ID) is not None
+    assert deals.time.monotonic() - deals._results[(AD_ID, "")][0] > deals.RESULT_TTL_S - 120
+
+
+async def test_claude_verdict_tied_to_price(wh, monkeypatch):
+    async def no_gh(q):
+        return None
+    monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
+    fake = FakeClaude()
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.analyze(_ad(100), use_claude=True)
+    deals.remember(res)
+    assert res["claude"]["price"] == 100.0 and len(fake.calls) == 1
+    deals.clear_cache()
+    cheaper = await deals.analyze(_ad(80))                     # seller lowered the price: old verdict not shown
+    assert cheaper["claude"] is None
+    await deals.analyze(_ad(80), use_claude=True)
+    assert len(fake.calls) == 2
+
+
+def test_deals_page_rejects_non_ad_links(app_client):
+    page = app_client.get("/deals", params={"q": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrraeder-4552"}).text
+    assert "This link is not a willhaben ad." in page and app_client.calls["search"] == 0

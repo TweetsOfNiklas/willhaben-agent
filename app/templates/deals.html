@@ -6,7 +6,7 @@
          placeholder="{{ _('willhaben link, ad id or search text, e.g. iPhone 13 128GB') }}">
   <button type="submit">{{ _("Check") }}</button>
 </form>
-<p><small class="muted">{{ _("Each check costs 1–3 willhaben/Geizhals requests (results are cached for an hour); Claude is only asked when you click.") }}</small></p>
+<p><small class="muted">{{ _("Each check costs up to 4 willhaben/Geizhals requests (results are cached for an hour); Claude is only asked when you click.") }}</small></p>
 
 {% if res %}
   {% set ad = res.ad %}
@@ -39,9 +39,9 @@
   <div class="grid-cards">
   {% for a in results %}
     <div class="card">
-      <a href="{{ a.url }}" target="_blank" data-ad="{{ a.ad_id }}">{% if a.image_url %}<img src="{{ a.image_url }}" loading="lazy" alt="">{% else %}<img alt="">{% endif %}</a>
+      <a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}">{% if a.image_url %}<img src="{{ a.image_url }}" loading="lazy" alt="">{% else %}<img alt="">{% endif %}</a>
       <div class="body">
-        <a href="{{ a.url }}" target="_blank" data-ad="{{ a.ad_id }}">{{ a.title }}</a>
+        <a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}">{{ a.title }}</a>
         <div class="price">{{ a.price_display or (a.price|eur) }}
           {% if a.level %}<span class="deal-lvl lvl-{{ a.level }}">{{ deal_level_label(a.level) }}</span>{% endif %}</div>
         <div class="meta">{{ a.location or '' }}</div>

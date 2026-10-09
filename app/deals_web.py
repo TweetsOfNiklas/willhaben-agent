@@ -4,6 +4,7 @@ Kept out of main.py (one include there); `render`/`templates` are imported from 
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -87,7 +88,9 @@ async def deals_page(request: Request, q: str = ""):
     if ad_id:
         return RedirectResponse(f"/deals/ad/{ad_id}", status_code=303)
     results, error, spread = None, None, None
-    if q:
+    if q and re.search(r"(^https?://|^www\.|willhaben\.at)", q, re.I):    # a link, but not to an ad
+        error = t("This link is not a willhaben ad.")
+    elif q:
         try:
             data = await deals.search_ads(q)
         except WillhabenError as e:
