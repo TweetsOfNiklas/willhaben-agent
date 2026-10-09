@@ -188,6 +188,7 @@
 <footer class="site">
   <div class="container">
     <span><strong>willhaben Agent</strong> v{{ app_version }} · {{ _("by {author}", author=app_author) }}
+      · <a href="/bugreport">{{ _("Report a bug") }}</a>
       <form method="post" action="/lang" class="lang-switch">
         <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()">
           {% set pref = ui_lang_pref() %}

@@ -1,0 +1,23 @@
+{
+ "Report a bug": "Fehler melden",
+ "Creates an anonymised report with the app version, connection states, counts and recent warnings and errors. It is made here on your server, costs no willhaben or Claude request, and is never sent anywhere: you decide whether to copy or download it and share it.": "Erstellt einen anonymisierten Bericht mit App-Version, Verbindungsstatus, Zählern und den letzten Warnungen und Fehlern. Er entsteht hier auf deinem Server, kostet keine willhaben- oder Claude-Anfrage und wird nirgendwohin geschickt: Du entscheidest, ob du ihn kopierst oder herunterlädst und weitergibst.",
+ "What happened?": "Was ist passiert?",
+ "What did you do, what did you expect, what happened instead?": "Was hast du gemacht, was hast du erwartet, was ist stattdessen passiert?",
+ "Include INFO log lines (more detail, longer report)": "INFO-Logzeilen mitnehmen (mehr Details, längerer Bericht)",
+ "Include settings (harmless values only, everything else as set/empty)": "Einstellungen mitnehmen (nur harmlose Werte, alles andere nur als gesetzt/leer)",
+ "Create report": "Bericht erstellen",
+ "Removed or replaced before you see it:": "Entfernt oder ersetzt, bevor du ihn siehst:",
+ "Nothing is uploaded, e-mailed or sent by the app.": "Die App lädt nichts hoch, verschickt keine E-Mail und sendet nichts.",
+ "Preview": "Vorschau",
+ "Copy": "Kopieren",
+ "Download (.txt)": "Herunterladen (.txt)",
+ "Download (.json)": "Herunterladen (.json)",
+ "Copied to the clipboard.": "In die Zwischenablage kopiert.",
+ "tokens, passwords, cookies and other secrets": "Tokens, Passwörter, Cookies und andere Geheimnisse",
+ "e-mail addresses and phone numbers": "E-Mail-Adressen und Telefonnummern",
+ "IP addresses and your server's host names": "IP-Adressen und die Hostnamen deines Servers",
+ "URL query strings and logins in URLs": "Abfrageteile von URLs und Zugangsdaten in URLs",
+ "names of people (chat partners, your account, Telegram, shipping addresses)": "Namen von Personen (Chatpartner, dein Konto, Telegram, Versandadressen)",
+ "chat messages, ad titles and descriptions (only counts are included)": "Chatnachrichten, Anzeigentitel und Beschreibungen (nur Anzahlen sind enthalten)",
+ "ad, conversation and user ids (replaced by placeholders such as ad#1)": "Anzeigen-, Chat- und Benutzer-IDs (ersetzt durch Platzhalter wie ad#1)"
+}
