@@ -147,9 +147,47 @@ async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
 async def load_for_edit(ad_id: str) -> dict[str, Any]:
     """Current title, description (plain text) and price as willhaben has them."""
     from app.willhaben import insert
-    ad = await insert.get_own_ad(get_session(), ad_id)
+    s = get_session()
+    ad = await insert.get_own_ad(s, ad_id)
+    try:
+        images = [{"reference": i["reference"], "thumb": insert.image_thumb(i)}
+                  for i in (await insert.get_own_images(s, ad))["advertImage"]]
+        images_error = None
+    except (insert.InsertError, RuntimeError, ValueError) as e:      # text editing still works without photos
+        log.info("photos of ad %s not loadable: %s", ad_id, e)
+        images, images_error = [], str(e)
     return {"heading": ad.get("heading") or "", "description": insert.description_text(ad.get("description")),
-            "price": ad.get("price")}
+            "price": ad.get("price"), "images": images, "images_error": images_error}
+
+
+PHOTO_MIMES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+               ".gif": "image/gif"}
+
+
+async def set_photos(ad_id: str, order: list[str], new_photos: list[tuple[str, bytes]]) -> MyAd | None:
+    """Reorder / remove / add photos on willhaben (first = cover), then refresh the status."""
+    from pathlib import Path
+
+    from app.willhaben import insert
+    files = []
+    for name, data in new_photos:
+        mime = PHOTO_MIMES.get(Path(name).suffix.lower())
+        if mime is None:
+            raise insert.InsertError(t("Unsupported photo format: {name} (JPG, PNG, WebP)", name=name))
+        files.append((name, data, mime))
+    await insert.set_own_images(get_session(), ad_id, order, files)
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row:
+            row.last_action = t("photos changed on willhaben {when}", when=f"{utcnow():%d.%m. %H:%M}")
+            db.add(row)
+            db.commit()
+    try:
+        await import_from_account()
+    except (NotLoggedIn, SessionUnavailable, ValueError) as e:
+        log.info("status refresh after photo change skipped: %s", e)
+    with session() as db:
+        return db.get(MyAd, ad_id)
 
 
 async def ai_revise(ad_id: str, heading: str, description: str, price: float | None,

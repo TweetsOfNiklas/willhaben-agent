@@ -279,7 +279,9 @@ async def test_edit_changes_only_three_fields(monkeypatch):
     monkeypatch.setattr(my_ads, "get_session", lambda: acct)
     await my_ads.import_from_account()
     cur = await my_ads.load_for_edit("1000000001")
-    assert cur == {"heading": "Alter Titel", "description": "Zeile eins\nZeile zwei\n\n• Netzteil\n• Tasche", "price": 40}
+    assert {k: cur[k] for k in ("heading", "description", "price")} == {
+        "heading": "Alter Titel", "description": "Zeile eins\nZeile zwei\n\n• Netzteil\n• Tasche", "price": 40}
+    assert cur["images"] == [] and cur["images_error"]        # no imageList link: text editing still works
     row = await my_ads.edit("1000000001", "Neuer Titel", "Neu\n\n• Netzteil", 35.0)
     body = acct.put_body
     assert body["heading"] == "Neuer Titel" and body["price"] == 35 and body["description"] == "<p>Neu</p><ul><li>Netzteil</li></ul>"

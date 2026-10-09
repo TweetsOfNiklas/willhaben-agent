@@ -1,0 +1,21 @@
+{
+ "Photos": "Fotos",
+ "the first photo is the cover": "das erste Foto ist das Titelbild",
+ "Could not load the photos from willhaben: {error}": "Fotos konnten nicht von willhaben geladen werden: {error}",
+ "Cover": "Titelbild",
+ "Move left": "Nach links",
+ "Move right": "Nach rechts",
+ "Make cover photo": "Als Titelbild verwenden",
+ "Remove": "Entfernen",
+ "Add photos": "Fotos hinzufügen",
+ "Put new photos first (the first one becomes the cover)": "Neue Fotos an den Anfang (das erste wird Titelbild)",
+ "Save photos on willhaben": "Fotos auf willhaben speichern",
+ "Saves only the photos – unsaved text changes above are not included. At most {n} photos; removed photos are gone on willhaben.": "Speichert nur die Fotos – ungespeicherte Textänderungen oben werden nicht mitgenommen. Höchstens {n} Fotos; entfernte Fotos sind auf willhaben weg.",
+ "{n} photos": "{n} Fotos",
+ "At most {n} photos – remove some first.": "Höchstens {n} Fotos – entferne zuerst welche.",
+ "An ad needs at least one photo.": "Eine Anzeige braucht mindestens ein Foto.",
+ "Unsupported photo format: {name} (JPG, PNG, WebP)": "Fotoformat nicht unterstützt: {name} (JPG, PNG, WebP)",
+ "photos changed on willhaben {when}": "Fotos auf willhaben geändert {when}",
+ "Saving the photos failed: {error}": "Speichern der Fotos fehlgeschlagen: {error}",
+ "Photos saved on willhaben – status now: {status}": "Fotos auf willhaben gespeichert – Status jetzt: {status}"
+}

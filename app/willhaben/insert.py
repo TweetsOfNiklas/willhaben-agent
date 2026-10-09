@@ -169,6 +169,93 @@ async def edit_own_ad(s: BrowserSession, ad_id: str, *, heading: str, descriptio
     return after
 
 
+# ------------------------------------------------------------------ photos of an own ad
+# Like the edit page's image hook (bbx-adin buildId 1058731-20d7e775, chunk 9792 module 83070): existing photos are
+# kept by their `reference`, new ones uploaded to atimage/temp first, then ONE call sets the whole list in order:
+#   PUT /webapi/iad-upload<imageList link>/order-and-associate  {advertImage: [{reference}…], floorPlans: […]}
+# Photos left out are removed, the first photo is the cover. The edit page sends it after PUT bap/edit; the photo
+# call stands on its own (nothing else is sent). NEEDS LIVE VERIFICATION: the GET shape of the imageList link.
+def _images(raw: Any) -> dict[str, list[dict[str, Any]]]:
+    if isinstance(raw, dict) and "advertImageList" in raw and "advertImage" not in raw:
+        raw = raw.get("advertImageList") or {}
+    raw = raw if isinstance(raw, dict) else {"advertImage": raw if isinstance(raw, list) else []}
+    return {"advertImage": [i for i in raw.get("advertImage") or [] if isinstance(i, dict) and i.get("reference")],
+            "floorPlans": [i for i in raw.get("floorPlans") or [] if isinstance(i, dict) and i.get("reference")]}
+
+
+def image_thumb(img: dict[str, Any]) -> str:
+    """A small preview URL of an existing photo (willhaben's public image cache)."""
+    url = img.get("thumbnailImageUrl") or img.get("mainImageUrl") or img.get("referenceImageUrl")
+    if url:
+        return url
+    ref = str(img.get("reference") or "")
+    stem, dot, ext = ref.rpartition(".")
+    return f"https://cache.willhaben.at/mmo/{stem}_thumb.{ext}" if dot else f"https://cache.willhaben.at/mmo/{ref}"
+
+
+async def get_own_images(s: BrowserSession, ad: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """{advertImage: [...], floorPlans: [...]} of an own ad (editor JSON from get_own_ad), read-only."""
+    link = _link(ad, "imageList")
+    if not link:
+        raise InsertError("kein imageList-Link in der Anzeige")
+    return _images(await s.api_json("GET", _webapi(link)))
+
+
+async def set_own_images(s: BrowserSession, ad_id: str, order: list[str],
+                         new_photos: list[tuple[str, bytes, str]]) -> list[dict[str, Any]]:
+    """Set the photos of an own ad: `order` lists existing references and "new:<i>" (index into new_photos).
+
+    Existing references must belong to the ad (nothing foreign can be attached); photos not named are removed.
+    Returns willhaben's new photo list; raises InsertError when the result does not match.
+    """
+    ad = await get_own_ad(s, ad_id)
+    if not isinstance(ad, dict) or not ad.get("adId"):
+        raise InsertError(f"Anzeige {ad_id} nicht im Editor gefunden")
+    link = _link(ad, "imageList")
+    if not link:
+        raise InsertError("kein imageList-Link in der Anzeige")
+    current = _images(await s.api_json("GET", _webapi(link)))
+    known = {i["reference"] for i in current["advertImage"]}
+    used_new: set[int] = set()
+    for item in order:
+        if item.startswith("new:"):
+            idx = int(item[4:]) if item[4:].isdigit() else -1
+            if not 0 <= idx < len(new_photos) or idx in used_new:
+                raise InsertError(f"unbekanntes neues Foto: {item}")
+            used_new.add(idx)
+        elif item not in known:
+            raise InsertError("Foto gehört nicht zu dieser Anzeige")
+    if not order:
+        raise InsertError("Eine Anzeige braucht mindestens ein Foto")
+    if len(order) > MAX_PHOTOS:
+        raise InsertError(f"höchstens {MAX_PHOTOS} Fotos")
+    if len(set(order)) != len(order):
+        raise InsertError("Foto doppelt in der Reihenfolge")
+    if order == [i["reference"] for i in current["advertImage"]]:
+        return current["advertImage"]                       # unchanged: like the web app, send nothing
+
+    temp: dict[int, str] = {}
+    for idx in sorted(used_new):
+        name, data, mime = new_photos[idx]
+        r = await s.upload("/webapi/iad-upload/atimage/temp", "file", name, data, mime)
+        if not r.ok:
+            raise InsertError(f"Foto-Upload {name}: HTTP {r.status} {r.text[:150]}")
+        ref = (r.json() or {}).get("reference")
+        if not ref:
+            raise InsertError(f"Foto-Upload {name}: keine Referenz")
+        temp[idx] = ref
+    refs = [temp[int(i[4:])] if i.startswith("new:") else i for i in order]
+    body = {"advertImage": [{"reference": r} for r in refs],
+            "floorPlans": [{"reference": f["reference"]} for f in current["floorPlans"]]}
+    res = await s.api_json("PUT", _webapi(link, upload=True) + "/order-and-associate", body)
+    after = _images(res)["advertImage"] if isinstance(res, dict) and res.get("advertImage") is not None else \
+        _images(await s.api_json("GET", _webapi(link)))["advertImage"]
+    kept = [(pos, r) for pos, r in enumerate(refs) if r in known]
+    if len(after) != len(refs) or any(after[pos].get("reference") != r for pos, r in kept):
+        raise InsertError("willhaben hat die Fotos nicht wie gewünscht übernommen")
+    return after
+
+
 # ------------------------------------------------------------------ plan (read-only)
 PICKUP = {"label": "Selbstabholung", "code": "PICKUP"}
 SHIPPING = {"label": "Versand", "code": "Versand"}     # bundle module 76697: I2="Uebergabe", z5="Versand", $9="PICKUP"

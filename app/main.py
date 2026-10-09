@@ -603,6 +603,22 @@ async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str
     return back(f"/myads?msg={quote(t('Saved on willhaben – status now: {status}', status=status), safe='')}#ad-{ad_id}")
 
 
+@app.post("/myads/{ad_id}/photos")
+async def myads_photos_save(ad_id: str, order: list[str] = Form(default=[]),
+                            photos: list[UploadFile] = File(default=[]), new_first: str = Form("")):
+    """Photos in the order shown on the edit page; new uploads go to the start or the end."""
+    from app.willhaben.insert import InsertError
+    files = [(p.filename or "foto.jpg", await p.read()) for p in photos if p.filename]
+    new = [f"new:{i}" for i in range(len(files))]
+    order = (new + order) if new_first else (order + new)
+    try:
+        row = await my_ads.set_photos(ad_id, order, files)
+    except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        return back(f"/myads/{ad_id}/edit?msg={quote(t('Saving the photos failed: {error}', error=e), safe='')}#photos")
+    status = (row.status if row else "") or ""
+    return back(f"/myads/{ad_id}/edit?msg={quote(t('Photos saved on willhaben – status now: {status}', status=status), safe='')}#photos")
+
+
 @app.post("/myads/bulk/{action}")
 async def myads_bulk(request: Request, action: str):
     if action not in ("activate", "deactivate", "delete"):

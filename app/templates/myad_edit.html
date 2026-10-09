@@ -43,4 +43,79 @@
     <small class="muted">{{ _("Claude sees the text above, the ad's photos and your rules. Nothing is saved until you click “Save on willhaben”. Takes 10–60 seconds.") }}</small>
   </fieldset>
 </form>
+
+<article id="photos" style="margin-top:1.6rem">
+  <header><strong>📷 {{ _("Photos") }}</strong>
+    <small class="muted">· {{ _("the first photo is the cover") }}</small></header>
+  {% if cur.images_error %}
+    <p><small style="color:#e5484d">{{ _("Could not load the photos from willhaben: {error}", error=cur.images_error) }}</small></p>
+  {% else %}
+  <form method="post" action="/myads/{{ a.ad_id }}/photos" enctype="multipart/form-data" id="photo-form">
+    <div class="photo-grid" id="photo-grid">
+      {% for img in cur.images %}
+      <div class="photo-tile">
+        <input type="hidden" name="order" value="{{ img.reference }}">
+        <img src="{{ img.thumb }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+        <span class="badge ok cover-badge">{{ _("Cover") }}</span>
+        <div class="photo-tools">
+          <button type="button" class="secondary outline" data-move="-1" title="{{ _('Move left') }}" aria-label="{{ _('Move left') }}">◀</button>
+          <button type="button" class="secondary outline" data-cover title="{{ _('Make cover photo') }}" aria-label="{{ _('Make cover photo') }}">★</button>
+          <button type="button" class="secondary outline" data-move="1" title="{{ _('Move right') }}" aria-label="{{ _('Move right') }}">▶</button>
+          <button type="button" class="secondary outline" data-remove title="{{ _('Remove') }}" aria-label="{{ _('Remove') }}">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <label style="margin-top:var(--pico-spacing)">{{ _("Add photos") }}
+      <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label>
+    <label><input type="checkbox" name="new_first" value="1"> {{ _("Put new photos first (the first one becomes the cover)") }}</label>
+    <div class="row-actions">
+      <button id="photo-save" onclick="this.setAttribute('aria-busy','true')">{{ _("Save photos on willhaben") }}</button>
+      <small class="muted" id="photo-count"></small>
+    </div>
+    <small class="muted">{{ _("Saves only the photos – unsaved text changes above are not included. At most {n} photos; removed photos are gone on willhaben.", n=15) }}</small>
+  </form>
+  <style>
+    .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .6rem; }
+    .photo-tile { position: relative; border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius); overflow: hidden; }
+    .photo-tile img { display: block; width: 100%; height: 110px; object-fit: cover; }
+    .photo-tile .cover-badge { position: absolute; top: .3rem; left: .3rem; display: none; }
+    .photo-tile:first-child .cover-badge { display: inline-block; }
+    .photo-tile:first-child [data-cover], .photo-tile:first-child [data-move="-1"], .photo-tile:last-child [data-move="1"] { visibility: hidden; }
+    .photo-tools { display: flex; justify-content: space-between; gap: .2rem; padding: .25rem; }
+    .photo-tools button { width: auto; flex: 1; margin: 0; padding: .1rem 0; font-size: .8rem; }
+    .photo-tile.removed img { opacity: .25; }
+    .photo-tile.removed .photo-tools button:not([data-remove]) { visibility: hidden; }
+    .photo-tile.removed [data-remove] { border-color: #e5484d; color: #e5484d; }
+  </style>
+  <script>
+    (() => {
+      const grid = document.getElementById('photo-grid'), form = document.getElementById('photo-form');
+      const file = form.querySelector('input[type=file]'), count = document.getElementById('photo-count');
+      const MAX = 15, txt = {{ {"n": _("{n} photos"), "max": _("At most {n} photos – remove some first.", n=15),
+                                "none": _("An ad needs at least one photo.")}|tojson }};
+      const update = () => {
+        const kept = grid.querySelectorAll('.photo-tile:not(.removed)').length, n = kept + file.files.length;
+        count.textContent = txt.n.replace('{n}', n) + (n > MAX ? ' – ' + txt.max : n < 1 ? ' – ' + txt.none : '');
+        document.getElementById('photo-save').disabled = n > MAX || n < 1;
+      };
+      grid.addEventListener('click', e => {
+        const b = e.target.closest('button'); if (!b) return;
+        const tile = b.closest('.photo-tile');
+        if (b.dataset.move === '-1' && tile.previousElementSibling) grid.insertBefore(tile, tile.previousElementSibling);
+        else if (b.dataset.move === '1' && tile.nextElementSibling) grid.insertBefore(tile.nextElementSibling, tile);
+        else if (b.hasAttribute('data-cover')) grid.prepend(tile);
+        else if (b.hasAttribute('data-remove')) {
+          const off = tile.classList.toggle('removed');
+          tile.querySelector('input[name=order]').disabled = off;
+          if (off) grid.append(tile);                 // removed ones collect at the end
+        }
+        update();
+      });
+      file.addEventListener('change', update);
+      update();
+    })();
+  </script>
+  {% endif %}
+</article>
 {% endblock %}
