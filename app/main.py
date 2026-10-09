@@ -83,9 +83,11 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await task
     scheduler.shutdown()
-    await get_session().stop()
-    await get_public().aclose()
-    access_log.flush()                            # last unwritten willhaben access counts
+    try:
+        await get_session().stop()
+        await get_public().aclose()
+    finally:
+        access_log.flush()                        # last unwritten willhaben access counts
 
 
 _background: set[asyncio.Task] = set()

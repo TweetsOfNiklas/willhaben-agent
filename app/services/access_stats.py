@@ -42,24 +42,37 @@ def outcome_label(o: str) -> str:
             "error": t("error (5xx/network)"), "cached": t("from cache (no access)")}.get(o, o)
 
 
-def _rows(first_min: int, last_min: int) -> list[tuple[int, str, str, str, int]]:
-    """Stored rows plus the not yet flushed buffer, minutes in [first_min, last_min]."""
+def _rows(first_min: int, last_min: int, bucket_s: int, off: int) -> list[tuple[int, str, str, str, int]]:
+    """(bucket index, channel, kind, outcome, count) for minutes in [first_min, last_min], summed in SQLite, plus the
+    not yet flushed buffer. Bucket index = (UTC seconds + local offset) // bucket_s."""
+    b = ((AccessCount.minute * 60 + off) // bucket_s).label("b")
     with session() as db:
         stored = [tuple(r) for r in db.exec(
-            select(AccessCount.minute, AccessCount.channel, AccessCount.kind, AccessCount.outcome, AccessCount.count)
-            .where(AccessCount.minute >= first_min, AccessCount.minute <= last_min))]
-    pend = [(m, c, k, o, n) for (m, c, k, o), n in access_log.pending().items() if first_min <= m <= last_min]
+            select(b, AccessCount.channel, AccessCount.kind, AccessCount.outcome, func.sum(AccessCount.count))
+            .where(AccessCount.minute >= first_min, AccessCount.minute <= last_min)
+            .group_by(b, AccessCount.channel, AccessCount.kind, AccessCount.outcome))]
+    pend = [((m * 60 + off) // bucket_s, c, k, o, n) for (m, c, k, o), n in access_log.pending().items()
+            if first_min <= m <= last_min]
     return stored + pend
 
 
-def last_hour(now: float | None = None) -> int:
-    """willhaben accesses (cache hits excluded) in the last 60 minutes incl. the current one, from the persisted log."""
+# live-chat reconnect attempts are not paced by the limiter (backoff up to 60 s, so up to ~60/h in an outage);
+# the footer compares against the limiter budget and leaves them out, the stats page shows them
+UNPACED = (("chat", "chat", "error"),)
+
+
+def last_hour(now: float | None = None, exclude: tuple[tuple[str, str, str], ...] = ()) -> int:
+    """willhaben accesses (cache hits excluded) in the last 60 minutes incl. the current one, from the persisted log.
+    `exclude`: (channel, kind, outcome) combinations not to count."""
     now_min = int((now if now is not None else time.time()) // 60)
     first = now_min - 59
+    where = [AccessCount.minute >= first, AccessCount.minute <= now_min, AccessCount.outcome != "cached"]
+    for c, k, o in exclude:
+        where.append(~((AccessCount.channel == c) & (AccessCount.kind == k) & (AccessCount.outcome == o)))
     with session() as db:
-        stored = db.exec(select(func.coalesce(func.sum(AccessCount.count), 0)).where(
-            AccessCount.minute >= first, AccessCount.minute <= now_min, AccessCount.outcome != "cached")).one()
-    pend = sum(n for (m, _c, _k, o), n in access_log.pending().items() if first <= m <= now_min and o != "cached")
+        stored = db.exec(select(func.coalesce(func.sum(AccessCount.count), 0)).where(*where)).one()
+    pend = sum(n for (m, c, k, o), n in access_log.pending().items()
+               if first <= m <= now_min and o != "cached" and (c, k, o) not in exclude)
     return int(stored or 0) + pend
 
 
@@ -77,8 +90,10 @@ def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]
     span, bucket_s = RANGES[rng]
     now = time.time() if now is None else now
     n = span // bucket_s
-    first_idx = int(now // bucket_s) - n + 1
-    first_ts = first_idx * bucket_s
+    # buckets aligned to local time (2-h bars of 7d start at 00:00, 02:00 ... Vienna time, also across DST)
+    off = int(datetime.fromtimestamp(now, VIENNA).utcoffset().total_seconds())
+    first_idx = int((now + off) // bucket_s) - n + 1
+    first_ts = first_idx * bucket_s - off
     fmt = "%d.%m. %H:%M" if rng == "7d" else "%H:%M"
     buckets = [{"start": _iso(first_ts + i * bucket_s), "ts": first_ts + i * bucket_s,
                 "label": _local(first_ts + i * bucket_s, fmt), "end_label": _local(first_ts + (i + 1) * bucket_s, "%H:%M"),
@@ -86,8 +101,8 @@ def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]
     by_channel = {c: 0 for c in CHANNELS}
     by_kind = {k: 0 for k in KINDS}
     by_outcome = {o: 0 for o in OUTCOMES}
-    for minute, ch, kind, outcome, cnt in _rows(first_ts // 60, int(now // 60)):
-        idx = minute * 60 // bucket_s - first_idx
+    for bidx, ch, kind, outcome, cnt in _rows(first_ts // 60, int(now // 60), bucket_s, off):
+        idx = bidx - first_idx
         if not 0 <= idx < n:
             continue
         b = buckets[idx]

@@ -18,9 +18,10 @@ router = APIRouter()
 
 
 def footer_used() -> int:
-    """Footer counter: from the persisted access log (survives restarts); the limiter's own count as a fallback."""
+    """Footer counter: from the persisted access log (survives restarts); the limiter's own count as a fallback.
+    Unpaced live-chat reconnect attempts are left out, the footer is compared against the limiter budget."""
     try:
-        return access_stats.last_hour()
+        return access_stats.last_hour(exclude=access_stats.UNPACED)
     except Exception as e:  # noqa: BLE001 - the footer must always render
         log.debug("access stats unavailable: %s", e)
         return willhaben_limiter().last_hour

@@ -10,7 +10,12 @@ would be simpler but a commit can stall the event loop for tens of milliseconds 
 
 Channels: anonymous = PublicClient (search agents, screening, Preischeck, ad viewer); account = the logged-in browser's
 REST calls, uploads and page navigations; chat = chat WebSocket calls (send, read receipts, ping) plus every connect /
-reconnect of the live chat socket (one long connection: its frames and pings are not counted).
+reconnect of the live chat socket (one long connection: its frames and pings are not counted). Image downloads from
+willhaben's CDN for hit screening count as anonymous/other. Clicks, typing and scrolling in the remote view are not
+counted (the page loads they cause happen inside the browser); its back / reload buttons are.
+
+A 403 counts as `blocked`. For the account channel it is often just an expired login or a refused CSRF token rather than
+anti-bot blocking.
 """
 from __future__ import annotations
 
@@ -41,6 +46,7 @@ _RULES: list[tuple[re.Pattern[str], str]] = [(re.compile(p), k) for p, k in (
     (r"/chat-api/|/iad-messaging/|/chat-ws/", "chat"),
     (r"/userprofile|/sso/|/myprofile/login", "login"),
     (r"/bap/categorysuggestion|/anzeigenaufgabe", "categories"),
+    (r"^/webapi/myatz/", "myads"),                     # own ads: delete, deactivate, ...
     (r"/bap/(presave|save|edit)$|/bap/\d+$|/iad/products/|/p2p-aggregator/", "publish"),
     (r"/myprofile/|/soldreasons|/bap/", "myads"),
     (r"/ad-search/|^/iad/(kaufen-und-verkaufen|immobilien|gebrauchtwagen|jobs)/(?!d/)", "search"),

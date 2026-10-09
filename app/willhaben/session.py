@@ -262,7 +262,10 @@ class BrowserSession:
                     })""",
                     {"url": url, "frame": frame, "rid": request_id, "reqType": req_type, "timeout": timeout_ms},
                 )
-                tr.outcome = access_log.ws_outcome(res.get("status") if isinstance(res, dict) else None)
+                status = res.get("status") if isinstance(res, dict) else None
+                # acked but no final frame: the caller treats it as a likely success (checks the history)
+                tr.outcome = "ok" if isinstance(res, dict) and res.get("acked") and status in ("timeout", "closed") \
+                    else access_log.ws_outcome(status)
         return res
 
     async def api_json(self, method: str, path: str, body: Any = None) -> Any:
@@ -364,10 +367,10 @@ class BrowserSession:
             elif kind == "scroll":
                 await page.mouse.move(float(ev.get("x", 640)), float(ev.get("y", 430)))
                 await page.mouse.wheel(0, max(-3000.0, min(3000.0, float(ev["dy"]))))
-            elif kind == "back":
-                await page.go_back(wait_until="domcontentloaded")
-            elif kind == "reload":
-                await page.reload(wait_until="domcontentloaded")
+            elif kind in ("back", "reload"):
+                with access_log.track("account", "navigation") as tr:
+                    res = await (page.go_back if kind == "back" else page.reload)(wait_until="domcontentloaded")
+                    tr.status = getattr(res, "status", None)
             else:
                 raise ValueError(t("unknown input: {kind}", kind=kind))
 

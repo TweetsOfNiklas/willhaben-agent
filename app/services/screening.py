@@ -11,6 +11,7 @@ import tempfile
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from sqlmodel import col, select
@@ -21,6 +22,7 @@ from app.i18n import LANGS, background_lang, t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import SCREEN_SCHEMA, SCREEN_SYSTEM, screen_prompt
 from app.services.ad_creator import price_stats
+from app.willhaben import access_log
 
 log = logging.getLogger(__name__)
 
@@ -116,9 +118,12 @@ def _stats(agent_id: int, exclude: set[int]) -> dict[str, Any] | None:
 async def _download(url: str | None, folder: Path, name: str) -> Path | None:
     if not (url or "").startswith("https://"):
         return None
+    willhaben = (urlsplit(url).hostname or "").endswith("willhaben.at")   # CDN image: a willhaben access
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True, transport=_transport) as c:
             r = await c.get(url)
+        if willhaben:
+            access_log.record("anonymous", "other", access_log.outcome_for_status(r.status_code))
         if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/") \
                 or len(r.content) > MAX_IMAGE_BYTES:
             return None
@@ -127,6 +132,8 @@ async def _download(url: str | None, folder: Path, name: str) -> Path | None:
         p.write_bytes(r.content)
         return p
     except httpx.HTTPError as e:
+        if willhaben:
+            access_log.record("anonymous", "other", "error")
         log.info("screening image download failed: %s", e)
         return None
 

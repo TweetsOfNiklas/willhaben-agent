@@ -68,6 +68,8 @@ def _put(minute, channel="anonymous", kind="search", outcome="ok", count=1):
     ("/webapi/iad/bap/presave", "publish"),
     ("/webapi/iad/bap/save", "publish"),
     (f"/webapi/iad/bap/{AD}", "publish"),
+    (f"/webapi/myatz/bap/{AD}", "myads"),                               # delete own ad
+    (f"/webapi/myatz/bap/deactivate/{AD}", "myads"),
     ("/webapi/iad/products/privates/carts/42/checkout", "publish"),
     ("/webapi/p2p-aggregator/restapi/v2/p2pp/options/delivery", "publish"),
     ("/webapi/iad-upload/atimage/temp", "upload"),
@@ -168,6 +170,12 @@ class _FakePage:
     async def bring_to_front(self):
         pass
 
+    async def go_back(self, **kw):
+        return _Resp(200)
+
+    async def reload(self, **kw):
+        return None                                                    # Playwright: no response (e.g. cached)
+
     async def wait_for_load_state(self, *a, **kw):
         pass
 
@@ -220,6 +228,37 @@ async def test_browser_session_records(monkeypatch):
         ("chat", "chat", "error"): 1, ("account", "login", "error"): 1, ("account", "login", "ok"): 2,
         ("account", "navigation", "ok"): 1,
     }
+
+
+async def test_acked_send_without_final_frame_is_ok():
+    s = _session([{"status": "timeout", "acked": True}, {"status": "closed", "acked": True},
+                  {"status": "timeout", "acked": False}])
+    for _ in range(3):
+        await s.ws_request("wss://chat-realtime-web.willhaben.at/webapi/chat-ws/v1/ws/", {"req_type": "send_message"},
+                           "rid", req_type="send_message")
+    assert _counts() == {("chat", "send", "ok"): 2, ("chat", "send", "error"): 1}
+
+
+async def test_remote_back_and_reload_are_counted():
+    s = _session([])
+    await s.remote_input({"type": "back"})
+    await s.remote_input({"type": "reload"})
+    assert _counts() == {("account", "navigation", "ok"): 2}
+
+
+async def test_screening_cdn_images_are_counted(monkeypatch, tmp_path):
+    from app.services import screening
+
+    def handler(req):
+        if req.url.host == "cache.willhaben.at" and req.url.path.endswith("broken.jpg"):
+            raise httpx.ConnectError("down")
+        return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"x")
+
+    monkeypatch.setattr(screening, "_transport", httpx.MockTransport(handler))
+    assert await screening._download("https://cache.willhaben.at/mmo/1/000/000/001_1.jpg", tmp_path, "a")
+    assert await screening._download("https://cache.willhaben.at/mmo/1/000/000/001_broken.jpg", tmp_path, "b") is None
+    assert await screening._download("https://example.org/foto.jpg", tmp_path, "c")      # not willhaben
+    assert _counts() == {("anonymous", "other", "ok"): 1, ("anonymous", "other", "error"): 1}
 
 
 async def test_live_chat_counts_connects_not_frames():
@@ -280,6 +319,37 @@ def test_last_hour_window():
     _put(NOW_MIN, count=1)
     _put(NOW_MIN, outcome="cached", count=9)
     assert access_stats.last_hour(NOW) == 3
+
+
+def test_footer_leaves_out_unpaced_reconnects(client):
+    access_log.record("anonymous", "search")
+    access_log.record("chat", "send", "error")
+    for _ in range(5):
+        access_log.record("chat", "chat", "error")                   # failed live-chat reconnects
+    assert access_stats.last_hour() == 7
+    assert access_stats.last_hour(exclude=access_stats.UNPACED) == 2
+    access_log.flush()
+    assert access_stats.last_hour(exclude=access_stats.UNPACED) == 2
+    assert "2 / 240 willhaben requests in the last hour" in client.get("/stats/willhaben?range=1h").text
+
+
+def test_7d_buckets_align_to_local_time():
+    winter = 1_798_000_000.0 - 1_798_000_000.0 % 7200                  # Dec 2026, UTC+1; a UTC multiple of 2 h
+    for now in (NOW, winter, winter + 3600):
+        b = access_stats.series("7d", now=now)["buckets"]
+        assert all(x["label"].endswith((":00",)) and int(x["label"][-5:-3]) % 2 == 0 for x in b)
+    _put(int(winter // 60) - 90, count=4)                                # 03:30 local: in the 02-04 bar
+    d = access_stats.series("7d", now=winter)                            # now = 05:00 local, current bar 04-06
+    assert d["buckets"][-2]["total"] == 4 and d["buckets"][-2]["label"].endswith("02:00")
+
+
+def test_series_sums_rows_in_buckets():
+    for m in range(NOW_MIN - 119, NOW_MIN + 1):                           # 2 h of per-minute rows, 2 combos each
+        _put(m, count=1)
+        _put(m, "account", "chat", count=2)
+    d = access_stats.series("7d", now=NOW)
+    assert d["total"] == 360 and d["by_channel"] == {"anonymous": 120, "account": 240, "chat": 0}
+    assert sum(b["total"] for b in d["buckets"]) == 360
 
 
 def test_prune_keeps_eight_days():
