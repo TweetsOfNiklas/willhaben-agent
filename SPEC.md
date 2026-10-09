@@ -174,6 +174,9 @@ claude -p --output-format json --json-schema <schema> --model opus --system-prom
 
 - robots.txt explicitly forbids automated access; account suspension is possible. Keep intervals ≥ 2 min per agent,
   ≥ 2 s between requests, no bulk actions, human approval for every write.
+  Exception (owner's request 2026-10-09): My ads has a UI multi-select to activate/deactivate/delete several own ads.
+  It runs only on an explicit click + confirm listing every title, strictly sequential through the shared limiter, stops
+  at the first logout/429, and is never used by jobs, pushes or MCP.
 - Rate limiting: one shared `willhaben_limiter()` (app/willhaben/public.py) for anonymous httpx AND the logged-in browser:
   `REQUEST_MIN_GAP_S` (3 s) + `REQUESTS_PER_HOUR` budget (240); waits > 45 s raise `Blocked` instead of hanging. One-off
   lookups (builder filters, details, keyword searches) are cached 2–5 min; agent polls are never cached. Usage shows in the footer.

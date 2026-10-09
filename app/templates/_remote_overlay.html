@@ -1,0 +1,60 @@
+{# Remote browser view as an overlay on any page (instead of navigating to Settings or /session).
+   Opens for: links to /session or /settings#willhaben (when not already on Settings), [data-remote] links,
+   and pages loaded with ?remote=1 (e.g. after "Create label"). The iframe only loads while the overlay is
+   open, so the screenshot polling stops when it closes. Closing reloads the page to show the new state. #}
+<dialog id="remote-overlay" aria-label="{{ _('Browser window') }}">
+  <article class="remote-overlay">
+    <header>
+      <strong>{{ _("Browser window") }}</strong>
+      <small class="muted">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
+      <button type="button" class="secondary outline" data-close aria-label="{{ _('Close') }}" title="{{ _('Close') }}">✕</button>
+    </header>
+    <iframe title="{{ _('Browser window') }}" src="about:blank"></iframe>
+  </article>
+</dialog>
+<style>
+  #remote-overlay { padding: 0; }
+  #remote-overlay > article.remote-overlay { width: min(1280px, 96vw); max-width: none; height: 92vh; margin: 0;
+    padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+  #remote-overlay header { display: flex; gap: .6rem; align-items: center; margin: 0; padding: .25rem .4rem .25rem .8rem;
+    font-size: .9rem; min-height: 0; }
+  #remote-overlay header small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 900px) { #remote-overlay header small { display: none; } }
+  #remote-overlay header button { margin-left: auto; width: auto; padding: .1rem .55rem; font-size: .95rem; line-height: 1.4; }
+  #remote-overlay iframe { flex: 1; width: 100%; border: 0; background: var(--pico-background-color); }
+</style>
+<script>
+(() => {
+  const dlg = document.getElementById('remote-overlay'), frame = dlg.querySelector('iframe');
+  const open = (path) => {
+    frame.src = path || '/session?embed=1';
+    if (!dlg.open) dlg.showModal();
+  };
+  const close = () => {
+    dlg.close();
+  };
+  dlg.addEventListener('close', () => {
+    frame.src = 'about:blank';                    // stops the screenshot loop
+    const url = new URL(location.href);
+    url.searchParams.delete('remote'); url.searchParams.delete('msg');
+    if (url.toString() === location.href) location.reload();   // fresh state (login, label saved, ...)
+    else location.replace(url.toString());
+  });
+  // Esc while typing in the remote view belongs to willhaben, not to the dialog
+  dlg.addEventListener('cancel', e => { if (document.activeElement === frame) e.preventDefault(); });
+  dlg.querySelector('[data-close]').addEventListener('click', close);
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || a.target === '_blank') return;
+    const href = a.getAttribute('href');
+    const remote = a.hasAttribute('data-remote') || href === '/session' ||
+                   (href === '/settings#willhaben' && location.pathname !== '/settings');
+    if (!remote) return;
+    e.preventDefault();
+    open(a.dataset.remote && a.dataset.remote.startsWith('/session') ? a.dataset.remote : '/session?embed=1');
+  });
+  const q = new URLSearchParams(location.search);
+  if (q.get('remote') === '1') open('/session?embed=1' + (q.get('msg') ? '&msg=' + encodeURIComponent(q.get('msg')) : ''));
+  window.whRemote = {open, close};
+})();
+</script>

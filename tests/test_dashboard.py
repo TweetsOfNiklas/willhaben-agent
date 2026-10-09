@@ -266,3 +266,17 @@ def test_ad_viewer_shows_full_claude_assessment(client):
         db.commit()
     frag = client.get("/hits/ad/1662146981", params={"hit": 6}).text
     assert "Claude" in frag and reason.strip() in frag            # complete text, not the 90-char card excerpt
+
+
+def test_remote_overlay_compact_header(client, monkeypatch):
+    from app.willhaben.session import get_session
+
+    sess = get_session()
+    status = {**sess.status(), "started": True, "logged_in": True, "user": {"nickname": "Max"}}
+    monkeypatch.setattr(sess, "status", lambda: status)
+    embed = client.get("/session", params={"embed": 1}).text
+    assert 'class="embed-status' in embed and "Max" in embed
+    assert "You log in in the app" not in embed and "Sie loggen" not in embed     # long explanation only on the full page
+    assert '<header>' not in embed.split('id="remote"')[1].split("remote-screen")[0]  # no "Browser window" heading in the overlay
+    full = client.get("/session").text
+    assert 'class="embed-status' not in full and 'id="remote"' in full

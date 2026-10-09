@@ -1,5 +1,16 @@
 {# willhaben browser session: status, login, live remote view, recorder. Used by /session and Settings → willhaben account.
    session_next = where the forms return to. #}
+{% if embed and session_status.started %}
+{# overlay: one compact status line instead of the full login card #}
+<div class="embed-status row-actions">
+  {% if session_status.logged_in %}<span class="badge ok">{{ _("logged in") }}</span>
+    {% if session_status.user %}<small>{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}
+  {% elif session_status.logged_in is none %}<span class="badge muted">{{ _("unknown") }}</span>
+  {% else %}<span class="badge">{{ _("not logged in") }}</span>{% endif %}
+  <form method="post" action="/session/login"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="secondary outline">{{ _("Open login page") }}</button></form>
+  <form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="secondary outline">{{ _("Check login") }}</button></form>
+</div>
+{% else %}
 <article>
   {% if not session_status.started %}
     <p>{{ _("The browser is not running.") }} {{ session_status.error or '' }}</p>
@@ -18,20 +29,22 @@
       {{ _("The session then stays stored in the browser profile and is renewed automatically as long as willhaben allows it.") }}</small></p>
   {% endif %}
 </article>
+{% endif %}
 
 {% if session_status.started %}
   {% if label_form %}
   <article id="label-form" style="border-left:4px solid var(--brand)">
     <form method="post" action="/session/label-fill" class="row-actions" style="margin:0;align-items:center">
+      <input type="hidden" name="next" value="{{ session_next or '/session' }}">
       <span>📦 {{ _("Label form for this chat's parcel. After each step (“Weiter”), let the app fill the next page.") }}</span>
       <button style="width:auto" onclick="this.setAttribute('aria-busy','true')">{{ _("Fill this page") }}</button>
-      <a href="/shipments/{{ label_form.shipment_id }}/back" class="secondary">{{ _("Back to the chat") }}</a>
+      {% if not embed %}<a href="/shipments/{{ label_form.shipment_id }}/back" class="secondary">{{ _("Back to the chat") }}</a>{% endif %}
     </form>
   </article>
   {% endif %}
   <article id="remote">
-    <header>{{ _("Browser window") }}
-      <small class="muted">· {{ _("click into the picture and type, paste with Ctrl+V") }}</small></header>
+    {% if not embed %}<header>{{ _("Browser window") }}
+      <small class="muted">· {{ _("click into the picture and type, paste with Ctrl+V") }}</small></header>{% endif %}
     <div class="remote-bar">
       <button type="button" class="secondary" data-act="back">← {{ _("Back") }}</button>
       <button type="button" class="secondary" data-act="reload">⟳ {{ _("Reload") }}</button>
@@ -43,7 +56,7 @@
       <button type="button" class="secondary" data-key="Enter">Enter</button>
       <span class="remote-state muted"></span>
     </div>
-    <div class="remote-screen" tabindex="0" title="{{ _('Click, then type') }}">
+    <div class="remote-screen" tabindex="0" title="{{ _('Click, then type') }} · {{ _('click into the picture and type, paste with Ctrl+V') }}">
       <img alt="{{ _('Loading browser window …') }}">
     </div>
   </article>

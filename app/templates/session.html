@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<p><a href="/settings">← {{ _("Settings") }}</a></p>
-<h3>{{ _("willhaben account") }}</h3>
+{% if not embed %}<p><a href="/settings">← {{ _("Settings") }}</a></p>
+<h3>{{ _("willhaben account") }}</h3>{% endif %}
 {% include "_session_panel.html" %}
 {% endblock %}

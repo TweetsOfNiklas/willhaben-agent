@@ -46,12 +46,21 @@
     </details>
 
     {% if ship_options %}
+    <p class="row-actions" style="margin:.3rem 0"><small>{{ _("Sort:") }}
+      <a href="?sort=price#shipping" {% if ship_sort == 'price' %}aria-current="true" style="font-weight:600"{% endif %}>{{ _("cheapest") }}</a> ·
+      <a href="?sort=near#shipping" {% if ship_sort == 'near' %}aria-current="true" style="font-weight:600"{% endif %}>{{ _("nearest drop-off") }}</a>
+      {% if not ship_near %}<span class="muted">· {{ _("drop-off points need your sender address") }}</span>{% endif %}</small></p>
     <table class="striped">
       <tbody>
       {% for o in ship_options %}
         <tr {% if ship_option and o.key == ship_option.key %}style="font-weight:600"{% endif %}>
-          <td>{{ o.label() }}{% if loop.first %} <span class="badge ok">{{ _("cheapest") }}</span>{% endif %}
-            <br><small class="muted">{{ o.note or ship_carriers[o.carrier].dropoff }}</small></td>
+          <td>{{ o.label() }}{% if o.price == ship_options|map(attribute='price')|min %} <span class="badge ok">{{ _("cheapest") }}</span>{% endif %}
+            <br><small class="muted">{% set pts = ship_near.get(o.carrier) or [] %}{% if not o.online %}{% set pts = pts|rejectattr('kind', 'equalto', 'station')|list %}{% endif %}
+              {% if pts %}📍 {{ pts[0].name }}, {{ pts[0].address }} · <strong>{{ fmt_dist(pts[0].dist_m) }}</strong>
+                {% if pts|length > 1 %}<details style="display:inline"><summary style="display:inline">{{ _("+{n} more", n=pts|length - 1) }}</summary>
+                  {% for p in pts[1:] %}<br>📍 {{ p.name }}, {{ p.address }} · {{ fmt_dist(p.dist_m) }}{% endfor %}</details>{% endif %}
+              {% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}
+              {% if o.note %}<br>{{ o.note }}{% endif %}</small></td>
           <td style="white-space:nowrap">{{ o.price|eur }}</td>
           <td style="text-align:right">
             {% if shipment.status == 'draft' and o.online %}
@@ -67,6 +76,31 @@
       {% endfor %}
       </tbody>
     </table>
+    <details>
+      <summary><small>{{ _("All options ({n})", n=ship_all|length) }}</small></summary>
+      <table class="striped">
+        <tbody>
+        {% for o, fits in ship_all %}
+          <tr {% if not fits %}class="muted" style="opacity:.55"{% endif %}>
+            <td>{{ o.label() }}<br><small class="muted">{% set pts = ship_near.get(o.carrier) or [] %}{% if pts %}📍 {{ pts[0].name }} · {{ fmt_dist(pts[0].dist_m) }}{% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}{% if o.note %} · {{ o.note }}{% endif %}
+              · {{ _("max. {kg} kg", kg=o.max_kg|round(1)|string|replace('.0', '')) }}</small></td>
+            <td style="white-space:nowrap">{{ o.price|eur }}</td>
+            <td style="text-align:right">
+              {% if not fits %}<small>{{ _("too big/heavy") }}</small>
+              {% elif shipment.status == 'draft' and o.online %}
+                <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
+                  <input type="hidden" name="key" value="{{ o.key }}">
+                  <button class="secondary outline" style="width:auto;padding:.2rem .7rem;margin:0"
+                    {% if not ship_sender_ok or not r.name %}disabled{% endif %}
+                    onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button>
+                </form>
+              {% elif not o.online %}<small class="muted">{{ _("at the counter") }}</small>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
     <p><small class="muted">{{ _("Published prices for online labels within Austria; the carrier's checkout shows the binding price. “→ Shop”: delivered to a parcel shop near the buyer.") }}</small></p>
     {% elif p.length_cm %}
       <p><small>{{ _("No enabled carrier takes a parcel this size or weight.") }}</small></p>

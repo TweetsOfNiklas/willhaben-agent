@@ -55,6 +55,8 @@ class Carrier:
     login: str                    # what account the flow needs
     options: tuple[Option, ...] = field(default_factory=tuple)
     verified: bool = False        # prices checked against the carrier's own page
+    login_url: str = ""           # where "Open & log in" starts (falls back to label_url)
+    login_click: str = ""         # button that reveals the login form (GLS shows it in a dialog)
 
 
 def _gls() -> tuple[Option, ...]:
@@ -81,6 +83,7 @@ CARRIERS: dict[str, Carrier] = {
     "post": Carrier(
         name="Post", label_url="https://www.post.at/p/a/paketmarke",
         dropoff="Postfiliale, Post Partner, SB-Versandstation; Abholservice", login="post.at Online Services",
+        login_url="https://www.post.at/s/sendungsuebersicht",
         options=(
             # online Paketmarke: longest + shortest side, ≤10 kg, tracking + 510 € liability, print at home (A5)
             Option("post", "PM 45", 5.21, 10, "ls", (45,)),
@@ -97,10 +100,12 @@ CARRIERS: dict[str, Carrier] = {
     "gls": Carrier(
         name="GLS", label_url="https://www.gls-one.at/de/parcel/",
         dropoff="GLS PaketShop (QR-Code, ohne Drucker)", login="optional (Gast)", options=_gls(), verified=True,
+        login_url="https://www.gls-one.at/de/parcel/", login_click="Melde dich an",
     ),
     "hermes": Carrier(
         name="Hermes", label_url="https://www.myhermes.at/privatkunden/sendung-aufgeben/online-paketschein-erzeugen/",
         dropoff="Hermes PaketShop (bar bezahlen, Schein ausgedruckt)", login="optional",
+        login_url="https://www.myhermes.at/privatkunden/login-registrierung/login-anmeldung/",
         options=tuple(Option("hermes", size, price, 31.5, "ls", (ls,), note="Bezahlung bar im PaketShop")
                       for size, ls, price in [("S", 50, 4.60), ("M", 80, 6.60), ("L", 120, 9.60)]),
         verified=True,
@@ -108,6 +113,7 @@ CARRIERS: dict[str, Carrier] = {
     "dpd": Carrier(
         name="DPD", label_url="https://www.mydpd.at/paket-versenden",
         dropoff="DPD Pickup Paketshop (QR-Code, ohne Drucker)", login="optional (Gast)", options=_dpd(),
+        login_url="https://www.mydpd.at/login",
         verified=True,
     ),
 }

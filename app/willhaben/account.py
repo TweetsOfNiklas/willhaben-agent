@@ -169,6 +169,8 @@ class OwnAdvert:
 # Link ids in an own ad's advertEditStatusActionsList (from the /bbx-adin myadverts bundle, 2026-10-09)
 ACTION_ACTIVATE = "4"     # deactivated ad back online: PUT, no body
 ACTION_REPUBLISH = "6"    # expired ad: POST -> new insertion draft (new adId), finished like a new ad
+ACTION_DEACTIVATE = "2"   # take a live ad offline (reversible via ACTIVATE): PUT, no body
+ACTION_DELETE = "3"       # delete the ad for good: DELETE, no body (the delete-reason survey is optional)
 
 
 def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
@@ -332,6 +334,34 @@ class AccountClient:
             return res["ad_id"]
         raise EndpointUnknown(t("willhaben offers no reactivation for this ad (status: {status})",
                                 status=ad.status_label or ad.status))
+
+    async def _ad_action(self, ad_id: str, action: str, method: str, what: str,
+                         ads: list[OwnAdvert] | None = None) -> None:
+        """Run one of willhaben's own action links of an ad, like its button in "Meine Anzeigen".
+
+        `ads`: an account list fetched before (several ads in a row need only one list request).
+        """
+        ad = next((a for a in (ads if ads is not None else await self.my_adverts()) if a.ad_id == str(ad_id)), None)
+        if ad is None:
+            raise EndpointUnknown(t("Ad {id} is not in the account list", id=ad_id))
+        link = (ad.actions or {}).get(action)
+        if link is None:
+            raise EndpointUnknown(t("willhaben offers no “{what}” for this ad (status: {status})",
+                                    what=what, status=ad.status_label or ad.status))
+        r = await self.s.api(method, _link_path(link))
+        if r.status in (401, 403):
+            raise NotLoggedIn(f"{_link_path(link)}: HTTP {r.status}")
+        if not r.ok:
+            raise RuntimeError(f"{method} {_link_path(link)}: HTTP {r.status} {r.text[:200]}")
+
+    async def deactivate_ad(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> None:
+        await self._ad_action(ad_id, ACTION_DEACTIVATE, "PUT", t("Deactivate"), ads)
+
+    async def activate_ad(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> None:
+        await self._ad_action(ad_id, ACTION_ACTIVATE, "PUT", t("Activate"), ads)
+
+    async def delete_ad(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> None:
+        await self._ad_action(ad_id, ACTION_DELETE, "DELETE", t("Delete"), ads)
 
     async def publish_ad(self, draft: dict[str, Any]) -> str:
         raise EndpointUnknown(t("Ad posting not captured yet (recording 'anzeige-aufgeben')."))

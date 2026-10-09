@@ -300,7 +300,24 @@ async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], 
     def remember(wh_id: str) -> None:            # so a retry continues the same willhaben draft
         update_draft(draft_id, wh_ad_id=wh_id)
 
-    res = await insert.publish(sess, ad, photos, existing_ad_id=d.wh_ad_id, on_presaved=remember, stop_after=stop_after)
+    try:
+        res = await insert.publish(sess, ad, photos, existing_ad_id=d.wh_ad_id, on_presaved=remember,
+                                   stop_after=stop_after)
+    except RuntimeError as e:
+        # 409 on the reused willhaben draft: it was deleted (or finished) meanwhile -> start one fresh insertion
+        if not d.wh_ad_id or "HTTP 409" not in str(e):
+            raise
+        # ...unless it still exists: then it may already be live, and a new insertion would be a public duplicate
+        from app.willhaben.account import AccountClient
+        old = next((a for a in await AccountClient(sess).my_adverts() if a.ad_id == str(d.wh_ad_id)), None)
+        if old is not None:
+            if old.status == "active":
+                update_draft(draft_id, status="published", error=None)
+            raise insert.InsertError(f"Existiert auf willhaben schon als {old.ad_id} "
+                                     f"({old.status_label or old.status}) – nicht noch einmal angelegt") from e
+        log.info("willhaben draft %s of ad draft %s is gone (%s); publishing as a new insertion", d.wh_ad_id, draft_id, e)
+        update_draft(draft_id, wh_ad_id=None)
+        res = await insert.publish(sess, ad, photos, existing_ad_id=None, on_presaved=remember, stop_after=stop_after)
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)

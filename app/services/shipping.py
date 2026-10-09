@@ -61,6 +61,45 @@ def save_carriers(selected: list[str]) -> None:
     set_setting("ship_carriers", ",".join(c for c in selected if c in CARRIERS) or "-")
 
 
+# ------------------------------------------------------------------ carrier logins
+def _logins_path():
+    from app.config import get_settings
+    return get_settings().data_dir / "carrier-logins.json"
+
+
+def carrier_logins() -> dict[str, dict[str, str]]:
+    """{carrier: {user, password}} – DATA_DIR/carrier-logins.json (mode 600). Passwords never go to Claude."""
+    try:
+        data = json.loads(_logins_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {c: v for c, v in data.items() if c in CARRIERS and isinstance(v, dict)}
+
+
+def save_login(carrier: str, user: str, password: str) -> None:
+    """Empty password keeps the stored one; empty user removes the login."""
+    import os
+    if carrier not in CARRIERS:
+        raise ShippingError(t("unknown carrier"))
+    data = carrier_logins()
+    user = user.strip()
+    if not user:
+        data.pop(carrier, None)
+    else:
+        data[carrier] = {"user": user, "password": password or (data.get(carrier) or {}).get("password", "")}
+    p = _logins_path()
+    tmp = p.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, p)
+
+
+def login_status() -> dict[str, dict[str, Any]]:
+    """For the settings page: user name and whether a password is stored (never the password)."""
+    return {c: {"user": v.get("user", ""), "has_password": bool(v.get("password"))} for c, v in carrier_logins().items()}
+
+
 def config() -> dict[str, Any]:
     return {"sender": sender(), "carriers": enabled_carriers(), "detect": get_setting("ship_detect") != "0"}
 
@@ -71,6 +110,12 @@ def quote(parcel: dict[str, Any] | None) -> list[Option]:
     if not parcel:
         return []
     return options_for(parcel, enabled_carriers())
+
+
+def all_options(parcel: dict[str, Any] | None) -> list[tuple[Option, bool]]:
+    """Every option of the enabled carriers with whether it fits, fitting and cheap first."""
+    every = [o for c in enabled_carriers() for o in CARRIERS[c].options]
+    return sorted(((o, bool(parcel) and o.fits(parcel)) for o in every), key=lambda x: (not x[1], x[0].price))
 
 
 def by_key(key: str | None) -> Option | None:

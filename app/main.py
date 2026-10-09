@@ -397,7 +397,7 @@ async def chats_sync():
 
 
 @app.get("/chats/{conversation_id}", response_class=HTMLResponse)
-async def chat_page(request: Request, conversation_id: str, msg: str | None = None):
+async def chat_page(request: Request, conversation_id: str, msg: str | None = None, sort: str | None = None):
     with session() as db:
         conv = db.get(Conversation, conversation_id)
     if conv is None:
@@ -409,14 +409,30 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     drafts = chats.drafts_of(conversation_id)
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
-                  gcal_duration=gcal.config()["duration"], **_shipping_ctx(conversation_id, conv))
+                  gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort))
 
 
-def _shipping_ctx(conversation_id: str, conv: Conversation) -> dict[str, Any]:
+async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | None = None) -> dict[str, Any]:
+    from app.services import dropoff
     s = shipping.open_for(conversation_id)
-    return {"shipment": s, "ship_options": shipping.quote(s.parcel) if s else [],
+    if sort in ("price", "near"):
+        set_setting("ship_sort", sort)
+    sort = get_setting("ship_sort") or "price"
+    near: dict[str, list[dict[str, Any]]] = {}
+    if s and conv.role == "seller":
+        try:
+            near = await asyncio.wait_for(dropoff.nearest(shipping.sender(), shipping.enabled_carriers()), 10)
+        except TimeoutError:
+            near = {}
+    options = shipping.quote(s.parcel) if s else []
+    if sort == "near" and near:
+        far = 10 ** 9
+        options = sorted(options, key=lambda o: ((near.get(o.carrier) or [{}])[0].get("dist_m") or far, o.price))
+    return {"shipment": s, "ship_options": options, "ship_near": near, "ship_sort": sort,
+            "fmt_dist": dropoff.fmt_dist,
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
-            "ship_sender_ok": shipping.sender_complete()}
+            "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
+            "ship_all": shipping.all_options(s.parcel) if s else []}
 
 
 @app.post("/chats/{conversation_id}/refresh")
@@ -466,7 +482,7 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 @app.get("/myads", response_class=HTMLResponse)
-async def myads_page(request: Request, msg: str | None = None):
+async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False):
     with session() as db:
         empty = db.exec(select(MyAd).limit(1)).first() is None
     if empty and get_session().logged_in:
@@ -475,8 +491,11 @@ async def myads_page(request: Request, msg: str | None = None):
         except (NotLoggedIn, SessionUnavailable, ValueError) as e:
             msg = msg or t("Could not load ads: {error}", error=e)
     with session() as db:
-        ads = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).asc().nulls_last())))
-    return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL)
+        rows = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).asc().nulls_last())))
+    hidden = [a for a in rows if a.hidden]
+    ads = rows if show_hidden else [a for a in rows if not a.hidden]
+    return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
+                  hidden_count=len(hidden), show_hidden=show_hidden)
 
 
 @app.post("/myads/check")
@@ -505,10 +524,46 @@ async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions
     return back(f"/myads?msg={quote(t('Automatic replies on') if on else t('Automatic replies off'), safe='')}#ad-{ad_id}")
 
 
+@app.post("/myads/bulk/{action}")
+async def myads_bulk(request: Request, action: str):
+    if action not in ("activate", "deactivate", "delete"):
+        raise HTTPException(404)
+    ids = [str(i) for i in (await request.form()).getlist("ids") if str(i).isdigit()]
+    if not ids:
+        return back(f"/myads?msg={quote(t('No ads selected'), safe='')}")
+    try:
+        res = await my_ads.bulk(action, ids)
+    except (NotLoggedIn, SessionUnavailable, WillhabenError, RuntimeError, ValueError) as e:
+        return back(f"/myads?msg={quote(t('Failed: {error}', error=e), safe='')}")
+    lines = [{"delete": t("Deleted on willhaben: {n}", n=len(res["done"])),
+              "activate": t("Activated on willhaben: {n}", n=len(res["done"])),
+              "deactivate": t("Deactivated on willhaben: {n}", n=len(res["done"]))}[action]]
+    lines += [f"✗ {title}: {err}" for title, err in res["failed"]]
+    return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}")
+
+
+@app.post("/myads/{ad_id}/hide")
+async def myads_hide(ad_id: str, hidden: str = Form("1")):
+    my_ads.set_hidden(ad_id, hidden == "1")
+    return back(f"/myads?msg={quote(t('Hidden from the list (still online on willhaben)') if hidden == '1' else '', safe='')}")
+
+
+@app.post("/myads/{ad_id}/deactivate")
+async def myads_deactivate(ad_id: str):
+    try:
+        await my_ads.deactivate(ad_id)
+    except (EndpointUnknown, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        return back(f"/myads?msg={quote(t('Deactivating failed: {error}', error=e), safe='')}")
+    return back(f"/myads?msg={quote(t('Deactivated on willhaben – it can be activated again there'), safe='')}")
+
+
 @app.post("/myads/{ad_id}/delete")
 async def myads_delete(ad_id: str):
-    my_ads.remove(ad_id)
-    return back("/myads")
+    try:
+        await my_ads.delete(ad_id)
+    except (EndpointUnknown, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        return back(f"/myads?msg={quote(t('Deleting failed: {error}', error=e), safe='')}")
+    return back(f"/myads?msg={quote(t('Deleted on willhaben'), safe='')}")
 
 
 # ------------------------------------------------------------------ new ad
@@ -768,10 +823,12 @@ def _session_back(next_url: str | None, msg: str | None = None) -> RedirectRespo
 
 
 @app.get("/session", response_class=HTMLResponse)
-async def session_page(request: Request, msg: str | None = None):
+async def session_page(request: Request, msg: str | None = None, embed: bool = False):
+    """embed=1: bare page for the remote-view overlay (base.html opens it in a dialog on any page)."""
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
     return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),
-                  label_form=label_fill.active(), session_next="/session")
+                  label_form=label_fill.active(), session_next="/session?embed=1" if embed else "/session",
+                  embed=embed)
 
 
 @app.post("/session/start")
@@ -869,7 +926,7 @@ async def settings_page(request: Request, msg: str | None = None):
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
-                  ship=shipping.config(), ship_carriers=shipping.CARRIERS,
+                  ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings#willhaben")
 
@@ -1141,6 +1198,24 @@ async def settings_shipping(request: Request):
     return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
 
 
+@app.post("/settings/shipping/login/{carrier}")
+async def settings_shipping_login(carrier: str, user: str = Form(""), password: str = Form("")):
+    try:
+        shipping.save_login(carrier, user, password)
+    except shipping.ShippingError as e:
+        return back(f"/settings?msg={quote(str(e), safe='')}#shipping")
+    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+
+
+@app.post("/settings/shipping/open/{carrier}")
+async def settings_shipping_open(carrier: str):
+    try:
+        msg = await label_fill.open_carrier(carrier)
+    except shipping.ShippingError as e:
+        return back(f"/settings?msg={quote(str(e), safe='')}#shipping")
+    return back(f"/settings?remote=1&msg={quote(msg, safe='')}#shipping")   # shows the page in the overlay
+
+
 @app.post("/chats/{conversation_id}/shipping/detect")
 async def shipping_detect(conversation_id: str):
     try:
@@ -1183,7 +1258,8 @@ async def shipment_label(shipment_id: int, key: str = Form("")):
         msg = await label_fill.start(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return back(f"/session?msg={quote(msg, safe='')}")
+    # stay on the chat; ?remote=1 opens the remote-view overlay with the carrier's form
+    return back(f"/chats/{s.conversation_id}?remote=1&msg={quote(msg, safe='')}#shipping")
 
 
 @app.get("/shipments/{shipment_id}/back")
@@ -1192,12 +1268,12 @@ async def shipment_back(shipment_id: int):
 
 
 @app.post("/session/label-fill")
-async def session_label_fill():
+async def session_label_fill(next: str = Form("/session")):
     try:
         msg = await label_fill.fill_current()
     except shipping.ShippingError as e:
         msg = str(e)
-    return back(f"/session?msg={quote(msg, safe='')}")
+    return _session_back(next, msg)
 
 
 @app.post("/shipments/{shipment_id}/status")

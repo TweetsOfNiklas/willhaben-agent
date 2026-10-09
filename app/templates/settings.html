@@ -351,6 +351,21 @@
           {{ _("Notice addresses in chats automatically and offer a label") }}</label>
         <button>{{ _("Save") }}</button>
       </form>
+      <h5 style="margin-top:1.5rem">{{ _("Carrier logins") }}</h5>
+      <p><small class="muted">{{ _("Optional. When a carrier's page asks for a login, the app types it in for you. Stored only on this server (data folder, owner-only); the password is never shown again and never sent to Claude.") }}</small></p>
+      {% for key, c in ship_carriers.items() %}{% set lg = ship_logins.get(key) or {} %}
+        <form method="post" action="/settings/shipping/login/{{ key }}" class="carrier-login">
+          <fieldset role="group" style="margin-bottom:.4rem">
+            <input value="{{ c.name }}" readonly tabindex="-1" style="max-width:6.5rem;font-weight:600" aria-label="{{ _('Carrier') }}">
+            <input name="user" value="{{ lg.user or '' }}" placeholder="{{ _('E-mail / user name') }}" autocomplete="off" aria-label="{{ _('E-mail / user name') }}">
+            <input name="password" type="password" placeholder="{{ _('•••••• (saved)') if lg.has_password else _('Password') }}" autocomplete="new-password" aria-label="{{ _('Password') }}">
+            <button class="secondary" style="white-space:nowrap">{{ _("Save") }}</button>
+            <button class="secondary outline" style="white-space:nowrap" formaction="/settings/shipping/open/{{ key }}"
+                    onclick="this.setAttribute('aria-busy','true')">{{ _("Open & log in") }}</button>
+          </fieldset>
+        </form>
+      {% endfor %}
+      <p><small class="muted">{{ _("Leave the password empty to keep the saved one; clear the user name to remove a login.") }}</small></p>
       <p><small class="muted">{{ _("Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size, you check and pay. Log in there once if the carrier asks; the browser remembers it. The app never presses “buy” or “pay”.") }}</small></p>
     </section>
 

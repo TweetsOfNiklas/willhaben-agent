@@ -205,3 +205,140 @@ async def test_fill_falls_back_without_claude(monkeypatch):
     monkeypatch.setattr("app.llm.base.get_backend", lambda *a: Broken())
     with pytest.raises(shipping.ShippingError):
         await label_fill.fill_current()                                     # nothing open
+
+
+async def test_chat_page_renders_with_shipment(chat):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    s = await shipping.detect("c1")
+    assert s.option
+    with TestClient(app) as c:
+        r = c.get("/chats/c1")
+        assert r.status_code == 200 and 'id="shipping"' in r.text and "Create label" in r.text
+        assert "All options" in r.text and "too big/heavy" in r.text
+        r = c.post(f"/shipments/{s.id}", data={**ADDR, "length_cm": 30, "width_cm": 22, "height_cm": 8,
+                                                "weight_kg": 1.4}, follow_redirects=False)
+        assert r.status_code == 303
+        assert c.get("/settings").status_code == 200
+
+
+@pytest.fixture
+def finders(monkeypatch):
+    import httpx
+
+    from app.services import dropoff
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if host == "nominatim.openstreetmap.org":
+            return httpx.Response(200, json=[{"lat": "48.2100", "lon": "16.3300"}])
+        if host == "api.post.at":
+            return httpx.Response(200, json={"data": {"branches": [
+                {"type": "ABHOLSTATION", "name": "Abholstation nur Abholung", "openinghourformatted": "",
+                 "address": {"streetname": "A", "streetnumber": "1", "postalcode": "1160", "city": "Wien",
+                             "coordinates": {"latitudewgs84": 48.2101, "longitudewgs84": 16.3301}},
+                 "services": [{"serviceid": 379}]},
+                {"type": "FILIALE", "name": "Postfiliale 1160", "openinghourformatted": "Mo-Fr 8-18",
+                 "address": {"streetname": "B", "streetnumber": "2", "postalcode": "1160", "city": "Wien",
+                             "coordinates": {"latitudewgs84": 48.2200, "longitudewgs84": 16.3300}},
+                 "services": [{"serviceid": 1}]}]}})
+        if host == "api.gls-group.net":
+            assert request.headers["apikey"]
+            return httpx.Response(200, json=[
+                {"name": "Trafik", "type": "SHOPINSHOP", "street": "C", "houseNumber": "3", "zipCode": "1160",
+                 "city": "Wien", "latitude": 48.2105, "longitude": 16.3300, "offersPrepaidParcelDropOff": True},
+                {"name": "Nur Abholung", "type": "LOCKER", "street": "D", "houseNumber": "4", "zipCode": "1160",
+                 "city": "Wien", "latitude": 48.2100, "longitude": 16.3300, "offersPrepaidParcelDropOff": False}])
+        if host == "www.mydpd.at":
+            return httpx.Response(403, text="captcha")                         # bot protection: no DPD data
+        if host == "wsfinder.hlg.at":
+            return httpx.Response(200, json=[{"description": "Copyshop", "street": "E", "houseNumber": "5",
+                                              "postCode": "1160", "city": "Wien", "lat": 48.2300, "lng": 16.3300}])
+        return httpx.Response(404)
+
+    monkeypatch.setattr(dropoff, "_transport", httpx.MockTransport(handler))
+    dropoff._cache.clear()
+    return dropoff
+
+
+async def test_nearest_dropoff_points(finders):
+    res = await finders.nearest({"street": "Musterstraße", "house_no": "1", "zip": "1160", "city": "Wien"},
+                                ["post", "gls", "dpd", "hermes"])
+    assert [p["name"] for p in res["post"]] == ["Postfiliale 1160"]           # pickup-only station skipped
+    assert [p["name"] for p in res["gls"]] == ["Trafik"] and res["gls"][0]["dist_m"] == 55
+    assert res["dpd"] == [] and res["hermes"][0]["dist_m"] > 2000
+    assert finders.fmt_dist(55) == "55 m" and finders.fmt_dist(2224) == "2,2 km"
+    assert await finders.nearest({"street": "", "zip": ""}, ["post"]) == {}
+
+
+async def test_chat_page_sorted_by_nearest(chat, finders):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    shipping.save_sender({**ADDR, "name": "Max Muster"})
+    await shipping.detect("c1")
+    with TestClient(app) as c:
+        near = c.get("/chats/c1?sort=near").text
+        cheap = c.get("/chats/c1?sort=price").text
+    assert "Trafik" in near and "55 m" in near
+    first = lambda html: html.split('<table class="striped">')[1].split("</td>")[0]   # noqa: E731
+    assert "GLS" in first(near)                                               # 55 m beats Post (1.1 km)
+    assert "GLS" in first(cheap)                                              # GLS S → Shop is also cheapest
+
+
+def test_remote_overlay_and_embed():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats").text
+        assert 'id="remote-overlay"' in page and 'src="about:blank"' in page    # iframe loads only when opened
+        embed = c.get("/session?embed=1").text
+        assert 'class="embed"' in embed and 'nav class="top"' not in embed and 'id="remote-overlay"' not in embed
+        assert 'value="/session?embed=1"' in embed or "Browser" in embed          # forms stay inside the overlay
+
+
+def test_carrier_logins_are_private(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    monkeypatch.setattr(shipping, "_logins_path", lambda: tmp_path / "carrier-logins.json")
+    shipping.save_login("gls", "max@example.com", "geheim-123")
+    shipping.save_login("post", "max@example.com", "")
+    assert (tmp_path / "carrier-logins.json").stat().st_mode & 0o777 == 0o600
+    assert shipping.login_status() == {"gls": {"user": "max@example.com", "has_password": True},
+                                       "post": {"user": "max@example.com", "has_password": False}}
+    shipping.save_login("gls", "max@example.com", "")                      # empty password keeps the old one
+    assert shipping.carrier_logins()["gls"]["password"] == "geheim-123"
+    with TestClient(app) as c:
+        html = c.get("/settings").text
+        assert "max@example.com" in html and "geheim-123" not in html
+        c.post("/settings/shipping/login/gls", data={"user": "", "password": ""})
+    assert "gls" not in shipping.carrier_logins()                          # cleared user = login removed
+    with pytest.raises(shipping.ShippingError):
+        shipping.save_login("ups", "x", "y")
+
+
+LOGIN_FORM = """<html><body><form onsubmit="window.__sent = [this.email.value, this.pw.value]; return false">
+ <label>E-Mail <input type=email name=email></label><label>Passwort <input type=password name=pw></label>
+ <button type=submit>Anmelden</button></form></body></html>"""
+
+
+async def test_fill_login_in_real_browser(tmp_path, monkeypatch):
+    pw_mod = pytest.importorskip("playwright.async_api")
+    monkeypatch.setattr(shipping, "_logins_path", lambda: tmp_path / "carrier-logins.json")
+    shipping.save_login("dpd", "max@example.com", "geheim-123")
+    async with pw_mod.async_playwright() as pw:
+        try:
+            browser = await pw.chromium.launch()
+        except Exception as e:  # noqa: BLE001
+            pytest.skip(f"no chromium: {e}")
+        page = await browser.new_page()
+        await page.set_content(LOGIN_FORM)
+        fields, _ = await label_fill._collect(page)
+        assert not any(f["type"] == "password" for f in fields)              # passwords never reach Claude
+        assert not await label_fill.fill_login(page, "gls")                  # no login stored for GLS
+        assert await label_fill.fill_login(page, "dpd")
+        assert await page.evaluate("window.__sent") == ["max@example.com", "geheim-123"]
+        await browser.close()

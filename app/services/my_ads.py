@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from sqlmodel import select
 
@@ -11,7 +12,7 @@ from app.i18n import t
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown
 from app.willhaben.parse import extract_ad_id
-from app.willhaben.public import WillhabenError, get_public
+from app.willhaben.public import Blocked, WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,109 @@ def remove(ad_id: str) -> None:
         if row:
             db.delete(row)
             db.commit()
+
+
+def _unlink_drafts(ad_id: str) -> None:
+    """The willhaben ad is gone: drafts that pointed to it start a fresh insertion when published again."""
+    from app.db import AdDraft
+    with session() as db:
+        for d in db.exec(select(AdDraft).where(AdDraft.wh_ad_id == str(ad_id))):
+            d.wh_ad_id = None
+            if d.status == "published":
+                d.status = "draft"
+            db.add(d)
+        db.commit()
+
+
+def set_hidden(ad_id: str, hidden: bool) -> None:
+    """Hide from the list only (nothing happens on willhaben); the daily import keeps it hidden."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row:
+            row.hidden = hidden or None
+            db.add(row)
+            db.commit()
+
+
+async def deactivate(ad_id: str) -> MyAd | None:
+    """Take the ad offline on willhaben (reversible). Auto-renew goes off: offline was intended."""
+    await AccountClient(get_session()).deactivate_ad(ad_id)
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row:
+            row.auto_renew, row.last_action = False, t("deactivated on willhaben {when}", when=f"{utcnow():%d.%m. %H:%M}")
+            db.add(row)
+            db.commit()
+    await import_from_account()            # status as willhaben shows it now
+    with session() as db:
+        return db.get(MyAd, ad_id)
+
+
+async def delete(ad_id: str) -> None:
+    """Delete the ad on willhaben for good, confirm it is gone, then drop it here (so auto-renew never sees it)."""
+    acct = AccountClient(get_session())
+    await acct.delete_ad(ad_id)
+    if any(a.ad_id == str(ad_id) for a in await acct.my_adverts()):
+        raise EndpointUnknown(t("willhaben still lists the ad after deleting – please check on willhaben"))
+    remove(ad_id)
+    _unlink_drafts(ad_id)
+    log.info("ad %s deleted on willhaben", ad_id)
+
+
+async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
+    """Deactivate or delete several selected ads, one by one with willhaben's per-ad links.
+
+    One list request before and one after; every delete is confirmed against the account list before the
+    row goes. Returns {"done": [titles], "failed": [(title, error)]}.
+    """
+    if action not in ("activate", "deactivate", "delete"):
+        raise ValueError(action)
+    acct = AccountClient(get_session())
+    ads = await acct.my_adverts()
+    titles = {a.ad_id: a.heading or a.ad_id for a in ads}
+    done, failed = [], []
+    queue = list(dict.fromkeys(ad_ids))
+    for i, ad_id in enumerate(queue):   # strictly one after another, each request through the shared limiter
+        title = titles.get(ad_id, ad_id)
+        try:
+            if action == "delete":
+                await acct.delete_ad(ad_id, ads)
+            elif action == "activate":
+                await acct.activate_ad(ad_id, ads)
+            else:
+                await acct.deactivate_ad(ad_id, ads)
+            done.append(ad_id)
+        except (NotLoggedIn, SessionUnavailable, Blocked) as e:    # logged out / rate limited: stop right here
+            failed.append((title, str(e)))
+            failed += [(titles.get(x, x), t("not done (stopped after an error)")) for x in queue[i + 1:]]
+            break
+        except (EndpointUnknown, RuntimeError) as e:
+            failed.append((title, str(e)))
+    if action == "delete":
+        still = {a.ad_id for a in await acct.my_adverts()}
+        for ad_id in list(done):
+            if ad_id in still:
+                done.remove(ad_id)
+                failed.append((titles.get(ad_id, ad_id), t("willhaben still lists the ad after deleting – please check on willhaben")))
+            else:
+                remove(ad_id)
+                _unlink_drafts(ad_id)
+    else:
+        with session() as db:
+            for ad_id in done:
+                row = db.get(MyAd, ad_id)
+                if row:
+                    when = f"{utcnow():%d.%m. %H:%M}"
+                    if action == "deactivate":
+                        row.auto_renew = False    # offline on purpose: auto-renew must not undo it
+                        row.last_action = t("deactivated on willhaben {when}", when=when)
+                    else:
+                        row.last_action = t("activated on willhaben {when}", when=when)
+                    db.add(row)
+            db.commit()
+        await import_from_account()
+    log.info("bulk %s: %d done, %d failed", action, len(done), len(failed))
+    return {"done": [titles.get(i, i) for i in done], "failed": failed}
 
 
 def set_auto_renew(ad_id: str, on: bool) -> None:
