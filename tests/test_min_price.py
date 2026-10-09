@@ -182,12 +182,12 @@ def test_route_saves_min_price():
         db.add(MyAd(ad_id="1000000002", heading="Rad"))
         db.commit()
     with TestClient(app) as c:
-        assert 'name="min_price"' in c.get("/myads").text
+        assert 'name="min_price"' in c.get("/myads?show_inactive=1").text
         c.post("/myads/1000000002/auto-reply", data={"instructions": "Abholung Wien", "min_price": "25,50"})
         with session() as db:
             ad = db.get(MyAd, "1000000002")
         assert ad.min_price == 25.5 and ad.auto_reply_instructions == "Abholung Wien" and not ad.auto_reply
-        assert 'value="25.5"' in c.get("/myads").text
+        assert 'value="25.5"' in c.get("/myads?show_inactive=1").text
 
         r = c.post("/myads/1000000002/auto-reply", data={"instructions": "neu", "min_price": "abc"})
         assert "number" in r.text or r.status_code in (200, 303)
@@ -196,7 +196,7 @@ def test_route_saves_min_price():
         assert ad.min_price == 25.5 and ad.auto_reply_instructions == "neu"   # junk floor: floor kept, rest saved
 
         c.post("/myads/1000000002/auto-reply", data={"instructions": "neu", "min_price": "12345,67"})
-        assert 'value="12345.67"' in c.get("/myads").text     # no precision loss in the rendered value
+        assert 'value="12345.67"' in c.get("/myads?show_inactive=1").text     # no precision loss in the rendered value
 
         c.post("/myads/1000000002/auto-reply", data={"instructions": "x", "min_price": ""})  # emptied: floor cleared
         with session() as db:

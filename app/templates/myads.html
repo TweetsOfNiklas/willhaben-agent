@@ -11,6 +11,9 @@
   .btn-danger:hover, .btn-danger:focus { background: #c93c40; border-color: #c93c40; color: #fff; }
   .bulkbar { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-bottom:.6rem; }
   .bulkbar button { width:auto; margin:0; padding:.3rem .8rem; }
+  details.auto-reply { margin:0; } details.auto-reply summary { font-size:.9em; }
+  details.auto-reply[open] summary { margin-bottom:.5rem; }
+  details.dropdown summary { width:auto; display:inline-block; }
 </style>
 <form id="bulk" method="post" class="bulkbar">
   <label style="margin:0"><input type="checkbox" id="select-all" aria-label="{{ _('Select all') }}"> <small id="sel-count">{{ _("Select ads") }}</small></label>
@@ -18,9 +21,11 @@
   <button type="submit" class="secondary outline" formaction="/myads/bulk/deactivate" data-act="deactivate" disabled>{{ _("Deactivate") }}</button>
   <button type="submit" class="btn-danger" formaction="/myads/bulk/delete" data-act="delete" disabled>🗑 {{ _("Delete") }}</button>
 </form>
-<form method="get" action="/myads" style="margin:0 0 .6rem">
+<form method="get" action="/myads" class="bulkbar">
   {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-  <label style="margin:0"><input type="checkbox" name="show_sold" value="1" {% if show_sold %}checked{% endif %} onchange="this.form.submit()">
+  <label style="margin:0"><input type="checkbox" role="switch" name="show_inactive" value="1" {% if show_inactive %}checked{% endif %} onchange="this.form.submit()">
+    <small>{{ _("Show inactive ads ({n})", n=inactive_count) }}</small></label>
+  <label style="margin:0"><input type="checkbox" role="switch" name="show_sold" value="1" {% if show_sold %}checked{% endif %} onchange="this.form.submit()">
     <small>{{ _("Show sold ads ({n})", n=sold_count) }}</small></label>
   <noscript><button class="secondary">{{ _("Apply") }}</button></noscript>
 </form>
@@ -75,10 +80,12 @@
   <tr id="ad-{{ a.ad_id }}" class="auto-row">
     <td></td>
     <td colspan="5">
+      <details class="auto-reply" {% if a.auto_reply %}open{% endif %}>
+      <summary><strong>{{ _("Answer buyers automatically") }}</strong>
+        {% if a.auto_reply %}<span class="badge ok">{{ _("on") }}</span>{% else %}<small class="muted">{{ _("off") }}</small>{% endif %}</summary>
       <form method="post" action="/myads/{{ a.ad_id }}/auto-reply">
         <label><input type="checkbox" name="on" {% if a.auto_reply %}checked{% endif %}>
-          <strong>{{ _("Answer buyers automatically") }}</strong>
-          {% if a.auto_reply %}<span class="badge ok">{{ _("on") }}</span>{% endif %}</label>
+          {{ _("Answer buyers automatically") }}</label>
         <textarea name="instructions" rows="2" placeholder="{{ _('Instruction for this ad, e.g.: Fixed price €20. Power supply included, battery lasts about 4 h. Pickup in Vienna 15 in the evening, shipping €5 extra.') }}">{{ a.auto_reply_instructions or '' }}</textarea>
         <label>{{ _("Minimum (€)") }}
           <input type="text" inputmode="decimal" name="min_price" value="{{ ('%.2f'|format(a.min_price)).rstrip('0').rstrip('.') if a.min_price is not none else '' }}" placeholder="{{ _('none') }}" style="max-width:9rem"
@@ -87,6 +94,7 @@
         <small class="muted">{{ _("The general instruction also applies, see") }} <a href="/settings">{{ _("Settings") }}</a>.
           {{ _("Uncertain cases (price negotiation, open questions, suspected scam) end up as a draft, with a push via Home Assistant.") }}</small>
       </form>
+      </details>
     </td>
   </tr>
   {% else %}
@@ -119,5 +127,5 @@
   update();
 })();
 </script>
-{% if hidden_count %}<p><small class="muted"><a href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_sold=1' if show_sold else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a></small></p>{% endif %}
+{% if hidden_count %}<p><small class="muted"><a href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_sold=1&' if show_sold else '' }}{{ 'show_inactive=1' if show_inactive else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a></small></p>{% endif %}
 {% endblock %}

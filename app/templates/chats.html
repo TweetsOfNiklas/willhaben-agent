@@ -10,17 +10,17 @@
   {% elif live.state == 'off' %}<span class="badge muted">{{ _("off") }}</span>
   {% else %}<span class="badge">{{ live.state }}</span> – {{ _("until then it polls every few minutes") }}{% endif %}</small></p>
 <form method="post" action="/chats/sync"><button>{{ _("Sync now") }}</button></form>
-<table class="stack">
+<table class="stack chat-list">
   <thead><tr><th>{{ _("Partner") }}</th><th>{{ _("Ad") }}</th><th>{{ _("Last message") }}</th><th></th></tr></thead>
   <tbody>
   {% for c in convs %}
     <tr>
-      <td><a href="/chats/{{ c.id }}">{{ c.partner_name or _('unknown') }}</a>
+      <td><a href="/chats/{{ c.id }}" class="rowlink">{{ c.partner_name or _('unknown') }}</a>
         {% if c.unread_count %}<span class="badge">{{ c.unread_count }}</span>{% endif %}
         {% if c.id in open_drafts %}<span class="badge ok">{{ _("Draft") }}</span>{% endif %}</td>
       <td>{{ c.ad_title or c.ad_id or '–' }}{% if c.role %}<br><small class="muted">{{ _('I am selling') if c.role == 'seller' else _('I am buying') }}</small>{% endif %}</td>
       <td><small>{{ (c.last_message_text or '')[:120] }}</small><br><small class="muted">{{ c.last_message_at|ago }}</small></td>
-      <td><a href="/chats/{{ c.id }}" role="button" class="outline">{{ _("Open") }}</a></td>
+      <td class="open-btn"><a href="/chats/{{ c.id }}" role="button" class="outline">{{ _("Open") }}</a></td>
     </tr>
   {% else %}
     <tr><td colspan="4" class="muted">{{ _("No conversations synced yet.") }}</td></tr>

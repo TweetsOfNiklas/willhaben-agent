@@ -148,6 +148,13 @@
       .grid-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .7rem; }
       .card img { height: 130px; }
       .bubble { max-width: 88%; }
+      /* chat list: the whole card opens the chat */
+      table.chat-list tr { position: relative; }
+      table.chat-list a.rowlink::after { content: ""; position: absolute; inset: 0; }
+      table.chat-list td.open-btn { display: none; }
+      /* activity feed: long entries clamped */
+      table.activity td:last-child small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+      table.activity td { padding: .35rem .25rem; }
     }
     /* inside the overlay iframe: tight chrome so the browser picture gets the space */
   body.embed main.container { padding: .4rem .6rem 0; max-width: none; }
@@ -158,6 +165,7 @@
   body.embed .remote-bar { gap: .3rem; margin-bottom: .35rem; flex-wrap: nowrap; }
   body.embed .remote-text { min-width: 8rem; }
   body.embed details { display: none; }
+    button.linklike { background:none; border:none; padding:0; margin:0; width:auto; color:var(--pico-primary); font-size:inherit; cursor:pointer; }
     .htmx-indicator { display:none; } .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display:inline; }
   </style>
 </head>
@@ -189,6 +197,7 @@
   <div class="container">
     <span><strong>willhaben Agent</strong> v{{ app_version }} · {{ _("by {author}", author=app_author) }}
       · <a href="/bugreport">{{ _("Report a bug") }}</a>
+      {% if auth_enabled() %}· <form method="post" action="/logout" style="display:inline;margin:0"><button class="linklike">{{ _("Log out") }}</button></form>{% endif %}
       <form method="post" action="/lang" class="lang-switch">
         <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()">
           {% set pref = ui_lang_pref() %}

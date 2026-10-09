@@ -119,7 +119,7 @@ Every variable is optional. Values set in the dashboard win over the environment
 
 | Variable | Purpose |
 |---|---|
-| `DASHBOARD_PASSWORD`, `DASHBOARD_USER` | HTTP basic auth for dashboard and API (recommended) |
+| `DASHBOARD_PASSWORD`, `DASHBOARD_USER` | Login page for the dashboard (session cookie, optionally 30 days); API clients and the MCP server use HTTP basic auth with the same credentials (recommended) |
 | `DASHBOARD_PORT` | Host port of the dashboard (default 8000) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude token from `claude setup-token`, instead of signing in through the dashboard |
 | `HA_URL`, `HA_TOKEN`, `HA_NOTIFY_SERVICE` | Home Assistant without the connect flow |

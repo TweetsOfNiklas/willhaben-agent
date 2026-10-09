@@ -182,7 +182,7 @@ def test_settings_and_myads_forms():
         db.commit()
     with TestClient(app) as c:
         assert "General instruction for automatic replies" in c.get("/settings").text
-        assert "Answer buyers automatically" in c.get("/myads").text
+        assert "Answer buyers automatically" in c.get("/myads?show_inactive=1").text
         c.post("/myads/222/auto-reply", data={"on": "1", "instructions": "Preis fix\r\nAbholung Wien"})
         c.post("/settings", data={"auto_reply_rules": "nur Verfügbarkeit"})
     with session() as db:

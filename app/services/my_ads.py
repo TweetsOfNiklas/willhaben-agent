@@ -20,6 +20,11 @@ log = logging.getLogger(__name__)
 MYADVERTS_URL = "https://www.willhaben.at/iad/myprofile/myadverts"
 
 
+def is_sold(ad: MyAd) -> bool:
+    """Sold on willhaben, given away ("Verschenkt") or marked sold in the app."""
+    return ad.status in ("sold", "Verschenkt") or ad.sale_status == "sold"
+
+
 def add(ref: str, auto_renew: bool = False) -> MyAd:
     ad_id = extract_ad_id(ref)
     if not ad_id:

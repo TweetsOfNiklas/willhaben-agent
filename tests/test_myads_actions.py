@@ -137,7 +137,7 @@ async def test_bulk_route(account):
         r = c.post("/myads/bulk/delete", data={"ids": ["1000000001"]}, follow_redirects=False)
         assert r.status_code == 303 and "1" in r.headers["location"]
         assert c.post("/myads/bulk/nuke", data={"ids": ["1"]}).status_code == 404
-        page = c.get("/myads").text
+        page = c.get("/myads?show_inactive=1").text
         assert "btn-danger" in page and 'name="ids"' in page and "Activate on willhaben" in page
 
 
@@ -147,9 +147,9 @@ async def test_hide_only_survives_import_and_routes(account):
     await my_ads.import_from_account()
     with TestClient(app) as c:
         assert c.post("/myads/1000000001/hide", data={"hidden": "1"}, follow_redirects=False).status_code == 303
-        page = c.get("/myads").text
+        page = c.get("/myads?show_inactive=1").text
         assert "Anzeige 1000000001" not in page and "Show 1 hidden ads" in page
-        assert "Anzeige 1000000001" in c.get("/myads?show_hidden=1").text
+        assert "Anzeige 1000000001" in c.get("/myads?show_hidden=1&show_inactive=1").text
         assert "Delete on willhaben" in page and "Activate on willhaben" in page   # the visible ad is deactivated
     await my_ads.import_from_account()
     with session() as db:
@@ -351,3 +351,30 @@ def test_ai_revision_fills_the_form_without_saving(monkeypatch):
     assert 'value="40"' in page and "Claude estimates" in page                   # price stays, estimate offered
     assert "kürzer" in Backend.prompts[0] and "Audio > Lautsprecher" in Backend.prompts[0]
     assert acct.put_body is None                                                 # nothing saved on willhaben
+
+
+def test_myads_filters_and_order():
+    from datetime import UTC, datetime, timedelta
+
+    from app.db import MyAd, session
+    from app.main import app
+    from fastapi.testclient import TestClient
+    now = datetime(2026, 10, 1, tzinfo=UTC)
+    with session() as db:
+        db.add(MyAd(ad_id="1", heading="Bald", status="active", end_date=now + timedelta(days=2)))
+        db.add(MyAd(ad_id="2", heading="Lange", status="active", end_date=now + timedelta(days=40)))
+        db.add(MyAd(ad_id="3", heading="Deaktiviert", status="Passiv", end_date=now))
+        db.add(MyAd(ad_id="4", heading="Weg", status="sold", end_date=now))
+        db.add(MyAd(ad_id="5", heading="Geschenkt", status="Verschenkt", end_date=now))
+        db.add(MyAd(ad_id="6", heading="Reserviert", status="active", sale_status="sold", end_date=now))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/myads").text
+        assert page.index("Lange") < page.index("Bald")       # most days left first
+        for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert"):
+            assert gone not in page
+        assert "Show inactive ads (1)" in page and "Show sold ads (3)" in page
+        page = c.get("/myads?show_inactive=1").text
+        assert "Deaktiviert" in page and "Weg" not in page
+        page = c.get("/myads?show_sold=1").text
+        assert "Weg" in page and "Geschenkt" in page and "Deaktiviert" not in page

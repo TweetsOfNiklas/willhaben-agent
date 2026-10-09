@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import re
-import secrets
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -20,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import col, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app import AUTHOR, __version__, i18n, scheduler
+from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
 from app.config import get_settings
 from app.db import (
@@ -97,24 +95,23 @@ app.include_router(backup_routes.router)   # Settings → Backup
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-class BasicAuth(BaseHTTPMiddleware):
+class DashboardAuth(BaseHTTPMiddleware):
+    """Login cookie for browsers (see /login), HTTP Basic auth still accepted for scripts and the MCP server."""
     async def dispatch(self, request: Request, call_next):
-        s = get_settings()
-        if s.dashboard_password and request.url.path != "/healthz":
-            header = request.headers.get("authorization", "")
-            ok = False
-            if header.startswith("Basic "):
-                try:
-                    user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
-                    ok = secrets.compare_digest(user, s.dashboard_user) and secrets.compare_digest(pw, s.dashboard_password)
-                except ValueError:
-                    ok = False
-            if not ok:
-                return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="willhaben-agent"'})
-        return await call_next(request)
+        if not auth.enabled() or request.url.path in auth.PUBLIC_PATHS:
+            return await call_next(request)
+        if auth.valid_token(request.cookies.get(auth.COOKIE)) or auth.valid_basic(request.headers.get("authorization", "")):
+            return await call_next(request)
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        login = f"/login?next={quote(target, safe='')}"
+        if request.headers.get("hx-request"):                       # htmx fragment: reload the whole page to the login
+            return Response(status_code=401, headers={"HX-Redirect": login})
+        if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+            return RedirectResponse(login, status_code=303)
+        return JSONResponse({"detail": "login required"}, status_code=401)   # no WWW-Authenticate: no browser popup
 
 
-app.add_middleware(BasicAuth)
+app.add_middleware(DashboardAuth)
 
 
 @app.middleware("http")
@@ -171,7 +168,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
-                             app_version=__version__, app_author=AUTHOR, wh_limiter=willhaben_limiter,
+                             app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
                              wh_budget=lambda: get_settings().requests_per_hour)
 
 
@@ -182,6 +179,46 @@ def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
 
 def back(url: str) -> RedirectResponse:
     return RedirectResponse(url, status_code=303)
+
+
+# ------------------------------------------------------------------ login
+def _https(request: Request) -> bool:
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str = "/"):
+    if not auth.enabled() or auth.valid_token(request.cookies.get(auth.COOKIE)):
+        return back(auth.safe_next(next))
+    return templates.TemplateResponse(request, "login.html", {"next": auth.safe_next(next), "error": None,
+                                                              "user": get_settings().dashboard_user})
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request, username: str = Form(""), password: str = Form(""),
+                       remember: str | None = Form(None), next: str = Form("/")):
+    client = request.client.host if request.client else "?"
+    target = auth.safe_next(next)
+    if auth.locked_out(client):
+        error = t("Too many failed attempts. Try again in 15 minutes.")
+    elif auth.check_password(username.strip(), password):
+        r = back(target)
+        r.set_cookie(auth.COOKIE, auth.make_token(bool(remember)), max_age=auth.REMEMBER_S if remember else None,
+                     httponly=True, samesite="lax", secure=_https(request))
+        return r
+    else:
+        auth.record_failure(client)
+        await asyncio.sleep(1)                     # slows down guessing
+        error = t("Wrong user name or password.")
+    return templates.TemplateResponse(request, "login.html", {"next": target, "error": error, "user": username},
+                                      status_code=401)
+
+
+@app.post("/logout")
+async def logout():
+    r = back("/login")
+    r.delete_cookie(auth.COOKIE)
+    return r
 
 
 # ------------------------------------------------------------------ dashboard
@@ -507,7 +544,8 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 @app.get("/myads", response_class=HTMLResponse)
-async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False, show_sold: bool = False):
+async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False, show_sold: bool = False,
+                     show_inactive: bool = False):
     with session() as db:
         empty = db.exec(select(MyAd).limit(1)).first() is None
     if empty and get_session().logged_in:
@@ -516,17 +554,16 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
         except (NotLoggedIn, SessionUnavailable, ValueError) as e:
             msg = msg or t("Could not load ads: {error}", error=e)
     with session() as db:
-        rows = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).asc().nulls_last())))
+        rows = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).desc().nulls_last())))   # most days left first
     hidden = [a for a in rows if a.hidden]
     ads = rows if show_hidden else [a for a in rows if not a.hidden]
-    # sold ads go to the bottom (stable sort keeps the expiry order) and are hidden unless asked for
-    is_sold = lambda a: a.status == "sold" or a.sale_status == "sold"  # noqa: E731
-    ads.sort(key=is_sold)
-    sold_count = sum(map(is_sold, ads))
-    if not show_sold:
-        ads = [a for a in ads if not is_sold(a)]
+    # sold / given away and inactive (Passiv, expired, renewed) ads are hidden unless asked for
+    sold = [a for a in ads if my_ads.is_sold(a)]
+    inactive = [a for a in ads if not my_ads.is_sold(a) and a.status not in ("active", "reserved")]
+    ads = [a for a in ads if (show_sold or a not in sold) and (show_inactive or a not in inactive)]
     return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
-                  hidden_count=len(hidden), show_hidden=show_hidden, sold_count=sold_count, show_sold=show_sold)
+                  hidden_count=len(hidden), show_hidden=show_hidden, sold_count=len(sold), show_sold=show_sold,
+                  inactive_count=len(inactive), show_inactive=show_inactive)
 
 
 @app.post("/myads/check")
