@@ -36,6 +36,7 @@ from app.services import health
 from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
+from app import backup_routes
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben.account import EndpointUnknown, SendFailed
 from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with_params
@@ -73,6 +74,7 @@ async def lifespan(app: FastAPI):
             tasks.append(asyncio.create_task(sess.chat_watchdog()))
         except Exception as e:  # noqa: BLE001 - polling still works
             log.warning("live chat not started: %s", e)
+    app.state.listener_tasks = tasks             # Settings → Backup stops them before a restore
     yield
     for task in tasks:
         task.cancel()
@@ -85,6 +87,7 @@ async def lifespan(app: FastAPI):
 
 _background: set[asyncio.Task] = set()
 app = FastAPI(title="willhaben Agent", lifespan=lifespan)
+app.include_router(backup_routes.router)   # Settings → Backup
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -1012,7 +1015,7 @@ async def settings_page(request: Request, msg: str | None = None):
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
-                  label_form=label_fill.active(), session_next="/settings#willhaben")
+                  label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel())
 
 
 async def _gcal_ctx() -> dict[str, Any]:

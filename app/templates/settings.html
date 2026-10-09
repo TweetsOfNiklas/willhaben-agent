@@ -54,6 +54,7 @@
       {% if quiet and quiet.active %}<span class="badge ok">{{ _("active") }}</span>{% elif quiet_cfg.enabled %}<span class="badge muted">{{ _("on") }}</span>{% endif %}</a>
     <small>{{ _("General") }}</small>
     <a href="#language">{{ _("Language") }}</a>
+    <a href="#backup">{{ _("Backup") }}</a>
   </nav>
 
   <div class="settings-panels">
@@ -467,6 +468,44 @@
           </select></label>
         <noscript><button class="secondary">{{ _("Save") }}</button></noscript>
       </form>
+    </section>
+
+    <section id="backup">
+      <h4>{{ _("Backup") }}</h4>
+      <p class="lead">{{ _("Save everything in one file and bring it back later, e.g. on a new server.") }}</p>
+      <form method="post" action="/settings/backup/export">
+        <p class="msg">⚠ {{ _("The file contains your logins and tokens (Claude, Home Assistant, Telegram, Google) and all chats. Keep it private.") }}</p>
+        <p><small class="muted">{{ _("Contains: database, tokens, ad photos and parcel labels. Not included: API recordings.") }}</small></p>
+        <label><input type="checkbox" role="switch" name="include_profile">
+          {{ _("Include willhaben login (browser profile)") }}
+          <small class="muted">· {{ _("can be large; without it you log in to willhaben again after a restore") }}</small></label>
+        {% if backup.crypto %}
+        <div class="grid">
+          <label>{{ _("Passphrase (optional)") }} <input type="password" name="passphrase" autocomplete="new-password" minlength="8"></label>
+          <label>{{ _("Repeat passphrase") }} <input type="password" name="passphrase2" autocomplete="new-password"></label>
+        </div>
+        <small class="muted">{{ _("With a passphrase the file is encrypted (AES-256). Without the passphrase it cannot be restored.") }}</small>
+        {% endif %}
+        {% if backup.downloads %}<p><button>{{ _("Download backup") }}</button></p>
+        {% else %}<p class="msg">{{ _("Set DASHBOARD_PASSWORD to enable backup downloads.") }}</p>{% endif %}
+      </form>
+
+      <h5 style="margin-top:1.5rem">{{ _("Restore backup") }}</h5>
+      <form method="post" action="/settings/backup/import" enctype="multipart/form-data">
+        <label>{{ _("Backup file") }} <input type="file" name="file" accept=".zip,.enc" required></label>
+        {% if backup.crypto %}<label>{{ _("Passphrase (only for encrypted backups)") }} <input type="password" name="passphrase" autocomplete="off"></label>{% endif %}
+        <button class="secondary">{{ _("Check backup") }}</button>
+        <small class="muted">{{ _("Nothing is changed yet: you see what the backup contains and confirm first.") }}</small>
+      </form>
+      {% if backup.safety %}
+      <p><small>{{ _("Automatic backups before the last imports (newest {n} are kept):", n=backup.keep) }}</small></p>
+      <table class="stack">
+        {% for b in backup.safety %}
+        <tr><td>{{ b.created_at|local("%d.%m.%Y %H:%M") }}</td><td class="muted">{{ b.size|filesizeformat }}</td>
+          <td>{% if backup.downloads %}<a href="/settings/backup/file/{{ b.name }}" download>{{ _("Download") }}</a>{% endif %}</td></tr>
+        {% endfor %}
+      </table>
+      {% endif %}
     </section>
   </div>
 </div>

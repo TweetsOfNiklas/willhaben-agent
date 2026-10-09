@@ -49,6 +49,10 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
 The interface follows your browser's language (English or German). You can switch it in the footer or under
 Settings → Language.
 
+**Settings → Backup** downloads everything (database, tokens, ad photos, optionally the willhaben login) as one
+ZIP, optionally encrypted with a passphrase, and restores such a file after a preview and a confirm click. The file
+contains your logins: keep it private.
+
 That's it. Setting a dashboard password is strongly recommended, because the app can send messages in your name
 (`DASHBOARD_PASSWORD` in `.env`).
 

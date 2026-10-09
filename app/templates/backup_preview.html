@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>{{ _("Restore backup") }}</h3>
+<article class="card">
+  <p>{{ _("Backup from {date}", date=p.created_at|local("%d.%m.%Y %H:%M")) }}
+    <small class="muted">· {{ _("app version {v}", v=p.app_version) }}{% if filename %} · {{ filename }}{% endif %}</small></p>
+  {% if not p.same_version %}<p class="msg">{{ _("This backup was made with a different app version ({v}). Missing columns are added on start; check the app afterwards.", v=p.app_version) }}</p>{% endif %}
+  <table class="stack">
+    <tr><th>{{ _("Database") }}</th><td>{{ p.db_size|filesizeformat }}
+      {% if p.db_counts %}<br><small class="muted">{% for label, n in p.db_counts.items() %}{{ n }} {{ label }}{% if not loop.last %} · {% endif %}{% endfor %}</small>{% endif %}</td></tr>
+    <tr><th>{{ _("Logins and tokens") }}</th><td>{% if p.secrets %}{{ p.secrets|join(", ") }}{% else %}<span class="muted">{{ _("none") }}</span>{% endif %}</td></tr>
+    <tr><th>{{ _("Ad photos") }}</th><td>{{ _("{n} files", n=p.photos) }} · {{ p.photos_size|filesizeformat }}</td></tr>
+    <tr><th>{{ _("Parcel labels") }}</th><td>{{ _("{n} files", n=p.labels) }}</td></tr>
+    <tr><th>{{ _("willhaben login (browser profile)") }}</th><td>{% if p.profile %}{{ _("{n} files", n=p.profile_files) }} · {{ p.profile_size|filesizeformat }}{% else %}<span class="muted">{{ _("not included – the current login stays") }}</span>{% endif %}</td></tr>
+  </table>
+  <p class="msg">⚠ {{ _("Restoring replaces the database, tokens, ad photos and labels of this installation with the backup. The current state is saved first in data/backups/. Afterwards the app restarts.") }}</p>
+  <form method="post" action="/settings/backup/restore">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label><input type="checkbox" name="confirm" required> {{ _("Yes, replace the current data with this backup") }}</label>
+    <div class="row-actions">
+      <button>{{ _("Restore now") }}</button>
+      <button class="secondary" formaction="/settings/backup/cancel" formnovalidate>{{ _("Cancel") }}</button>
+    </div>
+  </form>
+</article>
+{% endblock %}
