@@ -216,7 +216,7 @@ async def test_chat_page_renders_with_shipment(chat):
     with TestClient(app) as c:
         r = c.get("/chats/c1")
         assert r.status_code == 200 and 'id="shipping"' in r.text and "Create label" in r.text
-        assert "All options" in r.text and "too big/heavy" in r.text
+        assert "All options" in r.text and ("too heavy:" in r.text or "too big:" in r.text or "too long:" in r.text)
         r = c.post(f"/shipments/{s.id}", data={**ADDR, "length_cm": 30, "width_cm": 22, "height_cm": 8,
                                                 "weight_kg": 1.4}, follow_redirects=False)
         assert r.status_code == 303
@@ -342,3 +342,16 @@ async def test_fill_login_in_real_browser(tmp_path, monkeypatch):
         assert await label_fill.fill_login(page, "dpd")
         assert await page.evaluate("window.__sent") == ["max@example.com", "geheim-123"]
         await browser.close()
+
+
+def test_misfit_names_the_broken_rule():
+    from app.services.shipping_tariffs import CARRIERS
+    pm45 = next(o for o in CARRIERS["post"].options if o.size == "PM 45")
+    assert pm45.misfit({"length_cm": 30, "width_cm": 20, "height_cm": 10, "weight_kg": 2}) is None
+    assert pm45.misfit({"length_cm": 30, "width_cm": 20, "height_cm": 10, "weight_kg": 12}) == "too heavy: 12 kg > 10 kg"
+    assert pm45.misfit({"length_cm": 40, "width_cm": 30, "height_cm": 10, "weight_kg": 2}) == \
+        "too big: longest + shortest side 50 cm > 45 cm"
+    xl = next(o for o in CARRIERS["dpd"].options if o.size == "XL")
+    assert xl.misfit({"length_cm": 180, "width_cm": 10, "height_cm": 10, "weight_kg": 5}) == "too long: 180 cm > 175 cm"
+    small = next(o for o in CARRIERS["post"].options if o.size == "Päckchen S")
+    assert small.misfit({"length_cm": 30, "width_cm": 20, "height_cm": 5, "weight_kg": 1}) == "too big: 30×20×5 cm > 35.3×25×3 cm"

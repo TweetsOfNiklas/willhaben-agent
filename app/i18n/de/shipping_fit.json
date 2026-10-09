@@ -1,0 +1,9 @@
+{
+ "too heavy: {kg} kg > {max} kg": "zu schwer: {kg} kg > {max} kg",
+ "too long: {cm} cm > {max} cm": "zu lang: {cm} cm > {max} cm",
+ "too big: longest + shortest side {cm} cm > {max} cm": "zu groß: längste + kürzeste Seite {cm} cm > {max} cm",
+ "too big: length + girth {cm} cm > {max} cm": "zu groß: Länge + Gurtmaß {cm} cm > {max} cm",
+ "too big: {size} cm > {max} cm": "zu groß: {size} cm > {max} cm",
+ "parcel size missing": "Paketmaße fehlen",
+ "The size is Claude's generous estimate. Enter the real size of the packed parcel above and more options may fit.": "Die Maße sind eine großzügige Schätzung von Claude. Trag oben die echten Maße des verpackten Pakets ein, dann passen eventuell mehr Optionen."
+}

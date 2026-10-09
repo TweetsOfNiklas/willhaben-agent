@@ -14,6 +14,11 @@ from typing import Any
 CHECKED = "2026-10-09"
 
 
+def _n(x: float) -> str:
+    """12.0 -> "12", 2.5 -> "2.5"."""
+    return f"{x:g}"
+
+
 @dataclass(frozen=True)
 class Option:
     carrier: str
@@ -35,16 +40,29 @@ class Option:
         return f"{name} {self.size}" + (" → Shop" if self.delivery == "shop" else "")
 
     def fits(self, parcel: dict[str, Any]) -> bool:
+        return self.misfit(parcel) is None
+
+    def misfit(self, parcel: dict[str, Any]) -> str | None:
+        """Why the parcel doesn't fit this option (first rule broken, with the numbers), None if it fits."""
+        from app.i18n import t
         dims = sorted((float(parcel.get(k) or 0) for k in ("length_cm", "width_cm", "height_cm")), reverse=True)
-        if float(parcel.get("weight_kg") or 0) > self.max_kg:
-            return False
+        kg = float(parcel.get("weight_kg") or 0)
+        if kg > self.max_kg:
+            return t("too heavy: {kg} kg > {max} kg", kg=_n(kg), max=_n(self.max_kg))
         lo, mid, hi = dims[2], dims[1], dims[0]
-        if self.rule == "ls":
-            return hi + lo <= self.limit[0] and (len(self.limit) < 2 or hi <= self.limit[1])
-        if self.rule == "girth":
-            return hi + 2 * mid + 2 * lo <= self.limit[0] and (len(self.limit) < 2 or hi <= self.limit[1])
+        if self.rule in ("ls", "girth"):
+            if len(self.limit) > 1 and hi > self.limit[1]:
+                return t("too long: {cm} cm > {max} cm", cm=_n(hi), max=_n(self.limit[1]))
+            if self.rule == "ls" and hi + lo > self.limit[0]:
+                return t("too big: longest + shortest side {cm} cm > {max} cm", cm=_n(hi + lo), max=_n(self.limit[0]))
+            if self.rule == "girth" and hi + 2 * mid + 2 * lo > self.limit[0]:
+                return t("too big: length + girth {cm} cm > {max} cm", cm=_n(hi + 2 * mid + 2 * lo), max=_n(self.limit[0]))
+            return None
         lim = sorted(self.limit, reverse=True)
-        return hi <= lim[0] and mid <= lim[1] and lo <= lim[2]
+        if hi > lim[0] or mid > lim[1] or lo > lim[2]:
+            return t("too big: {size} cm > {max} cm", size="×".join(_n(x) for x in (hi, mid, lo)),
+                     max="×".join(_n(x) for x in lim))
+        return None
 
 
 @dataclass(frozen=True)

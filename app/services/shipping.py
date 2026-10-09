@@ -112,10 +112,11 @@ def quote(parcel: dict[str, Any] | None) -> list[Option]:
     return options_for(parcel, enabled_carriers())
 
 
-def all_options(parcel: dict[str, Any] | None) -> list[tuple[Option, bool]]:
-    """Every option of the enabled carriers with whether it fits, fitting and cheap first."""
+def all_options(parcel: dict[str, Any] | None) -> list[tuple[Option, str | None]]:
+    """Every option of the enabled carriers with why it doesn't fit (None = fits), fitting and cheap first."""
     every = [o for c in enabled_carriers() for o in CARRIERS[c].options]
-    return sorted(((o, bool(parcel) and o.fits(parcel)) for o in every), key=lambda x: (not x[1], x[0].price))
+    rows = [(o, o.misfit(parcel) if parcel else t("parcel size missing")) for o in every]
+    return sorted(rows, key=lambda x: (x[1] is not None, x[0].price))
 
 
 def by_key(key: str | None) -> Option | None:

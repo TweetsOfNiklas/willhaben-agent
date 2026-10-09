@@ -78,15 +78,18 @@
     </table>
     <details>
       <summary><small>{{ _("All options ({n})", n=ship_all|length) }}</small></summary>
+      {% if p.source == 'claude' and ship_all|selectattr(1)|list %}
+        <p><small class="muted">{{ _("The size is Claude's generous estimate. Enter the real size of the packed parcel above and more options may fit.") }}</small></p>
+      {% endif %}
       <table class="striped">
         <tbody>
-        {% for o, fits in ship_all %}
+        {% for o, misfit in ship_all %}{% set fits = not misfit %}
           <tr {% if not fits %}class="muted" style="opacity:.55"{% endif %}>
             <td>{{ o.label() }}<br><small class="muted">{% set pts = ship_near.get(o.carrier) or [] %}{% if pts %}📍 {{ pts[0].name }} · {{ fmt_dist(pts[0].dist_m) }}{% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}{% if o.note %} · {{ o.note }}{% endif %}
               · {{ _("max. {kg} kg", kg=o.max_kg|round(1)|string|replace('.0', '')) }}</small></td>
             <td style="white-space:nowrap">{{ o.price|eur }}</td>
             <td style="text-align:right">
-              {% if not fits %}<small>{{ _("too big/heavy") }}</small>
+              {% if not fits %}<small title="{{ misfit }}">{{ misfit }}</small>
               {% elif shipment.status == 'draft' and o.online %}
                 <form method="post" action="/shipments/{{ shipment.id }}/label" style="margin:0">
                   <input type="hidden" name="key" value="{{ o.key }}">
