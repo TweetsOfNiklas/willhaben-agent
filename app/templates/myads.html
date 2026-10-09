@@ -42,7 +42,8 @@
         <summary role="button" class="secondary outline" style="padding:.2rem .6rem" aria-label="{{ _('Actions') }}">⋯</summary>
         <ul dir="rtl">
           {% if not a.replaced_by %}
-          <li><a href="/myads/{{ a.ad_id }}/edit" role="button" class="secondary outline" dir="ltr" style="width:100%;margin:0">✎ {{ _("Edit on willhaben") }}</a></li>
+          <li><form method="get" action="/myads/{{ a.ad_id }}/edit" style="margin:0" dir="ltr">
+            <button class="secondary outline" style="width:100%;margin:0">✎ {{ _("Edit on willhaben") }}</button></form></li>
           {% endif %}
           {% if a.status not in ('active', 'expired') and not a.replaced_by %}
           <li><form method="post" action="/myads/bulk/activate" style="margin:0" dir="ltr">
