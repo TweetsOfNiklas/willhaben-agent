@@ -6,6 +6,7 @@ Telegram message. If Claude fails, hits are notified as before (fail open: no hi
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 from datetime import timedelta
 from pathlib import Path
@@ -54,7 +55,14 @@ def summary(hit: Hit) -> str:
     if hit.screen_relevant is None:
         return ""
     head = deal_label(hit.screen_deal) if hit.screen_relevant else t("wrong item")
-    return f"🤖 {head}: {hit.screen_reason}" if hit.screen_reason else f"🤖 {head}"
+    return f"🤖 {head}: {short_reason(hit.screen_reason)}" if hit.screen_reason else f"🤖 {head}"
+
+
+def short_reason(reason: str | None, limit: int = 140) -> str:
+    """First sentence of Claude's reason for push texts; the ad viewer shows the whole text."""
+    text = (reason or "").strip()
+    first = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    return first if len(first) <= limit else first[:limit - 1].rstrip() + "…"
 
 
 def _stats(agent_id: int, exclude: set[int]) -> dict[str, Any] | None:

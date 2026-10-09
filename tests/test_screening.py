@@ -134,3 +134,10 @@ def test_agent_form_settings_and_hit_badge(client):  # noqa: F811
     with dbmod.session() as db:
         a = db.get(dbmod.SearchAgent, agent.id)
     assert a.screen is False and a.screen_min == "match"
+
+
+def test_push_line_uses_first_sentence_only():
+    hit = dbmod.Hit(agent_id=1, ad_id="1", heading="x", url="u", screen_relevant=True, screen_deal="good",
+                    screen_reason="Guter Preis für ein gepflegtes Rad. Neu kostet es 900 €, gebraucht meist 500–600 €.")
+    assert screening.summary(hit) == "🤖 good price: Guter Preis für ein gepflegtes Rad."
+    assert screening.short_reason("x" * 300).endswith("…") and len(screening.short_reason("x" * 300)) == 140
