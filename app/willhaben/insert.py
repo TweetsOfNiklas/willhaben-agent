@@ -21,6 +21,8 @@ This module stops if anything would cost money (totalPrice > 0 or a paymentUrl) 
 """
 from __future__ import annotations
 
+import re
+
 import logging
 import time
 from typing import Any
@@ -127,6 +129,44 @@ def search_categories(tree: dict[str, Any], query: str, limit: int = 25) -> list
 async def get_own_ad(s: BrowserSession, ad_id: str) -> dict[str, Any]:
     """An own ad in the editor's JSON format (read-only), the same shape presave/save take."""
     return await s.api_json("GET", f"/webapi/iad/bap/{int(ad_id)}")
+
+
+def description_text(html_text: str | None) -> str:
+    """The editor's HTML description → plain text for editing (inverse of description_html)."""
+    import html as _html
+    t_ = html_text or ""
+    t_ = re.sub(r"(?i)<li[^>]*>\s*", "• ", t_)
+    t_ = re.sub(r"(?i)</li>\s*", "\n", t_)
+    t_ = re.sub(r"(?i)<br\s*/?>", "\n", t_)
+    t_ = re.sub(r"(?i)</p>\s*|</ul>\s*|</div>\s*", "\n\n", t_)
+    t_ = re.sub(r"<[^>]+>", "", t_)
+    t_ = _html.unescape(t_)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(ln.rstrip() for ln in t_.split("\n"))).strip()
+
+
+async def edit_own_ad(s: BrowserSession, ad_id: str, *, heading: str, description: str,
+                      price: float | None) -> dict[str, Any]:
+    """Change title, description and price of an own ad like willhaben's edit page.
+
+    Loads the complete editor JSON, changes only these three fields and PUTs the whole object back to
+    bap/edit (a partial body would wipe the other fields). Never creates a cart or checkout. Afterwards the ad
+    is read again; raises InsertError if willhaben did not take the change. NEEDS LIVE VERIFICATION whether an
+    edit of an active ad goes live at once or into willhaben's review first (the status shows it).
+    """
+    ad = await get_own_ad(s, ad_id)
+    if not isinstance(ad, dict) or not ad.get("adId"):
+        raise InsertError(f"Anzeige {ad_id} nicht im Editor gefunden")
+    body = dict(ad)
+    body["heading"] = heading.strip()[:80]
+    body["description"] = description_html(description)
+    body["price"] = int(price) if price is not None and float(price).is_integer() else price
+    await s.api_json("PUT", "/webapi/iad/bap/edit", body)
+    after = await get_own_ad(s, ad_id)
+    got = (after.get("heading"), description_text(after.get("description")), after.get("price"))
+    want = (body["heading"], description_text(body["description"]), body["price"])
+    if got[0] != want[0] or got[1] != want[1] or (want[2] is not None and float(got[2] or 0) != float(want[2])):
+        raise InsertError("willhaben hat die Änderung nicht übernommen")
+    return after
 
 
 # ------------------------------------------------------------------ plan (read-only)

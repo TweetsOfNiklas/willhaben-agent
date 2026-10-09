@@ -144,6 +144,35 @@ async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
     return {"done": [titles.get(i, i) for i in done], "failed": failed}
 
 
+async def load_for_edit(ad_id: str) -> dict[str, Any]:
+    """Current title, description (plain text) and price as willhaben has them."""
+    from app.willhaben import insert
+    ad = await insert.get_own_ad(get_session(), ad_id)
+    return {"heading": ad.get("heading") or "", "description": insert.description_text(ad.get("description")),
+            "price": ad.get("price")}
+
+
+async def edit(ad_id: str, heading: str, description: str, price: float | None) -> MyAd | None:
+    """Save title/description/price on willhaben, then refresh the status (an edit may go to review)."""
+    from app.willhaben import insert
+    if not heading.strip() or not description.strip():
+        raise insert.InsertError(t("Title and description must not be empty"))
+    await insert.edit_own_ad(get_session(), ad_id, heading=heading, description=description, price=price)
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row:
+            row.heading = heading.strip()[:80]
+            row.last_action = t("edited on willhaben {when}", when=f"{utcnow():%d.%m. %H:%M}")
+            db.add(row)
+            db.commit()
+    try:
+        await import_from_account()
+    except (NotLoggedIn, SessionUnavailable, ValueError) as e:
+        log.info("status refresh after edit skipped: %s", e)
+    with session() as db:
+        return db.get(MyAd, ad_id)
+
+
 def set_auto_renew(ad_id: str, on: bool) -> None:
     with session() as db:
         row = db.get(MyAd, ad_id)

@@ -32,5 +32,16 @@
  "Activated on willhaben: {n}": "Auf willhaben aktiviert: {n}",
  "Deactivated on willhaben: {n}": "Auf willhaben deaktiviert: {n}",
  "activated on willhaben {when}": "auf willhaben aktiviert {when}",
- "not done (stopped after an error)": "nicht ausgeführt (nach einem Fehler abgebrochen)"
+ "not done (stopped after an error)": "nicht ausgeführt (nach einem Fehler abgebrochen)",
+ "Edit on willhaben": "Auf willhaben bearbeiten",
+ "Edit ad": "Anzeige bearbeiten",
+ "Status: {status}": "Status: {status}",
+ "Save on willhaben": "Auf willhaben speichern",
+ "Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.": "Nur Titel, Beschreibung und Preis ändern sich; Fotos, Kategorie und alles andere bleiben. willhaben prüft die geänderte Anzeige eventuell erneut, bevor die neue Version erscheint – der Status unter Meine Anzeigen zeigt es.",
+ "Could not load the ad from willhaben: {error}": "Anzeige konnte nicht von willhaben geladen werden: {error}",
+ "Invalid price": "Ungültiger Preis",
+ "Saving failed: {error}": "Speichern fehlgeschlagen: {error}",
+ "Saved on willhaben – status now: {status}": "Auf willhaben gespeichert – Status jetzt: {status}",
+ "Title and description must not be empty": "Titel und Beschreibung dürfen nicht leer sein",
+ "edited on willhaben {when}": "auf willhaben bearbeitet {when}"
 }

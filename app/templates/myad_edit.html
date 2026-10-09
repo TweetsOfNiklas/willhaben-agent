@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/myads#ad-{{ a.ad_id }}">← {{ _("My ads") }}</a></p>
+<h3>{{ _("Edit ad") }}</h3>
+<p><small class="muted">{{ a.heading or a.ad_id }} · <a href="{{ a.url }}" target="_blank" rel="noopener">{{ _("View on willhaben") }} ↗</a>
+  · {{ _("Status: {status}", status=a.status or '?') }}</small></p>
+<form method="post" action="/myads/{{ a.ad_id }}/edit">
+  <label>{{ _("Title") }} <small class="muted">(<span id="len">{{ cur.heading|length }}</span>/60)</small>
+    <input name="heading" value="{{ cur.heading }}" maxlength="80" required
+           oninput="document.getElementById('len').textContent = this.value.length"></label>
+  <label>{{ _("Description") }}
+    <textarea name="description" rows="14" required>{{ cur.description }}</textarea></label>
+  <label>{{ _("Price (€)") }}
+    <input name="price" inputmode="decimal" value="{{ '%g'|format(cur.price) if cur.price is not none else '' }}"></label>
+  <button onclick="this.setAttribute('aria-busy','true')">{{ _("Save on willhaben") }}</button>
+  <small class="muted">{{ _("Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.") }}</small>
+</form>
+{% endblock %}

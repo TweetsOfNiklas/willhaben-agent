@@ -243,3 +243,74 @@ async def test_publish_409_never_duplicates_a_live_ad(account, monkeypatch):
     assert calls == ["1000000001"]                              # no second, fresh insertion
     with session() as db:
         assert db.get(AdDraft, 52).status == "published"
+
+
+class _Editor(_Account):
+    """Fake willhaben editor: GET /webapi/iad/bap/<id> returns the full ad, PUT bap/edit replaces it."""
+
+    def __init__(self, applies=True):
+        super().__init__()
+        self.applies, self.put_body = applies, None
+        self.ad = {"adId": 1000000001, "heading": "Alter Titel", "price": 40, "categoryPath": {"path": ["X"]},
+                   "description": "<p>Zeile eins<br>Zeile zwei</p><ul><li>Netzteil</li><li>Tasche</li></ul>",
+                   "advertImageList": {"advertImage": [{"id": 1}]}, "contextLinkList": {"contextLink": []}}
+
+    async def api_json(self, method, path, body=None):
+        self.calls.append((method, path))
+        if method == "GET" and path == "/webapi/iad/bap/1000000001":
+            return dict(self.ad)
+        if method == "PUT" and path == "/webapi/iad/bap/edit":
+            self.put_body = body
+            if self.applies:
+                self.ad = dict(body)
+            return body
+        raise AssertionError((method, path))
+
+
+def test_description_text_roundtrip():
+    from app.willhaben import insert
+    text = "Zeile eins\nZeile zwei\n\n• Netzteil\n• Tasche"
+    assert insert.description_text(insert.description_html(text)) == text
+    assert insert.description_text("<p>A &amp; B</p>") == "A & B"
+
+
+async def test_edit_changes_only_three_fields(monkeypatch):
+    acct = _Editor()
+    monkeypatch.setattr(my_ads, "get_session", lambda: acct)
+    await my_ads.import_from_account()
+    cur = await my_ads.load_for_edit("1000000001")
+    assert cur == {"heading": "Alter Titel", "description": "Zeile eins\nZeile zwei\n\n• Netzteil\n• Tasche", "price": 40}
+    row = await my_ads.edit("1000000001", "Neuer Titel", "Neu\n\n• Netzteil", 35.0)
+    body = acct.put_body
+    assert body["heading"] == "Neuer Titel" and body["price"] == 35 and body["description"] == "<p>Neu</p><ul><li>Netzteil</li></ul>"
+    assert body["advertImageList"] == {"advertImage": [{"id": 1}]} and body["categoryPath"] == {"path": ["X"]}   # full object
+    assert "edited" in row.last_action                       # heading comes back from the account list
+    assert not any("cart" in p or "checkout" in p for _, p in acct.calls)
+
+
+async def test_edit_not_applied_is_reported(monkeypatch):
+    from app.willhaben.insert import InsertError
+    acct = _Editor(applies=False)
+    monkeypatch.setattr(my_ads, "get_session", lambda: acct)
+    with pytest.raises(InsertError, match="nicht übernommen"):
+        await my_ads.edit("1000000001", "Neuer Titel", "Text", 10.0)
+
+
+def test_edit_page_and_route(monkeypatch):
+    from app.main import app
+
+    acct = _Editor()
+    monkeypatch.setattr(my_ads, "get_session", lambda: acct)
+    with session() as db:
+        db.add(MyAd(ad_id="1000000001", heading="Alter Titel", url="https://www.willhaben.at/iad/object?adId=1000000001"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/myads/1000000001/edit").text
+        assert 'value="Alter Titel"' in page and "• Netzteil" in page and 'value="40"' in page
+        r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "12,50"},
+                   follow_redirects=False)
+        assert r.status_code == 303 and "/myads?msg=" in r.headers["location"]
+        assert acct.put_body["price"] == 12.5
+        r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "abc"},
+                   follow_redirects=False)
+        assert "/edit?msg=" in r.headers["location"]

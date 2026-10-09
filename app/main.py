@@ -548,6 +548,34 @@ async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions
     return back(f"/myads?msg={quote(msg, safe='')}#ad-{ad_id}")
 
 
+@app.get("/myads/{ad_id}/edit", response_class=HTMLResponse)
+async def myads_edit_page(request: Request, ad_id: str, msg: str | None = None):
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    if row is None:
+        raise HTTPException(404)
+    try:
+        cur = await my_ads.load_for_edit(ad_id)
+    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        return back(f"/myads?msg={quote(t('Could not load the ad from willhaben: {error}', error=e), safe='')}")
+    return render(request, "myad_edit.html", a=row, cur=cur, msg=msg)
+
+
+@app.post("/myads/{ad_id}/edit")
+async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str = Form(...), price: str = Form("")):
+    from app.willhaben.insert import InsertError
+    try:
+        value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
+    except ValueError:
+        return back(f"/myads/{ad_id}/edit?msg={quote(t('Invalid price'), safe='')}")
+    try:
+        row = await my_ads.edit(ad_id, heading, description, value)
+    except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        return back(f"/myads/{ad_id}/edit?msg={quote(t('Saving failed: {error}', error=e), safe='')}")
+    status = (row.status if row else "") or ""
+    return back(f"/myads?msg={quote(t('Saved on willhaben – status now: {status}', status=status), safe='')}#ad-{ad_id}")
+
+
 @app.post("/myads/bulk/{action}")
 async def myads_bulk(request: Request, action: str):
     if action not in ("activate", "deactivate", "delete"):
