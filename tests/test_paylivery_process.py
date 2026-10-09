@@ -565,6 +565,23 @@ async def _true(page):
     return True
 
 
+async def test_buy_fills_the_card_once_then_presses_pay(browser, monkeypatch):
+    set_setting("paylivery_buy_allowed", "1")
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_field(1, "Kartennummer", "text", "cardnumber"), _btn(2, "Jetzt bezahlen")]
+    monkeypatch.setattr(paylivery, "_card_fields_visible", _true)
+    fills = []
+
+    async def fill_card(page):
+        fills.append(1)
+        return True
+
+    monkeypatch.setattr(paylivery, "_fill_card", fill_card)
+    browser.backend.replies = [_step(action_idx=2, status="done", note="bezahlt")]
+    msg = await paylivery.run_action("b1", "buy", 12.0)
+    assert fills == [1] and browser.clicked == ["Jetzt bezahlen"] and "bezahlt" in msg
+
+
 async def test_label_and_mark_shipped_are_local(browser):
     _chat(state={"role": "seller", "stage": "paid", "history": [], "applied": []})
     msg = await paylivery.start_action("c1", "mark_shipped")

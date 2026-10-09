@@ -457,8 +457,9 @@ def _sold_to_buyer(s: Shipment) -> bool:
 
 def _bought_today(exclude_id: int) -> int:
     start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    with session() as db:
-        rows = db.exec(select(Shipment).where(Shipment.approval == "auto")).all()
+    with session() as db:                       # SQLite stores UTC without zone: compare in UTC, re-check in Python
+        rows = db.exec(select(Shipment).where(Shipment.approval == "auto",
+                                              Shipment.approved_at >= start.astimezone(timezone.utc))).all()
     return sum(1 for r in rows if r.id != exclude_id and _aware(r.approved_at) and _aware(r.approved_at) >= start)
 
 

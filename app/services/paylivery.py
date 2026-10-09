@@ -428,12 +428,14 @@ async def scan(conversation_id: str, fresh: list[ChatMessage] | None = None) -> 
     if conv is None or conv.role not in ROLES:
         return None
     seen = set(_seen())
+    applied = set((conv.paylivery or {}).get("applied") or [])     # stage already taken from these notices
     links = {m.ext_id: m.raw_links for m in fresh or []}
     done: list[str] = []
     touched: Shipment | None = None
     for msg in reversed(_stored_notices(conversation_id)):
         key = f"{conversation_id}:{msg.ext_id}"
-        await _apply_and_push(conv, msg)
+        if msg.ext_id not in applied:
+            await _apply_and_push(conv, msg)
         if key in seen:
             continue
         if msg.created_at is not None and _aware(msg.created_at) < utcnow() - MAX_AGE:
@@ -999,16 +1001,16 @@ async def _drive(sess, conv: Conversation, action: str, amount: float | None) ->
     await _settle(page)
     await _dismiss(page)
     goal = _goal(action, amount)
-    final_clicked = False
+    final_clicked = card_filled = False
     for step in range(MAX_STEPS):
         reason = await _bank_reason(page)
         if reason:
             return False, _stopped(t("the page needs you: {reason}", reason=reason))
-        if action == "buy" and await _card_fields_visible(page):
+        if action == "buy" and not card_filled and await _card_fields_visible(page):
             if not await _fill_card(page):
                 return False, _stopped(t("enter the card details on willhaben yourself"))
+            card_filled = True                      # once; the fields stay visible, Claude presses the pay button
             await _settle(page)
-            continue
         elements = await _collect(page)
         plan = await _ask(goal, conv, step, elements)
         if plan is None:

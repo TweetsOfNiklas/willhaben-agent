@@ -6,6 +6,7 @@ import stat
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.db import Conversation, MyAd, Shipment, session
@@ -34,7 +35,33 @@ def test_refuse_and_purchase_words():
     for text in ("Kostenpflichtig kaufen", "Jetzt zahlen", "Zahlungspflichtig bestellen"):
         assert label_buy._PURCHASE.search(text), text
     assert not label_buy._PURCHASE.search("PayPal anmelden")                    # "pay" only as a whole word
+    for text in ("Weiter einkaufen", "Zur Bestellübersicht", "Zahlungsart ändern"):   # navigation, no price check
+        assert not label_buy._PURCHASE.search(text), text
     assert not label_buy._REFUSE.search("Weiter")
+
+
+def test_label_downloads_are_told_from_other_pdfs():
+    assert label_buy.label_download("Paketschein_123.pdf") and label_buy.label_download("label.pdf")
+    for name in ("AGB.pdf", "Rechnung-2026.pdf", "Datenschutz.pdf", "info.txt"):
+        assert not label_buy.label_download(name), name
+
+
+async def test_other_downloads_before_the_purchase_are_not_the_label(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.config.get_settings", lambda: SimpleNamespace(data_dir=tmp_path))
+    monkeypatch.setattr(label_buy, "get_settings", lambda: SimpleNamespace(data_dir=tmp_path))
+    sid = _seed()
+    saved = []
+
+    class Download:
+        suggested_filename = "AGB.pdf"
+
+        async def save_as(self, path):
+            saved.append(path)
+
+    label_buy._active.update(shipment=sid, bought=False)
+    await label_buy._download(sid, Download())
+    assert saved and saved[0].name == "doc-AGB.pdf" and shipping.get(sid).label_path is None
+    label_buy._active.update(shipment=None, bought=False)
 
 
 def test_bank_hosts_and_texts():
@@ -311,6 +338,42 @@ async def test_buy_fills_pays_and_saves_the_label(checkout, claude, monkeypatch)
     assert all("4111" not in p and "4111111111111111" not in p for p in fake.prompts)  # card never reaches Claude
     assert (label_buy.get_settings().data_dir / "labels" / f"shipment-{sid}" / "step-1.png").exists()
     assert label_buy.active() is None
+
+
+async def test_auto_limit_only_applies_to_automatic_purchases(checkout, claude):
+    """A manually approved label above the automatic limit is still bought (the limit is an auto rule)."""
+    from app.db import set_setting
+    set_setting("ship_auto_max_price", "4")
+    _good_site(checkout, "4,90")
+    label_buy.save_card(*CARD)
+    claude(_script())
+    sid = _seed()
+    shipping.update(sid, approval="approved")
+    await label_buy.buy(sid)
+    assert shipping.get(sid).status == "labelled" and shipping.get(sid).paid_price == 4.9
+    shipping.update(sid, approval="auto", status="buying", label_path=None)
+    claude(_script())
+    with pytest.raises(label_buy.BuyError, match="limit"):
+        await label_buy.buy(sid)
+
+
+async def test_retry_resumes_the_open_checkout(monkeypatch):
+    """After a NeedsHuman stop the page stays open; buy() for the same shipment carries on instead of failing."""
+    sid = _seed()
+    page = SimpleNamespace(is_closed=lambda: False)
+    label_buy._active.update(shipment=sid, page=page)
+    driven = []
+
+    async def drive(s, p, steps):
+        driven.append((s, p, steps))
+        return "labelled"
+
+    monkeypatch.setattr(label_buy, "_drive", drive)
+    await label_buy.buy(sid)
+    assert driven == [(sid, page, label_buy.MAX_STEPS)]
+    with pytest.raises(label_buy.BuyError, match="still open"):                # another shipment must wait
+        await label_buy.buy(sid + 1000)
+    label_buy._active.update(shipment=None, page=None)
 
 
 async def test_price_guard_stops_before_paying(checkout, claude):

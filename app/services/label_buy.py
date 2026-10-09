@@ -137,8 +137,8 @@ def remove_card() -> None:
 
 
 # ------------------------------------------------------------------ what Claude may and may not click
-_PURCHASE = re.compile(r"kostenpflichtig|zahlungspflichtig|kaufen|buchen|bezahlen|zahlen|\bpay\b|\bbuy\b|bestellen|"
-                       r"\border\b|verbindlich", re.I)
+_PURCHASE = re.compile(r"\b(kostenpflichtig|zahlungspflichtig|kaufen|buchen|bezahlen|zahlen|pay|buy|bestellen|order|"
+                       r"verbindlich)\b", re.I)          # whole words: "Weiter einkaufen" is navigation, not a purchase
 _REFUSE = re.compile(r"lösch|loesch|delete|entfern|remove|abmeld|log ?out|registrier|adressbuch|versicherung|"
                      r"insurance|newsletter|werbung|\babo\b|storno|stornier|cancel", re.I)
 _CHOICE_REFUSE = re.compile(_REFUSE.pattern + "|" + _PURCHASE.pattern + "|weiter|next|fortfahren|warenkorb|cart|"
@@ -162,7 +162,9 @@ _CARD_AUTOCOMPLETE = {"cc-number": "number", "cc-name": "name", "cc-csc": "cvc",
 _CARD_HINT = re.compile("|".join(_CARD_RX.values()) + r"|\bcc-", re.I)
 
 _BANK_HOST = re.compile(r"3ds|secure|acs|bank|sparkasse|raiffeisen|erste|bawag|cardcomplete|paylife|psd2", re.I)
-_BANK_TEXT = re.compile(r"Bank-App|(?i:bestätigen Sie)|Freigabe|(?<!\w)TAN(?!\w)|pushTAN|George")
+_BANK_TEXT = re.compile(r"Bank-App|Banking-App|(?i:bestätigen Sie)|(?<!\w)TAN(?!\w)|pushTAN|3-?D.?Secure|Verified by|"
+                        r"SecureCode|Ihre Bank")
+_NOT_LABEL = re.compile(r"agb|terms|bedingung|rechnung|invoice|datenschutz|privacy|widerruf", re.I)
 
 _AMOUNT = re.compile(r"(\d{1,3}(?:\.\d{3})+|\d{1,4}),(\d{2})\s*€|€\s*(\d{1,3}(?:\.\d{3})+|\d{1,4}),(\d{2})")
 _TOTAL_WORD = re.compile(r"gesamt|summe|total|betrag|zu zahlen", re.I)
@@ -490,7 +492,7 @@ async def _prepare(page, s: Shipment, n: int) -> dict[str, Any]:
     await label_fill.dismiss_consent(page)
     if await label_fill.fill_login(page, _active["carrier"]):
         await label_fill.dismiss_consent(page)
-    if _active["bought"] and await _bank_check(page):
+    if _active["bought"] and not _label_arrived(s.id) and await _bank_check(page):
         raise NeedsHuman(t("confirm the payment in your bank app, then finish in the browser window"))
     await _card_step(page)
     fields, actions, where = await _collect_all(page)
@@ -558,7 +560,7 @@ async def _check_price(page, s: Shipment) -> float:
         raise BuyError(t("No price on the page before the payment – refusing to pay"))
     if total > s.price + PRICE_TOLERANCE_EUR:
         raise BuyError(t("price on the page €{page} > expected €{expected}", page=_eur(total), expected=_eur(s.price)))
-    cap = _cap()
+    cap = _cap() if s.approval == "auto" else None        # the limit is a rule for automatic buying only
     if cap and total > cap:
         raise BuyError(t("price on the page €{page} > limit €{limit}", page=_eur(total), limit=_eur(cap)))
     return total
@@ -847,6 +849,26 @@ async def _drive(sid: int, page, steps: int) -> str:
 
 
 # ------------------------------------------------------------------ entry points
+def label_download(name: str) -> bool:
+    """Whether a download of this name may be the label (terms, invoices and privacy PDFs are not)."""
+    return bool(_DOWNLOAD.search(name)) and not _NOT_LABEL.search(name)
+
+
+async def _download(sid: int, download) -> None:
+    """A file the checkout page downloads: the label once the purchase was clicked (or when its name says so)."""
+    name = download.suggested_filename or ""
+    if _active.get("bought") or label_download(name):
+        await label_fill._on_download(sid)(download)
+        return
+    d = _labels_dir() / f"shipment-{sid}"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / ("doc-" + re.sub(r"[^\w.-]", "_", name or "file"))
+    try:
+        await download.save_as(path)              # kept for the record, not as the label
+    except Exception as e:  # noqa: BLE001
+        log.info("download %s for shipment %s skipped: %s", name, sid, e)
+
+
 async def _open(sid: int):
     from app.willhaben.session import get_session
 
@@ -859,7 +881,7 @@ async def _open(sid: int):
         raise BuyError(t("Browser session is not running"))
     try:
         page = await sess.context.new_page()
-        page.on("download", lambda dl: label_fill._spawn(label_fill._on_download(sid)(dl)))
+        page.on("download", lambda dl: label_fill._spawn(_download(sid, dl)))
         await page.goto(CARRIERS[o.carrier].label_url, wait_until="domcontentloaded")
     except Exception as e:  # noqa: BLE001 - network or browser trouble: a clear message for the user
         raise BuyError(t("The carrier's page did not open: {error}", error=e)) from e
@@ -874,10 +896,14 @@ async def buy(shipment_id: int) -> Shipment:
     """Buy and save the label for an approved, paid shipment (status "buying"). See the module docstring."""
     busy = _active.get("page")
     if busy is not None and not busy.is_closed():
-        msg = t("Another label purchase is still open – finish or close it first")
-        _mark_failed(shipment_id, msg)
-        raise BuyError(msg)
-    page = await _open_or_fail(shipment_id)
+        if _active.get("shipment") == shipment_id:       # stopped for the user (bank app …): carry on where it was
+            page = busy
+        else:
+            msg = t("Another label purchase is still open – finish or close it first")
+            _mark_failed(shipment_id, msg)
+            raise BuyError(msg)
+    else:
+        page = await _open_or_fail(shipment_id)
     res = await _drive(shipment_id, page, MAX_STEPS)
     if res != "labelled":
         msg = t("no label after {n} steps – see the steps in the shipment log", n=MAX_STEPS)
