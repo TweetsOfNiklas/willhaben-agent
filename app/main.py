@@ -150,7 +150,9 @@ def _eur(v: float | None) -> str:
 
 
 templates.env.filters.update(local=_local, ago=_ago, eur=_eur)
-templates.env.globals.update(deal_label=screening.deal_label)   # Claude verdict on hit cards
+templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
+                             screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
+                             screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, wh_limiter=willhaben_limiter,
                              wh_budget=lambda: get_settings().requests_per_hour)
@@ -234,13 +236,14 @@ async def agents_new(request: Request):
 
 @app.post("/agents")
 async def agents_create(url: str = Form(...), name: str = Form(""), interval_min: int = Form(5),
-                        screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match")):
+                        screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
+                        screen_hide: list[str] = Form([])):
     try:
         agent = create_agent(url, name or None, interval_min * 60)
     except InvalidSearchUrl as e:
         return back(f"/agents?error={e}")
     if screen_on:
-        agent = _set_screening(agent.id, True, screen_brief, screen_min)
+        agent = _set_screening(agent.id, True, screen_brief, screen_min, screen_hide)
     scheduler.schedule_agent(agent)
     return back("/agents")
 
@@ -275,7 +278,8 @@ async def agents_toggle(agent_id: int):
 @app.post("/agents/{agent_id}/edit")
 async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = Form(...),
                       notify_on: str | None = Form(None), drops_on: str | None = Form(None),
-                      screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match")):
+                      screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
+                      screen_hide: list[str] = Form([])):
     s = get_settings()
     with session() as db:
         a = db.get(SearchAgent, agent_id)
@@ -285,18 +289,20 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         db.add(a)
         db.commit()
         db.refresh(a)
-    a = _set_screening(agent_id, bool(screen_on), screen_brief, screen_min)
+    a = _set_screening(agent_id, bool(screen_on), screen_brief, screen_min, screen_hide)
     scheduler.schedule_agent(a, run_soon=False)
     return back("/agents")
 
 
-def _set_screening(agent_id: int, on: bool, brief: str, minimum: str) -> SearchAgent:
+def _set_screening(agent_id: int, on: bool, brief: str, minimum: str, hide: list[str] | None = None) -> SearchAgent:
     """Claude screening of new hits (see app/services/screening.py)."""
     with session() as db:
         a = db.get(SearchAgent, agent_id)
         a.screen = on
         a.screen_brief = brief.replace("\r\n", "\n").strip() or None
         a.screen_min = minimum if minimum in screening.MIN_RANK else "match"
+        if hide is not None:
+            a.screen_hide = ",".join(i for i in screening.HIDEABLE if i in hide) or "-"
         db.add(a)
         db.commit()
         db.refresh(a)

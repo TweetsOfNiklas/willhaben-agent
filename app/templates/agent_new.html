@@ -53,7 +53,7 @@
         <label>{{ _("Name") }} <input name="name" value="{{ f.suggested_name() }}"></label>
         <label>{{ _("Check every (minutes)") }}
           <input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
-        <div style="grid-column:1/-1">{% with screen=False, brief='', minimum='match' %}{% include "_screen_fields.html" %}{% endwith %}</div>
+        <div style="grid-column:1/-1">{% with screen=False, brief='', minimum='match', hide=None %}{% include "_screen_fields.html" %}{% endwith %}</div>
         <button type="submit" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>{{ _("Create search agent") }}</button>
       </form>
       <small class="muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}

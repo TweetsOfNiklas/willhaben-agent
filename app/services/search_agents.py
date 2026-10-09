@@ -157,4 +157,5 @@ def _screen_data(h: Hit) -> dict:
     """Screening result in the HA event, so automations can filter on it too."""
     if h.screen_relevant is None:
         return {}
-    return {"screen_relevant": h.screen_relevant, "screen_deal": h.screen_deal, "screen_reason": h.screen_reason}
+    return {"screen_relevant": h.screen_relevant, "screen_deal": h.screen_deal, "screen_reason": h.screen_reason,
+            "screen_issues": h.screen_issues or []}

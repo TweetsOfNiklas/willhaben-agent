@@ -29,8 +29,7 @@
     {% if h and h.screen_relevant is not none %}
       <div class="adv-claude">
         <p><strong>🤖 {{ _("Claude's assessment") }}</strong>
-          {% if h.screen_relevant %}<span class="badge {{ 'ok' if h.screen_deal in ('great', 'good') else 'muted' }}">{{ deal_label(h.screen_deal) }}</span>
-          {% else %}<span class="badge">{{ _("wrong item") }}</span>{% endif %}
+          {% for lbl in screen_labels(h) %}<span class="badge {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else 'muted' if h.screen_relevant else '') }}">{{ lbl }}</span> {% endfor %}
           {% if h.screen_at %}<small class="muted">· {{ h.screen_at|ago }}</small>{% endif %}</p>
         {% if h.screen_reason %}<p class="adv-reason">{{ h.screen_reason }}</p>{% endif %}
       </div>

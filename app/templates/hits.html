@@ -26,8 +26,7 @@
       <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}">{{ h.heading }}</a>
       <div class="price">{{ h.price_display or (h.price|eur) }}{% if h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span>{% endif %}</div>
       {% if h.screen_relevant is not none %}<div class="meta" title="{{ h.screen_reason or '' }}">🤖
-        {% if h.screen_relevant %}<span class="badge {{ 'ok' if h.screen_deal in ('great', 'good') else 'muted' }}">{{ deal_label(h.screen_deal) }}</span>
-        {% else %}<span class="badge">{{ _("wrong item") }}</span>{% endif %} {{ (h.screen_reason or '')[:90] }}</div>{% endif %}
+        {% for lbl in screen_labels(h) %}<span class="badge {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else 'muted' if h.screen_relevant else '') }}">{{ lbl }}</span> {% endfor %} {{ (h.screen_reason or '')[:90] }}</div>{% endif %}
       <div class="meta">{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}</div>
       <div class="meta">{{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
       {% if not agent_id %}<div class="meta">{{ agents[h.agent_id].name if agents.get(h.agent_id) else '' }}</div>{% endif %}

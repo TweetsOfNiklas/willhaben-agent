@@ -1,4 +1,4 @@
-{# Claude screening settings of a search agent (create + edit form). Expects screen, brief, minimum, thresholds. #}
+{# Claude screening settings of a search agent (create + edit form). Expects screen, brief, minimum, hide, thresholds. #}
 <details class="screen-fields" {% if screen %}open{% endif %}>
   <summary><small>🤖 {{ _("Claude screening") }}{% if screen %} – {{ _("on") }}{% endif %}</small></summary>
   <label><input type="checkbox" role="switch" name="screen_on" {% if screen %}checked{% endif %}>
@@ -7,5 +7,13 @@
     <textarea name="screen_brief" rows="3" placeholder="{{ _('e.g. road bike, frame size 56–58, Shimano 105 or better, no e-bikes, no parts') }}">{{ brief or '' }}</textarea></label>
   <label>{{ _("Notify for") }}
     <select name="screen_min">{% for k, label in thresholds.items() %}<option value="{{ k }}" {% if k == (minimum or 'match') %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <fieldset class="screen-hide">
+    <legend><small>{{ _("Don't notify when the hit is …") }}</small></legend>
+    {% set names = screen_issue_labels() %}{% set chosen = hide if hide is not none else screen_default_hide %}
+    {% for key in screen_hideable %}
+      <label><input type="checkbox" name="screen_hide" value="{{ key }}" {% if key in chosen %}checked{% endif %}> {{ names[key] }}</label>
+    {% endfor %}
+    <small class="muted">{{ _("“Too expensive” and “price unclear” are covered by “Notify for”. “Too far away” needs an area in the description above; “dealer” comes from willhaben itself.") }}</small>
+  </fieldset>
   <small class="muted">{{ _("Other hits still appear under Hits and fire the Home Assistant event, just without a push or Telegram message. The model is chosen in Settings → Claude.") }}</small>
 </details>
