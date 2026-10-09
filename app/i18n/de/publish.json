@@ -1,0 +1,19 @@
+{
+ "Carrier": "Versanddienst",
+ "Choose another category": "Andere Kategorie wählen",
+ "Handover": "Übergabe",
+ "Marked as published.": "Als veröffentlicht markiert.",
+ "New ads are checked by willhaben first and can take a few minutes to show up.": "Neue Anzeigen prüft willhaben zuerst – es kann ein paar Minuten dauern, bis sie sichtbar sind.",
+ "No category found.": "Keine Kategorie gefunden.",
+ "Parcel size": "Paketgröße",
+ "Parcel size and carrier only count with PayLivery; the buyer pays the shipping. Shipping has not been tested with willhaben yet – if a step fails, the ad stays an unpublished draft on willhaben.": "Paketgröße und Versanddienst zählen nur mit PayLivery; den Versand zahlt der Käufer. Versand ist mit willhaben noch nicht getestet – klappt ein Schritt nicht, bleibt die Anzeige ein unveröffentlichter Entwurf auf willhaben.",
+ "Publish on willhaben now": "Jetzt auf willhaben veröffentlichen",
+ "Published on willhaben": "Auf willhaben veröffentlicht",
+ "Search failed: {error}": "Suche fehlgeschlagen: {error}",
+ "Search willhaben categories, e.g. speaker": "willhaben-Kategorien durchsuchen, z. B. Lautsprecher",
+ "Self pickup": "Selbstabholung",
+ "Self pickup or shipping": "Selbstabholung oder Versand",
+ "This category cannot be chosen (not found or not a final category)": "Diese Kategorie geht nicht (nicht gefunden oder keine Endkategorie)",
+ "chosen by hand": "selbst gewählt",
+ "with PayLivery (buyer protection)": "mit PayLivery (Käuferschutz)"
+}

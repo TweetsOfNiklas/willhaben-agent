@@ -133,7 +133,7 @@ Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_sea
 | Own ads: import, expiry reminders | done |
 | Own ads: automatic reactivation | not yet: endpoint unknown, a reminder with a link is sent instead |
 | Ad drafts with Claude, comparable prices, Geizhals specs, batch upload | done |
-| Publishing ads directly | not yet: endpoint unknown, copy buttons plus a link to willhaben's form instead |
+| Publishing ads directly | done for free private ads with pickup (click + confirm, batch cards and single draft page, manual category picker); shipping/PayLivery built from the bundle but **not yet live-tested**; the manual link stays as fallback |
 | Home Assistant events, pushes with action buttons | done |
 | MCP server | done |
 

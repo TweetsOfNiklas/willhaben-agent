@@ -34,6 +34,7 @@ from app.services import ad_batch, ad_creator, chats, my_ads, screening
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services.notify import PUSH_CHANNELS, notify
 from app.services.search_agents import create_agent, run_agent
+from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
 from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with_params
 from app.willhaben.public import WillhabenError, get_public, willhaben_limiter
@@ -151,6 +152,7 @@ def _eur(v: float | None) -> str:
 
 templates.env.filters.update(local=_local, ago=_ago, eur=_eur)
 templates.env.globals.update(deal_label=screening.deal_label)   # Claude verdict on hit cards
+templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, wh_limiter=willhaben_limiter,
                              wh_budget=lambda: get_settings().requests_per_hour)
@@ -578,6 +580,74 @@ async def ad_draft_geizhals(draft_id: int, url: str = Form(""), query: str = For
     return back(f"/new-ad/{draft_id}#geizhals")
 
 
+def _save_posted_fields(draft_id: int, form: Any) -> None:
+    """Unsaved title/description/price that came along with a willhaben action: saved first."""
+    if form.get("title") is not None and form.get("description") is not None:
+        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+
+
+@app.post("/new-ad/{draft_id:int}/willhaben/prepare")
+async def ad_draft_wh_prepare(request: Request, draft_id: int):
+    """Read-only: categories and required fields from willhaben's insertion form."""
+    _draft_or_404(draft_id)
+    form = await request.form()
+    _save_posted_fields(draft_id, form)
+    try:
+        await ad_creator.prepare_willhaben(draft_id, str(form.get("category_query") or "").strip() or None)
+    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        ad_creator.update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
+    return back(f"/new-ad/{draft_id}#willhaben")
+
+
+@app.post("/new-ad/{draft_id:int}/willhaben/category")
+async def ad_draft_wh_category(draft_id: int, code: str = Form(...)):
+    """A category picked by hand ("Choose another category") becomes a selectable option in wh_plan."""
+    _draft_or_404(draft_id)
+    try:
+        await ad_creator.add_manual_category(draft_id, code.strip())
+    except ValueError as e:
+        ad_creator.update_draft(draft_id, error=str(e))
+    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        ad_creator.update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
+    return back(f"/new-ad/{draft_id}#willhaben")
+
+
+@app.post("/new-ad/{draft_id:int}/willhaben/publish")
+async def ad_draft_wh_publish(request: Request, draft_id: int):
+    """Publish on willhaben after the user's click + confirm; never twice (publish_willhaben checks the status)."""
+    from app.willhaben.insert import InsertError
+
+    _draft_or_404(draft_id)
+    form = await request.form()
+    _save_posted_fields(draft_id, form)
+    try:
+        option = int(str(form.get("option", "")))
+    except ValueError:
+        option = -1
+    prefix = f"o{option}_"
+    values = {k[len(prefix):]: str(v) for k, v in form.multi_items() if k.startswith(prefix) and v}
+    try:
+        await ad_creator.publish_willhaben(draft_id, option, values, shipping=ad_creator.parse_shipping(form))
+    except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        log.warning("publishing draft %s failed: %s", draft_id, e)
+        ad_creator.update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
+        return back(f"/new-ad/{draft_id}#willhaben")
+    return back(f"/new-ad/{draft_id}?msg={quote(t('Published on willhaben'), safe='')}#willhaben")
+
+
+@app.get("/api/willhaben/categories")
+async def api_wh_categories(q: str = "", limit: int = 25):
+    """Read-only: leaf categories of willhaben's insertion form matching q (form cached ~1 h in memory)."""
+    from app.willhaben import insert
+    if len(q.strip()) < 2:
+        return {"results": []}
+    try:
+        form = await insert.cached_form(get_session())
+    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        return JSONResponse({"results": [], "error": str(e)}, status_code=503)
+    return {"results": insert.search_categories(form.get("categoryTree") or {}, q, limit=max(1, min(limit, 50)))}
+
+
 @app.get("/ad-drafts/{draft_id}/image/{idx}")
 async def ad_draft_image(draft_id: int, idx: int):
     with session() as db:
@@ -735,10 +805,25 @@ async def ad_draft_inline_publish(request: Request, draft_id: int):
     prefix = f"o{option}_"
     values = {k[len(prefix):]: str(v) for k, v in form.multi_items() if k.startswith(prefix) and v}
     try:
-        d = await ad_creator.publish_willhaben(draft_id, option, values)
+        d = await ad_creator.publish_willhaben(draft_id, option, values, shipping=ad_creator.parse_shipping(form))
     except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
         log.warning("publishing draft %s failed: %s", draft_id, e)
         d = ad_creator.update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
+    return _draft_card(request, d)
+
+
+@app.post("/ad-drafts/{draft_id}/inline/category", response_class=HTMLResponse)
+async def ad_draft_inline_category(request: Request, draft_id: int):
+    """Batch card: a category picked by hand becomes a selectable option in wh_plan (read-only on willhaben)."""
+    _draft_or_404(draft_id)
+    form = await request.form()
+    _save_posted_fields(draft_id, form)
+    try:
+        d = await ad_creator.add_manual_category(draft_id, str(form.get("code") or "").strip())
+    except ValueError as e:
+        d = ad_creator.update_draft(draft_id, error=str(e))
+    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        d = ad_creator.update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
     return _draft_card(request, d)
 
 
@@ -1462,7 +1547,7 @@ async def api_ad_draft_publish(draft_id: int, payload: dict[str, Any]):
         await ad_creator.prepare_willhaben(draft_id)
     try:
         res = await ad_creator.publish_willhaben(draft_id, int(payload.get("option", 0)), payload.get("values") or {},
-                                                 stop_after=stop)
+                                                 stop_after=stop, shipping=ad_creator.parse_shipping(payload.get("shipping") or {}))
     except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
         d = ad_creator.update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
         return JSONResponse({"ok": False, "error": str(e), "wh_ad_id": d.wh_ad_id}, status_code=502)

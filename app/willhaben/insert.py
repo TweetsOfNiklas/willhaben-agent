@@ -9,6 +9,10 @@ Taken from the web app bundle /bbx-adin (2026-10-09); every call runs as fetch()
   images    POST /webapi/iad-upload/atimage/temp   multipart "file" -> {reference, …}
             PUT  /webapi/iad-upload<imageList>/order-and-associate  {advertImage:[{reference}], floorPlans:[]}
   save      POST /webapi/iad/bap/save              ad JSON (with adId)
+  delivery  (only with Versand, NEEDS LIVE VERIFICATION - read from the bundle, never run against willhaben)
+            PUT  /webapi/iad/bap/edit              ad JSON with treeAttributes Uebergabe = [PICKUP?, Versand]
+            GET  /webapi/<p2ppUserOptions link>    PayLivery options (deliveryOptions[] per parcel size/carrier)
+            PUT  /webapi/p2p-aggregator/restapi/v2/p2pp/options/delivery  {adId, deliveryOptions: [uuid…]}
   cart      POST /webapi/iad/products/privates/atz/<adUuid>/carts  {currency:"EUR"} -> {shoppingCartId, status:"Open"}
             PUT  /webapi/iad/products/privates/carts/<id>/items     {productReferences: []} -> {totalPrice}
             POST /webapi/iad/products/privates/carts/<id>/checkout  {billingData: null} -> {status:"ACTIVATED"}
@@ -18,6 +22,7 @@ This module stops if anything would cost money (totalPrice > 0 or a paymentUrl) 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -80,6 +85,45 @@ def attribute_values(tree: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
+FORM_CACHE_S = 3600.0
+_form_cache: dict[str, Any] = {}
+
+
+async def cached_form(s: BrowserSession, max_age: float = FORM_CACHE_S) -> dict[str, Any]:
+    """load_form() kept in memory for about an hour: the category tree barely changes and each load is a
+    logged-in GET. Publishing itself always loads a fresh form (context links, contact)."""
+    hit = _form_cache.get("form")
+    if hit and time.monotonic() - _form_cache.get("at", 0) < max_age:
+        return hit
+    form = await load_form(s)
+    _form_cache.update(form=form, at=time.monotonic())
+    return form
+
+
+def remember_form(form: dict[str, Any]) -> None:
+    _form_cache.update(form=form, at=time.monotonic())
+
+
+def clear_form_cache() -> None:
+    _form_cache.clear()
+
+
+def search_categories(tree: dict[str, Any], query: str, limit: int = 25) -> list[dict[str, Any]]:
+    """Leaf categories whose name or path contains every word of the query, best (name match, short path) first."""
+    words = [_norm(w) for w in (query or "").split() if _norm(w)]
+    if not words:
+        return []
+    hits = []
+    for code, info in category_index(tree).items():
+        if not info.get("leaf"):
+            continue
+        label, hay = _norm(info.get("label")), _norm(" ".join(info.get("path") or []))
+        if all(w in hay for w in words):
+            hits.append((0 if all(w in label for w in words) else 1, len(info["path"]), " › ".join(info["path"]), code))
+    hits.sort()
+    return [{"code": code, "label": path.split(" › ")[-1], "path": path} for _, _, path, code in hits[:limit]]
+
+
 async def get_own_ad(s: BrowserSession, ad_id: str) -> dict[str, Any]:
     """An own ad in the editor's JSON format (read-only), the same shape presave/save take."""
     return await s.api_json("GET", f"/webapi/iad/bap/{int(ad_id)}")
@@ -87,7 +131,12 @@ async def get_own_ad(s: BrowserSession, ad_id: str) -> dict[str, Any]:
 
 # ------------------------------------------------------------------ plan (read-only)
 PICKUP = {"label": "Selbstabholung", "code": "PICKUP"}
+SHIPPING = {"label": "Versand", "code": "Versand"}     # bundle module 76697: I2="Uebergabe", z5="Versand", $9="PICKUP"
 HANDOVER = "Uebergabe"
+# Übergabe choice in the UI -> value nodes. Everything except "pickup" NEEDS LIVE VERIFICATION.
+HANDOVERS = {"pickup": [PICKUP], "shipping": [SHIPPING], "both": [PICKUP, SHIPPING]}
+PARCEL_SIZES = ("XS", "S", "M", "L")                  # PayLivery sizes offered by willhaben's form (bundle: eT)
+PAYLIVERY_CARRIERS = ("Post", "dpd", "Hermes")         # carrier.description values seen in the bundle (eC)
 
 
 def suggestion_paths(raw: Any) -> list[list[dict[str, str]]]:
@@ -126,22 +175,38 @@ def guess_value(attr_label: str, values: dict[str, str], draft_attrs: list[dict[
     return None
 
 
+def _option(cats: dict[str, Any], vals: dict[str, Any], path: list[dict[str, str]], condition: str | None,
+            attributes: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """One category option: path root → leaf plus its required fields with a guessed value."""
+    info = cats.get(path[-1]["code"]) or {}
+    fields = []
+    for code in dict.fromkeys(info.get("required") or []):
+        if code == HANDOVER:
+            continue                       # chosen separately ("Übergabe": pickup / shipping)
+        a = vals.get(code) or {"label": code, "values": {}}
+        fields.append({"code": code, "label": a["label"], "values": list(a["values"].items()),
+                       "selected": guess_value(a["label"], a["values"], attributes or [], condition)})
+    return {"path": path, "label": " › ".join(p["label"] for p in path), "fields": fields}
+
+
+def manual_option(form: dict[str, Any], code: str, *, condition: str | None,
+                  attributes: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """A category the user picked from the whole tree (search box), in the same shape as build_plan's options."""
+    tree = form.get("categoryTree") or {}
+    cats = category_index(tree)
+    info = cats.get(code)
+    if not info or not info.get("leaf"):
+        return None
+    path = [{"label": lbl, "code": c} for lbl, c in zip(info["path"], info["codes"], strict=False)]
+    return {**_option(cats, attribute_values(tree), path, condition, attributes), "manual": True}
+
+
 def build_plan(form: dict[str, Any], raw_suggestions: Any, *, condition: str | None,
                attributes: list[dict[str, Any]] | None) -> dict[str, Any]:
     """Everything the user confirms before publishing: category options and required fields per option."""
     tree = form.get("categoryTree") or {}
     cats, vals = category_index(tree), attribute_values(tree)
-    options = []
-    for path in suggestion_paths(raw_suggestions)[:5]:
-        info = cats.get(path[-1]["code"]) or {}
-        fields = []
-        for code in dict.fromkeys(info.get("required") or []):
-            if code == HANDOVER:
-                continue                       # always "Selbstabholung" in this version
-            a = vals.get(code) or {"label": code, "values": {}}
-            fields.append({"code": code, "label": a["label"], "values": list(a["values"].items()),
-                           "selected": guess_value(a["label"], a["values"], attributes or [], condition)})
-        options.append({"path": path, "label": " › ".join(p["label"] for p in path), "fields": fields})
+    options = [_option(cats, vals, path, condition, attributes) for path in suggestion_paths(raw_suggestions)[:5]]
     ad = form.get("ad") or {}
     return {"options": options, "location": " ".join(x for x in (ad.get("postCode"), ad.get("location")) if x),
             "contact": " ".join(x for x in (ad.get("firstName"), ad.get("surName")) if x)}
@@ -176,7 +241,8 @@ def _webapi(link: dict[str, Any], upload: bool = False) -> str:
 
 
 def compose_ad(template: dict[str, Any], *, heading: str, description: str, price: float | None,
-               path: list[dict[str, str]], attrs: dict[str, tuple[str, str]], attr_labels: dict[str, str]) -> dict[str, Any]:
+               path: list[dict[str, str]], attrs: dict[str, tuple[str, str]], attr_labels: dict[str, str],
+               handover: str = "pickup") -> dict[str, Any]:
     import copy
 
     ad = copy.deepcopy(template)
@@ -187,13 +253,14 @@ def compose_ad(template: dict[str, Any], *, heading: str, description: str, pric
     tree_attrs = [{"attributeNode": {"label": attr_labels.get(code, code), "code": code},
                    "selectedAttributeValueNodes": [{"label": label, "code": value}]}
                   for code, (value, label) in attrs.items()]
-    tree_attrs.append({"attributeNode": {"label": "Übergabe", "code": HANDOVER}, "selectedAttributeValueNodes": [PICKUP]})
+    tree_attrs.append({"attributeNode": {"label": "Übergabe", "code": HANDOVER},
+                       "selectedAttributeValueNodes": [dict(n) for n in HANDOVERS.get(handover, [PICKUP])]})
     ad["treeAttributes"] = tree_attrs
     ad.pop("treeAttributeIds", None)
     return ad
 
 
-STEPS = ("presave", "photos", "save", "cart")   # stop_after: halt before the ad goes public (checkout)
+STEPS = ("presave", "photos", "save", "delivery", "cart")   # stop_after: halt before the ad goes public (checkout)
 
 
 def _shape(obj: Any) -> Any:
@@ -206,11 +273,76 @@ def _shape(obj: Any) -> Any:
     return {"keys": sorted(obj), "links": links, **keep}
 
 
-async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str, bytes, str]],
-                  existing_ad_id: str | None = None, on_presaved=None, stop_after: str | None = None) -> dict[str, Any]:
-    """presave → photos → save → empty cart → checkout. Returns {ad_id, ad_uuid, url}.
+def _with_handover(ad: dict[str, Any], nodes: list[dict[str, str]]) -> dict[str, Any]:
+    """The ad with its Uebergabe attribute replaced, like the bundle's handleFormSubmit does."""
+    keep = [a for a in ad.get("treeAttributes") or [] if (a.get("attributeNode") or {}).get("code") != HANDOVER]
+    return {**ad, "treeAttributes": keep + [{"attributeNode": {"label": "Übergabe", "code": HANDOVER},
+                                             "selectedAttributeValueNodes": [dict(n) for n in nodes]}]}
 
-    stop_after ("presave" | "photos" | "save" | "cart") returns {"stopped": step, ...} with the response
+
+def pick_delivery_option(options: dict[str, Any], size: str | None, carrier: str | None) -> dict[str, Any] | None:
+    """The PayLivery deliveryOption for a parcel size (and carrier, else the cheapest)."""
+    cands = [o for o in options.get("deliveryOptions") or []
+             if ((o.get("parcelSize") or {}).get("size") or "").upper() == (size or "").upper()]
+    if carrier:
+        cands = [o for o in cands if ((o.get("carrier") or {}).get("description") or "").lower() == carrier.lower()]
+
+    def price(o: dict[str, Any]) -> float:
+        try:
+            return float(o.get("price") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    return min(cands, key=price) if cands else None
+
+
+async def set_delivery(s: BrowserSession, ad: dict[str, Any], shipping: dict[str, Any]) -> dict[str, Any]:
+    """Shipping step of willhaben's "Übergabe & Versand" page (/iad/anzeigenaufgabe/marktplatz/versandoptionen).
+
+    NEEDS LIVE VERIFICATION: read from the bbx-adin bundle (buildId 1058731-20d7e775, chunk 9691 modules 41117/54527/
+    35688), never run against willhaben. The page does:
+      1. PUT /webapi/iad/bap/edit  with the ad, treeAttributes Uebergabe = [{code:PICKUP}?, {code:Versand}]
+      2. GET /webapi/<serviceName><relativePath> of the ad's contextLink "p2ppUserOptions"   (PayLivery offers)
+      3. on "Weiter": PUT bap/edit again (same body; skipped here) + PUT /webapi/p2p-aggregator/restapi/v2/p2pp/
+         options/delivery {adId, deliveryOptions: [deliveryOption.uuid, …add-on uuids]}  ([] = Versand without PayLivery)
+    Add-ons (oversize, "fragile") are not offered here.
+    The ad stays a non-public draft throughout; the cart afterwards keeps the money guard."""
+    nodes = HANDOVERS.get(shipping.get("handover") or "", [SHIPPING])
+    body = _with_handover(ad, nodes)
+    edited = await s.api_json("PUT", "/webapi/iad/bap/edit", body)
+    out: dict[str, Any] = {"handover": [n["code"] for n in nodes], "edit": _shape(edited)}
+    chosen: list[str] = []
+    if shipping.get("paylivery"):
+        link = _link(edited if isinstance(edited, dict) else {}, "p2ppUserOptions") or _link(body, "p2ppUserOptions")
+        if not link:
+            raise InsertError("PayLivery: willhaben bietet für diese Anzeige keine Versandoptionen an")
+        opts = await s.api_json("GET", _webapi(link))
+        opts = opts if isinstance(opts, dict) else {}
+        if opts.get("sellerOnboardingDTO"):
+            raise InsertError("PayLivery ist für dein Konto noch nicht eingerichtet – bitte einmal auf willhaben "
+                              "erledigen (Bankdaten), dann erneut versuchen")
+        opt = pick_delivery_option(opts, shipping.get("size"), shipping.get("carrier"))
+        if not opt or not opt.get("uuid"):
+            sizes = sorted({(o.get("parcelSize") or {}).get("size") or "?" for o in opts.get("deliveryOptions") or []})
+            raise InsertError(f"PayLivery: keine Versandoption für Größe {shipping.get('size') or '?'}"
+                              f"{' / ' + shipping['carrier'] if shipping.get('carrier') else ''}"
+                              f" (angeboten: {', '.join(sizes) or 'keine'})")
+        chosen = [opt["uuid"]]
+        out["option"] = {"size": (opt.get("parcelSize") or {}).get("size"),
+                         "carrier": (opt.get("carrier") or {}).get("description"), "price": opt.get("price")}
+    res = await s.api_json("PUT", "/webapi/p2p-aggregator/restapi/v2/p2pp/options/delivery",
+                           {"adId": ad.get("adId"), "deliveryOptions": chosen})
+    out["delivery"] = _shape(res)
+    return out
+
+
+async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str, bytes, str]],
+                  existing_ad_id: str | None = None, on_presaved=None, stop_after: str | None = None,
+                  shipping: dict[str, Any] | None = None) -> dict[str, Any]:
+    """presave → photos → save → [delivery] → empty cart → checkout. Returns {ad_id, ad_uuid, url}.
+
+    shipping {"handover": "pickup"|"shipping"|"both", "paylivery": bool, "size", "carrier"}: anything but pickup
+    runs set_delivery() between save and cart (NEEDS LIVE VERIFICATION). None/pickup = the live-verified path.
+    stop_after ("presave" | "photos" | "save" | "delivery" | "cart") returns {"stopped": step, ...} with the response
     structures instead; everything before checkout stays a non-public willhaben draft."""
     trace: dict[str, Any] = {}
     if existing_ad_id:          # a former attempt already created the willhaben draft: continue with it
@@ -255,6 +387,12 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
     trace["save"] = _shape(saved)
     if stop_after == "save":
         return {"stopped": "save", "ad_id": ad_id, "trace": trace}
+
+    if shipping and shipping.get("handover") in ("shipping", "both"):
+        ad = {**ad, **{k: v for k, v in saved.items() if k in ("adId", "adUuid", "contextLinkList") and v}}
+        trace["delivery"] = await set_delivery(s, ad, shipping)
+    if stop_after == "delivery":
+        return {"stopped": "delivery", "ad_id": ad_id, "trace": trace}
 
     cart = await s.api_json("POST", f"/webapi/iad/products/privates/atz/{ad_uuid}/carts", {"currency": "EUR"})
     cart_id = cart.get("shoppingCartId")

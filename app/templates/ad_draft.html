@@ -50,8 +50,50 @@
         </form>
       {% endif %}
     </article>
-    <p><a href="{{ insert_url }}" target="_blank" role="button" class="outline">{{ _("Insert on willhaben") }}</a>
-      <br><small class="muted">{{ _("Opens the willhaben form in a new tab – copy the title and description above with one click.") }}</small></p>
+    {% set plan = d.wh_plan or {} %}
+    <article id="willhaben">
+      <header><strong>{{ _("Publish on willhaben") }}</strong>
+        {% if d.status == 'published' %}<span class="badge ok">{{ _("published") }}</span>{% endif %}</header>
+      {% if d.status == 'published' %}
+        {% if d.wh_ad_id %}<p><a href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" rel="noopener" role="button">{{ _("View on willhaben") }} ↗</a></p>
+          <small class="muted">{{ _("New ads are checked by willhaben first and can take a few minutes to show up.") }}</small>
+        {% else %}<p class="muted">{{ _("Marked as published.") }}</p>{% endif %}
+      {% else %}
+        <form method="post" action="/new-ad/{{ d.id }}/willhaben/prepare" class="row-actions">
+          {% if plan.options is defined %}<input name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}"
+            title="{{ _('Wrong categories? Search with your own term') }}" style="flex:1;margin:0">{% endif %}
+          <button class="secondary" onclick="this.setAttribute('aria-busy','true')">{{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button>
+        </form>
+        {% if plan.options is defined and not plan.options %}<p><small class="muted">{{ _("willhaben suggests no category for this title.") }}</small></p>{% endif %}
+        {% if plan.options is defined %}
+        <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" style="margin-top:var(--pico-spacing)"
+              data-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}">
+          <p><small class="muted">{{ plan.location }}{% if plan.contact %} · {{ plan.contact }}{% endif %}</small></p>
+          {% with pick_url="/new-ad/" ~ d.id ~ "/willhaben/category" %}{% include "_category_picker.html" %}{% endwith %}
+          {% if plan.options %}
+            {% include "_wh_handover.html" %}
+            <input type="hidden" name="title"><input type="hidden" name="description"><input type="hidden" name="price">
+            <button>{{ _("Publish on willhaben now") }}</button>
+            <small class="muted">{{ _("Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.") }}</small>
+          {% endif %}
+        </form>
+        <script>
+          (() => {
+            const f = document.getElementById('wh-publish');
+            f.addEventListener('submit', (e) => {      // unsaved edits above come along and are saved first
+              if (!f.elements.title || !confirm(f.dataset.confirm)) { e.preventDefault(); return; }
+              f.elements.title.value = document.getElementById('title').value;
+              f.elements.description.value = document.getElementById('desc').value;
+              f.elements.price.value = document.getElementById('price').value;
+              f.querySelector('button:not([type=button])').setAttribute('aria-busy', 'true');
+            });
+          })();
+        </script>
+        {% endif %}
+      {% endif %}
+      <p style="margin-top:var(--pico-spacing)"><a href="{{ insert_url }}" target="_blank" rel="noopener" role="button" class="secondary outline">{{ _("Insert manually") }} ↗</a>
+        <br><small class="muted">{{ _("Opens the willhaben form in a new tab – copy the title and description above with one click.") }}</small></p>
+    </article>
   </section>
   <section>
     <article>

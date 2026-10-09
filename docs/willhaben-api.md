@@ -87,7 +87,7 @@ Response: `rowsFound`, `rowsReturned`, `advertSummaryList.advertSummary[]`. Each
 | Send reply | REST: ? — sent via the chat WebSocket instead, see below | V (WebSocket) |
 | My ads (list, status) | no JSON call: `GET /iad/myprofile/myadverts` (HTML) → `__NEXT_DATA__.props.pageProps.initialUserAdsList.verticalList[].advertDetails[]` with `id`, `description` (title), `startDate`, `endDate`, `advertStatus{id,description}`, `advertEditStatusActionsList` | V |
 | Extend / reactivate ad | ? | ? |
-| Create ad (categories, attributes, image upload, publish) | entry point `/iad/anzeigenaufgabe` ("Anzeige aufgeben", place an ad) | ? |
+| Create ad (categories, attributes, image upload, publish) | see "Placing an ad" below | V (pickup) / ? (shipping) |
 
 Conversation list fields according to willmehr: `conversations[]` or `data[]` with `id`/`conversationId`,
 `adId`, `adTitle`, `partnerName`, `lastMessage{text, createdAt}`, `unreadCount`. The parser in
@@ -124,3 +124,47 @@ No REST call: the web app sends via the chat WebSocket `wss://chat-realtime-web.
 - Deep link to a conversation: `/iad/myprofile/chat/<conversation_id>` (Next route `[[...slug]]`).
 
 The app verifies every sent message via `GET chat-api/v1/conversations/{id}/messages` (`client_message_id`).
+
+## Placing an ad (insertion app `/bbx-adin`, 2026-10-09)
+
+Free private marketplace ad (`adTypeId=productId=67`), every call as `fetch()` in the logged-in page
+(`app/willhaben/insert.py`). **V** = first ad published live on 2026-10-09 with pickup only.
+
+| Step | Call | Status |
+|---|---|---|
+| Form | `GET /iad/anzeigenaufgabe/marktplatz?adTypeId=67&productId=67` (HTML) → `__NEXT_DATA__.props.pageProps`: `ad` (template with location, contact, `contextLinkList`), `categoryTree` (`categoryNode` with `children`/`attributeReferences{code,required}`, `attributes[].treeAttributeElement{code,label}` + `values[]`), `prefillAttributes`. The app caches it ~1 h for the category search; publishing always loads it fresh | V |
+| Category suggestion | `GET /webapi/iad/bap/categorysuggestion/attributetree?title=…&adTypeId=67&productId=67` | V |
+| Presave | `POST /webapi/iad/bap/presave` (ad JSON) → `adId`, `adUuid`, `contextLinkList` (non-public draft) | V |
+| Photos | `POST /webapi/iad-upload/atimage/temp` (multipart `file`) → `reference`; `PUT /webapi/iad-upload<imageList link>/order-and-associate` `{advertImage:[{reference}], floorPlans:[]}` | V |
+| Save | `POST /webapi/iad/bap/save` (link `selfLinkFinish`/`selfLinkSave`) | V |
+| Cart | `POST /webapi/iad/products/privates/atz/<adUuid>/carts` `{currency:"EUR"}` → `PUT …/carts/<id>/items` `{productReferences:[]}` → `totalPrice` → `POST …/carts/<id>/checkout` `{billingData:null}` → `status:"ACTIVATED"`. The app stops if `totalPrice > 0` or a `paymentUrl` appears | V |
+
+### Handover and shipping ("Übergabe & Versand", PayLivery) – from the bundle only, **needs live verification**
+
+Page `/iad/anzeigenaufgabe/marktplatz/versandoptionen` (edit: `/iad/anzeige-bearbeiten/marktplatz/versandoptionen`),
+between save and the cart page `zusatzprodukte`. Read in bbx-adin buildId `1058731-20d7e775`, chunk
+`9691-e1ac02b24a890a29.js`: hook module 41117 (`saveBapAdWithDeliveryOption`, `getP2PPOptions`, `handleFormSubmit`),
+API module 54527, constants 76697/35688, form 45421. Nothing of this was sent to willhaben by us.
+
+- Attribute `Uebergabe` (tree attribute) with value codes **`PICKUP`** (Selbstabholung) and **`Versand`** (not
+  `SHIPPING`); both together = pickup or shipping. The page replaces the attribute in `treeAttributes`:
+  `{attributeNode:{code:"Uebergabe"}, selectedAttributeValueNodes:[{code:"PICKUP"},{code:"Versand"}]}`.
+- Ticking "Versand": `PUT /webapi/iad/bap/edit` (ad JSON incl. `adId`, function `Ih`), then from the returned ad's
+  `contextLinkList` the link `p2ppUserOptions` → `GET /webapi/<serviceName><relativePath>` (function `tQ`) =
+  PayLivery options:
+  `deliveryOptions[] {uuid, parcelSize{size: XS|S|M|L, longName, additionalDescription}, carrier{description: Post|dpd|Hermes},
+  price, depositoryPrice, shippingAddOns[{uuid}], descriptionShort, parcelInsurance, carrierInfoText}`,
+  `selectedDeliveryOptions[] {deliveryOptionUuid, isOverSizePackageChosen, isFragileLabelChosen}`, `autoSelectPayLivery`,
+  `attributes.labelTrackingNumber`, `sellerOnboardingDTO` (seller still has to set up PayLivery), `qrCodeInformationDto`,
+  `payLiveryInactiveDTO`. Add-on uuids: oversize `1b27afa3-8b38-49f5-b635-85c7e905f704`, fragile
+  `e87f3937-5a2d-4e63-b1f0-0102f2862007`.
+- "Weiter" (`handleFormSubmit`, function `o4`): `PUT /webapi/iad/bap/edit` again (same ad) and
+  `PUT /webapi/p2p-aggregator/restapi/v2/p2pp/options/delivery` `{adId, deliveryOptions:[<deliveryOption uuid>, …add-on uuids]}`;
+  `[]` = shipping without PayLivery (or the user is blocked for PayLivery). Then the cart page as above.
+- `POST /webapi/p2p-aggregator/restapi/v2/p2pp/onboarding/views` only records that the onboarding hint was seen (not used).
+- The buyer pays the PayLivery shipping; the private seller confirms "nichtsteuerpflichtige Privatperson" (text only,
+  no extra field in the calls).
+
+The app (`insert.set_delivery`) does edit → options (only with PayLivery) → delivery PUT, skips the second identical
+edit, picks the option by parcel size (and carrier, else the cheapest) and stops before the cart if PayLivery onboarding
+is missing or no option matches. Pickup-only ads skip this step entirely (the live-verified path).

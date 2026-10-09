@@ -1,0 +1,74 @@
+{# willhaben category choice inside a publish form: plan options as radios ("option") with their required fields
+   ("o{n}_<code>"), plus "Choose another category" (search over the cached category tree).
+   Needs: d, plan, pick_url (POST code=<category>); optional pick_target + pick_include for htmx (batch card). #}
+{% set sel = plan.selected if plan.selected is defined and plan.selected is not none and plan.selected < (plan.options or [])|length else 0 %}
+{% for o in plan.options or [] %}
+  <fieldset>
+    <label><input type="radio" name="option" value="{{ loop.index0 }}" {% if loop.index0 == sel %}checked{% endif %}> {{ o.label }}{% if o.manual %} <small class="muted">({{ _("chosen by hand") }})</small>{% endif %}</label>
+    {% set oi = loop.index0 %}
+    {% for f in o.fields %}
+      <label style="margin-left:1.6rem">{{ f.label }}
+        <select name="o{{ oi }}_{{ f.code }}">
+          <option value="">–</option>
+          {% for code, label in f['values'] %}<option value="{{ code }}" {% if code == f.selected %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></label>
+    {% endfor %}
+  </fieldset>
+{% endfor %}
+<details class="wh-catpick" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}"
+         data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" {% if not plan.options %}open{% endif %}>
+  <summary><small>{{ _("Choose another category") }}</small></summary>
+  <input type="search" data-catq autocomplete="off" placeholder="{{ _('Search willhaben categories, e.g. speaker') }}">
+  <small class="muted" data-catmsg data-empty="{{ _('No category found.') }}" data-fail="{{ _('Search failed: {error}') }}"></small>
+  <ul data-catres style="list-style:none;padding-left:0;margin:0"></ul>
+</details>
+<script>
+  (() => {
+    if (window.whCatPicker) return;
+    window.whCatPicker = true;
+    const pick = (box, code) => {
+      const url = box.dataset.pick, target = box.dataset.target;
+      if (target && window.htmx) {
+        const values = {code};
+        const inc = box.dataset.include && document.querySelector(box.dataset.include);
+        if (inc) new FormData(inc).forEach((v, k) => { values[k] = v; });
+        htmx.ajax('POST', url, {target, swap: 'outerHTML', values});
+        return;
+      }
+      const f = document.createElement('form');
+      f.method = 'post'; f.action = url;
+      const i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'code'; i.value = code;
+      f.appendChild(i); document.body.appendChild(f); f.submit();
+    };
+    const search = async (box) => {
+      const q = box.querySelector('[data-catq]').value.trim(), list = box.querySelector('[data-catres]');
+      const msg = box.querySelector('[data-catmsg]');
+      list.replaceChildren(); msg.textContent = '';
+      if (q.length < 2) return;
+      try {
+        const r = await fetch(box.dataset.search + '?q=' + encodeURIComponent(q));
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || r.status);
+        if (!data.results.length) msg.textContent = msg.dataset.empty;
+        for (const c of data.results) {
+          const li = document.createElement('li'), b = document.createElement('button');
+          b.type = 'button'; b.className = 'secondary outline small'; b.style.textAlign = 'left';
+          b.style.margin = '.15rem 0'; b.textContent = c.path; b.dataset.code = c.code;
+          b.addEventListener('click', () => { b.setAttribute('aria-busy', 'true'); pick(box, c.code); });
+          li.appendChild(b); list.appendChild(li);
+        }
+      } catch (e) { msg.textContent = msg.dataset.fail.replace('{error}', e.message); }
+    };
+    let timer;
+    document.addEventListener('input', (e) => {
+      const box = e.target.closest && e.target.matches('[data-catq]') && e.target.closest('.wh-catpick');
+      if (!box) return;
+      clearTimeout(timer); timer = setTimeout(() => search(box), 350);
+    });
+    document.addEventListener('keydown', (e) => {      // Enter searches instead of submitting the publish form
+      if (e.key !== 'Enter' || !e.target.matches || !e.target.matches('[data-catq]')) return;
+      e.preventDefault(); clearTimeout(timer); search(e.target.closest('.wh-catpick'));
+    });
+  })();
+</script>

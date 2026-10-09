@@ -52,27 +52,20 @@
     <button class="secondary small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Revise") }}</button>
   </form>
   {% set plan = d.wh_plan or {} %}
-  {% if d.status != 'published' and plan.options %}
+  {% if d.status != 'published' and plan.options is defined %}
   <form class="bdraft-wh" hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/publish"
         hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" hx-disabled-elt="find button"
         hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}">
     <p><strong>{{ _("Publish on willhaben") }}</strong>
-      <small class="muted">· {{ plan.location }}{% if plan.contact %} · {{ plan.contact }}{% endif %} · {{ _("pickup") }}</small></p>
-    {% for o in plan.options %}
-      <fieldset>
-        <label><input type="radio" name="option" value="{{ loop.index0 }}" {% if loop.first %}checked{% endif %}> {{ o.label }}</label>
-        {% set oi = loop.index0 %}
-        {% for f in o.fields %}
-          <label style="margin-left:1.6rem">{{ f.label }}
-            <select name="o{{ oi }}_{{ f.code }}">
-              <option value="">–</option>
-              {% for code, label in f['values'] %}<option value="{{ code }}" {% if code == f.selected %}selected{% endif %}>{{ label }}</option>{% endfor %}
-            </select></label>
-        {% endfor %}
-      </fieldset>
-    {% endfor %}
+      <small class="muted">· {{ plan.location }}{% if plan.contact %} · {{ plan.contact }}{% endif %}</small></p>
+    {% with pick_url="/ad-drafts/" ~ d.id ~ "/inline/category", pick_target="#draft-" ~ d.id, pick_include="#draft-" ~ d.id ~ " .bdraft-form" %}
+      {% include "_category_picker.html" %}
+    {% endwith %}
+    {% if plan.options %}
+    {% include "_wh_handover.html" %}
     <button class="small"><span class="htmx-indicator" aria-busy="true"></span> {{ _("Publish on willhaben") }}</button>
     <small class="muted">{{ _("Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.") }}</small>
+    {% endif %}
   </form>
   {% endif %}
   <footer class="row-actions">
