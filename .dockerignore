@@ -16,3 +16,4 @@ compose.override.yaml
 tests/
 docs/
 *.md
+.claude/
