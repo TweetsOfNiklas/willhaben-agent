@@ -1,4 +1,5 @@
-"""Preischeck routes: the /deals tab and the lazily loaded price section of the ad viewer.
+"""Produktsuche routes (formerly Preischeck): the /deals tab with the Claude product search and the single-ad price
+check, plus the lazily loaded price section of the ad viewer.
 
 Kept out of main.py (one include there); `render`/`templates` are imported from app.main at call time.
 """
@@ -14,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.db import Hit, SearchAgent, session
 from app.i18n import t
-from app.services import deals
+from app.services import deals, product_search
 from app.willhaben.parse import url_param
 from app.willhaben.public import WillhabenError, get_public
 
@@ -79,8 +80,55 @@ async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str 
                                                                         "hit": hit})
 
 
+def _search_ctx(search: int | None = None, msg: str | None = None) -> dict[str, Any]:
+    """Template context of the product search part of the page."""
+    run = product_search.running()
+    shown = product_search.get(search) if search else run
+    return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": msg,
+            "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
+            "ps_is_running": product_search.is_running}
+
+
+@router.get("/search")
+async def search_alias():
+    return RedirectResponse("/deals", status_code=307)
+
+
+@router.post("/deals/search")
+async def product_search_start(description: str = Form(""), depth: str = Form("normal"), unusual: str = Form(""),
+                               categories: str = Form(""), sort: str = Form("relevance")):
+    if not description.strip():
+        return RedirectResponse("/deals?msg=" + quote(t("Describe what you are looking for."), safe=""), status_code=303)
+    settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort)
+    try:
+        sid = product_search.start(description, settings)
+    except product_search.Busy as e:
+        run = product_search.running()
+        return RedirectResponse(f"/deals?search={run.id if run else ''}&msg=" + quote(str(e), safe=""), status_code=303)
+    return RedirectResponse(f"/deals?search={sid}#ps-result", status_code=303)
+
+
+@router.post("/deals/search/{search_id}/rerun")
+async def product_search_rerun(search_id: int):
+    try:
+        product_search.rerun(search_id)
+    except KeyError as e:
+        raise HTTPException(404) from e
+    except product_search.Busy as e:
+        return RedirectResponse(f"/deals?search={search_id}&msg=" + quote(str(e), safe=""), status_code=303)
+    return RedirectResponse(f"/deals?search={search_id}#ps-result", status_code=303)
+
+
+@router.get("/deals/search/{search_id}", response_class=HTMLResponse)
+async def product_search_status(request: Request, search_id: int):
+    """The result block of one search; polled by htmx while the search runs."""
+    if product_search.get(search_id) is None:
+        raise HTTPException(404)
+    return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id))
+
+
 @router.get("/deals", response_class=HTMLResponse)
-async def deals_page(request: Request, q: str = ""):
+async def deals_page(request: Request, q: str = "", search: int | None = None, msg: str | None = None):
     from app.main import render
 
     q = q.strip()
@@ -103,7 +151,7 @@ async def deals_page(request: Request, q: str = ""):
                 pos = deals.position(a.get("price"), spread, None) if spread and spread["count"] >= deals.MIN_COMPARABLES else None
                 results.append({**a, "level": (pos or {}).get("level")})
     return render(request, "deals.html", q=q, results=results, spread=spread, error=error, recent=deals.recent(),
-                  res=None, quote=quote)
+                  res=None, quote=quote, **_search_ctx(search, msg))
 
 
 @router.get("/deals/ad/{ad_id}", response_class=HTMLResponse)
@@ -116,4 +164,4 @@ async def deals_ad(request: Request, ad_id: str, q: str = ""):
     if res is not None:
         deals.remember(res)
     return render(request, "deals.html", q=q.strip(), results=None, spread=None, error=error,
-                  recent=deals.recent(), res=res, quote=quote)
+                  recent=deals.recent(), res=res, quote=quote, **_search_ctx())

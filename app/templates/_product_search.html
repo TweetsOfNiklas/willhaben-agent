@@ -1,0 +1,101 @@
+{# One Claude product search (ps = ProductSearch). Polls itself while the background task runs. #}
+{% set live = ps_is_running(ps) %}{% set plan = ps.plan or {} %}{% set st = ps.settings or {} %}
+<article class="ps" id="ps-box"{% if live %} hx-get="/deals/search/{{ ps.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <header class="ps-head">
+    <strong>🔎 {{ _("Search #{id}", id=ps.id) }}</strong>
+    <small class="muted">{{ (ps.started_at or ps.created_at)|ago }} ·
+      {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}
+      {% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}
+      {% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}</small>
+    <p class="ps-desc">„{{ ps.description }}“</p>
+  </header>
+  {% if live %}
+    {% set pr = ps.progress or {} %}
+    <p aria-busy="true">
+      {% if ps.status == 'planning' %}{{ _("Claude is planning the searches …") }}
+      {% elif ps.status == 'searching' %}{{ _("Searching willhaben: {done} of {total} searches done …", done=pr.done or 0, total=pr.total or 0) }}
+      {% else %}{{ _("Claude is picking the best offers …") }}{% endif %}</p>
+    <progress {% if ps.status == 'searching' and pr.total %}value="{{ pr.done or 0 }}" max="{{ pr.total }}"{% endif %}></progress>
+  {% elif ps.status == 'error' %}
+    <p class="ps-warn">⚠️ {{ ps.error or _("The search failed.") }}</p>
+  {% elif ps.status in ('planning', 'searching', 'ranking') %}
+    <p class="ps-warn">⚠️ {{ _("This search was interrupted.") }}</p>
+  {% endif %}
+
+  {% if plan.summary %}
+    <p class="ps-plan"><strong>{{ _("Claude's understanding") }}:</strong> {{ plan.summary }}
+      {% if plan.max_price %}<br><small>{{ _("Budget: up to {price}", price=plan.max_price|eur) }}</small>{% endif %}
+      {% if plan.must_have %}<br><small>✔ {{ plan.must_have|join(" · ") }}</small>{% endif %}
+      {% if plan.nice_to_have %}<br><small>➕ {{ plan.nice_to_have|join(" · ") }}</small>{% endif %}
+      {% if plan.exclude %}<br><small>✖ {{ plan.exclude|join(" · ") }}</small>{% endif %}</p>
+  {% endif %}
+
+  {% if not live and ps.status == 'done' %}
+    {% if ps.warning %}<p class="ps-warn">⚠️ {{ ps.warning }}</p>{% endif %}
+    {% if ps.note %}<p>🤖 {{ ps.note }}</p>{% endif %}
+    <p><small class="muted">{{ _("{n} willhaben searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=ps_claude_calls) }}</small></p>
+    {% if ps.results %}
+    <div class="grid-cards">
+    {% for r in ps.results %}{% set p = r.position or {} %}
+      <div class="card ps-card">
+        <a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ r.ad_id }}">{% if r.image_url %}<img src="{{ r.image_url }}" loading="lazy" alt="">{% else %}<img alt="">{% endif %}</a>
+        <div class="body">
+          {% if r.fit is not none %}<div><span class="ps-fit {{ 'hi' if r.fit >= 75 else 'mid' if r.fit >= 50 else 'lo' }}" title="{{ _('How well it fits your description (Claude)') }}">{{ _("Fit {n}/100", n=r.fit) }}</span></div>{% endif %}
+          <a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ r.ad_id }}">{{ r.title }}</a>
+          <div class="price">{{ r.price_display or (r.price|eur) }}
+            {% if p.pos is not none %}<span class="deal-lvl lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}</div>
+          {% if p.pos is not none %}
+            <div class="ps-bar" role="img" aria-label="{{ deal_level_label(p.level) }}"><div class="deal-track"></div>
+              <span class="deal-needle" style="left: {{ (p.pos * 100)|round(1) }}%"></span></div>
+            {% if r.median and r.price %}{% set diff = ((r.price - r.median) * 100 / r.median)|round|int %}
+              <div class="meta">{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %}
+                ({{ _("{n} comparable ads", n=r.comparables) }})</div>{% endif %}
+          {% endif %}
+          <div class="meta">{% if r.location %}📍 {{ r.location }} · {% endif %}{% if r.is_private == false %}{{ _("dealer") }}{% elif r.is_private %}{{ _("private") }}{% endif %}
+            {% if r.query %} · „{{ r.query }}“{% endif %}</div>
+          {% if r.reason %}<p class="ps-reason">🤖 {{ r.reason }}</p>{% endif %}
+          {% set scam_w = scam_warnings(r.scam_flags) %}
+          {% if r.red_flags or scam_w %}<div class="meta">⚠️
+            {% for f in r.red_flags %}<span class="badge muted">{{ f }}</span> {% endfor %}
+            {% for f in scam_w %}<span class="badge"{% if f.severity == 'warn' %} style="background:#f08c00"{% endif %} title="{{ _('Scam check (rules, no AI)') }}">{{ f.label }}</span> {% endfor %}</div>{% endif %}
+        </div>
+        <div class="actions">
+          <a role="button" class="outline" href="{{ r.url }}" data-ad="{{ r.ad_id }}">{{ _("Open in viewer") }}</a>
+          <a role="button" class="secondary outline" href="/deals/ad/{{ r.ad_id }}?q={{ (r.query or '')|urlencode }}">{{ _("Check price closely") }}</a>
+        </div>
+        <div class="ps-wh"><a href="{{ r.url }}" target="_blank" rel="noopener"><small>{{ _("Open on willhaben") }} ↗</small></a></div>
+      </div>
+    {% endfor %}
+    </div>
+    {% else %}
+      <p class="muted">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>
+    {% endif %}
+  {% endif %}
+
+  {% if plan.queries %}
+  <details class="ps-queries">
+    <summary>{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
+    <table class="stack">
+      <thead><tr><th>{{ _("Search term") }}</th><th>{{ _("Why") }}</th><th>{{ _("Found") }}</th></tr></thead>
+      <tbody>
+      {% for q in (ps.queries or plan.queries) %}
+        <tr><td><a href="https://www.willhaben.at/iad/{{ q.category_path or 'kaufen-und-verkaufen/marktplatz' }}?keyword={{ q.keyword|urlencode }}" target="_blank" rel="noopener">{{ q.keyword }}</a>
+              {% if q.price_from or q.price_to %}<br><small class="muted">{{ q.price_from|eur if q.price_from else '' }}–{{ q.price_to|eur if q.price_to else '' }}</small>{% endif %}</td>
+            <td><small>{{ q.why }}{% if q.category_hint %}<br><span class="muted">{{ q.category_hint }}</span>{% endif %}</small></td>
+            <td><small>{% if q.error %}⚠️ {{ q.error }}{% elif q.skipped %}{{ _("skipped") }}{% elif q.found is defined and q.found is not none %}{{ _("{n} ads, {k} new candidates", n=q.found, k=q.kept) }}{% else %}–{% endif %}</small></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+
+  {% if not live %}
+  <footer class="ps-foot">
+    <form method="post" action="/deals/search/{{ ps.id }}/rerun">
+      <button type="submit" class="secondary outline" {% if ps_running %}disabled{% endif %}
+              title="{{ _('Runs the same searches again; only the ranking asks Claude.') }}">↻ {{ _("Run again") }}</button>
+    </form>
+  </footer>
+  <script>document.getElementById('ps-submit')?.removeAttribute('disabled');</script>
+  {% endif %}
+</article>

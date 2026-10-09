@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
     s = get_settings()
     init_db()
     ad_batch.recover()
+    deals_web.product_search.recover()
     if s.browser_enabled:
         sess = get_session()
         await sess.start()
@@ -1782,5 +1783,5 @@ async def api_convert(url: str):
         raise HTTPException(400, str(e)) from e
 
 
-from app import deals_web  # noqa: E402  Preischeck tab (/deals) + price section of the ad viewer
+from app import deals_web  # noqa: E402  Produktsuche tab (/deals) + price section of the ad viewer
 deals_web.install(app, templates)

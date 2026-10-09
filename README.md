@@ -11,7 +11,12 @@ It runs on your own server, from your home internet connection, and you control 
 - **Create ads quickly**: drop in notes and photos and Claude writes the title, description and category. You also get
   a price suggestion from comparable listings and the product's spec sheet from Geizhals. Upload photos of several
   items at once and Claude sorts them into one draft per item.
-- **Price check**: paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
+- **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
+  Claude plans a few willhaben searches, the app runs them anonymously and Claude picks the best offers, each with a
+  fit score, a short reason, red flags, the price bar and the scam check. Toggles for unusual names (misspellings,
+  nicknames, generic descriptions) and other categories (mis-categorised ads, bundles) dig for hidden deals; the
+  depth (≈3 / 6 / 12 searches) is the number of willhaben requests, Claude is called twice.
+- **Price check** (same tab): paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
   green-to-red bar against comparable listings, the Geizhals new price and, on click, Claude's verdict. Also in the hit viewer.
 - **Your ads**: imported from your account, with a reminder before they expire.
 - **Notifications** through Home Assistant: events plus phone pushes with action buttons
@@ -173,7 +178,7 @@ More background (architecture, decisions, willhaben interface facts) is in `SPEC
 ## Account separation (search agents never use your login)
 
 Everything that only **reads** willhaben runs as an **anonymous visitor**, completely separate from your
-willhaben account: search agents, the Claude screening of hits, the price check (Preischeck), the scam check
+willhaben account: search agents, the Claude screening of hits, the product search and price check (Produktsuche), the scam check
 and the ad viewer. They use their own HTTP client (`app/willhaben/public.py`, `PublicClient`) with its own cookie
 jar — never the cookies of the logged-in browser. That anonymous session is replaced by a fresh one every
 6 hours and immediately after willhaben blocks a request (403/429), so a blocked or rate-limited search does
