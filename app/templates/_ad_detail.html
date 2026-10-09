@@ -26,6 +26,15 @@
       {% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}
       {% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}
     </p>
+    {% if h and h.screen_relevant is not none %}
+      <div class="adv-claude">
+        <p><strong>🤖 {{ _("Claude's assessment") }}</strong>
+          {% if h.screen_relevant %}<span class="badge {{ 'ok' if h.screen_deal in ('great', 'good') else 'muted' }}">{{ deal_label(h.screen_deal) }}</span>
+          {% else %}<span class="badge">{{ _("wrong item") }}</span>{% endif %}
+          {% if h.screen_at %}<small class="muted">· {{ h.screen_at|ago }}</small>{% endif %}</p>
+        {% if h.screen_reason %}<p class="adv-reason">{{ h.screen_reason }}</p>{% endif %}
+      </div>
+    {% endif %}
     <div class="adv-actions">
       {% if h %}
         {% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}

@@ -253,3 +253,16 @@ def test_hit_detail_viewer(client):
     with dbmod.session() as db:
         assert db.get(Hit, 5).state == "seen"                      # opening counts as seen
     assert client.get("/hits/ad/abc").status_code == 400
+
+
+def test_ad_viewer_shows_full_claude_assessment(client):
+    from app.db import Hit, SearchAgent
+
+    reason = "Passt genau: Carbon-Rennrad Größe M. " + "Preis liegt deutlich unter vergleichbaren Angeboten. " * 6
+    with dbmod.session() as db:
+        db.add(SearchAgent(id=8, name="Rad", source_url="https://www.willhaben.at/iad/x", webapi_url="https://x"))
+        db.add(Hit(id=6, agent_id=8, ad_id="1662146981", heading="Fahrradhose", url="https://www.willhaben.at/iad/object?adId=1662146981",
+                   state="new", screen_relevant=True, screen_deal="great", screen_reason=reason, screen_at=dbmod.utcnow()))
+        db.commit()
+    frag = client.get("/hits/ad/1662146981", params={"hit": 6}).text
+    assert "Claude" in frag and reason.strip() in frag            # complete text, not the 90-char card excerpt

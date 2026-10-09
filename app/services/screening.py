@@ -122,7 +122,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
             row = db.get(Hit, h.id)
             row.screen_relevant = bool(r.get("relevant"))
             row.screen_deal = r.get("deal") if r.get("deal") in DEAL_RANK else "unknown"
-            row.screen_reason = (r.get("reason") or "").strip()[:200] or None
+            row.screen_reason = (r.get("reason") or "").strip()[:1500] or None   # full text for the ad viewer
             row.screen_at = utcnow()
             db.add(row)
             judged += 1
