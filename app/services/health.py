@@ -14,6 +14,10 @@ disk – it makes no calls to willhaben, Claude, HA, Telegram or Google itself:
 
 Each item is "ok", "problem", "off" (not set up / switched off) or "unknown" (no data yet, ignored).
 A problem must be seen on DEBOUNCE consecutive checks before it counts; then one `notify(kind="health")`.
+Items whose source refreshes less often than this job runs (willhaben session check, Claude calls, Telegram
+API calls) carry a `sample` id; re-reading the same failed sample does not count as another check, so one
+transient failure is never reported. With no evidence since startup (no Claude call / Telegram API call yet)
+an item is "unknown", so a restart never sends a "restored" message without a real successful call.
 Recovery from a reported problem is reported once, right away. The confirmed state lives in the
 `health_state` setting (JSON), so a restart does not repeat warnings. The very first observation of an item
 is a silent baseline.
@@ -52,6 +56,7 @@ class Status:
     state: str                   # ok | problem | off | unknown
     reason: str = ""
     href: str | None = None      # settings panel for the tile
+    sample: str | None = None    # id of the underlying observation; same id = same evidence, not a new check
 
 
 # ------------------------------------------------------------------ individual checks
@@ -72,6 +77,7 @@ def _willhaben() -> Status:
         return st
     if not sess.logged_in:
         st.state, st.reason = "problem", t("Not logged in")
+        st.sample = sess.last_check.isoformat() if sess.last_check else None
         return st
     overdue = timedelta(seconds=3 * s.session_check_interval_s + 120)
     if sess.last_check and utcnow() - sess.last_check > overdue:
@@ -86,15 +92,19 @@ def _claude() -> Status:
     from app.llm import base
     from app.llm.claude_login import claude_token
 
-    st = Status("claude", "Claude", "ok", href="/settings#claude")
+    st = Status("claude", "Claude", "unknown", href="/settings#claude")
     if not claude_token():
         st.state, st.reason = "problem", t("Not signed in")
         return st
     last = base.last_call
+    at = last.get("at")
+    st.sample = at.isoformat() if hasattr(at, "isoformat") else (str(at) if at else None)
     if last.get("ok") is False:
         st.state, st.reason = "problem", t("Last call failed: {error}", error=(last.get("error") or "")[:120])
+    elif last.get("ok"):
+        st.state, st.reason = "ok", t("Last call OK")
     else:
-        st.reason = t("Last call OK") if last.get("ok") else t("Signed in")
+        st.reason = t("Signed in")           # no call since startup: no evidence either way -> "unknown"
     return st
 
 
@@ -129,8 +139,12 @@ def _telegram() -> Status:
         st.state, st.reason = "problem", t("No chat linked")
         return st
     h = telegram.api_health
+    if not h.get("ok_at") and not h.get("error_at"):
+        st.state, st.reason = "unknown", t("Not checked yet")    # no Bot API call since startup
+        return st
     if h.get("error_at") and (not h.get("ok_at") or h["error_at"] > h["ok_at"]):
         st.state, st.reason = "problem", t("Telegram not reachable: {error}", error=h.get("error") or "")
+        st.sample = h["error_at"].isoformat() if hasattr(h["error_at"], "isoformat") else str(h["error_at"])
         return st
     st.reason = t("Connected")
     return st
@@ -225,11 +239,14 @@ def step(state: dict[str, Any], current: list[Status], now: datetime | None = No
             state[st.key] = {"state": st.state, "reason": st.reason, "since": now_s, "count": 0, "notified": False}
             continue
         if st.state == prev["state"]:
-            prev.update(reason=st.reason, count=0, pending=None)
+            prev.update(reason=st.reason, count=0, pending=None, sample=None)
             continue
         if st.state == "problem":
+            if prev.get("pending") == "problem" and st.sample is not None and st.sample == prev.get("sample"):
+                continue                                     # same observation read again: not a new check
             prev["count"] = prev.get("count", 0) + 1 if prev.get("pending") == "problem" else 1
             prev["pending"] = "problem"
+            prev["sample"] = st.sample
             if prev["count"] >= DEBOUNCE:
                 was_ok = prev["state"] == "ok"
                 state[st.key] = {"state": "problem", "reason": st.reason, "since": now_s, "count": 0,

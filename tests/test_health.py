@@ -21,6 +21,7 @@ FAKE = [sys.executable, str(Path(__file__).parent / "fake_claude.py")]
 def _reset(monkeypatch):
     monkeypatch.setitem(llm_base.last_call, "ok", None)
     monkeypatch.setitem(llm_base.last_call, "error", None)
+    monkeypatch.setitem(llm_base.last_call, "at", None)
     monkeypatch.setattr(ha_actions, "listener", {"running": False, "connected": False, "error": None})
     monkeypatch.setattr(telegram, "api_health", {"ok_at": None, "error_at": None, "error": None})
 
@@ -106,6 +107,92 @@ async def test_state_survives_restart(world):
 def test_step_ignores_unknown():
     state, problems, _ = health.step({}, [Status("x", "X", "unknown")])
     assert state == {} and problems == []
+
+
+# ------------------------------------------------------------------ distinct observations + restart
+@pytest.fixture
+def real_claude(monkeypatch):
+    sent = []
+    monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: "sk-ant-oat01-x")
+    monkeypatch.setattr(health, "CHECKS", [health._claude])
+
+    async def fake_send(title, items, channel):
+        sent.append((title, [s.key for s in items]))
+
+    monkeypatch.setattr(health, "_send", fake_send)
+    return sent
+
+
+async def test_one_failed_claude_call_read_by_many_checks_is_silent(real_claude):
+    sent = real_claude
+    llm_base.record_call(True)
+    await health.check()                          # baseline ok
+    llm_base.record_call(False, "timeout")
+    for _ in range(4):
+        await health.check()                      # same failed call read again and again
+    assert sent == []
+    llm_base.last_call["at"] = utcnow() + timedelta(seconds=1)   # a second failed call
+    await health.check()
+    assert sent == [("Connection problem", ["claude"])]
+
+
+async def test_restart_sends_no_recovery_without_successful_call(real_claude):
+    sent = real_claude
+    llm_base.record_call(True)
+    await health.check()
+    llm_base.record_call(False, "timeout")
+    await health.check()
+    llm_base.last_call["at"] = utcnow() + timedelta(seconds=1)
+    await health.check()
+    assert [s[0] for s in sent] == ["Connection problem"]
+    llm_base.last_call.update(ok=None, at=None, error=None)     # "restart": in-memory state is gone
+    await health.check()
+    await health.check()
+    assert len(sent) == 1
+    assert health.load_state()["claude"]["state"] == "problem"
+    llm_base.record_call(True)                   # first real successful call
+    await health.check()
+    assert sent[-1] == ("Connection restored", ["claude"])
+
+
+async def test_one_failed_session_check_read_by_three_checks_is_silent(monkeypatch):
+    from app.willhaben import session as sess_mod
+
+    class FakeSess:
+        started, logged_in, user, last_check = True, True, {"nickname": "Max Muster"}, utcnow()
+
+    fake = FakeSess()
+    monkeypatch.setattr(sess_mod, "get_session", lambda: fake)
+    monkeypatch.setattr(health.get_settings(), "browser_enabled", True)
+    monkeypatch.setattr(health, "CHECKS", [health._willhaben])
+    sent = []
+
+    async def fake_send(title, items, channel):
+        sent.append(title)
+
+    monkeypatch.setattr(health, "_send", fake_send)
+    await health.check()
+    fake.logged_in, fake.last_check = False, utcnow()   # one failed session check (e.g. transient 5xx)
+    for _ in range(3):
+        await health.check()
+    assert sent == []
+    fake.logged_in, fake.last_check = True, utcnow()    # next session check recovers
+    await health.check()
+    assert sent == []
+    fake.logged_in, fake.last_check = False, utcnow()   # two failed session checks in a row -> report
+    await health.check()
+    fake.last_check = utcnow() + timedelta(seconds=1)
+    await health.check()
+    assert sent == ["Connection problem"]
+
+
+def test_step_same_sample_does_not_count():
+    state = {"x": {"state": "ok", "reason": "", "since": "", "count": 0, "notified": False}}
+    for _ in range(3):
+        state, problems, _ = health.step(state, [Status("x", "X", "problem", "r", sample="A")])
+        assert problems == []
+    state, problems, _ = health.step(state, [Status("x", "X", "problem", "r", sample="B")])
+    assert [p.key for p in problems] == ["x"]
 
 
 # ------------------------------------------------------------------ channel fallback
@@ -207,7 +294,8 @@ def test_claude_check(monkeypatch):
     monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: None)
     assert health._claude().state == "problem"
     monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: "sk-ant-oat01-x")
-    assert health._claude().state == "ok"
+    st = health._claude()
+    assert st.state == "unknown" and st.reason == "Signed in"   # no call since startup: no evidence
     llm_base.record_call(False, "Failed to authenticate")
     st = health._claude()
     assert st.state == "problem" and "Failed to authenticate" in st.reason
@@ -254,6 +342,7 @@ async def test_telegram_check_and_api_hook(monkeypatch):
     monkeypatch.setattr(telegram, "active", lambda: False)
     assert health._telegram().state == "problem"   # token but no chat linked
     monkeypatch.setattr(telegram, "active", lambda: True)
+    assert health._telegram().state == "unknown"   # no Bot API call since startup
     await telegram.api("getMe")
     assert health._telegram().state == "ok"
     status["code"] = 400
