@@ -105,16 +105,23 @@ def data_dir() -> Path:
     return get_settings().data_dir
 
 
-def backups_dir() -> Path:
-    d = data_dir() / "backups"
-    d.mkdir(parents=True, exist_ok=True)
+def _private_dir(d: Path) -> Path:
+    """Backups hold every token: their folders are owner-only (./data is a host bind mount)."""
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        if stat.S_IMODE(d.stat().st_mode) != 0o700:
+            os.chmod(d, 0o700)
+    except OSError as e:
+        log.warning("backup: cannot restrict %s: %s", d, e)
     return d
+
+
+def backups_dir() -> Path:
+    return _private_dir(data_dir() / "backups")
 
 
 def _pending_dir() -> Path:
-    d = backups_dir() / "pending"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return _private_dir(backups_dir() / "pending")
 
 
 def has_crypto() -> bool:
@@ -196,6 +203,7 @@ def create_backup(dest: Path, include_profile: bool = False, passphrase: str | N
     """Write a backup ZIP (or its encrypted form) to `dest`; returns the manifest."""
     root = data_dir()
     dest.parent.mkdir(parents=True, exist_ok=True)
+    old_umask = os.umask(0o077)    # .part and .db snapshot hold every token: owner-only from the start
     part = dest.with_name(dest.name + f".{secrets.token_hex(4)}.part")
     snap = dest.with_name(dest.name + f".{secrets.token_hex(4)}.db")
     entries: list[dict[str, Any]] = []
@@ -228,6 +236,7 @@ def create_backup(dest: Path, include_profile: bool = False, passphrase: str | N
         os.chmod(dest, 0o600)
         return manifest
     finally:
+        os.umask(old_umask)
         part.unlink(missing_ok=True)
         snap.unlink(missing_ok=True)
 
@@ -455,7 +464,7 @@ def summarize(path: Path, m: dict[str, Any]) -> dict[str, Any]:
         return [e for e in entries if _kind(e["path"]) == kind]
     tmp = path.with_name(path.name + ".check.db")
     try:
-        with zipfile.ZipFile(path) as zf, open(tmp, "wb") as out:
+        with zipfile.ZipFile(path) as zf, os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as out:
             _copy_checked(zf, DB_NAME, next(e for e in entries if e["path"] == DB_NAME), out)
         counts = _db_summary(tmp)
     finally:
@@ -471,10 +480,16 @@ def summarize(path: Path, m: dict[str, Any]) -> dict[str, Any]:
         "secrets": sorted(e["path"] for e in of("secret")),
         "photos": len(of("photo")), "photos_size": sum(e["size"] for e in of("photo")),
         "labels": len(of("label")),
-        "profile": bool(of("profile")), "profile_files": len(of("profile")),
+        "profile": includes_profile(m), "profile_files": len(of("profile")),
         "profile_size": sum(e["size"] for e in of("profile")),
         "total_size": sum(e["size"] for e in entries),
     }
+
+
+def includes_profile(m: dict[str, Any]) -> bool:
+    """The manifest flag decides (an empty profile in the backup still replaces the current one), plus any
+    profile entries as a fallback for hand-made manifests."""
+    return bool(m.get("includes_profile")) or any(_kind(e["path"]) == "profile" for e in m["entries"])
 
 
 def _kind(name: str) -> str:
@@ -487,6 +502,8 @@ def _kind(name: str) -> str:
 
 # ------------------------------------------------------------------ import: upload → pending
 def _purge_pending(everything: bool = False) -> None:
+    """Drop parked (decrypted!) uploads: all of them, or those older than PENDING_TTL_S. Called from the settings
+    panel, export, preview and restore, so an abandoned preview does not leave a plaintext backup lying around."""
     now = time.time()
     for p in _pending_dir().iterdir():
         try:
@@ -538,6 +555,7 @@ def _pending_zip(token: str) -> Path:
 
 
 def load_pending(token: str) -> Pending:
+    _purge_pending()
     p = _pending_zip(token)
     m = json.loads((_pending_dir() / f"{token}.json").read_text(encoding="utf-8"))
     return Pending(token, m, summarize(p, m))
@@ -618,7 +636,7 @@ def restore(token: str) -> dict[str, Any]:
     zpath = _pending_zip(token)
     m = validate_zip(zpath)                        # again: the file sat on disk between preview and confirm
     entries = {e["path"]: e for e in m["entries"]}
-    has_profile = any(_kind(p) == "profile" for p in entries)
+    has_profile = includes_profile(m)
     safety = safety_backup(include_profile=has_profile)
     stage = backups_dir() / f"restore-{secrets.token_hex(4)}"
     stage.mkdir(mode=0o700)

@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
             tasks.append(asyncio.create_task(sess.chat_watchdog()))
         except Exception as e:  # noqa: BLE001 - polling still works
             log.warning("live chat not started: %s", e)
+    app.state.listener_tasks = tasks             # Settings → Backup stops them before a restore
     yield
     for task in tasks:
         task.cancel()

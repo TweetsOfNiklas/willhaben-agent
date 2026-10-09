@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import stat
+import time
 import zipfile
 from pathlib import Path
 
@@ -311,7 +312,10 @@ def test_web_flow(ddir, monkeypatch):
     from app.main import app
     restarts = []
     monkeypatch.setattr(backup, "schedule_restart", lambda *a, **k: restarts.append(1))
-    with TestClient(app) as c:
+    monkeypatch.setattr(get_settings(), "dashboard_password", "pw-test")
+    import base64
+    basic = base64.b64encode(f"{get_settings().dashboard_user}:pw-test".encode()).decode()
+    with TestClient(app, headers={"Authorization": f"Basic {basic}"}) as c:
         page = c.get("/settings").text
         assert 'id="backup"' in page and "/settings/backup/export" in page
         r = c.post("/settings/backup/export", data={"passphrase": "abc", "passphrase2": "abd"}, follow_redirects=False)
@@ -335,3 +339,142 @@ def test_web_flow(ddir, monkeypatch):
         assert len(safety) == 1
         assert c.get(f"/settings/backup/file/{safety[0]['name']}").status_code == 200
         assert c.get("/settings/backup/file/app.db").status_code == 404
+
+
+def test_downloads_need_dashboard_password(ddir, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    monkeypatch.setattr(get_settings(), "dashboard_password", None)
+    backup.safety_backup(include_profile=False)
+    name = backup.safety_backups()[0]["name"]
+    with TestClient(app) as c:
+        page = c.get("/settings").text
+        assert "Download backup" not in page and "DASHBOARD_PASSWORD" in page
+        assert f"/settings/backup/file/{name}" not in page
+        r = c.post("/settings/backup/export", data={}, follow_redirects=False)
+        assert r.status_code == 303 and "#backup" in r.headers["location"]
+        assert c.get(f"/settings/backup/file/{name}").status_code == 403
+    assert not [p for p in backup.backups_dir().iterdir() if p.name.startswith("export-")]
+
+
+def test_import_refuses_oversized_body_before_parsing(ddir, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    monkeypatch.setattr(backup, "MAX_UPLOAD", 10)
+    parsed = []
+    from starlette.requests import Request
+    orig = Request.form
+    monkeypatch.setattr(Request, "form", lambda self, *a, **k: parsed.append(1) or orig(self, *a, **k))
+    with TestClient(app) as c:
+        r = c.post("/settings/backup/import", files={"file": ("b.zip", b"x" * (2 << 20))}, follow_redirects=False)
+    assert r.status_code == 303 and not parsed
+    assert not list(backup._pending_dir().iterdir())
+
+
+def test_pending_upload_expires(ddir, tmp_path):
+    out = tmp_path / "b.zip"
+    backup.create_backup(out)
+    pending = backup.inspect_upload(io.BytesIO(out.read_bytes()))
+    old = time.time() - backup.PENDING_TTL_S - 60
+    for p in backup._pending_dir().iterdir():
+        os.utime(p, (old, old))
+    from app.backup_routes import panel
+    panel()                                                  # the settings page purges stale previews
+    assert not list(backup._pending_dir().iterdir())
+    with pytest.raises(backup.BackupError):
+        backup.load_pending(pending.token)
+    # a fresh one survives the TTL purge
+    fresh = backup.inspect_upload(io.BytesIO(out.read_bytes()))
+    backup._purge_pending()
+    assert backup.load_pending(fresh.token).token == fresh.token
+
+
+def test_backup_dirs_are_private(ddir, tmp_path):
+    (ddir / "backups").mkdir(mode=0o755)
+    os.chmod(ddir / "backups", 0o755)
+    assert stat.S_IMODE(backup.backups_dir().stat().st_mode) == 0o700
+    assert stat.S_IMODE(backup._pending_dir().stat().st_mode) == 0o700
+    seen = []
+    orig = backup._db_snapshot
+
+    def snap(dest):
+        orig(dest)
+        seen.append(stat.S_IMODE(dest.stat().st_mode))
+    backup._db_snapshot = snap
+    try:
+        backup.create_backup(backup.backups_dir() / "x.zip")
+    finally:
+        backup._db_snapshot = orig
+    assert seen == [0o600]
+
+
+def test_empty_profile_in_backup_still_replaces_login(ddir, tmp_path):
+    import shutil
+    shutil.rmtree(ddir / "browser-profile")
+    out = tmp_path / "b.zip"
+    backup.create_backup(out, include_profile=True)
+    assert _manifest(out)["includes_profile"] is True
+    (ddir / "browser-profile" / "Default").mkdir(parents=True)
+    (ddir / "browser-profile" / "Default" / "Cookies").write_bytes(b"other-login")
+    pending = backup.inspect_upload(io.BytesIO(out.read_bytes()))
+    assert pending.summary["profile"] and pending.summary["profile_files"] == 0
+    backup.restore(pending.token)
+    assert not (ddir / "browser-profile" / "Default" / "Cookies").exists()
+
+
+def test_restore_stops_writers_first(ddir, monkeypatch):
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app import scheduler as sched
+    from app.services import chats
+    from app.willhaben.session import get_session
+    monkeypatch.setattr(backup, "schedule_restart", lambda *a, **k: None)
+    monkeypatch.setattr(get_settings(), "dashboard_password", None)
+    out = ddir.parent / "b.zip"
+    backup.create_backup(out)
+    pending = backup.inspect_upload(io.BytesIO(out.read_bytes()))
+    sess = get_session()
+    stops, state = [], {}
+
+    async def fake_stop():
+        stops.append(1)
+    monkeypatch.setattr(sess, "stop", fake_stop)
+    orig_restore_db = backup._restore_db
+
+    def check_restore_db(path):
+        state.update(cb=sess._chat_cb, sched=sched.scheduler.running, stops=len(stops),
+                     tasks=[x.cancelled() for x in tasks])
+        orig_restore_db(path)
+    monkeypatch.setattr(backup, "_restore_db", check_restore_db)
+    tasks: list = []
+
+    async def forever():
+        await asyncio.sleep(3600)
+
+    async def arm():
+        sess._chat_cb = chats.on_live_event
+        for bucket in ("live", "humanized", "background", "listener"):
+            task = asyncio.create_task(forever())
+            tasks.append(task)
+            if bucket == "live":
+                chats._live["task"] = task
+            elif bucket == "humanized":
+                chats._humanized["conv-1"] = task
+            elif bucket == "background":
+                main._background.add(task)
+            else:
+                main.app.state.listener_tasks = [task]
+
+    with TestClient(main.app) as c:
+        c.portal.call(arm)
+        r = c.post("/settings/backup/restore", data={"token": pending.token, "confirm": "on"})
+        assert r.status_code == 200
+    chats._humanized.pop("conv-1", None)
+    chats._live["task"] = None
+    main._background.difference_update(tasks)
+    assert state == {"cb": None, "sched": False, "stops": 1, "tasks": [True, True, True, True]}

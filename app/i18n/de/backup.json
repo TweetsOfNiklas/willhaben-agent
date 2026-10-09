@@ -74,5 +74,8 @@
  "Check backup": "Backup prüfen",
  "Nothing is changed yet: you see what the backup contains and confirm first.": "Noch wird nichts geändert: Du siehst zuerst, was das Backup enthält, und bestätigst dann.",
  "Automatic backups before the last imports (newest {n} are kept):": "Automatische Backups vor den letzten Importen (die neuesten {n} bleiben):",
- "Download": "Herunterladen"
+ "Download": "Herunterladen",
+ "Set DASHBOARD_PASSWORD to enable backup downloads.": "Setze DASHBOARD_PASSWORD, um Backups herunterzuladen.",
+ "The upload has no size.": "Der Upload hat keine Größenangabe.",
+ "Choose a backup file first.": "Wähle zuerst eine Backup-Datei."
 }

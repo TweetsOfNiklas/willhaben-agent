@@ -453,7 +453,8 @@
         </div>
         <small class="muted">{{ _("With a passphrase the file is encrypted (AES-256). Without the passphrase it cannot be restored.") }}</small>
         {% endif %}
-        <p><button>{{ _("Download backup") }}</button></p>
+        {% if backup.downloads %}<p><button>{{ _("Download backup") }}</button></p>
+        {% else %}<p class="msg">{{ _("Set DASHBOARD_PASSWORD to enable backup downloads.") }}</p>{% endif %}
       </form>
 
       <h5 style="margin-top:1.5rem">{{ _("Restore backup") }}</h5>
@@ -468,7 +469,7 @@
       <table class="stack">
         {% for b in backup.safety %}
         <tr><td>{{ b.created_at|local("%d.%m.%Y %H:%M") }}</td><td class="muted">{{ b.size|filesizeformat }}</td>
-          <td><a href="/settings/backup/file/{{ b.name }}" download>{{ _("Download") }}</a></td></tr>
+          <td>{% if backup.downloads %}<a href="/settings/backup/file/{{ b.name }}" download>{{ _("Download") }}</a>{% endif %}</td></tr>
         {% endfor %}
       </table>
       {% endif %}
