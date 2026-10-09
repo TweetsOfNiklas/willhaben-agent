@@ -32,9 +32,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.i18n import t
-from app.willhaben.account import AccountClient, OwnAdvert
-from app.willhaben.public import WillhabenError
-from app.willhaben.session import BrowserSession, NotLoggedIn, SessionUnavailable
+from app.willhaben.account import AccountClient, OwnAdvert, _link_path
+from app.willhaben.session import BrowserSession, NotLoggedIn
 
 log = logging.getLogger(__name__)
 
@@ -84,30 +83,44 @@ async def own_advert(s: BrowserSession, ad_id: str) -> OwnAdvert:
 
 
 def action_path(ad: OwnAdvert, link_id: str) -> str:
-    """/webapi path of one of the ad's action links, exactly as the web app builds it."""
-    link = ad.links.get(link_id) or {}
+    """/webapi path of one of the ad's action links (account._link_path, the way the web app builds it),
+    with extra checks because these writes are irreversible: absolute path, no "..", plain service name."""
+    link = (ad.actions or {}).get(link_id) or {}
     rel, svc = link.get("relativePath"), link.get("serviceName") or "iad"
-    if not isinstance(rel, str) or not rel.startswith("/") or ".." in rel or "/" in svc:
+    if not isinstance(rel, str) or not rel.startswith("/") or ".." in rel or not isinstance(svc, str) or "/" in svc:
         raise NotOffered(t("willhaben does not offer this for the ad right now (status: {status}).",
                            status=ad.status_label or ad.status))
-    return f"/webapi/{svc}{rel}"
+    return _link_path(link)
 
 
 def offers(ad: OwnAdvert) -> dict[str, bool]:
-    return {"sold": SOLD in ad.links, "reserve": RESERVE in ad.links, "unreserve": UNRESERVE in ad.links}
+    acts = ad.actions or {}
+    return {"sold": SOLD in acts, "reserve": RESERVE in acts, "unreserve": UNRESERVE in acts}
 
 
-async def _write(s: BrowserSession, method: str, path: str, body: Any = None) -> Any:
+async def _call(s: BrowserSession, method: str, path: str, body: Any = None, *, need_json: bool = False) -> Any:
+    """One willhaben call, decided on the HTTP status alone. The response bodies of the sold/reserve calls are
+    not known (needs live verification), so a 2xx write counts as done whatever it returns: parsing the body
+    must never turn a change willhaben already made into an error. A read (need_json) must return JSON."""
+    r = await s.api(method, path, body)
+    if r.status in (401, 403) and await s.refresh_sso():   # same as BrowserSession.api_json
+        r = await s.api(method, path, body)
+    if r.status in (401, 403):
+        s.logged_in = False
+        raise NotLoggedIn(f"{path}: HTTP {r.status}")
+    if not r.ok:
+        raise SaleFailed(t("willhaben refused the change: {detail}", detail=f"{method} {path}: HTTP {r.status} {r.text[:200]}"))
     try:
-        return await s.api_json(method, path, body)
-    except (NotLoggedIn, SessionUnavailable, WillhabenError):
-        raise
-    except RuntimeError as e:   # api_json raises a plain RuntimeError for any other non-2xx answer
-        raise SaleFailed(t("willhaben refused the change: {detail}", detail=str(e)[:200])) from e
+        return r.json()
+    except ValueError as e:
+        if need_json:
+            raise SaleFailed(t("willhaben refused the change: {detail}", detail=f"{method} {path}: no JSON")) from e
+        log.info("%s %s: HTTP %s, body is not JSON (ignored)", method, path, r.status)
+        return None
 
 
 async def sold_reasons(s: BrowserSession, ad_id: str) -> list[SoldReason]:
-    return parse_sold_reasons(await s.api_json("GET", REASONS.format(id=int(ad_id))))
+    return parse_sold_reasons(await _call(s, "GET", REASONS.format(id=int(ad_id)), need_json=True))
 
 
 async def mark_sold(s: BrowserSession, ad_id: str, reason_id: str | None = None) -> OwnAdvert:
@@ -119,8 +132,8 @@ async def mark_sold(s: BrowserSession, ad_id: str, reason_id: str | None = None)
         if reasons:
             if reason_id is None or str(reason_id) not in {r.id for r in reasons}:
                 raise ReasonRequired(reasons)
-            await _write(s, "POST", REASONS.format(id=int(ad_id)), {"soldReasonId": str(reason_id)})
-    await _write(s, "PUT", path)
+            await _call(s, "POST", REASONS.format(id=int(ad_id)), {"soldReasonId": str(reason_id)})
+    await _call(s, "PUT", path)
     log.info("ad %s marked as sold on willhaben", ad_id)
     return ad
 
@@ -128,6 +141,6 @@ async def mark_sold(s: BrowserSession, ad_id: str, reason_id: str | None = None)
 async def mark_reserved(s: BrowserSession, ad_id: str, on: bool = True) -> OwnAdvert:
     """Mark as reserved (on=True) or remove the mark (on=False)."""
     ad = await own_advert(s, ad_id)
-    await _write(s, "PUT", action_path(ad, RESERVE if on else UNRESERVE))
+    await _call(s, "PUT", action_path(ad, RESERVE if on else UNRESERVE))
     log.info("ad %s reserved=%s on willhaben", ad_id, on)
     return ad

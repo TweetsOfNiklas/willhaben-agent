@@ -56,5 +56,6 @@
  "A sold ad never gets automatic answers again.": "Eine verkaufte Anzeige bekommt nie wieder automatische Antworten.",
  "Ad {id} is not in your willhaben list (only the 50 most recently changed ads are loaded).": "Anzeige {id} ist nicht in deiner willhaben-Liste (nur die 50 zuletzt geänderten werden geladen).",
  "willhaben does not offer this for the ad right now (status: {status}).": "willhaben bietet das für diese Anzeige gerade nicht an (Status: {status}).",
- "willhaben refused the change: {detail}": "willhaben hat die Änderung abgelehnt: {detail}"
+ "willhaben refused the change: {detail}": "willhaben hat die Änderung abgelehnt: {detail}",
+ "Pick the buyer above first, so they do not get this message too.": "Wähle oben zuerst den Käufer, damit er diese Nachricht nicht auch bekommt."
 }

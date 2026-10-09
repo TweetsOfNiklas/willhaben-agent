@@ -110,6 +110,8 @@ async def on_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: 
     with session() as db:
         row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
         row.status, row.last_action, row.last_error = status, msg, None
+        if status == "sold":
+            row.auto_renew = False    # sold: auto-renew must never reactivate or republish it
         db.add(row)
         db.commit()
     return msg
@@ -186,6 +188,8 @@ def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True) -
         if auto_off:
             row.auto_reply = False
         row.sale_status, row.sale_conversation_id, row.sale_at = kind, buyer or None, utcnow()
+        if kind == "sold":
+            row.auto_renew = False    # sold: auto-renew must never reactivate or republish it
         row.last_action = t("Sold") if kind == "sold" else t("Reserved")
         db.add(row)
         db.commit()

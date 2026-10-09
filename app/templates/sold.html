@@ -54,11 +54,12 @@
   {% if others %}
   <form method="post" action="/sold/{{ ad_id }}/notices">
     {{ hidden }}
+    {% if not buyer %}<p><small class="muted">{{ _("Pick the buyer above first, so they do not get this message too.") }}</small></p>{% endif %}
     <table class="stack">
       <tbody>
       {% for o in others %}
       <tr>
-        <td><label><input type="checkbox" name="conv" value="{{ o.conv.id }}" {% if not o.informed and not o.draft %}checked{% endif %}>
+        <td><label><input type="checkbox" name="conv" value="{{ o.conv.id }}" {% if buyer and not o.informed and not o.draft %}checked{% endif %}>
           <a href="/chats/{{ o.conv.id }}">{{ o.conv.partner_name or _('unknown') }}</a></label></td>
         <td><small class="muted">{{ (o.last_in or '')[:120] }}</small></td>
         <td>{% if o.informed %}<span class="badge ok">{{ _("informed") }}</span>{% elif o.draft %}<span class="badge muted">{{ _("draft") }}</span>{% endif %}</td>

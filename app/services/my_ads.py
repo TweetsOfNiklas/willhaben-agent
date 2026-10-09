@@ -293,6 +293,8 @@ async def check_all() -> dict[str, int]:
         if row is None:
             continue
         counts["checked"] += 1
+        if row.sale_status == "sold":
+            continue    # sold (sold workflow): no expiry warnings, never reactivated/republished
         if row.status == "active" and row.end_date and row.end_date - utcnow() < timedelta(days=warn_days) \
                 and row.notified_expiry_for != row.end_date:
             await notify("ad_expiring", t("Ad expires soon"),

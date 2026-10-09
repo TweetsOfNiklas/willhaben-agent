@@ -33,23 +33,29 @@ REASONS = {"header": "Wo hast du verkauft?", "soldReasons": [
 
 
 class FakeSession:
-    """Logged-in browser stand-in: serves the my-adverts page, records every other call."""
+    """Logged-in browser stand-in: serves the my-adverts page, records every other call (all go through api())."""
 
-    def __init__(self, page, reasons=None, fail=False):
+    def __init__(self, page, reasons=None, fail=False, write_text="", reasons_status=200):
         self.page, self.reasons, self.fail, self.calls = page, reasons, fail, []
+        self.write_text, self.reasons_status, self.logged_in = write_text, reasons_status, True
 
     async def api(self, method, path, body=None, accept="application/json"):
-        assert (method, path) == ("GET", "/iad/myprofile/myadverts")
-        html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(self.page)}</script>'
-        return ApiResponse(status=200, text=html, url="https://www.willhaben.at" + path)
+        if (method, path) == ("GET", "/iad/myprofile/myadverts"):
+            html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(self.page)}</script>'
+            return ApiResponse(status=200, text=html, url="https://www.willhaben.at" + path)
+        self.calls.append((method, path, body))
+        url = "https://www.willhaben.at" + path
+        if method == "GET" and path.startswith("/webapi/iad/soldreasons"):
+            return ApiResponse(status=self.reasons_status, text=json.dumps(self.reasons) if self.reasons else "", url=url)
+        if self.fail:
+            return ApiResponse(status=409, text="conflict", url=url)
+        return ApiResponse(status=200, text=self.write_text, url=url)
+
+    async def refresh_sso(self):
+        return False
 
     async def api_json(self, method, path, body=None):
-        self.calls.append((method, path, body))
-        if method == "GET" and path.startswith("/webapi/iad/soldreasons"):
-            return self.reasons
-        if self.fail:
-            raise RuntimeError(f"{method} {path}: HTTP 409 conflict")
-        return None
+        raise AssertionError("sales.py decides on the HTTP status itself, not via api_json")
 
     @property
     def writes(self):
@@ -59,7 +65,7 @@ class FakeSession:
 # ------------------------------------------------------------------ willhaben layer
 def test_parse_keeps_action_links():
     ad = parse_my_adverts(_page(_links("setAdSold", "markAdReserved"), "adId=1"))[0]
-    assert set(ad.links) == {"setAdSold", "markAdReserved"} and ad.reasons_query
+    assert set(ad.actions) == {"setAdSold", "markAdReserved"} and ad.reasons_query
     assert sales.action_path(ad, sales.SOLD) == f"/webapi/iad/bap/sold/{AD}"
     assert sales.offers(ad) == {"sold": True, "reserve": True, "unreserve": False}
     with pytest.raises(sales.NotOffered):
@@ -111,10 +117,45 @@ async def test_refused_change_and_login_errors():
         await sales.mark_reserved(s, AD)
 
     class Expired(FakeSession):
-        async def api_json(self, method, path, body=None):
-            raise NotLoggedIn(path)
+        async def api(self, method, path, body=None, accept="application/json"):
+            r = await super().api(method, path, body, accept)
+            return r if method == "GET" else ApiResponse(status=401, text="", url=r.url)
+    s = Expired(_page(_links("markAdReserved")))
     with pytest.raises(NotLoggedIn):
-        await sales.mark_reserved(Expired(_page(_links("markAdReserved"))), AD)
+        await sales.mark_reserved(s, AD)
+    assert s.logged_in is False
+
+
+async def test_write_with_non_json_2xx_body_counts_as_done():
+    # willhaben's answer bodies are unknown: a 2xx with plain text / HTML must not be reported as "not changed"
+    s = FakeSession(_page(_links("setAdSold")), write_text="OK")
+    await sales.mark_sold(s, AD)
+    assert s.writes == [("PUT", f"/webapi/iad/bap/sold/{AD}", None)]
+    s = FakeSession(_page(_links("markAdReserved")), write_text="<!DOCTYPE html><html></html>")
+    await sales.mark_reserved(s, AD)
+
+
+async def test_sold_reasons_http_error_is_sale_failed(ad_with_chats, monkeypatch):
+    s = FakeSession(_page(_links("setAdSold"), "adId=1"), REASONS, reasons_status=500)
+    with pytest.raises(sales.SaleFailed, match="500"):
+        await sales.mark_sold(s, AD)
+    assert not s.writes
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    monkeypatch.setattr(sold, "get_session", lambda: s)
+    with TestClient(app) as c:
+        r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
+    assert r.status_code == 200 and "Not changed on willhaben" in r.text and not s.writes
+
+
+def test_action_path_rejects_odd_links():
+    for link in ({"id": "setAdSold", "serviceName": "iad", "relativePath": "/bap/../x"},
+                 {"id": "setAdSold", "serviceName": "iad/x", "relativePath": "/bap/sold/1"}):
+        ad = parse_my_adverts(_page({"contextLink": [link]}))[0]
+        with pytest.raises(sales.NotOffered):
+            sales.action_path(ad, sales.SOLD)
 
 
 # ------------------------------------------------------------------ service
@@ -228,6 +269,10 @@ def test_web_flow(ad_with_chats, monkeypatch):
         assert f"/sold/{AD}?kind=sold" in c.get("/myads").text
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
         assert "Erika Muster" in page and "Mark as sold on willhaben" in page
+        assert page.count('name="conv"') == 2 and page.count("checked>") >= 2 and "Pick the buyer above" not in page
+        nobuyer = c.get(f"/sold/{AD}?kind=sold").text   # buyer unknown: nobody pre-checked (the buyer is among them)
+        assert nobuyer.count('name="conv"') == 3 and "Pick the buyer above" in nobuyer
+        assert not any('name="conv"' in line and "checked" in line for line in nobuyer.splitlines())
 
         r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
         assert r.status_code == 200 and "Über willhaben" in r.text and not s.writes   # reason first, nothing written
@@ -247,3 +292,84 @@ def test_web_flow(ad_with_chats, monkeypatch):
         ad = sold.ad_row(AD)
         assert ad.sale_status == "sold" and ad.sale_conversation_id == "c-buyer" and ad.auto_reply is False
         assert "to this buyer" in c.get("/chats/c-buyer").text
+
+
+async def test_sold_ad_is_never_auto_renewed(ad_with_chats, monkeypatch):
+    from app.services import my_ads
+    calls = []
+
+    async def no_import():
+        return {AD}
+
+    async def fake_reactivate(row):
+        calls.append(row.ad_id)
+
+    async def fake_notify(*a, **kw):
+        calls.append("notify")
+    monkeypatch.setattr(my_ads, "import_from_account", no_import)
+    monkeypatch.setattr(my_ads, "_reactivate", fake_reactivate)
+    monkeypatch.setattr(my_ads, "notify", fake_notify)
+    with session() as db:
+        row = db.get(MyAd, AD)
+        row.auto_renew = True
+        db.add(row)
+        db.commit()
+    assert sold.finish(AD, "sold", "c-buyer").auto_renew is False
+    with session() as db:   # switched on again by hand and expired on willhaben: still never reactivated
+        row = db.get(MyAd, AD)
+        row.status, row.auto_renew = "expired", True
+        db.add(row)
+        db.commit()
+    await my_ads.check_all()
+    assert calls == []
+
+    s = FakeSession(_page(_links("setAdSold")))
+    monkeypatch.setattr(sold, "get_session", lambda: s)
+    sold.reset(AD)
+    with session() as db:
+        row = db.get(MyAd, AD)
+        row.auto_renew = True
+        db.add(row)
+        db.commit()
+    await sold.on_willhaben(AD, "sold")
+    assert sold.ad_row(AD).auto_renew is False
+
+
+def _fake_draft(on_draft=None):
+    async def fake_draft(cid, hint=None, auto=False):
+        if on_draft:
+            on_draft()
+        with session() as db:
+            d = Draft(conversation_id=cid, text="Ja, noch da.", auto=True, status="draft", auto_reason="✓ ok")
+            db.add(d)
+            db.commit()
+            db.refresh(d)
+            return d
+    return fake_draft
+
+
+@pytest.mark.parametrize("humanized", [True, False])
+async def test_running_auto_answer_stops_when_sold(ad_with_chats, monkeypatch, humanized):
+    account = ad_with_chats
+    finish = lambda: sold.finish(AD, "sold", "c-buyer", auto_off=False)  # noqa: E731 - sold, auto switch untouched
+    monkeypatch.setattr(chats, "draft_reply", _fake_draft(None if humanized else finish))
+    monkeypatch.setattr(chats, "_auto_blockers", lambda *a: [])
+
+    async def typing(d):   # the owner marks the ad sold while the answer is "typing"
+        finish()
+        return True
+    d = await chats.auto_reply("c-2", before_send=typing if humanized else None)
+    assert d is None and not account.sent
+    with session() as db:
+        assert {x.status for x in db.exec(select(Draft).where(Draft.conversation_id == "c-2"))} == {"discarded"}
+
+
+async def test_running_auto_answer_stops_when_auto_off(ad_with_chats, monkeypatch):
+    account = ad_with_chats
+    monkeypatch.setattr(chats, "draft_reply", _fake_draft())
+    monkeypatch.setattr(chats, "_auto_blockers", lambda *a: [])
+
+    async def typing(d):
+        sold.finish(AD, "reserved", "c-buyer")   # step 3 with "auto answers off"
+        return True
+    assert await chats.auto_reply("c-2", before_send=typing) is None and not account.sent
