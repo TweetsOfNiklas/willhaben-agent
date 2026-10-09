@@ -121,22 +121,51 @@ async def check(ad_id: str) -> MyAd | None:
 
 
 async def _reactivate(row: MyAd) -> None:
+    from app.willhaben.insert import InsertError
+
     sess = get_session()
+    new_id = row.ad_id
     try:
-        await AccountClient(sess).reactivate(row.ad_id)
+        new_id = await AccountClient(sess).reactivate(row.ad_id)
         action, err = t("reactivated"), None
-    except (EndpointUnknown, NotLoggedIn, SessionUnavailable) as e:
+    except (EndpointUnknown, NotLoggedIn, SessionUnavailable, InsertError, RuntimeError) as e:
         action, err = t("Reactivation needed manually"), str(e)
     with session() as db:
         r = db.get(MyAd, row.ad_id)
         r.last_action, r.last_error = action, err
         db.add(r)
         db.commit()
+    if not err and new_id != row.ad_id:
+        row = _move_to_new_id(row.ad_id, new_id)
     if err:
         await notify("ad_expired", t("Please reactivate the ad"), f"{row.heading or row.ad_id} ({action})",
                      url=MYADVERTS_URL, image=row.image_url, data={"ad_id": row.ad_id})
     else:
+        await notify("ad_renewed", t("Ad renewed automatically"), row.heading or row.ad_id, url=row.url,
+                     image=row.image_url, data={"ad_id": row.ad_id})
         await check(row.ad_id)
+
+
+def _move_to_new_id(old_id: str, new_id: str) -> MyAd:
+    """A republished ad has a new willhaben id: copy the per-ad settings over. The old row stays (marked
+    replaced, auto-renew off) because buyer chats keep pointing at the old id and still need its auto-reply
+    settings."""
+    keep = ("heading", "image_url", "auto_renew", "auto_reply", "auto_reply_instructions", "published_at")
+    with session() as db:
+        old = db.get(MyAd, old_id)
+        new = db.get(MyAd, new_id) or MyAd(ad_id=new_id)
+        for k in keep:
+            if hasattr(old, k):
+                setattr(new, k, getattr(old, k))
+        new.url, new.status = f"https://www.willhaben.at/iad/object?adId={new_id}", "active"
+        new.last_action = t("republished (was {id})", id=old_id)
+        old.replaced_by, old.auto_renew, old.status = new_id, False, "replaced"
+        db.add(new)
+        db.add(old)
+        db.commit()
+        db.refresh(new)
+    log.info("ad %s republished as %s", old_id, new_id)
+    return new
 
 
 async def check_all() -> dict[str, int]:

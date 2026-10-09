@@ -1,0 +1,10 @@
+{
+ "Ad renewed automatically": "Anzeige automatisch erneuert",
+ "Ad {id} is not in the account list": "Anzeige {id} ist nicht in der Kontoliste",
+ "Auto-renew": "Automatisch verlängern",
+ "When the ad expires, the app puts it online again (free ad, nothing is ever paid).": "Läuft die Anzeige ab, stellt die App sie wieder online (kostenlose Anzeige, es wird nie etwas bezahlt).",
+ "renewed as": "erneuert als",
+ "republished (was {id})": "neu veröffentlicht (vorher {id})",
+ "willhaben offers no reactivation for this ad (status: {status})": "willhaben bietet für diese Anzeige keine Reaktivierung an (Status: {status})",
+ "willhaben returned no ad id for the republished ad": "willhaben hat für die neu veröffentlichte Anzeige keine ID geliefert"
+}

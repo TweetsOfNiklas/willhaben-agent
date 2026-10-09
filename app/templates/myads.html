@@ -7,7 +7,7 @@
 <p><small class="muted">{{ _("Your ads are imported automatically from your willhaben account once a day. Before an ad expires you get a reminder on your phone, with a link straight to") }}
   <a href="{{ myadverts_url }}" target="_blank" rel="noopener">{{ _("My ads on willhaben") }}</a>.</small></p>
 <table class="stack">
-  <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Expires") }}</th><th>{{ _("Remind") }}</th><th></th></tr></thead>
+  <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Expires") }}</th><th title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">{{ _("Auto-renew") }}</th><th></th></tr></thead>
   <tbody>
   {% for a in ads %}
   <tr>
@@ -17,7 +17,12 @@
       {% if a.last_error %}<br><small style="color:#e5484d">{{ a.last_error }}</small>{% endif %}</td>
     <td>{% if a.status == 'active' %}<span class="badge ok">{{ _("active") }}</span>{% elif a.status == 'expired' %}<span class="badge">{{ _("expired") }}</span>{% elif a.status and a.status != 'unknown' %}<span class="badge muted">{{ a.status }}</span>{% else %}<span class="badge muted">?</span>{% endif %}</td>
     <td>{{ a.end_date|local('%d.%m.%Y %H:%M') }}<br><small class="muted">{{ a.end_date|ago }}</small></td>
-    <td><form method="post" action="/myads/{{ a.ad_id }}/auto-renew"><input type="hidden" name="on" value="{{ '0' if a.auto_renew else '1' }}"><button class="outline {{ '' if a.auto_renew else 'secondary' }}">{{ _('on') if a.auto_renew else _('off') }}</button></form></td>
+    <td>{% if a.replaced_by %}<small class="muted">{{ _("renewed as") }} <a href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></small>
+      {% else %}<form method="post" action="/myads/{{ a.ad_id }}/auto-renew"><input type="hidden" name="on" value="{{ '0' if a.auto_renew else '1' }}">
+        <label style="margin:0" title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">
+          <input type="checkbox" role="switch" {% if a.auto_renew %}checked{% endif %} onchange="this.form.submit()" aria-label="{{ _('Auto-renew') }}">
+          <small>{{ _('on') if a.auto_renew else _('off') }}</small></label>
+        <noscript><button class="secondary">{{ _("Save") }}</button></noscript></form>{% endif %}</td>
     <td><form method="post" action="/myads/{{ a.ad_id }}/delete"><button class="contrast outline" title="{{ _('Remove') }}" aria-label="{{ _('Remove') }}">×</button></form></td>
   </tr>
   <tr id="ad-{{ a.ad_id }}" class="auto-row">

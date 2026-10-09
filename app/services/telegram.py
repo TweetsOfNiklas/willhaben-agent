@@ -61,6 +61,7 @@ def kinds() -> dict[str, str]:
         "price_drop": t("Price drops"),
         "ad_expiring": t("Own ads about to expire"),
         "ad_expired": t("Own ads expired"),
+        "ad_renewed": t("Own ads renewed automatically"),
         "meetup": t("Appointments for the calendar"),
         "shipping": t("Shipping addresses and labels"),
     }

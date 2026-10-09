@@ -163,6 +163,12 @@ class OwnAdvert:
     end: datetime | None
     url: str
     image_url: str | None
+    actions: dict[str, dict[str, Any]] | None = None   # advertEditStatusActionsList link id -> link
+
+
+# Link ids in an own ad's advertEditStatusActionsList (from the /bbx-adin myadverts bundle, 2026-10-09)
+ACTION_ACTIVATE = "4"     # deactivated ad back online: PUT, no body
+ACTION_REPUBLISH = "6"    # expired ad: POST -> new insertion draft (new adId), finished like a new ad
 
 
 def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
@@ -190,8 +196,15 @@ def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
                 end=_iso(ad.get("endDate")),
                 url=f"{BASE}/iad/object?adId={ad_id}",
                 image_url=(images[0].get("mainImageUrl") or images[0].get("thumbnailImageUrl")) if images else None,
+                actions={str(link.get("id")): link for link in
+                         ((ad.get("advertEditStatusActionsList") or {}).get("contextLinkList") or {}).get("contextLink") or []
+                         if link.get("relativePath")},
             ))
     return out
+
+
+def _link_path(link: dict[str, Any]) -> str:
+    return f"/webapi/{link.get('serviceName') or 'iad'}{link['relativePath']}"
 
 
 class AccountClient:
@@ -294,11 +307,31 @@ class AccountClient:
             raise NotLoggedIn(t("{page}: no ad list (HTTP {status}, logged in?)", page=MYADVERTS_PAGE, status=r.status))
         return parse_my_adverts(nd)
 
-    async def reactivate(self, ad_id: str) -> None:
-        raise EndpointUnknown(t(
-            "Reactivation endpoint not captured yet (record 'reaktivieren' while clicking "
-            "'Wieder aktivieren' on an expired ad)."
-        ))
+    async def reactivate(self, ad_id: str) -> str:
+        """Put an own ad online again, like the buttons in "Meine Anzeigen". Returns the ad id afterwards.
+
+        Deactivated ads offer ACTIVATE (same id). Expired ads offer REPUBLISH, which creates a new insertion
+        draft with a NEW id; it is finished like a new ad (save -> empty cart -> checkout, never paid).
+        """
+        from app.willhaben import insert
+
+        ad = next((a for a in await self.my_adverts() if a.ad_id == str(ad_id)), None)
+        if ad is None:
+            raise EndpointUnknown(t("Ad {id} is not in the account list", id=ad_id))
+        links = ad.actions or {}
+        if link := links.get(ACTION_ACTIVATE):
+            await self.s.api_json("PUT", _link_path(link))
+            return ad.ad_id
+        if (link := links.get(ACTION_REPUBLISH)) and ad.status == "expired":   # never duplicate a live ad
+            new = await self.s.api_json("POST", _link_path(link))
+            new_id = str((new or {}).get("adId") or "")
+            if not new_id:
+                raise EndpointUnknown(t("willhaben returned no ad id for the republished ad"))
+            base = await insert.get_own_ad(self.s, new_id)
+            res = await insert.publish(self.s, base, [], existing_ad_id=new_id)
+            return res["ad_id"]
+        raise EndpointUnknown(t("willhaben offers no reactivation for this ad (status: {status})",
+                                status=ad.status_label or ad.status))
 
     async def publish_ad(self, draft: dict[str, Any]) -> str:
         raise EndpointUnknown(t("Ad posting not captured yet (recording 'anzeige-aufgeben')."))
