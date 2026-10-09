@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.db import SearchAgent, session, utcnow
 from app.services import chats, health, human_pace, my_ads, quiet_hours
 from app.services.search_agents import run_agent
+from app.willhaben import access_log
 from app.willhaben.session import get_session
 
 log = logging.getLogger(__name__)
@@ -104,6 +105,8 @@ def start() -> None:
     scheduler.add_job(health.check, IntervalTrigger(seconds=health.CHECK_INTERVAL_S), id="health-check",
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=120))
+    scheduler.add_job(access_log.flush_job, IntervalTrigger(seconds=access_log.FLUSH_INTERVAL_S), id="access-log",
+                      replace_existing=True, max_instances=1, coalesce=True)   # write + prune willhaben access counts
     scheduler.add_job(my_ads.check_all, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.start()

@@ -38,6 +38,7 @@ from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes
 from app.services.search_agents import create_agent, run_agent
+from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
 from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with_params
@@ -83,8 +84,11 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await task
     scheduler.shutdown()
-    await get_session().stop()
-    await get_public().aclose()
+    try:
+        await get_session().stop()
+        await get_public().aclose()
+    finally:
+        access_log.flush()                        # last unwritten willhaben access counts
 
 
 _background: set[asyncio.Task] = set()
@@ -1825,3 +1829,5 @@ from app import deals_web  # noqa: E402  Produktsuche tab (/deals) + price secti
 deals_web.install(app, templates)
 from app import bugreport_routes  # noqa: E402  footer "Report a bug" (/bugreport), log ring buffer, unhandled-error log
 bugreport_routes.install(app)
+from app import stats_web  # noqa: E402  willhaben access statistics (/stats/willhaben, footer counter)
+stats_web.install(app, templates)

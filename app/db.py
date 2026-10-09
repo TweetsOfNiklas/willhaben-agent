@@ -263,6 +263,15 @@ class LLMCall(SQLModel, table=True):
     error: str | None = None
 
 
+class AccessCount(SQLModel, table=True):
+    """willhaben requests per minute (app/willhaben/access_log.py): aggregated counters only, no paths, ids or texts."""
+    minute: int = Field(primary_key=True)     # UTC epoch minute (unix time // 60)
+    channel: str = Field(primary_key=True)    # anonymous | account | chat
+    kind: str = Field(primary_key=True)       # access_log.KINDS
+    outcome: str = Field(primary_key=True)    # ok | client_error | blocked | error | cached
+    count: int = 0
+
+
 class EventLog(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     ts: datetime = Field(default_factory=utcnow, index=True)

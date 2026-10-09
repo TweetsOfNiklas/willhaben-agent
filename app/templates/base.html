@@ -184,7 +184,7 @@
   {% block content %}{% endblock %}
 </main>
 {% if not embed %}
-{% set lim = wh_limiter() %}{% set used = lim.last_hour %}{% set budget = wh_budget() %}
+{% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
 <footer class="site">
   <div class="container">
     <span><strong>willhaben Agent</strong> v{{ app_version }} · {{ _("by {author}", author=app_author) }}
@@ -196,13 +196,13 @@
           {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
         </select>
       </form></span>
-    <span title="{% if budget %}{{ _('All requests to willhaben run one after another with a pause in between and at most {n} per hour.', n=budget) }}{% else %}{{ _('All requests to willhaben run one after another with a pause in between.') }}{% endif %}">
+    <a href="/stats/willhaben" class="muted" title="{% if budget %}{{ _('All requests to willhaben run one after another with a pause in between and at most {n} per hour.', n=budget) }}{% else %}{{ _('All requests to willhaben run one after another with a pause in between.') }}{% endif %}">
       {% if lim.cooling_down_s %}{{ _("willhaben pause: {n} min left", n=(lim.cooling_down_s / 60)|round(0, 'ceil')|int) }}
       {% elif budget %}{{ _("{used} / {budget} willhaben requests in the last hour", used=used, budget=budget) }}
       {% else %}{{ _("{used} willhaben requests in the last hour", used=used) }}{% endif %}
       {% if budget %}{% set pct = [100, (used * 100 / budget)|round|int]|min %}
         <span class="meter {{ 'full' if pct >= 90 or lim.cooling_down_s else 'warn' if pct >= 60 else '' }}"><span style="width:{{ 100 if lim.cooling_down_s else pct }}%"></span></span>{% endif %}
-    </span>
+    </a>
   </div>
 </footer>
 {% include "_ad_panel.html" %}
