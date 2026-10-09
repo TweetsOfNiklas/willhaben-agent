@@ -26,6 +26,9 @@
 <section class="deal">
   <p class="deal-head"><strong>💶 {{ _("Price") }}</strong>
     {% if p.pos is not none %}<span class="deal-lvl lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}
+    {% if c.median and ad.price %}{% set diff = ((ad.price - c.median) * 100 / c.median)|round|int %}
+      <small>{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %}
+        <span class="muted">({{ _("median {price}", price=c.median|eur) }})</span></small>{% endif %}
     {% if c.count %}<small class="muted">{{ _("{n} comparable ads", n=c.count) }}{% if c.query %} · „{{ c.query }}“{% endif %}</small>{% endif %}
   </p>
   {% if p.pos is not none %}
