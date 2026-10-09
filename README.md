@@ -1,31 +1,68 @@
 # willhaben Agent
 
+> [!WARNING]
+> **This tool was written entirely by AI (Claude).** It has been tested, but its correctness and safety cannot be
+> guaranteed. You use it at your own risk and are responsible for everything it does in your name: it can send chat
+> messages, publish, edit and delete ads on your willhaben account. Watch out for **prompt injection**: listings and
+> chat messages from strangers end up in Claude's prompts, and a crafted text could try to steer an automatic reply or
+> a screening verdict. Keep automatic replies limited to ads you are comfortable with and review what is sent.
+
 A self-hosted assistant for [willhaben.at](https://www.willhaben.at), Austria's classifieds marketplace.
 It runs on your own server, from your home internet connection, and you control it through a web dashboard
 (English or German).
 
 - **Search agents**: build a search with willhaben's own filters and get notified about new listings and
   price drops, usually much faster than willhaben's e-mail alerts. Hits open in a detail view inside the dashboard.
+  Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
+  predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
+  only hits that pass reach your phone. Agents check at irregular, human-like intervals and slow down at night.
 - **Chats**: your willhaben conversations, synced live. Claude drafts replies in your style and nothing is sent
-  until you click. For your own ads you can opt in to automatic answers to simple questions.
+  until you click. For your own ads you can opt in to automatic answers to simple questions, with a minimum price
+  Claude never goes below, human-like timing and read receipts; your 👍/👎 feedback goes into later answers.
 - **Create ads quickly**: drop in notes and photos and Claude writes the title, description and category. You also get
   a price suggestion from comparable listings and the product's spec sheet from Geizhals. Upload photos of several
-  items at once and Claude sorts them into one draft per item.
+  items at once and Claude sorts them into one draft per item. Publish directly on willhaben (free private ads; the
+  category comes from willhaben's suggestion or your own pick).
 - **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
   Claude plans a few willhaben searches, the app runs them anonymously and Claude picks the best offers, each with a
   fit score, a short reason, red flags, the price bar and the scam check. Toggles for unusual names (misspellings,
   nicknames, generic descriptions) and other categories (mis-categorised ads, bundles) dig for hidden deals; the
   depth (≈3 / 6 / 12 searches) is the number of willhaben requests, Claude is called twice.
 - **Price check** (same tab): paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
-  green-to-red bar against comparable listings, the Geizhals new price and, on click, Claude's verdict. Also in the hit viewer.
-- **Your ads**: imported from your account, with a reminder before they expire.
-- **Notifications** through Home Assistant: events plus phone pushes with action buttons
-  (send / revise with Claude / discard).
+  green-to-red bar against comparable listings of the **same kind of item** (same willhaben category, without accessories,
+  other variants and extreme prices; you can pick another category), the Geizhals new price and, on click, Claude's verdict.
+  Also in the hit viewer.
+- **Your ads**: imported from your account, with a reminder before they expire. Per ad: auto-renew when it expires,
+  edit text and photos (Claude can propose a better text), deactivate, delete, mark sold or reserved (other buyers get a
+  notice draft).
+- **Shipping**: when a buyer sends an address, the app compares parcel prices of Post, GLS, Hermes and DPD, shows the
+  nearest drop-off points and fills the carrier's label form in the built-in browser (you check and pay there).
+- **Google Calendar** (optional): free times go into reply drafts, agreed appointments become calendar entries on a tap.
+- **Notifications** through Home Assistant (events always, phone pushes with action buttons: send / revise with Claude /
+  discard) and/or a **Telegram bot** with the same buttons, feedback buttons, commands and a typing indicator.
+- **Connection watchdog**: tiles on the home page and a warning push when the willhaben login, Claude, Home Assistant,
+  Telegram, live chat or disk space fails.
 - **Polite by design**: every willhaben request goes through one shared rate limiter (minimum gap plus an
   hourly budget). Quiet hours slow the agents down at night. Nothing is ever written to willhaben without your approval.
 - **MCP server**, so Claude Desktop or Claude Code can use the agent as a tool.
 
 Claude runs through the Claude Code CLI with your Claude subscription. You don't need an API key.
+
+## Screenshots
+
+*Demo data – all names, ads and photos are made up.*
+
+| | |
+|---|---|
+| ![Home page with counters, connection status, latest hits and activity](docs/images/dashboard.png) | ![Search agents with their newest hits](docs/images/search-agents.png) |
+| **Home**: counters, connection watchdog, latest hits, activity | **Search agents**: built from willhaben's own filters, optional Claude screening |
+| ![Hits with Claude's verdict, price drops and a scam warning](docs/images/hits.png) | ![Ad viewer with photos, price bar and comparable ads](docs/images/ad-viewer.png) |
+| **Hits**: Claude's verdict and reason, price drops | **Ad viewer**: price bar against the same kind of item, Geizhals new price |
+| ![Chat with a reply drafted by Claude](docs/images/chat.png) | ![Batch draft card with category, required fields and publish button](docs/images/batch-publish.png) |
+| **Chats**: Claude drafts the answer, you send it | **New ad**: Claude writes the listing, publish straight to willhaben |
+
+![My ads with auto-renew switches, automatic answers and a minimum price](docs/images/my-ads.png)
+**My ads**: auto-renew, automatic answers with a minimum price, deactivate / delete / mark sold.
 
 ## Quick start
 
@@ -33,14 +70,15 @@ Requirements: Docker with Compose, on a machine with a **home internet connectio
 datacenter and VPN IP ranges.
 
 ```bash
-git clone https://github.com/<owner>/willhaben-agent.git
-cd willhaben-agent
-cp .env.example .env          # optional: everything in it can stay empty
-docker compose up -d --build
+mkdir willhaben-agent && cd willhaben-agent
+curl -fsSLO https://raw.githubusercontent.com/lumascet/willhaben-agent/master/compose.yaml
+docker compose up -d
 ```
 
-Or use the prebuilt image instead of building: in `compose.yaml` replace `build: .` with
-`image: ghcr.io/<owner>/willhaben-agent:latest`, then run `docker compose pull && docker compose up -d`.
+This pulls the prebuilt image `ghcr.io/lumascet/willhaben-agent:latest`, which GitHub Actions builds from every push.
+Update later with `docker compose pull && docker compose up -d`. To build from source instead, clone the repository and run
+`docker compose up -d --build`. An optional `.env` next to `compose.yaml` (see `.env.example`) holds overrides such as
+the dashboard password.
 
 Open `http://<your-server>:8000` and finish the setup in the browser:
 
@@ -51,7 +89,13 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
 3. **Settings → Home Assistant → Connect** (optional). Enter your Home Assistant address and log in. You're sent
    back automatically, and the app creates its own long-lived token in your HA profile. Pick the phone that should
    get pushes.
-4. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
+4. **Settings → Telegram** (optional): create a bot with @BotFather (`/newbot`), paste its token, tap "Link this chat"
+   and press Start in Telegram. Settings → Chats decides whether pushes go to Home Assistant, Telegram or both.
+5. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
+   Optionally switch on "Claude screening" and describe exactly what you want.
+
+Settings → Claude also shows the token usage per job and lets you pick a model per job (default: Opus for writing
+listings, Sonnet for chat replies, screening and the product search).
 
 The interface follows your browser's language (English or German). You can switch it in the footer or under
 Settings → Language.
@@ -99,8 +143,11 @@ it as `.txt`/`.json` and share it yourself. Read it before sharing.
 ## Home Assistant
 
 The app fires events on the HA event bus: `willhaben_hit`, `willhaben_price_drop`, `willhaben_message`,
-`willhaben_ad_expiring`, `willhaben_ad_expired`, `willhaben_test`. The payload has `title`, `message`, `url` and
-`image`, plus `agent`, `ad_id`, `price` or `conversation_id` depending on the event. If you picked a phone in
+`willhaben_auto_reply`, `willhaben_auto_reply_pending`, `willhaben_ad_expiring`, `willhaben_ad_expired`,
+`willhaben_ad_renewed`, `willhaben_meetup`, `willhaben_shipping`, `willhaben_health`, `willhaben_test`. The payload has
+`title`, `message`, `url` and `image`, plus `agent`, `ad_id`, `price` or `conversation_id` depending on the event.
+Hits also carry the screening result (`screen_relevant`, `screen_deal`, `screen_reason`, `screen_issues`) and the scam
+check (`scam_flags`, `scam_level`). Events always fire, even for hits the screening holds back from your phone. If you picked a phone in
 Settings, the app also sends pushes directly. Otherwise you can build your own automation:
 
 ```yaml
@@ -152,26 +199,31 @@ Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_sea
 
 | Feature | Status |
 |---|---|
-| Search agents, hits, price drops, quiet hours | done |
+| Search agents, hits, price drops, quiet hours, human pace | done |
+| Claude screening of hits (with reasons), scam check | done (thresholds still being tuned on real hits) |
 | willhaben login in the dashboard, session check, silent re-login | done |
-| Chat sync (live), history, Claude reply drafts, sending | done |
-| Automatic replies (opt-in per ad, with limits) | done |
-| Own ads: import, expiry reminders | done |
-| Own ads: automatic reactivation | not yet: endpoint unknown, a reminder with a link is sent instead |
+| Chat sync (live), history, Claude reply drafts, sending, read receipts | done |
+| Automatic replies (opt-in per ad, limits, minimum price, feedback) | done |
+| Own ads: import, expiry reminders, deactivate, delete | done |
+| Own ads: auto-renew (activate / republish) | built from willhaben's web app; the first real renewal is still to be observed |
+| Own ads: edit text and photos, sold / reserved | built; saving is **not yet live-tested** |
 | Ad drafts with Claude, comparable prices, Geizhals specs, batch upload | done |
-| Publishing ads directly | done for free private ads with pickup (click + confirm, batch cards and single draft page, manual category picker); shipping/PayLivery built from the bundle but **not yet live-tested**; the manual link stays as fallback |
+| Publishing ads directly | done for free private ads with pickup (batch cards and single draft page, category picker); shipping/PayLivery built from the bundle but **not yet live-tested** |
+| Price check and product search (Produktsuche) | done (comparables from the same category, category selectable) |
 | Home Assistant events, pushes with action buttons | done |
+| Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
+| Connection watchdog, backup, bug report, request statistics | done |
 | MCP server | done |
 
-Missing endpoints can be recorded in the dashboard (Settings → willhaben account → Advanced → API recording);
-see `docs/willhaben-api.md`.
+willhaben's interfaces used by the app are documented in `docs/willhaben-api.md`. To check a response shape, the
+dashboard can record the built-in browser's requests (Settings → willhaben account → Advanced → API recording).
 
 ## Development
 
 ```bash
 uv sync
 uv run playwright install chromium
-uv run pytest
+uv run pytest            # on a server without a matching venv: scripts/test.sh (tests + lint in the app image)
 uv run python -m app
 ```
 
@@ -188,7 +240,7 @@ Locally a real Chromium window opens for the login. Use `BROWSER_HEADLESS=1` for
   `sha-<commit>`. Pull requests build without pushing. To release, bump `app/__init__.py` and `pyproject.toml` and
   push a `vX.Y.Z` tag.
 
-More background (architecture, decisions, willhaben interface facts) is in `SPEC.md`.
+How the app talks to willhaben (endpoints, verification status) is documented in `docs/willhaben-api.md`.
 
 ## Account separation (search agents never use your login)
 

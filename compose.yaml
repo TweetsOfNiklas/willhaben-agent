@@ -1,8 +1,10 @@
 services:
   willhaben-agent:
+    # Prebuilt image from GitHub Actions; `docker compose up -d` pulls it. To build from source instead,
+    # run `docker compose up -d --build` in a clone of the repository.
+    image: ghcr.io/lumascet/willhaben-agent:latest
+    pull_policy: missing
     build: .
-    # or use the prebuilt image from GitHub Actions instead of building locally:
-    # image: ghcr.io/<owner>/willhaben-agent:latest
     container_name: willhaben-agent
     restart: unless-stopped
     env_file:

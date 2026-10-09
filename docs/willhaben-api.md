@@ -40,7 +40,13 @@ Response: `rowsFound`, `rowsReturned`, `advertSummaryList.advertSummary[]`. Each
 `attributes.attribute[{name, values[]}]` with, among others, `ADID`, `HEADING`, `BODY_DYN` (truncated), `PRICE`,
 `PRICE/AMOUNT`, `PRICE_FOR_DISPLAY`, `OLD_PRICE`, `LOCATION`, `POSTCODE`, `STATE`, `DISTRICT`, `COORDINATES`,
 `PUBLISHED` (epoch ms), `CHANGED`, `ENDDATE`, `IS_BUMPED`, `ISPRIVATE`, `SEO_URL`, `ALL_IMAGE_URLS`, `AD_UUID`,
-`ORGID`. **V** (example: `tests/fixtures/search_fahrrad_rows3.json`)
+`ORGID`, `categorytreeids` (category path as ids, root → leaf, e.g. `"2691;2722;2724;5013241"`). **V** (example:
+`tests/fixtures/search_fahrrad_rows3.json`)
+
+`navigatorGroups[].navigatorList[]` are the filters of the result list (label, type HIERARCHICAL/RANGE/STANDARD, values with
+`label`, `hits` and a result-list link, selected values with a reset link). The navigator with `id: "category"` is the
+category tree for the current search; following a value's link narrows the search to that category. **V** (used by the
+search-agent builder and the price-check category selector)
 
 ## Ad detail (anonymous)
 
@@ -52,7 +58,8 @@ Response: `rowsFound`, `rowsReturned`, `advertSummaryList.advertSummary[]`. Each
 - Important fields: `id`, `description` (title), `startDate`, `endDate`, `publishedDate`,
   `firstPublishedDate`, `advertStatus`, `attributes` (`DESCRIPTION` with `<br/>`), `advertImageList`,
   `advertAddressDetails`, `sellerProfileUserData`, `loginId`, `loginUUid`, `chatEnabled`, `breadcrumbs`,
-  `advertEditStatusActionsList`. **V** (example: `tests/fixtures/detail_1662146981_nextdata.json`)
+  `advertEditStatusActionsList`, `categoryTreeId` (the leaf category, same ids as `categorytreeids` in search results).
+  **V** (example: `tests/fixtures/detail_1662146981_nextdata.json`)
 - Deleted or expired ad: HTTP 404, `__NEXT_DATA__.page == "/404"`. **V**
 - Private marketplace ads expire 45 days after publication (`endDate`). **V**
 
@@ -86,7 +93,11 @@ Response: `rowsFound`, `rowsReturned`, `advertSummaryList.advertSummary[]`. Each
 | Messages of a conversation | `GET /webapi/chat-api/v1/conversations/{id}/messages?limit=100&offset=0` → `conversation_info` (same as list entry) + `messages[]` with `message_id`, `type` (`text` / `integration_message` / `system_message`), `text`, `is_mine`, `read`, `created_at`, `parameters` | V |
 | Send reply | REST: ? — sent via the chat WebSocket instead, see below | V (WebSocket) |
 | My ads (list, status) | no JSON call: `GET /iad/myprofile/myadverts` (HTML) → `__NEXT_DATA__.props.pageProps.initialUserAdsList.verticalList[].advertDetails[]` with `id`, `description` (title), `startDate`, `endDate`, `advertStatus{id,description}`, `advertEditStatusActionsList` | V |
-| Extend / reactivate ad | ? | ? |
+| Activate a deactivated ad | `PUT /webapi/<serviceName><relativePath>` of my-adverts link `4`, no body | V (bundle) |
+| Renew an expired ad | `POST /webapi/<svc><path>` of link `6` (REPUBLISH) → JSON with a **new** `adId` (insertion draft), then the normal insertion flow from "Save" (see "Placing an ad"); the renewad page's "Neu veröffentlichen" uses the same call | V (bundle), first real renewal pending |
+| Deactivate / delete own ad | link `2` `PUT` / link `3` `DELETE`, no body; bulk variants `PUT`/`DELETE` with `{bulkChangeAdIds:[…]}` via the list's BULK_* links; delete reasons optionally via `GET/POST /webapi/iad/deletereasons?adId=` | V (delete used live) |
+| Edit own ad | `GET /webapi/iad/bap/{id}` (editor JSON) → `PUT /webapi/iad/bap/edit` with the full object | V (read) / ? (save) |
+| Photos of own ad | `GET` link `imageList` (`/webapi/iad/atimage/{id}`) → `advertImage[]` with `reference` + thumbnails; new files `POST /webapi/iad-upload/atimage/temp`; then one `PUT /webapi/iad-upload/atimage/{id}/order-and-associate` `{advertImage:[{reference}], floorPlans:[…]}` (left-out photos are removed, first = cover) | V (read) / ? (save) |
 | Mark sold / reserved / unreserve | `PUT /webapi/<serviceName><relativePath>` of the ad's my-adverts links `setAdSold` / `markAdReserved` / `removeMarkAdReserved`, no body; sold reason first via `/webapi/iad/soldreasons?adId=` (see below) | V (bundle), needs live verification |
 | Create ad (categories, attributes, image upload, publish) | see "Placing an ad" below | V (pickup) / ? (shipping) |
 
@@ -94,10 +105,12 @@ Conversation list fields according to willmehr: `conversations[]` or `data[]` wi
 `adId`, `adTitle`, `partnerName`, `lastMessage{text, createdAt}`, `unreadCount`. The parser in
 `app/willhaben/account.py` accepts several variants.
 
-## Capturing open endpoints
+## Reading the web-app bundles / capturing requests
 
-The pages for chat, my ads and ad creation are separate Next.js apps that are not served without a
-login, so their endpoints are not visible in the public bundle. This is how to capture them:
+The pages for chat, my ads and ad creation are separate Next.js apps (`/bbx-lead`, `/bbx-adin`) whose page HTML needs a
+login, but their JavaScript chunks are public static files. Sending chat messages, placing ads and all own-ad actions in
+this document were read from those chunks (find the chunk names in the logged-in page or a capture, download them
+anonymously, search for the action ids). To see real request/response shapes, capture them:
 
 1. Dashboard → Settings → willhaben account → log in (this opens the session page with the remote browser view).
 2. On the session page, start a recording with a matching label (`chat`, `chat-senden` (send chat),
