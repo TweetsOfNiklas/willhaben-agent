@@ -758,7 +758,6 @@ async def ad_batch_image(batch_id: int, idx: int):
 
 
 # ------------------------------------------------------------------ session / capture
-@app.get("/session", response_class=HTMLResponse)
 def _session_back(next_url: str | None, msg: str | None = None) -> RedirectResponse:
     """Back to where a session form was posted from (/session or Settings → willhaben account), with a message."""
     url = next_url if next_url and next_url.startswith("/") and not next_url.startswith("//") else "/session"
@@ -768,6 +767,7 @@ def _session_back(next_url: str | None, msg: str | None = None) -> RedirectRespo
     return back(path + (f"#{frag}" if frag else ""))
 
 
+@app.get("/session", response_class=HTMLResponse)
 async def session_page(request: Request, msg: str | None = None):
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
     return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),
