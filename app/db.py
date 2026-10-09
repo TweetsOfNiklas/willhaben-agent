@@ -122,6 +122,7 @@ class MyAd(SQLModel, table=True):
     last_error: str | None = None
     auto_reply: bool | None = None                 # answer buyers of this ad automatically
     auto_reply_instructions: str | None = None     # ad-specific facts/limits for those answers
+    min_price: float | None = None                 # floor for automatic answers: never agree below this (€)
     replaced_by: str | None = None    # republished (auto-renew) under this new ad id; old chats still point here
     parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # confirmed size/weight for shipping
     hidden: bool | None = None        # hidden from the list by the user; the import keeps it hidden
