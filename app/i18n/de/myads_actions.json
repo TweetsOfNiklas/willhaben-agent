@@ -47,6 +47,8 @@
  "Delete selected on willhaben": "Ausgewählte auf willhaben löschen",
  "The app no longer answers buyers of a deleted ad automatically.": "Interessenten einer gelöschten Anzeige beantwortet die App nicht mehr automatisch.",
  "Nothing to clean up.": "Nichts aufzuräumen.",
+ "Shift-click selects or clears every ad in between.": "Shift-Klick wählt alle Anzeigen dazwischen aus oder ab.",
+ "Click to close": "Zum Schließen klicken",
  "Only hidden here (willhaben offers no deleting): {n}": "Nur hier ausgeblendet (willhaben bietet kein Löschen an): {n}",
  "not done (stopped after an error)": "nicht ausgeführt (nach einem Fehler abgebrochen)",
  "Edit on willhaben": "Auf willhaben bearbeiten",

@@ -11,7 +11,7 @@
   <tbody>
   {% for c in cands %}
   <tr>
-    <td><input type="checkbox" name="ids" value="{{ c.ad_id }}" checked aria-label="{{ _('Select') }}"></td>
+    <td><input type="checkbox" name="ids" value="{{ c.ad_id }}" class="sel" checked aria-label="{{ _('Select') }}"></td>
     <td><a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.heading }}</a></td>
     <td><span class="badge muted">{{ c.status }}</span></td>
     <td>{{ c.reasons|join(" · ") }}{% if not c.deletable %}<br><small class="muted">{{ _("willhaben offers no deleting – only hidden here") }}</small>{% endif %}</td>
@@ -19,6 +19,7 @@
   {% endfor %}
   </tbody>
 </table>
+<p><small class="muted">{{ _("Shift-click selects or clears every ad in between.") }}</small></p>
 <button class="btn-danger" style="width:auto">🗑 {{ _("Delete selected on willhaben") }}</button>
 </form>
 <p><small class="muted">{{ _("The app no longer answers buyers of a deleted ad automatically.") }}</small></p>

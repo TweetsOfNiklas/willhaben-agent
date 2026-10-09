@@ -496,3 +496,19 @@ async def test_cleanup_page_and_route(account):
         r = c.post("/myads/cleanup", data={"ids": ["1000000002"]}, follow_redirects=False)
         assert r.status_code == 303 and "/myads?msg=" in r.headers["location"]
     assert ("DELETE", "/webapi/myatz/bap/1000000002") in account.calls
+
+
+def test_row_actions_keep_the_list_filters():
+    from app.main import app
+
+    with session() as db:
+        db.add(MyAd(ad_id="1000000001", heading="Rad", status="Passiv"))
+        db.commit()
+    ref = {"referer": "http://testserver/myads?show_inactive=1&show_sold=1&msg=x"}
+    with TestClient(app) as c:
+        r = c.post("/myads/1000000001/auto-renew", data={"on": "1"}, headers=ref, follow_redirects=False)
+        assert r.headers["location"] == "/myads?msg=&show_inactive=1&show_sold=1"
+        r = c.post("/myads/1000000001/auto-reply", data={"on": ""}, headers=ref, follow_redirects=False)
+        assert r.headers["location"].endswith("&show_inactive=1&show_sold=1#ad-1000000001")
+        r = c.post("/myads/1000000001/hide", data={"hidden": "0"}, follow_redirects=False)   # no referer: plain list
+        assert r.headers["location"] == "/myads?msg="

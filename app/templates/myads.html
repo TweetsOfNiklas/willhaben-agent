@@ -14,6 +14,8 @@
   details.auto-reply { margin:0; } details.auto-reply summary { font-size:.9em; }
   details.auto-reply[open] summary { margin-bottom:.5rem; }
   details.dropdown summary { width:auto; display:inline-block; }
+  /* the page keeps its scroll position after an action, so the message stays in view */
+  .msg { position:sticky; top:.5rem; z-index:5; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.15); }
 </style>
 <form id="bulk" method="post" class="bulkbar">
   {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
@@ -133,6 +135,16 @@
     e.submitter.setAttribute('aria-busy', 'true');
   });
   update();
+  // every action posts and comes back here: keep the scroll position instead of jumping to the top
+  const KEY = 'myads-scroll';
+  addEventListener('pagehide', () => { try { sessionStorage.setItem(KEY, String(scrollY)); } catch (e) {} });
+  let from = '';
+  try { from = new URL(document.referrer).pathname; } catch (e) {}
+  if (from === location.pathname && !location.hash) {
+    try { const y = Number(sessionStorage.getItem(KEY)); if (y) scrollTo(0, y); } catch (e) {}
+  }
+  const msg = document.querySelector('.msg');
+  if (msg) { msg.title = {{ _("Click to close")|tojson }}; msg.addEventListener('click', () => msg.remove()); }
 })();
 </script>
 {% if hidden_count %}<p><small class="muted"><a href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_sold=1&' if show_sold else '' }}{{ 'show_inactive=1' if show_inactive else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a></small></p>{% endif %}
