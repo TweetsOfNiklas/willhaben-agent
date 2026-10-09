@@ -27,6 +27,7 @@ from app.db import (
     AdBatch, AdDraft, Conversation, Draft, Hit, MyAd, SearchAgent, get_setting, init_db, recent_events,
     session, set_setting, utcnow,
 )
+from app.llm import usage as llm_usage
 from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import ad_batch, ad_creator, chats, my_ads, screening
@@ -864,6 +865,7 @@ async def settings_page(request: Request, msg: str | None = None):
     return render(request, "settings.html", values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(), models=MODELS,
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
+                  llm_usage=llm_usage.summary(), purpose_labels={p: label for p, (_, label, _h) in PURPOSES.items()},
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),

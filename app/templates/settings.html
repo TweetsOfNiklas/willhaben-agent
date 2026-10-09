@@ -104,6 +104,32 @@
           <noscript><button class="secondary">{{ _("Save") }}</button></noscript>
         </form>
       {% endfor %}
+
+      <h5 style="margin-top:1.5rem">{{ _("Token usage") }}</h5>
+      {% set u = llm_usage %}
+      {% macro num(n) %}{{ '{:,}'.format(n or 0).replace(',', '.') }}{% endmacro %}
+      {% if u and u.groups %}
+        <table class="stack usage">
+          <thead><tr><th>{{ _("Job") }}</th><th>{{ _("Model") }}</th><th>{{ _("Calls") }}</th>
+            <th>{{ _("Today") }}</th><th>{{ _("7 days") }}</th><th>{{ _("Total") }}</th><th>{{ _("Cache read") }}</th></tr></thead>
+          <tbody>
+          {% for g in u.groups %}
+            <tr>
+              <td>{{ _(purpose_labels.get(g.purpose, "Other (tests, misc.)")) }}</td>
+              <td><code>{{ g.model }}</code></td>
+              <td>{{ g.calls }}{% if g.errors %} <span class="badge" title="{{ _('failed calls') }}">{{ g.errors }} ✗</span>{% endif %}</td>
+              <td>{{ num(g.today) }}</td><td>{{ num(g.week) }}</td><td><strong>{{ num(g.all) }}</strong></td>
+              <td class="muted">{{ num(g.cache_read) }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+          <tfoot><tr><th>{{ _("All jobs") }}</th><th></th><th>{{ u.total.calls }}</th><th>{{ num(u.total.today) }}</th>
+            <th>{{ num(u.total.week) }}</th><th>{{ num(u.total.all) }}</th><th class="muted">{{ num(u.total.cache_read) }}</th></tr></tfoot>
+        </table>
+        <small class="muted">{{ _("Tokens = input + output as reported by Claude Code; cache reads are listed separately. Your subscription is not billed per token – the CLI's own cost estimate for comparison: {cost}.", cost="$%.2f"|format(u.total.cost_usd)) }}</small>
+      {% else %}
+        <p class="muted">{{ _("No Claude calls recorded yet.") }}</p>
+      {% endif %}
     </section>
 
     <section id="ha">

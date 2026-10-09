@@ -122,6 +122,7 @@ class MyAd(SQLModel, table=True):
     last_error: str | None = None
     auto_reply: bool | None = None                 # answer buyers of this ad automatically
     auto_reply_instructions: str | None = None     # ad-specific facts/limits for those answers
+    replaced_by: str | None = None    # republished (auto-renew) under this new ad id; old chats still point here
     parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # confirmed size/weight for shipping
 
 
@@ -201,6 +202,23 @@ class TelegramMessage(SQLModel, table=True):
 class Setting(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: str
+
+
+class LLMCall(SQLModel, table=True):
+    """One Claude call (one row per model it used), for the token usage table in Settings → Claude."""
+    id: int | None = Field(default=None, primary_key=True)
+    ts: datetime = Field(default_factory=utcnow, index=True)
+    purpose: str = Field(index=True)          # chat | ads | screen | other
+    model: str
+    ok: bool = True
+    call_part: int | None = None              # 0 = first model of the call (counts as the call), 1.. = further models
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    cost_usd: float | None = None             # the CLI's estimate; the subscription is not billed per token
+    duration_ms: int | None = None
+    error: str | None = None
 
 
 class EventLog(SQLModel, table=True):

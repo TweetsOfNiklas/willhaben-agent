@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +27,9 @@ log = logging.getLogger(__name__)
 
 class ClaudeCLI:
     def __init__(self, cmd: list[str] | None = None, model: str | None = None,
-                 timeout_s: int | None = None) -> None:
+                 timeout_s: int | None = None, purpose: str | None = None) -> None:
         s = get_settings()
+        self.purpose = purpose      # for the usage statistics (app/llm/usage.py)
         self.cmd = cmd or [s.claude_bin]
         self.model = model or model_for(None)
         self.timeout_s = timeout_s or s.llm_timeout_s
@@ -60,6 +62,20 @@ class ClaudeCLI:
 
     async def complete(self, *, system: str, prompt: str, schema: dict[str, Any],
                        images: list[Path] | None = None) -> LLMResult:
+        from app.llm import usage
+
+        started = time.monotonic()
+        try:
+            res = await self._complete(system=system, prompt=prompt, schema=schema, images=images)
+        except LLMError as e:
+            usage.record(self.purpose, self.model, None, ok=False, error=str(e),
+                         duration_ms=int((time.monotonic() - started) * 1000))
+            raise
+        usage.record(self.purpose, res.model, res.raw, ok=True, duration_ms=res.duration_ms)
+        return res
+
+    async def _complete(self, *, system: str, prompt: str, schema: dict[str, Any],
+                        images: list[Path] | None = None) -> LLMResult:
         images = images or []
         with tempfile.TemporaryDirectory(prefix="wh-llm-") as tmp:
             names = []
@@ -110,5 +126,5 @@ class ClaudeCLI:
             model=models[0] if models else self.model,
             duration_ms=data.get("duration_ms"),
             cost_usd=data.get("total_cost_usd"),
-            raw={k: data.get(k) for k in ("session_id", "num_turns", "duration_ms", "usage")},
+            raw={k: data.get(k) for k in ("session_id", "num_turns", "duration_ms", "usage", "modelUsage", "total_cost_usd")},
         )

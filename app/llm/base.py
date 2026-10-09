@@ -64,7 +64,7 @@ def get_backend(purpose: str | None = None) -> LLMBackend:
     if s.llm_backend == "claude_cli":
         from app.llm.claude_cli import ClaudeCLI
 
-        return ClaudeCLI(model=model_for(purpose))
+        return ClaudeCLI(model=model_for(purpose), purpose=purpose)
     raise LLMError(
         f"LLM_BACKEND={s.llm_backend!r} is not implemented. Option B (claude_cli) was chosen; "
         "the Anthropic SDK backend will only be built if option B stops working."

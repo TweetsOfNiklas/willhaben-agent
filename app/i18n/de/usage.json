@@ -1,0 +1,15 @@
+{
+ "Token usage": "Token-Verbrauch",
+ "Job": "Aufgabe",
+ "Model": "Modell",
+ "Calls": "Aufrufe",
+ "Today": "Heute",
+ "7 days": "7 Tage",
+ "Total": "Gesamt",
+ "Cache read": "Cache gelesen",
+ "All jobs": "Alle Aufgaben",
+ "failed calls": "fehlgeschlagene Aufrufe",
+ "Other (tests, misc.)": "Sonstiges (Tests, …)",
+ "Tokens = input + output as reported by Claude Code; cache reads are listed separately. Your subscription is not billed per token – the CLI's own cost estimate for comparison: {cost}.": "Tokens = Eingabe + Ausgabe laut Claude Code; Cache-Lesezugriffe stehen extra. Dein Abo wird nicht pro Token abgerechnet – die Kostenschätzung der CLI zum Vergleich: {cost}.",
+ "No Claude calls recorded yet.": "Noch keine Claude-Aufrufe erfasst."
+}
