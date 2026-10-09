@@ -170,6 +170,23 @@ Locally a real Chromium window opens for the login. Use `BROWSER_HEADLESS=1` for
 
 More background (architecture, decisions, willhaben interface facts) is in `SPEC.md`.
 
+## Account separation (search agents never use your login)
+
+Everything that only **reads** willhaben runs as an **anonymous visitor**, completely separate from your
+willhaben account: search agents, the Claude screening of hits, the price check (Preischeck), the scam check
+and the ad viewer. They use their own HTTP client (`app/willhaben/public.py`, `PublicClient`) with its own cookie
+jar — never the cookies of the logged-in browser. That anonymous session is replaced by a fresh one every
+6 hours and immediately after willhaben blocks a request (403/429), so a blocked or rate-limited search does
+not touch your account. A test (`tests/test_anonymous_public.py`) fails if any of these modules imports the
+logged-in session.
+
+Only actions that need your account go through the logged-in browser (`app/willhaben/session.py`): chats and
+replies, "Meine Anzeigen", publishing, reserving/sold, reactivating. Each of these happens on your click or for
+ads where you switched automation on.
+
+What is still shared: the **home IP address** (unavoidable without a proxy) — which is why *all* willhaben requests,
+anonymous and logged-in, go through one rate limiter with a minimum gap and an hourly budget, and back off on 403/429.
+
 ## Risks
 
 - willhaben's robots.txt and terms forbid automated access. The app polls sparingly, serializes every request,

@@ -119,6 +119,7 @@ def willhaben_limiter() -> RateLimiter:
 
 
 NOT_FOUND_CACHE_S = 30
+ANON_SESSION_S = 6 * 3600   # fresh anonymous visitor every 6 h
 
 
 class PublicClient:
@@ -126,12 +127,22 @@ class PublicClient:
         s = get_settings()
         self.limiter = willhaben_limiter()
         self._cache: dict[str, tuple[float, httpx.Response]] = {}
+        # Anonymous visitor, deliberately separate from the logged-in browser session (own cookie jar, never the
+        # account's cookies): search agents, screening, price checks and the ad viewer must not be linkable to the
+        # owner's willhaben account. The jar is reset regularly and after a block -> a fresh anonymous visitor.
         self._client = httpx.AsyncClient(
             headers={"user-agent": s.user_agent, "accept-language": "de-AT,de;q=0.9,en;q=0.5"},
             timeout=30,
             follow_redirects=True,
             transport=transport,
+            cookies=httpx.Cookies(),
         )
+        self._jar_since = time.monotonic()
+
+    def new_anonymous_session(self) -> None:
+        """Forget willhaben's anonymous cookies; the next request starts as a new visitor."""
+        self._client.cookies.clear()
+        self._jar_since = time.monotonic()
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -144,12 +155,15 @@ class PublicClient:
         if cache_s and hit and time.monotonic() - hit[0] < (min(cache_s, NOT_FOUND_CACHE_S) if hit[1].status_code == 404 else cache_s):
             return hit[1]
         headers = {"accept": "application/json", "x-wh-client": WEB_CLIENT} if json_api else {"accept": "text/html"}
+        if time.monotonic() - self._jar_since > ANON_SESSION_S:
+            self.new_anonymous_session()
         async with self.limiter:
             try:
                 r = await self._client.get(url, headers=headers)
             except httpx.HTTPError as e:
                 raise WillhabenError(t("Network error: {error}", error=e)) from e
         if r.status_code in (403, 429):
+            self.new_anonymous_session()        # don't keep presenting the visitor that just got blocked
             delay = self.limiter.penalize()
             raise Blocked(t("willhaben responded {status}; pausing {s}s", status=r.status_code, s=f"{delay:.0f}"))
         self.limiter.reward()

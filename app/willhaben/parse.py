@@ -208,6 +208,14 @@ class AdDetail:
         }
 
 
+def _price_from_display(v: str | None) -> float | None:
+    """'€ 2.400' / '€ 1.234,50' -> number, for detail pages that carry the price only as display text."""
+    if not v:
+        return None
+    m = re.search(r"\d[\d.]*(?:,\d{1,2})?", v)
+    return _float(m.group(0).replace(".", "").replace(",", ".")) if m else None
+
+
 def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
     ad = page_props.get("advertDetails")
     if not ad:
@@ -229,7 +237,7 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
         ad_id=str(ad.get("id")),
         heading=ad.get("description") or "",
         description=clean_text(_first(a, "DESCRIPTION")),
-        price=_float(price_raw),
+        price=_float(price_raw) if _float(price_raw) is not None else _price_from_display(_first(a, "PRICE_FOR_DISPLAY")),
         price_display=_first(a, "PRICE_FOR_DISPLAY"),
         status=((ad.get("advertStatus") or {}).get("id")) or "unknown",
         published_at=_iso(ad.get("publishedDate")),
