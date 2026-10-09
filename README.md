@@ -81,8 +81,8 @@ a `compose.override.yaml`. Compose merges it automatically, and it is git-ignore
 The footer link **Report a bug** opens a page where you describe what happened and click **Create report**. The app
 builds an anonymised report from its own state: version, connection states, counts, recent warnings and errors
 (with tracebacks) and, optionally, harmless settings. Tokens, passwords, e-mail addresses, phone numbers, IP addresses,
-your server's host names, people's names, chat messages and ad titles are removed, and ids become placeholders such
-as `ad#1`. Creating it costs no willhaben or Claude request, and the app never sends it anywhere: copy it or download
+your server's host names (including other subdomains of your domain), people's names, carrier logins, chat
+messages, addresses, ad titles (also from willhaben URLs) are removed, and ids become placeholders such as `ad#1`. Creating it costs no willhaben or Claude request, and the app never sends it anywhere: copy it or download
 it as `.txt`/`.json` and share it yourself. Read it before sharing.
 
 ## Home Assistant

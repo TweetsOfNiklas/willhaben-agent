@@ -4,6 +4,8 @@ import json
 import logging
 import socket
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -54,10 +56,51 @@ def test_token_shapes_removed(raw, secret):
 
 
 def test_known_secret_values_removed_even_without_token_shape():
-    a = anon(secrets=["my-dashboard-pw", "vnc-pass-77", "short"])
-    out = a("auth failed for my-dashboard-pw and vnc-pass-77; short words stay short")
+    a = anon(secrets=["my-dashboard-pw", "vnc-pass-77", "abc"])
+    out = a("auth failed for my-dashboard-pw and vnc-pass-77; abc words stay")
     assert "my-dashboard-pw" not in out and "vnc-pass-77" not in out
-    assert "short words stay short" in out            # values under 6 characters are not used (over-redaction)
+    assert "abc words stay" in out                    # values under 4 characters are not used (over-redaction)
+
+
+def test_short_known_secrets_as_whole_words(monkeypatch):
+    monkeypatch.setattr(get_settings(), "dashboard_password", "abc12")
+    a = bugreport.build_anonymizer()
+    assert a("dashboard pw abc12 used") == "dashboard pw <secret> used"
+    assert a("xabc12y stays") == "xabc12y stays"      # short secrets only as whole words
+
+
+def test_carrier_logins_and_keyed_json_values_are_secrets():
+    d = get_settings().data_dir
+    (d / "carrier-logins.json").write_text(json.dumps({"post": {"user": "mmuster7", "password": "Pw.4711"},
+                                                       "gls": {"user": "K12345", "password": "kurz9"}}))
+    (d / "other-login.json").write_text(json.dumps({"login": {"user_name": "maxm", "client_pin": "a1b2"},
+                                                    "label": "harmless"}))
+    try:
+        a = bugreport.build_anonymizer()
+        out = a("login mmuster7 / Pw.4711 failed; gls K12345 kurz9; other maxm a1b2; label harmless")
+        for leak in ("mmuster7", "Pw.4711", "K12345", "kurz9", "maxm", "a1b2"):
+            assert leak not in out, out
+        assert "harmless" in out
+    finally:
+        (d / "carrier-logins.json").unlink(missing_ok=True)
+        (d / "other-login.json").unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("raw, leaks", [
+    ("{'cookie': 'bbxsess=abc123def; x-bbx-csrf=zz9; IADVISITOR=a1b2c3d4e5f6'}", ["abc123def", "zz9", "a1b2c3d4e5f6"]),
+    ('headers {"Cookie": "IADVISITOR=a1b2c3d4e5f6; other=qq77"}', ["a1b2c3d4e5f6", "qq77"]),
+    ("cookies [{'name': 'IADVISITOR', 'value': '8f3k2l9q0w1e2r3t4y5u', 'domain': '.willhaben.at'}]",
+     ["8f3k2l9q0w1e2r3t4y5u"]),
+    ("password: correct horse battery", ["correct", "horse", "battery"]),
+    ('{"password": "correct horse battery", "x": 1}', ["correct", "horse", "battery"]),
+    ("x-bbx-session: 0123456789abcdef0123", ["0123456789", "abcdef0123"]),
+    ("sessionid=s3ss10nvalu3 ok", ["s3ss10nvalu3"]),
+])
+def test_cookie_dicts_and_password_values(raw, leaks):
+    out = anon()(raw)
+    for leak in leaks:
+        assert leak not in out, out
+    assert "<redacted>" in out
 
 
 def test_secrets_from_token_files_are_redacted(monkeypatch):
@@ -89,7 +132,7 @@ def test_emails(raw):
 
 
 @pytest.mark.parametrize("raw", ["+43 664 1234567", "+436641234567", "0043 1 234 56 78", "0664/1234567",
-                                 "0664 123 45 67", "06641234567", "01 234 5678"])
+                                 "0664 123 45 67", "06641234567", "01 234 5678", "0660.123.4567"])
 def test_phone_numbers(raw):
     out = anon()(f"Ruf mich an: {raw} danke")
     assert raw not in out and "<phone>" in out, out
@@ -119,6 +162,22 @@ def test_relative_query_strings():
     assert "adId=1000000001" not in out and "?<query>" in out
 
 
+def test_dates_are_not_phone_numbers():
+    assert anon()("abholen am 01.10.2026 oder 09.10.26") == "abholen am 01.10.2026 oder 09.10.26"
+
+
+def test_sibling_subdomains_of_home_domain(monkeypatch):
+    monkeypatch.setattr(get_settings(), "public_url", "https://willhaben.lush.ws")
+    monkeypatch.setenv("PROXY_HOSTS", "nas.example.co.at")
+    hosts = bugreport.known_hosts()
+    assert "lush.ws" in hosts and "example.co.at" in hosts
+    a = anon(hosts=hosts)
+    out = a("proxy error ha.lush.ws and paperless.lush.ws unreachable; https://cloud.example.co.at/x; "
+            "willhaben.at ok")
+    assert "lush" not in out and "example" not in out, out
+    assert out.count("<host>") == 3 and "willhaben.at ok" in out
+
+
 def test_home_hosts():
     a = anon(hosts=["homeserver.lan", "ha.example.net"])
     out = a("HA at https://ha.example.net:8123/api failed; novnc http://homeserver.lan:6080/vnc.html; "
@@ -142,6 +201,24 @@ def test_ad_ids_in_willhaben_urls():
     out = a("https://www.willhaben.at/iad/kaufen-und-verkaufen/d/ktm-kinderrad-1000000001/ and adId: 1000000001")
     assert "1000000001" not in out
     assert out.count("ad#1") == 2
+    assert "ktm" not in out and "kinderrad" not in out, out
+
+
+@pytest.mark.parametrize("raw, leaks", [
+    ("GET https://www.willhaben.at/iad/kaufen-und-verkaufen/d/kinderfahrrad-20-zoll-blau-1000000001/ 404",
+     ["kinderfahrrad", "zoll", "blau", "1000000001"]),
+    ("Page.goto: net::ERR_ABORTED at https://www.willhaben.at/iad/kaufen-und-verkaufen/d/rotes-sofa-von-oma-1000000002",
+     ["rotes", "sofa", "oma", "1000000002"]),
+    ("GET /iad/kaufen-und-verkaufen/d/rotes-sofa-von-oma-1000000003/ failed", ["rotes", "sofa", "1000000003"]),
+    ("HTTP 500 for https://www.willhaben.at/iad/verkaeuferprofil/12345678", ["12345678"]),
+    ("https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/geschenk-fuer-max-muster-zum-geburtstag",
+     ["geschenk", "muster"]),
+])
+def test_url_paths_without_titles_or_user_ids(raw, leaks):
+    out = anon()(raw)
+    for leak in leaks:
+        assert leak not in out, out
+    assert "willhaben.at/iad/" in out or "GET /iad/" in out
 
 
 # ------------------------------------------------------------------ names, texts, paths
@@ -153,6 +230,26 @@ def test_names_and_texts():
     assert out.splitlines()[0] == "draft for <name> (<name>): <text>"
     assert out.splitlines()[1] == "next line <name> ok"
     assert a("hit KTM Kinderrad 20 Zoll blau saved") == "hit <text>"
+
+
+def test_names_any_case_and_short_full_names():
+    a = anon(names=["Max Muster", "Bo"])
+    assert a("reply to max muster / MAX MUSTER / Bo / bo") == "reply to <name> / <name> / <name> / <name>"
+    assert a("bonus and Bob stay") == "bonus and Bob stay"
+
+
+def test_texts_in_json_other_case_and_spacing():
+    a = anon(texts=["Kühlschrank Liebherr top Zustand", "Kinderfahrrad 20 Zoll blau", 'Sofa "wie neu" abzugeben'])
+    for raw in ('payload {"text": "K\\u00fchlschrank Liebherr top Zustand"}',
+                "payload " + json.dumps({"text": 'Sofa "wie neu" abzugeben'}),
+                "hit kinderfahrrad   20 zoll BLAU saved"):
+        out = a(raw)
+        assert "<text>" in out and "Liebherr" not in out and "zoll" not in out.lower() and "neu" not in out, out
+
+
+def test_relative_data_dir_does_not_garble_words():
+    out = anon(data_dir=Path("data"))("metadata error in data/app.db, update_data done")
+    assert "metadata error" in out and "update_data done" in out and "<<" not in out, out
 
 
 def test_data_dir_paths_relative(tmp_path):
@@ -221,6 +318,10 @@ def _seed():
                                   partner_name="Max Muster", last_message_text="Ist das Rad noch zu haben?"))
         db.add(dbmod.Message(conversation_id=CONV, ext_id="m1", direction="in",
                              text="Ist das Rad noch zu haben? Meine Nummer ist 0664 1234567"))
+        db.add(dbmod.Hit(agent_id=1, ad_id="1000000004", heading="Rotes Sofa", location="Musterdorf, Waldviertel", url="u",
+                         body="Sehr gut erhalten, Abholung in der Musterdorfer Hauptstraße 5\nzweite Zeile"))
+        db.add(dbmod.Shipment(conversation_id=CONV, recipient={"name": "Erika Musterfrau", "street": "Testgasse", "house_no": "17",
+                                         "zip": "1234", "city": "Musterstadt"}, note="Klingel defekt, bitte anrufen"))
         db.add(dbmod.LLMCall(purpose="chat", model="claude-opus-5-5", ok=False,
                              error=f"401 invalid token {SK} for max.muster@example.org"))
         db.commit()
@@ -254,6 +355,9 @@ def test_report_sections_and_anonymity(client):
     _seed()
     logging.getLogger("app.services.chats").warning(
         "auto reply for %s (Max Muster): Ist das Rad noch zu haben? Meine Nummer ist 0664 1234567", CONV)
+    logging.getLogger("app.services.shipping").warning(
+        "label failed for Testgasse 17, 1234 Musterstadt (Klingel defekt, bitte anrufen); hit at Musterdorf, "
+        "Waldviertel: Abholung in der Musterdorfer Hauptstraße 5")
     rep = bugreport.build("Max Muster schrieb mir von max.muster@example.org, dann kam Fehler 500",
                           include_info=False, include_settings=True)
     text = bugreport.render_text(rep)
@@ -269,7 +373,8 @@ def test_report_sections_and_anonymity(client):
     assert rep["settings"]["environment"]["dashboard_password"] == "<empty>"
     assert rep["description"] == "<name> schrieb mir von <email>, dann kam Fehler 500"
     for leak in ("Max Muster", "Musterfrau", "0664 1234567", "Ist das Rad", "Kinderrad", "max.muster@", SK, CONV,
-                 "keyword=rad", "Musterstraße", "Maximilian"):
+                 "keyword=rad", "Musterstraße", "Maximilian", "Testgasse 17", "1234 Musterstadt", "Klingel",
+                 "Waldviertel", "Hauptstraße 5"):
         assert leak not in text, leak
     assert "conv#1" in text and "<redacted>" not in rep["description"]
     assert json.loads(json.dumps(rep, default=str))["format"] == "willhaben-agent-bugreport/1"

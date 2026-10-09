@@ -53,9 +53,14 @@ _SK_ANT = re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}")
 _TELEGRAM = re.compile(r"(?<!\d)\d{6,12}:[A-Za-z0-9_\-]{30,}")
 _JWT = re.compile(r"eyJ[A-Za-z0-9_\-]{8,}(?:\.[A-Za-z0-9_\-]*){0,2}")
 _AUTH_HEADER = re.compile(r"(?i)\b(bearer|basic|token)(\s+)(?!<)[A-Za-z0-9._~+/=\-]{8,}")
-_COOKIE_LINE = re.compile(r"(?i)\b(set-cookie|cookie)(\s*[:=]\s*)[^\n]+")
+_COOKIE_LINE = re.compile(r"(?i)\b(set-cookie|cookie)([\"']?\s*[:=]\s*)[^\n]+")
+# Playwright / browser cookie objects: {'name': 'IADVISITOR', 'value': '...', 'domain': ...}
+_COOKIE_OBJ = re.compile(r"(?i)[\"'](?:domain|name|httponly|samesite|expires)[\"']\s*:")
+_COOKIE_VALUE = re.compile(r"(?i)([\"']value[\"']\s*:\s*[\"'])[^\"']*")
+# password-like keys: the value may contain spaces, so it runs to the closing quote or the end of the line
+_PASSWORD_KV = re.compile(r"(?i)\b([\w\-]*(?:passw(?:or)?d|pwd|passphrase)[\w\-]*)([\"']?\s*[:=]\s*[\"']?)(?!<)[^\n\"']+")
 _SECRET_KV = re.compile(
-    r"(?i)\b([\w\-]*(?:token|secret|passw(?:or)?d|pwd|session[_\-]?id|sessionid|csrf|api[_\-]?key|apikey|"
+    r"(?i)\b([\w\-]*(?:token|secret|passw(?:or)?d|pwd|sess(?:ion)?(?:[_\-]?(?:id|key))?|csrf|api[_\-]?key|apikey|"
     r"access[_\-]?key|private[_\-]?key|authorization|refresh|code[_\-]?verifier|signature|hmac|cookie)[\w\-]*)"
     r"(\"?'?\s*[:=]\s*\"?'?)(?!<)([^\s\"'&,;)}\]]+)")
 _URL = re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s<>\"'`)\]]+")
@@ -65,14 +70,23 @@ _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.]*\d)")
 _IPV6 = re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:%\w+)?(?![\w:])")
 _UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 _PHONE_INTL = re.compile(r"(?<![\w+])(?:\+|00)[1-9]\d{0,3}(?:[ /\-]?\(0\))?(?:[ /\-]?\d{1,6}){1,6}(?!\d)")
-_PHONE_NAT = re.compile(r"(?<![\w./:+\-])0\d{1,4}(?:[ /\-]\d{2,8}){1,3}(?![\w])")
+_PHONE_NAT = re.compile(r"(?<![\w./:+\-])0\d{1,4}(?:[ /.\-]\d{2,8}){1,3}(?![\w])")
+_DATE = re.compile(r"\d{1,2}\.\d{1,2}\.\d{2,4}")
 _PHONE_COMPACT = re.compile(r"(?<![\w./:+\-])0[1-9]\d{8,12}(?!\d)")
 _AD_ID = re.compile(r"(?<![\w.#])\d{9,10}(?![\w.]*\d)")
 _ADID_PARAM = re.compile(r"(?i)(ad_?id[\"']?\s*[=:]\s*[\"']?)(\d{5,12})")
 _HEX = re.compile(r"\b[0-9a-fA-F]{32,}\b")
 _B64 = re.compile(r"(?<![\w+/\-])[A-Za-z0-9+/_\-]{32,}={0,2}")
 _HOME = re.compile(r"/home/[^/\s]+")
-_NOT_NAMES = {"none", "true", "false", "error", "info", "warning", "user", "admin", "test", "hallo", "null", "unknown"}
+# willhaben ad URL slug (the ad title): /d/<title-slug>-<adid>/, also in paths logged without scheme and host
+_AD_SLUG = re.compile(r"(/d/)[^/\s?#\"'<>]*?-?(\d{5,12})(?=[/?#\s\"'<>]|$)")
+# any other title-like slug in front of an id: two or more hyphenated words, then -<id>
+_ID_SLUG = re.compile(r"(?<=/)[A-Za-z0-9%]+(?:-[A-Za-z0-9%]+){2,}(?=-\d{5,12}(?:/|$))")
+_NUM_SEGMENT = re.compile(r"(?<=/)\d{6,}(?=/|$)")
+_LONG_SLUG = re.compile(r"(?<=/)(?=[^/]{21,})[^/]*[A-Za-z][^/]*-[^/]*(?=/|$)")
+_WILLHABEN_HOSTS = ("willhaben.at",)
+_NOT_NAMES = {"none", "true", "false", "error", "info", "warning", "user", "admin", "test", "hallo", "null", "unknown",
+              "auto", "chat", "claude", "willhaben", "telegram", "agent", "search", "draft", "debug", "ok", "ja", "nein"}
 
 
 def _digits(s: str) -> int:
@@ -84,25 +98,38 @@ class Anonymizer:
 
     def __init__(self, *, secrets: Iterable[str] = (), hosts: Iterable[str] = (), names: Iterable[str] = (),
                  texts: Iterable[str] = (), ids: dict[str, str] | None = None, data_dir: Path | str | None = None):
-        self.secrets = sorted({s.strip() for s in secrets if s and len(s.strip()) >= 6}, key=len, reverse=True)
+        self.secrets = sorted({s.strip() for s in secrets if s and len(s.strip()) >= 4}, key=len, reverse=True)
+        # short secrets only as whole words (a 5-letter password must not eat parts of other words)
+        self._short_secrets = {sec: re.compile(r"(?<!\w)" + re.escape(sec) + r"(?!\w)")
+                               for sec in self.secrets if len(sec) < 8}
         self.hosts = sorted({h.lower().strip() for h in hosts if h and h.strip().lower() not in ("localhost", "")},
                             key=len, reverse=True)
         parts: set[str] = set()
         for n in names:
             n = (n or "").strip()
-            if len(n) >= 3:
+            if len(n) >= 2 and n.lower() not in _NOT_NAMES:      # a whole name may be short ("Bo"), parts not
                 parts.add(n)
-                parts.update(p for p in re.split(r"[\s,]+", n) if len(p) >= 3 and p.lower() not in _NOT_NAMES)
+            parts.update(p for p in re.split(r"[\s,]+", n) if len(p) >= 3 and p.lower() not in _NOT_NAMES)
         self.names = sorted(parts, key=len, reverse=True)
+        self._name_rx = {n: re.compile(r"(?<!\w)" + re.escape(n) + r"(?!\w)", re.IGNORECASE) for n in self.names}
         prefixes: set[str] = set()
         for x in texts:
             x = " ".join((x or "").split())
             if len(x) >= 6:
-                prefixes.add(x[:24])
+                prefix = x[:24]
+                prefixes.add(prefix)
+                # the same text inside JSON (escaped quotes, \u00fc for umlauts)
+                prefixes.add(json.dumps(prefix)[1:-1])
+                prefixes.add(json.dumps(prefix, ensure_ascii=False)[1:-1])
         self.texts = sorted(prefixes, key=len, reverse=True)
+        # case- and whitespace-insensitive; the longest word is a cheap pre-filter before the regex runs
+        self._text_rx = [(max(p.split(), key=len).lower(),
+                          re.compile(r"\s+".join(map(re.escape, p.split())) + r"[^\n]*", re.IGNORECASE))
+                         for p in self.texts]
         self.ids = dict(ids or {})                     # exact value -> kind (conv, user, ad, tg)
         self.data_dirs = sorted({str(p).rstrip("/") for p in self._dirs(data_dir) if len(str(p)) > 1},
                                 key=len, reverse=True)
+        self._dir_rx = [re.compile(r"(?<![\w/.\-])" + re.escape(d) + r"(?![\w\-])") for d in self.data_dirs]
         self._numbers: dict[str, dict[str, int]] = {}
 
     @staticmethod
@@ -110,7 +137,7 @@ class Anonymizer:
         if not data_dir:
             return []
         p = Path(data_dir)
-        out = [str(p)]
+        out = [str(p)] if p.is_absolute() else []      # a relative "data" would hit every "metadata"
         try:
             out.append(str(p.resolve()))
         except OSError:
@@ -135,7 +162,9 @@ class Anonymizer:
             port = f":{u.port}" if u.port else ""
         except ValueError:
             return "<url>" + trail
-        if host.lower() in self.hosts:
+        lhost = host.lower()
+        path = self._path(u.path, lhost)
+        if self._is_home(lhost):
             host = "<host>"
         else:
             try:
@@ -146,7 +175,23 @@ class Anonymizer:
                 pass
         netloc = (host if ":" not in host or host.startswith("<") else f"[{host}]") + port
         query = "<query>" if u.query else ""
-        return urlunsplit((u.scheme, netloc, u.path, query, "")) + trail
+        return urlunsplit((u.scheme, netloc, path, query, "")) + trail
+
+    def _is_home(self, host: str) -> bool:
+        return any(host == h or host.endswith("." + h) for h in self.hosts)
+
+    def _id_placeholder(self, value: str) -> str:
+        kind = self.ids.get(value) or ("ad" if 9 <= len(value) <= 10 else "id")
+        return "<telegram-chat>" if kind == "tg" else self.placeholder(kind, value)
+
+    def _path(self, path: str, host: str) -> str:
+        """URL path: ad title slugs and numeric ids (seller profiles, ...) out."""
+        path = _AD_SLUG.sub(lambda m: m.group(1) + "<slug>-" + self.placeholder("ad", m.group(2)), path)
+        path = _ID_SLUG.sub("<slug>", path)
+        path = _NUM_SEGMENT.sub(lambda m: self._id_placeholder(m.group(0)), path)
+        if host == "willhaben.at" or host.endswith(tuple("." + h for h in _WILLHABEN_HOSTS)):
+            path = _LONG_SLUG.sub("<slug>", path)
+        return path
 
     @staticmethod
     def _ip(m: re.Match) -> str:
@@ -163,7 +208,8 @@ class Anonymizer:
 
     @staticmethod
     def _phone(m: re.Match) -> str:
-        return "<phone>" if _digits(m.group(0)) >= 8 else m.group(0)
+        s = m.group(0)
+        return "<phone>" if _digits(s) >= 8 and not _DATE.fullmatch(s) else s
 
     @staticmethod
     def _b64(m: re.Match) -> str:
@@ -181,27 +227,35 @@ class Anonymizer:
         # 1. exact secrets the app knows (tokens, passwords) - before anything can split them up
         for sec in self.secrets:
             if sec in s:
-                s = s.replace(sec, "<secret>")
+                rx = self._short_secrets.get(sec)
+                s = rx.sub("<secret>", s) if rx else s.replace(sec, "<secret>")
         # 2. token shapes
         s = _SK_ANT.sub("<claude-token>", s)
         s = _TELEGRAM.sub("<telegram-token>", s)
         s = _JWT.sub("<jwt>", s)
         # URLs (user-info, query, fragment, home host), then stray query strings
         s = _URL.sub(self._url, s)
+        s = _AD_SLUG.sub(lambda m: m.group(1) + "<slug>-" + self.placeholder("ad", m.group(2)), s)  # bare paths
         s = _QUERY.sub("?<query>", s)
         s = _COOKIE_LINE.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", s)
+        if _COOKIE_OBJ.search(s):
+            s = _COOKIE_VALUE.sub(lambda m: m.group(1) + "<redacted>", s)
         s = _AUTH_HEADER.sub(lambda m: m.group(1) + m.group(2) + "<secret>", s)
+        s = _PASSWORD_KV.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", s)
         s = _SECRET_KV.sub(lambda m: m.group(1) + m.group(2) + "<redacted>", s)
         # 3. chat texts, ad titles, descriptions: the known start of the text and the rest of that line
-        for prefix in self.texts:
-            if prefix in s:
-                s = re.sub(re.escape(prefix) + r"[^\n]*", "<text>", s)
+        low = s.lower()
+        for word, rx in self._text_rx:
+            if word in low:
+                s2 = rx.sub("<text>", s)
+                if s2 != s:
+                    s, low = s2, s2.lower()
         # 4. contact data and network addresses
         s = _EMAIL.sub("<email>", s)
         low = s.lower()
         for host in self.hosts:
-            if host in low:
-                s = re.sub(r"(?i)(?<![\w.\-])" + re.escape(host) + r"(?![\w\-])", "<host>", s)
+            if host in low:                            # the host and every other subdomain of it
+                s = re.sub(r"(?i)(?<![\w.\-])(?:[\w\-]+\.)*" + re.escape(host) + r"(?![\w\-])", "<host>", s)
                 low = s.lower()
         s = _IPV4.sub(self._ip, s)
         s = _IPV6.sub(self._ip, s)
@@ -222,14 +276,16 @@ class Anonymizer:
         # 7. remaining long random strings
         s = _HEX.sub("<hex>", s)
         s = _B64.sub(self._b64, s)
-        # 8. people's names (case-sensitive, whole words)
+        # 8. people's names (any case, whole words)
+        low = s.lower()
         for name in self.names:
-            if name in s:
-                s = re.sub(r"(?<!\w)" + re.escape(name) + r"(?!\w)", "<name>", s)
+            if name.lower() in low:
+                s = self._name_rx[name].sub("<name>", s)
+                low = s.lower()
         # 9. file paths: data dir relative, no user names from home directories
-        for d in self.data_dirs:
+        for d, rx in zip(self.data_dirs, self._dir_rx, strict=True):
             if d in s:
-                s = s.replace(d + "/", "<data>/").replace(d, "<data>")
+                s = rx.sub("<data>", s)
         s = _HOME.sub("/home/<user>", s)
         return s
 
@@ -247,14 +303,36 @@ def _read(path: Path, limit: int = 64 * 1024) -> str:
     return ""
 
 
-def _json_strings(data: Any) -> list[str]:
+_SECRET_KEY = re.compile(r"(?i)secret|token|password|passwd|pwd|user|login|client")
+
+
+def _json_pairs(data: Any, key: str = "") -> list[tuple[str, str]]:
+    """(nearest key, string value) for every string in a JSON document."""
     if isinstance(data, str):
-        return [data]
+        return [(key, data)]
     if isinstance(data, dict):
-        return [x for v in data.values() for x in _json_strings(v)]
+        return [x for k, v in data.items() for x in _json_pairs(v, str(k))]
     if isinstance(data, list):
-        return [x for v in data for x in _json_strings(v)]
+        return [x for v in data for x in _json_pairs(v, key)]
     return []
+
+
+def carrier_login_values() -> tuple[list[str], list[str]]:
+    """(users + passwords, users) from DATA_DIR/carrier-logins.json - short values too."""
+    try:
+        data = json.loads(_read(get_settings().data_dir / "carrier-logins.json") or "{}")
+    except ValueError:
+        return [], []
+    secrets, users = [], []
+    for v in (data.values() if isinstance(data, dict) else []):
+        if isinstance(v, dict):
+            for k in ("user", "password"):
+                x = str(v.get(k) or "").strip()
+                if len(x) >= 3:
+                    secrets.append(x)
+                    if k == "user":
+                        users.append(x)
+    return secrets, users
 
 
 def known_secrets() -> list[str]:
@@ -270,12 +348,34 @@ def known_secrets() -> list[str]:
     for p in files:
         if p.name.endswith(("-token", "-secret")) or p.name in ("action-secret",):
             out.append(_read(p))
+        elif p.name == "carrier-logins.json":
+            out += carrier_login_values()[0]
         elif p.suffix == ".json":                       # google-calendar.json: client secret, refresh token
             try:
-                out += [v for v in _json_strings(json.loads(_read(p) or "null")) if len(v) >= 16]
+                out += [v for k, v in _json_pairs(json.loads(_read(p) or "null"))
+                        if len(v) >= 16 or (len(v) >= 4 and _SECRET_KEY.search(k))]
             except ValueError:
                 pass
     return [x for x in out if x]
+
+
+# second-level registry suffixes: the owner's domain is the last three labels there
+_SECOND_LEVEL = {"co.at", "or.at", "ac.at", "gv.at", "co.uk", "org.uk", "ac.uk", "me.uk", "com.au", "net.au", "org.au",
+                 "co.nz", "com.br", "co.jp", "com.de", "co.de"}
+# never treated as the owner's domain, even if a home host happens to sit below it
+_PUBLIC_DOMAINS = {"willhaben.at", "anthropic.com", "claude.ai", "telegram.org", "google.com", "googleapis.com",
+                   "duckdns.org", "github.io", "nip.io", "sslip.io", "ts.net", "home.arpa"}
+
+
+def _registrable(host: str) -> str | None:
+    labels = host.lower().strip(".").split(".")
+    if len(labels) < 3:
+        return None
+    n = 3 if ".".join(labels[-2:]) in _SECOND_LEVEL else 2
+    if len(labels) <= n:
+        return None
+    dom = ".".join(labels[-n:])
+    return None if dom in _PUBLIC_DOMAINS else dom
 
 
 def known_hosts() -> list[str]:
@@ -294,7 +394,18 @@ def known_hosts() -> list[str]:
         if h and h not in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
             hosts.append(h)
     hosts += [h.split(":")[0] for h in re.split(r"[,\s]+", os.environ.get("PROXY_HOSTS", "")) if h]
-    return hosts
+    # sibling subdomains of the owner's domain (ha.example.net next to willhaben.example.net) give it away too
+    out = list(hosts)
+    for h in hosts:
+        try:
+            ipaddress.ip_address(h)
+            continue
+        except ValueError:
+            pass
+        dom = _registrable(h)
+        if dom:
+            out.append(dom)
+    return out
 
 
 def _setting(db, key: str) -> str:
@@ -317,6 +428,16 @@ def build_anonymizer() -> Anonymizer:
         ids[str(user["uuid"]).lower()] = "user"
     if user.get("id"):
         ids[str(user["id"])] = "user"
+    names += carrier_login_values()[1]
+
+    def meetup(m: Any) -> list[str]:
+        return [str(m.get(k) or "") for k in ("location", "summary")] if isinstance(m, dict) else []
+
+    def address(rec: dict) -> list[str]:
+        g = lambda k: str(rec.get(k) or "").strip()  # noqa: E731
+        return ([g(k) for k in ("street", "extra", "city", "phone", "email")]
+                + [f"{g('street')} {g('house_no')}".strip(), f"{g('zip')} {g('city')}".strip()])
+
     with session() as db:
         for k in ("telegram_chat_name", "telegram_username"):
             names.append(_setting(db, k))
@@ -326,32 +447,41 @@ def build_anonymizer() -> Anonymizer:
             sender = json.loads(_setting(db, "ship_sender") or "{}")
             if isinstance(sender, dict):
                 names.append(str(sender.get("name") or ""))
-                texts += [str(sender.get(k) or "") for k in ("street", "extra", "city", "phone", "email")]
+                texts += address(sender)
         except ValueError:
             pass
         for k in ("reply_rules", "auto_reply_rules", "ship_sender_geo", "gcal_calendars", "gcal_target"):
             texts += [line for line in _setting(db, k).splitlines() if len(line.strip()) >= 6]
-        for cid, partner, title, last in db.exec(select(Conversation.id, Conversation.partner_name,
-                                                        Conversation.ad_title, Conversation.last_message_text)):
+        for cid, partner, title, last, meet in db.exec(select(
+                Conversation.id, Conversation.partner_name, Conversation.ad_title, Conversation.last_message_text,
+                Conversation.meetup)):
             ids[str(cid).lower()] = "conv"
             names.append(partner or "")
-            texts += [title or "", last or ""]
+            texts += [title or "", last or ""] + meetup(meet)
         texts += list(db.exec(select(Message.text).order_by(col(Message.id).desc()).limit(1000)))
-        for text, note in db.exec(select(Draft.text, Draft.feedback_note).order_by(col(Draft.id).desc()).limit(500)):
-            texts += [text or "", note or ""]
-        texts += [h or "" for h in db.exec(select(Hit.heading).order_by(col(Hit.id).desc()).limit(2000))]
+        for text, note, meet in db.exec(select(Draft.text, Draft.feedback_note, Draft.meetup)
+                                        .order_by(col(Draft.id).desc()).limit(500)):
+            texts += [text or "", note or ""] + meetup(meet)
+        for heading, loc in db.exec(select(Hit.heading, Hit.location).order_by(col(Hit.id).desc()).limit(2000)):
+            texts += [heading or "", loc or ""]
+        for body in db.exec(select(Hit.body).where(col(Hit.body).is_not(None))
+                            .order_by(col(Hit.id).desc()).limit(300)):
+            texts += [line for line in str(body).splitlines()[:30] if len(line.strip()) >= 12]
         for heading, instr in db.exec(select(MyAd.heading, MyAd.auto_reply_instructions)):
             texts += [heading or "", instr or ""]
         for row in db.exec(select(AdDraft.title, AdDraft.input_text, AdDraft.description)
                            .order_by(col(AdDraft.id).desc()).limit(200)):
             texts += [x or "" for x in row]
-        texts += [x or "" for x in db.exec(select(DealCheck.title).limit(500))]
+        for title, query in db.exec(select(DealCheck.title, DealCheck.query).limit(500)):
+            texts += [title or "", query or ""]
+        texts += [x or "" for x in db.exec(select(AdBatch.notes).limit(200))]
         for name, brief in db.exec(select(SearchAgent.name, SearchAgent.screen_brief)):
             texts += [name or "", brief or ""]
-        for rec in db.exec(select(Shipment.recipient)):
+        for rec, note in db.exec(select(Shipment.recipient, Shipment.note)):
+            texts.append(note or "")
             if isinstance(rec, dict):
                 names.append(str(rec.get("name") or ""))
-                texts += [str(rec.get(k) or "") for k in ("street", "extra", "city", "phone", "email")]
+                texts += address(rec)
     # long free texts: every line on its own, so a line logged alone is found too
     split_texts: list[str] = []
     for x in texts:
