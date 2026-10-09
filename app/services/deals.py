@@ -19,6 +19,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from sqlmodel import col, select
 
@@ -26,7 +27,7 @@ from app.db import DealCheck, session, utcnow
 from app.i18n import LANGS, lang, t
 from app.llm.base import LLMError, get_backend
 from app.services import geizhals
-from app.willhaben.parse import AdDetail
+from app.willhaben.parse import AdDetail, InvalidSearchUrl, to_webapi_url
 from app.willhaben.public import WillhabenError, get_public
 
 log = logging.getLogger(__name__)
@@ -234,6 +235,62 @@ def _wanted(title: str | None) -> bool:
     return bool(re.match(r"\s*(suche|tausche?)\b", title or "", re.I))
 
 
+# Comparables must be the same kind of item: a "iPhone 15 Pro" is not compared with cases or a "15 Pro Max".
+ACCESSORY_WORDS = (
+    "hülle", "huelle", "case", "cover", "bumper", "panzerglas", "schutzglas", "schutzfolie", "displayschutz", "folie",
+    "kabel", "ladekabel", "ladegerät", "ladegeraet", "netzteil", "adapter", "halterung", "tasche", "etui", "skin",
+    "ersatzteil", "ersatzteile", "teile", "display", "akku", "gehäuse", "gehaeuse", "platine", "defekt", "kaputt",
+    "bastler", "attrappe", "dummy", "karton", "verpackung", "ovp nur", "nur ovp", "leerkarton", "zubehör", "zubehoer",
+)
+PARTS_WORDS = {"ersatzteil", "ersatzteile", "teile", "display", "akku", "gehäuse", "gehaeuse", "platine", "defekt",
+               "kaputt", "bastler"}
+VARIANT_WORDS = ("max", "plus", "mini", "ultra", "lite", "pro", "se", "air", "fe", "neo")
+TRIM_LOW, TRIM_HIGH = 0.35, 2.5       # around the median, after the category and title filters
+
+
+def _words(text: str | None) -> set[str]:
+    return set(re.findall(r"[\wäöüß]+", (text or "").lower()))
+
+
+def _same_kind(other_title: str | None, ad_title: str | None) -> bool:
+    """False for accessories/parts/defects the ad itself is not about, and for other model variants."""
+    o, a = (other_title or "").lower(), (ad_title or "").lower()
+    ow, aw = _words(o), _words(a)
+    broken = bool(aw & PARTS_WORDS)          # the ad itself is defective/for parts: so are fair comparables
+    for w in ACCESSORY_WORDS:
+        if broken and w in PARTS_WORDS:
+            continue
+        hit = (w in o) if " " in w else (w in ow)
+        mine = (w in a) if " " in w else (w in aw)
+        if hit and not mine:
+            return False
+    return not any(v in ow and v not in aw for v in VARIANT_WORDS)
+
+
+def _category_scope(ads: list[dict[str, Any]], category_id: str | None) -> tuple[list[dict[str, Any]], str | None]:
+    """Same leaf category as the ad; too few -> same parent category; none known -> unchanged."""
+    if not category_id:
+        return ads, None
+    leaf = [a for a in ads if (a.get("category_ids") or [None])[-1] == category_id]
+    if len(leaf) >= MIN_COMPARABLES:
+        return leaf, "leaf"
+    parents = {tuple(a["category_ids"][:-1]) for a in leaf if len(a.get("category_ids") or []) > 1}
+    if len(parents) == 1:
+        parent = next(iter(parents))
+        same_parent = [a for a in ads if tuple((a.get("category_ids") or [])[:-1]) == parent]
+        if len(same_parent) >= MIN_COMPARABLES:
+            return same_parent, "parent"
+    return (leaf, "leaf") if leaf else (ads, None)
+
+
+def _trim(ads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop extreme prices (a "€1 Tausch" or a bundle of five) once the list is the same kind of item."""
+    if len(ads) < MIN_COMPARABLES:
+        return ads
+    med = statistics.median(a["price"] for a in ads)
+    return [a for a in ads if TRIM_LOW * med <= a["price"] <= TRIM_HIGH * med]
+
+
 async def search_ads(query: str) -> dict[str, Any]:
     """willhaben keyword search (rows 50, relevance), cached 1 h – the Preischeck list uses the same call."""
     key = re.sub(r"\s+", " ", query.strip().lower())
@@ -246,23 +303,67 @@ async def search_ads(query: str) -> dict[str, Any]:
     return data
 
 
-async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None) -> dict[str, Any]:
-    out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None}
-    if not query:
+async def search_category(category_url: str) -> dict[str, Any]:
+    """The comparable search restricted to a category the user picked (a willhaben result-list URL), cached 1 h."""
+    hit = _cached(_comparables, category_url, COMPARABLES_TTL_S)
+    if hit:
+        return hit[1]
+    page = await get_public().search(to_webapi_url(category_url, rows=SEARCH_ROWS), cache_s=300)
+    data = {"rows_found": page.rows_found, "ads": [a.as_dict() for a in page.ads]}
+    _put(_comparables, category_url, data, COMPARABLES_TTL_S)
+    return data
+
+
+async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None, *,
+                      category_id: str | None = None, title: str | None = None,
+                      category_url: str | None = None) -> dict[str, Any]:
+    """Comparable ads: the keyword search narrowed to the ad's own category (or a category the user picked),
+    without accessories/other variants and extreme prices. `filtered` says how many each step dropped."""
+    out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
+                           "scope": None, "filtered": {}}
+    if not query and not category_url:
         return out
     try:
-        data = await search_ads(query)
-    except WillhabenError as e:
-        log.info("comparable search failed for %r: %s", query, e)
+        data = await (search_category(category_url) if category_url else search_ads(query))
+    except (WillhabenError, InvalidSearchUrl) as e:
+        log.info("comparable search failed for %r: %s", category_url or query, e)
         out["error"] = str(e)
         return out
     ads = [a for a in data["ads"] if str(a["ad_id"]) != str(exclude_ad_id or "") and a.get("price")
            and a["price"] > 0 and not _wanted(a.get("title"))]
+    n0 = len(ads)
+    if category_url:
+        scope = "chosen"
+    else:
+        ads, scope = _category_scope(ads, category_id)
+    n1 = len(ads)
+    if title:
+        kind = [a for a in ads if _same_kind(a.get("title"), title)]
+        ads = kind if len(kind) >= MIN_COMPARABLES else ads
+    n2 = len(ads)
+    ads = _trim(ads)
+    out["scope"], out["filtered"] = scope, {"category": n0 - n1, "kind": n1 - n2, "outliers": n2 - len(ads)}
     st = stats([a["price"] for a in ads])
     centre = price if price and price > 0 else (st or {}).get("median") or 0
     closest = sorted(sorted(ads, key=lambda a: abs(a["price"] - centre))[:CLOSEST], key=lambda a: a["price"])
     out.update(rows_found=data["rows_found"], count=len(ads), stats=st, closest=closest)
     return out
+
+
+async def category_choices(query: str, category_url: str | None = None) -> dict[str, Any]:
+    """willhaben's own category navigator for the comparable search (public, anonymous): the categories the
+    keyword occurs in with their hit counts, and the chosen path. Each value carries a result-list URL."""
+    base = category_url or f"https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword={quote_plus(query)}"
+    try:
+        f = await get_public().search_filters(base)
+    except (WillhabenError, InvalidSearchUrl) as e:
+        return {"error": str(e), "values": [], "selected": []}
+    nav = next((n for _, fs in f.groups for n in fs if n.id == "category"), None)
+    if nav is None:
+        return {"error": None, "values": [], "selected": []}
+    return {"error": None,
+            "values": [{"label": v.label, "url": v.url, "hits": v.hits} for v in nav.values],
+            "selected": [{"label": v.label, "reset_url": v.url} for v in nav.selected]}
 
 
 async def geizhals_match(query: str | None) -> dict[str, Any] | None:
@@ -296,8 +397,9 @@ def _ad_summary(ad: AdDetail) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ analysis
-def _key(ad_id: str, query: str | None) -> tuple[str, str]:
-    return str(ad_id), re.sub(r"\s+", " ", (query or "").strip().lower())
+def _key(ad_id: str, query: str | None, category_url: str | None = None) -> tuple[str, str]:
+    q = re.sub(r"\s+", " ", (query or "").strip().lower())
+    return str(ad_id), f"{q}\x00{category_url}" if category_url else q
 
 
 def _claude_for(verdict: dict[str, Any] | None, price: float | None) -> dict[str, Any] | None:
@@ -313,21 +415,27 @@ def _ran_at(res: dict[str, Any]) -> datetime | None:
     return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
 
 
-def cached(ad_id: str, query: str | None = None) -> dict[str, Any] | None:
+def _current(res: dict[str, Any] | None) -> bool:
+    """Results from before the category/variant filter (no "filtered" counts) are recomputed."""
+    return bool(res) and "filtered" in (res.get("comparables") or {})
+
+
+def cached(ad_id: str, query: str | None = None, category_url: str | None = None) -> dict[str, Any] | None:
     """A fresh analysis from memory or the DealCheck table, without any request. Freshness counts from when the
     analysis ran (result["checked_at"]), not from the last view (row.checked_at, only used for ordering)."""
-    hit = _cached(_results, _key(ad_id, query), RESULT_TTL_S)
-    if hit:
+    hit = _cached(_results, _key(ad_id, query, category_url), RESULT_TTL_S)
+    if hit and _current(hit[1]):
         return hit[1]
     with session() as db:
         row = db.get(DealCheck, str(ad_id))
-    if row and row.result and _key(ad_id, row.result.get("asked_query"))[1] == _key(ad_id, query)[1]:
+    if row and _current(row.result) and row.result.get("category_url") == category_url \
+            and _key(ad_id, row.result.get("asked_query"))[1] == _key(ad_id, query)[1]:
         at = _ran_at(row.result)
         age = (utcnow() - at).total_seconds() if at else RESULT_TTL_S
         if 0 <= age < RESULT_TTL_S:
             price = (row.result.get("ad") or {}).get("price")
             res = {**row.result, "claude": _claude_for(row.claude or row.result.get("claude"), price)}
-            _put(_results, _key(ad_id, query), res, RESULT_TTL_S, at=time.monotonic() - age)
+            _put(_results, _key(ad_id, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - age)
             return res
     return None
 
@@ -339,29 +447,31 @@ def stored_claude(ad_id: str, price: float | None) -> dict[str, Any] | None:
 
 
 async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = False,
-                  fallback_query: str | None = None) -> dict[str, Any]:
+                  fallback_query: str | None = None, category_url: str | None = None) -> dict[str, Any]:
     """Price position of one ad. `query` overrides the comparable search; `fallback_query` (a search agent's
     keyword) is used only when the title gives none. Claude runs only with use_claude (explicit click)."""
-    res = cached(ad.ad_id, query)
+    res = cached(ad.ad_id, query, category_url)
     if res is not None and (res.get("ad") or {}).get("price") != ad.price:
         res = None                                    # price changed since: re-position (searches are cached)
     if res is None:
         q = (query or "").strip() or query_from_title(ad.heading) or (fallback_query or "").strip()
-        comp = await comparables(q, ad.ad_id, ad.price)
+        comp = await comparables(q, ad.ad_id, ad.price, category_id=ad.category_id, title=ad.heading,
+                                 category_url=category_url)
         gh = await geizhals_match(geizhals_query(ad.heading, ad.category_path))
         res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None,
+               "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,
                "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None),
                "claude": stored_claude(ad.ad_id, ad.price), "checked_at": utcnow().isoformat()}
         if not comp.get("error"):
-            _put(_results, _key(ad.ad_id, query), res, RESULT_TTL_S)
+            _put(_results, _key(ad.ad_id, query, category_url), res, RESULT_TTL_S)
     if use_claude and not _claude_for(res.get("claude"), ad.price):
         verdict = await ask_claude(ad, res)
         res = {**res, "claude": verdict}
         if "deal" in verdict:
             at = _ran_at(res)
             age = (utcnow() - at).total_seconds() if at else 0
-            _put(_results, _key(ad.ad_id, query), res, RESULT_TTL_S, at=time.monotonic() - max(0.0, age))
+            _put(_results, _key(ad.ad_id, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - max(0.0, age))
             save_claude(ad.ad_id, verdict)
     return res
 

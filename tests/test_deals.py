@@ -340,7 +340,8 @@ def test_deals_pages_and_claude_on_post(app_client):
 
     result = app_client.get(f"/deals/ad/{AD_ID}", params={"q": "Bosch GSR 18V-55"}).text
     assert "deal-comp" in result and "this ad" in result and "Recently checked" in result
-    assert app_client.calls["search"] == 1                       # same query as the list: served from cache
+    assert app_client.calls["search"] == 2   # comparables served from cache; +1 for the category navigator (selector)
+    assert 'name="cat"' in result and "Automatic (category of this ad)" in result
     assert app_client.fake.calls == []                           # never automatic
 
     verdict = app_client.post(f"/deals/ad/{AD_ID}/claude", data={"q": "Bosch GSR 18V-55"}).text
@@ -418,3 +419,77 @@ async def test_claude_verdict_tied_to_price(wh, monkeypatch):
 def test_deals_page_rejects_non_ad_links(app_client):
     page = app_client.get("/deals", params={"q": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrraeder-4552"}).text
     assert "This link is not a willhaben ad." in page and app_client.calls["search"] == 0
+
+
+
+def _summ(n, title, price, cats):
+    return {"ad_id": f"20000000{n:02d}", "title": title, "price": price, "category_ids": cats.split(";")}
+
+
+async def test_comparables_same_category_kind_and_trimmed(monkeypatch):
+    """iPhone 15 Pro at 490: cases (other category), a 15 Pro Max and a €1 swap must not shape the bar."""
+    phone, case_cat = "2691;2722;2724;5013241", "2691;2722;2752"
+    ads = [_summ(n, "iPhone 15 Pro 128GB", p, phone) for n, p in enumerate([520, 560, 600, 640, 580, 610, 590])]
+    ads += [_summ(20, "iPhone 15 Pro Max 256GB", 900, phone), _summ(21, "iPhone 15 Pro Hülle MagSafe", 12, phone),
+            _summ(22, "iPhone 15 Pro", 1, phone)]
+    ads += [_summ(30 + n, "Panzerglas iPhone 15 Pro", 8, case_cat) for n in range(6)]
+
+    async def search_ads(q):
+        return {"rows_found": len(ads), "ads": ads}
+
+    monkeypatch.setattr(deals, "search_ads", search_ads)
+    out = await deals.comparables("iPhone 15 pro", AD_ID, 490, category_id="5013241", title="iPhone 15 pro")
+    assert out["scope"] == "leaf" and out["count"] == 7
+    assert out["filtered"] == {"category": 6, "kind": 2, "outliers": 1}
+    assert out["stats"]["min"] == 520 and out["stats"]["max"] == 640
+    assert deals.position(490, out["stats"], None)["level"] == "bargain"      # was "teuer" against cases at €12
+
+
+async def test_comparables_fall_back_to_parent_category(monkeypatch):
+    ads = [_summ(n, "Rennrad Shimano 105", p, "1;2;3") for n, p in enumerate([400, 500, 600])]
+    ads += [_summ(10 + n, "Rennrad Ultegra", p, "1;2;4") for n, p in enumerate([450, 550, 650])]
+
+    async def search_ads(q):
+        return {"rows_found": len(ads), "ads": ads}
+
+    monkeypatch.setattr(deals, "search_ads", search_ads)
+    out = await deals.comparables("rennrad", AD_ID, 500, category_id="3", title="Rennrad")
+    assert out["scope"] == "parent" and out["count"] == 6
+    out = await deals.comparables("rennrad", AD_ID, 500, category_id=None, title="Rennrad")
+    assert out["scope"] is None and out["count"] == 6
+
+
+def test_same_kind_rules():
+    assert deals._same_kind("iPhone 15 Pro 256GB blau", "iPhone 15 pro")
+    assert not deals._same_kind("iPhone 15 Pro Max", "iPhone 15 pro")
+    assert not deals._same_kind("Hülle für iPhone 15 Pro", "iPhone 15 pro")
+    assert deals._same_kind("iPhone 15 Pro Display defekt", "iPhone 15 Pro defekt")    # the ad itself is defective
+    assert not deals._same_kind("Nur OVP iPhone 15 Pro", "iPhone 15 pro")
+
+
+async def test_category_choices_and_chosen_category(monkeypatch):
+    from app.willhaben.parse import FilterValue, SearchFilter, SearchFilters
+
+    seen = []
+
+    async def search_filters(url, rows=6):
+        seen.append(url)
+        nav = SearchFilter(id="category", label="Kategorie", kind="HIERARCHICAL", multi=False,
+                           values=[FilterValue("Smartphones / Telefonie", "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/smartphones-telefonie-2691?keyword=iphone", 36)],
+                           selected=[])
+        return SearchFilters(url=url, rows_found=50, groups=[("Kategorie", [nav])], ads=[])
+
+    monkeypatch.setattr(deals.get_public(), "search_filters", search_filters)
+    ch = await deals.category_choices("iphone 15 pro")
+    assert seen[0].endswith("keyword=iphone+15+pro") and ch["values"][0]["hits"] == 36
+
+    cat = ch["values"][0]["url"]
+    got = []
+
+    async def search_category(url):
+        got.append(url)
+        return {"rows_found": 2, "ads": [_summ(n, "Handy", p, "9") for n, p in enumerate([100, 120, 140, 160, 180])]}
+
+    monkeypatch.setattr(deals, "search_category", search_category)
+    out = await deals.comparables("iphone", AD_ID, 150, category_id="5013241", title="Handy", category_url=cat)
+    assert got == [cat] and out["scope"] == "chosen" and out["count"] == 5   # no leaf filter on a chosen category

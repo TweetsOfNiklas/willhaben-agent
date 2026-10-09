@@ -30,6 +30,19 @@
                  title="{{ _('Compare with another search term') }}">
           <button type="submit" class="secondary outline">{{ _("Compare again") }}</button>
         </form>
+        {% if choices %}
+        <form method="get" action="/deals/ad/{{ ad.ad_id }}" class="deal-cat">
+          {% if res.asked_query %}<input type="hidden" name="q" value="{{ res.asked_query }}">{% endif %}
+          <label>{{ _("Category for the comparison") }}
+            <select name="cat" onchange="this.form.submit()">
+              <option value="" {% if not res.category_url %}selected{% endif %}>{{ _("Automatic (category of this ad)") }}{% if res.category_path %}: {{ res.category_path[-1] }}{% endif %}</option>
+              {% if res.category_url %}<option value="{{ res.category_url }}" selected>{{ choices.selected|map(attribute='label')|join(' › ') or _("chosen category") }}</option>{% endif %}
+              {% for v in choices['values'] %}<option value="{{ v.url }}">{{ ((choices.selected|map(attribute='label')|join(' › ')) ~ ' › ') if choices.selected else '' }}{{ v.label }}{% if v.hits is not none %} ({{ v.hits }}){% endif %}</option>{% endfor %}
+            </select></label>
+          <noscript><button class="secondary outline">{{ _("Compare again") }}</button></noscript>
+          {% if choices.error %}<small class="muted">{{ choices.error }}</small>{% endif %}
+        </form>
+        {% endif %}
       </div>
     </div>
   </article>

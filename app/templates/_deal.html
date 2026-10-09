@@ -31,6 +31,16 @@
         <span class="muted">({{ _("median {price}", price=c.median|eur) }})</span></small>{% endif %}
     {% if c.count %}<small class="muted">{{ _("{n} comparable ads", n=c.count) }}{% if c.query %} · „{{ c.query }}“{% endif %}</small>{% endif %}
   </p>
+  {% set path = res.category_path or [] %}{% set fl = c.filtered or {} %}
+  <p class="deal-note muted">
+    {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}
+    {% elif c.scope == 'leaf' and path %}{{ _("Compared within „{category}“.", category=path[-1]) }}
+    {% elif c.scope == 'parent' and path|length > 1 %}{{ _("Compared within „{category}“ (too few ads in „{leaf}“).", category=path[-2], leaf=path[-1]) }}
+    {% else %}{{ _("Compared across all categories.") }}{% endif %}
+    {% if fl.kind %}{{ _("{n} accessories/parts or other variants left out.", n=fl.kind) }}{% endif %}
+    {% if fl.outliers %}{{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
+    {% if compact %}<a href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}
+  </p>
   {% if p.pos is not none %}
     {% set pct = (p.pos * 100)|round(1) %}
     <div class="deal-bar" role="img" aria-label="{{ deal_level_label(p.level) }}">

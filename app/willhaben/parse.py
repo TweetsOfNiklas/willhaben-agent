@@ -106,11 +106,13 @@ class AdSummary:
     is_private: bool | None
     is_bumped: bool
     status: str
+    category_ids: list[str] = field(default_factory=list)   # category tree root -> leaf ("categorytreeids")
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "ad_id": self.ad_id,
             "title": self.heading,
+            "category_ids": self.category_ids,
             "price": self.price,
             "price_display": self.price_display,
             "old_price": self.old_price,
@@ -156,6 +158,7 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         is_private=None if private is None else private == "1",
         is_bumped=_first(a, "IS_BUMPED") == "1",
         status=((ad.get("advertStatus") or {}).get("id")) or "unknown",
+        category_ids=[c for c in (_first(a, "categorytreeids") or "").split(";") if c],
     )
 
 
@@ -189,6 +192,7 @@ class AdDetail:
     chat_enabled: bool | None = None
     category_path: list[str] = field(default_factory=list)
     edit_actions: Any = None
+    category_id: str | None = None     # leaf category (same id space as AdSummary.category_ids)
 
     def as_context(self) -> dict[str, Any]:
         return {
@@ -253,6 +257,7 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
         chat_enabled=ad.get("chatEnabled"),
         category_path=[c for c in crumbs if c],
         edit_actions=ad.get("advertEditStatusActionsList"),
+        category_id=str(ad["categoryTreeId"]) if ad.get("categoryTreeId") is not None else None,
     )
 
 

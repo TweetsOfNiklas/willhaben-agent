@@ -41,10 +41,16 @@ def _hit(hit_id: int | None) -> tuple[Hit | None, str | None]:
     return h, (url_param(agent.source_url, "keyword") if agent else None)
 
 
+def _cat(cat: str | None) -> str | None:
+    """A category the user picked: only willhaben marketplace result lists."""
+    cat = (cat or "").strip()
+    return cat if cat.startswith("https://www.willhaben.at/iad/kaufen-und-verkaufen/") else None
+
+
 async def _analysis(ad_id: str, q: str | None, fallback: str | None = None,
-                    use_claude: bool = False) -> tuple[dict[str, Any] | None, str | None]:
+                    use_claude: bool = False, cat: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """(result, error). A fresh cached result costs no request; otherwise ad detail (cached) + analysis."""
-    res = deals.cached(ad_id, q)
+    res = deals.cached(ad_id, q, cat)
     if res is not None and not use_claude:
         return res, None
     try:
@@ -53,7 +59,7 @@ async def _analysis(ad_id: str, q: str | None, fallback: str | None = None,
         return res, str(e)
     if d is None:
         return None, t("This ad is no longer online (sold, expired or deleted).")
-    return await deals.analyze(d, query=q, use_claude=use_claude, fallback_query=fallback), None
+    return await deals.analyze(d, query=q, use_claude=use_claude, fallback_query=fallback, category_url=cat), None
 
 
 @router.get("/hits/ad/{ad_id}/deal", response_class=HTMLResponse)
@@ -67,12 +73,12 @@ async def hit_ad_deal(request: Request, ad_id: str, hit: int | None = None, q: s
 
 
 @router.post("/deals/ad/{ad_id}/claude", response_class=HTMLResponse)
-async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str = Form("")):
+async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str = Form(""), cat: str = Form("")):
     """Claude's verdict – only ever on this explicit click; cached with the analysis."""
     if not ad_id.isdigit():
         raise HTTPException(400)
     _, fallback = _hit(int(hit) if hit.isdigit() else None)
-    res, error = await _analysis(ad_id, q or None, fallback, use_claude=True)
+    res, error = await _analysis(ad_id, q or None, fallback, use_claude=True, cat=_cat(cat))
     if res is not None:
         deals.remember(res)
     return _templates().TemplateResponse(request, "_deal_claude.html", {"res": res, "error": error, "q": q,
@@ -107,13 +113,15 @@ async def deals_page(request: Request, q: str = ""):
 
 
 @router.get("/deals/ad/{ad_id}", response_class=HTMLResponse)
-async def deals_ad(request: Request, ad_id: str, q: str = ""):
+async def deals_ad(request: Request, ad_id: str, q: str = "", cat: str = ""):
     from app.main import render
 
     if not ad_id.isdigit():
         raise HTTPException(400)
-    res, error = await _analysis(ad_id, q.strip() or None)
+    res, error = await _analysis(ad_id, q.strip() or None, cat=_cat(cat))
+    choices = None
     if res is not None:
         deals.remember(res)
+        choices = await deals.category_choices(res.get("query") or "", _cat(cat))   # willhaben's category navigator
     return render(request, "deals.html", q=q.strip(), results=None, spread=None, error=error,
-                  recent=deals.recent(), res=res, quote=quote)
+                  recent=deals.recent(), res=res, quote=quote, choices=choices)
