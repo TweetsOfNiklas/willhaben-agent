@@ -170,7 +170,8 @@ def _scam_context(hits, ads) -> dict:
     since = (utcnow() - timedelta(days=scam.CONTEXT_DAYS)).replace(tzinfo=None)   # SQLite gives naive UTC
     prices = {h.ad_id: h.price for h in hits if h.screen_relevant is not False
               and (h.first_seen_at is None or h.first_seen_at.replace(tzinfo=None) >= since)}
-    prices.update({a.ad_id: a.price for a in ads if a.ad_id})
+    rejected = {h.ad_id for h in hits if h.screen_relevant is False}
+    prices.update({a.ad_id: a.price for a in ads if a.ad_id and a.ad_id not in rejected})
     return scam.median_context(list(prices.values()))
 
 

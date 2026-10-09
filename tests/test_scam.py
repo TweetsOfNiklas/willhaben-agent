@@ -300,3 +300,53 @@ def test_hit_card_and_viewer_render_badges():
         html = c.get("/hits", headers={"accept-language": "de"}).text
     assert "Preis nur 28 % vom Üblichen (900 €)" in html and "Will Kontakt außerhalb von willhaben" in html
     assert "Telefonnummer im Text" not in html          # info flags stay out of the hit cards
+
+
+# --- review fixes: wanted/swap ads, body words, unscreened hits, rejected hits ------------------------------------
+
+@pytest.mark.parametrize("heading,price", [("Suche iPhone 16 Pro neu", 250), ("Tausche PS5 neu gegen Switch", 100)])
+def test_wanted_and_swap_ads_are_not_luxury_scams(heading, price):
+    assert codes(ad(heading=heading, body="Bitte melden.", price=price), None) == []
+    assert codes(ad(heading=heading, body="Bitte melden.", price=price), {"median": 1000.0, "count": 20}) == []
+
+
+@pytest.mark.parametrize("body", ["Neu im Originalkarton, Versand gratis.", "Inkl. Hülle und Case.",
+                                  "Ich suche einen schnellen Käufer.", "Tausch ausgeschlossen."])
+def test_common_body_words_do_not_switch_off_the_price_rule(body):
+    assert codes(ad(price=250, body=body)) == ["price_far_below"]
+
+
+def test_viewer_counts_unscreened_hits():
+    from app.willhaben.parse import AdDetail
+    with dbmod.session() as db:
+        a = dbmod.SearchAgent(name="Rennrad", source_url=URL, webapi_url=URL)
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        for i in range(10):                                  # never screened: screen_relevant stays NULL
+            db.add(dbmod.Hit(agent_id=a.id, ad_id=f"10000004{i:02d}", heading=f"Rennrad {i}", url="https://x",
+                             price=850 + i * 10))
+        for i in range(10):                                  # rejected by screening: left out of the median
+            db.add(dbmod.Hit(agent_id=a.id, ad_id=f"10000005{i:02d}", heading=f"Pedal {i}", url="https://x",
+                             price=20, screen_relevant=False))
+        h = dbmod.Hit(agent_id=a.id, ad_id="1000000499", heading="Rennrad Carbon", url="https://x", price=250)
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    ctx = scam.agent_context(h.agent_id, {h.id})
+    assert ctx["count"] == 10 and ctx["median"] == 895
+    d = AdDetail(ad_id="1000000499", heading="Rennrad Carbon", description="Abholung in Wien.", price=250,
+                 price_display="€ 250", status="active", published_at=None, first_published_at=None, end_date=None,
+                 url="https://www.willhaben.at/iad/object?adId=1000000499")
+    assert [f["code"] for f in scam.for_viewer(d, h)] == ["price_far_below"]
+
+
+def test_scam_context_leaves_out_rejected_page_ads():
+    from types import SimpleNamespace as NS
+
+    from app.services.search_agents import _scam_context
+    hits = [NS(ad_id=f"10000006{i:02d}", price=900.0, screen_relevant=None, first_seen_at=None) for i in range(8)]
+    hits += [NS(ad_id=f"10000007{i:02d}", price=20.0, screen_relevant=False, first_seen_at=None) for i in range(8)]
+    ads = [NS(ad_id=f"10000007{i:02d}", price=20.0) for i in range(8)] + [NS(ad_id="1000000800", price=950.0)]
+    ctx = _scam_context(hits, ads)
+    assert ctx["count"] == 9 and ctx["median"] == 900.0

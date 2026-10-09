@@ -27,10 +27,14 @@ CONTEXT_DAYS = 60
 RANK = {"info": 0, "warn": 1, "high": 2}
 
 _I = re.I | re.U
-# cheap for a legitimate reason: parts, defects, wanted/swap/rent ads, giveaways
-CHEAP_OK = re.compile(r"\b(defekt\w*|kaputt|bastler\w*|ersatzteil\w*|teile|für teile|zu verschenken|verschenke|gratis|"
-                      r"tausch\w*|suche|gesucht|miete[n]?|vermiete\w*|verleih\w*|leihen|reparatur\w*|"
-                      r"hülle|case|cover|attrappe|dummy|leerkarton|karton|ovp leer|nur (die )?(box|verpackung))\b", _I)
+# cheap for a legitimate reason: parts, defects, rent ads, giveaways (searched in heading + body)
+CHEAP_OK = re.compile(r"\b(defekt\w*|kaputt|bastler\w*|ersatzteil\w*|(als|für) teile|zu verschenken|verschenke|"
+                      r"miete[n]?|vermiete\w*|verleih\w*|leihen|reparatur\w*|leerkarton|ovp leer|"
+                      r"nur (die )?(box|verpackung))\b", _I)
+# wanted/swap ads and accessories/packaging: heading only, because normal (and scam) ads use these words in the
+# body for the real item ("im Originalkarton", "inkl. Hülle", "suche nichts anderes")
+CHEAP_OK_HEADING = re.compile(r"\b(tausch\w*|suche|gesucht|teile|hülle|case|cover|attrappe|dummy|karton|"
+                              r"nur (die )?(box|verpackung))\b", _I)
 PREPAY_ONLY = re.compile(r"\b(nur|ausschlie(?:ß|ss)lich)\s+(?:(?:gegen|per|mit|bei|über)\s+)?"
                          r"(vor(?:aus)?kasse|vorab[- ]?(?:überweisung|zahlung)|überweisung)\b", _I)
 PICKUP_OK = re.compile(r"\b(abholung|abholen|selbstabhol\w*|barzahlung|bar bei|paylivery|treffen|persönlich)\b", _I)
@@ -149,13 +153,14 @@ def median_context(prices: list[float | None]) -> dict[str, Any]:
 
 def agent_context(agent_id: int, exclude: set[int] | None = None) -> dict[str, Any]:
     """Price context of a search agent: median of its hits of the last 60 days (Claude-rejected hits left out)."""
-    from sqlmodel import col, select
+    from sqlmodel import col, or_, select
 
     from app.db import Hit, session, utcnow
     since = utcnow() - timedelta(days=CONTEXT_DAYS)
     with session() as db:
+        # unscreened hits (NULL) count; `!= False` alone would drop them in SQL
         q = select(Hit.price).where(Hit.agent_id == agent_id, col(Hit.first_seen_at) >= since,
-                                    Hit.screen_relevant != False)  # noqa: E712
+                                    or_(col(Hit.screen_relevant).is_(None), Hit.screen_relevant == True))  # noqa: E712
         if exclude:
             q = q.where(col(Hit.id).not_in(exclude))
         prices = db.exec(q).all()
@@ -183,13 +188,13 @@ def flags(item: Any, context: dict[str, Any] | None = None) -> list[dict[str, An
     spread_ok = not (p25 and p75) or p75 / p25 <= MAX_SPREAD
     if price and price > 1 and median and count >= MIN_SAMPLES and spread_ok:
         ratio = price / median
-    cheap_ok = bool(CHEAP_OK.search(text))
+    cheap_ok = bool(CHEAP_OK.search(text) or CHEAP_OK_HEADING.search(heading))
     low = ratio is not None and FLOOR_RATIO <= ratio < WARN_RATIO and not cheap_ok
     very_low = low and ratio < HIGH_RATIO
 
     # --- brand-new luxury item at a fraction of the price
     luxury = bool(LUXURY.search(heading) and NEW_WORD.search(text) and not NOT_THE_ITEM.search(heading))
-    if luxury and price and price > 1:
+    if luxury and price and price > 1 and not cheap_ok:       # wanted/swap/defect ads are not offers
         floor_hit = any(rx.search(heading) and price < floor for rx, floor in LUXURY_FLOOR)
         if (ratio is not None and ratio < WARN_RATIO) or floor_hit:
             add("luxury_new_cheap", "high")
