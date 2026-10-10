@@ -79,9 +79,12 @@
                    .finally(() => wake && wake());
     }
 
-    // Frame loop: next frame when the previous one arrived, faster right after input, slow when the tab is hidden.
+    // Frame loop: next frame when the previous one arrived, faster right after input. A hidden browser tab fetches
+    // nothing at all: every frame counts as use of the browser page, which otherwise never idles (CPU).
+    const visible = () => new Promise(res => document.addEventListener('visibilitychange', res, {once: true}));
     async function loop() {
       for (;;) {
+        if (document.hidden) { await visible(); continue; }
         if (box.offsetParent === null) {          // panel hidden (another settings section is open): don't poll
           await new Promise(res => { wake = res; setTimeout(res, 1000); });
           continue;
@@ -93,7 +96,7 @@
           img.src = url; if (old.startsWith('blob:')) URL.revokeObjectURL(old);
           fails = 0; if (state.textContent === T.lost || state.textContent === T.interrupted) state.textContent = '';
         } catch (e) { fails++; state.textContent = T.interrupted; }
-        await new Promise(res => { wake = res; setTimeout(res, document.hidden ? 5000 : Math.min(1000 + fails * 1000, 8000)); });
+        await new Promise(res => { wake = res; setTimeout(res, Math.min(1000 + fails * 1000, 8000)); });
       }
     }
 
