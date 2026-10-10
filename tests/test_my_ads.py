@@ -81,10 +81,12 @@ async def test_ended_passive_ad_is_renewed(monkeypatch):
     page = json.loads(json.dumps(NEXT))
     page["props"]["pageProps"]["initialUserAdsList"]["verticalList"][1]["advertDetails"] = [
         _links(_ad("1000000003", "passive", "Passiv", "2026-10-09T21:53:08+02:00"), ["6", "3"]),
-        _links(_ad("1000000004", "passive", "Passiv", "2026-11-01T10:00:00+01:00"), ["4", "6", "3"])]
+        _links(_ad("1000000004", "passive", "Passiv", "2026-11-01T10:00:00+01:00"), ["4", "6", "3"]),
+        _links(_ad("1000000005", "passive", "Passiv", "2026-09-01T10:00:00+02:00"), ["6", "3"])]
     with session() as db:
         db.add(MyAd(ad_id="1000000003", status="Passiv", auto_renew=True))
         db.add(MyAd(ad_id="1000000004", status="Passiv", auto_renew=True))
+        db.add(MyAd(ad_id="1000000005", status="replaced", replaced_by="1000000003"))
         db.commit()
     monkeypatch.setattr(my_ads, "get_session", lambda: _FakeSession(page))
     renewed = []
@@ -98,3 +100,4 @@ async def test_ended_passive_ad_is_renewed(monkeypatch):
     with session() as db:
         assert db.get(MyAd, "1000000003").status == "expired"
         assert db.get(MyAd, "1000000004").status == "Passiv"
+        assert db.get(MyAd, "1000000005").status == "replaced"   # the old copy of a renewed ad: never again

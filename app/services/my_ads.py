@@ -353,7 +353,9 @@ async def import_from_account() -> set[str]:
             previous = row.status
             row.heading = ad.heading or row.heading
             row.url, row.image_url = ad.url, ad.image_url or row.image_url
-            if has_ended(ad):
+            if row.replaced_by:
+                row.status = "replaced"   # republished under a new id; the old copy stays "Passiv" on willhaben
+            elif has_ended(ad):
                 row.status = "expired"    # ran out ("Passiv" on willhaben): auto-renew republishes it
             else:
                 row.status = ad.status if ad.status in ("active", "expired", "sold", "reserved") else ad.status_label or ad.status
