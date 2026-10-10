@@ -250,7 +250,7 @@ class BrowserSession:
         self._require()
         async with self.limiter:
             await self._ensure_parked()
-            with access_log.track("chat", "send" if req_type in ("send_message", "create_conversation") else "chat") as tr:
+            with access_log.track("chat", "send" if req_type == "send_message" else "chat") as tr:
                 res = await self.api_page.evaluate(
                     """({url, frame, rid, reqType, timeout}) => new Promise((resolve) => {
                         let done = false, acked = false;

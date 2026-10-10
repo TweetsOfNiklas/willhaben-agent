@@ -5,7 +5,7 @@ Verification status (see docs/willhaben-api.md):
              chat-api/v1/conversations/{id}/messages (first MESSAGE_CANDIDATES entry),
              my adverts (server-rendered in /iad/myprofile/myadverts __NEXT_DATA__)
   FROM BUNDLE send message (chat WebSocket send_message; confirmed per send via the REST history)
-  FROM BUNDLE create conversation (chat WebSocket create_conversation; live unverified, see create_conversation)
+  FROM BUNDLE create conversation (ad contact form, POST iad-messaging/sendrequest/chat; see create_conversation)
   FROM BUNDLE mark sold / reserved (app/willhaben/sales.py, links from the my-adverts list; needs live verification)
   MISSING    reactivate, ad insertion -> need a request capture
 Unverified write endpoints are never guessed: they raise EndpointUnknown until captured.
@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 CHAT = "/webapi/chat-api/v1"
 MYADVERTS_PAGE = "/iad/myprofile/myadverts"
 CHAT_WS = "wss://chat-realtime-web.willhaben.at/webapi/chat-ws/v1/ws/"
+SEND_REQUEST_CHAT = "/webapi/iad-messaging/sendrequest/chat"   # the ad page's contact form, opens the chat
 MESSAGE_CANDIDATES = [
     CHAT + "/conversations/{id}/messages?limit=100&offset=0",
     CHAT + "/conversations/{id}/messages",
@@ -358,40 +359,47 @@ class AccountClient:
     async def create_conversation(self, ad_id: str, text: str) -> str:
         """Open a new chat about an ad with a first message (the buyer's opener). Returns the conversation id.
 
-        Frame from the chat web app bundle (2026-10-09, see docs/willhaben-api.md "Sending chat messages"):
-        `{"req_type": "create_conversation", "request_id", "payload": {"ad_id", "client_conversation_id", "message"}}`.
-        LIVE UNVERIFIED: the response shape is unseen. The id is taken from the response when it carries one
-        (`conversation_id` at top level, in `payload` or in `response`); otherwise the conversation list is polled
-        for the entry of this ad whose newest message is ours with this text. A new conversation only counts once it
-        shows up there.
-
-        Fallback, recorded but NOT implemented: the REST call
-        `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` (bundle, unverified). Switch to it only if
-        the WebSocket frame is refused in the first live use (capture label `purchase-opener`).
+        A chat with a seller can only be started from the ad page: its contact form ("Nachricht absenden") posts
+        `POST /webapi/iad-messaging/sendrequest/chat` and answers `{sent, conversationId}` (ad-detail bundle of
+        /bbx-search, 2026-10-10, see docs/willhaben-api.md "Purchase orders"). The chat WebSocket cannot open one:
+        a `create_conversation` frame went unanswered live (timeout). The sender's name and e-mail come from the
+        profile, like the form fills them in. Without an id in the answer the conversation list is polled for the
+        entry of this ad whose newest message is ours with this text.
         """
         text = text.strip()
         if not text:
             raise ValueError(t("Empty message"))
-        client_id, request_id = str(uuid.uuid4()), str(uuid.uuid4())
-        frame = {"req_type": "create_conversation", "request_id": request_id,
-                 "payload": {"ad_id": str(ad_id), "client_conversation_id": client_id, "message": text}}
-        res = await self.s.ws_request(CHAT_WS, frame, request_id, req_type="create_conversation")
-        if res.get("status") == "error":
+        me = await self.me()
+        u = (me.get("userData") if isinstance(me, dict) and isinstance(me.get("userData"), dict) else me) or {}
+        first, last = (u.get("firstName") or "").strip(), (u.get("lastName") or "").strip()
+        body = {"fromFullName": " ".join(x for x in (first, last) if x), "shareTenantProfile": False,
+                "from": u.get("emailAddress") or u.get("email") or "", "adId": int(ad_id), "copyToSender": False,
+                "showTelephoneNumber": False, "telephone": "", "selectedContactSuggestions": [], "mailContent": text}
+        if first:
+            body["firstName"] = first
+        if last:
+            body["lastName"] = last
+        r = await self.s.api("POST", SEND_REQUEST_CHAT, body)
+        if r.status in (401, 403):
+            raise NotLoggedIn(f"{SEND_REQUEST_CHAT}: HTTP {r.status}")
+        try:
+            res = r.json()
+        except ValueError:
+            res = {}
+        if not r.ok or (isinstance(res, dict) and res.get("sent") is False):
             raise SendFailed(t("willhaben rejected the new conversation: {detail}",
-                               detail=res.get('response') or res.get('error') or res))
-        if res.get("status") in ("ws_error", "closed") and not res.get("acked"):
-            raise SendFailed(t("Chat connection failed ({status})", status=f"{res.get('status')} {res.get('code') or ''}".strip()))
-        cid = _pick(res, "conversation_id", "payload.conversation_id", "response.conversation_id")
+                               detail=f"HTTP {r.status} {r.text[:200]}".strip()))
+        cid = _pick(res, "conversationId", "conversation_id") if isinstance(res, dict) else None
         if cid:
             return str(cid)
-        # no id in the answer (or only an ack before the timeout): the conversation list decides
+        # sent, but no id in the answer: the conversation list decides
         for attempt in range(3):
             await asyncio.sleep(1.5 * (attempt + 1))
             for c in await self.conversations(limit=20):
                 if c.ad_id == str(ad_id) and c.last_is_mine is not False and _preview_matches(c.last_text, text):
                     return c.id
         raise SendFailed(t("Conversation did not show up in the list (response: {status}) – check on willhaben",
-                           status=res.get('status')))
+                           status=r.status))
 
     async def my_adverts(self) -> list[OwnAdvert]:
         """The account's ads; willhaben renders them server-side into the my-adverts page."""
