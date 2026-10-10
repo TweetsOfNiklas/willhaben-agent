@@ -104,11 +104,15 @@ async def test_republish_copies_settings_and_keeps_old_row(monkeypatch):
         sent.append(kind)
 
     async def check(ad_id):
-        return None
+        raise AssertionError("a just republished ad is not public yet: the public page would call it expired")
+
+    async def import_from_account():
+        return {"1000000002"}
 
     monkeypatch.setattr(account.AccountClient, "reactivate", reactivate)
     monkeypatch.setattr(my_ads, "notify", notify)
     monkeypatch.setattr(my_ads, "check", check)
+    monkeypatch.setattr(my_ads, "import_from_account", import_from_account)
     monkeypatch.setattr(my_ads, "get_session", lambda: None)
     with session() as db:
         row = db.get(MyAd, "1000000001")

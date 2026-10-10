@@ -429,7 +429,10 @@ async def _reactivate(row: MyAd) -> None:
     else:
         await notify("ad_renewed", t("Ad renewed automatically"), row.heading or row.ad_id, url=row.url,
                      image=row.image_url, data={"ad_id": row.ad_id})
-        await check(row.ad_id)
+        try:    # the account list, not the public page: a just republished ad is not public yet ("expired")
+            await import_from_account()
+        except (NotLoggedIn, SessionUnavailable, ValueError) as e:
+            log.info("status refresh after renewal skipped: %s", e)
 
 
 def _move_to_new_id(old_id: str, new_id: str) -> MyAd:
