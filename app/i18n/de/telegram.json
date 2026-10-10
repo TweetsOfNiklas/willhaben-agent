@@ -54,7 +54,6 @@
  "Remove bot": "Bot entfernen",
  "Remove the Telegram bot from the app?": "Telegram-Bot aus der App entfernen?",
  "Reply": "Antworten",
- "Request received – confirm the link in the app under Settings → Telegram.": "Anfrage erhalten – bestätige die Verknüpfung in der App unter Einstellungen → Telegram.",
  "Requests in Telegram:": "Anfragen in Telegram:",
  "Send notifications to Telegram": "Benachrichtigungen an Telegram senden",
  "Sending failed: {error}": "Senden fehlgeschlagen: {error}",
@@ -83,5 +82,8 @@
  "in Telegram": "in Telegram",
  "linked with {name}": "verknüpft mit {name}",
  "logged in": "eingeloggt",
- "requested in Telegram": "in Telegram angefordert"
+ "requested in Telegram": "in Telegram angefordert",
+ "Request received – confirm the link in the app under Settings → Telegram. Your code: {code}": "Anfrage erhalten – bestätige die Verknüpfung in der App unter Einstellungen → Telegram. Dein Code: {code}",
+ "Only link the one whose code the bot sent you in Telegram – anyone can write to the bot.": "Nur den verknüpfen, dessen Code dir der Bot in Telegram geschickt hat – jeder kann dem Bot schreiben.",
+ "code {code}": "Code {code}"
 }

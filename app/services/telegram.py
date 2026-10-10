@@ -52,7 +52,9 @@ _transport: httpx.AsyncBaseTransport | None = None   # tests inject a mock trans
 _tasks: set[asyncio.Task] = set()
 _pending: dict[int, tuple[str, str, float]] = {}     # ForceReply prompt message id -> (verb, ref, time)
 PENDING_TTL = 30 * 60
-_candidates: dict[int, tuple[str, float]] = {}       # chat id -> (display name, time) while no chat is linked
+# chat id -> (display name, time, pairing code) while no chat is linked. The bot sends the code to that chat and
+# Settings shows it next to the button: anyone can find the bot and pick the owner's name, the code tells them apart.
+_candidates: dict[int, tuple[str, float, str]] = {}
 CANDIDATE_TTL = 10 * 60
 MAX_CANDIDATES = 20
 # Last Bot API outcome that says something about the connection, read by app/services/health.py.
@@ -136,7 +138,7 @@ def candidates() -> list[dict[str, Any]]:
     now = time.monotonic()
     for k in [k for k, v in _candidates.items() if now - v[1] > CANDIDATE_TTL]:
         _candidates.pop(k, None)
-    return [{"chat_id": k, "name": v[0], "age_s": int(now - v[1])}
+    return [{"chat_id": k, "name": v[0], "age_s": int(now - v[1]), "code": v[2]}
             for k, v in sorted(_candidates.items(), key=lambda kv: -kv[1][1])]
 
 
@@ -423,9 +425,13 @@ async def _on_candidate(chat: dict[str, Any]) -> None:
     live = {c["chat_id"] for c in candidates()}          # drops expired entries first
     if not isinstance(cid, int) or cid in live or len(live) >= MAX_CANDIDATES:
         return
-    _candidates[cid] = (chat.get("username") or chat.get("first_name") or chat.get("title") or str(cid), time.monotonic())
+    name = " ".join(x for x in (chat.get("first_name") or chat.get("title"),
+                                 f"@{chat['username']}" if chat.get("username") else None) if x) or str(cid)
+    code = f"{secrets.randbelow(10000):04d}"
+    _candidates[cid] = (name, time.monotonic(), code)
     with suppress(TelegramError, httpx.HTTPError):
-        await api("sendMessage", chat_id=cid, text="👋 " + t("Request received – confirm the link in the app under Settings → Telegram."))
+        await api("sendMessage", chat_id=cid, text="👋 " + t(
+            "Request received – confirm the link in the app under Settings → Telegram. Your code: {code}", code=code))
 
 
 def _latest_pending() -> tuple[str, str, float] | None:

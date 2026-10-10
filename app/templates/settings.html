@@ -215,12 +215,13 @@
               <figure class="tg-qr" aria-label="QR">{{ tg_qr|safe }}</figure>
             </div>
             {% if tg.candidates %}
-              <p><strong>{{ _("Requests in Telegram:") }}</strong></p>
+              <p><strong>{{ _("Requests in Telegram:") }}</strong>
+                <br><small class="muted">{{ _("Only link the one whose code the bot sent you in Telegram – anyone can write to the bot.") }}</small></p>
               <div class="row-actions">
                 {% for c in tg.candidates %}
                   <form method="post" action="/settings/telegram/link">
                     <input type="hidden" name="chat_id" value="{{ c.chat_id }}">
-                    <button>{{ _("Link with {name}", name=c.name) }}</button>
+                    <button>{{ _("Link with {name}", name=c.name) }} · {{ _("code {code}", code=c.code) }}</button>
                   </form>
                 {% endfor %}
               </div>

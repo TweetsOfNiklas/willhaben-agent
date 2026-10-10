@@ -56,6 +56,8 @@ async def _linked(tg):
     assert [c["chat_id"] for c in telegram.candidates()] == [CHAT, 666]
     assert [b["chat_id"] for m, b in tg if m == "sendMessage"] == [666, CHAT]
     assert "Settings" in tg[-1][1]["text"] and telegram.chat_id() is None
+    codes = {c["chat_id"]: c["code"] for c in telegram.candidates()}     # each chat gets its own code, shown in Settings
+    assert [b["text"][-4:] for m, b in tg if m == "sendMessage"] == [codes[666], codes[CHAT]]
     assert await telegram.link(4711) is None                             # not a candidate
     assert await telegram.link(CHAT) == "Max"
     assert telegram.chat_id() == CHAT and get_setting("telegram_chat_name") == "Max" and not telegram.candidates()
@@ -213,11 +215,11 @@ def test_settings_panel_and_routes(client, monkeypatch):  # noqa: F811
     page = client.get("/settings").text
     assert "@wh_test_bot" in page and 'id="tg-link"' in page and "https://t.me/wh_test_bot" in page and "<svg" in page
     assert client.get("/settings/telegram/status").json() == {"linked": False, "chat_name": "", "candidates": []}
-    telegram._candidates[CHAT] = ("Max <b>", telegram.time.monotonic())
+    telegram._candidates[CHAT] = ("Max <b>", telegram.time.monotonic(), "0042")
     st = client.get("/settings/telegram/status").json()
     assert st["candidates"][0]["chat_id"] == CHAT and st["candidates"][0]["name"] == "Max <b>"
     page = client.get("/settings").text
-    assert "Link with Max &lt;b&gt;" in page and f'data-tg-fp="{CHAT}"' in page
+    assert "Link with Max &lt;b&gt; · code 0042" in page and f'data-tg-fp="{CHAT}"' in page
     r = client.post("/settings/telegram/link", data={"chat_id": "999"}, follow_redirects=False)
     assert "expired" in r.headers["location"] and telegram.chat_id() is None
     r = client.post("/settings/telegram/link", data={"chat_id": str(CHAT)}, follow_redirects=False)
