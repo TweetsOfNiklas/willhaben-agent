@@ -454,10 +454,12 @@ def test_myads_filters_and_order():
             assert gone not in page
         assert "Show deactivated ads (1)" in page and "Show sold ads (3)" in page
         # expired ads always show, in their own section above the others
-        assert page.index("Expired (1)") < page.index("Ausgelaufen") < page.index("Other ads") < page.index("Lange")
+        assert page.index("Active (2)") < page.index("Lange") < page.index("Bald") < page.index("Expired (1)") \
+            < page.index("Ausgelaufen")    # active ads on top, then the expired ones
         assert "Activate on willhaben" in page    # an expired ad can be put online again by hand (republished)
         page = c.get("/myads?show_inactive=1").text
         assert "Deaktiviert" in page and "Weg" not in page
+        assert page.index("Bald") < page.index("Ausgelaufen") < page.index("Other ads") < page.index("Deaktiviert")
         page = c.get("/myads?show_sold=1").text
         assert "Weg" in page and "Geschenkt" in page and "Deaktiviert" not in page
 

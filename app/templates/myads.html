@@ -39,8 +39,7 @@
   <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Expires") }}</th><th title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">{{ _("Auto-renew") }}</th><th></th></tr></thead>
   <tbody>
   {% for a in ads %}
-  {% if expired_count and loop.index0 == 0 %}<tr class="section"><th colspan="6">{{ _("Expired ({n})", n=expired_count) }}</th></tr>{% endif %}
-  {% if expired_count and loop.index0 == expired_count %}<tr class="section"><th colspan="6">{{ _("Other ads") }}</th></tr>{% endif %}
+  {% if loop.index0 in sections %}<tr class="section"><th colspan="6">{{ sections[loop.index0] }}</th></tr>{% endif %}
   <tr>
     <td><label style="display:flex;gap:.4rem;align-items:center;margin:0">
       {% if not a.replaced_by %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel" data-title="{{ a.heading or a.ad_id }}" aria-label="{{ _('Select') }}">{% endif %}

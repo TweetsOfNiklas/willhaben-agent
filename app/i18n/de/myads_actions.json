@@ -74,6 +74,7 @@
  "Show sold ads ({n})": "Verkaufte Anzeigen zeigen ({n})",
  "Apply": "Anwenden",
  "Show deactivated ads ({n})": "Deaktivierte Anzeigen zeigen ({n})",
+ "Active ({n})": "Aktiv ({n})",
  "Expired ({n})": "Abgelaufen ({n})",
  "Other ads": "Weitere Anzeigen"
 }
