@@ -10,7 +10,7 @@ from sqlmodel import select
 from app.db import MyAd, get_setting, session, utcnow
 from app.i18n import t
 from app.services.notify import notify
-from app.willhaben.account import ACTION_DELETE, AccountClient, EndpointUnknown
+from app.willhaben.account import ACTION_DELETE, AccountClient, EndpointUnknown, has_ended
 from app.willhaben.parse import extract_ad_id
 from app.willhaben.public import Blocked, WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
@@ -353,7 +353,10 @@ async def import_from_account() -> set[str]:
             previous = row.status
             row.heading = ad.heading or row.heading
             row.url, row.image_url = ad.url, ad.image_url or row.image_url
-            row.status = ad.status if ad.status in ("active", "expired", "sold", "reserved") else ad.status_label or ad.status
+            if has_ended(ad):
+                row.status = "expired"    # ran out ("Passiv" on willhaben): auto-renew republishes it
+            else:
+                row.status = ad.status if ad.status in ("active", "expired", "sold", "reserved") else ad.status_label or ad.status
             row.published_at, row.end_date = ad.start or row.published_at, ad.end or row.end_date
             row.last_checked_at, row.last_error = utcnow(), None
             db.add(row)
