@@ -12,7 +12,6 @@ websocket subscription to that event (long-lived token from ha_auth) and acts on
   WH_PAID_<shipment>_<sig>   the buyer has paid (marked by hand) -> ask for the go, or buy by the automatic rules
   WH_BUY_ / WH_BUYNP_        approve: buy the label and print it / buy only (shipment ids)
   WH_DECL_ / WH_CANCEL_      decline the purchase / stop the automatic countdown (shipment ids)
-  WH_WAIT_                   "Not yet" on a buyer's payment remark: only clears the push
 
 <sig> is an HMAC over verb+draft with a secret in DATA_DIR, so no other event source can make the app
 send. A draft is only acted on while it is still a draft, so a second tap does nothing.
@@ -36,8 +35,8 @@ log = logging.getLogger(__name__)
 EVENT = "mobile_app_notification_action"
 # Websocket listener state, read by the connection watchdog (app/services/health.py).
 listener: dict[str, Any] = {"running": False, "connected": False, "error": None}
-_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP|PAID|BUY|BUYNP|DECL|CANCEL|WAIT)_(\d+)_([0-9a-f]{12})")
-SHIPMENT_VERBS = ("PAID", "BUY", "BUYNP", "DECL", "CANCEL", "WAIT")
+_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP|PAID|BUY|BUYNP|DECL|CANCEL)_(\d+)_([0-9a-f]{12})")
+SHIPMENT_VERBS = ("PAID", "BUY", "BUYNP", "DECL", "CANCEL")
 
 
 def _secret() -> bytes:
@@ -98,8 +97,8 @@ def offer_actions(shipment_id: int, label: bool) -> list[dict[str, Any]]:
 
 
 def claim_actions(shipment_id: int) -> list[dict[str, Any]]:
-    """The buyer wrote that they paid: mark it and ask for the label, or leave it."""
-    return [_ship_button("PAID", shipment_id, t("Paid, buy label")), _ship_button("WAIT", shipment_id, t("Not yet"))]
+    """The buyer wrote that they paid: once the money is there, one tap marks it and asks for the label."""
+    return [_ship_button("PAID", shipment_id, t("Paid, buy label"))]
 
 
 def approval_actions(shipment_id: int) -> list[dict[str, Any]]:
@@ -198,8 +197,6 @@ async def _shipment_action(verb: str, shipment_id: int) -> str | None:
     if s is None or s.status not in ("draft", "awaiting"):
         return None                              # already handled
     await clear_push(ship_tag(shipment_id))
-    if verb == "WAIT":
-        return "later"
     done = {"PAID": s.paid_at is not None, "BUY": s.approval in ("approved", "buy_only"),
             "BUYNP": s.approval in ("approved", "buy_only"), "DECL": s.approval == "declined",
             "CANCEL": s.approval != "auto"}

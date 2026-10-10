@@ -146,7 +146,7 @@ async def test_claim_from_chat_asks_the_user_and_does_not_pay(desk, pushes):
         await task
     push = pushes[-1]
     assert push["title"] == "Buyer reports payment – check your account"
-    assert [a["title"] for a in push["actions"]] == ["Paid, buy label", "Not yet"]
+    assert [a["title"] for a in push["actions"]] == ["Paid, buy label"]
     s = shipping.get(sid)
     assert s.payment_claimed_at and s.paid_at is None and s.status == "draft"
 
@@ -382,7 +382,7 @@ async def test_push_buttons_follow_the_rules(desk, pushes, buy):
         return {"action": ha_actions.action_id(verb, sid)}
 
     sid = await draft()
-    assert await ha_actions.handle(act("WAIT", sid)) == "later"
+    assert ha_actions.parse_action(act("WAIT", sid)["action"]) is None         # no such button any more
     assert await ha_actions.handle(act("PAID", sid)) == "paid"
     assert shipping.get(sid).paid_at and states(sid)["approval"] == "pending"
     assert await ha_actions.handle(act("PAID", sid)) is None                   # second tap
