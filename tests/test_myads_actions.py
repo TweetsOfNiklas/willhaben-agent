@@ -432,12 +432,12 @@ def test_ai_revision_fills_the_form_without_saving(monkeypatch):
 
 
 def test_myads_filters_and_order():
-    from datetime import UTC, datetime, timedelta
+    from datetime import timedelta
 
-    from app.db import MyAd, session
+    from app.db import MyAd, session, utcnow
     from app.main import app
     from fastapi.testclient import TestClient
-    now = datetime(2026, 10, 1, tzinfo=UTC)
+    now = utcnow()
     with session() as db:
         db.add(MyAd(ad_id="1", heading="Bald", status="active", end_date=now + timedelta(days=2)))
         db.add(MyAd(ad_id="2", heading="Lange", status="active", end_date=now + timedelta(days=40)))
@@ -446,19 +446,24 @@ def test_myads_filters_and_order():
         db.add(MyAd(ad_id="5", heading="Geschenkt", status="Verschenkt", end_date=now))
         db.add(MyAd(ad_id="6", heading="Reserviert", status="active", sale_status="sold", end_date=now))
         db.add(MyAd(ad_id="7", heading="Ausgelaufen", status="expired", end_date=now))
+        db.add(MyAd(ad_id="8", heading="Uralt", status="expired", end_date=now - timedelta(days=400)))
+        db.add(MyAd(ad_id="9", heading="Erneuert", status="expired", replaced_by="2", end_date=now,
+                    url="https://www.willhaben.at/iad/object?adId=9"))
         db.commit()
     with TestClient(app) as c:
         page = c.get("/myads").text
         assert page.index("Lange") < page.index("Bald")       # most days left first
-        for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert"):
+        # long expired (past the 30-day cutoff) and the old copy of a renewed ad are not "expired"
+        for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert", "Uralt", "Erneuert"):
             assert gone not in page
-        assert "Show deactivated ads (1)" in page and "Show sold ads (3)" in page
+        assert "Show deactivated ads (2)" in page and "Show sold ads (3)" in page
         # expired ads always show, in their own section above the others
         assert page.index("Active (2)") < page.index("Lange") < page.index("Bald") < page.index("Expired (1)") \
             < page.index("Ausgelaufen")    # active ads on top, then the expired ones
         assert "Activate on willhaben" in page    # an expired ad can be put online again by hand (republished)
         page = c.get("/myads?show_inactive=1").text
-        assert "Deaktiviert" in page and "Weg" not in page
+        assert "Deaktiviert" in page and "Uralt" in page and "Weg" not in page
+        assert "Erneuert" not in page     # a renewed ad's old copy is never listed: its chats use the new copy
         assert page.index("Bald") < page.index("Ausgelaufen") < page.index("Other ads") < page.index("Deaktiviert")
         page = c.get("/myads?show_sold=1").text
         assert "Weg" in page and "Geschenkt" in page and "Deaktiviert" not in page

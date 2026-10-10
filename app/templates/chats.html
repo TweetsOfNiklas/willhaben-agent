@@ -10,20 +10,27 @@
   {% elif live.state == 'off' %}<span class="badge muted">{{ _("off") }}</span>
   {% else %}<span class="badge">{{ live.state }}</span> – {{ _("until then it polls every few minutes") }}{% endif %}</small></p>
 <form method="post" action="/chats/sync"><button>{{ _("Sync now") }}</button></form>
+{% if hidden_count %}<form method="get" action="/chats" class="bulkbar">
+  <label style="margin:0"><input type="checkbox" role="switch" name="show_hidden" value="1" {% if show_hidden %}checked{% endif %} onchange="this.form.submit()">
+    <small>{{ _("Show hidden chats ({n})", n=hidden_count) }}</small></label>
+  <noscript><button class="secondary">{{ _("Apply") }}</button></noscript>
+</form>{% endif %}
 <table class="stack chat-list">
-  <thead><tr><th>{{ _("Partner") }}</th><th>{{ _("Ad") }}</th><th>{{ _("Last message") }}</th><th></th></tr></thead>
+  <thead><tr><th>{{ _("Partner") }}</th><th>{{ _("Ad") }}</th><th>{{ _("Last message") }}</th><th></th><th></th></tr></thead>
   <tbody>
   {% for c in convs %}
     <tr>
       <td><a href="/chats/{{ c.id }}" class="rowlink">{{ c.partner_name or _('unknown') }}</a>
         {% if c.unread_count %}<span class="badge">{{ c.unread_count }}</span>{% endif %}
-        {% if c.id in open_drafts %}<span class="badge ok">{{ _("Draft") }}</span>{% endif %}</td>
+        {% if c.id in open_drafts %}<span class="badge ok">{{ _("Draft") }}</span>{% endif %}
+        {% if c.hidden_at %}<span class="badge muted">{{ _("hidden") }}</span>{% endif %}</td>
       <td>{{ c.ad_title or c.ad_id or '–' }}{% if c.role %}<br><small class="muted">{{ _('I am selling') if c.role == 'seller' else _('I am buying') }}</small>{% endif %}</td>
       <td><small>{{ (c.last_message_text or '')[:120] }}</small><br><small class="muted">{{ c.last_message_at|ago }}</small></td>
       <td class="open-btn"><a href="/chats/{{ c.id }}" role="button" class="outline">{{ _("Open") }}</a></td>
+      <td class="chat-actions">{% include "_chat_actions.html" %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="4" class="muted">{{ _("No conversations synced yet.") }}</td></tr>
+    <tr><td colspan="5" class="muted">{{ _("No conversations synced yet.") }}</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -86,6 +86,9 @@ class Conversation(SQLModel, table=True):
     meetup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     # PayLivery process of this chat (app/services/paylivery.py): role, stage, amounts, deadline, history, applied notices
     paylivery: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # hidden from the chat list (only here, not on willhaben) until the other person writes again
+    hidden_at: datetime | None = None
+    removed: bool | None = None    # also hidden, and its messages/drafts deleted here; the row stays so sync skips it
 
 
 class Message(SQLModel, table=True):
@@ -399,6 +402,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "chat_sync_limit": "10",    # sync only the N latest conversations
     "chat_sync_since": "",      # YYYY-MM-DD: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",
+    "myads_expired_days": "30",  # My ads: expired ads older than this are listed with the inactive ones; 0 = always shown
     "auto_reply_rules": (
         "- Automatisch nur einfache Fragen beantworten: ob der Artikel noch da ist, Abholung/Versand, Zustand laut Inserat.\n"
         "- Keine Preiszusagen und kein Handeln: bei Preisfragen auf den Inseratspreis verweisen oder nicht automatisch antworten.\n"
@@ -419,6 +423,18 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "quiet_mode": "slow",
     "quiet_interval_min": "60",
 }
+
+
+def current_ad(db: Session, ad_id: str) -> MyAd | None:
+    """The own ad, following renewals: chats keep the old ad id, the settings live on the newest copy."""
+    ad, seen = db.get(MyAd, ad_id), {ad_id}
+    while ad is not None and ad.replaced_by and ad.replaced_by not in seen:
+        newer = db.get(MyAd, ad.replaced_by)
+        if newer is None:
+            break    # new copy not imported yet: keep the old row
+        seen.add(newer.ad_id)
+        ad = newer
+    return ad
 
 
 def get_setting(key: str) -> str:

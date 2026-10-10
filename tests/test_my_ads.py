@@ -101,3 +101,29 @@ async def test_ended_passive_ad_is_renewed(monkeypatch):
         assert db.get(MyAd, "1000000003").status == "expired"
         assert db.get(MyAd, "1000000004").status == "Passiv"
         assert db.get(MyAd, "1000000005").status == "replaced"   # the old copy of a renewed ad: never again
+
+
+async def test_check_keeps_renewed_ads_old_copy_replaced(monkeypatch):
+    async def get_detail(ad_id):
+        return None     # the old copy of a renewed ad is gone from the public site
+
+    monkeypatch.setattr(my_ads, "get_public", lambda: type("P", (), {"get_detail": staticmethod(get_detail)})())
+    with session() as db:
+        db.add(MyAd(ad_id="1000000006", status="expired", replaced_by="1000000007"))
+        db.commit()
+    row = await my_ads.check("1000000006")
+    assert row.status == "replaced"     # not listed as expired next to its new copy
+
+
+def test_current_ad_follows_renewals():
+    from app.db import current_ad
+
+    with session() as db:
+        db.add(MyAd(ad_id="1000000010", status="replaced", replaced_by="1000000011", auto_reply=False))
+        db.add(MyAd(ad_id="1000000011", status="replaced", replaced_by="1000000012"))
+        db.add(MyAd(ad_id="1000000012", status="active", auto_reply=True, min_price=50))
+        db.add(MyAd(ad_id="1000000013", status="replaced", replaced_by="1000000099"))   # new copy not imported yet
+        db.commit()
+        assert current_ad(db, "1000000010").ad_id == "1000000012"    # old chats get the newest settings
+        assert current_ad(db, "1000000013").ad_id == "1000000013"
+        assert current_ad(db, "404") is None

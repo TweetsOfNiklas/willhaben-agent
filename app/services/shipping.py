@@ -26,7 +26,7 @@ from typing import Any
 
 from sqlmodel import select
 
-from app.db import Conversation, MyAd, Shipment, get_setting, session, set_setting, utcnow
+from app.db import Conversation, Shipment, current_ad, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services.shipping_tariffs import CARRIERS, Option, options_for
 
@@ -194,7 +194,7 @@ def set_parcel(shipment_id: int, parcel: dict[str, Any], remember: bool = True) 
     s = update(shipment_id, parcel=p)
     if remember and s.ad_id:
         with session() as db:
-            ad = db.get(MyAd, s.ad_id)
+            ad = current_ad(db, s.ad_id)
             if ad:
                 ad.parcel = p
                 db.add(ad)
@@ -287,7 +287,7 @@ async def detect(conversation_id: str, force: bool = False) -> Shipment | None:
     if addr is None and not force:
         return claim_payment(existing.id) if claimed and existing else None
     with session() as db:
-        ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
+        ad = current_ad(db, conv.ad_id) if conv.ad_id else None
     parcel = (ad.parcel if ad and ad.parcel else None) or clean_parcel(d.get("parcel"))
     note = (d.get("note") or "").strip() or None
     if existing and existing.status == "draft":

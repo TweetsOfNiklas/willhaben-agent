@@ -369,6 +369,12 @@
       table.chat-list tr { position: relative; }
       table.chat-list a.rowlink::after { content: ""; position: absolute; inset: 0; }
       table.chat-list td.open-btn { display: none; }
+      /* hide/remove menu: a small button top right, above the row link */
+      table.chat-list td.chat-actions { position: absolute; top: .4rem; right: .4rem; z-index: 1; width: auto; padding: 0; }
+      table.chat-list td.chat-actions details.dropdown, table.chat-list td.chat-actions summary { width: auto; }
+      table.chat-list td.chat-actions summary::after { display: none; }
+      table.chat-list td.chat-actions ul { right: 0; left: auto; min-width: 14rem; }
+      table.chat-list td:first-child { padding-right: 3rem; }
       /* activity feed: long entries clamped */
       table.activity td:last-child small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
       table.activity td { padding: .35rem .25rem; }

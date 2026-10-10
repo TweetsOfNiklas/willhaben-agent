@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlmodel import col, select
 
-from app.db import Conversation, Draft, Message, MyAd, get_setting, session, set_setting, utcnow
+from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
@@ -76,6 +76,12 @@ async def sync(force: bool = False) -> dict[str, Any]:
                 row = Conversation(id=c.id)
             newer = c.last_at is not None and (row.last_message_at is None or c.last_at > row.last_message_at)
             more_unread = c.unread_count > (row.unread_count or 0)
+            if row.hidden_at is not None:
+                if not (newer and not c.last_is_mine):
+                    if row.removed:
+                        continue     # removed here: not synced again until the other person writes
+                else:
+                    row.hidden_at, row.removed = None, None    # they wrote again: back in the list
             row.ad_id = c.ad_id or row.ad_id
             row.ad_title = c.ad_title or row.ad_title
             row.partner_name = c.partner_name or row.partner_name
@@ -283,7 +289,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
     else:
         rules = get_setting("reply_rules")
         with session() as db:
-            ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
+            ad = current_ad(db, conv.ad_id) if conv.ad_id else None
         floor = ad.min_price if ad and conv.role == "seller" else None
         asking = (conv.ad_context or {}).get("price")
         if auto:
@@ -373,7 +379,7 @@ def _auto_ad(conv: Conversation) -> MyAd | None:
     if conv.role != "seller" or not conv.ad_id:
         return None
     with session() as db:
-        ad = db.get(MyAd, conv.ad_id)
+        ad = current_ad(db, conv.ad_id)
     if ad and "sold" in (ad.sale_status, ad.status):
         return None   # sold: no automatic answers to further buyers (the sold workflow offers a polite "sold" draft)
     return ad if ad and ad.auto_reply else None
@@ -402,7 +408,7 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
         why += purchase.blockers(p, d, msgs) if p is not None else [t("No open purchase for this chat")]
     else:                                 # price floor of the own ad, checked in code (app/services/min_price.py)
         with session() as db:
-            ad = db.get(MyAd, conv.ad_id) if conv and conv.ad_id else None
+            ad = current_ad(db, conv.ad_id) if conv and conv.ad_id else None
         why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text)
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":
@@ -750,3 +756,28 @@ def discard_draft(draft_id: int) -> None:
             draft.status = "discarded"
             db.add(draft)
             db.commit()
+
+
+def hide(conversation_id: str, on: bool = True) -> None:
+    """Hide a chat from the list (willhaben is not touched); it comes back when the other person writes."""
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv:
+            conv.hidden_at, conv.removed = (utcnow(), conv.removed) if on else (None, None)
+            db.add(conv)
+            db.commit()
+
+
+def remove(conversation_id: str) -> None:
+    """Delete a chat's messages and drafts here (not on willhaben) and skip it in future syncs, until the
+    other person writes again. Shipments and purchases stay: they are records of labels and money."""
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is None:
+            return
+        for model in (Message, Draft):
+            for r in db.exec(select(model).where(model.conversation_id == conversation_id)):
+                db.delete(r)
+        conv.hidden_at, conv.removed, conv.unread_count = utcnow(), True, 0
+        db.add(conv)
+        db.commit()

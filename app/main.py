@@ -247,7 +247,8 @@ async def index(request: Request):
             "unread": db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))).one(),
             "open_drafts": db.exec(select(func.count()).select_from(Draft).where(Draft.status == "draft")).one(),
             "myads": db.exec(select(func.count()).select_from(MyAd)).one(),
-            "expired": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "expired")).one(),
+            "expired": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "expired",
+                                                                             col(MyAd.replaced_by).is_(None))).one(),
         }
         soon = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.end_date).is_not(None))
                             .order_by(MyAd.end_date).limit(5)))
@@ -451,11 +452,28 @@ async def hits_mark_seen(agent_id: int | None = Form(None)):
 
 # ------------------------------------------------------------------ chats
 @app.get("/chats", response_class=HTMLResponse)
-async def chats_page(request: Request, msg: str | None = None):
+async def chats_page(request: Request, msg: str | None = None, show_hidden: bool = False):
     with session() as db:
-        convs = list(db.exec(select(Conversation).order_by(col(Conversation.last_message_at).desc().nulls_last())))
+        convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
+                             .order_by(col(Conversation.last_message_at).desc().nulls_last())))
         open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
-    return render(request, "chats.html", convs=convs, open_drafts=open_drafts, msg=msg)
+    hidden_count = sum(1 for c in convs if c.hidden_at)
+    if not show_hidden:
+        convs = [c for c in convs if not c.hidden_at]
+    return render(request, "chats.html", convs=convs, open_drafts=open_drafts, msg=msg,
+                  hidden_count=hidden_count, show_hidden=show_hidden)
+
+
+@app.post("/chats/{conversation_id}/hide")
+async def chat_hide(conversation_id: str, hidden: str = Form("1")):
+    chats.hide(conversation_id, hidden == "1")
+    return back(f"/chats?msg={quote(t('Chat hidden here (still on willhaben); it comes back when they write again') if hidden == '1' else '', safe='')}")
+
+
+@app.post("/chats/{conversation_id}/remove")
+async def chat_remove(conversation_id: str):
+    chats.remove(conversation_id)
+    return back(f"/chats?msg={quote(t('Chat removed here (still on willhaben); it comes back when they write again'), safe='')}")
 
 
 @app.post("/chats/sync")
@@ -578,14 +596,16 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
             msg = msg or t("Could not load ads: {error}", error=e)
     with session() as db:
         rows = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).desc().nulls_last())))   # most days left first
+    rows = [a for a in rows if not a.replaced_by]   # a renewed ad's old copy: its chats use the new one (current_ad)
     hidden = [a for a in rows if a.hidden]
     ads = rows if show_hidden else [a for a in rows if not a.hidden]
-    # sections: active on top, then expired (ran out, always shown: they need renewing), then the rest;
-    # sold / given away and inactive (deactivated, renewed) ads are hidden unless asked for
+    # sections: active on top, then expired (ran out recently, always shown: they need renewing), then the rest;
+    # sold / given away and inactive (deactivated, expired before the cutoff) ads are hidden unless asked for
+    cutoff = int(get_setting("myads_expired_days") or 0)
     sold = [a for a in ads if my_ads.is_sold(a)]
     active = [a for a in ads if not my_ads.is_sold(a) and a.status in ("active", "reserved")]
-    expired = [a for a in ads if not my_ads.is_sold(a) and a.status == "expired"]
-    inactive = [a for a in ads if not my_ads.is_sold(a) and a.status not in ("active", "reserved", "expired")]
+    expired = [a for a in ads if my_ads.is_expired(a, cutoff)]
+    inactive = [a for a in ads if not my_ads.is_sold(a) and a not in active and a not in expired]
     rest = [a for a in ads if a not in active and a not in expired and (show_sold or a not in sold)
             and (show_inactive or a not in inactive)]
     groups = [g for g in ((t("Active ({n})", n=len(active)), active), (t("Expired ({n})", n=len(expired)), expired),
@@ -1277,7 +1297,7 @@ async def capture_download(name: str):
 # ------------------------------------------------------------------ settings
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, msg: str | None = None):
-    keys = ["reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "auto_reply_rules", "send_verified",
+    keys = ["reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     return render(request, "settings.html", values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(), models=MODELS,
@@ -1323,6 +1343,7 @@ async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01
 @app.post("/settings")
 async def settings_save(reply_rules: str = Form(""), auto_draft: str | None = Form(None),
                         notify_messages: str | None = Form(None), expiry_warn_days: int = Form(3),
+                        myads_expired_days: int = Form(30),
                         chat_sync_limit: int = Form(10), chat_sync_since: str = Form(""),
                         push_channel: str = Form(""),
                         auto_reply_rules: str = Form(""), reply_humanize: str | None = Form(None),
@@ -1340,6 +1361,7 @@ async def settings_save(reply_rules: str = Form(""), auto_draft: str | None = Fo
     if push_channel in PUSH_CHANNELS:
         set_setting("push_channel", push_channel)
     set_setting("expiry_warn_days", str(max(0, expiry_warn_days)))
+    set_setting("myads_expired_days", str(max(0, myads_expired_days)))
     set_setting("reply_humanize", "1" if reply_humanize else "0")
     lo = min(max(0, reply_delay_min_s), 3600)
     set_setting("reply_delay_min_s", str(lo))
@@ -1874,7 +1896,8 @@ async def api_ad(ad_id: str):
 async def api_chats():
     with session() as db:
         return [c.model_dump(mode="json", exclude={"ad_context"})
-                for c in db.exec(select(Conversation).order_by(col(Conversation.last_message_at).desc().nulls_last()))]
+                for c in db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
+                                 .order_by(col(Conversation.last_message_at).desc().nulls_last()))]
 
 
 @app.get("/api/chats/{conversation_id}")

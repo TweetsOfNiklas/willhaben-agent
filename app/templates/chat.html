@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <p><a href="/chats">← {{ _("Chats") }}</a></p>
-<h3>{{ conv.partner_name or _('unknown') }} · {{ conv.ad_title or '' }}</h3>
+<div style="display:flex;gap:.5rem;align-items:flex-start;justify-content:space-between">
+  <h3>{{ conv.partner_name or _('unknown') }} · {{ conv.ad_title or '' }}
+    {% if conv.hidden_at %}<span class="badge muted">{{ _("hidden") }}</span>{% endif %}</h3>
+  {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
+</div>
 <div class="grid">
   <section>
     {% set ad = conv.ad_context or {} %}

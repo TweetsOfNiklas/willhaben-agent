@@ -6,5 +6,6 @@
  "renewed as": "erneuert als",
  "republished (was {id})": "neu veröffentlicht (vorher {id})",
  "willhaben offers no reactivation for this ad (status: {status})": "willhaben bietet für diese Anzeige keine Reaktivierung an (Status: {status})",
- "willhaben returned no ad id for the republished ad": "willhaben hat für die neu veröffentlichte Anzeige keine ID geliefert"
+ "willhaben returned no ad id for the republished ad": "willhaben hat für die neu veröffentlichte Anzeige keine ID geliefert",
+ "renewed": "erneuert"
 }

@@ -175,5 +175,7 @@
  "Open “Post an ad”": "„Anzeige aufgeben“ öffnen",
  "Open in the browser window": "Im Browserfenster öffnen",
  "Alternatively:": "Alternativ:",
- "noVNC in a new tab": "noVNC in neuem Tab"
+ "noVNC in a new tab": "noVNC in neuem Tab",
+ "Show expired ads in My ads for (days)": "Abgelaufene Anzeigen in „Meine Anzeigen“ zeigen (Tage)",
+ "Ads that ran out longer ago are listed with the inactive ones. 0 = always show.": "Länger abgelaufene Anzeigen stehen bei den inaktiven. 0 = immer zeigen."
 }

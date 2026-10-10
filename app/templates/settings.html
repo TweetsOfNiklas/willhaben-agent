@@ -453,6 +453,9 @@
         <a href="/myads">{{ _("My ads") }}</a>.</p>
       <label>{{ _("Warn before your own ads expire (days)") }}
         <input type="number" name="expiry_warn_days" form="general" value="{{ values.expiry_warn_days }}" min="0" max="30"></label>
+      <label>{{ _("Show expired ads in My ads for (days)") }}
+        <input type="number" name="myads_expired_days" form="general" value="{{ values.myads_expired_days }}" min="0">
+        <small class="muted">{{ _("Ads that ran out longer ago are listed with the inactive ones. 0 = always show.") }}</small></label>
       <button type="submit" form="general" formaction="/settings#myads">{{ _("Save") }}</button>
     </section>
 

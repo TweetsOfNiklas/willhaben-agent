@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import Any
 
 from sqlmodel import select
@@ -18,6 +18,16 @@ from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
 log = logging.getLogger(__name__)
 
 MYADVERTS_URL = "https://www.willhaben.at/iad/myprofile/myadverts"
+
+
+def is_expired(ad: MyAd, cutoff_days: int | None = None) -> bool:
+    """Ran out and can be renewed: not a renewed ad's old copy, and (with a cutoff) ended within the last N days."""
+    if ad.status != "expired" or ad.replaced_by or is_sold(ad):
+        return False
+    if not cutoff_days or ad.end_date is None:
+        return True
+    end = ad.end_date if ad.end_date.tzinfo else ad.end_date.replace(tzinfo=timezone.utc)   # SQLite: naive UTC
+    return end >= utcnow() - timedelta(days=cutoff_days)
 
 
 def is_sold(ad: MyAd) -> bool:
@@ -391,6 +401,8 @@ async def check(ad_id: str) -> MyAd | None:
         previous = row.status
         if previous == "sold":
             pass            # sold on willhaben: the public page only says "gone", keep the better status
+        elif row.replaced_by:
+            row.status = "replaced"   # republished under a new id: the old copy is gone, not expired
         elif detail is None:
             row.status = "expired"
         else:

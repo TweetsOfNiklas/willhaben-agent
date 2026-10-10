@@ -1,0 +1,12 @@
+{# hide / remove one chat, only in this app (willhaben is not touched); needs `c` (Conversation) #}
+<details class="dropdown" style="margin:0">
+  <summary role="button" class="secondary outline" style="padding:.2rem .6rem" aria-label="{{ _('Actions') }}">⋯</summary>
+  <ul dir="rtl">
+    <li><form method="post" action="/chats/{{ c.id }}/hide" style="margin:0" dir="ltr">
+      <input type="hidden" name="hidden" value="{{ '0' if c.hidden_at else '1' }}">
+      <button class="secondary outline" style="width:100%;margin:0">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form></li>
+    <li><form method="post" action="/chats/{{ c.id }}/remove" style="margin:0" dir="ltr"
+          onsubmit='return confirm({{ (_("Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.") ~ "\n\n" ~ (c.partner_name or _("unknown")) ~ " · " ~ (c.ad_title or ""))|tojson }})'>
+      <button class="btn-danger" style="width:100%;margin:0">🗑 {{ _("Remove from the app") }}</button></form></li>
+  </ul>
+</details>
