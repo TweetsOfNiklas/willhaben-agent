@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+{% if row %}
+<p><a href="/purchases">← {{ _("Purchases") }}</a></p>
+<h3>{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}</h3>
+<div class="grid">
+  <section>
+    {% include "_purchase.html" %}
+  </section>
+  <section>
+    <article>
+      {% if row.image_url %}<img src="{{ row.image_url }}" alt="" style="max-height:200px">{% endif %}
+      <dl class="specs">
+        <dt>{{ _("Mode") }}</dt><dd>{{ pcard.mode_label }}</dd>
+        <dt>{{ _("Status") }}</dt><dd>{{ pcard.status_label }}</dd>
+        <dt>{{ _("Started") }}</dt><dd>{{ row.created_at|local }}</dd>
+        <dt>{{ _("Updated") }}</dt><dd>{{ row.updated_at|local }}</dd>
+        {% if row.query %}<dt>{{ _("Search") }}</dt><dd>„{{ row.query }}“{% if row.search_id %} · <a href="/deals?search={{ row.search_id }}#ps-result">{{ _("Product search") }}</a>{% endif %}</dd>{% endif %}
+      </dl>
+      <div class="row-actions">
+        {% if row.ad_url %}<a role="button" class="secondary outline" href="{{ row.ad_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>{% endif %}
+        {% if chat_url %}<a role="button" class="outline" href="{{ chat_url }}">{{ _("Open chat") }}</a>{% endif %}
+      </div>
+    </article>
+  </section>
+</div>
+{% else %}
+<h3>{{ _("Purchases") }}</h3>
+<p class="lead">{{ _("Purchase orders from the product search and the ad viewer: the agent contacts the seller and negotiates within your maximum price. Nothing is paid automatically.") }}</p>
+{% if not rows %}
+  <p class="muted">{{ _("No purchase orders yet. Start one with Buy in the product search.") }}</p>
+{% else %}
+  <table class="stack purchase-list">
+    <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Prices") }}</th><th>{{ _("Links") }}</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{% if r.image %}<img src="{{ r.image }}" alt="" loading="lazy" style="width:4rem;height:4rem;object-fit:cover;border-radius:.4rem">{% endif %}</td>
+        <td><a href="/purchases/{{ r.id }}">{{ r.title }}</a><br><small class="muted">{{ r.mode }}{% if r.query %} · „{{ r.query }}“{% endif %}</small></td>
+        <td><span class="badge {{ r.tone }}">{{ r.status }}</span></td>
+        <td><small>{% if r.asking %}{{ _("Asking {price}", price=r.asking|eur) }}{% endif %}
+          {% if r.max %}<br>{{ _("Maximum {price} incl. shipping & fee", price=r.max|eur) }}{% endif %}
+          {% if r.agreed %}<br>{{ _("Agreed {price}", price=r.agreed|eur) }}{% endif %}</small></td>
+        <td><small>
+          <a href="/purchases/{{ r.id }}">{{ _("Details") }}</a>
+          {% if r.chat %} · <a href="{{ r.chat }}">{{ _("Chat") }}</a>{% endif %}
+          {% if r.wh_chat %} · <a href="{{ r.wh_chat }}" target="_blank" rel="noopener">willhaben ↗</a>{% endif %}
+          {% if r.ad_url %} · <a href="{{ r.ad_url }}" target="_blank" rel="noopener">{{ _("Ad") }} ↗</a>{% endif %}
+        </small></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endif %}
+{% endblock %}

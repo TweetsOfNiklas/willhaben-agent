@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -195,6 +196,7 @@ class AdDetail:
     category_id: str | None = None     # leaf category (same id space as AdSummary.category_ids)
     paylivery_enabled: bool = False    # the ad offers willhaben PayLivery (attribute payliveryEnabled)
     buy_now: bool = False              # "Sofort kaufen" (p2ppOptions.buyNowInformationDto.isBuyNowAd)
+    shipping_price: float | None = None  # cheapest PayLivery delivery price for the buyer (p2ppOptions.deliveryOptions[].price)
 
     def as_context(self) -> dict[str, Any]:
         return {
@@ -213,6 +215,7 @@ class AdDetail:
             "images": self.images[:5],
             "paylivery": self.paylivery_enabled,
             "buy_now": self.buy_now,
+            "shipping_price": self.shipping_price,
         }
 
 
@@ -231,6 +234,37 @@ def _price_from_display(v: str | None) -> float | None:
         return None
     m = re.search(r"\d[\d.]*(?:,\d{1,2})?", v)
     return _float(m.group(0).replace(".", "").replace(",", ".")) if m else None
+
+
+def _money_value(v: Any) -> float | None:
+    """A price as willhaben sends it: a number, or a text such as "4,90", "4,90 €" or "1.234,50"."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        f = float(v)
+    elif isinstance(v, str):
+        s = re.sub(r"[€\s]|EUR", "", v)
+        if "," in s:                                  # German decimal comma (dots are thousands separators)
+            s = s.replace(".", "").replace(",", ".")
+        try:
+            f = float(s)
+        except ValueError:
+            return None
+    else:
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _shipping_price(p2pp: Any) -> float | None:
+    """Cheapest PayLivery delivery price in p2ppOptions.deliveryOptions[] (None if there is no such price)."""
+    if not isinstance(p2pp, dict):
+        return None
+    opts = p2pp.get("deliveryOptions")
+    if isinstance(opts, dict):
+        opts = [opts]
+    prices = [v for o in opts or [] if isinstance(o, dict)
+              for v in [_money_value(o.get("price"))] if v is not None and v >= 0]
+    return min(prices) if prices else None
 
 
 def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
@@ -274,6 +308,7 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
         paylivery_enabled=_flag((ad.get("advertisingParameters") or {}).get("payliveryEnabled"),
                                 _first(a, "payliveryEnabled")),
         buy_now=bool(((ad.get("p2ppOptions") or {}).get("buyNowInformationDto") or {}).get("isBuyNowAd")),
+        shipping_price=_shipping_price(ad.get("p2ppOptions")),
     )
 
 

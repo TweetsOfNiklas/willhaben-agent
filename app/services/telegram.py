@@ -68,6 +68,7 @@ def kinds() -> dict[str, str]:
         "meetup": t("Appointments for the calendar"),
         "shipping": t("Shipping addresses and labels"),
         "paylivery": t("PayLivery steps (offers, payment, delivery)"),
+        "purchase": t("Purchases (negotiation, pay now)"),
     }
 
 

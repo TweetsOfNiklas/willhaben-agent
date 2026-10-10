@@ -59,10 +59,8 @@
   "Confirm on willhaben that you received the parcel?": "Auf willhaben bestätigen, dass du das Paket erhalten hast?",
   "Report a problem": "Problem melden",
   "Report a problem with this purchase on willhaben now?": "Ein Problem mit diesem Kauf jetzt auf willhaben melden?",
-  "Turn this on in Settings → PayLivery": "Einschalten unter Einstellungen → PayLivery",
   "Unknown action": "Unbekannte Aktion",
   "Not available for this side of the chat": "Diese Aktion gehört zur anderen Seite des Chats",
-  "Purchases and offers as a buyer are switched off. Turn them on in Settings → PayLivery.": "Käufe und Preisvorschläge als Käufer sind ausgeschaltet. Einschalten unter Einstellungen → PayLivery.",
   "Enter the offer amount in euros": "Betrag des Preisvorschlags in Euro eingeben",
   "This ad has no willhaben PayLivery": "Diese Anzeige hat kein willhaben PayLivery",
   "This ad has no buy-now price": "Diese Anzeige hat keinen Sofort-Kauf-Preis",
@@ -90,8 +88,10 @@
   "Offer amount in euros": "Betrag des Preisvorschlags in Euro",
   "History": "Verlauf",
   "Each step runs on willhaben in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet.": "Jeder Schritt läuft auf willhaben im Browserfenster mit eingeschalteter API-Aufnahme, weil die PayLivery-Aufrufe von willhaben noch nicht dokumentiert sind.",
-  "Allow purchases and offers as a buyer from this app (with confirmation, never automatic)": "Käufe und Preisvorschläge als Käufer aus dieser App erlauben (mit Bestätigung, nie automatisch)",
   "Notify me about PayLivery stage changes": "Mich über PayLivery-Änderungen benachrichtigen",
   "Every PayLivery action runs in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet. Send the recording file for verification.": "Jede PayLivery-Aktion läuft im Browserfenster mit eingeschalteter API-Aufnahme, weil die PayLivery-Aufrufe von willhaben noch nicht dokumentiert sind. Die Aufnahmedatei zur Prüfung schicken.",
-  "PayLivery steps (offers, payment, delivery)": "PayLivery-Schritte (Preisvorschläge, Zahlung, Zustellung)"
+  "PayLivery steps (offers, payment, delivery)": "PayLivery-Schritte (Preisvorschläge, Zahlung, Zustellung)",
+  "Approve the payment in your bank app": "Zahlung in deiner Banking-App freigeben",
+  "the purchase continues by itself afterwards": "der Kauf läuft danach von selbst weiter",
+  "Waiting for the approval in the bank app": "Warte auf die Freigabe in der Banking-App"
 }

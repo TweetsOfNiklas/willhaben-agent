@@ -39,6 +39,7 @@ REDIRECT_URI = "http://127.0.0.1:53682/"
 # events: free/busy + create entries; readonly: list calendars to pick from
 SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly"
 MIN_SLOT = timedelta(minutes=30)
+BUFFER_MAX = 240                                     # minutes kept free before and after each busy block
 WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]   # German on purpose: goes into the prompt
 
 _transport: httpx.AsyncBaseTransport | None = None   # tests inject a mock transport
@@ -265,11 +266,12 @@ def config() -> dict[str, Any]:
         "duration": int(get_setting("gcal_duration") or 30),
         "in_drafts": get_setting("gcal_in_drafts") != "0",
         "in_auto": get_setting("gcal_in_auto") == "1",
+        "buffer": min(max(int(get_setting("gcal_buffer") or 0), 0), BUFFER_MAX),
     }
 
 
 def save_config(calendars: list[str], target: str, days: int, window_start: str, window_end: str,
-                duration: int, in_drafts: bool, in_auto: bool) -> None:
+                duration: int, in_drafts: bool, in_auto: bool, buffer: int) -> None:
     for v in (window_start, window_end):
         datetime.strptime(v, "%H:%M")
     set_setting("gcal_calendars", ",".join(c.strip() for c in calendars if c.strip()) or "primary")
@@ -280,6 +282,7 @@ def save_config(calendars: list[str], target: str, days: int, window_start: str,
     set_setting("gcal_duration", str(min(max(5, duration), 480)))
     set_setting("gcal_in_drafts", "1" if in_drafts else "0")
     set_setting("gcal_in_auto", "1" if in_auto else "0")
+    set_setting("gcal_buffer", str(min(max(0, buffer), BUFFER_MAX)))
     _cache.clear()
 
 
@@ -318,10 +321,14 @@ async def busy(start: datetime, end: datetime) -> list[tuple[datetime, datetime]
 
 
 def free_slots(blocks: list[tuple[datetime, datetime]], now: datetime, days: int, window_start: str,
-               window_end: str) -> list[tuple[date, list[tuple[datetime, datetime]]]]:
-    """Free intervals (≥ 30 min) inside the daily window, per day, starting now."""
+               window_end: str, buffer_min: int = 0) -> list[tuple[date, list[tuple[datetime, datetime]]]]:
+    """Free intervals (≥ 30 min) inside the daily window, per day, starting now. Every busy block is widened by
+    buffer_min on both sides first (travel time between appointments)."""
     out = []
     (sh, sm), (eh, em) = _hm(window_start), _hm(window_end)
+    if buffer_min:
+        pad = timedelta(minutes=buffer_min)
+        blocks = [(b0 - pad, b1 + pad) for b0, b1 in blocks]
     for i in range(days):
         day = (now + timedelta(days=i)).date()
         lo = datetime(day.year, day.month, day.day, sh, sm, tzinfo=TZ)
@@ -365,7 +372,7 @@ async def availability_text(now: datetime | None = None) -> str | None:
     except CalendarError as e:
         log.warning("calendar availability failed: %s", e)
         return None
-    slots = free_slots(blocks, now, cfg["days"], cfg["window_start"], cfg["window_end"])
+    slots = free_slots(blocks, now, cfg["days"], cfg["window_start"], cfg["window_end"], cfg["buffer"])
     return format_slots(slots)
 
 

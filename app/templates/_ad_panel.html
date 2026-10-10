@@ -104,7 +104,8 @@
   });
 
   document.addEventListener('keydown', e => {
-    if (!dlg.open) return;
+    if (!dlg.open || document.getElementById('buy-dialog')?.open) return;   // the buy dialog above keeps the keys
+    if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;   // typing keeps its arrow keys
     if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
     if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
   });

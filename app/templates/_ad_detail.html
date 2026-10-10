@@ -47,6 +47,12 @@
         {% endfor %}
       {% endif %}
       <a href="{{ d.url }}" target="_blank" rel="noopener" role="button" class="secondary outline">{{ _("Open on willhaben") }} ↗</a>
+      {% if purchase_enabled() %}
+        <a role="button" data-buy="{{ d.ad_id }}" href="/purchases/new/{{ d.ad_id }}">🛒 {{ _("Buy") }}</a>
+      {% else %}
+        <button type="button" class="secondary outline" disabled>🛒 {{ _("Buy") }}</button>
+        <small class="muted"><a href="/settings#purchase">{{ _("Turn on purchases in Settings") }}</a></small>
+      {% endif %}
     </div>
     {% if d.description %}<div class="adv-desc">{{ d.description }}</div>{% endif %}
   </div>

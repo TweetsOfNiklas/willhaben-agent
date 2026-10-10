@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime, timezone
 
 import pytest
@@ -133,3 +134,36 @@ def test_clean_text_keeps_paragraphs_and_lists():
     raw = ("<p><strong>Carbon NEU </strong></p><p><strong>Shimano 105</strong></p><p>Größe M</p>"
            "<ul><li>Rechnung</li><li>Garantie &amp; Versand</li></ul>Zeile 1<br>Zeile 2")
     assert clean_text(raw) == "Carbon NEU\nShimano 105\nGröße M\n\n• Rechnung\n• Garantie & Versand\nZeile 1\nZeile 2"
+
+
+@pytest.mark.parametrize("options, expected", [
+    ([], None),                                              # the live fixture: no PayLivery delivery options
+    ([{"price": "4,90"}, {"price": 3.5}], 3.5),              # cheapest of several
+    ([{"price": "4,90 €"}, {"price": "1.234,50"}], 4.9),     # German text prices
+    ([{"price": "6"}], 6.0),
+    ([{"price": 0}], 0.0),                                   # free delivery is a price too
+    ([{"price": None}, {"price": "x"}, {"price": True}], None),
+    ({"price": "2,50"}, 2.5),                                # a single option, not in a list
+])
+def test_shipping_price_from_paylivery_delivery_options(options, expected):
+    page = copy.deepcopy(load("detail_1662146981_nextdata.json"))
+    page["advertDetails"]["p2ppOptions"]["deliveryOptions"] = options
+    d = parse_detail(page)
+    assert d.shipping_price == expected
+    assert d.as_context()["shipping_price"] == expected
+
+
+def test_shipping_price_none_without_p2pp_options():
+    page = copy.deepcopy(load("detail_1662146981_nextdata.json"))
+    del page["advertDetails"]["p2ppOptions"]
+    assert parse_detail(page).shipping_price is None
+
+
+def test_shipping_price_of_a_live_paylivery_ad():
+    """Recorded on 2026-10-10 from a real PayLivery ad (Post, parcel size M): the buyer's delivery price is 7.90."""
+    from app.willhaben.parse import parse_detail
+    from tests.conftest import load
+
+    nd = load("detail_922008415_nextdata.json")
+    d = parse_detail(nd["props"]["pageProps"])
+    assert d.paylivery_enabled and d.buy_now and d.shipping_price == 7.9 and d.price == 100.0

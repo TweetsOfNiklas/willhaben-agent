@@ -35,6 +35,22 @@ It runs on your own server, from your home internet connection, and you control 
   search agent created from the search. Toggles for unusual names (misspellings, nicknames, generic descriptions) and other categories
   (mis-categorised ads, bundles) dig for hidden deals; the depth (≈3 / 6 / 12 searches) is the number of willhaben
   requests, Claude is called two or three times (plan, ranking, photo check).
+- **Purchase orders** ("🛒 Buy" on a product search result or in the ad viewer opens the buy dialog): the ad on the
+  left, on the right a three-step buy dialog (step chips: how to buy, the maximum, start): how to buy (PayLivery with
+  the ad's shipping price, a bank transfer or pickup, the PayLivery card is preselected when the setting asks for it),
+  the maximum including shipping and, with PayLivery, willhaben's buyer protection fee of 4.5 % (min. € 0.99, max.
+  € 49.99; the field always holds the asking price plus the shipping and fee of the chosen mode
+  until you change it, a cleared field is refilled; one pill next to the field rates it as percent and level, and below
+  it one price-fairness hint as on the product search card: the deal bar with the asking price and the maximum, whose
+  ring you can drag to set the price, the cheapest and the most expensive comparable price at its ends, the level, the
+  distance to the median of the comparable ads, and at most three chips for the cheapest, the lower-quartile and the
+  median price when they lie below the asking price), and a summary with the start button. Explanations are tooltips. A
+  preferred pickup time is asked only for pickup. The agent contacts the seller,
+  negotiates as a buyer within your maximum and your rules, and then sends a PayLivery offer, your shipping address
+  (bank transfer) or agrees a pickup appointment (added to your calendar if connected). When payment is due you get a
+  push and a "Pay now!" card in the chat, and every order is listed under Purchases. **Nothing is paid automatically:**
+  you pay in the willhaben app or with the PayLivery button, where the 3-D Secure approval happens on your phone, or you
+  transfer the amount yourself and press Paid.
 - **Price check** (same tab): paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
   green-to-red bar against comparable listings of the **same kind of item** (same willhaben category, without accessories,
   other variants and extreme prices; you can pick another category), the Geizhals new price and, on click, Claude's verdict.
@@ -232,6 +248,7 @@ Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_sea
 | Home Assistant events, pushes with action buttons | done |
 | Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
 | Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet** |
+| Purchase orders (buyer side): contact, negotiation, PayLivery offer, pay-now push, pickup appointments | built and tested with fakes; **not yet live-tested** |
 | PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → willhaben account → Advanced → API recording) |
 | Connection watchdog, backup, bug report, request statistics | done |
 | MCP server | done |

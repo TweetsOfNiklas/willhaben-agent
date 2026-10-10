@@ -5,6 +5,7 @@ Verification status (see docs/willhaben-api.md):
              chat-api/v1/conversations/{id}/messages (first MESSAGE_CANDIDATES entry),
              my adverts (server-rendered in /iad/myprofile/myadverts __NEXT_DATA__)
   FROM BUNDLE send message (chat WebSocket send_message; confirmed per send via the REST history)
+  FROM BUNDLE create conversation (chat WebSocket create_conversation; live unverified, see create_conversation)
   FROM BUNDLE mark sold / reserved (app/willhaben/sales.py, links from the my-adverts list; needs live verification)
   MISSING    reactivate, ad insertion -> need a request capture
 Unverified write endpoints are never guessed: they raise EndpointUnknown until captured.
@@ -243,6 +244,13 @@ def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
     return out
 
 
+def _preview_matches(preview: str | None, text: str) -> bool:
+    """The list shows the newest message, possibly cut short with an ellipsis: compare the shared start."""
+    p = (preview or "").strip().rstrip("…").rstrip()
+    x = text.strip()
+    return bool(p) and (x == p or x.startswith(p) or p.startswith(x))
+
+
 def _link_path(link: dict[str, Any]) -> str:
     return f"/webapi/{link.get('serviceName') or 'iad'}{link['relativePath']}"
 
@@ -337,6 +345,44 @@ class AccountClient:
                 if m.get("client_message_id") == client_id or (m.get("is_mine") and (m.get("text") or "").strip() == text):
                     return str(m.get("message_id") or client_id)
         raise SendFailed(t("Message did not show up in the history (response: {status}) – check on willhaben",
+                           status=res.get('status')))
+
+    async def create_conversation(self, ad_id: str, text: str) -> str:
+        """Open a new chat about an ad with a first message (the buyer's opener). Returns the conversation id.
+
+        Frame from the chat web app bundle (2026-10-09, see docs/willhaben-api.md "Sending chat messages"):
+        `{"req_type": "create_conversation", "request_id", "payload": {"ad_id", "client_conversation_id", "message"}}`.
+        LIVE UNVERIFIED: the response shape is unseen. The id is taken from the response when it carries one
+        (`conversation_id` at top level, in `payload` or in `response`); otherwise the conversation list is polled
+        for the entry of this ad whose newest message is ours with this text. A new conversation only counts once it
+        shows up there.
+
+        Fallback, recorded but NOT implemented: the REST call
+        `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` (bundle, unverified). Switch to it only if
+        the WebSocket frame is refused in the first live use (capture label `purchase-opener`).
+        """
+        text = text.strip()
+        if not text:
+            raise ValueError(t("Empty message"))
+        client_id, request_id = str(uuid.uuid4()), str(uuid.uuid4())
+        frame = {"req_type": "create_conversation", "request_id": request_id,
+                 "payload": {"ad_id": str(ad_id), "client_conversation_id": client_id, "message": text}}
+        res = await self.s.ws_request(CHAT_WS, frame, request_id, req_type="create_conversation")
+        if res.get("status") == "error":
+            raise SendFailed(t("willhaben rejected the new conversation: {detail}",
+                               detail=res.get('response') or res.get('error') or res))
+        if res.get("status") in ("ws_error", "closed") and not res.get("acked"):
+            raise SendFailed(t("Chat connection failed ({status})", status=f"{res.get('status')} {res.get('code') or ''}".strip()))
+        cid = _pick(res, "conversation_id", "payload.conversation_id", "response.conversation_id")
+        if cid:
+            return str(cid)
+        # no id in the answer (or only an ack before the timeout): the conversation list decides
+        for attempt in range(3):
+            await asyncio.sleep(1.5 * (attempt + 1))
+            for c in await self.conversations(limit=20):
+                if c.ad_id == str(ad_id) and c.last_is_mine is not False and _preview_matches(c.last_text, text):
+                    return c.id
+        raise SendFailed(t("Conversation did not show up in the list (response: {status}) – check on willhaben",
                            status=res.get('status')))
 
     async def my_adverts(self) -> list[OwnAdvert]:

@@ -87,7 +87,7 @@ search-agent builder and the price-check category selector)
 | User statistics | `GET /webapi/iad/user/statistics` | V |
 | Watchlist | `GET /webapi/iad/userfolders/all/{userId}` | Q |
 | Number of search alerts | `GET /webapi/ad-search/alert/user/activeCount` | V |
-| Create conversation for an ad | `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` | V (bundle) |
+| Create conversation for an ad (first message to the seller) | chat WebSocket `create_conversation` `{ad_id, client_conversation_id, message}`, see "Sending chat messages" → `conversation_id` from the answer, else found in the conversation list. Fallback (not used): `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` | from the bundle, live unverified |
 | First message to the seller | `POST /webapi/iad-messaging/sendrequest/chat` (JSON, fields ?) | V path |
 | Contact request by e-mail | `POST /webapi/iad-messaging/sendrequest` | V path |
 | Messages of a conversation | `GET /webapi/chat-api/v1/conversations/{id}/messages?limit=100&offset=0` → `conversation_info` (same as list entry) + `messages[]` with `message_id`, `type` (`text` / `integration_message` / `system_message`), `text`, `is_mine`, `read`, `created_at`, `parameters` | V |
@@ -129,7 +129,10 @@ No REST call: the web app sends via the chat WebSocket `wss://chat-realtime-web.
 
 - Send: `{"req_type": "send_message", "request_id": "<uuid>", "payload": {"conversation_id": "…", "client_message_id": "<uuid>", "text": "…", "type": "text"}}`
   → responses with the same `request_id`, `req_type: "send_message"`, `status`: `ack` → `success` | `error`.
-- New conversation for an ad: `req_type: "create_conversation"`, `payload: {ad_id, client_conversation_id, message}`.
+- New conversation for an ad: `{"req_type": "create_conversation", "request_id": "<uuid>", "payload": {"ad_id": "…", "client_conversation_id": "<uuid>", "message": "…"}}`
+  (bundle, 2026-10-09). **Live unverified**: the answer's shape is unknown. `AccountClient.create_conversation` takes
+  `conversation_id` from the answer if present, otherwise polls `conversations` for the ad's entry whose newest message is ours
+  with that text. Used for purchase orders (buyer side, see below).
 - Health check: `{"req_type": "ping"}` → `{"req_type": "ping", "status": "success"}` (confirmed live).
 - Read receipt: `{"req_type": "mark_message_as_read", "payload": {"conversation_id": "…", "message_id": "…"}}`, no
   `request_id`, fire-and-forget; the web app sends one per unread incoming message (`read: false` in the history) when
@@ -139,6 +142,57 @@ No REST call: the web app sends via the chat WebSocket `wss://chat-realtime-web.
 - Deep link to a conversation: `/iad/myprofile/chat/<conversation_id>` (Next route `[[...slug]]`).
 
 The app verifies every sent message via `GET chat-api/v1/conversations/{id}/messages` (`client_message_id`).
+
+## Purchase orders (buyer side, "Kaufauftrag") – built with fakes, not live-tested
+
+A purchase order starts from a search hit or an ad: the agent writes to the seller in a new chat and negotiates as the
+buyer. Same machinery as the automatic seller replies, with code guards (max price, limits, no address or bank data
+unless the order says so). Planned flow (`app/services/purchase.py`):
+
+1. **Start**, mode `paylivery` (the ad has PayLivery and the buyer setting is on) or `direct` (no PayLivery: the own
+   shipping address is sent after agreement, the seller's bank details come from the chat).
+2. **Opener**: `AccountClient.create_conversation(ad_id, text)` sends the first message as a new chat (WebSocket
+   `create_conversation`, see "Sending chat messages"). The new conversation is synced like any other chat
+   (`messages` endpoint, notices, role `buyer`).
+3. **Negotiation** in the chat: replies over `send_message`, price moves in small steps, never above the max price.
+4. **Closing**, `paylivery`: once agreed, the agent runs the PayLivery action `offer` in the browser (see "Actions"
+   above). When the seller accepts (notice `offer_accepted`), the purchase moves to `pay_now` and the user gets a push
+   "Jetzt bezahlen!". Only the user pays, with the "Buy now & pay" button on the chat page; the agent never pays.
+   `direct`: after agreement the agent sends the own address and asks for the bank details; the user transfers the
+   money and marks the order paid.
+5. The order shows as a card in the chat and in a list of purchase orders.
+
+**Shipping and maximum price.** The maximum price includes shipping. The buyer's delivery price of a PayLivery ad is read
+from `advertDetails.p2ppOptions.deliveryOptions[].price` (the cheapest option; numbers or German text such as "4,90";
+`AdDetail.shipping_price`, None without such a price). **Live unverified**: the saved detail fixture has an empty
+`deliveryOptions` list, so the field is only known from the bundle's shape. Record one PayLivery ad with options (API
+recording on the ad page) and check the price format. Without a price the order estimates the shipping (PayLivery 6 €,
+bank transfer 6 €, `SHIPPING_ESTIMATE` in `app/services/purchase.py`); a seller-named shipping cost counts only when the
+amount appears in his text. Market figures at the start: `median`, `min` and `p25` of the comparable ads, plus the count.
+
+**Buyer protection fee (PayLivery).** With PayLivery the *buyer* pays, besides the shipping, willhaben's buyer protection
+fee ("Käuferschutzgebühr"); the seller pays nothing. Source: help centre article "Wie viel kostet PayLivery -
+Online-Zahlung und Versand?" (https://hilfe.willhaben.at/hc/de/articles/360011365380, updated 2026-10-09): 4.5 % of the
+item price, at least € 0.99, at most € 49.99 (the cap applies from an item price of about € 1,111); "the fee can vary by
+category and item price", so the rule is an approximation, kept in `PAYLIVERY_FEE_PCT/MIN/MAX` in
+`app/services/purchase.py`. Pickup and a bank transfer without PayLivery have no fee. The maximum price of a PayLivery
+order therefore covers item + shipping + fee: `paylivery_fee()` computes the fee in whole cents (rounded half up),
+`item_ceiling()` inverts `item + fee(item) <= maximum - shipping`, and the guards (agreement, buy-now shortcut) compare
+the total incl. fee with the maximum. The PayLivery offer stays the plain item price, willhaben adds shipping and fee at
+checkout. The buy dialog carries the rule as `data-fee` and mirrors the maths in `window.wbBuy` (`fee`, `costs`, `item`).
+Not live-verified: the amounts shown at the real checkout (compare them once with `costs_of()`).
+
+Hooks: `paylivery.on_stage(fn)` registers `fn(conv, stage, state)` (async). It runs as a background task after every
+PayLivery stage change of a chat, from a notice (`_apply_and_push`) or from an own successful browser action
+(`_record`). Failing hooks are logged and do not affect the sync. Sync callers without a running event loop do not
+fire hooks.
+
+**To record on the first live use** (Session → API recording, label `purchase-opener`): start one purchase order on a
+test ad you can leave, and keep the capture until the first seller answer. It must contain the `create_conversation`
+frame and its answer (look for `conversation_id`, its position and the status values: `ack`, `success`, `error`), and
+the conversation list entry afterwards (`ad_info.id`, `last_message.is_mine`, `last_message.preview`). If the frame is
+refused, switch to the REST fallback `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` (record it
+under the same label) and update this section and the table row.
 
 ## Mark as sold / reserved (from the my-adverts bundle, 2026-10-09)
 
@@ -283,10 +337,14 @@ Each step: the visible fields and buttons are collected (passwords, card and ban
 answers with fills, one button to click and a status (continue | done | need_human | abort), at most 10 steps. Every
 click is checked: a commit button of another action, a deny-listed word (löschen, abmelden, registrieren, Konto,
 Bedingungen, Cookie consents …) or an unlabelled element is refused. Terms and consent checkboxes are never ticked, card
-fields are only handed to `label_buy.fill_card_fields` when that helper exists, and a payment check (3-D Secure, TAN,
-another website) stops the step: the page stays open in the remote view and the chat shows why. `done` counts as success
-only when this run pressed the action's commit button. Buying and offers need the setting "Allow purchases and offers as
-a buyer" and PayLivery on the ad; a buy-now purchase also needs the ad's buy-now flag (`advertDetails.p2ppOptions.
+fields are only handed to `label_buy.fill_card_fields` when that helper exists. A payment check (3-D Secure, TAN,
+another website) in the buy action does not stop the run: once, a push asks for the approval in the bank app (the
+chat's history records the wait), and the run polls every 3 s for up to 10 minutes (`BANK_WAIT_S`, `BANK_POLL_S`)
+until the page is back on willhaben, then goes on with the step loop (Claude sees the confirmation and answers
+`done`). Only after the timeout does it stop, and the chat then shows the reason with the remote-view hint. The other
+actions stop at a payment check at once and leave the page open in the remote view. `done` counts as success
+only when this run pressed the action's commit button. Buying and offers need PayLivery on the ad (no setting: every
+offer or purchase asks for a confirmation on the chat page, and a purchase order sends its offer itself); a buy-now purchase also needs the ad's buy-now flag (`advertDetails.p2ppOptions.
 buyNowInformationDto.isBuyNowAd`); PayLivery on the ad is `advertDetails.advertisingParameters.payliveryEnabled`
 (a list, "true"/"false"). Each purchase or offer asks for a confirmation in the browser.
 

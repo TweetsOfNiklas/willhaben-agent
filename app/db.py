@@ -117,6 +117,7 @@ class Draft(SQLModel, table=True):
     feedback: str | None = None       # up | down, from Telegram buttons
     feedback_note: str | None = None  # what was wrong (goes into later automatic answers)
     meetup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # appointment this answer fixes
+    purchase: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # buyer side: Claude's purchase_state
 
 
 class MyAd(SQLModel, table=True):
@@ -251,6 +252,35 @@ class ProductSearch(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class Purchase(SQLModel, table=True):
+    """A purchase order (Kaufauftrag, app/services/purchase.py): the agent negotiates as buyer until the user pays."""
+    id: int | None = Field(default=None, primary_key=True)
+    ad_id: str = Field(index=True)
+    ad_title: str | None = None
+    ad_url: str | None = None
+    image_url: str | None = None
+    asking_price: float | None = None      # price of the ad when the order started
+    median_price: float | None = None      # median of comparable ads (deals.analyze), if there are enough
+    max_price: float | None = None         # code-enforced ceiling incl. shipping; default = asking price
+    mode: str = "paylivery"                # paylivery | direct | pickup
+    pickup_window: str | None = None       # pickup: the user's preferred time window (free text)
+    pickup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # pickup: {start, minutes, location}
+    status: str = "new"                    # see app/services/purchase.py STATUSES
+    conversation_id: str | None = Field(default=None, index=True)
+    agreed_price: float | None = None      # item price (without shipping)
+    shipping_cost: float | None = None     # shipping in euro; the effective value is purchase.shipping_of(row)
+    shipping_source: str | None = None     # "ad" (PayLivery price of the ad) | "chat" (named by the seller); else estimate
+    agreed_total: float | None = None      # agreed item price + shipping (or the agreed total of the seller)
+    market: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # {median, min, p25, count} at start
+    payment: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # direct: {iban, holder, amount, reference}
+    note: str | None = None                # last remark of Claude, or why it is paused / failed
+    log: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # [{at, status, text}], newest last
+    search_id: int | None = None           # ProductSearch the order came from
+    query: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class TelegramAction(SQLModel, table=True):
