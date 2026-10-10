@@ -67,3 +67,34 @@ async def test_import_and_check_all_keep_account_status(monkeypatch):
         rows = {r.ad_id: r for r in db.exec(select(MyAd))}
     assert rows["1000000001"].status == "active" and rows["1000000001"].heading == "Anzeige 1000000001"
     assert rows["1000000002"].status == "Deaktiviert"
+
+
+def _links(ad, ids):
+    ad["advertEditStatusActionsList"] = {"contextLinkList": {"contextLink": [
+        {"id": i, "relativePath": f"/bap/{i}/{ad['id']}", "serviceName": "iad"} for i in ids]}}
+    return ad
+
+
+async def test_ended_passive_ad_is_renewed(monkeypatch):
+    """willhaben lists a run-out ad as "Passiv" (only Neu veröffentlichen + Löschen), never as "expired"; an ad
+    deactivated by hand is "Passiv" too but keeps Aktivieren and must stay offline."""
+    page = json.loads(json.dumps(NEXT))
+    page["props"]["pageProps"]["initialUserAdsList"]["verticalList"][1]["advertDetails"] = [
+        _links(_ad("1000000003", "passive", "Passiv", "2026-10-09T21:53:08+02:00"), ["6", "3"]),
+        _links(_ad("1000000004", "passive", "Passiv", "2026-11-01T10:00:00+01:00"), ["4", "6", "3"])]
+    with session() as db:
+        db.add(MyAd(ad_id="1000000003", status="Passiv", auto_renew=True))
+        db.add(MyAd(ad_id="1000000004", status="Passiv", auto_renew=True))
+        db.commit()
+    monkeypatch.setattr(my_ads, "get_session", lambda: _FakeSession(page))
+    renewed = []
+
+    async def reactivate(row):
+        renewed.append(row.ad_id)
+
+    monkeypatch.setattr(my_ads, "_reactivate", reactivate)
+    res = await my_ads.check_all()
+    assert renewed == ["1000000003"] and res["reactivation"] == 1
+    with session() as db:
+        assert db.get(MyAd, "1000000003").status == "expired"
+        assert db.get(MyAd, "1000000004").status == "Passiv"

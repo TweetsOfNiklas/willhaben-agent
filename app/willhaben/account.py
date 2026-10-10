@@ -178,6 +178,14 @@ ACTION_DELETE = "3"       # delete the ad for good: DELETE, no body (the delete-
 REPUBLISHABLE = ("expired", "passive")
 
 
+def has_ended(ad: OwnAdvert) -> bool:
+    """The ad's run is over (willhaben lists it as "Passiv", not "expired"): no ACTIVATE, only REPUBLISH.
+    An ad deactivated by hand is passive too but keeps ACTIVATE, so it does not count."""
+    links = ad.actions or {}
+    return ad.status == "expired" or (ad.status == "passive" and ACTION_ACTIVATE not in links
+                                      and ACTION_REPUBLISH in links)
+
+
 def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
     """Own ads from the `__NEXT_DATA__` of /iad/myprofile/myadverts (all verticals, first 50)."""
     try:
