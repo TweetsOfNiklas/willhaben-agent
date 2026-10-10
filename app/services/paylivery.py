@@ -24,7 +24,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from sqlmodel import col, select
@@ -47,8 +47,9 @@ MAX_LABEL_BYTES = 10_000_000
 HISTORY_CAP = 30
 APPLIED_CAP = 200                 # notice ids already applied to a chat's state
 MAX_STEPS = 10                    # Claude steps of one browser action
+BANK_WAIT_S = 600                 # buy: how long a bank/3-D Secure step is waited for (approval in the bank app)
+BANK_POLL_S = 3
 MAX_AMOUNT = 100_000.0
-BUY_SETTING = "paylivery_buy_allowed"
 NOTIFY_SETTING = "paylivery_notify"
 CHAT_URL = "https://www.willhaben.at/iad/myprofile/chat"
 ROLES = ("seller", "buyer")
@@ -405,7 +406,7 @@ def apply_notice(conv: Conversation, msg: Message) -> dict[str, Any] | None:
 
 
 def _record(conversation_id: str, action: str, ok: bool, text: str, amount: float | None) -> None:
-    """History entry of a browser action; a successful one also moves the stage."""
+    """History entry of a browser action; a successful one also moves the stage (and fires the stage hooks)."""
     at = utcnow().isoformat()
     stage = ACTION_STAGE.get(action) if ok else None
 
@@ -414,7 +415,95 @@ def _record(conversation_id: str, action: str, ok: bool, text: str, amount: floa
             return _set_stage(st, stage, at, f"{action}: {text}", {"amount": amount})
         return _add_history(st, at, st.get("stage"), f"{action}: {text}")
 
-    _update_state(conversation_id, change)
+    state = _update_state(conversation_id, change)
+    if stage and state is not None:
+        _fire_stage_hooks(conversation_id, stage, state)
+    _fire_action_hooks(conversation_id, action, ok, text)
+
+
+# ------------------------------------------------------------------ stage hooks
+# Other modules react to a chat's PayLivery stage (e.g. purchase orders). A hook gets (conv, stage, state): the chat
+# as it is now, the stage just reached and the chat's whole PayLivery state. Hooks run as background tasks, one
+# failing hook is logged and never blocks the others, the chat sync or the browser action.
+StageHook = Callable[[Conversation, str, dict[str, Any]], Awaitable[Any]]
+STAGE_HOOKS: list[StageHook] = []
+_hook_tasks: set[asyncio.Task] = set()
+
+
+def on_stage(fn: StageHook) -> StageHook:
+    """Register a stage hook (usable as a decorator). Registering the same function twice does nothing."""
+    if fn not in STAGE_HOOKS:
+        STAGE_HOOKS.append(fn)
+    return fn
+
+
+async def _run_stage_hooks(conv: Conversation, stage: str, state: dict[str, Any]) -> None:
+    for fn in list(STAGE_HOOKS):
+        try:
+            await fn(conv, stage, copy.deepcopy(state))
+        except Exception as e:  # noqa: BLE001 - a hook must not break the others or the sync
+            log.warning("PayLivery stage hook %s failed for chat %s at %s: %s",
+                        getattr(fn, "__name__", fn), conv.id, stage, e)
+
+
+def _fire_stage_hooks(conversation_id: str, stage: str, state: dict[str, Any]) -> None:
+    """Schedule the hooks for a stage change; never waits for them. Sync callers without a running event loop
+    (scripts, plain tests) have nothing to schedule on, so their hooks do not run."""
+    if not STAGE_HOOKS:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        log.debug("PayLivery stage %s of chat %s: no event loop, stage hooks not run", stage, conversation_id)
+        return
+    try:
+        conv = _conv(conversation_id)
+        if conv is None:
+            return
+        task = loop.create_task(_run_stage_hooks(conv, stage, state))
+    except Exception as e:  # noqa: BLE001 - scheduling a hook never breaks the caller
+        log.warning("PayLivery stage hooks for chat %s not scheduled: %s", conversation_id, e)
+        return
+    _hook_tasks.add(task)
+    task.add_done_callback(_hook_tasks.discard)
+
+
+# Action hooks: a browser action ended (ok or not). fn(conv, action, ok, text); same scheduling as the stage hooks.
+ActionHook = Callable[[Conversation, str, bool, str], Awaitable[Any]]
+ACTION_HOOKS: list[ActionHook] = []
+
+
+def on_action(fn: ActionHook) -> ActionHook:
+    if fn not in ACTION_HOOKS:
+        ACTION_HOOKS.append(fn)
+    return fn
+
+
+async def _run_action_hooks(conv: Conversation, action: str, ok: bool, text: str) -> None:
+    for fn in list(ACTION_HOOKS):
+        try:
+            await fn(conv, action, ok, text)
+        except Exception as e:  # noqa: BLE001 - a hook must not break the others
+            log.warning("PayLivery action hook %s failed for chat %s (%s): %s", getattr(fn, "__name__", fn), conv.id, action, e)
+
+
+def _fire_action_hooks(conversation_id: str, action: str, ok: bool, text: str) -> None:
+    if not ACTION_HOOKS:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    try:
+        conv = _conv(conversation_id)
+        if conv is None:
+            return
+        task = loop.create_task(_run_action_hooks(conv, action, ok, text))
+    except Exception as e:  # noqa: BLE001
+        log.warning("PayLivery action hooks for chat %s not scheduled: %s", conversation_id, e)
+        return
+    _hook_tasks.add(task)
+    task.add_done_callback(_hook_tasks.discard)
 
 
 # ------------------------------------------------------------------ notices -> shipments (seller only)
@@ -466,6 +555,7 @@ async def _apply_and_push(conv: Conversation, msg: Message) -> None:
         return
     if changed is not None:
         await _push(conv, changed, msg)
+        _fire_stage_hooks(conv.id, changed["stage"], changed)
 
 
 async def _push(conv: Conversation, state: dict[str, Any], msg: Message) -> None:
@@ -682,19 +772,16 @@ def buy_amount(conv: Conversation) -> float | None:
     return parse_amount(str((conv.ad_context or {}).get("price") or ""))
 
 
-def _action_view(name: str, amount: float | None, buy_on: bool) -> dict[str, Any]:
-    money = name in MONEY_ACTIONS
+def _action_view(name: str, amount: float | None) -> dict[str, Any]:
     return {**_ui(name), "name": name, "amount": amount, "input": name == "offer",
-            "amount_text": _money(amount), "disabled": money and not buy_on,
-            "note": t("Turn this on in Settings → PayLivery") if money and not buy_on else ""}
+            "amount_text": _money(amount), "disabled": False, "note": ""}
 
 
 def settings_state() -> dict[str, Any]:
-    return {"buy_allowed": get_setting(BUY_SETTING) == "1", "notify": get_setting(NOTIFY_SETTING) != "0"}
+    return {"notify": get_setting(NOTIFY_SETTING) != "0"}
 
 
-def save_settings(buy_allowed: bool, notify: bool) -> None:
-    set_setting(BUY_SETTING, "1" if buy_allowed else "0")
+def save_settings(notify: bool) -> None:
     set_setting(NOTIFY_SETTING, "1" if notify else "0")
 
 
@@ -712,7 +799,6 @@ def card(conv) -> dict[str, Any] | None:
     stage = st.get("stage")
     if role not in ROLES or not (stage or flags["paylivery"]):
         return None
-    buy_on = get_setting(BUY_SETTING) == "1"
     names = allowed_actions(role, stage, flags)
     s = shipping.open_for(conv.id) if role == "seller" else None
     if role == "seller" and st.get("label_url") and not (s and s.label_path) and "label" not in names:
@@ -722,24 +808,22 @@ def card(conv) -> dict[str, Any] | None:
         "role": role, "stage": stage, "stage_label": stage_label(stage), "next": next_step(role, stage),
         "amount": st.get("amount"), "offer": st.get("offer"), "deadline": _date_text(st.get("deadline")),
         "tracking": st.get("tracking"), "history": list(reversed(st.get("history") or []))[:HISTORY_CAP],
-        "actions": [_action_view(n, amount if n == "buy" else (st.get("offer") if n == "offer" else None), buy_on)
+        "actions": [_action_view(n, amount if n == "buy" else (st.get("offer") if n == "offer" else None))
                     for n in names],
         "busy": _busy.get(conv.id), "busy_label": _ui(_busy[conv.id])["label"] if conv.id in _busy else "",
-        "buy_on": buy_on, "open_url": CHAT_URL, "shipment_id": s.id if s else None,
+        "open_url": CHAT_URL, "shipment_id": s.id if s else None,
         "label_saved": bool(s and s.label_path), "paylivery": flags["paylivery"],
     }
 
 
 # ------------------------------------------------------------------ actions
 def check_action(conv: Conversation, action: str, amount: float | None) -> None:
-    """Refusals that need no browser: role, the buyer setting, amounts, and the purchase rules of the ad."""
+    """Refusals that need no browser: role, amounts, and the purchase rules of the ad."""
     if action not in ACTION_ROLE:
         raise PayLiveryError(t("Unknown action"))
     need = ACTION_ROLE[action]
     if need and conv.role != need:
         raise PayLiveryError(t("Not available for this side of the chat"))
-    if action in MONEY_ACTIONS and get_setting(BUY_SETTING) != "1":
-        raise PayLiveryError(t("Purchases and offers as a buyer are switched off. Turn them on in Settings → PayLivery."))
     if action == "offer" and not (amount and 0 < amount <= MAX_AMOUNT):
         raise PayLiveryError(t("Enter the offer amount in euros"))
     if action == "buy":
@@ -994,6 +1078,36 @@ def _stopped(note: str) -> str:
     return t("Stopped: {note}. The page stays open in the remote view (Session page) – finish it there.", note=detail)
 
 
+async def _wait_for_bank(page) -> bool:
+    """buy: the bank step is approved in the user's bank app and willhaben's page goes on by itself. Polls every
+    BANK_POLL_S up to BANK_WAIT_S; True once no bank step is shown any more, False on timeout."""
+    for _ in range(BANK_WAIT_S // BANK_POLL_S):
+        await asyncio.sleep(BANK_POLL_S)
+        if await _bank_reason(page) is None:
+            await _settle(page)
+            if await _bank_reason(page) is None:
+                return True
+    return False
+
+
+async def _bank_push(conv: Conversation, amount: float | None) -> None:
+    """buy: once per action, a push asks for the approval in the bank app; the history records the wait."""
+    at = utcnow().isoformat()
+    _update_state(conv.id, lambda st: _add_history(st, at, st.get("stage"),
+                                                   t("Waiting for the approval in the bank app")))
+    if get_setting(NOTIFY_SETTING) == "0":
+        return
+    from app.services.notify import notify
+
+    ad = (conv.ad_context or {}).get("title") or conv.ad_title or ""
+    message = " · ".join(p for p in (ad, _money(amount), t("the purchase continues by itself afterwards")) if p)
+    try:
+        await notify("paylivery", t("Approve the payment in your bank app"), message,
+                     url=f"{_base()}/chats/{conv.id}#paylivery", data={"conversation_id": conv.id})
+    except Exception as e:  # noqa: BLE001 - a failed push never stops the purchase
+        log.warning("PayLivery bank push failed: %s", e)
+
+
 async def _drive(sess, conv: Conversation, action: str, amount: float | None) -> tuple[bool, str]:
     """The Claude-guided step loop of one action. Returns (done, message for the user)."""
     await sess.open_url(_start_url(conv, action))
@@ -1001,11 +1115,17 @@ async def _drive(sess, conv: Conversation, action: str, amount: float | None) ->
     await _settle(page)
     await _dismiss(page)
     goal = _goal(action, amount)
-    final_clicked = card_filled = False
+    final_clicked = card_filled = pushed = False
     for step in range(MAX_STEPS):
         reason = await _bank_reason(page)
         if reason:
-            return False, _stopped(t("the page needs you: {reason}", reason=reason))
+            if action != "buy":
+                return False, _stopped(t("the page needs you: {reason}", reason=reason))
+            if not pushed:
+                pushed = True
+                await _bank_push(conv, amount)
+            if not await _wait_for_bank(page):
+                return False, _stopped(t("the page needs you: {reason}", reason=reason))
         if action == "buy" and not card_filled and await _card_fields_visible(page):
             if not await _fill_card(page):
                 return False, _stopped(t("enter the card details on willhaben yourself"))

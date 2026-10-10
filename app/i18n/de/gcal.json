@@ -77,5 +77,6 @@
  "type unknown": "Typ unbekannt",
  "Google denied access ({reason}). Add your Google account as test user under Google Auth Platform → Audience, or publish the app, then connect again.": "Google hat den Zugriff verweigert ({reason}). Trag dein Google-Konto unter Google Auth Platform → Zielgruppe als Testnutzer ein oder veröffentliche die App, dann neu verbinden.",
  "Google reports: {reason}": "Google meldet: {reason}",
- "That is an address on accounts.google.com. Finish the sign-in first; the address to copy starts with {url}": "Das ist eine Adresse auf accounts.google.com. Schließ zuerst die Anmeldung ab; die zu kopierende Adresse beginnt mit {url}"
+ "That is an address on accounts.google.com. Finish the sign-in first; the address to copy starts with {url}": "Das ist eine Adresse auf accounts.google.com. Schließ zuerst die Anmeldung ab; die zu kopierende Adresse beginnt mit {url}",
+ "Buffer before and after each appointment (minutes, e.g. travel time)": "Puffer vor und nach jedem Termin (Minuten, z. B. Fahrzeit)"
 }

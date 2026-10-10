@@ -11,6 +11,223 @@
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.cyan.min.css">
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <script>
+    // Buy dialog (_buy_dialog.html): three steps in one form. The maximum includes the shipping of the chosen mode and, with
+    // PayLivery, willhaben's buyer protection fee (form data-fee = {pct, min, max}: pct % of the item price, at least min, at
+    // most max; fee()/costs()/item() mirror purchase._fee_cents/costs_of/_item_for_cents in integer cents). The field
+    // always holds a number, the default (asking price plus shipping and fee) until the user changes it; max_default is "1" while
+    // the value is that default (the server may then use its own exact figure), "" once it was changed. A cleared field
+    // is refilled with the default when it loses focus or the step is left. Next to the field one pill rates the value -
+    // percent below the asking price incl. shipping, and the level of the item price (maximum minus shipping) among
+    // the comparable ads. The rating reads the same scale as deals.position(): form data-fair = {pos: where the ad's own
+    // price lies, scale: [[price, 0..1]] (deals.anchors), levels: [[bound, name]], labels: {name: text}}; without it
+    // (no comparable ads) there is no pill, no ring, no bar to drag and no chips. Dragging the ring on the bar (.bd-drag)
+    // sets the item price through unplace() (the inverse of place()) plus the shipping. Formatted like eur.
+    window.wbBuy = {
+      ship: function (f) { var m = f.querySelector('input[name=mode]:checked'); if (!m) return 0;
+        try { return +(JSON.parse(f.dataset.ship || '{}')[m.value] || 0); } catch (e) { return 0; } },
+      // the PayLivery fee rule {pct, min, max} of the form while PayLivery is the chosen mode, else null (no fee)
+      rule: function (f) { var m = f.querySelector('input[name=mode]:checked'); if (!m || m.value !== 'paylivery') return null;
+        try { var r = JSON.parse(f.dataset.fee || 'null'); return r && r.pct > 0 ? r : null; } catch (e) { return null; } },
+      // the fee of an item price in cents (integer maths as purchase._fee_cents: percent rounded half up, then min and max)
+      feeCents: function (c, r) { if (!(c > 0)) return 0;
+        return Math.min(Math.max(Math.floor((c * Math.round(r.pct * 10) + 500) / 1000), Math.round(r.min * 100)), Math.round(r.max * 100)); },
+      // the buyer protection fee of an item price in euro (0 without PayLivery or a fee rule)
+      fee: function (f, item) { var r = this.rule(f); return r ? this.feeCents(Math.round(item * 100), r) / 100 : 0; },
+      // what an item price costs: shipping of the mode, the fee and the total (the maximum that fits exactly this item price)
+      costs: function (f, item) { var s = this.ship(f), e = this.fee(f, item);
+        return {ship: s, fee: e, total: Math.round(item * 100 + s * 100 + e * 100) / 100}; },
+      // the inverse of costs().total: the largest item price whose item + shipping + fee is at most the total (cents; the
+      // mirror of purchase._item_for_cents). Without PayLivery just total minus shipping; 0 when nothing is left.
+      item: function (f, total) {
+        var self = this, r = this.rule(f), avail = Math.round(total * 100) - Math.round(this.ship(f) * 100);
+        if (!r) return avail / 100;
+        if (avail <= 0) return 0;
+        var pm = Math.round(r.pct * 10), lo = Math.round(r.min * 100), hi = Math.round(r.max * 100), c;
+        if (avail <= lo * 1000 / pm + lo) c = avail - lo;
+        else if (avail >= hi * 1000 / pm + hi) c = avail - hi;
+        else c = Math.round(avail * 1000 / (1000 + pm));
+        c = Math.max(c, 0);
+        while (c + self.feeCents(c + 1, r) + 1 <= avail) c++;
+        while (c > 0 && c + self.feeCents(c, r) > avail) c--;
+        return c / 100;
+      },
+      base: function (f) { var a = +f.dataset.ask; return a > 0 ? this.costs(f, a).total : 0; },
+      eur: function (v) { var whole = Math.abs(v - Math.round(v)) < 0.005;
+        return '€ ' + v.toLocaleString('de-AT', {minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2}); },
+      val: function (f) { return parseFloat(f.elements.max_price.value); },
+      // percent below the asking price incl. shipping and fee (negative: above it); null without a maximum or an asking price
+      percent: function (f) { var b = this.base(f), v = this.val(f); return b > 0 && v > 0 ? Math.round((b - v) * 100 / b) : null; },
+      fair: function (f) { try { return JSON.parse(f.dataset.fair || 'null'); } catch (e) { return null; } },
+      // the scale as sorted [price, position] points, equal prices merged (as deals._interp does)
+      points: function (scale) {
+        var m = {};
+        scale.forEach(function (a) { (m[a[0]] = m[a[0]] || []).push(a[1]); });
+        return Object.keys(m).map(Number).sort(function (a, b) { return a - b; }).map(function (v) {
+          return [v, m[v].reduce(function (s, q) { return s + q; }, 0) / m[v].length]; });
+      },
+      // 0..1 position of a price on the scale: the mirror of deals._interp (outside = the ends)
+      place: function (scale, x) {
+        var pts = this.points(scale);
+        if (x < pts[0][0]) return 0;
+        if (x > pts[pts.length - 1][0]) return 1;
+        for (var i = 0; i + 1 < pts.length; i++)
+          if (pts[i][0] <= x && x <= pts[i + 1][0]) return pts[i][1] + (pts[i + 1][1] - pts[i][1]) * (x - pts[i][0]) / (pts[i + 1][0] - pts[i][0]);
+        return pts[pts.length - 1][1];
+      },
+      // the inverse of place(): the price at a 0..1 position (clamped to the bar, so the cheapest and the dearest price at most)
+      unplace: function (scale, q) {
+        var pts = this.points(scale), last = pts.length - 1;
+        if (!(q > pts[0][1])) return pts[0][0];
+        if (q >= pts[last][1]) return pts[last][0];
+        for (var i = 0; i + 1 < pts.length; i++)
+          if (pts[i][1] <= q && q <= pts[i + 1][1])
+            return pts[i + 1][1] === pts[i][1] ? pts[i][0] : pts[i][0] + (pts[i + 1][0] - pts[i][0]) * (q - pts[i][1]) / (pts[i + 1][1] - pts[i][1]);
+        return pts[last][0];
+      },
+      // {pos, level} of the item price at the maximum, or null (no scale, no maximum, no asking price)
+      rate: function (f) {
+        var fair = this.fair(f), v = this.val(f), c = this.item(f, v);
+        if (!fair || !fair.scale || !(this.base(f) > 0) || !(c > 0)) return null;
+        var pos = this.place(fair.scale, c), lv = fair.levels.find(function (l) { return pos < l[0]; }) || fair.levels[fair.levels.length - 1];
+        return {pos: pos, level: lv[1], label: (fair.labels || {})[lv[1]] || ''};
+      },
+      fill: function (el, text, tone) {
+        if (!el) return;
+        el.textContent = text; el.hidden = !text;
+        ['bargain', 'cheap', 'fair', 'expensive', 'very_expensive'].forEach(function (t) { el.classList.remove('lvl-' + t); });
+        el.classList.remove('deal-lvl');
+        if (tone) { el.classList.add('deal-lvl'); el.classList.add('lvl-' + tone); }
+      },
+      // the pill(s), the ring on the bar (always shown with a rating, also on the needle) and the suggestion chips
+      lines: function (f) {
+        var self = this, p = this.percent(f), r = this.rate(f), v = this.val(f);
+        f.querySelectorAll('.bd-live').forEach(function (pill) {
+          var sign = p > 0 ? '−' : p < 0 ? '+' : '';
+          self.fill(pill, r ? pill.dataset.tpl.replace('{n}', sign + Math.abs(p)).replace('{level}', r.label) : '', r && r.level);
+        });
+        f.querySelectorAll('.bd-pin').forEach(function (pin) {
+          pin.hidden = !r;
+          if (r) pin.style.left = (r.pos * 100).toFixed(1) + '%';
+        });
+        f.querySelectorAll('.bd-sugg button').forEach(function (btn) {   // item price of the comparable + shipping and fee of the mode
+          var t = self.costs(f, +btn.dataset.v).total;
+          btn.textContent = btn.dataset.tpl.replace('{x}', self.eur(t));
+          btn.classList.toggle('on', v > 0 && Math.abs(v - t) < 0.005);
+        });
+      },
+      sum: function (f) {
+        var x = f.querySelector('.bd-summary'); if (!x) return;
+        var self = this, m = f.querySelector('input[name=mode]:checked'), v = this.val(f), b = this.base(f), t = f.elements.pickup_window.value.trim();
+        var s = function (k) { return x.querySelector('[data-s=' + k + ']'); };
+        s('mode').textContent = m ? m.dataset.label : '';
+        // PayLivery: the shipping text plus the fee of the item price at the maximum (else of the asking price)
+        var item = v > 0 ? self.item(f, v) : +f.dataset.ask, extra = '';
+        if (m && self.rule(f) && item > 0 && x.dataset.feeTpl) extra = ' · ' + x.dataset.feeTpl.replace('{amount}', self.eur(self.fee(f, item)));
+        s('ship').textContent = m ? m.dataset.shipText + extra : '';
+        s('time').textContent = t || x.dataset.empty;
+        s('timerow').hidden = !(m && m.value === 'pickup');
+        // the default while the field is empty, or - the ad has no price - "no price in the ad"
+        s('max').textContent = v > 0 ? self.eur(v) : b > 0 ? self.eur(b) : (x.dataset.noprice || '');
+      },
+      cur: function (f) { return +(f.dataset.step || 1); },
+      // step 1: a mode is chosen; step 2: the maximum may be empty (= default), else at least 1 (€) and what the browser accepts
+      // (cents only; a half-typed "12,5" counts as bad input, not as empty); step 3 has nothing to check
+      valid: function (f, n) {
+        if (n === 1) return !!f.querySelector('input[name=mode]:checked');
+        if (n === 2) { var el = f.elements.max_price; return (!el.value || this.val(f) >= 1) && (!el.checkValidity || el.checkValidity()); }
+        return true;
+      },
+      // the step chips (done = ticked, current, upcoming = disabled) and the Next buttons
+      nav: function (f) {
+        var self = this, n = this.cur(f);
+        f.querySelectorAll('.bd-chip').forEach(function (c) {
+          var k = +c.dataset.n;
+          c.disabled = k > n;
+          c.classList.toggle('on', k === n);
+          c.classList.toggle('done', k < n);
+          if (k === n) c.setAttribute('aria-current', 'step'); else c.removeAttribute('aria-current');
+        });
+        f.querySelectorAll('.bd-next').forEach(function (b) { b.disabled = !self.valid(f, n); });
+      },
+      refresh: function (f) { this.lines(f); this.sum(f); this.nav(f); },
+      show: function (f) {
+        var n = this.cur(f);
+        f.querySelectorAll('.bd-step').forEach(function (s) { s.hidden = +s.dataset.step !== n; });
+        this.refresh(f);
+      },
+      // once per fresh form: JavaScript on, step 1 shown
+      init: function (f) { f.classList.add('bd-js'); if (!f.dataset.step) f.dataset.step = '1'; this.bind(f); this.show(f); },
+      // pointer (mouse, pen, finger) on the bar moves the ring: down, move while pressed, up; once per gauge
+      bind: function (f) {
+        var self = this;
+        f.querySelectorAll('.bd-drag').forEach(function (g) {
+          if (g.dataset.bound) return;
+          g.dataset.bound = '1';
+          var on = false;
+          var at = function (e) { var r = g.getBoundingClientRect(); self.drag(f, r.width > 0 ? (e.clientX - r.left) / r.width : 0); };
+          var end = function () { on = false; g.classList.remove('drag'); };
+          g.addEventListener('pointerdown', function (e) {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            on = true; g.classList.add('drag');
+            try { g.setPointerCapture(e.pointerId); } catch (x) {}
+            if (e.preventDefault) e.preventDefault();
+            at(e);
+          });
+          g.addEventListener('pointermove', function (e) { if (on) at(e); });
+          g.addEventListener('pointerup', end);
+          g.addEventListener('pointercancel', end);
+          g.addEventListener('lostpointercapture', end);
+        });
+      },
+      // the ring at q (0..1, clamped to the bar): the item price there (whole euros, cents below € 10) plus shipping and fee of the mode
+      drag: function (f, q) {
+        var fair = this.fair(f);
+        if (!fair || !fair.scale || !(this.base(f) > 0)) return false;
+        var c = this.unplace(fair.scale, Math.min(1, Math.max(0, q)));
+        c = c >= 10 ? Math.round(c) : Math.round(c * 10) / 10;
+        this.put(f, this.costs(f, Math.max(c, 0.01)).total);
+        return true;
+      },
+      // to step n; a jump forward stops at the first step that is not valid yet
+      go: function (f, n) {
+        this.refill(f);
+        for (var k = 1; k < n; k++) if (!this.valid(f, k)) { n = k; break; }
+        f.dataset.step = n;
+        this.show(f);
+        var dlg = f.closest('dialog');
+        if (dlg) dlg.querySelector('article').scrollTop = 0; else f.scrollIntoView({block: 'start'});
+        var chip = f.querySelector('.bd-chip.on'); if (chip) chip.focus({preventScroll: true});
+      },
+      next: function (f) { this.refill(f); var n = this.cur(f); if (n < 3 && this.valid(f, n)) this.go(f, n + 1); },
+      back: function (f) { var n = this.cur(f); if (n > 1) this.go(f, n - 1); },
+      // Enter in a field goes to the next step, never submits before the last one; links and summaries keep Enter
+      enter: function (e) {
+        var t = e.target, f = t.form;
+        if (e.key !== 'Enter' || !f || t.tagName !== 'INPUT' || this.cur(f) === 3) return;
+        e.preventDefault();
+        if (t.type === 'text' || t.type === 'number') this.next(f);
+      },
+      // the field holds a number: the default (asking price plus shipping), unless the ad has no price (then it may stay empty)
+      refill: function (f) {
+        var el = f.elements.max_price, b = this.base(f);
+        if (!el.value && b > 0) { el.value = b.toFixed(2); f.elements.max_default.value = '1'; this.refresh(f); }
+      },
+      // writes the value and its flag: "1" (default, the server may use its own figure) when empty or equal to the default, else ""
+      put: function (f, v) {
+        var el = f.elements.max_price, b = this.base(f);
+        el.value = v > 0 ? (+v).toFixed(2) : '';
+        f.elements.max_default.value = !el.value || (b > 0 && Math.abs(v - b) < 0.005) ? '1' : '';
+        this.refresh(f);
+      },
+      // the untouched default follows the mode; a changed value stays
+      mode: function (f) { if (f.elements.max_default.value === '1') { var b = this.base(f); f.elements.max_price.value = b ? b.toFixed(2) : ''; } this.refresh(f); },
+      input: function (f) { var el = f.elements.max_price, v = this.val(f), b = this.base(f);
+        f.elements.max_default.value = !el.value || (b > 0 && Math.abs(v - b) < 0.005) ? '1' : ''; this.refresh(f); },
+      blur: function (f) { this.refill(f); },
+      pick: function (f, v) { this.put(f, this.costs(f, v).total); }
+    };
+  </script>
   <style>
     :root { --pico-font-size: 95%; --brand: #0e9fb5; --ok: #2f9e44; --warn: #f59f00; --bad: #e5484d;
             --placeholder: var(--pico-card-sectioning-background-color); }
@@ -165,7 +382,12 @@
   body.embed .remote-bar { gap: .3rem; margin-bottom: .35rem; flex-wrap: nowrap; }
   body.embed .remote-text { min-width: 8rem; }
   body.embed details { display: none; }
+    .buy-pay { margin: .6rem 0; padding: .55rem .75rem; border-left: 4px solid #f08c00; background: var(--pico-card-sectioning-background-color); border-radius: .3rem; }
+    .buy-pay p { margin: .3rem 0; }
     button.linklike { background:none; border:none; padding:0; margin:0; width:auto; color:var(--pico-primary); font-size:inherit; cursor:pointer; }
+    .deal-lvl { display: inline-block; padding: .05rem .55rem; border-radius: 1em; font-size: .8rem; font-weight: 600; color: #fff; line-height: 1.5; }
+    .lvl-bargain { background: #2f9e44; } .lvl-cheap { background: #66a80f; } .lvl-fair { background: #e8a600; color: #222; }
+    .lvl-expensive { background: #f76707; } .lvl-very_expensive { background: #e5484d; }
     .htmx-indicator { display:none; } .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display:inline; }
   </style>
 </head>
@@ -178,6 +400,7 @@
       <li><a href="/agents">{{ _("Search agents") }}</a></li>
       <li><a href="/hits">{{ _("Hits") }}</a></li>
       <li><a href="/deals">{{ _("Product search") }}</a></li>
+      <li><a href="/purchases">{{ _("Purchases") }}</a></li>
       <li><a href="/chats">{{ _("Chats") }}</a></li>
       <li><a href="/myads">{{ _("My ads") }}</a></li>
       <li><a href="/new-ad">{{ _("New ad") }}</a></li>
@@ -187,6 +410,7 @@
     </ul>
   </nav>
   {% endif %}
+  {% set notice_text = purchase_notice() %}{% if notice_text %}<div class="msg">{{ notice_text }}</div>{% endif %}
   {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
   {% if error %}<div class="msg" style="border-color:#e5484d">{{ error }}</div>{% endif %}
   {% block content %}{% endblock %}
@@ -215,6 +439,7 @@
   </div>
 </footer>
 {% include "_ad_panel.html" %}
+{% include "_buy_panel.html" %}
 {% include "_remote_overlay.html" %}
 {% endif %}
 <script>

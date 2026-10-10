@@ -1,0 +1,5937 @@
+{
+ "props": {
+  "pageProps": {
+   "advertDetails": {
+    "id": "922008415",
+    "uuid": "deb2b416-6f6b-5bd6-b6c5-c62b9288765b",
+    "verticalId": 5,
+    "adTypeId": 67,
+    "productId": 67,
+    "parentAdId": null,
+    "description": "Type 2 Ladekabel Elektroauto",
+    "startDate": "2026-10-01T07:51:19+0200",
+    "endDate": "2026-11-15T07:51:19+0100",
+    "publishedDate": "2026-10-01T07:51:29+0200",
+    "firstPublishedDate": "2026-10-01T07:51:29+0200",
+    "createdDate": "2026-10-01T07:51:16+0200",
+    "changedDate": "2026-10-01T07:51:29+0200",
+    "advertiserReferenceNumber": null,
+    "attributes": {
+     "attribute": [
+      {
+       "name": "DESCRIPTION",
+       "values": [
+        "Zum Verkauf steht ein Type 2 Mode 3 Ladekabel.<br/><br/>Länge: 5m.<br/>Mennekes<br/><br/>Mit diesem Kabel können Elektro- und Hybridfahrzeuge an dafür geeigneter Ladeinfrastruktur geladen werden.<br/><br/>,<br/>Nrg kick<br/>Tesla<br/>Go echarger<br/>Wallbox<br/>Wattpilot Fronius<br/>"
+       ]
+      },
+      {
+       "name": "PRICE/AMOUNT",
+       "values": [
+        "100"
+       ]
+      },
+      {
+       "name": "PRICE",
+       "values": [
+        "100"
+       ]
+      },
+      {
+       "name": "PRICE_FOR_DISPLAY",
+       "values": [
+        "€ 100"
+       ]
+      },
+      {
+       "name": "AREA_ID",
+       "values": [
+        "115864"
+       ]
+      },
+      {
+       "name": "REGION_AREA_ID",
+       "values": [
+        "612"
+       ]
+      },
+      {
+       "name": "LOCATION/ADDRESS_2",
+       "values": [
+        "Sankt Gallen"
+       ]
+      },
+      {
+       "name": "LOCATION/ADDRESS_3",
+       "values": [
+        "Liezen"
+       ]
+      },
+      {
+       "name": "LOCATION/ADDRESS_4",
+       "values": [
+        "Steiermark"
+       ]
+      },
+      {
+       "name": "SHOW_MAP",
+       "values": [
+        "false"
+       ]
+      },
+      {
+       "name": "SHOW_SHADOWMAP",
+       "values": [
+        "false"
+       ]
+      },
+      {
+       "name": "ISPRIVATE",
+       "values": [
+        "1"
+       ]
+      },
+      {
+       "name": "DEALER",
+       "values": [
+        "0"
+       ]
+      },
+      {
+       "name": "ORG_TYPE",
+       "values": [
+        "2"
+       ]
+      }
+     ]
+    },
+    "advertImageList": {
+     "advertImage": [
+      {
+       "id": 1,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/1",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_1708023529_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_1708023529_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_1708023529.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_1708023529.jpg"
+      },
+      {
+       "id": 2,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/2",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_665294892_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_665294892_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_665294892.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_665294892.jpg"
+      },
+      {
+       "id": 3,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/3",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_232710059_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_232710059_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_232710059.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_232710059.jpg"
+      },
+      {
+       "id": 4,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/4",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1084921725_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1084921725_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1084921725.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_-1084921725.jpg"
+      },
+      {
+       "id": 5,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/5",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1239699437_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1239699437_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1239699437.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_-1239699437.jpg"
+      },
+      {
+       "id": 6,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/6",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_1678196048_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_1678196048_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_1678196048.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_1678196048.jpg"
+      },
+      {
+       "id": 7,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/7",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-981675371_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-981675371_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-981675371.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_-981675371.jpg"
+      },
+      {
+       "id": 8,
+       "name": null,
+       "selfLink": "https://api.willhaben.at/restapi/v2/atimage/922008415/8",
+       "description": null,
+       "mainImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1201442170_hoved.jpg",
+       "thumbnailImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1201442170_thumb.jpg",
+       "referenceImageUrl": "https://cache.willhaben.at/mmo/5/922/008/415_-1201442170.jpg",
+       "similarImageSearchUrl": null,
+       "reference": "5/922/008/415_-1201442170.jpg"
+      }
+     ],
+     "floorPlans": []
+    },
+    "advertAttachmentList": {
+     "advertAttachment": []
+    },
+    "organisationDetails": {
+     "id": 10870806,
+     "uuid": "4413829c-f9c1-5dc3-9381-453c6885e484",
+     "partnerId": "mp_10870806",
+     "description": "Organisation details",
+     "organisationDetailLinkList": {
+      "contextLink": [
+       {
+        "id": "seller.profile",
+        "description": "10870806",
+        "uri": "https://ad-search.willhaben.at/restapi/v2/sellerprofile/10870806/5/profile",
+        "selected": false,
+        "relativePath": "/sellerprofile/10870806/5/profile",
+        "serviceName": "ad-search"
+       },
+       {
+        "id": "organisation.furtherAds",
+        "description": "10870806",
+        "uri": "https://ad-search.willhaben.at/restapi/v2/search/atz/5/403?orgId=10870806",
+        "selected": false,
+        "relativePath": "/search/atz/5/403?orgId=10870806",
+        "serviceName": "ad-search"
+       }
+      ]
+     },
+     "orgName": null,
+     "orgPhone": null,
+     "orgEmail": "",
+     "orgLogoUrl": null,
+     "addressLines": {
+      "value": []
+     },
+     "postCode": null,
+     "country": null,
+     "countryId": -141,
+     "openingHours": {
+      "openingHoursByGroup": []
+     }
+    },
+    "sellerProfileUserData": {
+     "name": "Erika",
+     "registerDate": "2010-11-24T00:00:00+0100",
+     "location": null,
+     "street": "",
+     "district": null,
+     "orgUUID": null,
+     "pictureUrl": null,
+     "hasProfileImage": false,
+     "activeAdCount": 12,
+     "private": true
+    },
+    "advertAddressDetails": {
+     "addressLines": {
+      "value": [
+       "Sankt Gallen",
+       "Liezen",
+       "Steiermark"
+      ]
+     },
+     "postCode": "8933",
+     "postalName": "Bergerviertel",
+     "country": "Österreich",
+     "province": "Steiermark",
+     "district": "Liezen",
+     "municipality": "Sankt Gallen"
+    },
+    "advertContactDetails": {
+     "contactDetail": [
+      {
+       "id": "address",
+       "contactDetailField": [
+        {
+         "id": "country",
+         "description": "Land",
+         "value": "Österreich"
+        },
+        {
+         "id": "postalName",
+         "description": "Adresse",
+         "value": "Bergerviertel"
+        },
+        {
+         "id": "municipality",
+         "description": "Gemeinde",
+         "value": "Sankt Gallen"
+        },
+        {
+         "id": "postCode",
+         "description": "Postleitzahl",
+         "value": "8933"
+        },
+        {
+         "id": "state",
+         "description": "Bundesland",
+         "value": "Steiermark"
+        },
+        {
+         "id": "region",
+         "description": "Region",
+         "value": "Liezen"
+        },
+        {
+         "id": "countryId",
+         "description": "Länderkennzahl",
+         "value": "-141"
+        }
+       ]
+      },
+      {
+       "id": "contactName",
+       "contactDetailField": [
+        {
+         "id": "contactName",
+         "description": "Name",
+         "value": "Erika"
+        }
+       ]
+      },
+      {
+       "id": "contactFirstName",
+       "contactDetailField": [
+        {
+         "id": "contactFirstName",
+         "description": "Firstname",
+         "value": "Erika"
+        }
+       ]
+      },
+      {
+       "id": "address_contact",
+       "contactDetailField": [
+        {
+         "id": "country",
+         "description": "Land",
+         "value": "Österreich"
+        },
+        {
+         "id": "postalName",
+         "description": "Adresse",
+         "value": "Bergerviertel"
+        },
+        {
+         "id": "municipality",
+         "description": "Gemeinde",
+         "value": "Sankt Gallen"
+        },
+        {
+         "id": "postCode",
+         "description": "Postleitzahl",
+         "value": "8933"
+        },
+        {
+         "id": "state",
+         "description": "Bundesland",
+         "value": "Steiermark"
+        },
+        {
+         "id": "region",
+         "description": "Region",
+         "value": "Liezen"
+        },
+        {
+         "id": "countryId",
+         "description": "Länderkennzahl",
+         "value": "-141"
+        }
+       ]
+      },
+      {
+       "id": "address_vcard",
+       "contactDetailField": [
+        {
+         "id": "country",
+         "description": "Land",
+         "value": "Österreich"
+        },
+        {
+         "id": "postalName",
+         "description": "Adresse",
+         "value": "Bergerviertel"
+        },
+        {
+         "id": "municipality",
+         "description": "Gemeinde",
+         "value": "Sankt Gallen"
+        },
+        {
+         "id": "postCode",
+         "description": "Postleitzahl",
+         "value": "8933"
+        },
+        {
+         "id": "state",
+         "description": "Bundesland",
+         "value": "Steiermark"
+        },
+        {
+         "id": "region",
+         "description": "Region",
+         "value": "Liezen"
+        },
+        {
+         "id": "countryId",
+         "description": "Länderkennzahl",
+         "value": "-141"
+        }
+       ]
+      },
+      {
+       "id": "address_location",
+       "contactDetailField": [
+        {
+         "id": "country",
+         "description": "Land",
+         "value": "Österreich"
+        },
+        {
+         "id": "postalName",
+         "description": "Adresse",
+         "value": "Bergerviertel"
+        },
+        {
+         "id": "municipality",
+         "description": "Gemeinde",
+         "value": "Sankt Gallen"
+        },
+        {
+         "id": "postCode",
+         "description": "Postleitzahl",
+         "value": "8933"
+        },
+        {
+         "id": "state",
+         "description": "Bundesland",
+         "value": "Steiermark"
+        },
+        {
+         "id": "region",
+         "description": "Region",
+         "value": "Liezen"
+        },
+        {
+         "id": "countryId",
+         "description": "Länderkennzahl",
+         "value": "-141"
+        }
+       ]
+      }
+     ]
+    },
+    "contextLinkList": {
+     "contextLink": [
+      {
+       "id": "selfLink",
+       "description": "Identifies this entity",
+       "uri": "https://api.willhaben.at/restapi/v2/atverz/922008415",
+       "selected": false,
+       "relativePath": "/atverz/922008415",
+       "serviceName": "iad"
+      },
+      {
+       "id": "iadAdvertLink",
+       "description": "Ad link in iAd",
+       "uri": "https://www.willhaben.at/iad/object?adId=922008415",
+       "selected": false,
+       "relativePath": "/iad/object?adId=922008415",
+       "serviceName": "web_url"
+      },
+      {
+       "id": "reportAd",
+       "description": "Report this ad",
+       "uri": "https://api.willhaben.at/restapi/v2/dsa/reportad/922008415/reasons",
+       "selected": false,
+       "relativePath": "/dsa/reportad/922008415/reasons",
+       "serviceName": "iad"
+      },
+      {
+       "id": "adDetailLink",
+       "description": "Self reference to advert via ad detail component",
+       "uri": "https://publicapi.willhaben.at/atdetail/v1/922008415",
+       "selected": false,
+       "relativePath": "/922008415",
+       "serviceName": "addetail"
+      },
+      {
+       "id": "categoryTree",
+       "description": "categoryTree with attributes for adType 67",
+       "uri": "https://api.willhaben.at/restapi/v2/categorytree/67?adStatus=50",
+       "selected": false,
+       "relativePath": "/categorytree/67?adStatus=50",
+       "serviceName": "iad"
+      },
+      {
+       "id": "canonicalLink",
+       "description": "The canonical URL",
+       "uri": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/type-2-ladekabel-elektroauto-922008415/",
+       "selected": false,
+       "relativePath": "/iad/kaufen-und-verkaufen/d/type-2-ladekabel-elektroauto-922008415/",
+       "serviceName": "iad"
+      },
+      {
+       "id": "iadShareLink",
+       "description": "Share link in iAd",
+       "uri": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/type-2-ladekabel-elektroauto-922008415/",
+       "selected": false,
+       "relativePath": "/iad/kaufen-und-verkaufen/d/type-2-ladekabel-elektroauto-922008415/",
+       "serviceName": "web_url"
+      },
+      {
+       "id": "callTrackingLink",
+       "description": "Link to log an call event",
+       "uri": "https://api.willhaben.at/restapi/v2/logevent/ad/922008415/call",
+       "selected": false,
+       "relativePath": "/logevent/ad/922008415/call",
+       "serviceName": "iad"
+      },
+      {
+       "id": "logEventVirtualViewLinkClicked",
+       "description": "Event when 360 view is clicked",
+       "uri": "https://api.willhaben.at/restapi/v2/logevent/atz/922008415/virtual-tour-link-clicked",
+       "selected": false,
+       "relativePath": "/logevent/atz/922008415/virtual-tour-link-clicked",
+       "serviceName": "iad"
+      },
+      {
+       "id": "userProfileTrustSignals",
+       "description": "Trust Signals for the user profile",
+       "uri": "https://publicapi.willhaben.at/userprofile/trust-signals/10870806",
+       "selected": false,
+       "relativePath": "/trust-signals/10870806",
+       "serviceName": "userprofile"
+      },
+      {
+       "type": "similar-ads",
+       "displayText": "Weitere Anzeigen für dich",
+       "id": "similarAdsRecommendationUrl",
+       "description": "Url to load the similar ads recommendations",
+       "uri": "https://ad-search.willhaben.at/restapi/v2/imagesearch/atz?adId=922008415&imageId=1&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F5%2F922%2F008%2F415_1708023529.jpg&ATTRIBUTE_TREE=6154&rows=30",
+       "selected": false,
+       "relativePath": "/imagesearch/atz?adId=922008415&imageId=1&imageUrl=https%3A%2F%2Fcache.willhaben.at%2Fmmo%2F5%2F922%2F008%2F415_1708023529.jpg&ATTRIBUTE_TREE=6154&rows=30",
+       "serviceName": "ad-search"
+      },
+      {
+       "id": "conversationInit",
+       "description": "post a systemMessage for the buyer",
+       "uri": "https://api.willhaben.at/restapi/v2/conversation/init/922008415",
+       "selected": false,
+       "relativePath": "/conversation/init/922008415",
+       "serviceName": "iad"
+      },
+      {
+       "id": "logEventAdShared",
+       "description": "Event when ad is shared",
+       "uri": "https://api.willhaben.at/restapi/v2/logevent/atz/922008415/ad-shared",
+       "selected": false,
+       "relativePath": "/logevent/atz/922008415/ad-shared",
+       "serviceName": "iad"
+      },
+      {
+       "id": "logEventVirtualViewLinkClicked",
+       "description": "Event when 360Â° view is clicked",
+       "uri": "https://api.willhaben.at/restapi/v2/logevent/atz/922008415/virtual-tour-link-clicked",
+       "selected": false,
+       "relativePath": "/logevent/atz/922008415/virtual-tour-link-clicked",
+       "serviceName": "iad"
+      }
+     ]
+    },
+    "taggingData": {
+     "taggingNames": {
+      "nameValuePair": [
+       {
+        "name": "oewaMweb",
+        "value": "Service/Rubrikenmaerkte/Sonstiges/moewa/Alle/${page}/KFZ_Zubehoer_Motorradteile/6143"
+       },
+       {
+        "name": "oewa",
+        "value": "Service/Rubrikenmaerkte/Sonstiges/Alle/${page}/KFZ_Zubehoer_Motorradteile/6143"
+       },
+       {
+        "name": "xiti_SCV",
+        "value": "&x1=1&x5=6&x6=922008415&x8=4&x9=6142&x10=6143&x11=6152&x12=6154"
+       },
+       {
+        "name": "googleAdContentUrl",
+        "value": "https://www.willhaben.at/iad/object?adId=922008415"
+       }
+      ]
+     },
+     "tmsDataValues": {
+      "tmsData": {
+       "is_private": "true",
+       "ad_type": "Marktplatz",
+       "page_type": "Ad_View",
+       "region_level_label_1": "Austria",
+       "vertical_id": "5",
+       "vertical": "Marktplatz",
+       "source": "ResponsiveWeb",
+       "ad_title": "Type 2 Ladekabel Elektroauto",
+       "num_pictures": "8",
+       "category_level_1": "KFZ-Zubehör / Motorradteile",
+       "region_level_id_2": "6",
+       "category_level_3": "Batterien / Ladegeräte",
+       "region_level_id_3": "612",
+       "category_level_2": "PKW-Ersatzteile / Zubehör",
+       "seller_name": "Erika",
+       "region_level_id_1": "-141",
+       "price": "100",
+       "product_id": "67",
+       "category_level_max": "4",
+       "seller_uuid": "4413829c-f9c1-5dc3-9381-453c6885e484",
+       "region_level_2": "Steiermark",
+       "region_level_3": "Liezen",
+       "category_level_4": "Ladegeräte / Zubehör",
+       "seller_id": "10870806",
+       "region_level_1": "AT",
+       "ad_type_id": "67",
+       "category_level_id_3": "6152",
+       "category_level_id_2": "6143",
+       "category_level_id_1": "6142",
+       "category_level_id_4": "6154",
+       "exact_price": "100.0",
+       "ad_id": "922008415",
+       "post_code": "8933",
+       "event_name": "adview",
+       "publish_date": "2026-10-01T07:51:29.203Z"
+      }
+     },
+     "pulseData": {
+      "pulseEvents": [
+       {
+        "type": "CLASSIFIEDAD",
+        "id": 922008415,
+        "contentId": 922008415,
+        "adId": 922008415,
+        "name": "Type 2 Ladekabel Elektroauto",
+        "adType": "sell",
+        "publisherType": "private",
+        "currency": "EUR",
+        "location": {
+         "postalCode": "8933",
+         "addressLocality": "Liezen",
+         "addressRegion": "Steiermark",
+         "addressCountry": "AT"
+        },
+        "price": "100.0",
+        "priceAsNumber": 100,
+        "category": "Generalist > KFZ-Zubehör / Motorradteile > PKW-Ersatzteile / Zubehör > Batterien / Ladegeräte > Ladegeräte / Zubehör",
+        "publisherUuid": "4413829c-f9c1-5dc3-9381-453c6885e484",
+        "categories": [
+         {
+          "type": "MarketplaceCategory",
+          "localId": "sdrn:willhabenat:category:generalist:6154",
+          "localName": "Ladegeräte / Zubehör",
+          "level": 4,
+          "name": "Ladegeräte / Zubehör"
+         },
+         {
+          "type": "MarketplaceCategory",
+          "localId": "sdrn:willhabenat:category:generalist:6152",
+          "localName": "Batterien / Ladegeräte",
+          "level": 3,
+          "name": "Batterien / Ladegeräte"
+         },
+         {
+          "type": "MarketplaceCategory",
+          "localId": "sdrn:willhabenat:category:generalist:6143",
+          "localName": "PKW-Ersatzteile / Zubehör",
+          "level": 2,
+          "name": "PKW-Ersatzteile / Zubehör"
+         },
+         {
+          "type": "MarketplaceCategory",
+          "localId": "sdrn:willhabenat:category:generalist:6142",
+          "localName": "KFZ-Zubehör / Motorradteile",
+          "level": 1,
+          "name": "KFZ-Zubehör / Motorradteile"
+         },
+         {
+          "type": "MarketplaceCategory",
+          "localId": "sdrn:willhabenat:category:generalist:2",
+          "localName": "Generalist",
+          "level": 0,
+          "name": "Generalist"
+         }
+        ],
+        "publisher": {
+         "id": "sdrn:willhabenat:user:4413829c-f9c1-5dc3-9381-453c6885e484",
+         "accountId": "4413829c-f9c1-5dc3-9381-453c6885e484",
+         "type": "Account"
+        },
+        "adUuid": "deb2b416-6f6b-5bd6-b6c5-c62b9288765b"
+       },
+       {
+        "type": "PHONECONTACT",
+        "id": 922008415,
+        "name": "Erika",
+        "telephone": null
+       }
+      ]
+     },
+     "neustarTaggingData": {
+      "mainCategory": "autoparts",
+      "vertical": "marketplace",
+      "device": "mobile"
+     },
+     "segmentData": {
+      "ad_page_viewed": {
+       "event_name": "marketplace_ad_page_viewed",
+       "event_version": 2,
+       "properties": {
+        "ad_id": "deb2b416-6f6b-5bd6-b6c5-c62b9288765b",
+        "legacy_ad_id": 922008415,
+        "vertical": "marketplace",
+        "site_area": "marketplace",
+        "event_type": "page_view",
+        "page_name": "ad_page",
+        "ad_title": "Type 2 Ladekabel Elektroauto",
+        "publication_date": "2026-10-01T05:51:29.203Z",
+        "publisher_type": "private",
+        "region_name": "Steiermark",
+        "ad_price": 100,
+        "currency": "EUR",
+        "category_level_1": "KFZ-Zubehör / Motorradteile",
+        "category_level_1_id": "6142",
+        "category_level_2": "PKW-Ersatzteile / Zubehör",
+        "category_level_2_id": "6143",
+        "category_level_3": "Batterien / Ladegeräte",
+        "category_level_4": "Ladegeräte / Zubehör",
+        "category_max_depth": 4
+       }
+      },
+      "revealnumber_clicked": {
+       "event_name": "marketplace_revealnumber_clicked",
+       "event_version": 2,
+       "properties": {
+        "ad_id": "deb2b416-6f6b-5bd6-b6c5-c62b9288765b",
+        "legacy_ad_id": 922008415,
+        "vertical": "marketplace",
+        "site_area": "marketplace",
+        "event_type": "click",
+        "ad_title": "Type 2 Ladekabel Elektroauto",
+        "publication_date": "2026-10-01T05:51:29.203Z",
+        "publisher_type": "private",
+        "region_name": "Steiermark",
+        "ad_price": 100,
+        "currency": "EUR",
+        "category_level_1": "KFZ-Zubehör / Motorradteile",
+        "category_level_1_id": "6142",
+        "category_level_2": "PKW-Ersatzteile / Zubehör",
+        "category_level_2_id": "6143",
+        "category_level_3": "Batterien / Ladegeräte",
+        "category_level_4": "Ladegeräte / Zubehör",
+        "category_max_depth": 4,
+        "paylivery_enabled": true,
+        "condition": "Neuwertig"
+       }
+      },
+      "callphone_clicked": {
+       "event_name": "marketplace_callphone_clicked",
+       "event_version": 2,
+       "properties": {
+        "ad_id": "deb2b416-6f6b-5bd6-b6c5-c62b9288765b",
+        "legacy_ad_id": 922008415,
+        "vertical": "marketplace",
+        "site_area": "marketplace",
+        "event_type": "click",
+        "ad_title": "Type 2 Ladekabel Elektroauto",
+        "publication_date": "2026-10-01T05:51:29.203Z",
+        "publisher_type": "private",
+        "region_name": "Steiermark",
+        "ad_price": 100,
+        "currency": "EUR",
+        "category_level_1": "KFZ-Zubehör / Motorradteile",
+        "category_level_1_id": "6142",
+        "category_level_2": "PKW-Ersatzteile / Zubehör",
+        "category_level_2_id": "6143",
+        "category_level_3": "Batterien / Ladegeräte",
+        "category_level_4": "Ladegeräte / Zubehör",
+        "category_max_depth": 4,
+        "paylivery_enabled": true,
+        "condition": "Neuwertig"
+       }
+      },
+      "externallink_clicked": {
+       "event_name": "marketplace_externallink_clicked_mock",
+       "event_version": 1,
+       "properties": {}
+      },
+      "buynow_clicked": {
+       "event_name": "marketplace_buynow_clicked_mock",
+       "event_version": 1,
+       "properties": {}
+      },
+      "makeoffer_clicked": {
+       "event_name": "marketplace_makeoffer_clicked_mock",
+       "event_version": 1,
+       "properties": {}
+      },
+      "message_sent": {
+       "event_name": "marketplace_message_sent",
+       "event_version": 1,
+       "properties": {
+        "ad_id": "deb2b416-6f6b-5bd6-b6c5-c62b9288765b",
+        "legacy_ad_id": 922008415,
+        "vertical": "marketplace",
+        "site_area": "marketplace",
+        "event_type": "click",
+        "ad_title": "Type 2 Ladekabel Elektroauto",
+        "publication_date": "2026-10-01T05:51:29.203Z",
+        "publisher_type": "private",
+        "region_name": "Steiermark",
+        "ad_price": 100,
+        "currency": "EUR",
+        "contact_medium": "message"
+       }
+      }
+     },
+     "qualtricsParameter": null
+    },
+    "advertisingParameters": {
+     "pagetype": [
+      "Anzeige"
+     ],
+     "adimageurl": [
+      "https://cache.willhaben.at/mmo/5/922/008/415_1708023529.jpg"
+     ],
+     "city": [
+      "Bergerviertel"
+     ],
+     "AdImage": [
+      "true"
+     ],
+     "description": [
+      "Zum Verkauf steht ein Type 2 Mode 3 Ladekabel Laenge 5m Mennekes Mit diesem Kabel koennen Elektro und Hybridfahrzeuge an dafuer geeigneter Ladeinfrastruktur geladen werden Nrg kick Tesla Go echarger Wallbox Wattpilot Fronius"
+     ],
+     "vertical": [
+      "bap"
+     ],
+     "bap_level0": [
+      "KFZ_Zubehoer_Motorradteile"
+     ],
+     "bap_level1": [
+      "PKW_Ersatzteile_Zubehoer"
+     ],
+     "bap_level2": [
+      "Batterien_Ladegeraete"
+     ],
+     "bap_level3": [
+      "Ladegeraete_Zubehoer"
+     ],
+     "postcode_str": [
+      "8933"
+     ],
+     "price": [
+      "100"
+     ],
+     "willhabencode": [
+      "922008415"
+     ],
+     "payliveryEnabled": [
+      "true"
+     ],
+     "state": [
+      "Steiermark"
+     ],
+     "partnerid": [
+      "mp",
+      "10870806"
+     ],
+     "heading": [
+      "Type_2_Ladekabel_Elektroauto"
+     ],
+     "postcode": [
+      "KeywordValue{value=8933}"
+     ],
+     "pt1": [
+      "922008415"
+     ],
+     "orgid": [
+      "10870806"
+     ],
+     "pt5": [
+      "100.0"
+     ],
+     "isAdSavedInFolder": [
+      "false"
+     ],
+     "district": [
+      "Liezen"
+     ],
+     "Zustand": [
+      "Neuwertig"
+     ],
+     "device": [
+      "desktop"
+     ],
+     "dealer_2": [
+      "Privat"
+     ],
+     "Uebergabe": [
+      "Selbstabholung",
+      "Versand"
+     ]
+    },
+    "advertisingParametersV2": {
+     "pagetype": "Anzeige",
+     "adimageurl": "https://cache.willhaben.at/mmo/5/922/008/415_1708023529.jpg",
+     "city": [
+      "Bergerviertel"
+     ],
+     "heading": "Type_2_Ladekabel_Elektroauto",
+     "postcode": [
+      8933
+     ],
+     "vertical": "bap",
+     "bap_level0": "KFZ_Zubehoer_Motorradteile",
+     "bap_level1": "PKW_Ersatzteile_Zubehoer",
+     "bap_level2": "Batterien_Ladegeraete",
+     "bap_level3": "Ladegeraete_Zubehoer",
+     "orgid": 10870806,
+     "price": 100,
+     "district": [
+      "Liezen"
+     ],
+     "state": [
+      "Steiermark"
+     ],
+     "device": "desktop",
+     "dealer_2": [
+      "Privat"
+     ]
+    },
+    "dmpParameters": {
+     "pagetype": "Anzeige",
+     "adimageurl": "https://cache.willhaben.at/mmo/5/922/008/415_1708023529.jpg",
+     "city": [
+      "Bergerviertel"
+     ],
+     "AdImage": true,
+     "description": "Zum Verkauf steht ein Type 2 Mode 3 Ladekabel Laenge 5m Mennekes Mit diesem Kabel koennen Elektro und Hybridfahrzeuge an dafuer geeigneter Ladeinfrastruktur geladen werden Nrg kick Tesla Go echarger Wallbox Wattpilot Fronius",
+     "vertical": "bap",
+     "bap_level0": "KFZ_Zubehoer_Motorradteile",
+     "bap_level1": "PKW_Ersatzteile_Zubehoer",
+     "bap_level2": "Batterien_Ladegeraete",
+     "bap_level3": "Ladegeraete_Zubehoer",
+     "postcode_str": [
+      "8933"
+     ],
+     "price": 100,
+     "willhabencode": "922008415",
+     "payliveryEnabled": true,
+     "state": [
+      "Steiermark"
+     ],
+     "partnerid": [
+      "mp",
+      "10870806"
+     ],
+     "heading": "Type_2_Ladekabel_Elektroauto",
+     "postcode": [
+      8933
+     ],
+     "pt1": "922008415",
+     "orgid": 10870806,
+     "pt5": 100,
+     "isAdSavedInFolder": false,
+     "district": [
+      "Liezen"
+     ],
+     "Zustand": [
+      "Neuwertig"
+     ],
+     "device": "desktop",
+     "dealer_2": [
+      "Privat"
+     ],
+     "Uebergabe": [
+      "Selbstabholung",
+      "Versand"
+     ]
+    },
+    "dmpUserIdentities": {
+     "wh_uuid": "bf3ee3b8-6750-5a77-98f4-2dda1bf8b810"
+    },
+    "advertStatus": {
+     "id": "active",
+     "description": "aktiv",
+     "statusId": 50
+    },
+    "advertEditStatusActionsList": null,
+    "seoMetaData": {
+     "canonicalUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/type-2-ladekabel-elektroauto-922008415/",
+     "alternateUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/type-2-ladekabel-elektroauto-922008415/",
+     "title": "Type 2 Ladekabel Elektroauto, € 100,- (8933 Bergerviertel) - willhaben",
+     "keywords": "Type 2 Ladekabel Elektroauto",
+     "description": "Type 2 Ladekabel Elektroauto. 13.352.972 Angebote. Günstig kaufen und gratis inserieren auf willhaben - der größte Marktplatz Österreichs.",
+     "orgId": null
+    },
+    "premiumServiceBoxListResponseDto": {
+     "totalCount": 3,
+     "items": [
+      {
+       "id": 48,
+       "widgetLogo": "https://cache.willhaben.at/campaigns-v2/psb_56e43ddd-7369-5de5-80d8-2def5dda7f17.png",
+       "widgetLogoAltText": "Uniqa Österreich Versicherungen AG",
+       "title": "UNIQA Kfz-Versicherung",
+       "subtitle": "Versichern Sie Ihr Auto in wenigen Klicks.",
+       "buttonText": "Online-Rabatt sichern",
+       "buttonLink": "https://secure.adnxs.com/clktrb?id=827592",
+       "customerName": "Uniqa Österreich Versicherungen AG",
+       "customerIndustry": "UNKNOWN",
+       "countPixel": "https://secure.adnxs.com/imptr?id=79308&t=2&ts=1791623787&gdpr=1&gdpr_consent=${GDPR_CONSENT_STRING}"
+      },
+      {
+       "id": 5000093,
+       "widgetLogo": "https://cache.willhaben.at/campaigns-v2/psb_6c3b2210-1e08-5870-b9a9-8d439b018275.png",
+       "widgetLogoAltText": "Raiffeisen Bank International AG",
+       "title": "Einfach in Raten zahlen",
+       "subtitle": "Hol dir bis zu 7.000 EUR für alles, was du willst.",
+       "buttonText": "Jetzt beantragen",
+       "buttonLink": "https://secure.adnxs.com/clktrb?id=830353",
+       "customerName": "Raiffeisen Bank International AG",
+       "customerIndustry": "FINANCIAL",
+       "countPixel": "https://secure.adnxs.com/imptr?id=79941&t=2&ts=1791623787&gdpr=1&gdpr_consent=${GDPR_CONSENT_STRING}"
+      },
+      {
+       "id": 28,
+       "widgetLogo": "https://cache.willhaben.at/campaigns-v2/psb_4b6e8dda-c791-5f31-85a2-33dd1b6ab072.png",
+       "widgetLogoAltText": "Santander Consumer Bank GmbH",
+       "title": "Einfach in Raten bezahlen",
+       "subtitle": "Die schnelle Finanzierung für alles rund ums Auto",
+       "buttonText": "Wunschkredit anfragen",
+       "buttonLink": "https://secure.adnxs.com/clktrb?id=800396&redir=https://www.santanderconsumer.at/kredit?affiliate_id=843&wpt_id=e2e5ac66148d4aa72e679fef0298a0eda37172e6b34467f6474e0062940b39f6&pid=40107&utm_source=willhaben&utm_medium=affiliate&utm_campaign=Kredit&utm_content=kfzzubehoer&utm_term=widget&credit_amt=100&term=60",
+       "customerName": "Santander Consumer Bank GmbH",
+       "customerIndustry": "UNKNOWN",
+       "countPixel": "https://secure.adnxs.com/imptr?id=71742&t=2&ts=1791623787&gdpr=1&gdpr_consent=${GDPR_CONSENT_STRING}"
+      }
+     ]
+    },
+    "categoryTreeId": 6154,
+    "attributeInformation": [
+     {
+      "treeAttributeElement": {
+       "label": "Zustand",
+       "treeId": 21,
+       "code": "Zustand",
+       "systemTags": [
+        "ShowAsBubbleNavigator",
+        "ImageSearchNavigator"
+       ],
+       "sortOrder": 167
+      },
+      "values": [
+       {
+        "label": "Neuwertig",
+        "treeId": 2546,
+        "code": "MintCondition",
+        "systemTags": [],
+        "childrenDisplayType": "TEXT",
+        "sortOrder": 1
+       }
+      ]
+     },
+     {
+      "treeAttributeElement": {
+       "label": "Übergabe",
+       "treeId": 2535,
+       "code": "Uebergabe",
+       "systemTags": [
+        "ImageSearchNavigator",
+        "FromLastAd"
+       ],
+       "sortOrder": 173
+      },
+      "values": [
+       {
+        "label": "Selbstabholung",
+        "treeId": 2536,
+        "code": "PICKUP",
+        "systemTags": [],
+        "childrenDisplayType": "TEXT",
+        "sortOrder": 0
+       },
+       {
+        "label": "Versand",
+        "treeId": 2537,
+        "code": "Versand",
+        "systemTags": [],
+        "childrenDisplayType": "TEXT",
+        "sortOrder": 1
+       }
+      ]
+     }
+    ],
+    "facebookTrackingData": {
+     "vertical": "Marktplatz",
+     "category1": "KFZ-Zubehör / Motorradteile",
+     "category2": "PKW-Ersatzteile / Zubehör"
+    },
+    "savedInFolder": false,
+    "chatEnabled": true,
+    "loginUUid": "4413829c-f9c1-5dc3-9381-453c6885e484",
+    "tooltips": [],
+    "categoryXmlCode": null,
+    "ownageTypeXmlCode": null,
+    "contactOption": {
+     "contactType": "MESSAGING",
+     "additionalInfo": null
+    },
+    "breadcrumbs": [
+     {
+      "displayName": "Startseite",
+      "seoUrl": "https://www.willhaben.at/iad"
+     },
+     {
+      "displayName": "Marktplatz",
+      "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/"
+     },
+     {
+      "displayName": "KFZ-Zubehör / Motorradteile",
+      "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/kfz-zubehoer-motorradteile-6142"
+     },
+     {
+      "displayName": "PKW-Ersatzteile / Zubehör",
+      "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/pkw-ersatzteile-zubehoer-6143"
+     },
+     {
+      "displayName": "Batterien / Ladegeräte",
+      "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/pkw-ersatzteile-zubehoer/batterien-ladegeraete-6152"
+     },
+     {
+      "displayName": "Ladegeräte / Zubehör",
+      "seoUrl": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/batterien-ladegeraete/ladegeraete-zubehoer-6154"
+     }
+    ],
+    "inputSource": 11,
+    "equipmentList": {
+     "equipments": []
+    },
+    "contactSuggestions": {
+     "suggestions": []
+    },
+    "p2ppOptions": {
+     "deliveryOptions": [
+      {
+       "uuid": "d3378e3b-6484-5b7c-901b-5bfb2abde56a",
+       "logstaId": 1,
+       "price": 7.9,
+       "originalPrice": 7.9,
+       "description": "max. L 100cm × B 60cm × H 60cm, bis 10kg, quaderförmiges Paket",
+       "descriptionShort": "max. L 100cm × B 60cm × H 60cm, bis 10kg, quaderförmiges Paket",
+       "parcelInsurance": "Haftung bis € 510",
+       "optionName": "Post",
+       "detailLink": null,
+       "deliveryDays": "1-2 Werktage",
+       "sizeRequirements": null,
+       "depositoryPrice": 6.9,
+       "carrier": {
+        "uuid": "2472d431-1497-58df-b98f-7b443f48fe84",
+        "description": "Post",
+        "localitySelectorLink": "https://www.post.at/sf/standortfinder",
+        "iconUrl": "https://cache.willhaben.at/img/delivery/post-icon.png",
+        "iconActiveUrl": "https://cache.willhaben.at/img/delivery/logo_carrier_post_100x100px_active.png",
+        "iconInactiveUrl": "https://cache.willhaben.at/img/delivery/logo_carrier_post_100x100px_inactive.png"
+       },
+       "parcelSize": {
+        "size": "M",
+        "longName": "Paket",
+        "description": "z.B. Schischuhe, Küchenmaschine",
+        "additionalDescription": "bis 10 kg",
+        "weight": 10,
+        "iconActiveUrl": "https://cache.willhaben.at/img/delivery/package-size-M.png",
+        "iconInactiveUrl": "https://cache.willhaben.at/img/delivery/package-size-M.png"
+       },
+       "shippingAddOns": []
+      }
+     ],
+     "parcelSizes": [
+      {
+       "size": "M",
+       "longName": "Paket",
+       "description": "z.B. Schischuhe, Küchenmaschine",
+       "additionalDescription": "bis 10 kg",
+       "weight": 10,
+       "iconActiveUrl": "https://cache.willhaben.at/img/delivery/package-size-M.png",
+       "iconInactiveUrl": "https://cache.willhaben.at/img/delivery/package-size-M.png"
+      }
+     ],
+     "paymentOptions": [
+      {
+       "description": "Apple Pay",
+       "iconUrl": "https://cache.willhaben.at/img/delivery/apple_pay.svg"
+      },
+      {
+       "description": "Google Pay",
+       "iconUrl": "https://cache.willhaben.at/img/delivery/google_pay_v3.svg"
+      },
+      {
+       "description": "Mastercard",
+       "iconUrl": "https://cache.willhaben.at/img/delivery/mc_small_v2.png"
+      },
+      {
+       "description": "Visa",
+       "iconUrl": "https://cache.willhaben.at/img/delivery/visa_small_v2.png"
+      },
+      {
+       "description": "EPS",
+       "iconUrl": "https://cache.willhaben.at/img/delivery/eps_v2.png"
+      }
+     ],
+     "sellerOnboardingDTO": {
+      "page1": {
+       "headerIconUrlPng": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safedelivery.png",
+       "headerIconUrlSvg": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safedelivery.svg",
+       "title": "PayLivery – Versende jetzt einfach und sicher",
+       "description": "Wähle als nächstes Paketgröße und Versandanbieter. <b>Das Versandetikett erhältst du per E-Mail</b>, sobald jemand deinen Artikel bezahlt hat.<br/><br/><b>Die Versandkosten trägt der Käufer!</b>",
+       "buttonText": "Weiter"
+      },
+      "page2": {
+       "headerIconUrlPng": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safepayment.png",
+       "headerIconUrlSvg": "https://cache.willhaben.at/img/delivery/selleronboarding/gfx_onboarding_safepayment.svg",
+       "title": "PayLivery – Dein Geld ist sicher",
+       "description": "Der Käufer zahlt bequem online (zB. mit Kreditkarte) – <b>das Geld wird sicher hinterlegt.</b><br/><br/><b>Nach Zustellung</b> des Pakets erhältst du dein <b>Geld direkt auf dein Konto!</b>",
+       "buttonText": "Alles klar!",
+       "moreInfoText": "Wie funktioniert PayLivery?",
+       "moreInfoLink": "https://hilfe.willhaben.at/hc/de/articles/360011484279"
+      }
+     },
+     "howToPayLiveryDTO": {
+      "icon": "https://cache.willhaben.at/img/delivery/icon_PayLivery_circle.png",
+      "headline": "willhaben-PayLivery",
+      "subHeadline": "Unser eigenes Bezahl- und Versandservice",
+      "subline": "Erhöhe deine Verkaufschance und nutze PayLivery. Selbstabholung und eigener Versand sind auch mit PayLivery weiterhin möglich.",
+      "payLiveryAdvantageDTOList": [
+       {
+        "headline": "Schneller verkaufen",
+        "text": "Angebote, die auch PayLivery anbieten, werden öfter geklickt. Die Zahlung passiert in Echtzeit, ohne Verschicken des IBANs. Das Versandetikett lässt sich im Nu herunterladen und ausdrucken.",
+        "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_howto_sellfaster_Seller.png"
+       },
+       {
+        "headline": "Kostenlos und sicher",
+        "text": "Das Service ist für Verkäufer komplett kostenlos. Kosten für Versand trägt der Käufer. Deine Daten sind sicher und dein Paket automatisch bis € 510 versichert.",
+        "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_howto_savepayment_Seller.png"
+       }
+      ]
+     },
+     "buyNowInformationDto": {
+      "headline": "Sofort kaufen",
+      "badge": "NEU",
+      "hint": "— Kostenlos für dich",
+      "text": "Erhalte jetzt Fixpreis-Angebote ohne zu verhandeln. Du entscheidest weiterhin, ob du annimmst oder ablehnst.",
+      "link": "Mehr erfahren",
+      "url": "https://hilfe.willhaben.at/hc/de/articles/10116809082130",
+      "isBuyNowAd": true
+     },
+     "payLiveryInactiveDTO": {
+      "headline": "Warum soll ich willhaben-PayLivery nutzen?",
+      "modalHeadline": "Bist du dir sicher?",
+      "modalText": "Nutze zusätzlich Online-Zahlung und Versand mit <b>willhaben-PayLivery</b> und <b>erhöhe deine Verkaufschancen</b> - ohne zusätzliche Kosten!",
+      "selfShippingButtonLabel": "Nur eigenen Versand anbieten",
+      "selfShippingAndPayLiveryButtonLabel": "Eigenen Versand und PayLivery anbieten",
+      "payLiveryAdvantageDTOList": [
+       {
+        "headline": "Kein Drucker? Kein Problem!",
+        "text": "Dank QR-Code kannst du ab jetzt ganz ohne Drucker versenden.",
+        "iconUrl": "https://mint.willhaben.at/public/images/icon_paylivery_printer.png"
+       },
+       {
+        "headline": "Mehr Anfragen",
+        "text": "PayLivery-Anzeigen werden öfters geklickt.",
+        "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_sellfaster_Seller.png"
+       },
+       {
+        "headline": "Absolut kostenlos",
+        "text": "Der Käufer zahlt für Versicherung und Versand.",
+        "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_savemoney_Seller.png"
+       },
+       {
+        "headline": "Super bequem & sicher",
+        "text": "Kein lästiges Verschicken von IBAN und Adresse im Chat.",
+        "iconUrl": "https://cache.willhaben.at/img/delivery/icon_adinsertion_paylivery_savepayment_Seller.png"
+       }
+      ]
+     },
+     "contextLinkList": null,
+     "attributes": {
+      "priceSummaryHeaderText": "Das Versandetikett wird dir nach dem Verkauf zum Ausdruck bereitgestellt.",
+      "headlineLink": "https://hilfe.willhaben.at/hc/de/categories/360002297680",
+      "labelTrackingNumber": "inkl. Sendungsverfolgung",
+      "infoTextModalFragile": "Nur mit dieser Zusatzoption haftet die Post bis € 510, sollte dein erschütterungsanfälliger oder zerbrechlicher Artikel während des Transports beschädigt werden.<br/><br/>Eine entsprechend gute, stoßfeste Verpackung des Artikels ist dennoch Voraussetzung.",
+      "questionmarkIconUrl": "https://cache.willhaben.at/img/icons/icon_questionmark.svg",
+      "oversizePackageSize": "max. Länge 200cm, max. 360cm Gurtmaß (= Länge + 2 x Breite + 2 x Höhe), jede Paketform",
+      "infoTextModalOversize": "Der Artikel ist Sperrgut und muss gesondert transportiert werden, da er nicht rechteckig ist oder größer als 100 x 60 x 60cm.",
+      "detailsAboutSize": "Details zu Größe und Preis deines Pakets",
+      "hintShippingLabel": "Das Versandetikett wird dir sofort nach dem Verkauf zum Ausdruck bereitgestellt.<br/>Den Versand zahlt automatisch der Käufer:",
+      "shippingCostNote": "Die Versandkosten zahlt automatisch der Käufer.",
+      "subHeadline": "Länge max. 1,75 m",
+      "onlinePaymentAndShippmentWithWillhaben": "Online Zahlung und Versand mit willhaben",
+      "learnMoreLink": "https://hilfe.willhaben.at/hc/de/articles/360011484279",
+      "headlineLinkText": "Wie funktioniert PayLivery?",
+      "headline": "Wähle Paketgröße und Versandanbieter, so kennt ein interessierter Käufer schon vorab die Versandkosten. Selbstabholung ist natürlich weiterhin möglich! Wie funktioniert PayLivery?",
+      "ownDelivery": "Ich möchte selbst versenden, ohne automatisches Versandetikett und Käuferschutz (nicht empfohlen).",
+      "maxLength": "Länge: max. 1m (Post) bzw. 1,75 m (dpd)",
+      "learnMoreLinkText": "Erfahre mehr über PayLivery",
+      "priceSummarySumText": "Den Versand zahlt automatisch der Käufer:"
+     }
+    },
+    "disposed": 0,
+    "publishInfo": null,
+    "upsellings": [],
+    "deleteReason": null,
+    "teaserAttributes": null,
+    "loginId": 10870806
+   },
+   "seoSearchTerms": [
+    {
+     "title": "Aktuelle Suchen",
+     "searchTerms": [
+      {
+       "id": 174058,
+       "url": "kaufen-und-verkaufen/l/gmundner-keramik-kuh",
+       "name": "Gmundner Keramik Kuh"
+      },
+      {
+       "id": 52007,
+       "url": "kaufen-und-verkaufen/l/solarmatte",
+       "name": "Solarmatte"
+      },
+      {
+       "id": 3222,
+       "url": "kaufen-und-verkaufen/l/pendelleuchte",
+       "name": "Pendelleuchte"
+      },
+      {
+       "id": 171545,
+       "url": "kaufen-und-verkaufen/l/nintendo-wii-schwarz",
+       "name": "Nintendo Wii Schwarz"
+      },
+      {
+       "id": 103025,
+       "url": "kaufen-und-verkaufen/l/regenwurm",
+       "name": "Regenwurm"
+      },
+      {
+       "id": 62965,
+       "url": "kaufen-und-verkaufen/l/vintage-haengelampe",
+       "name": "Vintage Hängelampe"
+      },
+      {
+       "id": 216324,
+       "url": "kaufen-und-verkaufen/l/jack-wolfskin-28",
+       "name": "Jack Wolfskin 28"
+      },
+      {
+       "id": 77186,
+       "url": "kaufen-und-verkaufen/l/audi-a6-20",
+       "name": "Audi A6 20"
+      },
+      {
+       "id": 62461,
+       "url": "kaufen-und-verkaufen/l/lego-8297",
+       "name": "Lego 8297"
+      },
+      {
+       "id": 167732,
+       "url": "kaufen-und-verkaufen/l/damenjacke-xxl",
+       "name": "Damenjacke Xxl"
+      },
+      {
+       "id": 67785,
+       "url": "kaufen-und-verkaufen/l/sachen-suchen",
+       "name": "Sachen Suchen"
+      },
+      {
+       "id": 230662,
+       "url": "kaufen-und-verkaufen/l/sony-walkman-radio",
+       "name": "Sony Walkman Radio"
+      },
+      {
+       "id": 76470,
+       "url": "kaufen-und-verkaufen/l/erzwagen",
+       "name": "Erzwagen"
+      },
+      {
+       "id": 67224,
+       "url": "kaufen-und-verkaufen/l/wandregal-schwarz",
+       "name": "Wandregal Schwarz"
+      },
+      {
+       "id": 202944,
+       "url": "kaufen-und-verkaufen/l/sony-remote-control",
+       "name": "Sony Remote Control"
+      },
+      {
+       "id": 94936,
+       "url": "kaufen-und-verkaufen/l/schubladen-metall",
+       "name": "Schubladen Metall"
+      },
+      {
+       "id": 149725,
+       "url": "kaufen-und-verkaufen/l/hearts-roses",
+       "name": "Hearts Roses"
+      },
+      {
+       "id": 126690,
+       "url": "kaufen-und-verkaufen/l/heels-gr42",
+       "name": "Heels Gr42"
+      },
+      {
+       "id": 65211,
+       "url": "kaufen-und-verkaufen/l/parfum-prada",
+       "name": "Parfum Prada"
+      },
+      {
+       "id": 98487,
+       "url": "kaufen-und-verkaufen/l/boardwalk-empire",
+       "name": "Boardwalk Empire"
+      },
+      {
+       "id": 100445,
+       "url": "kaufen-und-verkaufen/l/hama-radio",
+       "name": "Hama Radio"
+      },
+      {
+       "id": 89962,
+       "url": "kaufen-und-verkaufen/l/sketchers-34",
+       "name": "Sketchers 34"
+      },
+      {
+       "id": 98340,
+       "url": "kaufen-und-verkaufen/l/beistelltisch-wien",
+       "name": "Beistelltisch Wien"
+      },
+      {
+       "id": 175377,
+       "url": "kaufen-und-verkaufen/l/scheunenfund-alte",
+       "name": "Scheunenfund Alte"
+      },
+      {
+       "id": 208048,
+       "url": "kaufen-und-verkaufen/l/lagenlook-schwarz",
+       "name": "Lagenlook Schwarz"
+      },
+      {
+       "id": 78576,
+       "url": "kaufen-und-verkaufen/l/schipullover",
+       "name": "Schipullover"
+      },
+      {
+       "id": 53669,
+       "url": "kaufen-und-verkaufen/l/samsung-galaxy-s9-wien",
+       "name": "Samsung Galaxy S9 Wien"
+      },
+      {
+       "id": 189896,
+       "url": "kaufen-und-verkaufen/l/tupperware-chini",
+       "name": "Tupperware Chini"
+      },
+      {
+       "id": 178988,
+       "url": "kaufen-und-verkaufen/l/rockabilly-hose",
+       "name": "Rockabilly Hose"
+      },
+      {
+       "id": 53097,
+       "url": "kaufen-und-verkaufen/l/wilhelmsburger-krug",
+       "name": "Wilhelmsburger Krug"
+      }
+     ]
+    }
+   ],
+   "hereApiKey": "REDACTED",
+   "storyblokPrivateContactBoxBannerBox": {
+    "_uid": "60d3ee6e-25d1-5cac-b5ae-dc7588d73a13",
+    "flex": {
+     "_uid": "36ab16e4-c46b-5a65-9d88-f58fb3293788",
+     "isFlex": false,
+     "plugin": "wh-flexbox-conditional",
+     "justifyContent": ""
+    },
+    "children": [],
+    "component": "box",
+    "previewlabel": "",
+    "paddingTopMobile": "0",
+    "paddingLeftMobile": "0",
+    "paddingTopDesktop": "0",
+    "paddingLeftDesktop": "0",
+    "paddingRightMobile": "0",
+    "paddingBottomMobile": "0",
+    "paddingRightDesktop": "0",
+    "paddingBottomDesktop": "0"
+   },
+   "sustainabilityDataItem": null
+  },
+  "showVerificationAlert": false,
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+  "isSSG": false,
+  "toggles": {
+   "enableUserZoomMyProfile": true,
+   "enableUserZoomAutoMotorResultList": false,
+   "enableUserZoomAutoMotorAdDetail": false,
+   "enableUserZoomAutoMotorStartpages": false,
+   "enableUserZoomRealEstateResultList": true,
+   "enableUserZoomRealEstateDetailSearch": false,
+   "enableUserZoomRealEstateStartpage": false,
+   "enableUserZoomRealEstateAdDetail": false,
+   "enableUserZoomBapAdDetail": false,
+   "enableUserZoomBapResultList": true,
+   "enableUserZoomBapStartPage": false,
+   "enableUserZoomStartPage": false,
+   "enableUserZoomAzaNegativePage": false,
+   "enableUserZoomAzaPositivePage": false,
+   "enableUserZoomFashion": false,
+   "enableUserZoomPriceFinder": true,
+   "enableUserZoomPersonalization": true,
+   "enableShippingCampaign": false,
+   "disableZendeskWidget": false,
+   "dsaReportingIadEnabled": true,
+   "dsaReportingMessagingEnabled": true,
+   "enableSizePersonalization": true,
+   "enableMaterialFilterFakeDoorTest": false,
+   "enableVideoVtrPlusPoc": false,
+   "enableServersideAdvertisementCall": false,
+   "enableSegment": true,
+   "enableMiraclBrandedMortgageCalculator": true,
+   "enableHyponoeBrandedMortgageCalculator": false,
+   "enableBankAustriaBrandedMortgageCalculator": false,
+   "enableIadMaintenanceBanner": false,
+   "enableLegacyFacebookPixelRevealnumberClicked": false,
+   "enableLegacyFacebookPixelCallphoneClicked": false,
+   "enableLegacyFacebookPixelContacted": true,
+   "enableLegacyFacebookPixelExternalLinkClicked": true,
+   "enableSimilarTransactions": true
+  },
+  "initialOptimizelyDatafile": {
+   "accountId": "121882033",
+   "projectId": "20606891308",
+   "revision": "3008",
+   "attributes": [
+    {
+     "id": "20667891221",
+     "key": "mintRole"
+    },
+    {
+     "id": "20674400169",
+     "key": "screenSize"
+    },
+    {
+     "id": "20711590197",
+     "key": "isPayLiveryAd"
+    },
+    {
+     "id": "20765200459",
+     "key": "isApp"
+    },
+    {
+     "id": "20779031212",
+     "key": "isLoggedIn"
+    },
+    {
+     "id": "20971820983",
+     "key": "isAndroid"
+    },
+    {
+     "id": "20975221600",
+     "key": "isAndroidBannerShown"
+    },
+    {
+     "id": "21118750869",
+     "key": "isEmail"
+    },
+    {
+     "id": "21369230847",
+     "key": "isFashionSearch"
+    },
+    {
+     "id": "22905895122",
+     "key": "mortgagesProd"
+    },
+    {
+     "id": "5746304903544832",
+     "key": "category"
+    }
+   ],
+   "audiences": [
+    {
+     "id": "$opt_dummy_audience",
+     "name": "Optimizely-Generated Audience for Backwards Compatibility",
+     "conditions": "[\"or\", {\"match\": \"exact\", \"name\": \"$opt_dummy_attribute\", \"type\": \"custom_attribute\", \"value\": \"$opt_dummy_value\"}]"
+    }
+   ],
+   "version": "4",
+   "events": [
+    {
+     "id": "20654650500",
+     "experimentIds": [],
+     "key": "resetBubbleClicked"
+    },
+    {
+     "id": "20679870903",
+     "experimentIds": [],
+     "key": "TrefferAnzeigenClicked"
+    },
+    {
+     "id": "20682410588",
+     "experimentIds": [],
+     "key": "payLiveryModalBuyerSendProposalButtonClick"
+    },
+    {
+     "id": "20705200454",
+     "experimentIds": [],
+     "key": "payLiveryAdDetailSendProposalButtonClick"
+    },
+    {
+     "id": "20817761206",
+     "experimentIds": [],
+     "key": "bap_resultlist_viewed"
+    },
+    {
+     "id": "20842820681",
+     "experimentIds": [],
+     "key": "bap_lead"
+    },
+    {
+     "id": "20843431751",
+     "experimentIds": [],
+     "key": "bap_addetail_viewed"
+    },
+    {
+     "id": "20849850890",
+     "experimentIds": [],
+     "key": "recommendationsInteraction"
+    },
+    {
+     "id": "20872240592",
+     "experimentIds": [],
+     "key": "recommendationsAdClick"
+    },
+    {
+     "id": "20877791334",
+     "experimentIds": [],
+     "key": "recommendationsShowMoreClick"
+    },
+    {
+     "id": "20889260171",
+     "experimentIds": [],
+     "key": "bap_startpage_viewed"
+    },
+    {
+     "id": "20896150154",
+     "experimentIds": [],
+     "key": "nasa_ad_list_revive_button_click"
+    },
+    {
+     "id": "20898734717",
+     "experimentIds": [],
+     "key": "messagingCTAClick"
+    },
+    {
+     "id": "20900530298",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_button_click"
+    },
+    {
+     "id": "20905812792",
+     "experimentIds": [],
+     "key": "initial_buyer_proposal_cta_click"
+    },
+    {
+     "id": "20911600266",
+     "experimentIds": [],
+     "key": "optimizely-setup"
+    },
+    {
+     "id": "20927110089",
+     "experimentIds": [],
+     "key": "nasa_upselling_buy_success"
+    },
+    {
+     "id": "20933051636",
+     "experimentIds": [],
+     "key": "searchAgentPushActivated"
+    },
+    {
+     "id": "20946900571",
+     "experimentIds": [],
+     "key": "bbx_android_banner_dismiss_button"
+    },
+    {
+     "id": "20954920821",
+     "experimentIds": [],
+     "key": "bbx_bottom_sticky_button_call_small"
+    },
+    {
+     "id": "20960610328",
+     "experimentIds": [],
+     "key": "bbx_bottom_sticky_button_contact_small"
+    },
+    {
+     "id": "20964200820",
+     "experimentIds": [],
+     "key": "bbx_bottom_sticky_button_order_now_small"
+    },
+    {
+     "id": "20969920525",
+     "experimentIds": [],
+     "key": "bbx_android_banner_dismiss_or_open_button"
+    },
+    {
+     "id": "20981640690",
+     "experimentIds": [],
+     "key": "bbx_bottom_sticky_button_offer_small"
+    },
+    {
+     "id": "20989400600",
+     "experimentIds": [],
+     "key": "bbx_android_banner_open_button"
+    },
+    {
+     "id": "20991140131",
+     "experimentIds": [],
+     "key": "categorySuggestionClicked"
+    },
+    {
+     "id": "20991300566",
+     "experimentIds": [],
+     "key": "bbx_bottom_sticky_button_create_search_agent_small"
+    },
+    {
+     "id": "20998862465",
+     "experimentIds": [],
+     "key": "payliveryAdResultlistClick"
+    },
+    {
+     "id": "21052900485",
+     "experimentIds": [],
+     "key": "iad_adin_upselling_next_click_with_super"
+    },
+    {
+     "id": "21114541220",
+     "experimentIds": [],
+     "key": "attempt-pay-in"
+    },
+    {
+     "id": "21123690073",
+     "experimentIds": [],
+     "key": "iad_adin_upselling_next_click_with_top"
+    },
+    {
+     "id": "21127280185",
+     "experimentIds": [],
+     "key": "iad_adin_upselling_next_click_with_bump"
+    },
+    {
+     "id": "21129070106",
+     "experimentIds": [],
+     "key": "iad_adin_upselling_next_click_with_highlight"
+    },
+    {
+     "id": "21181720197",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_cancel"
+    },
+    {
+     "id": "21199690564",
+     "experimentIds": [],
+     "key": "addetail_viewed"
+    },
+    {
+     "id": "21204640493",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_farblich_hervorheben_success"
+    },
+    {
+     "id": "21204923249",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_farb_success_without_hint"
+    },
+    {
+     "id": "21217700218",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_activate"
+    },
+    {
+     "id": "21218581339",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_success_without_hint"
+    },
+    {
+     "id": "21221781036",
+     "experimentIds": [],
+     "key": "myfolder_widget_ad_click"
+    },
+    {
+     "id": "21226690486",
+     "experimentIds": [],
+     "key": "myfolder_widget_view_all_click"
+    },
+    {
+     "id": "21227523078",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_button_with_hint_click"
+    },
+    {
+     "id": "21229840494",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_top_startseite_suchergebnisse_success"
+    },
+    {
+     "id": "21237330350",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_top_startseite_plus_success"
+    },
+    {
+     "id": "21237832435",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_farb_success_with_hint"
+    },
+    {
+     "id": "21239420199",
+     "experimentIds": [],
+     "key": "time_spent"
+    },
+    {
+     "id": "21243081455",
+     "experimentIds": [],
+     "key": "myfolder_widget_interaction"
+    },
+    {
+     "id": "21243482609",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_top_startseite_plus_success_with_hint"
+    },
+    {
+     "id": "21243751234",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_top_startseite_plus_success_wo_hint"
+    },
+    {
+     "id": "21247040266",
+     "experimentIds": [],
+     "key": "last_widget_viewed"
+    },
+    {
+     "id": "21247530730",
+     "experimentIds": [],
+     "key": "myfolder_similar_ads_recommendation_click"
+    },
+    {
+     "id": "21255471403",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_top_startseite_such_success_wo_hint"
+    },
+    {
+     "id": "21259420885",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_success_with_hint"
+    },
+    {
+     "id": "21259880280",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_button_without_hint_click"
+    },
+    {
+     "id": "21271011247",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_top_startseite_such_success_with_hint"
+    },
+    {
+     "id": "21274040657",
+     "experimentIds": [],
+     "key": "adResultListClickPosition"
+    },
+    {
+     "id": "21279601821",
+     "experimentIds": [],
+     "key": "bbx_button_contact_seller_desktop"
+    },
+    {
+     "id": "21289860164",
+     "experimentIds": [],
+     "key": "bbx_bottom_contact_seller_form_button"
+    },
+    {
+     "id": "21293280408",
+     "experimentIds": [],
+     "key": "adResultListClick"
+    },
+    {
+     "id": "21305730119",
+     "experimentIds": [],
+     "key": "bbx_top_sticky_button_contact_tablet"
+    },
+    {
+     "id": "21314371119",
+     "experimentIds": [],
+     "key": "miniDashboardProfileClick"
+    },
+    {
+     "id": "21317721783",
+     "experimentIds": [],
+     "key": "searchAgentWidgetShowMoreClick"
+    },
+    {
+     "id": "21318060721",
+     "experimentIds": [],
+     "key": "lastSearchesWidgetAdClick"
+    },
+    {
+     "id": "21318891358",
+     "experimentIds": [],
+     "key": "startpageFirstWidgetShowMoreClick"
+    },
+    {
+     "id": "21320501514",
+     "experimentIds": [],
+     "key": "adResultListClick_4"
+    },
+    {
+     "id": "21320800617",
+     "experimentIds": [],
+     "key": "nearbyWidgetAdClick"
+    },
+    {
+     "id": "21322011439",
+     "experimentIds": [],
+     "key": "adResultListClick_3"
+    },
+    {
+     "id": "21322361258",
+     "experimentIds": [],
+     "key": "nearbyWidgetInteraction"
+    },
+    {
+     "id": "21325281617",
+     "experimentIds": [],
+     "key": "searchAgentWidgetAdClick"
+    },
+    {
+     "id": "21329532542",
+     "experimentIds": [],
+     "key": "adResultListClick_2"
+    },
+    {
+     "id": "21335240788",
+     "experimentIds": [],
+     "key": "nearbyWidgetShowMoreClick"
+    },
+    {
+     "id": "21337660960",
+     "experimentIds": [],
+     "key": "searchAgentWidgetInteraction"
+    },
+    {
+     "id": "21340250681",
+     "experimentIds": [],
+     "key": "lastSearchesWidgetShowMoreClick"
+    },
+    {
+     "id": "21341101794",
+     "experimentIds": [],
+     "key": "lastSearchesWidgetInteraction"
+    },
+    {
+     "id": "21341511812",
+     "experimentIds": [],
+     "key": "resultListPaginationClick"
+    },
+    {
+     "id": "21350120096",
+     "experimentIds": [],
+     "key": "adResultListClick_1"
+    },
+    {
+     "id": "21352850964",
+     "experimentIds": [],
+     "key": "lastViewedAdsWidgetInteraction"
+    },
+    {
+     "id": "21354151404",
+     "experimentIds": [],
+     "key": "startpageFirstWidgetInteraction"
+    },
+    {
+     "id": "21355901042",
+     "experimentIds": [],
+     "key": "adResultListClick_fashion"
+    },
+    {
+     "id": "21357470160",
+     "experimentIds": [],
+     "key": "adResultListClick_5"
+    },
+    {
+     "id": "21359960811",
+     "experimentIds": [],
+     "key": "lastViewedAdsWidgetAdClick"
+    },
+    {
+     "id": "21362350766",
+     "experimentIds": [],
+     "key": "resultListPaginationClick_fashion"
+    },
+    {
+     "id": "21373351047",
+     "experimentIds": [],
+     "key": "lastViewedAdsWidgetShowMoreClick"
+    },
+    {
+     "id": "21400190286",
+     "experimentIds": [],
+     "key": "adResultListClick_priceReduction"
+    },
+    {
+     "id": "21405220072",
+     "experimentIds": [],
+     "key": "startpageFirstWidgetAdClick"
+    },
+    {
+     "id": "21456230403",
+     "experimentIds": [],
+     "key": "trendwidget_interaction"
+    },
+    {
+     "id": "21466590400",
+     "experimentIds": [],
+     "key": "payLiveryModalBuyerEditPriceButtonClick"
+    },
+    {
+     "id": "21518351806",
+     "experimentIds": [],
+     "key": "payliveryModalBuyerCancelProposal"
+    },
+    {
+     "id": "21659901565",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_modal_success"
+    },
+    {
+     "id": "21661671648",
+     "experimentIds": [],
+     "key": "nasa_ad_list_upselling_buy_adin_success"
+    },
+    {
+     "id": "21682240608",
+     "experimentIds": [],
+     "key": "dsf_ad_list_upselling_button_click"
+    },
+    {
+     "id": "21684480479",
+     "experimentIds": [],
+     "key": "dsf_ad_list_upselling_buy_success"
+    },
+    {
+     "id": "21753722453",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_lead"
+    },
+    {
+     "id": "21767020945",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_contact_form"
+    },
+    {
+     "id": "21779200258",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_start_form"
+    },
+    {
+     "id": "21834412888",
+     "experimentIds": [],
+     "key": "adWithPayliveryOptionNotSelected"
+    },
+    {
+     "id": "21836841658",
+     "experimentIds": [],
+     "key": "payliveryAdWithBuyNowOptionSelected"
+    },
+    {
+     "id": "21871161261",
+     "experimentIds": [],
+     "key": "adWithPayliveryOptionSelected"
+    },
+    {
+     "id": "22030864057",
+     "experimentIds": [],
+     "key": "jobs-addetail-similarad-click"
+    },
+    {
+     "id": "22186111069",
+     "experimentIds": [],
+     "key": "showHeroes_adResultListClick"
+    },
+    {
+     "id": "22245180021",
+     "experimentIds": [],
+     "key": "showHeroes_resultListPaginationClick"
+    },
+    {
+     "id": "22356710285",
+     "experimentIds": [],
+     "key": "item-recommendationsInteraction"
+    },
+    {
+     "id": "22362480314",
+     "experimentIds": [],
+     "key": "item-recommendationsAdClick"
+    },
+    {
+     "id": "22405460083",
+     "experimentIds": [],
+     "key": "item-recommendationsShowMoreClick"
+    },
+    {
+     "id": "22426103413",
+     "experimentIds": [],
+     "key": "jobs-addetail-click-send-application"
+    },
+    {
+     "id": "22457931520",
+     "experimentIds": [],
+     "key": "jobs-searchresult-click-to-addetail"
+    },
+    {
+     "id": "22960640419",
+     "experimentIds": [],
+     "key": "jobs-similarads-searchagent-click"
+    },
+    {
+     "id": "23173680018",
+     "experimentIds": [],
+     "key": "tab_click"
+    },
+    {
+     "id": "23369460393",
+     "experimentIds": [],
+     "key": "mortgageInteraction"
+    },
+    {
+     "id": "23383230221",
+     "experimentIds": [],
+     "key": "mortgageOfferButton"
+    },
+    {
+     "id": "23513080599",
+     "experimentIds": [],
+     "key": "item-recommendationsArrowClick"
+    },
+    {
+     "id": "24789170591",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_email_simulation_result"
+    },
+    {
+     "id": "25122400808",
+     "experimentIds": [],
+     "key": "bizdev-mortgage-microconversion-subscribed"
+    },
+    {
+     "id": "25427950052",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_price"
+    },
+    {
+     "id": "25793180311",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_equity"
+    },
+    {
+     "id": "26168570497",
+     "experimentIds": [],
+     "key": "bbx_bap_similar_ads_srl_in_view"
+    },
+    {
+     "id": "26173901043",
+     "experimentIds": [],
+     "key": "bbx_save_size_fake_door_btn_interaction"
+    },
+    {
+     "id": "26861770128",
+     "experimentIds": [],
+     "key": "button_click"
+    },
+    {
+     "id": "27053020811",
+     "experimentIds": [],
+     "key": "jobs-retail-info-click"
+    },
+    {
+     "id": "27056070706",
+     "experimentIds": [],
+     "key": "jobs-crafts-info-click"
+    },
+    {
+     "id": "27083500576",
+     "experimentIds": [],
+     "key": "jobs-no-experience-info-click"
+    },
+    {
+     "id": "28559910462",
+     "experimentIds": [],
+     "key": "recommendationsShowMoreButtonClick"
+    },
+    {
+     "id": "28578670698",
+     "experimentIds": [],
+     "key": "recommendationsSellerHeaderClick"
+    },
+    {
+     "id": "28780310878",
+     "experimentIds": [],
+     "key": "bizdev_mortgage_immoad_calculator_engagement"
+    },
+    {
+     "id": "28831890553",
+     "experimentIds": [],
+     "key": "savedAdsMortgageLinkInteraction"
+    },
+    {
+     "id": "28888880169",
+     "experimentIds": [],
+     "key": "savedAdsMortgageLinkClick"
+    },
+    {
+     "id": "29831140174",
+     "experimentIds": [],
+     "key": "bbx_user_click_all_other_ads_button_from_user"
+    },
+    {
+     "id": "29835950102",
+     "experimentIds": [],
+     "key": "bbx_user_click_other_ad_from_user"
+    },
+    {
+     "id": "29858850019",
+     "experimentIds": [],
+     "key": "bbx_bottom_contact_box_click_more_ads_from_seller"
+    },
+    {
+     "id": "29870410015",
+     "experimentIds": [],
+     "key": "bbx_top_contact_box_click_more_ads_from_seller"
+    },
+    {
+     "id": "29872970178",
+     "experimentIds": [],
+     "key": "bbx_user_click_all_other_ads_from_user"
+    },
+    {
+     "id": "30042580714",
+     "experimentIds": [],
+     "key": "bbx_mortgage_calculator_submit"
+    },
+    {
+     "id": "4879331218948096",
+     "experimentIds": [],
+     "key": "similar_ads_slider_interaction"
+    },
+    {
+     "id": "5110988687540224",
+     "experimentIds": [],
+     "key": "bbx_transaction_price_comparison_click"
+    },
+    {
+     "id": "5413316139417600",
+     "experimentIds": [],
+     "key": "carma_similar_car_feedback_button_clicked"
+    },
+    {
+     "id": "5498413848985600",
+     "experimentIds": [],
+     "key": "beast_ad_insertion_completed"
+    },
+    {
+     "id": "5589170098274304",
+     "experimentIds": [],
+     "key": "beast-address-mandatory-checkbox"
+    },
+    {
+     "id": "5676739855122432",
+     "experimentIds": [],
+     "key": "nasa_ad_new_publish_button"
+    },
+    {
+     "id": "5679320375492608",
+     "experimentIds": [],
+     "key": "nasa_ad_list_copy_button_click"
+    },
+    {
+     "id": "5923640120705024",
+     "experimentIds": [],
+     "key": "bbx_transaction_price_comparison_shown"
+    },
+    {
+     "id": "6176189987946496",
+     "experimentIds": [],
+     "key": "beast_ad_address_filled_out"
+    },
+    {
+     "id": "6203538980732928",
+     "experimentIds": [],
+     "key": "bbx_transaction_map_fake_door_btn_interaction"
+    },
+    {
+     "id": "6345090453471232",
+     "experimentIds": [],
+     "key": "similar_ad_clicked"
+    },
+    {
+     "id": "6507171838951424",
+     "experimentIds": [],
+     "key": "slider_interactions"
+    },
+    {
+     "id": "6678543990521856",
+     "experimentIds": [],
+     "key": "bbx_transaction_price_comparison_section_viewed"
+    }
+   ],
+   "integrations": [],
+   "holdouts": [],
+   "localHoldouts": [],
+   "anonymizeIP": true,
+   "botFiltering": true,
+   "typedAudiences": [],
+   "variables": [],
+   "environmentKey": "production",
+   "sdkKey": "8fxS9PiNKHpoJqK5SW8S8",
+   "featureFlags": [
+    {
+     "id": "9466",
+     "key": "bbx-3344",
+     "rolloutId": "rollout-9466-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "5622",
+       "key": "send_proposal_button_text",
+       "type": "string",
+       "defaultValue": "Kaufanfrage senden"
+      }
+     ]
+    },
+    {
+     "id": "12008",
+     "key": "bbx_contact_seller_wording",
+     "rolloutId": "rollout-12008-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "6737",
+       "key": "display_text",
+       "type": "string",
+       "defaultValue": "Verkäufer kontaktieren"
+      },
+      {
+       "id": "6924",
+       "key": "display_text_mobile",
+       "type": "string",
+       "defaultValue": "Kontaktieren"
+      }
+     ]
+    },
+    {
+     "id": "12948",
+     "key": "addetail_last_viewed_ads",
+     "rolloutId": "rollout-12948-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "12997",
+     "key": "startpage_last_viewed_ads",
+     "rolloutId": "rollout-12997-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "14131",
+     "key": "trendwidget",
+     "rolloutId": "rollout-14131-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "14064",
+     "key": "paylivery_show_buyer_protection_calculation",
+     "rolloutId": "rollout-14064-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "15424",
+     "key": "paylivery_buyer_protection_calculation_follow_up",
+     "rolloutId": "rollout-15424-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "17662",
+     "key": "bizdev-mortgage-landing-page-action-button",
+     "rolloutId": "rollout-17662-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "9482",
+       "key": "action_button_text",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "19422",
+     "key": "whiad-29098-show-aza-fake-buynow",
+     "rolloutId": "rollout-19422-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "21952",
+     "key": "dsf-upselling-explanation",
+     "rolloutId": "rollout-21952-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "27080",
+     "key": "nasa_upselling_explanation",
+     "rolloutId": "rollout-27080-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "27832",
+     "key": "bbx_showheroes",
+     "rolloutId": "rollout-27832-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "29344",
+     "key": "bbx_show_item_recommendations",
+     "rolloutId": "rollout-29344-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "31046",
+     "key": "bbx_show_item_recommendations_v2",
+     "rolloutId": "rollout-31046-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "32188",
+     "key": "bbx_show_item_recommendations_cars",
+     "rolloutId": "rollout-32188-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "33084",
+     "key": "bbx_show_item_recommendations_cars_v2",
+     "rolloutId": "rollout-33084-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "35449",
+     "key": "bbx_item_recommendations_boosting",
+     "rolloutId": "rollout-35449-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "41708",
+     "key": "bbx_item_recommendations_boosting_v2",
+     "rolloutId": "rollout-41708-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "42137",
+     "key": "bbx_item_recommendations_boosting_v3",
+     "rolloutId": "rollout-42137-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "22944",
+       "key": "dealer_boost_factor",
+       "type": "integer",
+       "defaultValue": "0"
+      }
+     ]
+    },
+    {
+     "id": "45812",
+     "key": "bbx_mortgages_tab_text",
+     "rolloutId": "rollout-45812-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "23655",
+       "key": "tab_label",
+       "type": "string",
+       "defaultValue": "Wohnkredite"
+      }
+     ]
+    },
+    {
+     "id": "8980",
+     "key": "iad-superkombi-booking",
+     "rolloutId": "rollout-8980-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "42012",
+     "key": "bizdev-mortgage-appointment-calendar",
+     "rolloutId": "rollout-42012-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "22889",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "19982",
+     "key": "bizdev-mortgage-overview-before-contact",
+     "rolloutId": "rollout-19982-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "32184",
+     "key": "bizdev-mortgage-startpage-heading",
+     "rolloutId": "rollout-32184-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "15217",
+       "key": "heading",
+       "type": "string",
+       "defaultValue": ""
+      },
+      {
+       "id": "15218",
+       "key": "subheading",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "32191",
+     "key": "bizdev-mortgage-landing-page-heading",
+     "rolloutId": "rollout-32191-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "15222",
+       "key": "subheading",
+       "type": "string",
+       "defaultValue": ""
+      },
+      {
+       "id": "15223",
+       "key": "heading",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "44733",
+     "key": "bizdev-mortgage-footer-schedule-advisory",
+     "rolloutId": "rollout-44733-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "23532",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "39776",
+     "key": "bizdev-mortgage-restructure-landing-page-hero",
+     "rolloutId": "rollout-39776-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "22460",
+       "key": "use_new_hero",
+       "type": "boolean",
+       "defaultValue": "true"
+      }
+     ]
+    },
+    {
+     "id": "45790",
+     "key": "bizdev-mortgage-offer-contact-lite",
+     "rolloutId": "rollout-45790-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "23650",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "47197",
+     "key": "bbx_mortgages_calculator",
+     "rolloutId": "rollout-47197-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "48119",
+     "key": "bizdev-mortgage-offer-contact-postalcode",
+     "rolloutId": "rollout-48119-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "24429",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "48764",
+     "key": "bbx_item_recommendations_boosting_real_estate",
+     "rolloutId": "rollout-48764-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "49687",
+     "key": "bizdev-mortgage-startpage-hero-collage",
+     "rolloutId": "rollout-49687-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "24660",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "50595",
+     "key": "bizdev-mortgage-offer-contact-typeofcontact",
+     "rolloutId": "rollout-50595-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "24787",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "78342",
+     "key": "bbx_item_recommendations_boosting_real_estate2_city",
+     "rolloutId": "rollout-78342-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "78344",
+     "key": "bbx_item_recommendations_boosting_real_estate2_rural",
+     "rolloutId": "rollout-78344-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "98710",
+     "key": "bizdev-mortgage-immoad-secondary-cta",
+     "rolloutId": "rollout-98710-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "31747",
+       "key": "variation",
+       "type": "string",
+       "defaultValue": "none"
+      }
+     ]
+    },
+    {
+     "id": "99506",
+     "key": "bizdev-mortgage-newsletter-doi-on-contact-form",
+     "rolloutId": "rollout-99506-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "99754",
+     "key": "bizdev-mortgage-contact-form-ssl-info",
+     "rolloutId": "rollout-99754-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "32098",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "99778",
+     "key": "bizdev-mortgage-email-simulation-result",
+     "rolloutId": "rollout-99778-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "100501",
+     "key": "bbx_similar_ads_slider_fashion_boost_size",
+     "rolloutId": "rollout-100501-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "104277",
+     "key": "bizdev-mortgage-immoad-form-entry-page",
+     "rolloutId": "rollout-104277-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "33114",
+       "key": "indication",
+       "type": "string",
+       "defaultValue": "Vorläufiges Angebot: Erster Überblick"
+      },
+      {
+       "id": "33115",
+       "key": "offer",
+       "type": "string",
+       "defaultValue": "Konkretes Angebot: Für geplante Finanzierung"
+      },
+      {
+       "id": "33116",
+       "key": "couteroffer",
+       "type": "string",
+       "defaultValue": "Gegenangebot: Zum Vergleichen"
+      },
+      {
+       "id": "33117",
+       "key": "info",
+       "type": "string",
+       "defaultValue": "Allgemeine Fragen klären"
+      },
+      {
+       "id": "33910",
+       "key": "form_entry_options",
+       "type": "json",
+       "defaultValue": "{\"data\":[{\"title\":\"Vorläufiges\", \"description\":\"Erhalte einen ersten Überblick über deine finanziellen Möglichkeiten\"},{\"title\":\"Detailiertes Angebot\", \"description\":\"Bekomme einen konkreten Finanzierungsvorschlag auf Basis eines Beratungsgesprächs\"},{\"title\":\"Gegenangebot\", \"description\":\"Erfahre, ob wir das Angebot deiner Hausbank unterbieten können\"},{\"title\":\"Beratungsgespräch\", \"description\":\"Kläre deine Fragen unverbindlich mit einem Finanzierungsprofi\"}]}"
+      }
+     ]
+    },
+    {
+     "id": "106490",
+     "key": "bizdev-mortgage-idle-exitintent-text",
+     "rolloutId": "rollout-106490-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "33629",
+       "key": "title",
+       "type": "string",
+       "defaultValue": "Bleib auf dem Laufenden"
+      },
+      {
+       "id": "33630",
+       "key": "subtitle",
+       "type": "string",
+       "defaultValue": "Die wichtigsten Infos & Expertentipps zum Thema Immofinanzierungen. Maximal 2 x pro Monat. Kompetent, kompakt und kostenlos."
+      }
+     ]
+    },
+    {
+     "id": "109921",
+     "key": "bizdev-mortgage-form-phase-timing",
+     "rolloutId": "rollout-109921-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "112209",
+     "key": "bizdev-mortgage-form-no-phase",
+     "rolloutId": "rollout-112209-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "113892",
+     "key": "bizdev-mortgage-form-skip-this-real-estate-question",
+     "rolloutId": "rollout-113892-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "36685",
+       "key": "skip",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "113963",
+     "key": "bbx_more_similar_ads_on_adddetail",
+     "rolloutId": "rollout-113963-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "115689",
+     "key": "bbx_save_size_fake_door",
+     "rolloutId": "rollout-115689-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "116602",
+     "key": "bizdev-mortgage-immoad-re-summary",
+     "rolloutId": "rollout-116602-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "37718",
+       "key": "pre-heading",
+       "type": "string",
+       "defaultValue": ""
+      },
+      {
+       "id": "37719",
+       "key": "heading",
+       "type": "string",
+       "defaultValue": ""
+      },
+      {
+       "id": "37720",
+       "key": "bubble",
+       "type": "string",
+       "defaultValue": ""
+      },
+      {
+       "id": "37721",
+       "key": "cta",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "116609",
+     "key": "bizdev-mortgage-immoad-step-explanation",
+     "rolloutId": "rollout-116609-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "37725",
+       "key": "steps",
+       "type": "json",
+       "defaultValue": "{\"headline\":\"Test headline\",\"steps\":[{\"headline\":\"Step 1\",\"explanation\":\"Das sit der text für step 1\"},{\"headline\":\"Step 2\",\"explanation\":\"Das sit der text für step 2\"},{\"headline\":\"Step 3\",\"explanation\":\"Das sit der text für step 3\"}]}"
+      }
+     ]
+    },
+    {
+     "id": "116671",
+     "key": "bizdev-mortgage-immoad-simulator",
+     "rolloutId": "rollout-116671-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "37735",
+       "key": "headline",
+       "type": "string",
+       "defaultValue": ""
+      },
+      {
+       "id": "37736",
+       "key": "cta",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "116718",
+     "key": "bizdev-mortgage-form-skip-timing-question",
+     "rolloutId": "rollout-116718-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "116844",
+     "key": "bbx_mortgages_tab_text_v2",
+     "rolloutId": "rollout-116844-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "37818",
+       "key": "tab_label",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "118240",
+     "key": "bizdev-mortgage-form-timing-after-income",
+     "rolloutId": "rollout-118240-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "38340",
+       "key": "hide_timing",
+       "type": "boolean",
+       "defaultValue": "true"
+      }
+     ]
+    },
+    {
+     "id": "118922",
+     "key": "bbx_mortgages_calculator_button_text",
+     "rolloutId": "rollout-118922-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "38567",
+       "key": "button_label",
+       "type": "string",
+       "defaultValue": "Jetzt Kreditangebot anfordern"
+      },
+      {
+       "id": "38569",
+       "key": "utm_content",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "119746",
+     "key": "bizdev-mortgage-usage-in-price",
+     "rolloutId": "rollout-119746-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "120911",
+     "key": "bizdev-mortgage-customer-satisfaction-patch",
+     "rolloutId": "rollout-120911-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "39139",
+       "key": "show",
+       "type": "boolean",
+       "defaultValue": "false"
+      }
+     ]
+    },
+    {
+     "id": "122577",
+     "key": "bizdev-mortgage-ants-stepper",
+     "rolloutId": "rollout-122577-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "125610",
+     "key": "bbx_mortgages_calculator_visualisation",
+     "rolloutId": "rollout-125610-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "131763",
+     "key": "bizdev-mortgage-immoad-trust-badge-with-stars",
+     "rolloutId": "rollout-131763-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "131860",
+     "key": "bbx_seller_recommendation_names",
+     "rolloutId": "rollout-131860-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "43024",
+       "key": "text",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "134195",
+     "key": "bizdev-mortgage-form-timing-alternate-wording",
+     "rolloutId": "rollout-134195-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "135140",
+     "key": "carma_test_experiment",
+     "rolloutId": "rollout-135140-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "145694",
+     "key": "bizdev-mortgage-immoad-comparison-matrix",
+     "rolloutId": "rollout-145694-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "147578",
+     "key": "bbx_saved_ads_mortgages_link",
+     "rolloutId": "rollout-147578-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "201366",
+     "key": "bizdev-mortgage-cta-wording",
+     "rolloutId": "rollout-201366-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "61702",
+       "key": "offer",
+       "type": "string",
+       "defaultValue": "Angebot"
+      },
+      {
+       "id": "61703",
+       "key": "advisory",
+       "type": "string",
+       "defaultValue": "Beratung "
+      }
+     ]
+    },
+    {
+     "id": "230978",
+     "key": "bbx_other_ads_from_user",
+     "rolloutId": "rollout-230978-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "233616",
+     "key": "bizdev-mortgage-cta-wording-secure-financing",
+     "rolloutId": "rollout-233616-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "245790",
+     "key": "bbx_mortgage_cta",
+     "rolloutId": "rollout-245790-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "74001",
+       "key": "text",
+       "type": "string",
+       "defaultValue": "Jetzt Kreditangebote vergleichen"
+      },
+      {
+       "id": "74002",
+       "key": "utm_content",
+       "type": "string",
+       "defaultValue": "angebot"
+      }
+     ]
+    },
+    {
+     "id": "250390",
+     "key": "bizdev-mortgage-contact-info-success",
+     "rolloutId": "rollout-250390-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "300296",
+     "key": "bbx_other_ads_from_user_v3",
+     "rolloutId": "rollout-300296-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "355717",
+     "key": "bizdev_mortgage_main_cta",
+     "rolloutId": "rollout-355717-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "101023",
+       "key": "cta_text",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "370996",
+     "key": "disco-test-20250304-demo",
+     "rolloutId": "rollout-370996-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "374172",
+     "key": "velebit_vs_njuskalo",
+     "rolloutId": "rollout-374172-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "390453",
+     "key": "carma-similar-cars-widget",
+     "rolloutId": "rollout-390453-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "113070",
+       "key": "hotjarEventName",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "408061",
+     "key": "nasa-remove-copy-ad-button",
+     "rolloutId": "rollout-408061-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "413880",
+     "key": "bizdev-mortgage-cta-on-contactinfo",
+     "rolloutId": "rollout-413880-20592305749",
+     "experimentIds": [],
+     "variables": [
+      {
+       "id": "115827",
+       "key": "button_text",
+       "type": "string",
+       "defaultValue": ""
+      }
+     ]
+    },
+    {
+     "id": "419945",
+     "key": "bizdev-mortgage-rate-on-contact-info",
+     "rolloutId": "rollout-419945-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "454022",
+     "key": "beast-address-mandatory",
+     "rolloutId": "rollout-454022-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "491157",
+     "key": "bbx_transaction_map_fake_door",
+     "rolloutId": "rollout-491157-20592305749",
+     "experimentIds": [],
+     "variables": []
+    },
+    {
+     "id": "595239",
+     "key": "bbx_estate_similar_transaction_price_comparison",
+     "rolloutId": "rollout-595239-20592305749",
+     "experimentIds": [],
+     "variables": []
+    }
+   ],
+   "rollouts": [
+    {
+     "id": "rollout-9466-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-9466-20592305749",
+       "key": "default-rollout-9466-20592305749",
+       "status": "Running",
+       "layerId": "rollout-9466-20592305749",
+       "variations": [
+        {
+         "id": "27179",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "5622",
+           "value": "Kaufanfrage senden"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "27179",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-12008-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-12008-20592305749",
+       "key": "default-rollout-12008-20592305749",
+       "status": "Running",
+       "layerId": "rollout-12008-20592305749",
+       "variations": [
+        {
+         "id": "33818",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "6737",
+           "value": "Verkäufer kontaktieren"
+          },
+          {
+           "id": "6924",
+           "value": "Kontaktieren"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "33818",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-12948-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-12948-20592305749",
+       "key": "default-rollout-12948-20592305749",
+       "status": "Running",
+       "layerId": "rollout-12948-20592305749",
+       "variations": [
+        {
+         "id": "36585",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "36585",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-12997-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-12997-20592305749",
+       "key": "default-rollout-12997-20592305749",
+       "status": "Running",
+       "layerId": "rollout-12997-20592305749",
+       "variations": [
+        {
+         "id": "36744",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "36744",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-14131-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-14131-20592305749",
+       "key": "default-rollout-14131-20592305749",
+       "status": "Running",
+       "layerId": "rollout-14131-20592305749",
+       "variations": [
+        {
+         "id": "40585",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "40585",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-14064-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-14064-20592305749",
+       "key": "default-rollout-14064-20592305749",
+       "status": "Running",
+       "layerId": "rollout-14064-20592305749",
+       "variations": [
+        {
+         "id": "40380",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "40380",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-15424-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-15424-20592305749",
+       "key": "default-rollout-15424-20592305749",
+       "status": "Running",
+       "layerId": "rollout-15424-20592305749",
+       "variations": [
+        {
+         "id": "44504",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "44504",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-17662-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-17662-20592305749",
+       "key": "default-rollout-17662-20592305749",
+       "status": "Running",
+       "layerId": "rollout-17662-20592305749",
+       "variations": [
+        {
+         "id": "52762",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "9482",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "52762",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-19422-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-19422-20592305749",
+       "key": "default-rollout-19422-20592305749",
+       "status": "Running",
+       "layerId": "rollout-19422-20592305749",
+       "variations": [
+        {
+         "id": "58332",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "58332",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-21952-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-21952-20592305749",
+       "key": "default-rollout-21952-20592305749",
+       "status": "Running",
+       "layerId": "rollout-21952-20592305749",
+       "variations": [
+        {
+         "id": "60876",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "60876",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-27080-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-27080-20592305749",
+       "key": "default-rollout-27080-20592305749",
+       "status": "Running",
+       "layerId": "rollout-27080-20592305749",
+       "variations": [
+        {
+         "id": "78129",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "78129",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-27832-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-27832-20592305749",
+       "key": "default-rollout-27832-20592305749",
+       "status": "Running",
+       "layerId": "rollout-27832-20592305749",
+       "variations": [
+        {
+         "id": "80101",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "80101",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-29344-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-29344-20592305749",
+       "key": "default-rollout-29344-20592305749",
+       "status": "Running",
+       "layerId": "rollout-29344-20592305749",
+       "variations": [
+        {
+         "id": "86269",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "86269",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-31046-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-31046-20592305749",
+       "key": "default-rollout-31046-20592305749",
+       "status": "Running",
+       "layerId": "rollout-31046-20592305749",
+       "variations": [
+        {
+         "id": "91077",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "91077",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-32188-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-32188-20592305749",
+       "key": "default-rollout-32188-20592305749",
+       "status": "Running",
+       "layerId": "rollout-32188-20592305749",
+       "variations": [
+        {
+         "id": "94194",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "94194",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-33084-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-33084-20592305749",
+       "key": "default-rollout-33084-20592305749",
+       "status": "Running",
+       "layerId": "rollout-33084-20592305749",
+       "variations": [
+        {
+         "id": "97330",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "97330",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-35449-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-35449-20592305749",
+       "key": "default-rollout-35449-20592305749",
+       "status": "Running",
+       "layerId": "rollout-35449-20592305749",
+       "variations": [
+        {
+         "id": "105817",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "105817",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-41708-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-41708-20592305749",
+       "key": "default-rollout-41708-20592305749",
+       "status": "Running",
+       "layerId": "rollout-41708-20592305749",
+       "variations": [
+        {
+         "id": "124178",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "124178",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-42137-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-42137-20592305749",
+       "key": "default-rollout-42137-20592305749",
+       "status": "Running",
+       "layerId": "rollout-42137-20592305749",
+       "variations": [
+        {
+         "id": "125265",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "22944",
+           "value": "0"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "125265",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-45812-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-45812-20592305749",
+       "key": "default-rollout-45812-20592305749",
+       "status": "Running",
+       "layerId": "rollout-45812-20592305749",
+       "variations": [
+        {
+         "id": "136301",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "23655",
+           "value": "Wohnkredite"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "136301",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-8980-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-8980-20592305749",
+       "key": "default-rollout-8980-20592305749",
+       "status": "Running",
+       "layerId": "rollout-8980-20592305749",
+       "variations": [
+        {
+         "id": "25911",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "25911",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-42012-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-42012-20592305749",
+       "key": "default-rollout-42012-20592305749",
+       "status": "Running",
+       "layerId": "rollout-42012-20592305749",
+       "variations": [
+        {
+         "id": "124998",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "22889",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "124998",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-19982-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-19982-20592305749",
+       "key": "default-rollout-19982-20592305749",
+       "status": "Running",
+       "layerId": "rollout-19982-20592305749",
+       "variations": [
+        {
+         "id": "59895",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "59895",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-32184-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-32184-20592305749",
+       "key": "default-rollout-32184-20592305749",
+       "status": "Running",
+       "layerId": "rollout-32184-20592305749",
+       "variations": [
+        {
+         "id": "94184",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "15217",
+           "value": ""
+          },
+          {
+           "id": "15218",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "94184",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-32191-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-32191-20592305749",
+       "key": "default-rollout-32191-20592305749",
+       "status": "Running",
+       "layerId": "rollout-32191-20592305749",
+       "variations": [
+        {
+         "id": "94200",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "15222",
+           "value": ""
+          },
+          {
+           "id": "15223",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "94200",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-44733-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-44733-20592305749",
+       "key": "default-rollout-44733-20592305749",
+       "status": "Running",
+       "layerId": "rollout-44733-20592305749",
+       "variations": [
+        {
+         "id": "134547",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "23532",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "134547",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-39776-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-39776-20592305749",
+       "key": "default-rollout-39776-20592305749",
+       "status": "Running",
+       "layerId": "rollout-39776-20592305749",
+       "variations": [
+        {
+         "id": "117288",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "22460",
+           "value": "true"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "117288",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-45790-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-45790-20592305749",
+       "key": "default-rollout-45790-20592305749",
+       "status": "Running",
+       "layerId": "rollout-45790-20592305749",
+       "variations": [
+        {
+         "id": "136234",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "23650",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "136234",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-47197-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-47197-20592305749",
+       "key": "default-rollout-47197-20592305749",
+       "status": "Running",
+       "layerId": "rollout-47197-20592305749",
+       "variations": [
+        {
+         "id": "140243",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "140243",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-48119-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-48119-20592305749",
+       "key": "default-rollout-48119-20592305749",
+       "status": "Running",
+       "layerId": "rollout-48119-20592305749",
+       "variations": [
+        {
+         "id": "142543",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "24429",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "142543",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-48764-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-48764-20592305749",
+       "key": "default-rollout-48764-20592305749",
+       "status": "Running",
+       "layerId": "rollout-48764-20592305749",
+       "variations": [
+        {
+         "id": "144021",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "144021",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-49687-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-49687-20592305749",
+       "key": "default-rollout-49687-20592305749",
+       "status": "Running",
+       "layerId": "rollout-49687-20592305749",
+       "variations": [
+        {
+         "id": "145436",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "24660",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "145436",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-50595-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-50595-20592305749",
+       "key": "default-rollout-50595-20592305749",
+       "status": "Running",
+       "layerId": "rollout-50595-20592305749",
+       "variations": [
+        {
+         "id": "147220",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "24787",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "147220",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-78342-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-78342-20592305749",
+       "key": "default-rollout-78342-20592305749",
+       "status": "Running",
+       "layerId": "rollout-78342-20592305749",
+       "variations": [
+        {
+         "id": "246516",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "246516",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-78344-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-78344-20592305749",
+       "key": "default-rollout-78344-20592305749",
+       "status": "Running",
+       "layerId": "rollout-78344-20592305749",
+       "variations": [
+        {
+         "id": "246536",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "246536",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-98710-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-98710-20592305749",
+       "key": "default-rollout-98710-20592305749",
+       "status": "Running",
+       "layerId": "rollout-98710-20592305749",
+       "variations": [
+        {
+         "id": "314709",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "31747",
+           "value": "none"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "314709",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-99506-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-99506-20592305749",
+       "key": "default-rollout-99506-20592305749",
+       "status": "Running",
+       "layerId": "rollout-99506-20592305749",
+       "variations": [
+        {
+         "id": "316547",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "316547",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-99754-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-99754-20592305749",
+       "key": "default-rollout-99754-20592305749",
+       "status": "Running",
+       "layerId": "rollout-99754-20592305749",
+       "variations": [
+        {
+         "id": "317278",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "32098",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "317278",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-99778-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-99778-20592305749",
+       "key": "default-rollout-99778-20592305749",
+       "status": "Running",
+       "layerId": "rollout-99778-20592305749",
+       "variations": [
+        {
+         "id": "317356",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "317356",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-100501-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-100501-20592305749",
+       "key": "default-rollout-100501-20592305749",
+       "status": "Running",
+       "layerId": "rollout-100501-20592305749",
+       "variations": [
+        {
+         "id": "319616",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "319616",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-104277-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-104277-20592305749",
+       "key": "default-rollout-104277-20592305749",
+       "status": "Running",
+       "layerId": "rollout-104277-20592305749",
+       "variations": [
+        {
+         "id": "328933",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "33114",
+           "value": "Vorläufiges Angebot: Erster Überblick"
+          },
+          {
+           "id": "33115",
+           "value": "Konkretes Angebot: Für geplante Finanzierung"
+          },
+          {
+           "id": "33116",
+           "value": "Gegenangebot: Zum Vergleichen"
+          },
+          {
+           "id": "33117",
+           "value": "Allgemeine Fragen klären"
+          },
+          {
+           "id": "33910",
+           "value": "{\"data\":[{\"title\":\"Vorläufiges\", \"description\":\"Erhalte einen ersten Überblick über deine finanziellen Möglichkeiten\"},{\"title\":\"Detailiertes Angebot\", \"description\":\"Bekomme einen konkreten Finanzierungsvorschlag auf Basis eines Beratungsgesprächs\"},{\"title\":\"Gegenangebot\", \"description\":\"Erfahre, ob wir das Angebot deiner Hausbank unterbieten können\"},{\"title\":\"Beratungsgespräch\", \"description\":\"Kläre deine Fragen unverbindlich mit einem Finanzierungsprofi\"}]}"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "328933",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-106490-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-106490-20592305749",
+       "key": "default-rollout-106490-20592305749",
+       "status": "Running",
+       "layerId": "rollout-106490-20592305749",
+       "variations": [
+        {
+         "id": "335326",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "33629",
+           "value": "Bleib auf dem Laufenden"
+          },
+          {
+           "id": "33630",
+           "value": "Die wichtigsten Infos & Expertentipps zum Thema Immofinanzierungen. Maximal 2 x pro Monat. Kompetent, kompakt und kostenlos."
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "335326",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-109921-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-109921-20592305749",
+       "key": "default-rollout-109921-20592305749",
+       "status": "Running",
+       "layerId": "rollout-109921-20592305749",
+       "variations": [
+        {
+         "id": "343050",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "343050",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-112209-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-112209-20592305749",
+       "key": "default-rollout-112209-20592305749",
+       "status": "Running",
+       "layerId": "rollout-112209-20592305749",
+       "variations": [
+        {
+         "id": "350115",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "350115",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-113892-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-113892-20592305749",
+       "key": "default-rollout-113892-20592305749",
+       "status": "Running",
+       "layerId": "rollout-113892-20592305749",
+       "variations": [
+        {
+         "id": "354914",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "36685",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "354914",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-113963-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-113963-20592305749",
+       "key": "default-rollout-113963-20592305749",
+       "status": "Running",
+       "layerId": "rollout-113963-20592305749",
+       "variations": [
+        {
+         "id": "355117",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "355117",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-115689-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-115689-20592305749",
+       "key": "default-rollout-115689-20592305749",
+       "status": "Running",
+       "layerId": "rollout-115689-20592305749",
+       "variations": [
+        {
+         "id": "360394",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "360394",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-116602-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-116602-20592305749",
+       "key": "default-rollout-116602-20592305749",
+       "status": "Running",
+       "layerId": "rollout-116602-20592305749",
+       "variations": [
+        {
+         "id": "363322",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "37718",
+           "value": ""
+          },
+          {
+           "id": "37719",
+           "value": ""
+          },
+          {
+           "id": "37720",
+           "value": ""
+          },
+          {
+           "id": "37721",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "363322",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-116609-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-116609-20592305749",
+       "key": "default-rollout-116609-20592305749",
+       "status": "Running",
+       "layerId": "rollout-116609-20592305749",
+       "variations": [
+        {
+         "id": "363340",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "37725",
+           "value": "{\"headline\":\"Test headline\",\"steps\":[{\"headline\":\"Step 1\",\"explanation\":\"Das sit der text für step 1\"},{\"headline\":\"Step 2\",\"explanation\":\"Das sit der text für step 2\"},{\"headline\":\"Step 3\",\"explanation\":\"Das sit der text für step 3\"}]}"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "363340",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-116671-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-116671-20592305749",
+       "key": "default-rollout-116671-20592305749",
+       "status": "Running",
+       "layerId": "rollout-116671-20592305749",
+       "variations": [
+        {
+         "id": "363527",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "37735",
+           "value": ""
+          },
+          {
+           "id": "37736",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "363527",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-116718-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-116718-20592305749",
+       "key": "default-rollout-116718-20592305749",
+       "status": "Running",
+       "layerId": "rollout-116718-20592305749",
+       "variations": [
+        {
+         "id": "363690",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "363690",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-116844-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-116844-20592305749",
+       "key": "default-rollout-116844-20592305749",
+       "status": "Running",
+       "layerId": "rollout-116844-20592305749",
+       "variations": [
+        {
+         "id": "364074",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "37818",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "364074",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-118240-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-118240-20592305749",
+       "key": "default-rollout-118240-20592305749",
+       "status": "Running",
+       "layerId": "rollout-118240-20592305749",
+       "variations": [
+        {
+         "id": "368371",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "38340",
+           "value": "true"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "368371",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-118922-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-118922-20592305749",
+       "key": "default-rollout-118922-20592305749",
+       "status": "Running",
+       "layerId": "rollout-118922-20592305749",
+       "variations": [
+        {
+         "id": "370250",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "38567",
+           "value": "Jetzt Kreditangebot anfordern"
+          },
+          {
+           "id": "38569",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "370250",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-119746-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-119746-20592305749",
+       "key": "default-rollout-119746-20592305749",
+       "status": "Running",
+       "layerId": "rollout-119746-20592305749",
+       "variations": [
+        {
+         "id": "373048",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "373048",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-120911-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-120911-20592305749",
+       "key": "default-rollout-120911-20592305749",
+       "status": "Running",
+       "layerId": "rollout-120911-20592305749",
+       "variations": [
+        {
+         "id": "376835",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "39139",
+           "value": "false"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "376835",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-122577-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-122577-20592305749",
+       "key": "default-rollout-122577-20592305749",
+       "status": "Running",
+       "layerId": "rollout-122577-20592305749",
+       "variations": [
+        {
+         "id": "383650",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "383650",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-125610-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-125610-20592305749",
+       "key": "default-rollout-125610-20592305749",
+       "status": "Running",
+       "layerId": "rollout-125610-20592305749",
+       "variations": [
+        {
+         "id": "395272",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "395272",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-131763-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-131763-20592305749",
+       "key": "default-rollout-131763-20592305749",
+       "status": "Running",
+       "layerId": "rollout-131763-20592305749",
+       "variations": [
+        {
+         "id": "417077",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "417077",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-131860-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-131860-20592305749",
+       "key": "default-rollout-131860-20592305749",
+       "status": "Running",
+       "layerId": "rollout-131860-20592305749",
+       "variations": [
+        {
+         "id": "417347",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "43024",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "417347",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-134195-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-134195-20592305749",
+       "key": "default-rollout-134195-20592305749",
+       "status": "Running",
+       "layerId": "rollout-134195-20592305749",
+       "variations": [
+        {
+         "id": "423922",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "423922",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-135140-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-135140-20592305749",
+       "key": "default-rollout-135140-20592305749",
+       "status": "Running",
+       "layerId": "rollout-135140-20592305749",
+       "variations": [
+        {
+         "id": "427002",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "427002",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-145694-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-145694-20592305749",
+       "key": "default-rollout-145694-20592305749",
+       "status": "Running",
+       "layerId": "rollout-145694-20592305749",
+       "variations": [
+        {
+         "id": "465607",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "465607",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-147578-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-147578-20592305749",
+       "key": "default-rollout-147578-20592305749",
+       "status": "Running",
+       "layerId": "rollout-147578-20592305749",
+       "variations": [
+        {
+         "id": "470993",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "470993",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-201366-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-201366-20592305749",
+       "key": "default-rollout-201366-20592305749",
+       "status": "Running",
+       "layerId": "rollout-201366-20592305749",
+       "variations": [
+        {
+         "id": "671133",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "61702",
+           "value": "Angebot"
+          },
+          {
+           "id": "61703",
+           "value": "Beratung "
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "671133",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-230978-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-230978-20592305749",
+       "key": "default-rollout-230978-20592305749",
+       "status": "Running",
+       "layerId": "rollout-230978-20592305749",
+       "variations": [
+        {
+         "id": "760956",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "760956",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-233616-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-233616-20592305749",
+       "key": "default-rollout-233616-20592305749",
+       "status": "Running",
+       "layerId": "rollout-233616-20592305749",
+       "variations": [
+        {
+         "id": "779992",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "779992",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-245790-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-245790-20592305749",
+       "key": "default-rollout-245790-20592305749",
+       "status": "Running",
+       "layerId": "rollout-245790-20592305749",
+       "variations": [
+        {
+         "id": "818596",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "74001",
+           "value": "Jetzt Kreditangebote vergleichen"
+          },
+          {
+           "id": "74002",
+           "value": "angebot"
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "818596",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-250390-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-250390-20592305749",
+       "key": "default-rollout-250390-20592305749",
+       "status": "Running",
+       "layerId": "rollout-250390-20592305749",
+       "variations": [
+        {
+         "id": "835610",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "835610",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-300296-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-300296-20592305749",
+       "key": "default-rollout-300296-20592305749",
+       "status": "Running",
+       "layerId": "rollout-300296-20592305749",
+       "variations": [
+        {
+         "id": "937400",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "937400",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-355717-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-355717-20592305749",
+       "key": "default-rollout-355717-20592305749",
+       "status": "Running",
+       "layerId": "rollout-355717-20592305749",
+       "variations": [
+        {
+         "id": "1114805",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "101023",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1114805",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-370996-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-370996-20592305749",
+       "key": "default-rollout-370996-20592305749",
+       "status": "Running",
+       "layerId": "rollout-370996-20592305749",
+       "variations": [
+        {
+         "id": "1167831",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1167831",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-374172-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-374172-20592305749",
+       "key": "default-rollout-374172-20592305749",
+       "status": "Running",
+       "layerId": "rollout-374172-20592305749",
+       "variations": [
+        {
+         "id": "1176689",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1176689",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-390453-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-390453-20592305749",
+       "key": "default-rollout-390453-20592305749",
+       "status": "Running",
+       "layerId": "rollout-390453-20592305749",
+       "variations": [
+        {
+         "id": "1225160",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "113070",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1225160",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-408061-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-408061-20592305749",
+       "key": "default-rollout-408061-20592305749",
+       "status": "Running",
+       "layerId": "rollout-408061-20592305749",
+       "variations": [
+        {
+         "id": "1296171",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1296171",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-413880-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-413880-20592305749",
+       "key": "default-rollout-413880-20592305749",
+       "status": "Running",
+       "layerId": "rollout-413880-20592305749",
+       "variations": [
+        {
+         "id": "1318789",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": [
+          {
+           "id": "115827",
+           "value": ""
+          }
+         ]
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1318789",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-419945-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-419945-20592305749",
+       "key": "default-rollout-419945-20592305749",
+       "status": "Running",
+       "layerId": "rollout-419945-20592305749",
+       "variations": [
+        {
+         "id": "1337387",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1337387",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-454022-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-454022-20592305749",
+       "key": "default-rollout-454022-20592305749",
+       "status": "Running",
+       "layerId": "rollout-454022-20592305749",
+       "variations": [
+        {
+         "id": "1439608",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1439608",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-491157-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-491157-20592305749",
+       "key": "default-rollout-491157-20592305749",
+       "status": "Running",
+       "layerId": "rollout-491157-20592305749",
+       "variations": [
+        {
+         "id": "1560567",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1560567",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    },
+    {
+     "id": "rollout-595239-20592305749",
+     "experiments": [
+      {
+       "id": "default-rollout-595239-20592305749",
+       "key": "default-rollout-595239-20592305749",
+       "status": "Running",
+       "layerId": "rollout-595239-20592305749",
+       "variations": [
+        {
+         "id": "1866048",
+         "key": "off",
+         "featureEnabled": false,
+         "variables": []
+        }
+       ],
+       "trafficAllocation": [
+        {
+         "entityId": "1866048",
+         "endOfRange": 10000
+        }
+       ],
+       "forcedVariations": {},
+       "audienceIds": [],
+       "audienceConditions": [],
+       "type": "td"
+      }
+     ]
+    }
+   ],
+   "experiments": [],
+   "groups": [],
+   "region": "US"
+  },
+  "cookies": {
+   "IADVISITOR": "1eb8955a-67ca-541b-a535-1359dd3e69ef"
+  },
+  "is404": false,
+  "verticalsInfo": {
+   "vertical": [
+    {
+     "id": 5,
+     "description": "Marktplatz",
+     "nrOfAdverts": 13352289,
+     "selfLink": "https://ad-search.willhaben.at/restapi/v2/vertical/5",
+     "searchConfigLink": "https://ad-search.willhaben.at/restapi/v2/searchconfig/5",
+     "startPageLink": null,
+     "taggingData": {
+      "taggingNames": {
+       "nameValuePair": [
+        {
+         "name": "oewa",
+         "value": "Service/Rubrikenmaerkte/Sonstiges/Home"
+        },
+        {
+         "name": "oewaMweb",
+         "value": "Service/Rubrikenmaerkte/Sonstiges/moewa/Home"
+        },
+        {
+         "name": "xiti_SCV",
+         "value": "&x8=4"
+        }
+       ]
+      },
+      "tmsDataValues": {
+       "tmsData": {
+        "vertical_id": "5",
+        "environment": "web",
+        "vertical": "Marktplatz",
+        "source": "ResponsiveWeb"
+       }
+      },
+      "pulseData": null,
+      "neustarTaggingData": null,
+      "qualtricsParameter": null
+     }
+    },
+    {
+     "id": 2,
+     "description": "Immobilien",
+     "nrOfAdverts": 114130,
+     "selfLink": "https://ad-search.willhaben.at/restapi/v2/vertical/2",
+     "searchConfigLink": "https://ad-search.willhaben.at/restapi/v2/searchconfig/2",
+     "startPageLink": null,
+     "taggingData": {
+      "taggingNames": {
+       "nameValuePair": [
+        {
+         "name": "oewa",
+         "value": "Service/Rubrikenmaerkte/Immobilienmarkt/Home"
+        },
+        {
+         "name": "oewaMweb",
+         "value": "Service/Rubrikenmaerkte/Immobilienmarkt/moewa/Home"
+        },
+        {
+         "name": "xiti_SCV",
+         "value": "&x8=2"
+        }
+       ]
+      },
+      "tmsDataValues": {
+       "tmsData": {
+        "vertical_id": "2",
+        "environment": "web",
+        "vertical": "Immobilien",
+        "source": "ResponsiveWeb",
+        "page_type": "RealEstate"
+       }
+      },
+      "pulseData": null,
+      "neustarTaggingData": null,
+      "qualtricsParameter": null
+     }
+    },
+    {
+     "id": 1,
+     "description": "Jobs",
+     "nrOfAdverts": 15263,
+     "selfLink": "https://ad-search.willhaben.at/restapi/v2/vertical/1",
+     "searchConfigLink": "https://ad-search.willhaben.at/restapi/v2/searchconfig/1",
+     "startPageLink": "https://publicapi.willhaben.at/jobs/v2/startpage",
+     "taggingData": {
+      "taggingNames": {
+       "nameValuePair": [
+        {
+         "name": "oewa",
+         "value": "Service/Rubrikenmaerkte/Stellenanzeige/Home"
+        },
+        {
+         "name": "oewaMweb",
+         "value": "Service/Rubrikenmaerkte/Stellenanzeige/moewa/Home"
+        },
+        {
+         "name": "xiti_SCV",
+         "value": "&x8=1"
+        }
+       ]
+      },
+      "tmsDataValues": {
+       "tmsData": {
+        "vertical_id": "1",
+        "environment": "web",
+        "vertical": "Jobs",
+        "source": "ResponsiveWeb"
+       }
+      },
+      "pulseData": null,
+      "neustarTaggingData": null,
+      "qualtricsParameter": null
+     }
+    },
+    {
+     "id": 3,
+     "description": "Auto & Motor",
+     "nrOfAdverts": 219699,
+     "selfLink": "https://ad-search.willhaben.at/restapi/v2/vertical/3",
+     "searchConfigLink": "https://ad-search.willhaben.at/restapi/v2/searchconfig/3",
+     "startPageLink": null,
+     "taggingData": {
+      "taggingNames": {
+       "nameValuePair": [
+        {
+         "name": "oewa",
+         "value": "Service/Rubrikenmaerkte/Automarkt/Home"
+        },
+        {
+         "name": "oewaMweb",
+         "value": "Service/Rubrikenmaerkte/Automarkt/moewa/Home"
+        },
+        {
+         "name": "xiti_SCV",
+         "value": "&x8=3"
+        }
+       ]
+      },
+      "tmsDataValues": {
+       "tmsData": {
+        "vertical_id": "3",
+        "environment": "web",
+        "vertical": "Auto & Motor",
+        "source": "ResponsiveWeb",
+        "page_type": "AutoMotor"
+       }
+      },
+      "pulseData": null,
+      "neustarTaggingData": null,
+      "qualtricsParameter": null
+     }
+    }
+   ]
+  },
+  "segmentConfig": {
+   "writeKey": "Kv6VrSSbcnDcUZsRDYjIDJ7VuxnWeQ2w",
+   "cdnURL": "https://heartbeatcdn.willhaben.at/wsc",
+   "apiHost": "heartbeat.willhaben.at/wsd",
+   "environment": "prod"
+  },
+  "__N_SSP": true
+ },
+ "page": "/iad/kaufen-und-verkaufen/d/[[...seopath]]",
+ "query": {
+  "seopath": [
+   "type-2-ladekabel-elektroauto-922008415"
+  ]
+ },
+ "buildId": "1059083-69d32b6f",
+ "assetPrefix": "/bbx-search",
+ "runtimeConfig": {
+  "context": "prod",
+  "app": "search"
+ },
+ "isFallback": false,
+ "isExperimentalCompile": false,
+ "gssp": true,
+ "appGip": true,
+ "scriptLoader": []
+}

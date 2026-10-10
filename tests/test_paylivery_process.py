@@ -242,8 +242,7 @@ async def test_push_can_be_switched_off(monkeypatch):
 
 
 # ------------------------------------------------------------------ card
-def _card(role, stage, ad_ctx=None, buy_on=True):
-    set_setting("paylivery_buy_allowed", "1" if buy_on else "0")
+def _card(role, stage, ad_ctx=None):
     conv = SimpleNamespace(id="c1", role=role, ad_context=AD_CTX if ad_ctx is None else ad_ctx,
                            paylivery={"role": role, "stage": stage, "history": [], "offer": 120.0} if stage else None,
                            partner_name="Max", ad_title="Kinderbuch")
@@ -266,11 +265,11 @@ def test_card_seller_paid_offers_label_and_mark_shipped():
     assert _card("seller", "delivered")["actions"] == []
 
 
-def test_card_buyer_offers_offer_and_buy_now_disabled_when_switched_off():
-    c = _card("buyer", None, buy_on=False)
+def test_card_buyer_offers_offer_and_buy_now():
+    c = _card("buyer", None)
     names = {a["name"]: a for a in c["actions"]}
     assert set(names) == {"offer", "buy"}
-    assert names["buy"]["disabled"] and names["offer"]["disabled"] and names["buy"]["note"]
+    assert not names["buy"]["disabled"] and not names["offer"]["disabled"]   # no switch: the confirm dialog guards
 
 
 def test_card_buy_now_only_with_both_flags():
@@ -293,9 +292,9 @@ def test_card_history_is_newest_first():
 
 
 def test_settings_card_defaults():
-    assert paylivery.card(None) == {"buy_allowed": False, "notify": True}
-    paylivery.save_settings(buy_allowed=True, notify=False)
-    assert paylivery.card(None) == {"buy_allowed": True, "notify": False}
+    assert paylivery.card(None) == {"notify": True}
+    paylivery.save_settings(notify=False)
+    assert paylivery.card(None) == {"notify": False}
 
 
 # ------------------------------------------------------------------ routes, pages and settings
@@ -319,23 +318,23 @@ def test_settings_route_saves_switches():
     from app.main import app
 
     with TestClient(app) as c:
-        r = c.post("/settings/paylivery", data={"buy_allowed": "1"}, follow_redirects=False)
+        r = c.post("/settings/paylivery", data={}, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"].endswith("#paylivery")
-        assert get_setting("paylivery_buy_allowed") == "1" and get_setting("paylivery_notify") == "0"
+        assert get_setting("paylivery_notify") == "0"
         page = c.get("/settings")
     assert page.status_code == 200 and 'id="paylivery"' in page.text
 
 
-def test_action_route_refuses_buying_while_switched_off():
+def test_action_route_refuses_buying_without_paylivery_on_the_ad():
     from fastapi.testclient import TestClient
 
     from app.main import app
 
-    _chat(cid="b1", role="buyer")
+    _chat(cid="b1", role="buyer", ad_ctx={**AD_CTX, "paylivery": False})
     with TestClient(app) as c:
         r = c.post("/chats/b1/paylivery/buy", data={"amount": ""}, follow_redirects=False)
     assert r.status_code == 303 and "#paylivery" in r.headers["location"]
-    assert "switched off" in r.headers["location"] or "ausgeschaltet" in r.headers["location"] or "msg=" in r.headers["location"]
+    assert "PayLivery" in r.headers["location"] or "msg=" in r.headers["location"]
 
 
 # ------------------------------------------------------------------ browser action guards (pure)
@@ -372,10 +371,6 @@ def test_click_policy(action, label, verdict):
 ])
 def test_fill_policy(field, allowed):
     assert paylivery.fill_allowed(field) is allowed
-
-
-def test_settings_default_is_buying_off():
-    assert paylivery.settings_state()["buy_allowed"] is False
 
 
 # ------------------------------------------------------------------ browser actions with fakes
@@ -518,7 +513,6 @@ async def test_recording_started_by_the_user_is_left_alone(browser):
 
 async def test_offer_amount_is_the_confirmed_one_not_claudes(browser, monkeypatch):
     monkeypatch.setattr(paylivery.willhaben_session, "get_session", lambda: browser.sess)
-    set_setting("paylivery_buy_allowed", "1")
     _chat(cid="b1", role="buyer")
     browser.elements = [_btn(1, "Preisvorschlag"), _field(2, "Betrag in €", "text", "amount")]
     browser.backend.replies = [
@@ -533,15 +527,7 @@ async def test_offer_amount_is_the_confirmed_one_not_claudes(browser, monkeypatc
     assert _state("b1")["stage"] == "offer_sent" and _state("b1")["history"][-1]["text"].startswith("offer:")
 
 
-async def test_buy_refused_while_the_setting_is_off(browser):
-    _chat(cid="b1", role="buyer")
-    with pytest.raises(paylivery.PayLiveryError):
-        await paylivery.run_action("b1", "buy", 12.0)
-    assert browser.sess.opened == [] and browser.sess.starts == []
-
-
 async def test_buy_needs_paylivery_and_a_price(browser):
-    set_setting("paylivery_buy_allowed", "1")
     _chat(cid="b1", role="buyer", ad_ctx={**AD_CTX, "paylivery": False})
     with pytest.raises(paylivery.PayLiveryError):
         await paylivery.run_action("b1", "buy", 12.0)
@@ -551,7 +537,6 @@ async def test_buy_needs_paylivery_and_a_price(browser):
 
 
 async def test_buy_never_fills_card_fields_itself(browser, monkeypatch):
-    set_setting("paylivery_buy_allowed", "1")
     _chat(cid="b1", role="buyer")
     browser.elements = [_field(1, "Kartennummer", "text", "cardnumber"), _btn(2, "Sofort kaufen")]
     monkeypatch.setattr(paylivery, "_card_fields_visible", _true)
@@ -566,7 +551,6 @@ async def _true(page):
 
 
 async def test_buy_fills_the_card_once_then_presses_pay(browser, monkeypatch):
-    set_setting("paylivery_buy_allowed", "1")
     _chat(cid="b1", role="buyer")
     browser.elements = [_field(1, "Kartennummer", "text", "cardnumber"), _btn(2, "Jetzt bezahlen")]
     monkeypatch.setattr(paylivery, "_card_fields_visible", _true)
@@ -580,6 +564,88 @@ async def test_buy_fills_the_card_once_then_presses_pay(browser, monkeypatch):
     browser.backend.replies = [_step(action_idx=2, status="done", note="bezahlt")]
     msg = await paylivery.run_action("b1", "buy", 12.0)
     assert fills == [1] and browser.clicked == ["Jetzt bezahlen"] and "bezahlt" in msg
+
+
+BANK = "Zahlungsbestätigung (3-D Secure / TAN)"
+
+
+@pytest.fixture
+def bank_steps(browser, monkeypatch):
+    """Scripted bank check (script first, then `default`); asyncio.sleep is recorded instead of waited for; pushes
+    are recorded. Built on the browser fixture, so the rest of the step loop is the fake one."""
+    real_sleep = asyncio.sleep
+    ns = SimpleNamespace(script=[], default=None, sleeps=[], pushes=[])
+
+    async def bank(page):
+        return ns.script.pop(0) if ns.script else ns.default
+
+    async def fake_sleep(seconds, *a, **k):
+        ns.sleeps.append(seconds)
+        await real_sleep(0)
+
+    async def fake_notify(kind, title, message, **kw):
+        ns.pushes.append({"kind": kind, "title": title, "message": message, **kw})
+        return True
+
+    monkeypatch.setattr(paylivery, "_bank_reason", bank)
+    monkeypatch.setattr(paylivery.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr("app.services.notify.notify", fake_notify)
+    return ns
+
+
+async def test_buy_waits_for_the_bank_approval_then_continues(browser, bank_steps):
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    # checks: before the pay click (no bank), the bank step appears, polls still bank, then approved (re-checked)
+    bank_steps.script = [None, BANK, BANK, None, None]
+    browser.backend.replies = [_step(action_idx=2, status="continue"), _step(status="done", note="bezahlt")]
+    msg = await paylivery.run_action("b1", "buy", 12.0)
+    assert browser.clicked == ["Jetzt bezahlen"] and len(browser.backend.prompts) == 2   # Claude sees the confirmation
+    assert "bezahlt" in msg
+    assert bank_steps.sleeps == [paylivery.BANK_POLL_S] * 2
+    assert len(bank_steps.pushes) == 1
+    push = bank_steps.pushes[0]
+    assert push["kind"] == "paylivery" and push["url"].endswith("/chats/b1#paylivery")
+    assert push["data"] == {"conversation_id": "b1"}
+    assert "Kinderbuch" in push["message"] and "12,00 €" in push["message"]
+    st = _state("b1")
+    assert st["stage"] == "paid" and any("bank" in h["text"].lower() for h in st["history"])
+
+
+async def test_buy_bank_wait_times_out_into_the_remote_view_message(browser, bank_steps):
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    bank_steps.script = [None]
+    bank_steps.default = BANK                                 # never approved
+    browser.backend.replies = [_step(action_idx=2, status="continue")]
+    msg = await paylivery.run_action("b1", "buy", 12.0)
+    assert len(bank_steps.sleeps) == paylivery.BANK_WAIT_S // paylivery.BANK_POLL_S
+    assert len(bank_steps.pushes) == 1                        # still only one push
+    assert len(browser.backend.prompts) == 1                  # no further Claude step after the timeout
+    assert "Session" in msg
+    assert _state("b1")["history"][-1]["text"].startswith("buy:")
+    assert browser.sess.stops == 1
+
+
+async def test_buy_bank_push_can_be_switched_off(browser, bank_steps):
+    set_setting("paylivery_notify", "0")
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    bank_steps.script = [None, BANK, None, None]
+    browser.backend.replies = [_step(action_idx=2, status="continue"), _step(status="done", note="bezahlt")]
+    msg = await paylivery.run_action("b1", "buy", 12.0)
+    assert "bezahlt" in msg and bank_steps.pushes == []
+    assert len(bank_steps.sleeps) == 1                        # the wait itself still happens
+
+
+async def test_other_actions_stop_at_the_bank_step_at_once(browser, bank_steps):
+    _chat(state={"role": "seller", "stage": "offer_received", "history": [], "applied": []})
+    browser.elements = [_btn(1, "Angebot annehmen")]
+    bank_steps.default = BANK
+    msg = await paylivery.run_action("c1", "accept")
+    assert browser.clicked == [] and browser.backend.prompts == []
+    assert bank_steps.sleeps == [] and bank_steps.pushes == []
+    assert browser.sess.stops == 1 and msg
 
 
 async def test_label_and_mark_shipped_are_local(browser):
@@ -606,7 +672,6 @@ async def test_action_refused_for_the_other_role(browser):
 
 
 async def test_start_action_is_background_for_browser_actions(browser, monkeypatch):
-    set_setting("paylivery_buy_allowed", "1")
     _chat(cid="b1", role="buyer")
     started = []
 

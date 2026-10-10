@@ -29,12 +29,13 @@ from app.llm import usage as llm_usage
 from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import ad_batch, ad_creator, chats, my_ads, screening, sold
+from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import health, human_pace
 from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
-from app import backup_routes, label_buy_routes, paylivery_routes, printing_routes
+from app import backup_routes, label_buy_routes, paylivery_routes, printing_routes, purchase_routes
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
     init_db()
     ad_batch.recover()
     deals_web.product_search.recover()
+    purchase_svc.recover()
     if s.browser_enabled:
         sess = get_session()
         await sess.start()
@@ -95,6 +97,9 @@ app.include_router(backup_routes.router)   # Settings → Backup
 app.include_router(label_buy_routes.router)   # Settings → Shipping → payment card, checkout
 app.include_router(printing_routes.router)    # Settings → Printers, print buttons
 app.include_router(paylivery_routes.router)   # PayLivery card on the chat page
+app.include_router(purchase_routes.router)    # Kaufauftrag: buy dialog, order pages, order buttons, Settings → Buying
+paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
+paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -170,6 +175,8 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
+templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
+                             purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
@@ -1440,7 +1447,7 @@ async def gcal_save(request: Request):
         gcal.save_config([str(c) for c in f.getlist("calendar")], str(f.get("target") or "primary"),
                          int(f.get("days") or 7), str(f.get("window_start") or "09:00"),
                          str(f.get("window_end") or "20:00"), int(f.get("duration") or 30),
-                         bool(f.get("in_drafts")), bool(f.get("in_auto")))
+                         bool(f.get("in_drafts")), bool(f.get("in_auto")), int(f.get("buffer") or 0))
     except ValueError:
         return _gcal_back(t("Invalid value"))
     return _gcal_back(t("Changes saved"))

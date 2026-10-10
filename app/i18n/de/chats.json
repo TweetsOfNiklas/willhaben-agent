@@ -102,6 +102,8 @@
  "willhaben rejected the message: {detail}": "willhaben lehnte die Nachricht ab: {detail}",
  "Chat connection failed ({status})": "Chat-Verbindung fehlgeschlagen ({status})",
  "Message did not show up in the history (response: {status}) – check on willhaben": "Nachricht nicht im Verlauf aufgetaucht (Antwort: {status}) – auf willhaben prüfen",
+ "willhaben rejected the new conversation: {detail}": "willhaben lehnte den neuen Chat ab: {detail}",
+ "Conversation did not show up in the list (response: {status}) – check on willhaben": "Chat nicht in der Liste aufgetaucht (Antwort: {status}) – auf willhaben prüfen",
  "{page}: no ad list (HTTP {status}, logged in?)": "{page}: keine Anzeigenliste (HTTP {status}, eingeloggt?)",
  "Reactivation endpoint not captured yet (record 'reaktivieren' while clicking 'Wieder aktivieren' on an expired ad).": "Reaktivierungs-Endpunkt noch nicht erfasst (Aufzeichnung 'reaktivieren' während 'Wieder aktivieren' bei einer abgelaufenen Anzeige).",
  "Ad posting not captured yet (recording 'anzeige-aufgeben').": "Anzeigenaufgabe noch nicht erfasst (Aufzeichnung 'anzeige-aufgeben').",

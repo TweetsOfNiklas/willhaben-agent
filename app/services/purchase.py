@@ -1,0 +1,1040 @@
+"""Kaufauftrag: the buyer side of the willhaben agent. The app starts a purchase for one ad, opens a chat with the
+seller, negotiates as buyer (chats.auto_reply with the buyer prompt) and stops before any money moves.
+
+Modes:
+- paylivery: after the agreement the app sends a PayLivery price offer (paylivery.run_action "offer"). When the seller
+  accepts (stage offer_accepted, or a buy-now ad at its asking price) the status is pay_now: the user pays with
+  willhaben or with the "Buy now & pay" button in the PayLivery card (3-D Secure is approved on the phone).
+- direct: after the agreement the own shipping address goes out with the next answer and the seller's bank details
+  come from purchase_state.payment. Valid IBAN that the seller really wrote -> pay_now with a push; the user transfers
+  and presses "Paid". Nothing is paid by the app.
+- pickup: the appointment is agreed in the chat (meetup, calendar), cash on pickup, no address of ours, no payment.
+
+Status flow: new -> contacting -> negotiating -> agreed -> pay_now -> paid -> shipped -> done (direct/PayLivery),
+agreed -> meetup -> done (pickup). paused: asks the user (see pause reasons); failed / cancelled are final.
+
+Code guards (blockers) run on every automatic answer, independent of what Claude wrote; pushes and status changes
+happen only in after_reply and the hooks, never in the guards.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import math
+import re
+from typing import Any, Coroutine
+
+from sqlmodel import col, select
+
+from app.config import get_settings
+from app.db import Conversation, Draft, Message, Purchase, get_setting, session, utcnow
+from app.i18n import t
+from app.llm.base import get_backend
+from app.llm.prompts import PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, purchase_opener_prompt, purchase_rules
+from app.services import deals, meetups, paylivery, shipping
+from app.services.notify import notify
+from app.willhaben.public import WillhabenError, get_public
+
+log = logging.getLogger(__name__)
+
+MODES = ("paylivery", "direct", "pickup")
+STAGES = ("negotiating", "agreed", "meetup_agreed", "declined", "unavailable", "needs_user")
+STATUSES = ("new", "contacting", "negotiating", "agreed", "meetup", "pay_now", "paid", "shipped", "done",
+            "paused", "failed", "cancelled")
+ACTIVE = ("new", "contacting", "negotiating", "agreed", "meetup", "pay_now", "paid", "shipped")
+AUTO = ("contacting", "negotiating", "agreed", "meetup", "pay_now", "paid", "shipped")   # answered automatically
+OPEN = (*ACTIVE, "paused")          # one open purchase per ad; the chat card shows these
+TERMINAL = ("done", "failed", "cancelled")
+AFTER_AGREEMENT = ("agreed", "meetup", "pay_now", "paid", "shipped", "done")  # own address allowed (direct only)
+PER_CONVERSATION_PER_DAY = 6        # own limit (a negotiation needs more than the 3 of a seller chat)
+DEFAULT_DISCOUNT_PCT = 10           # target = 10 % below min(asking price, median)
+# Shipping in euro while nothing better is known (no PayLivery price of the ad, no price named by the seller)
+SHIPPING_ESTIMATE = {"paylivery": 6.0, "direct": 6.0, "pickup": 0.0}   # € when the ad names no price (Post M is 7.90)
+# willhaben buyer protection fee ("Käuferschutzgebühr") of PayLivery: paid by the BUYER, the seller pays nothing. Source: help
+# centre article "Wie viel kostet PayLivery - Online-Zahlung und Versand?" (https://hilfe.willhaben.at/hc/de/articles/360011365380,
+# updated 2026-10-09): 4.5 % of the item price, at least € 0.99, at most € 49.99; "the fee can vary by category and item
+# price". Pickup and a bank transfer without PayLivery have no fee. The percentage has one decimal (see _fee_cents).
+PAYLIVERY_FEE_PCT = 4.5
+PAYLIVERY_FEE_MIN = 0.99
+PAYLIVERY_FEE_MAX = 49.99
+SETTING_ENABLED = "purchase_enabled"      # "1": purchase orders allowed (Settings)
+SETTING_RULES = "purchase_rules"          # free-text rules of the user for purchases
+SETTING_DISCOUNT = "purchase_discount_pct"
+SETTING_PREFER_PAYLIVERY = "purchase_prefer_paylivery"   # "1": PayLivery preselected in the buy dialog
+OVER = 1.5                          # asking price above 1.5 x the maximum: still started, with a note
+LOG_CAP = 50
+WH_CHAT = "https://www.willhaben.at/iad/myprofile/chat/{cid}"
+DEFAULT_RULES = (
+    "- Nur kaufen, wenn der Preis passt. Keine Vorkasse an Dritte.\n"
+    "- Du-Form, freundlich, kurz, keine Emojis.\n"
+    "- Bei Abholung nur Termine in meinem Zeitfenster vorschlagen."
+)
+_TASKS: set[asyncio.Task] = set()
+
+
+class PurchaseError(RuntimeError):
+    """A user-facing refusal of a purchase action."""
+
+
+# ------------------------------------------------------------------ numbers, IBAN, text guards
+_NUMBER = r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+\.\d{1,2}|\d+"
+_AMOUNT = re.compile(rf"(?:€|\bEUR\b)\s*({_NUMBER})|(?<![\w.,])({_NUMBER})\s*(?:€|\bEUR\b)", re.I)
+_IBAN_TEXT = re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,8}\b", re.I)
+_CARD_TEXT = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}\d(?!\d)")
+
+
+def _to_float(num: str) -> float:
+    if "," in num:                                   # 1.234,50 or 12,34
+        return float(num.replace(".", "").replace(",", "."))
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", num):   # 1.234
+        return float(num.replace(".", ""))
+    return float(num)
+
+
+def amounts(text: str | None) -> list[float]:
+    """Every euro amount in a text: "€ 12,50", "12,50 €", "EUR 300"."""
+    out = []
+    for m in _AMOUNT.finditer(text or ""):
+        try:
+            out.append(_to_float(m.group(1) or m.group(2)))
+        except ValueError:
+            continue
+    return out
+
+
+def normalize_iban(s: str | None) -> str:
+    return re.sub(r"[\s-]", "", s or "").upper()
+
+
+def valid_iban(s: str | None) -> bool:
+    """ISO 13616 check: shape plus mod-97 checksum (spaces and case ignored)."""
+    iban = normalize_iban(s)
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", iban):
+        return False
+    digits = "".join(str(int(c, 36)) for c in iban[4:] + iban[:4])
+    return int(digits) % 97 == 1
+
+
+def group_iban(s: str | None) -> str:
+    iban = normalize_iban(s)
+    return " ".join(iban[i:i + 4] for i in range(0, len(iban), 4))
+
+
+def _norm(s: str | None) -> str:
+    return re.sub(r"\s+", " ", (s or "").lower().replace("ß", "ss")).strip()
+
+
+def sender_address() -> dict[str, str]:
+    return shipping.sender()
+
+
+def _address_line(s: dict[str, str]) -> str:
+    street = " ".join(x for x in (s.get("street"), s.get("house_no")) if x)
+    city = " ".join(x for x in (s.get("zip"), s.get("city")) if x)
+    parts = [s.get("name"), street, s.get("extra"), city, s.get("phone"), s.get("email")]
+    return ", ".join(p for p in parts if p)
+
+
+def _address_hits(text: str) -> list[str]:
+    """Own address, phone or e-mail that our own message would give away."""
+    s = sender_address()
+    t_, digits, hits = _norm(text), re.sub(r"\D", "", text or ""), []
+    if len(_norm(s.get("street"))) >= 4 and _norm(s["street"]) in t_:
+        hits.append("street")
+    if s.get("zip") and s.get("city") and _norm(s["zip"]) in t_ and _norm(s["city"]) in t_:
+        hits.append("city")
+    phone = re.sub(r"\D", "", s.get("phone") or "")
+    if len(phone) >= 7 and phone[-7:] in digits:
+        hits.append("phone")
+    if s.get("email") and _norm(s["email"]) in t_:
+        hits.append("email")
+    return hits
+
+
+def text_problems(text: str | None, *, max_price: float | None, address_ok: bool) -> list[str]:
+    """Reasons why one of our own messages must not go out (empty list = fine)."""
+    why = []
+    if max_price:
+        for a in amounts(text):
+            if a > max_price + 0.005:
+                why.append(t("Amount {amount} is above your maximum {max}", amount=_money(a), max=_money(max_price)))
+                break
+    if _IBAN_TEXT.search(text or ""):
+        why.append(t("Bank details (IBAN) in our own message"))
+    if _CARD_TEXT.search(text or ""):
+        why.append(t("Card or account number in our own message"))
+    if not address_ok and _address_hits(text or ""):
+        why.append(t("Own address or contact details in a message before they are allowed"))
+    return why
+
+
+def _num(v: Any) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _money(v: float | None) -> str:
+    if v is None:
+        return ""
+    s = f"{v:,.2f}".translate(str.maketrans({",": ".", ".": ","}))
+    return (s[:-3] if s.endswith(",00") else s) + " €"
+
+
+def _discount() -> float:
+    try:
+        return min(max(float(get_setting(SETTING_DISCOUNT) or DEFAULT_DISCOUNT_PCT), 0.0), 90.0)
+    except ValueError:
+        return float(DEFAULT_DISCOUNT_PCT)
+
+
+def shipping_of(row: Purchase) -> tuple[float, str]:
+    """(cost, source) of the shipping that applies: "ad" (PayLivery price of the ad), "chat" (named by the seller,
+    direct only), "estimate" or "none" (pickup)."""
+    if row.mode == "pickup":
+        return 0.0, "none"
+    if row.shipping_cost is not None:
+        if row.shipping_source == "ad" and row.mode == "paylivery":
+            return float(row.shipping_cost), "ad"
+        if row.shipping_source == "chat" and row.mode == "direct":
+            return float(row.shipping_cost), "chat"
+    return float(SHIPPING_ESTIMATE.get(row.mode or "", 0.0)), "estimate"
+
+
+def shipping_label(source: str | None) -> str:
+    return {"ad": t("according to the ad"), "chat": t("named by the seller"), "estimate": t("estimate"),
+            "none": t("no shipping")}.get(source or "", "")
+
+
+def _cents(v: float) -> int:
+    return int(round(float(v) * 100))
+
+
+def _fee_cents(item_cents: int) -> int:
+    """The buyer protection fee in cents (integer maths, the browser mirrors it in wbBuy.feeCents): the percentage of the
+    item price rounded half up, at least the minimum, at most the maximum; 0 without a positive item price."""
+    if item_cents <= 0:
+        return 0
+    raw = (item_cents * round(PAYLIVERY_FEE_PCT * 10) + 500) // 1000
+    return min(max(raw, _cents(PAYLIVERY_FEE_MIN)), _cents(PAYLIVERY_FEE_MAX))
+
+
+def paylivery_fee(item_price: float | None) -> float:
+    """Buyer protection fee of PayLivery for an item price in euro (0 for a price that is not positive)."""
+    if item_price is None or item_price <= 0:
+        return 0.0
+    return _fee_cents(_cents(item_price)) / 100
+
+
+def fee_rule() -> dict[str, float]:
+    """The fee rule for the browser (data-fee of the buy dialog) and the prompts."""
+    return {"pct": PAYLIVERY_FEE_PCT, "min": PAYLIVERY_FEE_MIN, "max": PAYLIVERY_FEE_MAX}
+
+
+def fee_of(row: Purchase, item_price: float | None) -> float:
+    """The buyer protection fee that applies to this order: PayLivery only (a bank transfer or pickup has none)."""
+    return paylivery_fee(item_price) if row.mode == "paylivery" else 0.0
+
+
+def costs_of(row: Purchase, item_price: float) -> dict[str, Any]:
+    """What an item price costs in this order: shipping (and where it comes from), the buyer protection fee and the
+    total the buyer pays."""
+    ship, source = shipping_of(row)
+    fee = fee_of(row, item_price)
+    return {"shipping": ship, "shipping_source": source, "fee": fee, "total": round(float(item_price) + ship + fee, 2)}
+
+
+def _item_for_cents(avail: int) -> int:
+    """The largest item price (cents) whose price plus buyer protection fee is at most `avail` cents; the inverse of
+    item + fee(item), found by the formula of the fee regime and then corrected by single cents (the fee is rounded)."""
+    if avail <= 0:
+        return 0
+    pm, lo, hi = round(PAYLIVERY_FEE_PCT * 10), _cents(PAYLIVERY_FEE_MIN), _cents(PAYLIVERY_FEE_MAX)
+    if avail <= lo * 1000 / pm + lo:                    # the minimum fee applies (small prices)
+        c = avail - lo
+    elif avail >= hi * 1000 / pm + hi:                  # the maximum fee applies (about € 1,111 and more)
+        c = avail - hi
+    else:
+        c = round(avail * 1000 / (1000 + pm))
+    c = max(c, 0)
+    while c + _fee_cents(c + 1) + 1 <= avail:
+        c += 1
+    while c > 0 and c + _fee_cents(c) > avail:
+        c -= 1
+    return c
+
+
+def item_ceiling(row: Purchase) -> float | None:
+    """The most the item may cost: the maximum minus the shipping that applies and, with PayLivery, the buyer protection
+    fee of the item price (item + fee(item) <= maximum - shipping). Never below 1 euro."""
+    if not row.max_price:
+        return None
+    ship = shipping_of(row)[0]
+    if row.mode == "paylivery":
+        return max(1.0, _item_for_cents(_cents(row.max_price) - _cents(ship)) / 100)
+    return max(1.0, round(row.max_price - ship, 2))
+
+
+def pct_below(asking: float | None, value: float | None) -> int | None:
+    """Percent the value lies below the asking price (negative if above); None without both numbers."""
+    if not asking or value is None:
+        return None
+    return round((asking - value) / asking * 100)
+
+
+def _in_text(value: float, text: str) -> bool:
+    """A euro amount written the German or the English way appears in the text (4,90 / 4.90 / 5)."""
+    forms = {f"{value:g}", f"{value:.2f}"}
+    forms |= {f.replace(".", ",") for f in forms}
+    return any(re.search(rf"(?<![\d.,]){re.escape(f)}(?!\d|[.,]\d)", text or "") for f in forms)
+
+
+def _named_shipping(row: Purchase, ps: dict[str, Any], seller_text: str) -> float | None:
+    """Shipping the seller named in this answer: only without PayLivery, and only if the amount is in his text."""
+    cost = ps.get("shipping_cost")
+    if row.mode != "direct" or not cost:
+        return None
+    return float(cost) if _in_text(float(cost), seller_text) else None
+
+
+def _shipping_now(row: Purchase, ps: dict[str, Any], seller_text: str) -> tuple[float, str]:
+    named = _named_shipping(row, ps, seller_text)
+    return (named, "chat") if named is not None else shipping_of(row)
+
+
+def _total_now(row: Purchase, ps: dict[str, Any], seller_text: str, price: float | None = None) -> float | None:
+    """What the buyer pays for this answer: the total the seller named, else item price + shipping (+ the PayLivery buyer
+    protection fee of the item price)."""
+    if ps.get("total_price"):
+        return float(ps["total_price"])
+    price = price if price is not None else ps.get("agreed_price")
+    if not price:
+        return None
+    return round(float(price) + _shipping_now(row, ps, seller_text)[0] + fee_of(row, float(price)), 2)
+
+
+def _price_line(row: Purchase) -> str:
+    """Item + shipping (+ buyer protection with PayLivery) = total, where shipping applies (pickup: just the cash amount).
+    With PayLivery every part comes from costs_of; otherwise the total is the agreed total when there is one, so the
+    shipping is what it adds to the item price."""
+    item = row.agreed_price or row.asking_price
+    cost, src = shipping_of(row)
+    if item is None:
+        return ""
+    if src == "none":
+        return _money(item)
+    if row.mode == "paylivery":
+        c = costs_of(row, item)
+        return t("Item {item} + shipping {shipping} ({source}) + buyer protection {fee} = {total}", item=_money(item),
+                 shipping=_money(c["shipping"]), source=shipping_label(src), fee=_money(c["fee"]), total=_money(c["total"]))
+    total = row.agreed_total if row.agreed_total is not None and row.agreed_price is not None else item + cost
+    shipping = max(0.0, total - item)
+    return t("Item {item} + shipping {shipping} ({source}) = {total}", item=_money(item), shipping=_money(shipping),
+             source=shipping_label(src), total=_money(item + shipping))
+
+
+def target_price(row: Purchase) -> float | None:
+    """Opening target: discount below the cheaper of asking price and comparable median, never above the item ceiling
+    (the maximum minus shipping and, with PayLivery, the buyer protection fee)."""
+    refs = [x for x in (row.asking_price, row.median_price) if x]
+    if not refs:
+        return None
+    target = min(refs) * (1 - _discount() / 100)
+    target = float(math.floor(target)) if target >= 1 else round(target, 2)
+    ceiling = item_ceiling(row)
+    if ceiling:
+        target = min(target, ceiling)
+    return target
+
+
+def clean_state(raw: Any) -> dict[str, Any]:
+    """Claude's purchase_state, cleaned: known stage, positive numbers, sentinels turned into None."""
+    raw = raw if isinstance(raw, dict) else {}
+
+    def num(v: Any) -> float | None:
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else None
+
+    pay = raw.get("payment") if isinstance(raw.get("payment"), dict) else {}
+    payment = {"iban": str(pay.get("iban") or "").strip()[:40], "holder": str(pay.get("holder") or "").strip()[:100],
+               "amount": num(pay.get("amount")), "reference": str(pay.get("reference") or "").strip()[:140]}
+    pk = raw.get("pickup") if isinstance(raw.get("pickup"), dict) else {}
+    pickup = None
+    if str(pk.get("start") or "").strip():
+        pickup = {"start": str(pk["start"]).strip()[:16], "minutes": int(pk.get("minutes") or 30),
+                  "location": str(pk.get("location") or "").strip()[:200]}
+    return {"stage": raw.get("stage") if raw.get("stage") in STAGES else "negotiating",
+            "agreed_price": num(raw.get("agreed_price")),
+            "shipping_cost": num(raw.get("shipping_cost")),
+            "total_price": num(raw.get("total_price")),
+            "payment": payment if any(payment.values()) else None,
+            "pickup": pickup,
+            "reason": str(raw.get("reason") or "").strip()[:300]}
+
+
+# ------------------------------------------------------------------ rows
+def get(pid: int) -> Purchase | None:
+    with session() as db:
+        return db.get(Purchase, pid)
+
+
+def recent(limit: int = 20) -> list[Purchase]:
+    with session() as db:
+        return list(db.exec(select(Purchase).order_by(col(Purchase.updated_at).desc(), col(Purchase.id).desc())
+                            .limit(limit)))
+
+
+def active() -> list[Purchase]:
+    with session() as db:
+        return list(db.exec(select(Purchase).where(col(Purchase.status).in_(OPEN))
+                            .order_by(col(Purchase.updated_at).desc())))
+
+
+def for_conversation(conversation_id: str) -> Purchase | None:
+    """The open purchase of this chat (active or paused), newest first; None if there is none."""
+    with session() as db:
+        return db.exec(select(Purchase).where(Purchase.conversation_id == conversation_id,
+                                              col(Purchase.status).in_(OPEN))
+                       .order_by(col(Purchase.updated_at).desc())).first()
+
+
+def _latest_for_conversation(conversation_id: str) -> Purchase | None:
+    with session() as db:
+        return db.exec(select(Purchase).where(Purchase.conversation_id == conversation_id)
+                       .order_by(col(Purchase.updated_at).desc())).first()
+
+
+def auto_mode(conv: Conversation) -> bool:
+    """Automatic answers for this buyer chat: an open purchase whose status is answered automatically."""
+    p = for_conversation(conv.id)
+    return p is not None and p.status in AUTO
+
+
+def _change(pid: int, fn) -> Purchase | None:
+    with session() as db:
+        row = db.get(Purchase, pid)
+        if row is None:
+            return None
+        fn(row)
+        row.updated_at = utcnow()
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+
+def _move(row: Purchase, status: str, text: str = "", note: Any = ...) -> None:
+    """Set the status and append to the log ("from" = the status before, used by resume)."""
+    prev = row.status
+    row.status = status
+    if note is not ...:
+        row.note = note
+    entry = {"at": utcnow().isoformat(), "status": status, "text": (text or "")[:300], "from": prev}
+    row.log = (list(row.log or []) + [entry])[-LOG_CAP:]
+
+
+def _line(row: Purchase, text: str) -> None:
+    """Log line without a status change."""
+    row.log = (list(row.log or []) + [{"at": utcnow().isoformat(), "status": row.status, "text": text[:300]}])[-LOG_CAP:]
+
+
+def _base() -> str:
+    return get_settings().public_url.rstrip("/")
+
+
+def _chat_url(row: Purchase) -> str:
+    return f"{_base()}/chats/{row.conversation_id}#purchase" if row.conversation_id else f"{_base()}/purchases/{row.id}"
+
+
+async def _push(row: Purchase, title: str, message: str) -> None:
+    try:
+        await notify("purchase", title, message, url=_chat_url(row),
+                     data={"purchase_id": row.id, "conversation_id": row.conversation_id})
+    except Exception as e:  # noqa: BLE001 - a failed push never breaks the purchase
+        log.warning("purchase push failed: %s", e)
+
+
+def _spawn(coro: Coroutine[Any, Any, Any]) -> None:
+    task = asyncio.get_running_loop().create_task(coro)
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
+
+
+# ------------------------------------------------------------------ start
+def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: int | None = None,
+          query: str | None = None, title: str | None = None, url: str | None = None,
+          image_url: str | None = None, price: float | None = None, pickup_window: str | None = None) -> int:
+    """Store a purchase order and start it in the background. Raises PurchaseError on a refusal."""
+    if get_setting(SETTING_ENABLED) != "1":
+        raise PurchaseError(t("Purchase orders are switched off. Turn them on in Settings."))
+    ad_id = (ad_id or "").strip()
+    if not ad_id:
+        raise PurchaseError(t("No ad given."))
+    if mode not in MODES:
+        raise PurchaseError(t("Unknown purchase mode."))
+    if max_price is not None and max_price <= 0:
+        raise PurchaseError(t("Enter the maximum price in euros."))
+    if mode == "direct" and not shipping.sender_complete():
+        raise PurchaseError(t("Fill in your own shipping address first (Settings → Shipping)."))
+    with session() as db:
+        dup = db.exec(select(Purchase).where(Purchase.ad_id == ad_id, col(Purchase.status).in_(OPEN))).first()
+        if dup is not None:
+            raise PurchaseError(t("There is already an open purchase for this ad (#{id}).", id=dup.id))
+        row = Purchase(ad_id=ad_id, ad_title=title, ad_url=url, image_url=image_url, asking_price=price,
+                       max_price=max_price, mode=mode, status="new",   # None: asking price + shipping, set in _begin
+                       search_id=search_id, query=query,
+                       pickup_window=((pickup_window or "").strip()[:200] or None) if mode == "pickup" else None,
+                       log=[])
+        _line(row, t("Purchase started ({mode})", mode=mode_label(mode)))
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        pid = row.id
+    _spawn(_begin(pid))
+    return pid
+
+
+async def _fail(pid: int, reason: str) -> None:
+    row = _change(pid, lambda r: _move(r, "failed", reason, note=reason))
+    if row is not None:
+        await _push(row, t("Purchase failed"), reason)
+
+
+async def _begin(pid: int) -> None:
+    """Contact the seller: read the ad, price check, opening message by Claude, the chat itself."""
+    try:
+        await _begin_inner(pid)
+    except Exception as e:  # noqa: BLE001 - a background task must leave a readable state behind
+        log.exception("purchase %s failed to start", pid)
+        await _fail(pid, t("Could not start the purchase: {error}", error=e))
+
+
+async def _begin_inner(pid: int) -> None:
+    row = get(pid)
+    if row is None:
+        return
+    try:
+        detail = await get_public().get_detail(row.ad_id)
+    except WillhabenError as e:
+        return await _fail(pid, t("Could not read the ad: {error}", error=e))
+    if detail is None:
+        return await _fail(pid, t("The ad is no longer online."))
+    if row.mode == "paylivery" and not detail.paylivery_enabled:
+        return await _fail(pid, t("This ad has no willhaben PayLivery."))
+    median, market = None, None
+    try:
+        res = await deals.analyze(detail)
+        stats = (res.get("comparables") or {}).get("stats") or {}
+        if stats.get("median") and (stats.get("count") or 0) >= deals.MIN_COMPARABLES:
+            median = float(stats["median"])
+            market = {"median": median, "min": _num(stats.get("min")), "p25": _num(stats.get("p25")),
+                      "count": int(stats["count"])}
+    except Exception as e:  # noqa: BLE001 - the price check is a bonus, the purchase goes on without it
+        log.info("price check for %s failed: %s", row.ad_id, e)
+    ad_ship = detail.shipping_price if row.mode == "paylivery" else None     # PayLivery: the buyer's delivery price
+    default_max, ship, fee = None, 0.0, 0.0
+    if not row.max_price and detail.price:        # no maximum typed: the asking price plus shipping (and PayLivery's fee)
+        ship = ad_ship if ad_ship is not None else SHIPPING_ESTIMATE.get(row.mode or "", 0.0)
+        fee = paylivery_fee(detail.price) if row.mode == "paylivery" else 0.0
+        default_max = round(detail.price + ship + fee, 2)
+    max_price = row.max_price or default_max
+    far = bool(detail.price and max_price and detail.price > max_price * OVER)
+    info = t("The asking price is far above your maximum – the agent starts anyway.") if far else None
+    if default_max and fee:
+        info = t("Maximum set to {max}: asking price plus shipping {ship} and buyer protection {fee}",
+                 max=_money(default_max), ship=_money(ship), fee=_money(fee))
+    elif default_max:
+        info = t("Maximum set to {max}: asking price plus shipping {ship}", max=_money(default_max), ship=_money(ship))
+    row = _change(pid, lambda r: (setattr(r, "ad_title", detail.heading), setattr(r, "ad_url", detail.url),
+                                  setattr(r, "image_url", detail.images[0] if detail.images else r.image_url),
+                                  setattr(r, "asking_price", detail.price), setattr(r, "median_price", median),
+                                  setattr(r, "max_price", max_price), setattr(r, "market", market),
+                                  setattr(r, "shipping_cost", ad_ship),
+                                  setattr(r, "shipping_source", "ad" if ad_ship is not None else None),
+                                  info and _line(r, info)))
+    target = target_price(row)
+    cost, src = shipping_of(row)
+    prompt = purchase_opener_prompt(ad_context=detail.as_context(), target=target, max_price=row.max_price,
+                                    mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
+                                    seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
+                                    item_ceiling=item_ceiling(row), market=row.market,
+                                    fee=fee_rule() if row.mode == "paylivery" else None)
+    out = await get_backend("chat").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
+    data = out.data or {}
+    text = str(data.get("message") or "").strip()
+    if not text:
+        return await _fail(pid, t("Claude wrote no opening message."))
+    problems = text_problems(text, max_price=row.max_price, address_ok=False)
+    if problems:
+        return await _fail(pid, t("The opening message was refused: {why}", why="; ".join(problems)))
+    from app.services import chats  # lazy: chats imports this module
+
+    try:
+        cid = await chats._account().create_conversation(row.ad_id, text)
+    except Exception as e:  # noqa: BLE001 - nothing was sent, the order fails visibly
+        return await _fail(pid, t("willhaben did not open the chat: {error}", error=e))
+    with session() as db:
+        conv = db.get(Conversation, cid) or Conversation(id=cid)
+        conv.ad_id, conv.ad_title, conv.role = row.ad_id, detail.heading, "buyer"
+        conv.partner_name = conv.partner_name or detail.seller_name
+        conv.ad_context = detail.as_context()
+        db.add(conv)
+        db.add(Message(conversation_id=cid, ext_id=f"draft-purchase-{pid}", direction="out", text=text,
+                       created_at=utcnow()))
+        db.commit()
+    row = _change(pid, lambda r: (setattr(r, "conversation_id", cid),
+                                  _move(r, "contacting", t("Opening message sent: {text}", text=text[:200]))))
+    try:
+        await chats.sync_messages(cid)
+        await chats.ensure_ad_context(cid)
+    except Exception as e:  # noqa: BLE001 - the chat exists; the history follows at the next sync
+        log.info("first sync of purchase chat %s failed: %s", cid, e)
+
+
+# ------------------------------------------------------------------ prompts, guards
+def rules_block(p: Purchase, conv: Conversation | None = None, availability: str | None = None) -> str:
+    """Prompt block of one purchase: prices, mode, what may be disclosed, the user's rules."""
+    sender = None
+    if p.mode == "direct" and p.status in AFTER_AGREEMENT:
+        s = sender_address()
+        sender = _address_line(s) if shipping.sender_complete() and s else None
+    seller = None
+    if conv is not None:
+        seller = conv.partner_name or (conv.ad_context or {}).get("seller_name")
+    cost, src = shipping_of(p)
+    return purchase_rules(asking=p.asking_price, median=p.median_price, target=target_price(p), max_price=p.max_price,
+                          mode=p.mode, sender_address=sender, stage=p.status,
+                          user_rules=get_setting(SETTING_RULES) or DEFAULT_RULES, note=p.note,
+                          pickup_window=p.pickup_window, availability=availability, seller_name=seller,
+                          shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p), market=p.market,
+                          fee=fee_rule() if p.mode == "paylivery" else None)
+
+
+def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
+    """Hard checks in code for one buyer draft (pure: no status change, no push)."""
+    ps = d.purchase or {}
+    why = []
+    if ps.get("stage") == "needs_user":
+        why.append(t("Claude needs your decision: {reason}", reason=ps.get("reason") or "-"))
+    why += text_problems(d.text, max_price=p.max_price, address_ok=p.mode == "direct" and p.status in AFTER_AGREEMENT)
+    if p.max_price:
+        # PayLivery: the offer is the item price, the buyer pays shipping and buyer protection on willhaben (the ceiling
+        # is the maximum minus both)
+        cap = (item_ceiling(p) or p.max_price) if p.mode == "paylivery" else p.max_price
+        if d.suggested_price and d.suggested_price > cap:
+            why.append(t("Offer {amount} is above your maximum {max}", amount=_money(d.suggested_price), max=_money(cap))
+                       if cap == p.max_price else
+                       t("Offer {amount} is above the item ceiling {max} (maximum minus shipping and buyer protection)",
+                         amount=_money(d.suggested_price), max=_money(cap)))
+        total = _total_now(p, ps, _seller_text_of(msgs))
+        if total and total > p.max_price + 0.005:
+            if p.mode == "paylivery":
+                why.append(t("Agreed price incl. shipping and buyer protection {amount} is above your maximum {max}",
+                             amount=_money(total), max=_money(p.max_price)))
+            else:
+                why.append(t("Agreed price incl. shipping {amount} is above your maximum {max}", amount=_money(total),
+                             max=_money(p.max_price)))
+    return why
+
+
+def _seller_text_of(msgs: list[Message]) -> str:
+    return " ".join(m.text or "" for m in msgs if m.direction == "in")
+
+
+async def after_reply(p: Purchase, d: Draft, sent: bool) -> None:
+    """Apply Claude's purchase_state of one draft: status changes, pushes, the PayLivery offer. Called after a send
+    (sent=True) and after a blocked draft (sent=False: only pauses and refusals are acted on)."""
+    row = get(p.id)
+    if row is None or row.status in TERMINAL:
+        return
+    ps = d.purchase or {}
+    stage = ps.get("stage")
+    reason = (ps.get("reason") or "").strip()
+    if d.intent == "scam_suspect" or stage == "needs_user":
+        return await pause(row.id, reason or t("Claude asked for a decision"), push=True)
+    if not sent:
+        return
+    if stage in ("unavailable", "declined"):
+        return await _fail(row.id, reason or t("The seller ended the purchase."))
+    seller = _seller_text(row.conversation_id)
+    named = _named_shipping(row, ps, seller)
+    if named is not None and (row.shipping_source != "chat" or row.shipping_cost != named):
+        row = _change(row.id, lambda r: (setattr(r, "shipping_cost", named), setattr(r, "shipping_source", "chat"),
+                                         _line(r, t("Shipping named by the seller: {amount}", amount=_money(named)))))
+    total = _total_now(row, ps, seller)
+    if total and row.max_price and total > row.max_price + 0.005:
+        if row.mode == "paylivery":
+            return await pause(row.id, t("Agreed price incl. shipping and buyer protection is above your maximum."), push=True)
+        return await pause(row.id, t("Agreed price incl. shipping is above your maximum."), push=True)
+    prev = row.status
+    if stage == "negotiating" and prev == "contacting":
+        row = _change(row.id, lambda r: _move(r, "negotiating", reason))
+    if stage == "agreed" and prev in ("contacting", "negotiating"):
+        price = ps.get("agreed_price") or row.agreed_price
+        total = _total_now(row, ps, seller, price=price)
+        row = _change(row.id, lambda r: (setattr(r, "agreed_price", price), setattr(r, "agreed_total", total),
+                                         _move(r, "agreed", reason)))
+        if row.mode == "paylivery":
+            await _paylivery_next(row, prev)
+        elif row.mode == "direct":
+            await _direct_payment(row, ps.get("payment"))
+    elif stage == "agreed" and row.status == "agreed" and row.mode == "direct":
+        await _direct_payment(row, ps.get("payment"))
+    if stage == "meetup_agreed" and row.mode == "pickup" and row.status in ("contacting", "negotiating", "agreed"):
+        m = meetups.clean(ps.get("pickup"))
+        if m:
+            await _meetup_agreed(row, m, reason)
+
+
+async def _paylivery_next(row: Purchase, prev: str) -> None:
+    """After an agreement with PayLivery: buy-now at the asking price, else the PayLivery offer in the background."""
+    if prev == "agreed":
+        return
+    amount = row.agreed_price
+    with session() as db:
+        conv = db.get(Conversation, row.conversation_id) if row.conversation_id else None
+    buy_now = bool((conv.ad_context or {}).get("buy_now")) if conv else False
+    if amount and row.max_price:                  # item + shipping + buyer protection must fit the maximum
+        total = costs_of(row, amount)["total"]
+        if total > row.max_price + 0.005:
+            return await pause(row.id, t("Agreed price incl. shipping and buyer protection is above your maximum."), push=True)
+    if buy_now and amount and row.asking_price and abs(amount - row.asking_price) < 0.005:
+        row = _change(row.id, lambda r: _move(r, "pay_now", t("Buy-now price agreed")))
+        await _push_paylivery_pay(row)
+        return
+    _spawn(_send_offer(row.id, row.conversation_id, amount))
+
+
+async def _send_offer(pid: int, conversation_id: str | None, amount: float | None) -> None:
+    if not conversation_id or not amount:
+        return
+    try:
+        result = await paylivery.run_action(conversation_id, "offer", amount)
+    except Exception as e:  # noqa: BLE001 - the offer failed: the user decides
+        return await pause(pid, t("PayLivery offer failed: {error}", error=e), push=True)
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+    stage = ((conv.paylivery or {}) if conv else {}).get("stage")
+    if stage not in ("offer_sent", "offer_accepted"):
+        await pause(pid, t("PayLivery offer not sent: {text}", text=result[:200]), push=True)
+
+
+async def _direct_payment(row: Purchase, payment: dict[str, Any] | None) -> None:
+    """Bank details from the seller's answer: pay_now only for a valid IBAN that the seller really wrote."""
+    if row.status != "agreed" or not payment:
+        return
+    raw = payment.get("iban") or ""
+    if not raw:
+        return
+    seller_text = normalize_iban(_seller_text(row.conversation_id))
+    if not valid_iban(raw) or normalize_iban(raw) not in seller_text:
+        await _push(row, t("Check IBAN"), t("The seller wrote: {text}", text=f"{raw} · {payment.get('holder') or '-'}"))
+        return
+    amount = payment.get("amount") or row.agreed_total or row.agreed_price
+    if amount is None:
+        return
+    if row.agreed_total and amount > row.agreed_total + 0.005:
+        return await pause(row.id, t("The amount {amount} is above the agreed total {total}",
+                                     amount=_money(amount), total=_money(row.agreed_total)), push=True)
+    if row.max_price and amount > row.max_price + 0.005:
+        return await pause(row.id, t("The amount {amount} is above your maximum {max}",
+                                     amount=_money(amount), max=_money(row.max_price)), push=True)
+    data = {"iban": normalize_iban(raw), "holder": payment.get("holder") or "",
+            "amount": amount, "reference": (payment.get("reference") or "")
+            or f"{row.ad_title or ''} willhaben"}
+    row = _change(row.id, lambda r: (setattr(r, "payment", data),        # agreed_price stays the item price
+                                     _move(r, "pay_now", t("Bank details received"))))
+    await _push_direct_pay(row)
+
+
+def _seller_text(conversation_id: str | None) -> str:
+    if not conversation_id:
+        return ""
+    with session() as db:
+        rows = db.exec(select(Message).where(Message.conversation_id == conversation_id,
+                                             Message.direction == "in")).all()
+    return " ".join(m.text or "" for m in rows)
+
+
+async def _meetup_agreed(row: Purchase, m: dict[str, Any], reason: str) -> None:
+    row = _change(row.id, lambda r: (setattr(r, "pickup", m), _move(r, "meetup", reason)))
+    when = meetups.format_when(m)
+    where = m.get("location") or "-"
+    await _push(row, t("Pickup appointment"),
+                t("{when}, {where}, {price} cash", when=when, where=where, price=_price_line(row)))
+
+
+async def _push_paylivery_pay(row: Purchase) -> None:
+    amount = _price_line(row)
+    await _push(row, t("💳 Pay now!"),
+                t("{title}, {amount}. Pay in the willhaben app ({link}) or with Buy now & pay in the PayLivery card "
+                  "here – the app fills in your saved card, you approve 3-D Secure on your phone, then it continues by itself.",
+                  title=row.ad_title or row.ad_id, amount=amount, link=WH_CHAT.format(cid=row.conversation_id)))
+
+
+async def _push_direct_pay(row: Purchase) -> None:
+    p = row.payment or {}
+    text = t("Recipient: {holder}\nIBAN: {iban}\nAmount: {amount}\nReference: {reference}",
+             holder=p.get("holder") or "-", iban=group_iban(p.get("iban")), amount=_money(p.get("amount")),
+             reference=p.get("reference") or "-")
+    if shipping_of(row)[1] != "none":
+        text += "\n" + t("Price: {price}", price=_price_line(row))
+    await _push(row, t("💳 Pay now!"), text)
+
+
+# ------------------------------------------------------------------ pauses, failures and user buttons
+async def pause(pid: int, note: str | None = None, *, push: bool = True) -> None:
+    """Ask the user: the purchase waits until it is resumed (the previous status is kept in the log)."""
+    row = _change(pid, lambda r: (_move(r, "paused", note or "", note=note or r.note) if r.status != "paused" else None))
+    if row is not None and push:
+        await _push(row, t("Purchase paused"), note or t("Your decision is needed."))
+
+
+def card(conv: Conversation | None) -> dict[str, Any] | None:
+    """Chat card of a purchase (template context of _purchase.html); None hides it. Shows the newest purchase of the
+    chat, also a finished or failed one."""
+    if conv is None:
+        return None
+    row = _latest_for_conversation(conv.id)
+    return card_for(row) if row is not None else None
+
+
+def card_for(row: Purchase, log_limit: int | None = 8) -> dict[str, Any]:
+    """The same card for one purchase row (order detail page); log_limit None keeps the whole log."""
+    payment = row.payment or {}
+    entries = list(row.log or [])
+    if log_limit:
+        entries = entries[-log_limit:]
+    ship_cost, ship_source = shipping_of(row)
+    item = row.agreed_price or row.asking_price
+    costs = costs_of(row, item) if item else None
+    if costs is not None and row.mode != "paylivery" and row.agreed_total is not None and row.agreed_price is not None:
+        total = row.agreed_total                    # without PayLivery the seller may have named the total
+    else:
+        total = costs["total"] if costs is not None else None
+    return {
+        "id": row.id, "ad_title": row.ad_title, "status": row.status, "status_label": status_label(row.status),
+        "mode": row.mode, "mode_label": mode_label(row.mode), "asking": row.asking_price, "median": row.median_price,
+        "target": target_price(row), "max_price": row.max_price, "agreed": row.agreed_price,
+        "payment": ({**payment, "iban_group": group_iban(payment.get("iban"))} if payment else None),
+        "pickup": row.pickup, "pickup_window": row.pickup_window, "note": row.note,
+        "shipping_cost": ship_cost, "shipping_source": ship_source,
+        "shipping_label": shipping_label(ship_source), "agreed_total": row.agreed_total,
+        "fee": costs["fee"] if costs is not None else 0.0, "total": total,
+        "item_ceiling": item_ceiling(row), "market": dict(row.market) if row.market else None,
+        "pct_below": pct_below(row.asking_price, row.max_price),
+        "log": list(reversed(entries)), "next": next_text(row), "pay_now": row.status == "pay_now",
+        "wh_url": WH_CHAT.format(cid=row.conversation_id) if row.conversation_id else None,
+        "actions": actions(row),
+    }
+
+
+def actions(row: Purchase) -> list[dict[str, Any]]:
+    s, out = row.status, []
+    if s == "paused":
+        out.append({"name": "resume", "label": t("Resume")})
+    if s in ("contacting", "negotiating", "agreed", "meetup", "pay_now"):
+        out.append({"name": "pause", "label": t("Pause")})
+    if s in ("contacting", "negotiating", "agreed", "meetup", "pay_now", "paused"):
+        out.append({"name": "cancel", "label": t("Cancel purchase"), "confirm": True})
+    if s in ("contacting", "negotiating", "agreed", "pay_now", "paused"):
+        out.append({"name": "max_price", "label": t("Maximum price"), "input": True})
+    if row.mode == "direct" and s == "pay_now":
+        out.append({"name": "paid", "label": t("Paid"), "confirm": True})
+    if s in ("paid", "shipped"):
+        out.append({"name": "received", "label": t("Received"), "confirm": True})
+    if row.mode == "pickup" and s == "meetup":
+        out.append({"name": "collected", "label": t("Collected & paid"), "confirm": True})
+    if s == "failed":
+        out.append({"name": "restart", "label": t("Try again")})
+    return out
+
+
+def set_max_price(pid: int, value: float) -> None:
+    if not value or value <= 0:
+        raise PurchaseError(t("Enter the maximum price in euros."))
+    row = get(pid)
+    if row is None or row.status not in OPEN:
+        raise PurchaseError(t("This purchase is not open."))
+    _change(pid, lambda r: (setattr(r, "max_price", float(value)), _line(r, t("Maximum set to {max}", max=_money(value)))))
+
+
+async def resume(pid: int) -> None:
+    row = get(pid)
+    if row is None or row.status != "paused":
+        raise PurchaseError(t("This purchase is not paused."))
+    back = next((e.get("from") for e in reversed(row.log or []) if e.get("status") == "paused" and e.get("from")), None)
+    if row.conversation_id is None:
+        row = _change(pid, lambda r: _move(r, "new", t("Resumed")))
+        _spawn(_begin(pid))
+        return
+    row = _change(pid, lambda r: _move(r, back if back in OPEN and back != "paused" else "negotiating", t("Resumed"), note=None))
+
+
+async def restart(pid: int) -> None:
+    row = get(pid)
+    if row is None or row.status != "failed":
+        raise PurchaseError(t("Only a failed purchase can be started again."))
+    if row.conversation_id is None:
+        _change(pid, lambda r: _move(r, "new", t("Started again"), note=None))
+        _spawn(_begin(pid))
+    else:
+        _change(pid, lambda r: _move(r, "negotiating", t("Started again"), note=None))
+
+
+def cancel(pid: int) -> None:
+    row = get(pid)
+    if row is None or row.status not in OPEN:
+        raise PurchaseError(t("This purchase is not open."))
+    _change(pid, lambda r: _move(r, "cancelled", t("Cancelled by you")))
+
+
+def mark_received(pid: int) -> None:
+    row = get(pid)
+    if row is None or row.status not in ("paid", "shipped"):
+        raise PurchaseError(t("Only after payment can the receipt be confirmed."))
+    _change(pid, lambda r: _move(r, "done", t("Received")))
+
+
+def mark_collected(pid: int) -> None:
+    row = get(pid)
+    if row is None or row.status != "meetup" or row.mode != "pickup":
+        raise PurchaseError(t("Only a confirmed pickup can be marked as collected."))
+    _change(pid, lambda r: _move(r, "done", t("Collected and paid in cash")))
+
+
+def mark_paid(pid: int) -> None:
+    """The user transferred the money (direct mode): status paid, and the seller is told in the chat."""
+    row = get(pid)
+    if row is None or row.status != "pay_now" or row.mode != "direct":
+        raise PurchaseError(t("Nothing to pay for this purchase right now."))
+    _change(pid, lambda r: _move(r, "paid", t("Transfer reported as done by you")))
+    _spawn(_tell_seller_paid(pid))
+
+
+async def _tell_seller_paid(pid: int) -> None:
+    from app.services import chats  # lazy: chats imports this module
+
+    row = get(pid)
+    if row is None or not row.conversation_id:
+        return
+    p = row.payment or {}
+    text = (f"Hallo, ich habe {_money(p.get('amount'))} überwiesen"
+            + (f" (Verwendungszweck: {p['reference']})" if p.get("reference") else "")
+            + ". Gib mir bitte kurz Bescheid, wenn der Betrag angekommen ist. Danke!")
+    with session() as db:
+        draft = Draft(conversation_id=row.conversation_id, text=text, status="draft")
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+    try:
+        await chats.send_draft(draft.id, text)
+    except Exception as e:  # noqa: BLE001 - the payment is recorded; the message can be sent by hand
+        log.warning("paid message for purchase %s failed: %s", pid, e)
+        failed = t("The message to the seller failed: {error}", error=e)
+        _change(pid, lambda r: _line(r, failed))
+
+
+# ------------------------------------------------------------------ hooks: PayLivery (not registered here)
+async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, Any]) -> None:
+    """PayLivery stage of a buyer chat changed (registered by app/main.py)."""
+    row = for_conversation(conv.id)
+    if row is None:
+        return
+    if stage == "offer_accepted":
+        amount = state.get("offer") or row.agreed_price or row.asking_price
+        if row.status in ("contacting", "negotiating", "agreed", "meetup"):
+            row = _change(row.id, lambda r: (setattr(r, "agreed_price", amount),
+                                             setattr(r, "agreed_total", costs_of(r, amount)["total"] if amount else r.agreed_total),
+                                             _move(r, "pay_now", t("The seller accepted the PayLivery offer"))))
+            await _push_paylivery_pay(row)
+    elif stage == "offer_declined":
+        if row.status == "agreed":
+            _change(row.id, lambda r: _move(r, "negotiating", t("The seller declined the PayLivery offer"),
+                                            note=t("The seller declined our offer – negotiate further.")))
+    elif stage == "paid":
+        if row.status in ("agreed", "pay_now"):
+            _change(row.id, lambda r: _move(r, "paid", t("Paid with PayLivery")))
+    elif stage == "shipped":
+        if row.status == "paid":
+            _change(row.id, lambda r: _move(r, "shipped", t("Shipped")))
+    elif stage == "delivered":
+        if row.status in ("paid", "shipped"):
+            await _push(row, t("Confirm receipt?"), t("The parcel was delivered – confirm the receipt in the chat."))
+    elif stage == "received":
+        if row.status in ("paid", "shipped"):
+            _change(row.id, lambda r: _move(r, "done", t("Receipt confirmed")))
+    elif stage in ("cancelled", "problem"):
+        if row.status in OPEN and row.status != "paused":
+            await pause(row.id, t("PayLivery: {stage}", stage=stage), push=True)
+
+
+async def on_paylivery_action(conv: Conversation, action: str, ok: bool, text: str) -> None:
+    """A PayLivery browser action of this chat ended (registered by app/main.py). The 3-D Secure wait and its push
+    live in paylivery itself; here a failed offer or purchase gets a note on the order and a push, so the user can
+    finish it on willhaben or restart it."""
+    row = for_conversation(conv.id)
+    if row is None or action not in ("offer", "buy") or ok:
+        return
+    what = t("PayLivery offer") if action == "offer" else t("PayLivery purchase")
+    note = t("{what} did not finish: {text}", what=what, text=(text or "").strip()[:300])
+    row = _change(row.id, lambda r: setattr(r, "note", note))
+    if row is not None:
+        await _push(row, t("Purchase needs you"), note)
+
+
+# ------------------------------------------------------------------ startup
+def recover() -> None:
+    """After a restart no purchase task is running any more: unfinished starts are marked failed."""
+    with session() as db:
+        for row in db.exec(select(Purchase).where(col(Purchase.status).in_(("new", "contacting")),
+                                                  Purchase.conversation_id.is_(None))):
+            row.status, row.note, row.updated_at = "failed", t("Interrupted by a restart."), utcnow()
+            row.log = (list(row.log or []) + [{"at": utcnow().isoformat(), "status": "failed",
+                                               "text": t("Interrupted by a restart."), "from": "new"}])[-LOG_CAP:]
+            db.add(row)
+        db.commit()
+
+
+# ------------------------------------------------------------------ texts
+def status_label(status: str | None) -> str:
+    return {
+        "new": t("Starting"), "contacting": t("Contacting the seller"), "negotiating": t("Negotiating"),
+        "agreed": t("Price agreed"), "meetup": t("Pickup agreed"), "pay_now": t("Pay now"), "paid": t("Paid"),
+        "shipped": t("Shipped"), "done": t("Done"), "paused": t("Paused"), "failed": t("Failed"),
+        "cancelled": t("Cancelled"),
+    }.get(status or "", status or "")
+
+
+def mode_label(mode: str | None) -> str:
+    return {"paylivery": t("With PayLivery"), "direct": t("Bank transfer"), "pickup": t("Pickup (cash)")}.get(mode or "", mode or "")
+
+
+def next_text(row: Purchase) -> str:
+    s, m = row.status, row.mode
+    if s == "new":
+        return t("The agent opens the chat with the seller.")
+    if s == "contacting":
+        return t("The agent waits for the seller's answer and negotiates.")
+    if s == "negotiating":
+        return t("The agent negotiates within your maximum price.")
+    if s == "agreed":
+        if m == "paylivery":
+            return t("The PayLivery offer goes to the seller; the price is set once the seller accepts.")
+        if m == "pickup":
+            return t("The agent agrees a pickup time within your window.")
+        return t("Your address goes to the seller with the next answer; the agent waits for the bank details.")
+    if s == "meetup":
+        return t("Pick up the item at the agreed time and pay cash, then press Collected & paid.")
+    if s == "pay_now":
+        if m == "paylivery":
+            return t("Pay in the PayLivery card below (or in the willhaben app).")
+        return t("Transfer the amount to the account below, then press Paid.")
+    if s == "paid":
+        return t("Paid – waiting for the item; confirm the receipt afterwards.")
+    if s == "shipped":
+        return t("Shipped – confirm the receipt when it arrives.")
+    if s == "done":
+        return t("Finished.")
+    if s == "paused":
+        return t("Paused – your decision is needed.")
+    if s == "failed":
+        return t("The purchase failed.")
+    return t("Cancelled.")

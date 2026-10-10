@@ -180,6 +180,15 @@ def level(pos: float) -> str:
     return next(name for bound, name in LEVELS if pos < bound)
 
 
+def anchors(comp: dict[str, Any] | None) -> list[tuple[float, float]] | None:
+    """The price scale of the bar: (price, 0..1) pairs from the stats of the comparable ads, or None with too few ads or
+    incomplete stats. position() reads the bar on it; the buy dialog hands it to the browser to place the maximum."""
+    keys = ("min", "p10", "p25", "median", "p75", "p90", "max")
+    if not comp or comp.get("count", 0) < MIN_COMPARABLES or any(comp.get(k) is None for k in keys):
+        return None
+    return [(comp[k], q) for k, q in zip(keys, (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0), strict=True)]
+
+
 def level_label(lvl: str | None) -> str:
     return {"bargain": t("bargain"), "cheap": t("cheap"), "fair": t("fair"), "expensive": t("expensive"),
             "very_expensive": t("very expensive")}.get(lvl or "", "")
@@ -191,16 +200,15 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
         return {"pos": None, "reason": "no_price"}
     if price <= 0:
         return {"pos": None, "reason": "free"}
-    if comp and comp.get("count", 0) >= MIN_COMPARABLES:
-        anchors = [(comp["min"], 0.0), (comp["p10"], 0.1), (comp["p25"], 0.25), (comp["median"], 0.5),
-                   (comp["p75"], 0.75), (comp["p90"], 0.9), (comp["max"], 1.0)]
-        pos = _interp(price, anchors)
+    scale = anchors(comp)
+    if comp and scale:
+        pos = _interp(price, scale)
         ticks, seen = [], set()
         for key in ("p25", "median", "p75"):
             v = round(comp[key])
             if v not in seen:
                 seen.add(v)
-                ticks.append([round(_interp(comp[key], anchors), 3), v])
+                ticks.append([round(_interp(comp[key], scale), 3), v])
         return {"pos": round(pos, 3), "level": level(pos), "basis": "comparables", "ticks": ticks,
                 "ref": {k: comp[k] for k in ("count", "p10", "p25", "median", "p75", "p90")},
                 "suspicious": price < 0.5 * comp["p25"]}

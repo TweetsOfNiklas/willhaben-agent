@@ -102,6 +102,38 @@ async def test_availability_text_uses_freebusy(google):
     assert fb["items"] == [{"id": "primary"}]
 
 
+def test_buffer_widens_busy_blocks_on_both_sides():
+    now = datetime(2026, 10, 10, 6, 0, tzinfo=TZ)                      # Saturday, before the window
+    busy = [(datetime(2026, 10, 10, 10, 0, tzinfo=TZ), datetime(2026, 10, 10, 11, 0, tzinfo=TZ))]
+    assert gcal.format_slots(gcal.free_slots(busy, now, 1, "09:00", "20:00")) == \
+        "- Sa 10.10.: 09:00–10:00, 11:00–20:00"                         # default 0: unchanged
+    assert gcal.format_slots(gcal.free_slots(busy, now, 1, "09:00", "20:00", 0)) == \
+        "- Sa 10.10.: 09:00–10:00, 11:00–20:00"
+    assert gcal.format_slots(gcal.free_slots(busy, now, 1, "09:00", "20:00", 60)) == \
+        "- Sa 10.10.: 12:00–20:00"                                      # 09:00–12:00 is blocked
+    assert gcal.format_slots(gcal.free_slots(busy, now, 1, "09:00", "20:00", 30)) == \
+        "- Sa 10.10.: 09:00–09:30, 11:30–20:00"                         # 09:30–11:30 blocked
+
+
+def test_buffer_config_round_trip_and_clamping():
+    base = dict(calendars=["primary"], target="primary", days=7, window_start="09:00", window_end="20:00",
+                duration=30, in_drafts=True, in_auto=False)
+    assert gcal.config()["buffer"] == 0                                 # default
+    gcal.save_config(**base, buffer=45)
+    assert gcal.config()["buffer"] == 45
+    gcal.save_config(**base, buffer=900)
+    assert gcal.config()["buffer"] == 240
+    gcal.save_config(**base, buffer=-5)
+    assert gcal.config()["buffer"] == 0
+
+
+async def test_availability_uses_the_buffer(google):
+    await _connect()
+    set_setting("gcal_buffer", "60")
+    txt = await gcal.availability_text(now=datetime(2026, 10, 10, 8, 0, tzinfo=TZ))
+    assert txt.startswith("- Sa 10.10.: 13:00–20:00\n")                  # busy 10–12 Vienna, padded to 09–13
+
+
 def test_reply_prompt_has_now_and_availability():
     p = reply_prompt(role="seller", ad=None, partner="Max", messages=[("in", utcnow(), "Wann kann ich kommen?")],
                      rules="", examples=[], hint=None, availability="- Sa 10.10.: 09:00–12:00",

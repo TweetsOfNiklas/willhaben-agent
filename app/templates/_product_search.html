@@ -62,6 +62,12 @@
         <div class="actions">
           <a role="button" class="outline" href="{{ r.url }}" data-ad="{{ r.ad_id }}">{{ _("Open in viewer") }}</a>
           <a role="button" class="secondary outline" href="/deals/ad/{{ r.ad_id }}?q={{ (r.query or '')|urlencode }}">{{ _("Check price closely") }}</a>
+          {% if purchase_enabled() %}
+            <a role="button" class="outline" data-buy="{{ r.ad_id }}" href="/purchases/new/{{ r.ad_id }}?search={{ ps.id }}&amp;q={{ (r.query or '')|urlencode }}">🛒 {{ _("Buy") }}</a>
+          {% else %}
+            <button type="button" class="outline secondary" disabled>🛒 {{ _("Buy") }}</button>
+            <small class="muted"><a href="/settings#purchase">{{ _("Turn on purchases in Settings") }}</a></small>
+          {% endif %}
         </div>
         <div class="ps-wh"><a href="{{ r.url }}" target="_blank" rel="noopener"><small>{{ _("Open on willhaben") }} ↗</small></a></div>
       </div>
