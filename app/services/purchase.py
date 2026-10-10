@@ -63,6 +63,9 @@ SETTING_DISCOUNT = "purchase_discount_pct"
 SETTING_PREFER_PAYLIVERY = "purchase_prefer_paylivery"   # "1": PayLivery preselected in the buy dialog
 OVER = 1.5                          # asking price above 1.5 x the maximum: still started, with a note
 LOG_CAP = 50
+MAX_QUESTIONS = 8                   # the user's questions for the seller (buy dialog, last step)
+QUESTION_LEN = 300
+ANSWER_LEN = 500
 WH_CHAT = "https://www.willhaben.at/iad/myprofile/chat/{cid}"
 DEFAULT_RULES = (
     "- Nur kaufen, wenn der Preis passt. Keine Vorkasse an Dritte.\n"
@@ -360,13 +363,83 @@ def clean_state(raw: Any) -> dict[str, Any]:
     if str(pk.get("start") or "").strip():
         pickup = {"start": str(pk["start"]).strip()[:16], "minutes": int(pk.get("minutes") or 30),
                   "location": str(pk.get("location") or "").strip()[:200]}
+    answers = []
+    for a in raw.get("answers") if isinstance(raw.get("answers"), list) else []:
+        if isinstance(a, dict) and str(a.get("question") or "").strip() and str(a.get("answer") or "").strip():
+            answers.append({"question": str(a["question"]).strip()[:QUESTION_LEN],
+                            "answer": str(a["answer"]).strip()[:ANSWER_LEN]})
     return {"stage": raw.get("stage") if raw.get("stage") in STAGES else "negotiating",
             "agreed_price": num(raw.get("agreed_price")),
             "shipping_cost": num(raw.get("shipping_cost")),
             "total_price": num(raw.get("total_price")),
             "payment": payment if any(payment.values()) else None,
             "pickup": pickup,
+            "answers": answers[:MAX_QUESTIONS],
             "reason": str(raw.get("reason") or "").strip()[:300]}
+
+
+# ------------------------------------------------------------------ the user's questions for the seller
+def clean_questions(raw: str | list[str] | None) -> list[str]:
+    """The questions of the buy dialog: one per line (or a list), trimmed, without duplicates, at most MAX_QUESTIONS."""
+    items = raw.splitlines() if isinstance(raw, str) else list(raw or [])
+    out: list[str] = []
+    for q in items:
+        q = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", str(q or "")).strip()[:QUESTION_LEN]
+        if q and _norm(q) not in {_norm(x) for x in out}:
+            out.append(q)
+    return out[:MAX_QUESTIONS]
+
+
+def _q_key(s: str | None) -> str:
+    return re.sub(r"[^\w]+", " ", _norm(s)).strip()
+
+
+def merge_answers(row: Purchase, answers: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """Claude's answers (purchase_state.answers) onto the row's questions, matched by the question text. Returns the
+    questions that got a new or changed answer; questions Claude made up are ignored."""
+    qs = [dict(q) for q in (row.questions or [])]
+    changed = []
+    for a in answers or []:
+        key = _q_key(a.get("question"))
+        q = next((q for q in qs if _q_key(q.get("question")) == key), None)
+        if q is None or not key or q.get("answer") == a["answer"]:
+            continue
+        q["answer"] = a["answer"]
+        changed.append(q)
+    if changed:
+        row.questions = qs
+    return changed
+
+
+def questions_text(questions: list[dict[str, Any]] | None) -> str:
+    """Questions and answers as push text: one block per question, open ones marked."""
+    return "\n".join(t("Q: {question}\nA: {answer}", question=q.get("question"),
+                       answer=q.get("answer") or t("(no answer yet)")) for q in questions or [])
+
+
+async def notify_agreement(row: Purchase) -> None:
+    """The agreement push with the answers to the user's questions, once per purchase (the first agreement or pickup
+    appointment). Without questions there is nothing to send: the mode's own push says what follows."""
+    if not row.questions or row.questions_sent_at is not None:
+        return
+    row = _change(row.id, lambda r: setattr(r, "questions_sent_at", utcnow()))
+    await _push(row, t("The seller agreed"), t("{title}, {price}", title=row.ad_title or row.ad_id, price=_price_line(row))
+                + "\n\n" + questions_text(row.questions))
+
+
+async def _apply_answers(row: Purchase, answers: list[dict[str, str]] | None) -> Purchase:
+    """Store new answers; an answer that comes after the agreement push is sent on by itself."""
+    changed: list[dict[str, str]] = []
+
+    def apply(r: Purchase) -> None:
+        changed.extend(merge_answers(r, answers))
+        if changed:
+            _line(r, t("Seller answered: {questions}", questions="; ".join(q["question"] for q in changed)[:200]))
+
+    row = _change(row.id, apply) or row
+    if changed and row.questions_sent_at is not None:
+        await _push(row, t("Answer from the seller"), questions_text(changed))
+    return row
 
 
 # ------------------------------------------------------------------ rows
@@ -460,8 +533,12 @@ def _spawn(coro: Coroutine[Any, Any, Any]) -> None:
 # ------------------------------------------------------------------ start
 def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: int | None = None,
           query: str | None = None, title: str | None = None, url: str | None = None,
-          image_url: str | None = None, price: float | None = None, pickup_window: str | None = None) -> int:
-    """Store a purchase order and start it in the background. Raises PurchaseError on a refusal."""
+          image_url: str | None = None, price: float | None = None, pickup_window: str | None = None,
+          questions: str | list[str] | None = None) -> int:
+    """Store a purchase order and start it in the background. Raises PurchaseError on a refusal.
+
+    `questions`: the user's questions for the seller (text, one per line, or a list). The agent asks them in the chat
+    and the answers go to the user with the agreement push (notify_agreement)."""
     if get_setting(SETTING_ENABLED) != "1":
         raise PurchaseError(t("Purchase orders are switched off. Turn them on in Settings."))
     ad_id = (ad_id or "").strip()
@@ -481,6 +558,7 @@ def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: i
                        max_price=max_price, mode=mode, status="new",   # None: asking price + shipping, set in _begin
                        search_id=search_id, query=query,
                        pickup_window=((pickup_window or "").strip()[:200] or None) if mode == "pickup" else None,
+                       questions=[{"question": q, "answer": ""} for q in clean_questions(questions)] or None,
                        log=[])
         _line(row, t("Purchase started ({mode})", mode=mode_label(mode)))
         db.add(row)
@@ -555,7 +633,8 @@ async def _begin_inner(pid: int) -> None:
                                     mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
                                     seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
                                     item_ceiling=item_ceiling(row), market=row.market,
-                                    fee=fee_rule() if row.mode == "paylivery" else None)
+                                    fee=fee_rule() if row.mode == "paylivery" else None,
+                                    questions=[q["question"] for q in row.questions or []])
     out = await get_backend("chat").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
     data = out.data or {}
     text = str(data.get("message") or "").strip()
@@ -568,7 +647,7 @@ async def _begin_inner(pid: int) -> None:
 
     try:
         cid = await chats._account().create_conversation(row.ad_id, text)
-    except Exception as e:  # noqa: BLE001 - nothing was sent, the order fails visibly
+    except Exception as e:  # noqa: BLE001 - no chat to follow, the order fails visibly
         return await _fail(pid, t("willhaben did not open the chat: {error}", error=e))
     with session() as db:
         conv = db.get(Conversation, cid) or Conversation(id=cid)
@@ -604,7 +683,7 @@ def rules_block(p: Purchase, conv: Conversation | None = None, availability: str
                           user_rules=get_setting(SETTING_RULES) or DEFAULT_RULES, note=p.note,
                           pickup_window=p.pickup_window, availability=availability, seller_name=seller,
                           shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p), market=p.market,
-                          fee=fee_rule() if p.mode == "paylivery" else None)
+                          fee=fee_rule() if p.mode == "paylivery" else None, questions=p.questions)
 
 
 def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
@@ -649,6 +728,8 @@ async def after_reply(p: Purchase, d: Draft, sent: bool) -> None:
     reason = (ps.get("reason") or "").strip()
     if d.intent == "scam_suspect" or stage == "needs_user":
         return await pause(row.id, reason or t("Claude asked for a decision"), push=True)
+    if ps.get("answers") and row.questions:
+        row = await _apply_answers(row, ps.get("answers"))
     if not sent:
         return
     if stage in ("unavailable", "declined"):
@@ -671,6 +752,7 @@ async def after_reply(p: Purchase, d: Draft, sent: bool) -> None:
         total = _total_now(row, ps, seller, price=price)
         row = _change(row.id, lambda r: (setattr(r, "agreed_price", price), setattr(r, "agreed_total", total),
                                          _move(r, "agreed", reason)))
+        await notify_agreement(row)
         if row.mode == "paylivery":
             await _paylivery_next(row, prev)
         elif row.mode == "direct":
@@ -755,6 +837,7 @@ def _seller_text(conversation_id: str | None) -> str:
 
 async def _meetup_agreed(row: Purchase, m: dict[str, Any], reason: str) -> None:
     row = _change(row.id, lambda r: (setattr(r, "pickup", m), _move(r, "meetup", reason)))
+    await notify_agreement(row)
     when = meetups.format_when(m)
     where = m.get("location") or "-"
     await _push(row, t("Pickup appointment"),
@@ -815,6 +898,7 @@ def card_for(row: Purchase, log_limit: int | None = 8) -> dict[str, Any]:
         "target": target_price(row), "max_price": row.max_price, "agreed": row.agreed_price,
         "payment": ({**payment, "iban_group": group_iban(payment.get("iban"))} if payment else None),
         "pickup": row.pickup, "pickup_window": row.pickup_window, "note": row.note,
+        "questions": [dict(q) for q in row.questions or []],
         "shipping_cost": ship_cost, "shipping_source": ship_source,
         "shipping_label": shipping_label(ship_source), "agreed_total": row.agreed_total,
         "fee": costs["fee"] if costs is not None else 0.0, "total": total,
@@ -944,6 +1028,7 @@ async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, An
             row = _change(row.id, lambda r: (setattr(r, "agreed_price", amount),
                                              setattr(r, "agreed_total", costs_of(r, amount)["total"] if amount else r.agreed_total),
                                              _move(r, "pay_now", t("The seller accepted the PayLivery offer"))))
+            await notify_agreement(row)
             await _push_paylivery_pay(row)
     elif stage == "offer_declined":
         if row.status == "agreed":

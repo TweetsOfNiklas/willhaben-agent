@@ -159,6 +159,11 @@ unless the order says so). Planned flow (`app/services/purchase.py`):
    `direct`: after agreement the agent sends the own address and asks for the bank details; the user transfers the
    money and marks the order paid.
 5. The order shows as a card in the chat and in a list of purchase orders.
+6. **Questions** (optional, buy dialog step 3, one per line, at most 8): the opener asks them, the rules block lists them as
+   answered/open, Claude copies the seller's answers into `purchase_state.answers`, and the code merges them onto
+   `Purchase.questions` (only the user's own questions). The first agreement (`agreed`, a pickup appointment or an
+   accepted PayLivery offer) pushes "Kaufzusage" with all questions and answers once (`questions_sent_at`); a later
+   answer comes as its own push.
 
 **Shipping and maximum price.** The maximum price includes shipping. The buyer's delivery price of a PayLivery ad is read
 from `advertDetails.p2ppOptions.deliveryOptions[].price` (the cheapest option; numbers or German text such as "4,90";
