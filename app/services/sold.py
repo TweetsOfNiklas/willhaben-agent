@@ -75,6 +75,7 @@ class Other:
     last_in: str | None          # the buyer's latest message
     informed: bool               # a sold/reserved notice was already sent in this chat
     draft: Draft | None          # open notice draft, if any
+    sending: Draft | None = None # notice queued / being sent right now
 
 
 def others(ad_id: str, buyer: str | None) -> list[Other]:
@@ -91,7 +92,8 @@ def others(ad_id: str, buyer: str | None) -> list[Other]:
                                    .order_by(col(Draft.created_at).desc())))
             out.append(Other(conv=conv, last_in=msgs[0].text if msgs else conv.last_message_text,
                              informed=any(d.status == "sent" for d in notices),
-                             draft=next((d for d in notices if d.status == "draft"), None)))
+                             draft=next((d for d in notices if d.status == "draft"), None),
+                             sending=next((d for d in notices if d.status == "sending"), None)))
     return out
 
 
@@ -150,21 +152,18 @@ async def prepare_notices(ad_id: str, kind: str, conversation_ids: list[str], *,
     return made, errors
 
 
-async def send_notices(ad_id: str, items: list[tuple[int, str]]) -> tuple[int, list[str]]:
-    """Send the chosen notice drafts through the normal send path (chats.send_draft), one after another."""
-    convs = {c.id: c for c in seller_conversations(ad_id)}
-    sent, errors = 0, []
+def send_notices(ad_id: str, items: list[tuple[int, str]]) -> int:
+    """Queue the chosen notice drafts on the normal send path (chats.enqueue_send): one background job per chat,
+    sent one after another; a failure goes back to that draft with its reason. Returns how many were queued."""
+    convs = {c.id for c in seller_conversations(ad_id)}
+    queued = 0
     for draft_id, text in items:
         with session() as db:
             d = db.get(Draft, draft_id)
         if d is None or d.status != "draft" or d.conversation_id not in convs or d.intent not in NOTICE_INTENTS.values():
             continue
-        try:
-            await chats.send_draft(draft_id, text)
-            sent += 1
-        except Exception as e:  # noqa: BLE001 - report per chat, keep going
-            errors.append(f"{convs[d.conversation_id].partner_name or d.conversation_id}: {e}")
-    return sent, errors
+        queued += chats.enqueue_send(draft_id, text)
+    return queued
 
 
 def discard_notices(ad_id: str, draft_ids: list[int]) -> int:

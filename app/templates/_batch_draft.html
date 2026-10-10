@@ -3,7 +3,8 @@
 {% set st = d.price_stats or {} %}{% set match = (d.geizhals or {}).get('match') or {} %}{% set plan = d.wh_plan or {} %}
 {% set tone = 'ok' if d.status == 'published' else '' if d.status == 'discarded' else 'bad' if d.error else 'brand' %}
 {% set edge = 'border-l-success' if d.status == 'published' else 'border-l-base-300' if d.status == 'discarded' else 'border-l-primary' %}
-<article class="bdraft grid grid-cols-1 gap-3.5 rounded-box border border-base-300 border-l-[3px] bg-base-100 px-4 py-3.5 sm:grid-cols-[170px_minmax(0,1fr)] {{ edge }}{{ ' opacity-65' if d.status == 'discarded' else '' }}" id="draft-{{ d.id }}" data-dirty-scope>
+<article class="bdraft grid grid-cols-1 gap-3.5 rounded-box border border-base-300 border-l-[3px] bg-base-100 px-4 py-3.5 sm:grid-cols-[170px_minmax(0,1fr)] {{ edge }}{{ ' opacity-65' if d.status == 'discarded' else '' }}" id="draft-{{ d.id }}" data-dirty-scope
+         {% if d.publishing %}data-pending-key="addraft:{{ d.id }}" data-refresh="/ad-drafts/{{ d.id }}/card"{% endif %}>
   <div class="flex min-w-0 flex-col gap-1">
     {% if d.image_paths %}<a href="/ad-drafts/{{ d.id }}/image/0" target="_blank" class="block">{{ ui.thumb('/ad-drafts/' ~ d.id ~ '/image/0', 'aspect-[170/126] w-full', 'rounded-lg') }}</a>
     <div class="grid grid-cols-3 gap-1">{% for p in d.image_paths[1:4] %}<a href="/ad-drafts/{{ d.id }}/image/{{ loop.index }}" target="_blank" class="block">{{ ui.thumb('/ad-drafts/' ~ d.id ~ '/image/' ~ loop.index, 'aspect-square w-full', 'rounded-md') }}</a>{% endfor %}</div>
@@ -14,6 +15,10 @@
     {% if d.error %}<small class="text-error">{{ d.error }}</small>{% endif %}
     {% if d.status == 'discarded' %}
       <div class="flex flex-wrap items-center gap-2.5"><span class="min-w-0 truncate text-muted">{{ d.title or _('Untitled') }}</span><form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" class="m-0"><input type="hidden" name="status" value="draft"><button class="btn btn-xs">{{ _("Restore") }}</button></form></div>
+    {% elif d.publishing %}
+      {# publishing runs as a background job: this card swaps itself in when it is done #}
+      <div class="font-semibold break-words">{{ d.title }}</div>
+      <div>{{ ui.pending('addraft:' ~ d.id, _("Publishing on willhaben…"), _("Queued: publish on willhaben")) }}</div>
     {% elif d.status == 'published' %}
       <div class="font-semibold break-words">{{ d.title }}</div>
       <div class="flex flex-wrap items-center gap-2">{% if d.wh_ad_id %}<a href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" rel="noopener" class="btn btn-sm">{{ _("View on willhaben") }} ↗</a>{% endif %}<form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" class="m-0"><input type="hidden" name="status" value="draft"><button class="btn btn-ghost btn-sm">{{ _("Not published after all") }}</button></form></div>

@@ -31,10 +31,32 @@ def load(name: str):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+def wait_jobs(timeout: float = 5.0) -> None:
+    """TestClient runs the app's event loop in another thread: wait there until the background jobs are done."""
+    import time
+
+    from app.services import jobs
+    end = time.monotonic() + timeout
+    while jobs.busy() and time.monotonic() < end:
+        time.sleep(0.02)
+    assert not jobs.busy(), "background jobs still running"
+
+
+async def finish_jobs() -> None:
+    """In an async test: run the queued background jobs to the end."""
+    import asyncio
+
+    from app.services import jobs
+    while jobs._active:
+        await asyncio.gather(*(j.task for j in list(jobs._active)))
+
+
 @pytest.fixture(autouse=True)
 def fresh_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     dbmod.set_engine(engine)
     dbmod.init_db()
+    from app.services import jobs
+    jobs.reset()                # background jobs are per event loop
     yield
     dbmod.set_engine(None)

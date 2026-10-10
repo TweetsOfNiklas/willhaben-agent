@@ -9,6 +9,7 @@ from app.services import chats, sold
 from app.willhaben import sales
 from app.willhaben.account import parse_my_adverts
 from app.willhaben.session import ApiResponse, NotLoggedIn
+from tests.conftest import finish_jobs, wait_jobs
 
 AD = "1000000001"
 
@@ -202,8 +203,10 @@ async def test_notices_for_other_buyers_only_after_send(ad_with_chats):
         open_ = list(db.exec(select(Draft).where(Draft.conversation_id == "c-2", Draft.status == "draft")))
     assert len(open_) == 1
 
-    sent, errors = await sold.send_notices(AD, [(open_[0].id, "Leider schon verkauft, sorry!")])
-    assert (sent, errors) == (1, []) and account.sent == [("c-2", "Leider schon verkauft, sorry!")]
+    assert sold.send_notices(AD, [(open_[0].id, "Leider schon verkauft, sorry!")]) == 1
+    assert sold.others(AD, "c-buyer")[0].sending is not None                    # queued: shown as "sending"
+    await finish_jobs()
+    assert account.sent == [("c-2", "Leider schon verkauft, sorry!")]
     others = {o.conv.id: o for o in sold.others(AD, "c-buyer")}
     assert others["c-2"].informed and others["c-3"].draft is not None and not others["c-3"].informed
 
@@ -220,7 +223,7 @@ async def test_send_notices_ignores_foreign_drafts(ad_with_chats):
         db.add(foreign)
         db.commit()
         ids = [normal.id, foreign.id]
-    assert await sold.send_notices(AD, [(i, "x") for i in ids]) == (0, [])
+    assert sold.send_notices(AD, [(i, "x") for i in ids]) == 0
     assert not account.sent
 
 
@@ -285,7 +288,10 @@ def test_web_flow(ad_with_chats, monkeypatch):
         drafts = {o.conv.id: o.draft.id for o in sold.others(AD, "c-buyer")}
         r = c.post(f"/sold/{AD}/notices/send", data={"kind": "sold", "buyer": "c-buyer", "action": "send",
                                                       "send": [str(drafts["c-2"])], f"text_{drafts['c-2']}": "Schon weg, sorry."})
-        assert "1 messages sent" in r.text and ad_with_chats.sent == [("c-2", "Schon weg, sorry.")]
+        assert "1 messages queued" in r.text
+        wait_jobs()
+        assert ad_with_chats.sent == [("c-2", "Schon weg, sorry.")]
+        assert "informed" in c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
 
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "auto_off": "1"})
         assert "Saved" in r.text

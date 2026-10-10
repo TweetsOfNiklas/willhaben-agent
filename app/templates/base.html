@@ -96,6 +96,15 @@
     {{ ui.ring(pct / 100, ring_tone) }}<span class="absolute inset-0 grid place-items-center text-[9px] font-bold text-base-content">{{ used }}</span>
   </a>
 
+  {# background jobs (app/services/jobs.py): what runs, what is queued, the last results – opens the jobs popover #}
+  <button type="button" id="bg-jobs" x-show="$store.jobs.visible" x-cloak @click="toggle('jobs')" title="{{ _('Background jobs') }}"
+          class="relative flex h-10 w-full shrink-0 items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-muted hover:bg-hover hover:text-base-content"
+          :class="$store.jobs.active.length && 'text-primary'">
+    <span x-show="$store.jobs.active.length" class="loading loading-spinner loading-xs"></span>
+    <span x-show="!$store.jobs.active.length && !$store.jobs.problems">{{ ui.icon('check', 16) }}</span>
+    <span x-show="!$store.jobs.active.length && $store.jobs.problems" class="text-warning">{{ ui.icon('alert', 16) }}</span>
+    <span class="hidden min-w-0 flex-1 truncate text-left rail-x:inline" x-text="$store.jobs.summary()"></span>
+  </button>
   <button type="button" @click="rail = !rail" title="{{ _('Expand / collapse sidebar') }}"
           class="flex h-10 w-full shrink-0 items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-muted hover:bg-hover hover:text-base-content">
     <span class="hidden rail-x:inline">{{ ui.icon('collapse', 16) }}</span><span class="rail-x:hidden">{{ ui.icon('expand', 16) }}</span>
@@ -249,6 +258,37 @@
   </div>
 </div>
 
+{# ---- background jobs: running (step, progress), queued, finished in the last 15 minutes ---- #}
+<div id="jobs-pop" x-cloak x-show="layer === 'jobs'" class="fixed inset-0 z-[90]" @click.self="close()">
+  <div class="{{ layer_box }} flex max-h-[calc(100vh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
+    <div class="flex items-center gap-2 border-b border-base-300 px-3.5 py-3">
+      <span class="font-semibold">{{ _("Background jobs") }}</span>
+      <small class="text-muted" x-text="$store.jobs.summary()"></small>
+      <span class="flex-1"></span>
+      <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
+    </div>
+    <div class="overflow-auto">
+      <template x-for="j in $store.jobs.active.concat($store.jobs.recent)" :key="j.id">
+        <div class="flex flex-col gap-1 border-b border-base-300 px-3.5 py-2.5">
+          <div class="flex min-w-0 items-center gap-2">
+            <span x-show="j.status === 'running'" class="loading loading-spinner loading-xs text-primary"></span>
+            <span x-show="j.status === 'queued'" class="text-muted">{{ ui.icon('clock', 14) }}</span>
+            <span x-show="j.status === 'done' && !j.problems" class="text-success">{{ ui.icon('check', 14) }}</span>
+            <span x-show="j.status === 'done' && j.problems" class="text-warning">{{ ui.icon('alert', 14) }}</span>
+            <span x-show="j.status === 'failed'" class="text-error">{{ ui.icon('x', 14) }}</span>
+            <span class="min-w-0 flex-1 truncate font-medium" x-text="j.label"></span>
+          </div>
+          <div class="text-[12.5px] text-muted" x-text="$store.jobs.line(j)"></div>
+          <div x-show="j.status === 'running' && j.total" class="h-1 overflow-hidden rounded-sm bg-base-300">
+            <span class="block h-full bg-primary" :style="'width:' + Math.round(100 * j.done / (j.total || 1)) + '%'"></span></div>
+        </div>
+      </template>
+      <p x-show="!$store.jobs.active.length && !$store.jobs.recent.length" class="px-3.5 py-4.5 text-center text-muted">{{ _("Nothing running in the background") }}</p>
+    </div>
+    <div class="border-t border-base-300 px-3.5 py-2 text-xs text-muted">{{ _("You can leave the page: the jobs run on the server. Requests to willhaben still go out one by one with a pause.") }}</div>
+  </div>
+</div>
+
 {# ---- command palette (Ctrl K, ⌘K, "/"): nav links and settings sections, no server round-trip ---- #}
 <div id="cmdk" x-cloak x-show="layer === 'cmdk'" class="fixed inset-0 z-[95] flex items-start justify-center bg-black/50 pt-[12vh]" @click.self="close()">
   <div class="w-[min(560px,calc(100%-32px))] overflow-hidden rounded-[14px] border border-base-300 bg-base-100 shadow-[0_24px_80px_rgba(0,0,0,.35)]">
@@ -285,6 +325,16 @@
 {% for id, label in [('willhaben', _("willhaben account")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
 {% endfor %}</template>
 
+{# ---- phone: the jobs button floats above the tab bar while something runs or just finished ---- #}
+<div x-show="$store.jobs.visible" x-cloak class="toast toast-end toast-bottom z-30 max-md:bottom-[72px] md:hidden">
+  <button type="button" @click="toggle('jobs')" aria-label="{{ _('Background jobs') }}" class="btn btn-sm shadow-lg" :class="$store.jobs.active.length && 'text-primary'">
+    <span x-show="$store.jobs.active.length" class="loading loading-spinner loading-xs"></span>
+    <span x-show="!$store.jobs.active.length && !$store.jobs.problems">{{ ui.icon('check', 14) }}</span>
+    <span x-show="!$store.jobs.active.length && $store.jobs.problems" class="text-warning">{{ ui.icon('alert', 14) }}</span>
+    <span x-text="$store.jobs.summary()"></span>
+  </button>
+</div>
+
 {# ---- phone tab bar ---- #}
 <nav aria-label="{{ _('Navigation') }}" class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-base-300 bg-base-100 px-1 pt-1.5 pb-[calc(6px+env(safe-area-inset-bottom))] md:hidden">
   {% for href, icon, label, count in [('/', 'home', _("Home"), 0), ('/hits', 'target', _("Hits"), counts.get('hits', 0)), ('/chats', 'chat', _("Chats"), counts.get('chats', 0)), ('/myads', 'tag', _("My ads"), 0)] %}
@@ -307,8 +357,63 @@
 {% include "_buy_panel.html" %}
 {% include "_remote_overlay.html" %}
 {% endif %}
+<script type="application/json" id="bg-jobs-data">{{ bg_jobs()|tojson }}</script>
 <script>
 document.addEventListener('alpine:init', () => {
+  // Background jobs (GET /jobs). Polls only while something runs or the page shows elements waiting for a job.
+  // No page reloads: an element waiting for a job carries data-pending-key ("ad:123", "draft:5", "addraft:7") and,
+  // inside, ui.pending() (spinner while its job works on it, clock while queued). Once its key is no longer pending
+  // the element is replaced by its fresh copy (same id) from data-refresh="url" or, by default, from this page fetched
+  // in the background; gone from the fresh copy = removed (a deleted ad). data-refresh-on-lane="ads": refreshed
+  // whenever a job of that lane finished. data-refresh-also="id …": more elements taken along.
+  Alpine.store('jobs', {
+    active: [], recent: [], seen: null, timer: null,
+    T: {running: {{ _("{n} running")|tojson }}, queued: {{ _("{n} queued")|tojson }}, idle: {{ _("Background")|tojson }},
+        waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }}},
+    init() {
+      try { this.apply(JSON.parse(document.getElementById('bg-jobs-data').textContent)); } catch (e) {}
+      if (document.querySelector('[data-pending-key]')) this.poll();       // markers on the page: their state now
+      // anything sent through htmx may have queued a job (or finished one already): ask once
+      document.addEventListener('htmx:afterRequest', e => { if ((e.detail.requestConfig || {}).verb !== 'get') this.poll(); });
+    },
+    get visible() { return this.active.length > 0 || this.recent.length > 0; },
+    get problems() { return this.recent.some(j => j.status === 'failed' || j.problems); },
+    isWorking(key) { return this.active.some(j => j.status === 'running' && j.current === key); },
+    summary() {
+      const run = this.active.filter(j => j.status === 'running').length, q = this.active.length - run;
+      if (!this.active.length) return this.T.idle;
+      return this.T.running.replace('{n}', run) + (q ? ' · ' + this.T.queued.replace('{n}', q) : '');
+    },
+    line(j) {
+      if (j.status === 'running') return (j.step || this.T.starting) + (j.total ? ' · ' + j.done + '/' + j.total : '');
+      if (j.status === 'queued') return this.T.waiting;
+      const at = j.finished_at ? new Date(j.finished_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + ' · ' : '';
+      return at + (j.result || this.T[j.status] || '');
+    },
+    poll() {
+      clearTimeout(this.timer);
+      fetch('/jobs', {headers: {accept: 'application/json'}}).then(r => r.ok ? r.json() : null)
+        .then(d => d && this.apply(d)).catch(() => { this.timer = setTimeout(() => this.poll(), 10000); });
+    },
+    apply(data) {
+      this.active = data.active || []; this.recent = data.recent || [];
+      const todo = new Set();
+      if (this.seen === null) this.seen = new Set(this.recent.map(j => j.id));     // known at load: no refresh
+      const fresh = this.recent.filter(j => !this.seen.has(j.id));                 // finished since: even a quick one
+      fresh.forEach(j => this.seen.add(j.id));
+      document.querySelectorAll('[data-refresh-on-lane]').forEach(el => {
+        if (fresh.some(j => j.lane === el.dataset.refreshOnLane)) todo.add(el);
+      });
+      if (data.pending) document.querySelectorAll('[data-pending-key]').forEach(el => {
+        if (!data.pending.includes(el.dataset.pendingKey)) todo.add(el);
+      });
+      if (todo.size) refreshInPlace([...todo]);
+      clearTimeout(this.timer);
+      if (this.active.length || (data.pending && data.pending.length && document.querySelector('[data-pending-key]')))
+        this.timer = setTimeout(() => this.poll(), 3000);
+    },
+  });
+
   Alpine.data('shell', () => ({
     layer: null, q: '', sel: 0, items: [],
     rail: document.documentElement.dataset.rail === 'expanded',
@@ -376,6 +481,42 @@ document.addEventListener('alpine:init', () => {
   }));
 
 });
+
+// Replace elements by their fresh copy (same id) from the page fetched in the background (one request per URL);
+// gone there = removed here. An element you are typing in or have edited waits until you leave it.
+function refreshInPlace(els) {
+  const edited = el => {
+    const a = document.activeElement;
+    if (a && el.contains(a) && a.matches('input, textarea, select')) return true;
+    return [...el.querySelectorAll('input, textarea, select')].some(f =>
+      f.type === 'checkbox' || f.type === 'radio' ? f.checked !== f.defaultChecked
+        : f.tagName === 'SELECT' ? [...f.options].some(o => o.selected !== o.defaultSelected) : f.value !== f.defaultValue);
+  };
+  const pageUrl = () => { const q = new URLSearchParams(location.search); q.delete('msg'); return location.pathname + (q.toString() ? '?' + q : ''); };
+  const byUrl = new Map();
+  els.forEach(el => {
+    if (!el.id) return;
+    if (edited(el)) { el.addEventListener('focusout', () => setTimeout(() => refreshInPlace([el]), 300), {once: true}); return; }
+    const url = el.dataset.refresh || pageUrl();
+    byUrl.set(url, (byUrl.get(url) || []).concat([el.id], (el.dataset.refreshAlso || '').split(' ').filter(Boolean)));
+  });
+  byUrl.forEach(async (ids, url) => {
+    let doc;
+    try {
+      const r = await fetch(url, {headers: {accept: 'text/html'}});
+      if (!r.ok) return;
+      doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+    } catch (e) { return; }
+    new Set(ids).forEach(id => {
+      const cur = document.getElementById(id), fresh = doc.getElementById(id);
+      if (!cur || edited(cur)) return;      // taken along but being edited: stays as it is
+      if (!fresh) { cur.remove(); return; }
+      document.adoptNode(fresh);
+      cur.replaceWith(fresh);
+      if (window.htmx) htmx.process(fresh);
+    });
+  });
+}
 
 // split pages: the list column calls x-init="splitResize($el, 'key')"; drag its right edge, double-click resets
 function splitResize(list, key) {

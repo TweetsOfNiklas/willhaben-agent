@@ -132,3 +132,12 @@
 {% macro msg(text, kind='info') -%}
 <div role="status" class="mb-4 rounded-[10px] px-3.5 py-2.5 whitespace-pre-line {{ {'error': 'bg-bad-soft text-error', 'warn': 'bg-warn-soft text-warning'}.get(kind, 'bg-brand-soft') }}">{{ text }}</div>
 {%- endmacro %}
+
+{# An element waiting for a background job (its container carries data-pending-key=key, see base.html): a spinner
+   with running_text while its job works on it, a clock with queued_text while it waits in the queue. #}
+{% macro pending(key, running_text, queued_text, cls='') -%}
+<span class="inline-flex items-center gap-1.5 text-[12.5px] {{ cls }}" x-data="{ k: {{ key|tojson|forceescape }} }">
+  <span x-show="$store.jobs.isWorking(k)" x-cloak class="inline-flex items-center gap-1.5 text-primary"><span class="loading loading-spinner loading-xs"></span>{{ running_text }}</span>
+  <span x-show="!$store.jobs.isWorking(k)" class="inline-flex items-center gap-1.5 text-muted">{{ icon('clock', 13) }}{{ queued_text }}</span>
+</span>
+{%- endmacro %}

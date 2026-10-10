@@ -68,10 +68,11 @@
           <tbody>
           {% for o in others %}
           <tr>
-            <td><label class="flex items-center gap-2"><input type="checkbox" name="conv" value="{{ o.conv.id }}" class="checkbox checkbox-primary checkbox-sm" {% if buyer and not o.informed and not o.draft %}checked{% endif %}>
+            <td><label class="flex items-center gap-2"><input type="checkbox" name="conv" value="{{ o.conv.id }}" class="checkbox checkbox-primary checkbox-sm" {% if buyer and not o.informed and not o.draft and not o.sending %}checked{% endif %}>
               <a class="link link-primary no-underline" href="/chats/{{ o.conv.id }}">{{ o.conv.partner_name or _('unknown') }}</a></label></td>
             <td class="max-w-[260px] break-words text-xs text-muted">{{ (o.last_in or '')[:120] }}</td>
-            <td>{% if o.informed %}{{ ui.pill(_("informed"), 'ok', dot=false) }}{% elif o.draft %}{{ ui.pill(_("draft"), '', dot=false) }}{% endif %}</td>
+            {# a notice on its way: spinner / clock; the cell swaps itself when it is sent #}
+            <td id="notice-{{ o.conv.id }}" {% if o.sending %}data-pending-key="draft:{{ o.sending.id }}"{% endif %}>{% if o.sending %}{{ ui.pending('draft:' ~ o.sending.id, _("Sending…"), _("Queued: send")) }}{% elif o.informed %}{{ ui.pill(_("informed"), 'ok', dot=false) }}{% elif o.draft %}{{ ui.pill(_("draft"), '', dot=false) }}{% endif %}</td>
           </tr>
           {% endfor %}
           </tbody>
@@ -88,7 +89,9 @@
     {% endif %}
 
     {% if drafts %}
-    <form method="post" action="/sold/{{ ad_id }}/notices/send" class="flex flex-col gap-3">
+    {# sent in the background: only this step is swapped, the messages go out one after another #}
+    <form method="post" action="/sold/{{ ad_id }}/notices/send" class="flex flex-col gap-3" hx-boost="true"
+          hx-target="#step2" hx-select="#step2" hx-swap="outerHTML" hx-push-url="false">
       {{ hidden }}
       {% for o in drafts %}
       <div class="flex flex-col gap-2">

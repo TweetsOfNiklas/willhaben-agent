@@ -464,7 +464,7 @@ async def set_delivery(s: BrowserSession, ad: dict[str, Any], shipping: dict[str
 
 async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str, bytes, str]],
                   existing_ad_id: str | None = None, on_presaved=None, stop_after: str | None = None,
-                  shipping: dict[str, Any] | None = None, on_delivery=None) -> dict[str, Any]:
+                  shipping: dict[str, Any] | None = None, on_delivery=None, on_step=None) -> dict[str, Any]:
     """presave → photos → save → [delivery] → empty cart → checkout. Returns {ad_id, ad_uuid, url}.
 
     shipping {"handover": "pickup"|"shipping"|"both", "paylivery": bool, "size", "carrier"}: anything but pickup
@@ -472,8 +472,11 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
     stop_after ("presave" | "photos" | "save" | "delivery" | "cart") returns {"stopped": step, ...} with the response
     structures instead; everything before checkout stays a non-public willhaben draft.
     on_delivery() is called once set_delivery() went through (a retry switching to pickup must not leave
-    PayLivery options behind, see ad_creator)."""
+    PayLivery options behind, see ad_creator). on_step(step, i, n) is called before each stage for progress:
+    "presave", "photo" (i of n), "save", "delivery", "activate"."""
     trace: dict[str, Any] = {}
+    step = on_step or (lambda *_a: None)
+    step("presave", 0, 0)
     if existing_ad_id:          # a former attempt already created the willhaben draft: continue with it
         base = await get_own_ad(s, existing_ad_id)
         ad = {**ad, "adId": base.get("adId"), "adUuid": base.get("adUuid"), "contextLinkList": base.get("contextLinkList")}
@@ -494,7 +497,8 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
 
     if photos:
         refs = []
-        for name, data, mime in photos:
+        for i, (name, data, mime) in enumerate(photos, 1):
+            step("photo", i, len(photos))
             r = await s.upload("/webapi/iad-upload/atimage/temp", "file", name, data, mime)
             if not r.ok:
                 raise InsertError(f"Foto-Upload {name}: HTTP {r.status} {r.text[:150]}")
@@ -511,6 +515,7 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
     save = _link(ad, "selfLinkFinish", "selfLinkSave")
     if not save:
         raise InsertError("kein Speichern-Link")
+    step("save", 0, 0)
     saved = await s.api_json("POST", _webapi(save), ad)
     ad_id, ad_uuid = str(saved.get("adId") or ad["adId"]), saved.get("adUuid") or ad.get("adUuid")
     trace["save"] = _shape(saved)
@@ -521,6 +526,7 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
         # Like the bundle's versandoptionen page (module 41117: {...e.ad, treeAttributes: …Uebergabe}), edit the ad
         # willhaben holds after saving - not our composed template, which lacks the photo association and other
         # server-side state a full-ad PUT bap/edit could wipe. NEEDS LIVE VERIFICATION.
+        step("delivery", 0, 0)
         base = await get_own_ad(s, ad_id)
         if not isinstance(base, dict) or not base.get("adId"):
             raise InsertError("Versand: gespeicherte Anzeige nicht lesbar – abgebrochen, nichts veröffentlicht")
@@ -530,6 +536,7 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
     if stop_after == "delivery":
         return {"stopped": "delivery", "ad_id": ad_id, "trace": trace}
 
+    step("activate", 0, 0)
     cart = await s.api_json("POST", f"/webapi/iad/products/privates/atz/{ad_uuid}/carts", {"currency": "EUR"})
     cart_id = cart.get("shoppingCartId")
     items = await s.api_json("PUT", f"/webapi/iad/products/privates/carts/{cart_id}/items", {"productReferences": []})

@@ -112,7 +112,7 @@ class Draft(SQLModel, table=True):
     suggested_price: float | None = None
     model: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
-    status: str = "draft"  # draft | sent | discarded
+    status: str = "draft"  # draft | pending (auto reply "typing") | sending (queued send job) | sent | discarded
     sent_at: datetime | None = None
     error: str | None = None
     auto: bool | None = None          # created by the auto-reply job
@@ -128,7 +128,7 @@ class MyAd(SQLModel, table=True):
     heading: str | None = None
     url: str | None = None
     image_url: str | None = None
-    status: str = "unknown"  # active | expired | unknown
+    status: str = "unknown"  # active | expired | sold | reserved | deleted (gone from the account) | label | unknown
     published_at: datetime | None = None
     end_date: datetime | None = None
     auto_renew: bool = False
@@ -145,6 +145,7 @@ class MyAd(SQLModel, table=True):
     sale_status: str | None = None                 # sold | reserved, set by the sold workflow (/sold/{ad_id}); sticky locally
     sale_conversation_id: str | None = None        # the buyer's conversation
     sale_at: datetime | None = None
+    pending_action: str | None = None              # activate | deactivate | delete: queued as a background job
 
 
 class Shipment(SQLModel, table=True):
@@ -203,6 +204,7 @@ class AdDraft(SQLModel, table=True):
     status: str = "draft"  # draft | published | discarded
     error: str | None = None
     batch_id: int | None = None   # AdBatch this draft came from
+    publishing: bool | None = None     # queued/running as a background publish job
     created_at: datetime = Field(default_factory=utcnow)
 
 

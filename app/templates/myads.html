@@ -12,6 +12,11 @@
 {% macro chip_href(a_on, i_on, s_on) -%}
   /myads?{{ 'show_active=1&' if a_on and (i_on or s_on) else '' }}{{ 'show_inactive=1&' if i_on else '' }}{{ 'show_sold=1&' if s_on else '' }}{{ 'show_hidden=1' if show_hidden else '' }}
 {%- endmacro %}
+{# an ad waiting for its queued action (app/services/my_ads.py enqueue): spinner while it runs, clock while queued #}
+{% macro pending_note(a) -%}
+  {{ ui.pending('ad:' ~ a.ad_id, {'delete': _("Deleting…"), 'deactivate': _("Deactivating…"), 'activate': _("Activating…")}[a.pending_action],
+                {'delete': _("Queued: delete"), 'deactivate': _("Queued: deactivate"), 'activate': _("Queued: activate")}[a.pending_action]) }}
+{%- endmacro %}
 {% macro status_pill(a) -%}
   {%- if a.replaced_by %}{{ ui.pill(_("renewed")) }}
   {%- elif a.status == 'active' %}{{ ui.pill(_("active"), 'ok') }}
@@ -24,16 +29,18 @@
 <div x-data="myadsList" x-init="splitResize($el, 'myads')" class="flex min-w-0 flex-col border-base-300 md:border-r {{ 'max-md:hidden' if has_detail else '' }}">
   <div class="px-4 pt-5 pb-3 md:px-5 md:pt-[22px]">
     <div class="mb-3 flex items-center justify-between gap-2">
-      <h1 class="min-w-0 truncate text-xl">{{ _("My ads") }} <span class="text-[15px] font-normal text-muted">· {{ ads|length }}</span></h1>
+      <h1 class="min-w-0 truncate text-xl">{{ _("My ads") }} <span id="myads-count" class="text-[15px] font-normal text-muted">· {{ ads|length }}</span></h1>
       <div class="flex shrink-0 gap-1.5">
         <button class="btn btn-sm max-sm:btn-square" type="button" id="sel-toggle" @click="mode(!selecting)" title="{{ _('Select') }}" :class="selecting && 'btn-active'">{{ ui.icon('check', 14, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Select") }}</span></button>
-        <form method="post" action="/myads/check" x-data="{ busy: false }" @submit="busy = true">
+        {# runs as a background job: the jobs indicator shows it, the list refreshes itself when it is done #}
+        <form method="post" action="/myads/check" x-data="{ busy: false }" @submit="busy = true"
+              hx-post="/myads/check" hx-swap="none" @htmx:after-request="busy = false; $store.jobs.poll()">
           <button class="btn btn-sm max-sm:btn-square" title="{{ _('Update from willhaben') }}" :disabled="busy">
             <span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span><span x-show="!busy">{{ ui.icon('refresh', 14) }}</span><span class="max-sm:hidden">{{ _("Update") }}</span></button>
         </form>
       </div>
     </div>
-    <div class="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0">
+    <div id="myads-chips" class="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0">
       {{ ui.chip(chip_href(not show_active, show_inactive, show_sold), _("Active"), active_count, show_active) }}
       {{ ui.chip(chip_href(show_active, not show_inactive, show_sold), _("Deactivated"), inactive_count, show_inactive) }}
       {{ ui.chip(chip_href(show_active, show_inactive, not show_sold), _("Sold / reserved"), sold_count, show_sold) }}
@@ -41,34 +48,39 @@
   </div>
 
   {# bulk bar: only in selection mode #}
-  <form id="bulk" method="post" x-show="selecting" x-cloak @submit="confirmBulk($event)"
+  {# the buttons send in the background (htmx) and swap in the fresh list; the picked ads then wait for their job #}
+  <form id="bulk" method="post" x-show="selecting" x-cloak @submit="confirmBulk($event)" @htmx:confirm="confirmHx($event)"
+        @htmx:after-request="mode(false)" hx-target="#myads-rows" hx-select="#myads-rows" hx-swap="outerHTML"
+        hx-select-oob="#myads-chips,#myads-count,#myads-detail"
         class="mx-4 mb-2.5 flex flex-wrap md:mx-5 items-center gap-2 rounded-[10px] bg-brand-soft px-2.5 py-2">
     {% if show_active and (show_inactive or show_sold) %}<input type="hidden" name="show_active" value="1">{% endif %}{% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}{% if show_sold %}<input type="hidden" name="show_sold" value="1">{% endif %}{% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
     <label class="flex items-center gap-2"><input type="checkbox" id="select-all" class="checkbox checkbox-primary checkbox-sm" aria-label="{{ _('Select all') }}"
            :checked="picked.length && picked.length === total" :indeterminate="picked.length > 0 && picked.length < total" @change="all($event.target.checked)">
       <span class="font-semibold text-primary" id="sel-count" x-text="picked.length ? T.n.replace('{n}', picked.length) : T.none">{{ _("Select all") }}</span></label>
     <span class="flex-1"></span>
-    <button class="btn btn-xs" formaction="/myads/bulk/activate" data-act="activate" :disabled="!picked.length">{{ _("Activate") }}</button>
-    <button class="btn btn-xs" formaction="/myads/bulk/deactivate" data-act="deactivate" :disabled="!picked.length">{{ _("Deactivate") }}</button>
-    <button class="btn btn-xs btn-outline btn-error bg-base-100" formaction="/myads/bulk/delete" data-act="delete" :disabled="!picked.length">{{ _("Delete") }}</button>
+    <button class="btn btn-xs" formaction="/myads/bulk/activate" hx-post="/myads/bulk/activate" data-act="activate" :disabled="!picked.length">{{ _("Activate") }}</button>
+    <button class="btn btn-xs" formaction="/myads/bulk/deactivate" hx-post="/myads/bulk/deactivate" data-act="deactivate" :disabled="!picked.length">{{ _("Deactivate") }}</button>
+    <button class="btn btn-xs btn-outline btn-error bg-base-100" formaction="/myads/bulk/delete" hx-post="/myads/bulk/delete" data-act="delete" :disabled="!picked.length">{{ _("Delete") }}</button>
     <button type="button" class="btn btn-ghost btn-xs" id="sel-done" @click="mode(false)">{{ _("Done") }}</button>
   </form>
 
-  <div class="flex flex-col gap-0.5 px-2.5 pb-4">
+  {# refreshes itself (with the counts and the detail) whenever a job of the ads lane is done, e.g. the update #}
+  <div id="myads-rows" class="flex flex-col gap-0.5 px-2.5 pb-4" data-refresh-on-lane="ads" data-refresh-also="myads-chips myads-count myads-detail">
     {% for a in ads %}
     {% if loop.index0 in sections %}{{ ui.eyebrow(sections[loop.index0], 'px-2.5 pt-3 pb-1') }}{% endif %}
     {% set on = cur and cur.ad_id == a.ad_id %}
     <a href="/myads?ad={{ a.ad_id }}{{ keep }}" id="row-{{ a.ad_id }}" @click="rowClick($event)"
+       {% if a.pending_action %}data-pending-key="ad:{{ a.ad_id }}"{% endif %}
        class="grid w-full items-center gap-3 rounded-[10px] p-2.5 text-left text-base-content no-underline {{ 'bg-brand-soft' if on else 'hover:bg-hover' }}"
        :class="selecting ? 'grid-cols-[20px_52px_minmax(0,1fr)_auto]' : 'grid-cols-[52px_minmax(0,1fr)_auto]'">
-      {% if not a.replaced_by %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel checkbox checkbox-primary checkbox-sm"
+      {% if not a.replaced_by and not a.pending_action %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel checkbox checkbox-primary checkbox-sm"
              data-title="{{ a.heading or a.ad_id }}" x-show="selecting" x-cloak x-model="picked" @click.stop>
       {% else %}<span x-show="selecting" x-cloak></span>{% endif %}
       {{ ui.thumb(a.image_url) }}
       <span class="min-w-0"><span class="block truncate font-semibold">{{ a.heading or a.ad_id }}</span>
         <span class="mt-px block text-[12.5px] text-muted">{% if a.price_display is defined %}{{ a.price_display }} · {% endif %}<span class="{{ 'text-error' if a.status == 'expired' else 'text-warning' if a.expires_soon is defined and a.expires_soon else '' }}">{{ a.end_date|ago }}</span></span></span>
       <span class="flex flex-col items-end gap-1.5">
-        {{ status_pill(a) }}
+        {% if a.pending_action %}{{ pending_note(a) }}{% else %}{{ status_pill(a) }}{% endif %}
         <span class="flex gap-1">
           <span title="{{ _('Auto-renew') }}" class="grid size-[18px] place-items-center rounded-[5px] {{ 'bg-brand-soft text-primary' if a.auto_renew else 'bg-hover text-off' }}">{{ ui.icon('refresh', 12, 2.5) }}</span>
           <span title="{{ _('Automatic answers') }}" class="grid size-[18px] place-items-center rounded-[5px] {{ 'bg-ok-soft text-success' if a.auto_reply else 'bg-hover text-off' }}">{{ ui.icon('bot', 12, 2.5) }}</span>
@@ -83,7 +95,8 @@
 </div>
 
 {# ---- detail ---- #}
-<div class="flex min-w-0 max-w-[860px] flex-col gap-5 px-4 pt-5 pb-8 md:px-7 md:pt-[22px] {{ '' if has_detail else 'max-md:hidden' }}">
+<div id="myads-detail" class="flex min-w-0 max-w-[860px] flex-col gap-5 px-4 pt-5 pb-8 md:px-7 md:pt-[22px] {{ '' if has_detail else 'max-md:hidden' }}"
+     {% if cur and cur.pending_action %}data-pending-key="ad:{{ cur.ad_id }}"{% endif %}>
 {% if cur %}{% set a = cur %}
   <a href="/myads?{{ keep[1:] }}" class="btn btn-ghost btn-sm -ml-2 self-start md:hidden">{{ ui.icon('back', 16) }}{{ _("My ads") }}</a>
   <div class="flex items-start gap-4">
@@ -93,17 +106,22 @@
         {% if a.status == 'active' %}{{ ui.pill(_("active"), 'ok') }}{% elif a.status == 'expired' %}{{ ui.pill(_("expired"), 'bad') }}{% elif a.sale_status %}{{ ui.pill(_("sold") if a.sale_status == 'sold' else _("reserved"), 'warn') }}{% endif %}</div>
       <div class="mt-1 text-muted">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %} · <a class="link link-primary no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}</a></div>
       {% if a.last_error %}<div class="mt-1 text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
+      {% if a.pending_action %}<div class="mt-1.5">{{ pending_note(a) }}</div>{% endif %}
     </div>
   </div>
-  {# phone: two even columns; wider: one row with Delete on the right #}
-  <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+  {# phone: two even columns; wider: one row with Delete on the right. While an action waits for its job: none.
+     The willhaben actions send in the background and swap in the fresh detail and list (no reload). #}
+  {% if not a.pending_action %}
+  <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center" hx-target="#myads-detail" hx-select="#myads-detail" hx-swap="outerHTML"
+       hx-select-oob="#myads-rows,#myads-chips,#myads-count">
     <a class="btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a>
-    {% if a.status == 'active' %}<form method="post" action="/myads/{{ a.ad_id }}/deactivate" onsubmit='return confirm({{ _("Take this ad offline on willhaben? You can activate it again there.")|tojson }})'><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]">{{ _("Deactivate") }}</button></form>
-    {% elif a.status not in ('sold', 'reserved') %}<form method="post" action="/myads/bulk/activate" onsubmit='return confirm({{ _("Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.")|tojson }})'><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]">{{ _("Activate") }}</button></form>{% endif %}
+    {% if a.status == 'active' %}<form method="post" action="/myads/{{ a.ad_id }}/deactivate" hx-post="/myads/{{ a.ad_id }}/deactivate" hx-confirm="{{ _('Take this ad offline on willhaben? You can activate it again there.') }}"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]">{{ _("Deactivate") }}</button></form>
+    {% elif a.status not in ('sold', 'reserved') %}<form method="post" action="/myads/bulk/activate" hx-post="/myads/bulk/activate" hx-confirm="{{ _('Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.') }}"><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]">{{ _("Activate") }}</button></form>{% endif %}
     <a class="btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" href="/sold/{{ a.ad_id }}?kind=sold{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Mark sold…") }}</a>
     <a class="btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" href="/sold/{{ a.ad_id }}?kind=reserved{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Reserve…") }}</a>
-    <form method="post" action="/myads/{{ a.ad_id }}/delete" class="col-span-2 sm:ml-auto" onsubmit='return confirm({{ _("Delete this ad on willhaben for good? This cannot be undone.")|tojson }})'><button class="btn btn-ghost w-full text-error hover:bg-bad-soft">{{ _("Delete") }}</button></form>
+    <form method="post" action="/myads/{{ a.ad_id }}/delete" class="col-span-2 sm:ml-auto" hx-post="/myads/{{ a.ad_id }}/delete" hx-confirm="{{ _('Delete this ad on willhaben for good? This cannot be undone.') }}"><button class="btn btn-ghost w-full text-error hover:bg-bad-soft">{{ _("Delete") }}</button></form>
   </div>
+  {% endif %}
 
   <section class="rounded-box border border-base-300 bg-base-100">
     <div class="grid grid-cols-1 gap-4 border-b border-base-300 px-5 py-4 sm:grid-cols-2">
@@ -137,7 +155,8 @@
     </form>
   </section>
   <div class="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
-    <form method="post" action="/myads/{{ a.ad_id }}/hide"><input type="hidden" name="hidden" value="{{ '0' if a.hidden else '1' }}"><button class="link text-muted no-underline hover:text-base-content">{{ _("Show in list again") if a.hidden else _("Hide from this list") }}</button></form>
+    <form method="post" action="/myads/{{ a.ad_id }}/hide" hx-post="/myads/{{ a.ad_id }}/hide" hx-target="#myads-detail" hx-select="#myads-detail"
+          hx-swap="outerHTML" hx-select-oob="#myads-rows,#myads-chips,#myads-count"><input type="hidden" name="hidden" value="{{ '0' if a.hidden else '1' }}"><button class="link text-muted no-underline hover:text-base-content">{{ _("Show in list again") if a.hidden else _("Hide from this list") }}</button></form>
     {% if a.replaced_by %}<span>· {{ _("renewed as") }} <a class="link link-primary no-underline" href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></span>{% endif %}
   </div>
 {% else %}
@@ -160,6 +179,14 @@ document.addEventListener('alpine:init', () => Alpine.data('myadsList', () => ({
     e.preventDefault();
     const b = e.currentTarget.querySelector('input.sel');
     if (b) { b.checked = !b.checked; b.dispatchEvent(new Event('change', {bubbles: true})); }
+  },
+  // htmx sends the bulk buttons: one confirm with the picked titles, then the request
+  confirmHx(e) {
+    const btn = e.detail.elt;
+    if (!btn.dataset || !btn.dataset.act) return;
+    e.preventDefault();
+    const list = this.boxes().filter(b => this.picked.includes(b.value)).map(b => '• ' + b.dataset.title).join('\n');
+    if (confirm(this.T[btn.dataset.act] + '\n\n' + list)) e.detail.issueRequest(true);
   },
   confirmBulk(e) {
     const act = e.submitter && e.submitter.dataset.act;

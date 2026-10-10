@@ -127,3 +127,60 @@ def test_current_ad_follows_renewals():
         assert current_ad(db, "1000000010").ad_id == "1000000012"    # old chats get the newest settings
         assert current_ad(db, "1000000013").ad_id == "1000000013"
         assert current_ad(db, "404") is None
+
+
+def _page(total):
+    page = json.loads(json.dumps(NEXT))
+    page["props"]["pageProps"]["initialUserAdsList"]["totalNumberOfAdvertDetails"] = total
+    return page
+
+
+def test_list_knows_whether_it_is_complete():
+    assert parse_my_adverts(NEXT).complete
+    assert not parse_my_adverts(_page(60)).complete            # more ads than the page lists
+    assert not parse_my_adverts(_page(None)).complete          # unknown: never conclude "deleted"
+
+
+@pytest.mark.parametrize("total, expected", [(2, "deleted"), (60, "sold")])
+async def test_sold_ads_deleted_on_willhaben_leave_the_list(monkeypatch, total, expected):
+    """Sold ads stay in willhaben's account list until deleted there; the public page never shows them."""
+    monkeypatch.setattr(my_ads, "get_session", lambda: _FakeSession(_page(total)))
+    with session() as db:
+        db.add(MyAd(ad_id="9", heading="Verkauft und gelöscht", status="sold"))
+        db.add(MyAd(ad_id="8", heading="Verkauft (App)", status="active", sale_status="sold"))
+        db.add(MyAd(ad_id="7", heading="Alt", status="replaced", replaced_by="1000000001"))
+        db.commit()
+
+    async def no_public_check(ad_id, off_account=False):
+        raise AssertionError(f"{ad_id}: sold and renewed ads need no public lookup")
+
+    monkeypatch.setattr(my_ads, "check", no_public_check)
+    res = await my_ads.check_all()
+    with session() as db:
+        rows = {r.ad_id: r for r in db.exec(select(MyAd))}
+    assert rows["9"].status == expected and rows["7"].status == "replaced"
+    assert rows["8"].status == ("deleted" if expected == "deleted" else "active")
+    assert res["deleted"] == (2 if expected == "deleted" else 0)
+
+
+async def test_ad_missing_from_complete_list_and_public_page_is_deleted(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    monkeypatch.setattr(my_ads, "get_session", lambda: _FakeSession(NEXT))
+    with session() as db:
+        db.add(MyAd(ad_id="5", heading="Woanders gelöscht", status="active"))
+        db.commit()
+    looked_up = []
+
+    class Public:
+        async def get_detail(self, ad_id):
+            looked_up.append(ad_id)
+            return None
+
+    monkeypatch.setattr(my_ads, "get_public", lambda: Public())
+    assert (await my_ads.check_all())["deleted"] == 1
+    assert (await my_ads.check_all())["deleted"] == 0 and looked_up == ["5"]    # looked up once, then left alone
+    with TestClient(app) as c:
+        page = c.get("/myads?show_active=1&show_inactive=1&show_sold=1").text
+    assert "Woanders gelöscht" not in page and "Anzeige 1000000001" in page

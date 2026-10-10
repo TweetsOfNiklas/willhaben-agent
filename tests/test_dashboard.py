@@ -11,6 +11,7 @@ from app.llm.base import LLMResult
 from app.willhaben import public as public_mod
 from app.willhaben.public import PublicClient
 from tests.conftest import FIXTURES, load
+from tests.conftest import wait_jobs
 
 
 class FakeBackend:
@@ -95,12 +96,16 @@ def test_chat_draft_send_flow(client):
         conv = db.get(dbmod.Conversation, "c1")
     assert conv.ad_context["title"] == "Fahrradhose Gr xs"
 
-    # No browser session in tests: sending fails visibly and nothing is marked as sent.
+    # Sending is queued: the page comes back at once with the message marked "sending" ...
     r = client.post(f"/drafts/{draft.id}/send", data={"text": "Hallo, 180 € passt."}, follow_redirects=False)
-    assert "Browser session is not running" in httpx.URL(r.headers["location"]).params["msg"]
+    assert r.status_code == 303 and r.headers["location"] == f"/chats/c1#draft-{draft.id}"
+    wait_jobs()
+    # ... no browser session in tests: it fails visibly, goes back to an open draft and nothing is marked as sent
     with dbmod.session() as db:
         d = db.get(dbmod.Draft, draft.id)
-        assert d.status == "draft" and d.text == "Hallo, 180 € passt." and d.error
+        assert d.status == "draft" and d.text == "Hallo, 180 € passt." and "Browser session is not running" in d.error
+    assert client.get("/jobs").json()["recent"][0]["status"] == "failed"
+    assert "Browser session is not running" in client.get("/chats/c1").text
 
     client.post(f"/drafts/{draft.id}/mark-sent", data={"text": "Hallo, 180 € passt."})
     msgs = client.get("/api/chats/c1").json()["messages"]

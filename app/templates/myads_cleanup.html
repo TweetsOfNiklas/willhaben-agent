@@ -13,9 +13,9 @@
         <tbody>
         {% for c in cands %}
         <tr>
-          <td><input type="checkbox" name="ids" value="{{ c.ad_id }}" class="sel checkbox checkbox-primary checkbox-sm" checked aria-label="{{ _('Select') }}"></td>
+          <td>{% if c.ad_id not in pending %}<input type="checkbox" name="ids" value="{{ c.ad_id }}" class="sel checkbox checkbox-primary checkbox-sm" checked aria-label="{{ _('Select') }}">{% endif %}</td>
           <td class="min-w-0 break-words"><a class="link link-primary" href="{{ c.url }}" target="_blank" rel="noopener">{{ c.heading }}</a></td>
-          <td>{{ ui.pill(c.status, '', dot=false) }}</td>
+          <td>{% if c.ad_id in pending %}<span class="text-[12.5px] text-muted">{{ ui.icon('clock', 13) }} {{ _("already queued") }}</span>{% else %}{{ ui.pill(c.status, '', dot=false) }}{% endif %}</td>
           <td class="break-words">{{ c.reasons|join(" · ") }}{% if not c.deletable %}<br><small class="text-xs text-muted">{{ _("willhaben offers no deleting – only hidden here") }}</small>{% endif %}</td>
         </tr>
         {% endfor %}
@@ -25,6 +25,7 @@
     <p class="text-xs text-muted">{{ _("Shift-click selects or clears every ad in between.") }}</p>
     <div class="flex flex-wrap items-center gap-2">
       <button class="btn btn-error">{{ _("Delete selected on willhaben") }}</button>
+      <small class="text-muted">{{ _("Runs in the background, one willhaben request after another – you can leave the page. Progress in the sidebar.") }}</small>
     </div>
     <p class="text-xs text-muted">{{ _("The app no longer answers buyers of a deleted ad automatically.") }}</p>
   </form>

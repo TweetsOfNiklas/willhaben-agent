@@ -10,6 +10,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from sqlmodel import select
+
 from app.config import get_settings
 from app.db import AdDraft, get_setting, session, utcnow
 from app.i18n import t
@@ -333,27 +335,69 @@ _publishing: set[int] = set()     # drafts with a publish in flight (double clic
 
 
 async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None = None,
-                            shipping: dict[str, Any] | None = None):
+                            shipping: dict[str, Any] | None = None, job: Any = None):
     """Publish the saved draft as free private ad: the chosen category option and field values from the form.
-    shipping: parse_shipping() result; None = pickup only (the live-verified path)."""
+    shipping: parse_shipping() result; None = pickup only (the live-verified path). job: jobs.Job for progress."""
     from app.willhaben import insert
 
     if draft_id in _publishing:
         raise insert.InsertError("Wird gerade veröffentlicht – bitte warten")
     _publishing.add(draft_id)
     try:
-        return await _publish_willhaben(draft_id, option, values, stop_after, shipping)
+        return await _publish_willhaben(draft_id, option, values, stop_after, shipping, job)
     finally:
         _publishing.discard(draft_id)
 
 
-async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None,
-                             shipping: dict[str, Any] | None):
+def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping: dict[str, Any] | None = None) -> bool:
+    """Check the form right away (errors land on the draft at once), then publish as a background job.
+
+    Returns False when nothing was queued (input error, already queued or published); the reason is in d.error.
+    """
+    from app.services import jobs
     from app.willhaben import insert
-    from app.willhaben.session import get_session
 
     with session() as db:
         d = db.get(AdDraft, draft_id)
+    if d.publishing:
+        return False
+    try:
+        _publish_inputs(d, option, values, shipping)
+    except insert.InsertError as e:
+        update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
+        return False
+    d = update_draft(draft_id, publishing=True, error=None)
+    n_photos = len(d.image_paths[:insert.MAX_PHOTOS])
+
+    async def run(job) -> str:
+        try:
+            await publish_willhaben(draft_id, option, values, shipping=shipping, job=job)
+        except Exception as e:
+            log.warning("publishing draft %s failed: %s", draft_id, e)
+            update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
+            raise
+        finally:
+            update_draft(draft_id, publishing=None)
+        return t("Published on willhaben")
+
+    jobs.submit("publish", t("Publish „{title}“", title=(d.title or f"#{draft_id}")[:60]), run,
+                total=n_photos + 5, current=f"addraft:{draft_id}")
+    return True
+
+
+def recover_publishing() -> None:
+    """After a restart the queue is gone. The willhaben draft id is remembered, so publishing again continues it."""
+    with session() as db:
+        for d in db.exec(select(AdDraft).where(AdDraft.publishing == True)):  # noqa: E712
+            d.publishing, d.error = None, t("Publishing interrupted by a restart – check on willhaben, then try again")
+            db.add(d)
+        db.commit()
+
+
+def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: dict[str, Any] | None):
+    """Everything that can be checked without willhaben: (chosen option, attrs, labels, shipping) or InsertError."""
+    from app.willhaben import insert
+
     if d.status == "published":
         raise insert.InsertError("Schon veröffentlicht")
     plan = d.wh_plan or {}
@@ -375,14 +419,38 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     if shipping.get("paylivery") and not shipping.get("size"):
         raise insert.InsertError("Bitte eine Paketgröße für PayLivery wählen")
     if shipping != plan.get("shipping") or plan.get("selected") != option:   # remembered for the form
-        update_draft(draft_id, wh_plan={**plan, "shipping": shipping, "selected": option})
+        update_draft(d.id, wh_plan={**plan, "shipping": shipping, "selected": option})
 
     if d.wh_ad_id and plan.get("delivery_set") and shipping["handover"] == "pickup":
         # A former attempt already set shipping/PayLivery options on this willhaben draft; saving it with pickup
         # would not clear them (a reset call is unverified), so the user changes the handover on willhaben.
         raise insert.InsertError("Versand wurde bei willhaben schon eingerichtet – Übergabe bitte direkt auf "
                                  "willhaben ändern oder wieder Versand wählen")
+    return chosen, attrs, labels, shipping
 
+
+async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None,
+                             shipping: dict[str, Any] | None, job: Any = None):
+    from app.willhaben import insert
+    from app.willhaben.session import get_session
+
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    chosen, attrs, labels, shipping = _publish_inputs(d, option, values, shipping)
+    with session() as db:
+        d = db.get(AdDraft, draft_id)             # wh_plan may just have been updated
+    done = [0]
+
+    def on_step(step: str, i: int = 0, n: int = 0) -> None:
+        if job is None:
+            return
+        done[0] += 1
+        text = {"form": t("Loading the willhaben form"), "presave": t("Creating the willhaben draft"),
+                "photo": t("Uploading photo {i}/{n}", i=i, n=n), "save": t("Saving the ad"),
+                "delivery": t("Setting up shipping"), "activate": t("Activating the free ad")}[step]
+        job.progress(min(done[0], job.total), text, f"addraft:{draft_id}")
+
+    on_step("form")
     sess = get_session()
     form = await insert.load_form(sess)          # fresh template (contact, location, context links)
     insert.remember_form(form)
@@ -406,7 +474,7 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     ship = shipping if shipping["handover"] != "pickup" else None
     try:
         res = await insert.publish(sess, ad, photos, existing_ad_id=d.wh_ad_id, on_presaved=remember,
-                                   stop_after=stop_after, shipping=ship, on_delivery=delivery_set)
+                                   stop_after=stop_after, shipping=ship, on_delivery=delivery_set, on_step=on_step)
     except RuntimeError as e:
         # 409 on the reused willhaben draft: it was deleted (or finished) meanwhile -> start one fresh insertion
         if not d.wh_ad_id or "HTTP 409" not in str(e):
@@ -422,7 +490,7 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
         log.info("willhaben draft %s of ad draft %s is gone (%s); publishing as a new insertion", d.wh_ad_id, draft_id, e)
         update_draft(draft_id, wh_ad_id=None)
         res = await insert.publish(sess, ad, photos, existing_ad_id=None, on_presaved=remember, stop_after=stop_after,
-                                   shipping=ship, on_delivery=delivery_set)
+                                   shipping=ship, on_delivery=delivery_set, on_step=on_step)
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)

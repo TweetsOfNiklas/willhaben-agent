@@ -2,15 +2,15 @@
 {% import "_ui.html" as ui %}
 {% block content %}
 {% set plan = d.wh_plan or {} %}
-<div class="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+<div id="draft-head" class="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
   <div class="min-w-0">
     <div class="flex flex-wrap items-center gap-x-2 text-[13px] text-muted"><a href="/new-ad" class="text-muted no-underline hover:text-base-content">← {{ _("New ad") }}</a>{% if d.batch_id %}<a href="/new-ad/batch/{{ d.batch_id }}" class="text-muted no-underline hover:text-base-content">· ← {{ _("Batch #{id}", id=d.batch_id) }}</a>{% endif %}</div>
     <h1 class="mt-1.5 flex flex-wrap items-center gap-2">{{ _("Ad draft #{id}", id=d.id) }} {{ ui.pill(_("published") if d.status == 'published' else _("draft"), 'ok' if d.status == 'published' else '') }}</h1>
     <p class="mt-1 text-muted">{{ _("Written by Claude from your notes and {n} photos", n=d.image_paths|length) }} · {{ d.created_at|local }}</p>
   </div>
-  <div class="flex flex-wrap items-center gap-2"><button class="btn" form="draft-form">{{ _("Save") }}</button>{% if d.status != 'published' and plan.options %}<button class="btn btn-primary" form="wh-publish">{{ _("Publish on willhaben") }}</button>{% elif d.wh_ad_id %}<a class="btn" href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" rel="noopener">{{ _("View on willhaben") }} ↗</a>{% endif %}</div>
+  <div class="flex flex-wrap items-center gap-2"><button class="btn" form="draft-form">{{ _("Save") }}</button>{% if d.publishing %}{% elif d.status != 'published' and plan.options %}<button class="btn btn-primary" form="wh-publish">{{ _("Publish on willhaben") }}</button>{% elif d.wh_ad_id %}<a class="btn" href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" rel="noopener">{{ _("View on willhaben") }} ↗</a>{% endif %}</div>
 </div>
-{% if d.error %}{{ ui.msg(d.error, 'error') }}{% endif %}
+<div id="draft-error">{% if d.error %}{{ ui.msg(d.error, 'error') }}{% endif %}</div>
 <div class="grid grid-cols-1 items-start gap-5 md:grid-cols-[minmax(0,1fr)_340px]">
   <div class="flex min-w-0 flex-col gap-4">
     <form method="post" action="/new-ad/{{ d.id }}" id="draft-form" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
@@ -37,25 +37,36 @@
       <div class="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted"><span>{{ _("Save unsaved changes above first – Claude works with the saved version.") }}</span>
         {% if d.revisions %}<form method="post" action="/new-ad/{{ d.id }}/undo" class="m-0 max-w-full"><button class="btn btn-xs h-auto max-w-full py-1 text-left whitespace-normal">↶ {{ _("Undo: “{what}”", what=d.revisions[-1].instruction[:60]) }} <span class="text-muted">· {{ _("{n} earlier version", n=1) if d.revisions|length == 1 else _("{n} earlier versions", n=d.revisions|length) }}</span></button></form>{% endif %}</div>
     </section>
-    <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="willhaben">
+    {# publishing runs as a background job (ad_creator.enqueue_publish): this card shows its state and swaps itself
+       (with the head and the error line) when it is done #}
+    <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="willhaben"
+             {% if d.publishing %}data-pending-key="addraft:{{ d.id }}" data-refresh-also="draft-error draft-head"{% endif %}>
       <header class="flex flex-wrap items-center justify-between gap-2 border-b border-base-300 px-4 py-3 font-semibold"><span>{{ _("Publish on willhaben") }}{% if plan.location %} <span class="text-[12.5px] font-normal text-muted">· {{ plan.location }}{% if plan.contact %} · {{ plan.contact }}{% endif %}</span>{% endif %}</span>
-        {% if d.status != 'published' %}<form method="post" action="/new-ad/{{ d.id }}/willhaben/prepare" class="m-0 flex flex-wrap items-center gap-1.5" x-data="{ busy: false }" @submit="busy = true">{% if plan.options is defined %}<input name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}" class="input input-sm w-[170px] max-w-full bg-base-200 font-normal">{% endif %}<button class="btn btn-sm"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>{% endif %}</header>
-      {% if d.status == 'published' %}
+        {% if d.status != 'published' and not d.publishing %}<form method="post" action="/new-ad/{{ d.id }}/willhaben/prepare" class="m-0 flex flex-wrap items-center gap-1.5" x-data="{ busy: false }" @submit="busy = true">{% if plan.options is defined %}<input name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}" class="input input-sm w-[170px] max-w-full bg-base-200 font-normal">{% endif %}<button class="btn btn-sm"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>{% endif %}</header>
+      {% if d.publishing %}
+        <div class="flex flex-col gap-1 px-5 py-3.5">{{ ui.pending('addraft:' ~ d.id, _("Publishing on willhaben…"), _("Queued: publish on willhaben")) }}
+          <small class="text-muted">{{ _("Runs in the background – you can leave this page. Progress in the sidebar.") }}</small></div>
+      {% elif d.status == 'published' %}
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5 text-success">✓ <strong>{{ _("Published on willhaben") }}</strong><span class="text-[12.5px] text-muted">{{ _("New ads are checked by willhaben first and can take a few minutes to show up.") }}</span></div>
       {% else %}
         {% if plan.options is defined and not plan.options %}<p class="px-5 py-3.5 text-muted">{{ _("willhaben suggests no category for this title.") }}</p>{% endif %}
         {% if plan.options is defined %}
-        <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" data-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}" class="flex flex-col">
+        {# sent in the background with the (maybe unsaved) title, description and price; only this card, the head and the
+           error line are swapped, so edits in the fields stay #}
+        <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" data-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}" class="flex flex-col"
+              hx-post="/new-ad/{{ d.id }}/willhaben/publish" hx-include="#title, #desc, #price" hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}"
+              hx-target="#willhaben" hx-select="#willhaben" hx-select-oob="#draft-error,#draft-head" hx-swap="outerHTML" hx-push-url="false">
           <div class="flex flex-col gap-2.5 border-b border-base-300 px-5 py-3.5">{{ ui.eyebrow(_("Category")) }}{% with pick_url="/new-ad/" ~ d.id ~ "/willhaben/category" %}{% include "_category_picker.html" %}{% endwith %}</div>
           {% if plan.options %}
           <div class="flex flex-col gap-2.5 border-b border-base-300 px-5 py-3.5">{{ ui.eyebrow(_("Handover")) }}{% include "_wh_handover.html" %}</div>
-          <input type="hidden" name="title"><input type="hidden" name="description"><input type="hidden" name="price">
           <div class="flex flex-wrap items-center gap-3 px-5 py-3.5"><button class="btn btn-primary">{{ _("Publish on willhaben now") }}</button><small class="text-muted">{{ _("Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.") }}</small></div>
           {% endif %}
         </form>
-        <script>(() => { const f = document.getElementById('wh-publish'); f.addEventListener('submit', e => { if (!f.elements.title || !confirm(f.dataset.confirm)) { e.preventDefault(); return; }
-          f.elements.title.value = document.getElementById('title').value; f.elements.description.value = document.getElementById('desc').value; f.elements.price.value = document.getElementById('price').value;
-          f.querySelector('button:not([type=button])').prepend(Object.assign(document.createElement('span'), {className: 'loading loading-spinner loading-xs'})); }); })();</script>
+        <script>(() => { const f = document.getElementById('wh-publish'); f.addEventListener('submit', e => {   // without htmx only
+          if (window.htmx) return;
+          if (!confirm(f.dataset.confirm)) { e.preventDefault(); return; }
+          for (const [name, id] of [['title', 'title'], ['description', 'desc'], ['price', 'price']])
+            f.append(Object.assign(document.createElement('input'), {type: 'hidden', name, value: document.getElementById(id).value})); }); })();</script>
         {% endif %}
       {% endif %}
     </section>

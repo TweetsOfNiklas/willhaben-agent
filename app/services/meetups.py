@@ -41,7 +41,7 @@ def current(conv: Conversation, drafts: list[Draft]) -> dict[str, Any] | None:
     """What the chat page offers: the conversation's appointment, else the newest open draft's."""
     if conv.meetup:
         return conv.meetup
-    return next((d.meetup for d in drafts if d.status in ("draft", "pending") and d.meetup), None)
+    return next((d.meetup for d in drafts if d.status in ("draft", "pending", "sending") and d.meetup), None)
 
 
 def remember(conversation_id: str, meetup: dict[str, Any] | None) -> dict[str, Any] | None:

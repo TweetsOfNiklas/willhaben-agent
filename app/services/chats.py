@@ -22,7 +22,7 @@ from app.llm.prompts import (
     AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules,
     price_floor, reply_prompt,
 )
-from app.services import feedback, gcal, humanize, meetups, min_price, paylivery, purchase, shipping, telegram
+from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -396,6 +396,55 @@ async def send_draft(draft_id: int, text: str) -> Draft:
     except Exception as e:  # noqa: BLE001 - the message is out; the calendar offer is a bonus
         log.warning("calendar offer for draft %s failed: %s", draft_id, e)
     return sent
+
+
+def enqueue_send(draft_id: int, text: str) -> bool:
+    """The answer is marked "sending" right away and goes out as a background job (chat lane, never behind ad jobs).
+
+    The state lives in the database, so a restart cannot lose it silently (recover_sending). False: nothing queued
+    (draft gone, not open any more, or empty text).
+    """
+    text = text.strip()
+    with session() as db:
+        d = db.get(Draft, draft_id)
+        if d is None or d.status != "draft" or not text:
+            return False
+        d.text, d.status, d.error = text, "sending", None
+        db.add(d)
+        db.commit()
+        conv = db.get(Conversation, d.conversation_id)
+    who = (conv.partner_name if conv else None) or t("unknown")
+    jobs.submit("chat-send", t("Answer to {name}", name=who), lambda job: _send_job(draft_id), lane="chat",
+                current=f"draft:{draft_id}")
+    return True
+
+
+async def _send_job(draft_id: int) -> str:
+    with session() as db:
+        d = db.get(Draft, draft_id)
+    if d is None or d.status != "sending":
+        return t("Not sent: the draft changed meanwhile")
+    try:
+        await send_draft(draft_id, d.text)
+    except Exception as e:      # back to an open draft with the reason; the text stays as it was edited
+        with session() as db:
+            row = db.get(Draft, draft_id)
+            if row and row.status == "sending":
+                row.status, row.error = "draft", str(e)
+                db.add(row)
+                db.commit()
+        raise
+    return t("Sent – confirmed in the willhaben history")
+
+
+def recover_sending() -> None:
+    """After a restart the queue is gone. Never sent again automatically: the message may have gone out just before."""
+    with session() as db:
+        for d in db.exec(select(Draft).where(Draft.status == "sending")):
+            d.status = "draft"
+            d.error = t("Interrupted by a restart – it is unclear whether it went out: reload the history before sending again")
+            db.add(d)
+        db.commit()
 
 
 # ------------------------------------------------------------------ automatic answers

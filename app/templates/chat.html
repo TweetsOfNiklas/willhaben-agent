@@ -33,9 +33,15 @@
     {% else %}<p class="text-muted">{{ _("No history stored.") }}</p>{% endfor %}
   </div>
 
-  <div id="chat-composer" class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[64px]">
-    {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
-    {% if open %}{% set d = open|last %}
+  {% set sending = drafts|selectattr('status', 'equalto', 'sending')|list %}
+  {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
+  {# an answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done #}
+  <div id="chat-composer" class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[64px]"
+       {% if sending %}data-pending-key="draft:{{ (sending|last).id }}" data-refresh-also="chat-messages"{% endif %}>
+    {% if sending %}{% set d = sending|last %}
+    <div class="flex flex-wrap items-center gap-2">{{ ui.pending('draft:' ~ d.id, _("Sending…"), _("Queued: send")) }}</div>
+    <p class="rounded-[10px] bg-base-200 px-3.5 py-2.5 break-words whitespace-pre-wrap text-muted">{{ d.text }}</p>
+    {% elif open %}{% set d = open|last %}
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex min-w-0 flex-wrap items-center gap-2">{{ ui.pill(_("Draft"), 'brand', dot=false) }}<span class="text-[12.5px] text-muted">{{ d.created_at|local('%H:%M') }}{% if d.intent %} · {{ d.intent }}{% endif %}{% if d.suggested_price %} · {{ _("Price {price}", price=d.suggested_price|eur) }}{% endif %}{% if d.auto %} · {{ _("automatic") }}{% endif %}</span></div>
       <form method="post" action="/chats/{{ conv.id }}/draft" class="flex min-w-0 flex-wrap items-center gap-1.5" hx-disabled-elt="find button">
@@ -46,15 +52,18 @@
     {% if d.intent == 'scam_suspect' %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error">{{ _("Caution: possible scam attempt.") }}</div>{% endif %}
     {% if d.needs_info %}<ul class="list-disc pl-[18px] text-[12.5px] text-muted">{% for n in d.needs_info %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
     {% if d.meetup %}<div class="text-[12.5px] text-muted">{{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}</div>{% endif %}
-    <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" class="flex flex-col gap-2.5">
+    {# in the background: the answer is queued and the composer swaps to "Sending…" (no reload) #}
+    <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" class="flex flex-col gap-2.5"
+          hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML" hx-select-oob="#chat-messages">
       <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea w-full rounded-[10px] bg-base-200">{{ d.text }}</textarea>
       {% if d.error %}<small class="text-error">{{ d.error }}</small>{% endif %}
       <div class="flex flex-wrap items-center gap-1.5">
         <button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ _("Copy") }}</button>
-        <button class="btn btn-sm" formaction="/drafts/{{ d.id }}/mark-sent">{{ _("Sent manually") }}</button>
-        <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/discard">{{ _("Discard") }}</button>
+        <button class="btn btn-sm" formaction="/drafts/{{ d.id }}/mark-sent" hx-post="/drafts/{{ d.id }}/mark-sent">{{ _("Sent manually") }}</button>
+        <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ _("Discard") }}</button>
         <span class="flex-1"></span>
-        <button class="btn btn-primary" data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Send") }}</button>
+        <button class="btn btn-primary" hx-post="/drafts/{{ d.id }}/send" hx-confirm="{{ _('Send this message via willhaben now?') }}"
+                data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return !!window.htmx || confirm(this.dataset.confirm)">{{ _("Send") }}</button>
       </div>
     </form>
     {% else %}
