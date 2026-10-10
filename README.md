@@ -89,8 +89,9 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
 3. **Settings → Home Assistant → Connect** (optional). Enter your Home Assistant address and log in. You're sent
    back automatically, and the app creates its own long-lived token in your HA profile. Pick the phone that should
    get pushes.
-4. **Settings → Telegram** (optional): create a bot with @BotFather (`/newbot`), paste its token, tap "Link this chat"
-   and press Start in Telegram. Settings → Chats decides whether pushes go to Home Assistant, Telegram or both.
+4. **Settings → Telegram** (optional): create a bot with @BotFather (`/newbot`) and paste its token. Then open the bot
+   in Telegram on any device (link or QR code) and press Start; the chat shows up in Settings and you confirm it with
+   one tap. Settings → Chats decides whether pushes go to Home Assistant, Telegram or both.
 5. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
    Optionally switch on "Claude screening" and describe exactly what you want.
 

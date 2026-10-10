@@ -47,17 +47,33 @@ def _text(text, chat=CHAT, reply_to=None):
 
 
 async def _linked(tg):
+    """Pairing: whoever writes to the bot becomes a candidate; the Settings button picks one."""
     assert await telegram.save_token("123:abc") == "wh_test_bot"
-    url = telegram.link_url()
-    assert url.startswith("https://t.me/wh_test_bot?start=")
-    code = url.rsplit("=", 1)[1]
-    await telegram.handle_update(_text("/start wrong", chat=666))      # stranger, wrong code: silence
-    assert telegram.chat_id() is None and not [c for c in tg if c[0] == "sendMessage"]
-    await telegram.handle_update(_text(f"/start {code}"))
-    assert telegram.chat_id() == CHAT and get_setting("telegram_chat_name") == "Max"
-    await telegram.handle_update(_text(f"/start {code}", chat=666))     # one-time code
-    assert telegram.chat_id() == CHAT
+    assert telegram.bot_url() == "https://t.me/wh_test_bot" and telegram.status()["candidates"] == []
+    await telegram.handle_update(_text("/start", chat=666))
+    await telegram.handle_update(_text("hello"))
+    await telegram.handle_update(_text("hello again"))                  # same chat: one entry, one reply
+    assert [c["chat_id"] for c in telegram.candidates()] == [CHAT, 666]
+    assert [b["chat_id"] for m, b in tg if m == "sendMessage"] == [666, CHAT]
+    assert "Settings" in tg[-1][1]["text"] and telegram.chat_id() is None
+    assert await telegram.link(4711) is None                             # not a candidate
+    assert await telegram.link(CHAT) == "Max"
+    assert telegram.chat_id() == CHAT and get_setting("telegram_chat_name") == "Max" and not telegram.candidates()
+    assert tg[-1][1]["chat_id"] == CHAT and tg[-1][1]["text"].startswith("✅")
+    await telegram.handle_update(_text("/start", chat=666))             # linked: strangers get silence
+    assert tg[-1][1]["chat_id"] == CHAT
     tg.clear()
+
+
+async def test_candidates_expire_and_relink(tg, monkeypatch):
+    await _linked(tg)
+    telegram.unlink()
+    assert telegram.chat_id() is None and not telegram.candidates()
+    await telegram.handle_update(_text("hi", chat=555))
+    assert [c["chat_id"] for c in telegram.candidates()] == [555]
+    now = telegram.time.monotonic()
+    monkeypatch.setattr(telegram.time, "monotonic", lambda: now + telegram.CANDIDATE_TTL + 1)
+    assert telegram.candidates() == [] and await telegram.link(555) is None
 
 
 async def test_link_and_kinds(tg):
@@ -195,9 +211,18 @@ def test_settings_panel_and_routes(client, monkeypatch):  # noqa: F811
     assert r.headers["location"].endswith("#telegram") and telegram.token() == "123:abc"
     assert "setMyCommands" in calls and "deleteWebhook" in calls
     page = client.get("/settings").text
-    assert "@wh_test_bot" in page and 'id="tg-link"' in page and telegram.link_url() in page
-    assert client.get("/settings/telegram/status").json() == {"linked": False, "chat_name": ""}
-    set_setting("telegram_chat_id", str(CHAT))
+    assert "@wh_test_bot" in page and 'id="tg-link"' in page and "https://t.me/wh_test_bot" in page and "<svg" in page
+    assert client.get("/settings/telegram/status").json() == {"linked": False, "chat_name": "", "candidates": []}
+    telegram._candidates[CHAT] = ("Max <b>", telegram.time.monotonic())
+    st = client.get("/settings/telegram/status").json()
+    assert st["candidates"][0]["chat_id"] == CHAT and st["candidates"][0]["name"] == "Max <b>"
+    page = client.get("/settings").text
+    assert "Link with Max &lt;b&gt;" in page and f'data-tg-fp="{CHAT}"' in page
+    r = client.post("/settings/telegram/link", data={"chat_id": "999"}, follow_redirects=False)
+    assert "expired" in r.headers["location"] and telegram.chat_id() is None
+    r = client.post("/settings/telegram/link", data={"chat_id": str(CHAT)}, follow_redirects=False)
+    assert r.headers["location"].endswith("#telegram") and telegram.chat_id() == CHAT and calls[-1] == "sendMessage"
+    assert client.get("/settings/telegram/status").json()["linked"]
     client.post("/settings/telegram/kinds", data={"enabled": "on", "kind": ["message", "hit"]})
     assert telegram.enabled_kinds() == {"message", "hit"} and telegram.active()
     client.post("/settings/telegram/test")

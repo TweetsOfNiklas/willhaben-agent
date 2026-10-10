@@ -1,7 +1,9 @@
 """Telegram bot: a second push channel next to Home Assistant, with buttons.
 
-Long polling (getUpdates), so the server needs no public URL. The bot answers exactly one chat: the one
-that sent `/start <code>` with the one-time code shown in Settings. Updates from any other chat are ignored.
+Long polling (getUpdates), so the server needs no public URL. The bot answers exactly one chat. Linking:
+while no chat is linked, every chat that writes to the bot (any device, any Telegram client) is remembered as a
+candidate for a few minutes and Settings shows a "link with <name>" button; the logged-in user confirms there.
+Updates from any other chat are ignored.
 
 Buttons carry a short random token (`t:<token>`, table TelegramAction) instead of the action itself:
   D_SEND / D_REPLY / D_REVISE / D_DISCARD  held-back answer -> ha_actions.handle (the one send path)
@@ -49,6 +51,9 @@ _transport: httpx.AsyncBaseTransport | None = None   # tests inject a mock trans
 _tasks: set[asyncio.Task] = set()
 _pending: dict[int, tuple[str, str, float]] = {}     # ForceReply prompt message id -> (verb, ref, time)
 PENDING_TTL = 30 * 60
+_candidates: dict[int, tuple[str, float]] = {}       # chat id -> (display name, time) while no chat is linked
+CANDIDATE_TTL = 10 * 60
+MAX_CANDIDATES = 20
 # Last Bot API outcome that says something about the connection, read by app/services/health.py.
 api_health: dict[str, Any] = {"ok_at": None, "error_at": None, "error": None}
 
@@ -110,15 +115,33 @@ def active() -> bool:
     return bool(token() and chat_id() and get_setting("telegram_enabled") != "0")
 
 
-def link_url() -> str | None:
-    user, code = get_setting("telegram_username"), get_setting("telegram_link_code")
-    return f"https://t.me/{user}?start={code}" if user and code else None
+def bot_url() -> str | None:
+    user = get_setting("telegram_username")
+    return f"https://t.me/{user}" if user else None
+
+
+def bot_qr_svg() -> str:
+    """The bot link as an inline SVG QR code: scan it with the phone when Settings is open on a desktop."""
+    import segno
+
+    url = bot_url()
+    return segno.make(url, error="m").svg_inline(scale=4, border=1, dark="#000") if url else ""
+
+
+def candidates() -> list[dict[str, Any]]:
+    """Chats that wrote to the bot while nothing was linked, newest first (expired ones dropped)."""
+    now = time.monotonic()
+    for k in [k for k, v in _candidates.items() if now - v[1] > CANDIDATE_TTL]:
+        _candidates.pop(k, None)
+    return [{"chat_id": k, "name": v[0], "age_s": int(now - v[1])}
+            for k, v in sorted(_candidates.items(), key=lambda kv: -kv[1][1])]
 
 
 def status() -> dict[str, Any]:
     return {"configured": bool(token()), "source": token_source(), "username": get_setting("telegram_username"),
             "linked": chat_id() is not None, "chat_name": get_setting("telegram_chat_name"),
-            "enabled": get_setting("telegram_enabled") != "0", "kinds": enabled_kinds(), "link_url": link_url()}
+            "enabled": get_setting("telegram_enabled") != "0", "kinds": enabled_kinds(), "bot_url": bot_url(),
+            "candidates": candidates() if chat_id() is None else []}
 
 
 COMMANDS = [("drafts", "Open answer drafts"), ("auto", "Automatic answers per ad"),
@@ -126,16 +149,14 @@ COMMANDS = [("drafts", "Open answer drafts"), ("auto", "Automatic answers per ad
 
 
 async def save_token(tok: str) -> str:
-    """Check a BotFather token, store it (600) and start a fresh link. Returns the bot's @username."""
+    """Check a BotFather token, store it (600) and forget any linked chat. Returns the bot's @username."""
     tok = tok.strip()
     me = await api("getMe", _token=tok)
     p = _token_file()
     p.write_text(tok)
     p.chmod(0o600)
     set_setting("telegram_username", me.get("username") or "")
-    set_setting("telegram_chat_id", "")
-    set_setting("telegram_chat_name", "")
-    new_link_code()
+    unlink()
     try:
         await api("deleteWebhook")          # getUpdates does not work while a webhook is set
         await api("setMyCommands", commands=[{"command": c, "description": t(d)} for c, d in COMMANDS])
@@ -144,21 +165,28 @@ async def save_token(tok: str) -> str:
     return me.get("username") or ""
 
 
-def new_link_code() -> str:
-    code = secrets.token_urlsafe(12)
-    set_setting("telegram_link_code", code)
-    return code
-
-
 def unlink() -> None:
     set_setting("telegram_chat_id", "")
     set_setting("telegram_chat_name", "")
-    new_link_code()
+    _candidates.clear()
+
+
+async def link(cid: int) -> str | None:
+    """Confirm one candidate chat (the button in Settings). Returns its name, or None if it is not a candidate."""
+    found = {c["chat_id"]: c["name"] for c in candidates()}.get(cid)
+    if found is None:
+        return None
+    set_setting("telegram_chat_id", str(cid))
+    set_setting("telegram_chat_name", found)
+    _candidates.clear()
+    await _say("✅ " + t("Linked. Notifications from willhaben Agent now arrive here.") + "\n\n" + _help())
+    return found
 
 
 def forget() -> None:
     _token_file().unlink(missing_ok=True)
-    for k in ("telegram_chat_id", "telegram_chat_name", "telegram_username", "telegram_link_code"):
+    _candidates.clear()
+    for k in ("telegram_chat_id", "telegram_chat_name", "telegram_username", "telegram_link_code"):   # last: pre-0.2 leftover
         set_setting(k, "")
 
 
@@ -361,15 +389,10 @@ async def handle_update(u: dict[str, Any]) -> None:
 async def _on_message(msg: dict[str, Any]) -> None:
     chat = (msg.get("chat") or {})
     text = (msg.get("text") or "").strip()
-    if text.startswith("/start"):
-        code = text.partition(" ")[2].strip()
-        if code and secrets.compare_digest(code, get_setting("telegram_link_code") or "-"):
-            set_setting("telegram_chat_id", str(chat.get("id")))
-            set_setting("telegram_chat_name", chat.get("username") or chat.get("first_name") or chat.get("title") or "")
-            set_setting("telegram_link_code", "")      # one-time
-            await _say("✅ " + t("Linked. Notifications from willhaben Agent now arrive here.") + "\n\n" + _help())
-            return
-    if chat_id() is None or chat.get("id") != chat_id():
+    if chat_id() is None:
+        await _on_candidate(chat)
+        return
+    if chat.get("id") != chat_id():
         return                                          # not our user: stay silent
     reply_to = (msg.get("reply_to_message") or {}).get("message_id")
     pending = _pending.pop(reply_to, None) if reply_to else None
@@ -388,6 +411,17 @@ async def _on_message(msg: dict[str, Any]) -> None:
         await _cmd_status()
     else:
         await _say(_help())
+
+
+async def _on_candidate(chat: dict[str, Any]) -> None:
+    """Nothing linked yet: remember the chat and tell it once (per CANDIDATE_TTL) to confirm in Settings."""
+    cid = chat.get("id")
+    live = {c["chat_id"] for c in candidates()}          # drops expired entries first
+    if not isinstance(cid, int) or cid in live or len(live) >= MAX_CANDIDATES:
+        return
+    _candidates[cid] = (chat.get("username") or chat.get("first_name") or chat.get("title") or str(cid), time.monotonic())
+    with suppress(TelegramError, httpx.HTTPError):
+        await api("sendMessage", chat_id=cid, text="👋 " + t("Request received – confirm the link in the app under Settings → Telegram."))
 
 
 def _latest_pending() -> tuple[str, str, float] | None:

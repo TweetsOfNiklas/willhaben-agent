@@ -22,6 +22,10 @@
     .settings-index small { display:none; }
     .settings-index a { border:1px solid var(--pico-muted-border-color); padding:.25rem .6rem; font-size:.9em; }
   }
+  .tg-pair-how { display:flex; flex-wrap:wrap; gap:1rem 1.5rem; align-items:center; }
+  .tg-qr { margin:0; width:8.5rem; flex:none; }
+  .tg-qr svg { display:block; width:100%; height:auto; background:#fff; border-radius:.3rem; padding:.3rem; }
+  @media (max-width: 575px) { .tg-qr { display:none; } }   /* on the phone the link itself opens Telegram */
 </style>
 {% endblock %}
 {% block content %}
@@ -198,8 +202,27 @@
           {% else %}<span class="badge">{{ _("chat not linked yet") }}</span>{% endif %}
           {% if tg.source == 'env' %}<small class="muted">{{ _("(token from .env)") }}</small>{% endif %}</p>
         {% if not tg.linked %}
-          <p><a href="{{ tg.link_url }}" target="_blank" rel="noopener" role="button" id="tg-link">{{ _("Link this chat in Telegram") }} ↗</a>
-            <br><small class="muted">{{ _("Telegram opens your bot – tap “Start”. This page notices it by itself.") }}</small></p>
+          <div class="tg-pair" data-tg-fp="{{ tg.candidates|map(attribute='chat_id')|join(',') }}">
+            <p>{{ _("Open the bot in Telegram – on any device – and tap “Start” or send any message. The chat then appears here for you to confirm.") }}</p>
+            <div class="tg-pair-how">
+              <p><a href="{{ tg.bot_url }}" target="_blank" rel="noopener" role="button" class="secondary" id="tg-link">@{{ tg.username }} {{ _("in Telegram") }} ↗</a>
+                <br><small class="muted">{{ _("On a computer without Telegram: scan the code with your phone.") }}</small></p>
+              <figure class="tg-qr" aria-label="QR">{{ tg_qr|safe }}</figure>
+            </div>
+            {% if tg.candidates %}
+              <p><strong>{{ _("Requests in Telegram:") }}</strong></p>
+              <div class="row-actions">
+                {% for c in tg.candidates %}
+                  <form method="post" action="/settings/telegram/link">
+                    <input type="hidden" name="chat_id" value="{{ c.chat_id }}">
+                    <button>{{ _("Link with {name}", name=c.name) }}</button>
+                  </form>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p><small class="muted" aria-busy="true">{{ _("Waiting for a message to the bot …") }}</small></p>
+            {% endif %}
+          </div>
         {% else %}
           <form method="post" action="/settings/telegram/kinds">
             <label><input type="checkbox" role="switch" name="enabled" {% if tg.enabled %}checked{% endif %}>
@@ -227,10 +250,14 @@
       {% endif %}
       {% if tg.configured and not tg.linked %}
       <script>
-        (() => {   // the link happens in Telegram; reload once the bot has seen /start
+        (() => {   // chats that write to the bot show up as buttons: reload when the list (or the link) changes
+          const fp = () => document.querySelector('.tg-pair')?.dataset.tgFp ?? '';
           const timer = setInterval(async () => {
             const r = await fetch('/settings/telegram/status').then(r => r.json()).catch(() => null);
-            if (r && r.linked) { clearInterval(timer); location.hash = 'telegram'; location.reload(); }
+            if (!r) return;
+            if (r.linked || r.candidates.map(c => c.chat_id).join(',') !== fp()) {
+              clearInterval(timer); location.hash = 'telegram'; location.reload();
+            }
           }, 3000);
         })();
       </script>
