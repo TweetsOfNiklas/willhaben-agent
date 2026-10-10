@@ -511,7 +511,14 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
 
 @app.get("/chats", response_class=HTMLResponse)
 async def chats_page(request: Request, msg: str | None = None, show_hidden: bool = False):
-    return render(request, "chats.html", msg=msg, **_chat_list(show_hidden))
+    return render(request, "chats.html", msg=msg, live_state=chats.live_state(), **_chat_list(show_hidden))
+
+
+@app.get("/chats/live-state")
+async def chats_live_state(c: str | None = None):
+    """What the open chat page shows, as fingerprints: it polls this (local database only, no willhaben request)
+    and swaps just the part that changed – new messages appear without a reload."""
+    return chats.live_state(c)
 
 
 @app.post("/chats/bulk/{action}")
@@ -571,7 +578,7 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
         task.add_done_callback(_background.discard)
     drafts = chats.drafts_of(conversation_id)
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
-                  drafts=drafts, msg=msg, meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
+                  drafts=drafts, msg=msg, live_state=chats.live_state(conversation_id), meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
                   sale=sold.state_for(conv),
                   gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort),
                   **_chat_list(show_hidden or bool(conv.hidden_at)))

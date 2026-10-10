@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 
 from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, session, set_setting, utcnow
 from app.i18n import t
@@ -251,6 +252,34 @@ def messages_of(conversation_id: str) -> list[Message]:
     with session() as db:
         return list(db.exec(select(Message).where(Message.conversation_id == conversation_id)
                             .order_by(col(Message.created_at).asc().nulls_first(), Message.id)))
+
+
+def live_state(conversation_id: str | None = None) -> dict[str, str]:
+    """Short fingerprints of what the chat pages show: "list" and, for an open conversation, "messages", "composer"
+    and "context". The pages poll them (local database only, never willhaben) and swap just the part that changed."""
+    from app.db import Purchase, Shipment
+
+    def fp(*parts: Any) -> str:
+        return hashlib.sha1(json.dumps(parts, default=str, sort_keys=True).encode()).hexdigest()[:12]
+
+    with session() as db:
+        convs = db.exec(select(Conversation.id, Conversation.last_message_at, Conversation.unread_count,
+                               Conversation.last_message_text, Conversation.hidden_at, Conversation.removed)).all()
+        open_drafts = sorted(set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all()))
+        out = {"list": fp([list(r) for r in convs], open_drafts, get_session().chat_live.get("state"))}
+        conv = db.get(Conversation, conversation_id) if conversation_id else None
+        if conv is not None:
+            msgs = db.exec(select(func.count(), func.max(Message.id)).where(Message.conversation_id == conv.id)).one()
+            drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent)
+                             .where(Draft.conversation_id == conv.id)).all()
+            ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
+            ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
+            buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
+            out["messages"] = fp(list(msgs))
+            out["composer"] = fp([list(d) for d in drafts])
+            out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
+                                ad and [ad.sale_status, ad.sale_conversation_id], ships, buys)
+    return out
 
 
 def drafts_of(conversation_id: str) -> list[Draft]:
