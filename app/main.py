@@ -1305,7 +1305,7 @@ async def settings_page(request: Request, msg: str | None = None):
                   llm_usage=llm_usage.summary(), purpose_labels={p: label for p, (_, label, _h) in PURPOSES.items()},
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
-                  tg=telegram.status(), tg_kinds=telegram.kinds(), **await _gcal_ctx(),
+                  tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **await _gcal_ctx(),
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
@@ -1790,7 +1790,13 @@ async def settings_telegram_token(token: str = Form(...)):
 @app.get("/settings/telegram/status")
 async def settings_telegram_status():
     st = telegram.status()
-    return {"linked": st["linked"], "chat_name": st["chat_name"]}
+    return {"linked": st["linked"], "chat_name": st["chat_name"], "candidates": st["candidates"]}
+
+
+@app.post("/settings/telegram/link")
+async def settings_telegram_link(chat_id: int = Form(...)):
+    name = await telegram.link(chat_id)
+    return _tg_back(t("linked with {name}", name=name) if name else t("This request has expired – write to the bot again."))
 
 
 @app.post("/settings/telegram/kinds")
@@ -1804,7 +1810,7 @@ async def settings_telegram_kinds(request: Request):
 @app.post("/settings/telegram/relink")
 async def settings_telegram_relink():
     telegram.unlink()
-    return _tg_back(t("Chat unlinked – link it again with the button"))
+    return _tg_back(t("Chat unlinked – write to the bot from the chat that should get the notifications"))
 
 
 @app.post("/settings/telegram/forget")
