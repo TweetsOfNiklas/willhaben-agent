@@ -360,7 +360,8 @@ def _mark(ad_id: str, action: str, payload: dict[str, Any] | None = None) -> MyA
         row = db.get(MyAd, ad_id)
         if row is None or row.pending_action:
             return None
-        row.pending_action, row.pending_payload, row.last_error = action, payload, None
+        keep = {} if action == "edit" else {k: v for k, v in (row.pending_payload or {}).items() if k == "unsaved"}
+        row.pending_action, row.pending_payload, row.last_error = action, ({**keep, **payload} if payload else keep or None), None
         db.add(row)
         db.commit()
         db.refresh(row)
@@ -374,6 +375,8 @@ def _unmark(ad_id: str, error: str | None = None, payload: Any = False) -> None:
             row.pending_action = None
             if payload is not False:
                 row.pending_payload = payload
+            elif row.pending_payload:          # job done: what it needed goes, an unsaved edit text stays
+                row.pending_payload = {k: v for k, v in row.pending_payload.items() if k == "unsaved"} or None
             if error is not None:
                 row.last_error = error
             db.add(row)

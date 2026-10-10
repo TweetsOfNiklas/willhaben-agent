@@ -509,6 +509,18 @@ def test_ai_revision_fills_the_form_without_saving(monkeypatch):
     assert "kürzer" in Backend.prompts[0] and "Audio > Lautsprecher" in Backend.prompts[0]
     assert acct.put_body is None                                                 # nothing saved on willhaben
 
+    class Failing:
+        async def complete(self, *, system, prompt, schema, images=None):
+            from app.llm.base import LLMError
+            raise LLMError("Limit erreicht")
+
+    monkeypatch.setattr("app.llm.base.get_backend", lambda *a: Failing())
+    with TestClient(app) as c:                       # htmx keeps only #edit-main: the error must be inside it
+        page = c.post("/myads/1000000001/edit/ai", data={"heading": "Alter Titel", "description": "Alt", "price": "40",
+                                                         "instruction": "kürzer"}, headers={"HX-Request": "true"}).text
+    main = page.split('id="edit-main"', 1)[1]
+    assert "Limit erreicht" in main and 'value="Alter Titel"' in main
+
 
 def test_myads_filters_and_order():
     from datetime import timedelta

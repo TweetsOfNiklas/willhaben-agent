@@ -791,9 +791,9 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
     cur = {"heading": heading, "description": description, "price": value}
     try:
         prop = await my_ads.ai_revise(ad_id, heading, description, value, instruction)
-    except LLMError as e:
+    except LLMError as e:   # shown inside the part htmx swaps (#edit-main), not in the page head
         return render(request, "myad_edit.html", a=row, cur=cur, instruction=instruction,
-                      msg=t("Claude could not revise the ad: {error}", error=e))
+                      ai_error=t("Claude could not revise the ad: {error}", error=e))
     return render(request, "myad_edit.html", a=row, instruction=instruction, proposal=prop,
                   cur={"heading": prop["heading"], "description": prop["description"], "price": value})
 

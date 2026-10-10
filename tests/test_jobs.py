@@ -332,3 +332,26 @@ def test_chat_sync_and_reload_answer_htmx_at_once(monkeypatch):
         assert r.status_code == 303 and r.headers["location"].startswith("/chats?msg=")
         wait_jobs()
     assert ("reload", "c1") in ran and ("sync", True) in ran
+
+
+async def test_other_actions_keep_an_unsaved_edit_text(monkeypatch):
+    from app.services import my_ads, sold
+
+    with session() as db:
+        db.add(dbmod.MyAd(ad_id="6", heading="Rad", status="active", pending_payload={"unsaved": {"heading": "Neu"}}))
+        db.commit()
+
+    async def fake_set_photos(ad_id, order, files):
+        return None
+
+    async def fake_on_willhaben(ad_id, kind, *, undo=False, reason_id=None):
+        return "ok"
+
+    monkeypatch.setattr(my_ads, "set_photos", fake_set_photos)
+    monkeypatch.setattr(sold, "on_willhaben", fake_on_willhaben)
+    assert my_ads.enqueue_photos("6", ["1/6/a.jpg"], [])
+    await finish_jobs()
+    assert sold.enqueue_willhaben("6", "reserved")
+    await finish_jobs()
+    with session() as db:
+        assert db.get(dbmod.MyAd, "6").pending_payload == {"unsaved": {"heading": "Neu"}}

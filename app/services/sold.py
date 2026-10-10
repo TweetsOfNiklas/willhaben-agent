@@ -131,14 +131,16 @@ def enqueue_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: s
         row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
         if row.pending_action:
             return False
-        row.pending_action, row.pending_payload, row.last_error = action, None, None
+        unsaved = (row.pending_payload or {}).get("unsaved")      # an edit text waiting to be saved again stays
+        row.pending_action, row.pending_payload, row.last_error = action, ({"unsaved": unsaved} if unsaved else None), None
         db.add(row)
         db.commit()
 
     def unmark(error: str | None = None, payload: dict[str, Any] | None = None) -> None:
         with session() as db:
             r = db.get(MyAd, ad_id)
-            r.pending_action, r.pending_payload = None, payload
+            unsaved = (r.pending_payload or {}).get("unsaved")
+            r.pending_action, r.pending_payload = None, ({**(payload or {}), "unsaved": unsaved} if unsaved else payload)
             if error is not None:
                 r.last_error = error
             db.add(r)

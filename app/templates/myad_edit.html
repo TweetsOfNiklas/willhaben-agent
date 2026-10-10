@@ -13,6 +13,7 @@
   {% if unsaved %}{{ ui.msg(_("Your last changes were not saved on willhaben – they are filled in below. Save again when you are ready."), 'warn') }}{% endif %}
   {# Claude's proposal and the form swap in place (htmx), no reload; saving runs as a background job #}
   <div id="edit-main" class="flex flex-col gap-4">
+  {% if ai_error %}{{ ui.msg(ai_error, 'error') }}{% endif %}
   {% if proposal %}
   <section class="flex flex-col gap-1.5 rounded-box border border-base-300 border-l-4 border-l-primary bg-brand-soft px-4 py-3">
     <strong>{{ _("Claude's proposal – not saved yet") }}</strong>
