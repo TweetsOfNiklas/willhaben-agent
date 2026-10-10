@@ -9,6 +9,10 @@
       · {{ _("Status: {status}", status=a.status or '?') }}</p>
   </div>
 
+  {% if a.pending_action %}{{ ui.msg(_("This ad is being changed on willhaben in the background – wait until it is done before you save again."), 'warn') }}{% endif %}
+  {% if unsaved %}{{ ui.msg(_("Your last changes were not saved on willhaben – they are filled in below. Save again when you are ready."), 'warn') }}{% endif %}
+  {# Claude's proposal and the form swap in place (htmx), no reload; saving runs as a background job #}
+  <div id="edit-main" class="flex flex-col gap-4">
   {% if proposal %}
   <section class="flex flex-col gap-1.5 rounded-box border border-base-300 border-l-4 border-l-primary bg-brand-soft px-4 py-3">
     <strong>{{ _("Claude's proposal – not saved yet") }}</strong>
@@ -31,7 +35,8 @@
         <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('price').value = '{{ '%g'|format(proposal.price_estimate) }}'">{{ _("use") }}</button></p>
     {% endif %}
     <div class="flex flex-wrap items-center gap-2">
-      <button class="btn btn-primary" onclick="this.setAttribute('aria-busy','true')">{{ _("Save on willhaben") }}</button>
+      <button class="btn btn-primary" {% if a.pending_action %}disabled{% endif %}>{{ _("Save on willhaben") }}</button>
+      <small class="text-muted">{{ _("Runs in the background – you go back to the ad right away.") }}</small>
     </div>
     <small class="text-xs text-muted">{{ _("Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.") }}</small>
 
@@ -40,11 +45,12 @@
       <div class="join w-full">
         <input name="instruction" value="{{ instruction or '' }}" placeholder="{{ _('e.g. shorter, more convincing title, mention that the battery is new') }}" class="input join-item min-w-0 w-full bg-base-200">
         <button type="submit" class="btn join-item whitespace-nowrap" formaction="/myads/{{ a.ad_id }}/edit/ai" formnovalidate
-                onclick="this.setAttribute('aria-busy','true')">{{ _("Revise") }}</button>
+                hx-post="/myads/{{ a.ad_id }}/edit/ai" hx-target="#edit-main" hx-select="#edit-main" hx-swap="outerHTML"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Revise") }}</button>
       </div>
       <small class="text-xs text-muted">{{ _("Claude sees the text above, the ad's photos and your rules. Nothing is saved until you click “Save on willhaben”. Takes 10–60 seconds.") }}</small>
     </fieldset>
   </form>
+  </div>
 
   <section id="photos" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <header class="flex flex-wrap items-baseline gap-2"><strong>{{ _("Photos") }}</strong>
@@ -73,7 +79,7 @@
         <input type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple class="file-input file-input-sm w-full bg-base-200"></label>
       <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" name="new_first" value="1" class="checkbox checkbox-primary checkbox-sm">{{ _("Put new photos first (the first one becomes the cover)") }}</label>
       <div class="flex flex-wrap items-center gap-2">
-        <button id="photo-save" class="btn btn-primary" onclick="this.setAttribute('aria-busy','true')">{{ _("Save photos on willhaben") }}</button>
+        <button id="photo-save" class="btn btn-primary" {% if a.pending_action %}disabled{% endif %}>{{ _("Save photos on willhaben") }}</button>
         <small class="text-xs text-muted" id="photo-count"></small>
       </div>
       <small class="text-xs text-muted">{{ _("Saves only the photos – unsaved text changes above are not included. At most {n} photos; removed photos are gone on willhaben.", n=15) }}</small>

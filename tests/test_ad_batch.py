@@ -6,6 +6,7 @@ from app import db as dbmod
 from app.llm.base import LLMResult
 from app.services import ad_batch
 from tests.test_dashboard import client  # noqa: F401  (pytest fixture)
+from tests.conftest import wait_jobs  # noqa: E402
 
 SORTED = {
     "groups": [
@@ -141,6 +142,7 @@ def test_batch_inline_review_and_publish(client, monkeypatch):  # noqa: F811
 
     # refine saves unsaved edits first and goes through the normal refine (undo-able)
     client.post(f"/ad-drafts/{d1.id}/inline/refine", data={"instruction": "kürzer", "title": "Neu", "description": "x"})
+    wait_jobs()
     assert "Änderungswünsche: kürzer" in client.fake.calls[-1]["prompt"] and "- Titel: Neu" in client.fake.calls[-1]["prompt"]
     with dbmod.session() as db:
         assert db.get(dbmod.AdDraft, d1.id).revisions[-1]["title"] == "Neu"

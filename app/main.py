@@ -560,13 +560,12 @@ async def chat_remove(conversation_id: str):
 
 
 @app.post("/chats/sync")
-async def chats_sync():
-    try:
-        res = await chats.sync(force=True)
-    except (SessionUnavailable, NotLoggedIn, RuntimeError) as e:
-        return back(f"/chats?msg={quote(t('Sync failed: {error}', error=e), safe='')}")
-    msg = res.get("skipped") or t("{n} conversations, {changed} updated", n=res["conversations"], changed=res["changed"])
-    return back(f"/chats?msg={quote(msg, safe='')}")
+async def chats_sync(request: Request):
+    """Background job (lane chat): the list updates itself as the conversations come in (live view)."""
+    chats.enqueue_sync()
+    if _hx(request):
+        return Response(status_code=204)
+    return back(f"/chats?msg={quote(t('Sync started – it runs in the background'), safe='')}")
 
 
 @app.get("/chats/{conversation_id}", response_class=HTMLResponse)
@@ -613,22 +612,18 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
 
 
 @app.post("/chats/{conversation_id}/refresh")
-async def chat_refresh(conversation_id: str):
-    try:
-        mode = await chats.sync_messages(conversation_id)
-        await chats.ensure_ad_context(conversation_id)
-    except (SessionUnavailable, NotLoggedIn, WillhabenError) as e:
-        return back(f"/chats/{conversation_id}?msg={e}")
-    note = "" if mode == "full" else t("Only the last message is available (messages endpoint not verified yet).")
-    return back(f"/chats/{conversation_id}?msg={quote(note, safe='')}")
+async def chat_refresh(request: Request, conversation_id: str):
+    """Background job (lane chat): the thread updates itself (live view)."""
+    chats.enqueue_reload(conversation_id)
+    if _hx(request):
+        return Response(status_code=204)
+    return back(f"/chats/{conversation_id}")
 
 
 @app.post("/chats/{conversation_id}/draft", response_class=HTMLResponse)
 async def chat_draft(request: Request, conversation_id: str, hint: str = Form("")):
-    try:
-        await chats.draft_reply(conversation_id, hint.strip() or None)
-    except (LLMError, WillhabenError) as e:
-        return back(f"/chats/{conversation_id}?msg={quote(t('Draft failed: {error}', error=e), safe='')}")
+    """Background job (lane claude): the composer shows "Claude is writing…", the draft appears by itself."""
+    chats.enqueue_draft(conversation_id, hint.strip() or None)
     return back(f"/chats/{conversation_id}")
 
 
@@ -775,7 +770,10 @@ async def myads_edit_page(request: Request, ad_id: str, msg: str | None = None):
         cur = await my_ads.load_for_edit(ad_id)
     except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
         return back(f"/myads?msg={quote(t('Could not load the ad from willhaben: {error}', error=e), safe='')}")
-    return render(request, "myad_edit.html", a=row, cur=cur, msg=msg)
+    unsaved = (row.pending_payload or {}).get("unsaved") if not row.pending_action else None
+    if unsaved:     # a save that failed or was interrupted: its text comes back instead of willhaben's
+        cur = {**cur, **unsaved}
+    return render(request, "myad_edit.html", a=row, cur=cur, msg=msg, unsaved=bool(unsaved))
 
 
 @app.post("/myads/{ad_id}/edit/ai", response_class=HTMLResponse)
@@ -802,17 +800,19 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
 
 @app.post("/myads/{ad_id}/edit")
 async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str = Form(...), price: str = Form("")):
+    """Background job (lane ads): back to the ad, which shows "Saving…" until willhaben has it."""
     from app.willhaben.insert import InsertError
     try:
         value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
     except ValueError:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Invalid price'), safe='')}")
     try:
-        row = await my_ads.edit(ad_id, heading, description, value)
-    except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        queued = my_ads.enqueue_edit(ad_id, heading, description, value)
+    except InsertError as e:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Saving failed: {error}', error=e), safe='')}")
-    status = (row.status if row else "") or ""
-    return back(f"/myads?msg={quote(t('Saved on willhaben – status now: {status}', status=status), safe='')}#ad-{ad_id}")
+    if not queued:
+        return back(f"/myads/{ad_id}/edit?msg={quote(t('Nothing queued: these ads are already being processed'), safe='')}")
+    return back(f"/myads?ad={quote(ad_id, safe='')}&msg={quote(t('Saving on willhaben in the background'), safe='')}")
 
 
 @app.post("/myads/{ad_id}/photos")
@@ -824,11 +824,12 @@ async def myads_photos_save(ad_id: str, order: list[str] = Form(default=[]),
     new = [f"new:{i}" for i in range(len(files))]
     order = (new + order) if new_first else (order + new)
     try:
-        row = await my_ads.set_photos(ad_id, order, files)
-    except (InsertError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        queued = my_ads.enqueue_photos(ad_id, order, files)     # background job: uploads one after another
+    except InsertError as e:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Saving the photos failed: {error}', error=e), safe='')}#photos")
-    status = (row.status if row else "") or ""
-    return back(f"/myads/{ad_id}/edit?msg={quote(t('Photos saved on willhaben – status now: {status}', status=status), safe='')}#photos")
+    if not queued:
+        return back(f"/myads/{ad_id}/edit?msg={quote(t('Nothing queued: these ads are already being processed'), safe='')}#photos")
+    return back(f"/myads?ad={quote(ad_id, safe='')}&msg={quote(t('Saving the photos on willhaben in the background'), safe='')}")
 
 
 @app.post("/myads/bulk/{action}")
@@ -887,12 +888,15 @@ async def myads_delete(request: Request, ad_id: str):
 
 @app.get("/jobs")
 async def jobs_status():
-    """Background jobs for the header indicator, plus every element still waiting for one (spinners on the page):
-    keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published)."""
+    """Background jobs for the jobs indicator, plus every element still waiting for one (spinners on the page):
+    keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published),
+    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer)."""
     with session() as db:
         pending = [f"ad:{i}" for i in db.exec(select(MyAd.ad_id).where(col(MyAd.pending_action).is_not(None)))]
         pending += [f"draft:{i}" for i in db.exec(select(Draft.id).where(Draft.status == "sending"))]
         pending += [f"addraft:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.publishing == True))]  # noqa: E712
+        pending += [f"refining:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.refining == True))]  # noqa: E712
+        pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
     return {**jobs.snapshot(), "pending": pending}
 
 
@@ -914,20 +918,18 @@ def _sold_render(request: Request, ad_id: str, kind: str, buyer: str | None, msg
     buyer_conv = next((c for c in convs if c.id == buyer), None)
     return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=sold.ad_row(ad_id), title=sold.title_of(ad_id),
                   convs=convs, buyer=buyer_conv, others=sold.others(ad_id, buyer_conv.id if buyer_conv else None),
-                  reasons=reasons, msg=msg)
+                  reasons=reasons or sold.pending_reasons(ad_id), msg=msg)   # reasons a background step left behind
 
 
 @app.post("/sold/{ad_id}/willhaben", response_class=HTMLResponse)
 async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"), buyer: str = Form(""),
                          undo: str = Form(""), reason_id: str = Form("")):
-    from app.willhaben import sales
-    try:
-        msg = await sold.on_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
-    except sales.ReasonRequired as e:   # nothing written yet: let the user pick willhaben's reason, then confirm again
-        return _sold_render(request, ad_id, kind, buyer or None, t("willhaben asks why the ad is sold. Pick a reason."),
-                            reasons=e.reasons)
-    except (sales.NotOffered, sales.SaleFailed, NotLoggedIn, SessionUnavailable, WillhabenError, ValueError) as e:
-        msg = t("Not changed on willhaben: {error}", error=e)
+    """Background job (lane ads). If willhaben asks for a sold reason, the job leaves the reasons on the ad and this
+    page offers them; the next confirm queues it again with the reason."""
+    if sold.kind_of(kind) == "sold" and undo:
+        return back(_sold_url(ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#step1"))
+    queued = sold.enqueue_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
+    msg = t("On its way to willhaben – it runs in the background") if queued else t("Nothing queued: these ads are already being processed")
     return back(_sold_url(ad_id, kind, buyer or None, msg, "#step1"))
 
 
@@ -935,9 +937,12 @@ async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"),
 async def sold_notices(request: Request, ad_id: str):
     form = await request.form()
     kind, buyer = str(form.get("kind") or "sold"), str(form.get("buyer") or "") or None
-    made, errors = await sold.prepare_notices(ad_id, kind, [str(x) for x in form.getlist("conv")], buyer=buyer,
-                                              use_claude=form.get("mode") == "claude")
-    msg = t("{n} drafts prepared – nothing sent yet", n=made) + ("\n" + "\n".join(errors) if errors else "")
+    convs = [str(x) for x in form.getlist("conv")]
+    if form.get("mode") == "claude":      # Claude takes a while per chat: background job (lane claude)
+        msg = t("Claude writes {n} drafts in the background – nothing is sent", n=sold.enqueue_notice_drafts(ad_id, kind, convs, buyer=buyer))
+    else:
+        made, errors = await sold.prepare_notices(ad_id, kind, convs, buyer=buyer)
+        msg = t("{n} drafts prepared – nothing sent yet", n=made) + ("\n" + "\n".join(errors) if errors else "")
     return back(_sold_url(ad_id, kind, buyer, msg, "#step2"))
 
 
@@ -1005,8 +1010,9 @@ async def ad_draft_save(draft_id: int, title: str = Form(...), description: str 
 
 @app.post("/new-ad/{draft_id:int}/refine")
 async def ad_draft_refine(draft_id: int, instruction: str = Form(...)):
-    if instruction.strip():
-        await ad_creator.refine_draft(draft_id, instruction)
+    """Background job (lane claude): the draft shows "Claude is revising…" and swaps itself in when done."""
+    _draft_or_404(draft_id)
+    ad_creator.enqueue_refine(draft_id, instruction)
     return back(f"/new-ad/{draft_id}")
 
 
@@ -1207,8 +1213,8 @@ async def ad_draft_inline_refine(request: Request, draft_id: int, instruction: s
     _draft_or_404(draft_id)
     if title is not None and description is not None:   # unsaved edits first, Claude works on the saved version
         ad_creator.save_fields(draft_id, title, description, price)
-    d = await ad_creator.refine_draft(draft_id, instruction) if instruction.strip() else _draft_or_404(draft_id)
-    return _draft_card(request, d)
+    ad_creator.enqueue_refine(draft_id, instruction)      # background job: the card swaps itself in when done
+    return _draft_card(request, _draft_or_404(draft_id))
 
 
 @app.post("/ad-drafts/{draft_id}/inline/status", response_class=HTMLResponse)

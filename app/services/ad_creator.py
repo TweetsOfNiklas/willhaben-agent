@@ -385,11 +385,39 @@ def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping
     return True
 
 
+def enqueue_refine(draft_id: int, instruction: str) -> bool:
+    """"Revise with Claude" as a background job (lane claude, 10–60 s): the draft shows "Claude is revising…" and
+    swaps itself in when done. False: nothing to do or already on its way."""
+    from app.services import jobs
+
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d is None or d.refining or not instruction.strip():
+        return False
+    update_draft(draft_id, refining=True, error=None)
+
+    async def run(job) -> str:
+        try:
+            d = await refine_draft(draft_id, instruction)
+        finally:
+            update_draft(draft_id, refining=None)
+        if d.error:                       # refine_draft keeps Claude's errors on the draft
+            raise RuntimeError(d.error)
+        return t("Revised: {title}", title=(d.title or "")[:60])
+
+    jobs.submit("refine", t("Claude revises „{title}“", title=(d.title or f"#{draft_id}")[:60]), run, lane="claude",
+                current=f"refining:{draft_id}")
+    return True
+
+
 def recover_publishing() -> None:
     """After a restart the queue is gone. The willhaben draft id is remembered, so publishing again continues it."""
     with session() as db:
         for d in db.exec(select(AdDraft).where(AdDraft.publishing == True)):  # noqa: E712
             d.publishing, d.error = None, t("Publishing interrupted by a restart – check on willhaben, then try again")
+            db.add(d)
+        for d in db.exec(select(AdDraft).where(AdDraft.refining == True)):  # noqa: E712
+            d.refining = None             # the revision never happened: the draft is as it was
             db.add(d)
         db.commit()
 

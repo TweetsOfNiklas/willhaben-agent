@@ -31,9 +31,17 @@
         </div>
       </div>
     </form>
-    <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    {# Claude revises in the background (lane claude); when done this section, the text fields (unless you are editing
+       them), the head and the error line swap themselves in #}
+    <section id="draft-refine" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4"
+             {% if d.refining %}data-pending-key="refining:{{ d.id }}" data-refresh-also="draft-form draft-head draft-error"{% endif %}>
       <div class="font-semibold">{{ _("Improve the listing") }}</div>
-      <form method="post" action="/new-ad/{{ d.id }}/refine" class="flex items-center gap-2 m-0" x-data="{ busy: false }" @submit="busy = true"><input name="instruction" required placeholder="{{ _('e.g. shorter and more factual · mention that the battery was new in 2024 · frame size in the title') }}" class="input min-w-0 flex-1 bg-base-200"><button class="btn shrink-0 whitespace-nowrap"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Revise with Claude") }}</button></form>
+      {% if d.refining %}
+      <div>{{ ui.pending('refining:' ~ d.id, _("Claude is revising the text…"), _("Queued: Claude revises the text")) }}</div>
+      {% else %}
+      <form method="post" action="/new-ad/{{ d.id }}/refine" class="flex items-center gap-2 m-0" x-data="{ busy: false }" @submit="busy = true"
+            hx-post="/new-ad/{{ d.id }}/refine" hx-target="#draft-refine" hx-select="#draft-refine" hx-swap="outerHTML"><input name="instruction" required placeholder="{{ _('e.g. shorter and more factual · mention that the battery was new in 2024 · frame size in the title') }}" class="input min-w-0 flex-1 bg-base-200"><button class="btn shrink-0 whitespace-nowrap"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Revise with Claude") }}</button></form>
+      {% endif %}
       <div class="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted"><span>{{ _("Save unsaved changes above first – Claude works with the saved version.") }}</span>
         {% if d.revisions %}<form method="post" action="/new-ad/{{ d.id }}/undo" class="m-0 max-w-full"><button class="btn btn-xs h-auto max-w-full py-1 text-left whitespace-normal">↶ {{ _("Undo: “{what}”", what=d.revisions[-1].instruction[:60]) }} <span class="text-muted">· {{ _("{n} earlier version", n=1) if d.revisions|length == 1 else _("{n} earlier versions", n=d.revisions|length) }}</span></button></form>{% endif %}</div>
     </section>

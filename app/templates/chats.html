@@ -15,7 +15,9 @@
       <h1 class="text-xl">{{ _("Chats") }}</h1>
       <div class="flex shrink-0 gap-1.5">
         <button type="button" class="btn btn-sm" id="chat-select" @click="mode(!selecting)">{{ _("Select") }}</button>
-        <form method="post" action="/chats/sync" x-data="{ busy: false }" @submit="busy = true">
+        {# background job (lane chat): the list updates itself as conversations come in #}
+        <form method="post" action="/chats/sync" x-data="{ busy: false }" @submit="busy = true"
+              hx-post="/chats/sync" hx-swap="none" @htmx:after-request="busy = false">
           <button class="btn btn-sm" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span><span x-show="!busy">{{ ui.icon('refresh', 14) }}</span>{{ _("Sync") }}</button>
         </form>
       </div>

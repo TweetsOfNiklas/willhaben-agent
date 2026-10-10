@@ -170,3 +170,165 @@ def test_api_never_sends_a_queued_answer_twice():
             db.commit()
         r = c.post(f"/api/drafts/{draft_id}/send", json={"text": "nochmal"})
     assert r.status_code == 409 and r.json()["sent"] is False
+
+
+async def test_claude_draft_runs_in_the_background(monkeypatch):
+    _conv_and_draft()
+    gate, calls = asyncio.Event(), []
+
+    async def fake_draft(cid, hint=None, auto=False):
+        await gate.wait()
+        calls.append((cid, hint))
+        with session() as db:
+            db.add(Draft(conversation_id=cid, text="Ja, gerne."))
+            db.commit()
+
+    monkeypatch.setattr(chats, "draft_reply", fake_draft)
+    before = chats.live_state("c1")["composer"]
+    assert chats.enqueue_draft("c1", "freundlich")
+    assert not chats.enqueue_draft("c1")                                      # one at a time per chat
+    with session() as db:
+        assert db.get(Conversation, "c1").drafting is True
+    assert chats.live_state("c1")["composer"] != before                       # the open chat shows "writing…"
+    assert jobs.snapshot()["active"][0]["lane"] == "claude"
+    gate.set()
+    await finish_jobs()
+    with session() as db:
+        conv = db.get(Conversation, "c1")
+    assert calls == [("c1", "freundlich")] and not conv.drafting and not conv.draft_error
+
+
+async def test_claude_draft_failure_shows_in_the_chat(monkeypatch):
+    from app.llm.base import LLMError
+    _conv_and_draft()
+
+    async def boom(cid, hint=None, auto=False):
+        raise LLMError("Limit erreicht")
+
+    monkeypatch.setattr(chats, "draft_reply", boom)
+    chats.enqueue_draft("c1")
+    await finish_jobs()
+    with session() as db:
+        conv = db.get(Conversation, "c1")
+    assert not conv.drafting and "Limit erreicht" in conv.draft_error
+
+
+async def test_refine_runs_in_the_background(monkeypatch):
+    draft_id = _ad_draft()
+
+    async def fake_refine(did, instruction, label=None):
+        return ad_creator.update_draft(did, title="Kürzer")
+
+    monkeypatch.setattr(ad_creator, "refine_draft", fake_refine)
+    assert ad_creator.enqueue_refine(draft_id, "kürzer")
+    assert not ad_creator.enqueue_refine(draft_id, "nochmal")                 # already on its way
+    with session() as db:
+        assert db.get(dbmod.AdDraft, draft_id).refining is True
+    await finish_jobs()
+    with session() as db:
+        d = db.get(dbmod.AdDraft, draft_id)
+    assert d.title == "Kürzer" and not d.refining
+
+
+async def test_edit_keeps_its_text_until_willhaben_has_it(monkeypatch):
+    from app.services import my_ads
+    with session() as db:
+        db.add(dbmod.MyAd(ad_id="7", heading="Alt", status="active"))
+        db.commit()
+
+    async def fail(ad_id, heading, description, price):
+        raise RuntimeError("HTTP 500")
+
+    monkeypatch.setattr(my_ads, "edit", fail)
+    assert my_ads.enqueue_edit("7", "Neu", "Text", 12.0)
+    with session() as db:
+        row = db.get(dbmod.MyAd, "7")
+    assert row.pending_action == "edit" and row.pending_payload["edit"]["heading"] == "Neu"
+    assert not my_ads.enqueue_edit("7", "Noch", "x", None)                     # never two actions at once
+    await finish_jobs()
+    with session() as db:
+        row = db.get(dbmod.MyAd, "7")
+    assert not row.pending_action and "500" in row.last_error and row.pending_payload["unsaved"]["heading"] == "Neu"
+
+
+def test_restart_keeps_an_interrupted_edit_for_the_edit_page():
+    from app.services import my_ads
+    with session() as db:
+        db.add(dbmod.MyAd(ad_id="8", heading="Alt", status="active", pending_action="edit",
+                          pending_payload={"edit": {"heading": "Neu", "description": "Text", "price": None}}))
+        db.commit()
+    my_ads.recover()
+    with session() as db:
+        row = db.get(dbmod.MyAd, "8")
+    assert not row.pending_action and row.pending_payload == {"unsaved": {"heading": "Neu", "description": "Text", "price": None}}
+
+
+async def test_photos_wait_as_files_until_the_upload(monkeypatch):
+    from app.services import my_ads
+    with session() as db:
+        db.add(dbmod.MyAd(ad_id="9", heading="Rad", status="active"))
+        db.commit()
+    got = []
+
+    async def fake_set_photos(ad_id, order, files):
+        got.append((order, files))
+
+    monkeypatch.setattr(my_ads, "set_photos", fake_set_photos)
+    assert my_ads.enqueue_photos("9", ["new:0", "1/9/a.jpg"], [("neu.png", b"PNG")])
+    assert (my_ads._photo_dir("9") / "00.png").read_bytes() == b"PNG"        # survives until the job runs
+    await finish_jobs()
+    assert got == [(["new:0", "1/9/a.jpg"], [("neu.png", b"PNG")])] and not my_ads._photo_dir("9").exists()
+
+
+async def test_sold_step_leaves_willhabens_reasons_on_the_ad(monkeypatch):
+    from app.services import sold
+    from app.willhaben import sales
+    with session() as db:
+        db.add(dbmod.MyAd(ad_id="5", heading="Rad", status="active"))
+        db.commit()
+    seen = []
+
+    async def on_willhaben(ad_id, kind, *, undo=False, reason_id=None):
+        seen.append(reason_id)
+        if reason_id is None:
+            raise sales.ReasonRequired([sales.SoldReason(id="2", label="Über willhaben")])
+        return "Marked as sold on willhaben"
+
+    monkeypatch.setattr(sold, "on_willhaben", on_willhaben)
+    assert sold.enqueue_willhaben("5", "sold")
+    await finish_jobs()
+    assert [r.label for r in sold.pending_reasons("5")] == ["Über willhaben"]
+    assert sold.enqueue_willhaben("5", "sold", reason_id="2")
+    await finish_jobs()
+    assert seen == [None, "2"] and sold.pending_reasons("5") is None
+
+
+def test_chat_sync_and_reload_answer_htmx_at_once(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    _conv_and_draft()
+    ran = []
+
+    async def fake_sync(force=False):
+        ran.append(("sync", force))
+        return {"conversations": 1, "changed": 0}
+
+    async def fake_messages(cid):
+        ran.append(("reload", cid))
+        return "full"
+
+    async def fake_context(cid):
+        return None
+
+    monkeypatch.setattr(chats, "sync", fake_sync)
+    monkeypatch.setattr(chats, "sync_messages", fake_messages)
+    monkeypatch.setattr(chats, "ensure_ad_context", fake_context)
+    from tests.conftest import wait_jobs
+    with TestClient(app) as c:
+        assert c.post("/chats/sync", headers={"HX-Request": "true"}).status_code == 204
+        assert c.post("/chats/c1/refresh", headers={"HX-Request": "true"}).status_code == 204
+        r = c.post("/chats/sync", follow_redirects=False)                     # without htmx: back to the list
+        assert r.status_code == 303 and r.headers["location"].startswith("/chats?msg=")
+        wait_jobs()
+    assert ("reload", "c1") in ran and ("sync", True) in ran

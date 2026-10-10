@@ -14,8 +14,13 @@
 {%- endmacro %}
 {# an ad waiting for its queued action (app/services/my_ads.py enqueue): spinner while it runs, clock while queued #}
 {% macro pending_note(a) -%}
-  {{ ui.pending('ad:' ~ a.ad_id, {'delete': _("Deleting…"), 'deactivate': _("Deactivating…"), 'activate': _("Activating…")}[a.pending_action],
-                {'delete': _("Queued: delete"), 'deactivate': _("Queued: deactivate"), 'activate': _("Queued: activate")}[a.pending_action]) }}
+  {{ ui.pending('ad:' ~ a.ad_id,
+       {'delete': _("Deleting…"), 'deactivate': _("Deactivating…"), 'activate': _("Activating…"), 'edit': _("Saving…"),
+        'photos': _("Saving the photos…"), 'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"),
+        'unreserve': _("Removing the reservation…")}.get(a.pending_action, _("In progress…")),
+       {'delete': _("Queued: delete"), 'deactivate': _("Queued: deactivate"), 'activate': _("Queued: activate"),
+        'edit': _("Queued: save"), 'photos': _("Queued: save the photos"), 'sold': _("Queued: mark as sold"),
+        'reserved': _("Queued: mark as reserved"), 'unreserve': _("Queued: remove the reservation")}.get(a.pending_action, _("queued"))) }}
 {%- endmacro %}
 {% macro status_pill(a) -%}
   {%- if a.replaced_by %}{{ ui.pill(_("renewed")) }}

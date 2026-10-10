@@ -333,12 +333,113 @@ def _clear_pending(ad_ids: list[str]) -> None:
 
 
 def recover() -> None:
-    """After a restart the queue is gone: ads still marked were not (or not surely) changed on willhaben."""
+    """After a restart the queue is gone: ads still marked were not (or not surely) changed on willhaben.
+    An interrupted edit keeps its text (the edit page offers it again); photos waiting for upload are dropped."""
+    import shutil
     with session() as db:
         for row in db.exec(select(MyAd).where(col(MyAd.pending_action).is_not(None))):
+            if row.pending_action == "edit":
+                row.pending_payload = {"unsaved": (row.pending_payload or {}).get("edit")}
+            elif row.pending_action == "photos":
+                row.pending_payload = None
             row.pending_action, row.last_error = None, t("Interrupted by a restart – please try again")
             db.add(row)
         db.commit()
+    shutil.rmtree(_photo_dir(), ignore_errors=True)
+
+
+def _photo_dir(ad_id: str | None = None):
+    from app.config import get_settings
+    base = get_settings().data_dir / "pending-photos"
+    return base / ad_id if ad_id else base
+
+
+def _mark(ad_id: str, action: str, payload: dict[str, Any] | None = None) -> MyAd | None:
+    """Mark one ad for a queued action; None when it is already waiting for one (never two at once)."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row is None or row.pending_action:
+            return None
+        row.pending_action, row.pending_payload, row.last_error = action, payload, None
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def _unmark(ad_id: str, error: str | None = None, payload: Any = False) -> None:
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row is not None:
+            row.pending_action = None
+            if payload is not False:
+                row.pending_payload = payload
+            if error is not None:
+                row.last_error = error
+            db.add(row)
+            db.commit()
+
+
+def enqueue_edit(ad_id: str, heading: str, description: str, price: float | None) -> bool:
+    """Save title / description / price on willhaben as a background job. The text waits in the database, so a
+    restart cannot lose it. False: the ad already waits for another action."""
+    from app.willhaben.insert import InsertError
+    if not heading.strip() or not description.strip():
+        raise InsertError(t("Title and description must not be empty"))
+    row = _mark(ad_id, "edit", {"edit": {"heading": heading, "description": description, "price": price}})
+    if row is None:
+        return False
+
+    async def run(job: jobs.Job) -> str:
+        try:
+            r = await edit(ad_id, heading, description, price)
+        except Exception as e:
+            _unmark(ad_id, t("Saving failed: {error}", error=e),
+                    {"unsaved": {"heading": heading, "description": description, "price": price}})
+            raise
+        _unmark(ad_id, payload=None)
+        return t("Saved on willhaben – status now: {status}", status=(r.status if r else "") or "")
+
+    jobs.submit("myads-edit", t("Save „{title}“ on willhaben", title=(heading or ad_id)[:60]), run,
+                current=f"ad:{ad_id}")
+    return True
+
+
+def enqueue_photos(ad_id: str, order: list[str], new_photos: list[tuple[str, bytes]]) -> bool:
+    """Reorder / remove / add photos as a background job. New photos wait as files in the data folder until the
+    upload. False: the ad already waits for another action."""
+    from pathlib import Path
+
+    from app.willhaben.insert import InsertError
+    for name, _data in new_photos:
+        if PHOTO_MIMES.get(Path(name).suffix.lower()) is None:
+            raise InsertError(t("Unsupported photo format: {name} (JPG, PNG, WebP)", name=name))
+    row = _mark(ad_id, "photos")
+    if row is None:
+        return False
+    folder = _photo_dir(ad_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    files = []
+    for i, (name, data) in enumerate(new_photos):
+        path = folder / f"{i:02d}{Path(name).suffix.lower()}"
+        path.write_bytes(data)
+        files.append((name, path))
+
+    async def run(job: jobs.Job) -> str:
+        import shutil
+        try:
+            r = await set_photos(ad_id, order, [(name, path.read_bytes()) for name, path in files])
+        except Exception as e:
+            _unmark(ad_id, t("Saving the photos failed: {error}", error=e))
+            raise
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        _unmark(ad_id)
+        return t("Photos saved on willhaben – status now: {status}", status=(r.status if r else "") or "")
+
+    jobs.submit("myads-photos", t("Save the photos of „{title}“ on willhaben", title=(row.heading or ad_id)[:60]), run,
+                current=f"ad:{ad_id}")
+    return True
 
 
 async def load_for_edit(ad_id: str) -> dict[str, Any]:

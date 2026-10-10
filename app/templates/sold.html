@@ -28,10 +28,18 @@
 
   {% set hidden %}<input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}">{% endset %}
 
-  <section id="step1" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  {# step 1 runs as a background job (lane ads): the forms send through htmx, this section shows the job and swaps
+     itself in when it is done (with willhaben's reasons, if it asks for one) #}
+  {% set busy1 = ad and ad.pending_action in ('sold', 'reserved', 'unreserve') %}
+  <section id="step1" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4"
+           {% if busy1 %}data-pending-key="ad:{{ ad_id }}"{% endif %}>
     <h2 class="text-base font-semibold">1 · {{ _("On willhaben") }}</h2>
-    {% if is_sold %}
-    <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3">
+    {% if ad and ad.last_error and not busy1 %}<small class="text-error">{{ ad.last_error }}</small>{% endif %}
+    {% if busy1 %}
+    <div>{{ ui.pending('ad:' ~ ad_id, {'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}[ad.pending_action],
+                       {'sold': _("Queued: mark as sold"), 'reserved': _("Queued: mark as reserved"), 'unreserve': _("Queued: remove the reservation")}[ad.pending_action]) }}</div>
+    {% elif is_sold %}
+    <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3" hx-boost="true" hx-target="#step1" hx-select="#step1" hx-swap="outerHTML" hx-push-url="false">
       {{ hidden }}
       {% if reasons %}
       <fieldset class="flex flex-col gap-2">
@@ -45,7 +53,7 @@
       <small class="text-xs text-muted">{{ _('Like "Auf verkauft setzen" in My ads on willhaben. A sold ad cannot be activated again.') }}</small>
     </form>
     {% else %}
-    <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3">
+    <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3" hx-boost="true" hx-target="#step1" hx-select="#step1" hx-swap="outerHTML" hx-push-url="false">
       {{ hidden }}
       <div class="flex flex-wrap gap-2">
         <button class="btn btn-primary" data-confirm="{{ _('Mark this ad as reserved on willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Mark as reserved on willhaben") }}</button>
@@ -60,7 +68,8 @@
     <h2 class="text-base font-semibold">2 · {{ _("Tell the other buyers") }}</h2>
     {% set drafts = others | selectattr('draft') | list %}
     {% if others %}
-    <form method="post" action="/sold/{{ ad_id }}/notices" class="flex flex-col gap-3">
+    {# templates are made at once; Claude drafts run as a background job – only this step swaps, no reload #}
+    <form method="post" action="/sold/{{ ad_id }}/notices" class="flex flex-col gap-3" hx-boost="true" hx-target="#step2" hx-select="#step2" hx-swap="outerHTML" hx-push-url="false">
       {{ hidden }}
       {% if not buyer %}<p class="text-xs text-muted">{{ _("Pick the buyer above first, so they do not get this message too.") }}</p>{% endif %}
       <div class="overflow-x-auto">
@@ -72,7 +81,7 @@
               <a class="link link-primary no-underline" href="/chats/{{ o.conv.id }}">{{ o.conv.partner_name or _('unknown') }}</a></label></td>
             <td class="max-w-[260px] break-words text-xs text-muted">{{ (o.last_in or '')[:120] }}</td>
             {# a notice on its way: spinner / clock; the cell swaps itself when it is sent #}
-            <td id="notice-{{ o.conv.id }}" {% if o.sending %}data-pending-key="draft:{{ o.sending.id }}"{% endif %}>{% if o.sending %}{{ ui.pending('draft:' ~ o.sending.id, _("Sending…"), _("Queued: send")) }}{% elif o.informed %}{{ ui.pill(_("informed"), 'ok', dot=false) }}{% elif o.draft %}{{ ui.pill(_("draft"), '', dot=false) }}{% endif %}</td>
+            <td id="notice-{{ o.conv.id }}" {% if o.sending %}data-pending-key="draft:{{ o.sending.id }}"{% elif o.conv.drafting %}data-pending-key="drafting:{{ o.conv.id }}" data-refresh-also="notice-drafts"{% endif %}>{% if o.conv.drafting %}{{ ui.pending('drafting:' ~ o.conv.id, _("Claude is writing…"), _("Queued: Claude writes")) }}{% elif o.sending %}{{ ui.pending('draft:' ~ o.sending.id, _("Sending…"), _("Queued: send")) }}{% elif o.informed %}{{ ui.pill(_("informed"), 'ok', dot=false) }}{% elif o.draft %}{{ ui.pill(_("draft"), '', dot=false) }}{% endif %}</td>
           </tr>
           {% endfor %}
           </tbody>
@@ -88,6 +97,7 @@
     <p class="text-muted">{{ _("No other conversations about this ad.") }}</p>
     {% endif %}
 
+    <div id="notice-drafts">
     {% if drafts %}
     {# sent in the background: only this step is swapped, the messages go out one after another #}
     <form method="post" action="/sold/{{ ad_id }}/notices/send" class="flex flex-col gap-3" hx-boost="true"
@@ -106,6 +116,7 @@
       </div>
     </form>
     {% endif %}
+    </div>
   </section>
 
   <section id="step3" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">

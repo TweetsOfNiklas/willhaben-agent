@@ -148,7 +148,10 @@ async def test_sold_reasons_http_error_is_sale_failed(ad_with_chats, monkeypatch
     monkeypatch.setattr(sold, "get_session", lambda: s)
     with TestClient(app) as c:
         r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
-    assert r.status_code == 200 and "Not changed on willhaben" in r.text and not s.writes
+        assert r.status_code == 200 and not s.writes
+        wait_jobs()                                                      # the step runs as a background job
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+    assert "Not changed on willhaben" in page and not s.writes
 
 
 def test_action_path_rejects_odd_links():
@@ -278,9 +281,15 @@ def test_web_flow(ad_with_chats, monkeypatch):
         assert not any('name="conv"' in line and "checked" in line for line in nobuyer.splitlines())
 
         r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
-        assert r.status_code == 200 and "Über willhaben" in r.text and not s.writes   # reason first, nothing written
-        r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer", "reason_id": "2"})
-        assert "Marked as sold on willhaben" in r.text and len(s.writes) == 2
+        assert r.status_code == 200 and "On its way to willhaben" in r.text
+        wait_jobs()                                                      # background job: willhaben asks for a reason
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        assert "Über willhaben" in page and 'name="reason_id"' in page and not s.writes   # reason first, nothing written
+        c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer", "reason_id": "2"})
+        wait_jobs()
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        assert len(s.writes) == 2 and sold.ad_row(AD).last_action == "Marked as sold on willhaben"
+        assert 'name="reason_id"' not in page                            # the reasons are used up
 
         r = c.post(f"/sold/{AD}/notices", data={"kind": "sold", "buyer": "c-buyer", "conv": ["c-2", "c-3"],
                                                  "mode": "template"})

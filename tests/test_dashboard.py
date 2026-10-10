@@ -81,6 +81,7 @@ def test_pages_render(client):
 def test_chat_draft_send_flow(client):
     _conversation()
     r = client.post("/chats/c1/draft", data={"hint": "Gegenangebot 180"}, follow_redirects=False)
+    wait_jobs()
     assert r.status_code == 303 and r.headers["location"] == "/chats/c1"
 
     prompt = client.fake.calls[-1]["prompt"]
@@ -113,6 +114,7 @@ def test_chat_draft_send_flow(client):
 
     # the sent text becomes a style example for the next draft
     client.post("/chats/c1/draft", data={"hint": ""})
+    wait_jobs()
     assert "Hallo, 180 € passt." in client.fake.calls[-1]["prompt"]
 
 

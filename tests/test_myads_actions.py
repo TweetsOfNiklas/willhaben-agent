@@ -464,8 +464,12 @@ def test_edit_page_and_route(monkeypatch):
         assert 'value="Alter Titel"' in page and "• Netzteil" in page and 'value="40"' in page
         r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "12,50"},
                    follow_redirects=False)
-        assert r.status_code == 303 and "/myads?msg=" in r.headers["location"]
+        assert r.status_code == 303 and r.headers["location"].startswith("/myads?ad=1000000001&msg=")   # back to the ad
+        wait_jobs()                                                          # saved by the background job
         assert acct.put_body["price"] == 12.5
+        with session() as db:
+            row = db.get(MyAd, "1000000001")
+        assert not row.pending_action and not row.pending_payload
         r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "abc"},
                    follow_redirects=False)
         assert "/edit?msg=" in r.headers["location"]

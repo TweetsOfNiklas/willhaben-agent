@@ -15,7 +15,7 @@
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-1.5">
-      <form method="post" action="/chats/{{ conv.id }}/refresh"><button class="btn btn-sm">{{ ui.icon('refresh', 14) }}{{ _("Reload") }}</button></form>
+      <form method="post" action="/chats/{{ conv.id }}/refresh" hx-post="/chats/{{ conv.id }}/refresh" hx-swap="none"><button class="btn btn-sm">{{ ui.icon('refresh', 14) }}{{ _("Reload") }}</button></form>
       <a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" rel="noopener" class="btn btn-sm">willhaben{{ ui.icon('external', 14) }}</a>
       {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
     </div>
@@ -37,14 +37,19 @@
   {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
   {# an answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done #}
   <div id="chat-composer" class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[64px]"
-       {% if sending %}data-pending-key="draft:{{ (sending|last).id }}" data-refresh-also="chat-messages"{% endif %}>
-    {% if sending %}{% set d = sending|last %}
+       {% if sending %}data-pending-key="draft:{{ (sending|last).id }}" data-refresh-also="chat-messages"{% elif conv.drafting %}data-pending-key="drafting:{{ conv.id }}"{% endif %}>
+    {% if conv.drafting %}
+    {# Claude writes in the background (lane claude): the draft appears here by itself #}
+    <div class="flex flex-wrap items-center gap-2">{{ ui.pending('drafting:' ~ conv.id, _("Claude is writing an answer…"), _("Queued: Claude writes an answer")) }}</div>
+    <small class="text-muted">{{ _("Takes 10–60 seconds – you can leave the chat.") }}</small>
+    {% elif sending %}{% set d = sending|last %}
     <div class="flex flex-wrap items-center gap-2">{{ ui.pending('draft:' ~ d.id, _("Sending…"), _("Queued: send")) }}</div>
     <p class="rounded-[10px] bg-base-200 px-3.5 py-2.5 break-words whitespace-pre-wrap text-muted">{{ d.text }}</p>
     {% elif open %}{% set d = open|last %}
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex min-w-0 flex-wrap items-center gap-2">{{ ui.pill(_("Draft"), 'brand', dot=false) }}<span class="text-[12.5px] text-muted">{{ d.created_at|local('%H:%M') }}{% if d.intent %} · {{ d.intent }}{% endif %}{% if d.suggested_price %} · {{ _("Price {price}", price=d.suggested_price|eur) }}{% endif %}{% if d.auto %} · {{ _("automatic") }}{% endif %}</span></div>
-      <form method="post" action="/chats/{{ conv.id }}/draft" class="flex min-w-0 flex-wrap items-center gap-1.5" hx-disabled-elt="find button">
+      <form method="post" action="/chats/{{ conv.id }}/draft" class="flex min-w-0 flex-wrap items-center gap-1.5" hx-disabled-elt="find button"
+            hx-post="/chats/{{ conv.id }}/draft" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
         <input name="hint" placeholder="{{ _('Guidance, e.g. counter-offer €180, pickup Saturday') }}" class="input input-sm w-64 max-w-full bg-base-200">
         <button class="btn btn-sm">{{ _("Redraft") }}</button>
       </form>
@@ -67,11 +72,13 @@
       </div>
     </form>
     {% else %}
-    <form method="post" action="/chats/{{ conv.id }}/draft" class="flex flex-wrap items-center gap-1.5" hx-disabled-elt="find button">
+    <form method="post" action="/chats/{{ conv.id }}/draft" class="flex flex-wrap items-center gap-1.5" hx-disabled-elt="find button"
+          hx-post="/chats/{{ conv.id }}/draft" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
       <input name="hint" placeholder="{{ _('Guidance for this answer (optional), e.g. counter-offer €180, pickup Saturday from 10 am') }}" class="input min-w-0 flex-1 bg-base-200">
       <button class="btn btn-primary whitespace-nowrap">{{ _("Prepare answer with Claude") }}</button>
     </form>
     <small class="text-muted">{{ _("Takes 10–60 seconds.") }}</small>
+    {% if conv.draft_error %}<small class="text-error">{{ conv.draft_error }}</small>{% endif %}
     {% endif %}
     {% set sent = drafts|selectattr('status', 'equalto', 'sent')|list %}
     {% if sent %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("{n} earlier drafts", n=sent|length) }}</summary>{% for d in sent %}<p class="mt-1.5 break-words whitespace-pre-wrap">{{ d.sent_at|local }} · {{ d.text }}</p>{% endfor %}</details>{% endif %}

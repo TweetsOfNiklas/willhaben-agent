@@ -1,7 +1,8 @@
 """Background jobs on the user's behalf (ad actions, publishing, chat messages), one after another per lane.
 
 The page that starts a job returns at once; the header shows what is running right now, what is queued and the
-last results (GET /jobs). Lanes: "ads" (own ads: update, delete, publish, ...) and "chat" (messages). Within a lane
+last results (GET /jobs). Lanes: "ads" (own ads: update, delete, publish, ...), "chat" (messages, sync) and "claude"
+(answers and revisions Claude writes). Within a lane
 jobs run strictly in order (an update must not overlap a delete run); the lanes run side by side, so a chat answer
 never waits behind twenty deletes. The pacing towards willhaben stays the shared limiter's: requests of both lanes
 still go out one by one. Jobs live in memory only: a restart drops the queue (callers persist their own markers and
@@ -52,7 +53,7 @@ class Job:
                 "finished_at": self.finished_at.isoformat() if self.finished_at else None}
 
 
-LANES = ("ads", "chat")
+LANES = ("ads", "chat", "claude")   # claude: drafts and revisions (no willhaben account request, can take a minute)
 
 _ids = itertools.count(1)
 _locks: dict[str, asyncio.Lock] = {}

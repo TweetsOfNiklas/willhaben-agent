@@ -276,7 +276,7 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
             buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
             out["messages"] = fp(list(msgs))
-            out["composer"] = fp([list(d) for d in drafts])
+            out["composer"] = fp([list(d) for d in drafts], conv.drafting, conv.draft_error)
             out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
                                 ad and [ad.sale_status, ad.sale_conversation_id], ships, buys)
     return out
@@ -438,13 +438,76 @@ async def _send_job(draft_id: int) -> str:
 
 
 def recover_sending() -> None:
-    """After a restart the queue is gone. Never sent again automatically: the message may have gone out just before."""
+    """After a restart the queue is gone. Never sent again automatically: the message may have gone out just before.
+    A draft Claude was still writing is simply not there: the chat offers "Prepare answer" again."""
     with session() as db:
         for d in db.exec(select(Draft).where(Draft.status == "sending")):
             d.status = "draft"
             d.error = t("Interrupted by a restart – it is unclear whether it went out: reload the history before sending again")
             db.add(d)
+        for c in db.exec(select(Conversation).where(Conversation.drafting == True)):  # noqa: E712
+            c.drafting = None
+            db.add(c)
         db.commit()
+
+
+def _set_drafting(conversation_id: str, on: bool, error: str | None = None) -> None:
+    with session() as db:
+        c = db.get(Conversation, conversation_id)
+        if c is not None:
+            c.drafting, c.draft_error = (True if on else None), error
+            db.add(c)
+            db.commit()
+
+
+def enqueue_draft(conversation_id: str, hint: str | None = None) -> bool:
+    """"Prepare answer" as a background job (lane claude, 10–60 s): the chat shows "Claude is writing…" and the new
+    draft appears by itself (live view). False: this chat already has one on the way."""
+    with session() as db:
+        c = db.get(Conversation, conversation_id)
+        if c is None or c.drafting:
+            return False
+    _set_drafting(conversation_id, True)
+
+    async def run(job: jobs.Job) -> str:
+        try:
+            await draft_reply(conversation_id, hint)
+        except Exception as e:               # the reason shows in the chat, next to "Prepare answer"
+            _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
+            raise
+        _set_drafting(conversation_id, False)
+        return t("Draft ready")
+
+    who = (c.partner_name if c else None) or t("unknown")
+    jobs.submit("chat-draft", t("Claude writes an answer to {name}", name=who), run, lane="claude",
+                current=f"drafting:{conversation_id}")
+    return True
+
+
+def enqueue_sync() -> jobs.Job:
+    """"Sync" as a background job (lane chat): every conversation in the window is read again (one request per
+    chat); the list updates itself (live view). A sync already waiting is reused."""
+    async def run(job: jobs.Job) -> str:
+        res = await sync(force=True)
+        if res.get("skipped"):           # not logged in / browser off: shown with a warning sign
+            job.problems = 1
+            return res["skipped"]
+        return t("{n} conversations, {changed} updated", n=res["conversations"], changed=res["changed"])
+
+    return jobs.submit("chat-sync", t("Sync chats with willhaben"), run, lane="chat", reuse_queued=True)
+
+
+def enqueue_reload(conversation_id: str) -> jobs.Job:
+    """"Reload" of one chat as a background job (lane chat); the thread updates itself (live view)."""
+    async def run(job: jobs.Job) -> str:
+        mode = await sync_messages(conversation_id)
+        await ensure_ad_context(conversation_id)
+        return "" if mode == "full" else t("Only the last message is available (messages endpoint not verified yet).")
+
+    with session() as db:
+        c = db.get(Conversation, conversation_id)
+    return jobs.submit(f"chat-reload-{conversation_id}", t("Reload the chat with {name}", name=(c.partner_name if c else None) or t("unknown")),
+                       run, lane="chat", reuse_queued=True)
 
 
 # ------------------------------------------------------------------ automatic answers
