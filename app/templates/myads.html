@@ -30,7 +30,7 @@
 <form method="get" action="/myads" class="bulkbar">
   {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
   <label style="margin:0"><input type="checkbox" role="switch" name="show_inactive" value="1" {% if show_inactive %}checked{% endif %} onchange="this.form.submit()">
-    <small>{{ _("Show inactive ads ({n})", n=inactive_count) }}</small></label>
+    <small>{{ _("Show deactivated ads ({n})", n=inactive_count) }}</small></label>
   <label style="margin:0"><input type="checkbox" role="switch" name="show_sold" value="1" {% if show_sold %}checked{% endif %} onchange="this.form.submit()">
     <small>{{ _("Show sold ads ({n})", n=sold_count) }}</small></label>
   <noscript><button class="secondary">{{ _("Apply") }}</button></noscript>
@@ -39,6 +39,8 @@
   <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Expires") }}</th><th title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">{{ _("Auto-renew") }}</th><th></th></tr></thead>
   <tbody>
   {% for a in ads %}
+  {% if expired_count and loop.index0 == 0 %}<tr class="section"><th colspan="6">{{ _("Expired ({n})", n=expired_count) }}</th></tr>{% endif %}
+  {% if expired_count and loop.index0 == expired_count %}<tr class="section"><th colspan="6">{{ _("Other ads") }}</th></tr>{% endif %}
   <tr>
     <td><label style="display:flex;gap:.4rem;align-items:center;margin:0">
       {% if not a.replaced_by %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel" data-title="{{ a.heading or a.ad_id }}" aria-label="{{ _('Select') }}">{% endif %}
@@ -62,7 +64,7 @@
           <li><form method="get" action="/myads/{{ a.ad_id }}/edit" style="margin:0" dir="ltr">
             <button class="secondary outline" style="width:100%;margin:0">✎ {{ _("Edit on willhaben") }}</button></form></li>
           {% endif %}
-          {% if a.status not in ('active', 'expired', 'sold', 'reserved') and not a.replaced_by %}
+          {% if a.status not in ('active', 'sold', 'reserved') and not a.replaced_by %}
           <li><form method="post" action="/myads/bulk/activate" style="margin:0" dir="ltr"
                 onsubmit='return confirm({{ (_("Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.") ~ "\n\n„" ~ (a.heading or a.ad_id) ~ "“")|tojson }})'>
             <input type="hidden" name="ids" value="{{ a.ad_id }}">

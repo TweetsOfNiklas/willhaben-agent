@@ -445,13 +445,17 @@ def test_myads_filters_and_order():
         db.add(MyAd(ad_id="4", heading="Weg", status="sold", end_date=now))
         db.add(MyAd(ad_id="5", heading="Geschenkt", status="Verschenkt", end_date=now))
         db.add(MyAd(ad_id="6", heading="Reserviert", status="active", sale_status="sold", end_date=now))
+        db.add(MyAd(ad_id="7", heading="Ausgelaufen", status="expired", end_date=now))
         db.commit()
     with TestClient(app) as c:
         page = c.get("/myads").text
         assert page.index("Lange") < page.index("Bald")       # most days left first
         for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert"):
             assert gone not in page
-        assert "Show inactive ads (1)" in page and "Show sold ads (3)" in page
+        assert "Show deactivated ads (1)" in page and "Show sold ads (3)" in page
+        # expired ads always show, in their own section above the others
+        assert page.index("Expired (1)") < page.index("Ausgelaufen") < page.index("Other ads") < page.index("Lange")
+        assert "Activate on willhaben" in page    # an expired ad can be put online again by hand (republished)
         page = c.get("/myads?show_inactive=1").text
         assert "Deaktiviert" in page and "Weg" not in page
         page = c.get("/myads?show_sold=1").text

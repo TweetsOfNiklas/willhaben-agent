@@ -73,5 +73,7 @@
  "Claude could not revise the ad: {error}": "Claude konnte die Anzeige nicht überarbeiten: {error}",
  "Show sold ads ({n})": "Verkaufte Anzeigen zeigen ({n})",
  "Apply": "Anwenden",
- "Show inactive ads ({n})": "Inaktive Anzeigen zeigen ({n})"
+ "Show deactivated ads ({n})": "Deaktivierte Anzeigen zeigen ({n})",
+ "Expired ({n})": "Abgelaufen ({n})",
+ "Other ads": "Weitere Anzeigen"
 }

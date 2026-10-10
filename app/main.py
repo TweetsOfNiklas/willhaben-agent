@@ -580,13 +580,16 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
         rows = list(db.exec(select(MyAd).order_by(col(MyAd.end_date).desc().nulls_last())))   # most days left first
     hidden = [a for a in rows if a.hidden]
     ads = rows if show_hidden else [a for a in rows if not a.hidden]
-    # sold / given away and inactive (Passiv, expired, renewed) ads are hidden unless asked for
+    # expired (ran out) ads always show, in their own section on top: they need renewing;
+    # sold / given away and inactive (deactivated, renewed) ads are hidden unless asked for
     sold = [a for a in ads if my_ads.is_sold(a)]
-    inactive = [a for a in ads if not my_ads.is_sold(a) and a.status not in ("active", "reserved")]
-    ads = [a for a in ads if (show_sold or a not in sold) and (show_inactive or a not in inactive)]
+    expired = [a for a in ads if not my_ads.is_sold(a) and a.status == "expired"]
+    inactive = [a for a in ads if not my_ads.is_sold(a) and a.status not in ("active", "reserved", "expired")]
+    ads = expired + [a for a in ads if a not in expired and (show_sold or a not in sold)
+                     and (show_inactive or a not in inactive)]
     return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
                   hidden_count=len(hidden), show_hidden=show_hidden, sold_count=len(sold), show_sold=show_sold,
-                  inactive_count=len(inactive), show_inactive=show_inactive)
+                  inactive_count=len(inactive), show_inactive=show_inactive, expired_count=len(expired))
 
 
 @app.post("/myads/check")
