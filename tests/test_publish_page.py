@@ -289,7 +289,7 @@ def test_manual_category_saved_and_published(client, wh):  # noqa: F811
     assert plan["selected"] == 1 and plan["options"][1]["manual"]
     assert plan["options"][1]["fields"][0]["selected"] == "gebraucht"
     page = client.get(f"/new-ad/{d.id}").text
-    assert '<input type="radio" name="option" value="1" checked>' in page and "chosen by hand" in page
+    assert 'name="option" value="1" checked' in page and "chosen by hand" in page
 
     client.post(f"/new-ad/{d.id}/willhaben/category", data={"code": "MOBILE_SPEAKER"})   # same again: no duplicate
     assert len(_get(d.id).wh_plan["options"]) == 2
@@ -313,7 +313,7 @@ def test_manual_category_saved_and_published(client, wh):  # noqa: F811
     assert (d2.status, d2.wh_ad_id, d2.error) == ("published", "1000000001", None)
 
     page = client.get(f"/new-ad/{d.id}").text
-    assert "https://www.willhaben.at/iad/object?adId=1000000001" in page and 'class="badge ok"' in page
+    assert "https://www.willhaben.at/iad/object?adId=1000000001" in page and 'pill ok' in page
     assert "/willhaben/publish" not in page
 
     client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "1"})               # never twice

@@ -1,0 +1,217 @@
+/* willhaben Agent — transitional styles for pages not yet ported to the 1b design (ui.css).
+
+   The old shell was Pico CSS plus ~170 lines of page CSS in base.html. This file maps those idioms (article cards,
+   .grid, [role=button], .secondary/.outline, .badge, role=switch, details.dropdown, table.stack, ...) onto the ui.css
+   tokens, so every page stays usable while it waits for its port. Everything is scoped to an ancestor with class
+   "legacy": the base's default main class ("page legacy") and the wrapper around the shared includes. A ported page
+   sets {% block main_class %}page{% endblock %} (or "split") and leaves all of this behind.
+   Delete this file, the wrapper and the "legacy" default once the last page is ported. */
+
+:root {
+  /* the Pico variables the templates still use in inline styles */
+  --pico-muted-color: var(--muted); --pico-muted-border-color: var(--border); --pico-color: var(--text);
+  --pico-background-color: var(--bg); --pico-card-background-color: var(--surface);
+  --pico-card-sectioning-background-color: var(--hover); --pico-card-box-shadow: none;
+  --pico-primary: var(--brand); --pico-primary-background: var(--brand); --pico-spacing: 1rem;
+  --pico-border-radius: var(--r-ctl); --pico-font-size: 14px; --pico-line-height: 1.45;
+  --pico-h1-color: var(--text); --pico-h2-color: var(--text); --pico-h3-color: var(--text); --pico-h4-color: var(--text);
+  --pico-h5-color: var(--text); --pico-h6-color: var(--text);
+  --placeholder: var(--hover); --radius: var(--r-ctl);
+}
+
+/* ---- typography: the old pages use h3 as the page title and h4 for sections ---- */
+.legacy h1 { margin-bottom: 14px; } .legacy h2 { margin-bottom: 12px; }
+.legacy h3 { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 0 0 14px; }
+.legacy h4 { font-size: 17px; font-weight: 650; margin: 0 0 10px; }
+.legacy h5, .legacy h6 { font-size: 15px; font-weight: 650; margin: 0 0 8px; }
+.legacy p { margin: 0 0 12px; }
+.legacy ul, .legacy ol { margin: 0 0 12px; padding-left: 1.4em; }
+.legacy dl { margin: 0 0 12px; }
+.legacy figure { margin: 0 0 12px; overflow-x: auto; }
+.legacy hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.legacy table { margin-bottom: 16px; }
+.legacy td, .legacy th { vertical-align: top; }
+.legacy nav ul { display: flex; flex-wrap: wrap; gap: 4px 10px; list-style: none; margin: 0 0 12px; padding: 0; }
+.legacy a[role=button]:hover, .legacy .card a:hover, .legacy a.card:hover { text-decoration: none; }
+
+/* ---- article = card ---- */
+.legacy article { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 16px 20px; margin: 0 0 16px; }
+.legacy article > header { margin: -16px -20px 16px; padding: 12px 20px; border-bottom: 1px solid var(--border);
+                           border-radius: var(--r-card) var(--r-card) 0 0; font-weight: 600; }
+.legacy article > footer { margin: 16px -20px -16px; padding: 12px 20px; border-top: 1px solid var(--border);
+                           border-radius: 0 0 var(--r-card) var(--r-card); }
+
+/* ---- .grid (Pico): equal columns from 768px, one column below ---- */
+.legacy .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 768px) { .legacy .grid { grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); } }
+.legacy .grid > * { min-width: 0; }
+.legacy form.grid, .legacy .grid:has(> form) { align-items: end; }
+.legacy form.grid > button, .legacy form.grid > [role=button], .legacy form.grid > label > button { align-self: end; margin-bottom: 16px; }
+.legacy form.grid > button { width: 100%; }
+
+/* ---- buttons: <button> fills its line like in Pico, [role=button] links are inline ---- */
+.legacy button, .legacy [role=button], .legacy input[type=submit], .legacy input[type=button] {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 36px; padding: 7px 14px;
+  margin: 0; border: 1px solid var(--brand); border-radius: var(--r-ctl); background: var(--brand); color: #fff;
+  font-weight: 500; line-height: 1.3; text-align: center; text-decoration: none; cursor: pointer; }
+.legacy [role=button] { width: auto; }
+.legacy :is(button, [role=button]):hover { filter: brightness(1.05); text-decoration: none; }
+.legacy :is(button, [role=button]).secondary { background: var(--surface); border-color: var(--border); color: var(--text); }
+.legacy :is(button, [role=button]).secondary:hover { border-color: var(--muted); filter: none; }
+.legacy :is(button, [role=button]).contrast { background: var(--text); border-color: var(--text); color: var(--bg); }
+.legacy :is(button, [role=button]).outline { background: transparent; color: var(--brand); border-color: var(--brand); }
+.legacy :is(button, [role=button]).secondary.outline { color: var(--text); border-color: var(--border); }
+.legacy :is(button, [role=button]).contrast.outline { color: var(--text); border-color: var(--text); }
+.legacy :is(button, [role=button]).btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.legacy :is(button, [role=button]).btn-danger.outline { background: transparent; color: var(--bad); }
+.legacy button:disabled, .legacy [role=button][aria-disabled=true] { opacity: .5; cursor: default; filter: none; }
+.legacy button.linklike { display: inline; width: auto; min-height: 0; padding: 0; margin: 0; border: 0; background: none;
+                          color: var(--brand); font-weight: 400; font-size: inherit; }
+.legacy button.linklike:hover { filter: none; text-decoration: underline; }
+/* compact buttons where the old shell had them */
+.legacy .row-actions button, .legacy .row-actions [role=button], .legacy .card .actions button, .legacy table button,
+.legacy tr.auto-row button, .legacy .range button, .legacy .remote-bar button, .legacy .bulkbar button,
+.legacy details.dropdown > summary { width: auto; min-height: 32px; padding: 5px 11px; font-size: 13px; }
+.legacy .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.legacy .row-actions form { display: inline; margin: 0; }
+.legacy td > form { margin: 0; }
+/* spinner on anything marked busy (Pico did this for every element) */
+.legacy [aria-busy=true]:not(input):not(select):not(textarea):not(form):not(.btn)::before {
+  content: ""; display: inline-block; width: 1em; height: 1em; margin-right: .5em; border: 2px solid currentColor;
+  border-right-color: transparent; border-radius: 50%; vertical-align: -.15em; animation: spin .8s linear infinite; opacity: .7; }
+
+/* ---- forms: Pico's vertical rhythm ---- */
+.legacy label { display: block; margin-bottom: 6px; }
+.legacy label > input, .legacy label > select, .legacy label > textarea { margin-top: 4px; }
+.legacy input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=submit]):not([type=button]),
+.legacy select, .legacy textarea { margin-bottom: 16px; }
+.legacy input[type=checkbox]:not([role=switch]), .legacy input[type=radio] { vertical-align: -2px; margin-right: 6px; }
+.legacy label:has(> input[type=checkbox]), .legacy label:has(> input[type=radio]) { margin-bottom: 8px; cursor: pointer; }
+.legacy label:has(> input[type=checkbox]) small, .legacy label:has(> input[type=radio]) small { display: inline; }
+.legacy fieldset { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+.legacy legend { padding: 0; margin-bottom: 6px; font-weight: 550; }
+.legacy [role=group] { display: flex; margin-bottom: 16px; }
+.legacy [role=group] > * { margin-bottom: 0; }
+.legacy [role=group] > input, .legacy [role=group] > select { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.legacy [role=group] > button, .legacy [role=group] > [role=button] { width: auto; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.legacy input[type=checkbox][role=switch] { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--off);
+  position: relative; margin: 0 6px 0 0; vertical-align: -6px; cursor: pointer; transition: background .15s; flex: none; }
+.legacy input[role=switch]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s; }
+.legacy input[role=switch]:checked { background: var(--brand); } .legacy input[role=switch]:checked::after { left: 18px; }
+.legacy progress { width: 100%; height: 6px; margin-bottom: 12px; border: 0; border-radius: 3px; overflow: hidden;
+                   background: var(--border); accent-color: var(--brand); }
+.legacy progress::-webkit-progress-bar { background: var(--border); }
+.legacy progress::-webkit-progress-value { background: var(--brand); } .legacy progress::-moz-progress-bar { background: var(--brand); }
+
+/* ---- status badges (fixed colours: readable on both themes) ---- */
+.legacy .badge { display: inline-block; min-width: 1.4em; padding: 1px 8px; border-radius: 1em; background: #e5484d; color: #fff;
+                 font-size: 12px; font-weight: 600; line-height: 1.5; text-align: center; vertical-align: middle; }
+.legacy .badge.ok { background: #2f9e44; } .legacy .badge.muted { background: var(--muted); color: #fff; }
+
+/* ---- details / summary, dropdown menus ---- */
+.legacy details { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.legacy details > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.legacy details > summary::-webkit-details-marker { display: none; }
+.legacy details > summary::after { content: ""; width: 8px; height: 8px; margin: 0 6px 3px auto; border-right: 2px solid var(--muted);
+                                   border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform .15s; flex: none; }
+.legacy details[open] > summary::after { transform: rotate(-135deg); margin-bottom: -3px; }
+.legacy details[open] > summary { margin-bottom: 10px; }
+.legacy details.dropdown { position: relative; display: inline-block; margin: 0; padding: 0; border: 0; }
+.legacy details.dropdown > summary { display: inline-flex; margin: 0; } .legacy details.dropdown[open] > summary { margin-bottom: 0; }
+.legacy details.dropdown > summary::after { margin: 0 0 2px 2px; }
+.legacy details.dropdown > ul { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 14rem; margin: 0; padding: 6px;
+  list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card);
+  box-shadow: 0 12px 32px rgba(0,0,0,.18); display: flex; flex-direction: column; gap: 2px; }
+.legacy details.dropdown > ul > li { margin: 0; }
+.legacy details.dropdown > ul button, .legacy details.dropdown > ul [role=button] { width: 100%; }
+
+/* ---- <dialog> with an article inside (buy dialog, remote browser overlay) ---- */
+.legacy dialog { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 16px;
+                 border: 0; background: none; display: none; align-items: center; justify-content: center; }
+.legacy dialog[open] { display: flex; }
+.legacy dialog > article { width: 100%; max-width: 720px; max-height: calc(100vh - 32px); overflow: auto; margin: 0;
+                           box-shadow: 0 24px 80px rgba(0,0,0,.35); border-radius: var(--r-dialog); }
+
+/* ---- hit / deal cards ---- */
+.legacy .grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+.legacy .card { overflow: hidden; display: flex; flex-direction: column; }
+.legacy .card img { width: 100%; height: 180px; object-fit: cover; background: var(--hover); }
+.legacy .card img:not([src]), .legacy .card img[src=""] { background: var(--hover) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='1.5'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='9' cy='11' r='2'/%3E%3Cpath d='m21 17-5-5-9 7'/%3E%3C/svg%3E") center no-repeat; }
+.legacy .card .body { padding: 12px 14px 8px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.legacy .card .body > a, .legacy .card .body > span:first-child { font-weight: 600; line-height: 1.3; }
+.legacy .card a { color: inherit; }
+.legacy .card .price { font-weight: 700; font-size: 15px; }
+.legacy .card .old { text-decoration: line-through; color: var(--muted); font-weight: 400; margin-left: .4em; }
+.legacy .card .meta { font-size: 12.5px; color: var(--muted); }
+.legacy .card .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 14px 14px; }
+.legacy .card .actions button { flex: 1 1 auto; }
+
+/* ---- home: stat tiles ---- */
+.legacy .stats { margin-bottom: 24px; }
+.legacy .stats a.stat { display: block; padding: 0; color: inherit; text-decoration: none; }
+.legacy .stats a.stat article { margin: 0; text-align: center; transition: border-color .15s; }
+.legacy .stats a.stat:hover article { border-color: var(--brand); }
+.legacy .stats .num { font-size: 2rem; font-weight: 700; color: var(--brand); line-height: 1.1; }
+.legacy .stats .label { color: var(--muted); font-size: 13px; }
+.legacy table.activity td { padding: 7px 8px; } .legacy table.activity td:first-child { white-space: nowrap; color: var(--muted); }
+
+/* ---- chats ---- */
+.legacy .chat { display: flex; flex-direction: column; gap: 6px; }
+
+/* ---- remote browser view, search builder, misc page bits from the old base ---- */
+.legacy .remote-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.legacy .remote-bar button, .legacy .remote-bar input { margin: 0; padding: 4px 10px; font-size: 13px; width: auto; min-height: 0; }
+.legacy .remote-text { display: flex; gap: 5px; margin: 0; flex: 1; min-width: 14rem; } .legacy .remote-text input { flex: 1; }
+.legacy .remote-screen { outline: 2px solid var(--border); border-radius: 5px; overflow: hidden; line-height: 0; }
+.legacy .remote-screen:focus { outline-color: var(--brand); }
+.legacy .remote-screen img { width: 100%; cursor: pointer; user-select: none; -webkit-user-drag: none; }
+.legacy .builder-search { display: flex; gap: 8px; } .legacy .builder-search input { flex: 1; margin: 0; } .legacy .builder-search button { width: auto; margin: 0; }
+.legacy .builder { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 20px; margin-top: 16px; }
+.legacy .flt { margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.legacy .flt summary { font-weight: 600; font-size: 13px; }
+.legacy .chip { margin: 2px 1px; }
+.legacy .range { display: flex; gap: 5px; margin: 5px 0 0; } .legacy .range input, .legacy .range button { margin: 0; padding: 4px 8px; font-size: 13px; }
+.legacy .create form { align-items: end; margin-bottom: 5px; }
+.legacy dl.specs { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; margin: 6px 0 0; }
+.legacy dl.specs dt { color: var(--muted); } .legacy dl.specs dd { margin: 0; }
+.legacy tr.auto-row td { border-top: none; padding-top: 0; }
+.legacy tr.auto-row textarea { margin-bottom: 5px; }
+.legacy .buy-pay { margin: 10px 0; padding: 9px 12px; border-left: 4px solid #f08c00; background: var(--hover); border-radius: 5px; }
+.legacy .buy-pay p { margin: 5px 0; }
+
+/* ---- phone ---- */
+@media (max-width: 760px) {
+  .legacy .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; } .legacy .stats .num { font-size: 1.6rem; }
+  .legacy .builder { grid-template-columns: 1fr; }
+  .legacy table.stack thead { display: none; }
+  .legacy table.stack, .legacy table.stack tbody, .legacy table.stack tr, .legacy table.stack td { display: block; width: 100%; }
+  .legacy table.stack tr { border: 1px solid var(--border); border-radius: var(--r-card); padding: 10px 13px; margin-bottom: 11px; background: var(--surface); }
+  .legacy table.stack td { border: none; padding: 3px 0; }
+  .legacy table.stack td:empty { display: none; }
+  .legacy table.stack tfoot, .legacy table.stack tfoot tr, .legacy table.stack tfoot th { display: block; width: 100%; text-align: left; padding: 3px 0; }
+  .legacy table.stack td:has(> form:only-child) { display: inline-block; width: auto; margin-right: 6px; }
+  .legacy table.stack tr:has(+ tr.auto-row) { border-bottom: none; border-radius: var(--r-card) var(--r-card) 0 0; margin-bottom: 0; }
+  .legacy table.stack tr.auto-row { border-top: 1px dashed var(--border); border-radius: 0 0 var(--r-card) var(--r-card); }
+  .legacy .grid-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 11px; }
+  .legacy .card img { height: 130px; }
+  /* chat list: the whole card opens the chat; the hide/remove menu sits top right above the row link */
+  .legacy table.chat-list tr { position: relative; }
+  .legacy table.chat-list a.rowlink::after { content: ""; position: absolute; inset: 0; }
+  .legacy table.chat-list td.open-btn { display: none; }
+  .legacy table.chat-list td.chat-actions { position: absolute; top: 6px; right: 6px; z-index: 1; width: auto; padding: 0; }
+  .legacy table.chat-list td.chat-actions summary::after { display: none; }
+  .legacy table.chat-list td:first-child { padding-right: 3rem; }
+  .legacy table.activity td:last-child small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .legacy table.activity td { padding: 5px 4px; }
+  .legacy dialog { padding: 0; } .legacy dialog > article { max-width: none; max-height: 100vh; border-radius: 0; height: 100%; }
+}
+
+/* ---- inside the remote-view iframe (session.html?embed=1): tight chrome so the browser picture gets the space ---- */
+body.embed main { padding: 6px 10px 0; max-width: none; }
+body.embed article { padding: 6px 8px; margin-bottom: 6px; }
+body.embed .embed-status { margin: 0 0 6px; gap: 6px; align-items: center; }
+body.embed .embed-status button, body.embed .remote-bar button, body.embed .remote-bar input { padding: 3px 9px; font-size: 13px; line-height: 1.3; min-height: 0; }
+body.embed .remote-bar { gap: 5px; margin-bottom: 6px; flex-wrap: nowrap; }
+body.embed .remote-text { min-width: 8rem; }
+body.embed details { display: none; }

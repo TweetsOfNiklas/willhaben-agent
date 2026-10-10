@@ -207,23 +207,23 @@ def test_settings_panel_and_routes(client, monkeypatch):  # noqa: F811
         return httpx.Response(200, json={"ok": True, "result": True})
 
     monkeypatch.setattr(telegram, "_transport", httpx.MockTransport(handler))
-    page = client.get("/settings").text
-    assert 'id="telegram"' in page and "/newbot" in page and 'href="#telegram"' in page
+    page = client.get("/settings/telegram").text
+    assert "/newbot" in page
     r = client.post("/settings/telegram/token", data={"token": "123:abc"}, follow_redirects=False)
-    assert r.headers["location"].endswith("#telegram") and telegram.token() == "123:abc"
+    assert r.headers["location"].startswith("/settings/telegram?") and telegram.token() == "123:abc"
     assert "setMyCommands" in calls and "deleteWebhook" in calls
-    page = client.get("/settings").text
+    page = client.get("/settings/telegram").text
     assert "@wh_test_bot" in page and 'id="tg-link"' in page and "https://t.me/wh_test_bot" in page and "<svg" in page
     assert client.get("/settings/telegram/status").json() == {"linked": False, "chat_name": "", "candidates": []}
     telegram._candidates[CHAT] = ("Max <b>", telegram.time.monotonic(), "0042")
     st = client.get("/settings/telegram/status").json()
     assert st["candidates"][0]["chat_id"] == CHAT and st["candidates"][0]["name"] == "Max <b>"
-    page = client.get("/settings").text
-    assert "Link with Max &lt;b&gt; · code 0042" in page and f'data-tg-fp="{CHAT}"' in page
+    page = client.get("/settings/telegram").text
+    assert "New chat: Max &lt;b&gt; — is that you?" in page and "code 0042" in page and f'data-tg-fp="{CHAT}"' in page
     r = client.post("/settings/telegram/link", data={"chat_id": "999"}, follow_redirects=False)
     assert "expired" in r.headers["location"] and telegram.chat_id() is None
     r = client.post("/settings/telegram/link", data={"chat_id": str(CHAT)}, follow_redirects=False)
-    assert r.headers["location"].endswith("#telegram") and telegram.chat_id() == CHAT and calls[-1] == "sendMessage"
+    assert r.headers["location"].startswith("/settings/telegram?") and telegram.chat_id() == CHAT and calls[-1] == "sendMessage"
     assert client.get("/settings/telegram/status").json()["linked"]
     client.post("/settings/telegram/kinds", data={"enabled": "on", "kind": ["message", "hit"]})
     assert telegram.enabled_kinds() == {"message", "hit"} and telegram.active()

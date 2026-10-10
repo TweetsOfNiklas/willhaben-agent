@@ -1,26 +1,20 @@
-{# willhaben category choice inside a publish form: plan options as radios ("option") with their required fields
-   ("o{n}_<code>"), plus "Choose another category" (search over the cached category tree).
-   Needs: d, plan, pick_url (POST code=<category>); optional pick_target + pick_include for htmx (batch card). #}
+{# Category choice inside a publish form. Same inputs: option (radio), o{n}_<code> selects, picker search → pick_url. JS unchanged. #}
 {% set sel = plan.selected if plan.selected is defined and plan.selected is not none and plan.selected < (plan.options or [])|length else 0 %}
-{% for o in plan.options or [] %}
-  <fieldset>
-    <label><input type="radio" name="option" value="{{ loop.index0 }}" {% if loop.index0 == sel %}checked{% endif %}> {{ o.label }}{% if o.manual %} <small class="muted">({{ _("chosen by hand") }})</small>{% endif %}</label>
-    {% set oi = loop.index0 %}
-    {% for f in o.fields %}
-      <label style="margin-left:1.6rem">{{ f.label }}
-        <select name="o{{ oi }}_{{ f.code }}">
-          <option value="">–</option>
-          {% for code, label in f['values'] %}<option value="{{ code }}" {% if code == f.selected %}selected{% endif %}>{{ label }}</option>{% endfor %}
-        </select></label>
-    {% endfor %}
-  </fieldset>
+{% for o in plan.options or [] %}{% set oi = loop.index0 %}
+<label class="card" style="display:flex;flex-direction:column;gap:10px;padding:10px 14px;border-radius:10px;cursor:pointer;{% if oi == sel %}border-color:var(--brand);background:var(--brand-soft){% endif %}">
+  <span class="row" style="gap:10px;flex-wrap:nowrap"><input type="radio" name="option" value="{{ oi }}" {% if oi == sel %}checked{% endif %} onchange="this.closest('form').querySelectorAll('.cat-fields').forEach((f, i) => f.hidden = i !== {{ oi }})"><span style="font-weight:{{ 600 if oi == sel else 450 }}">{{ o.label }}</span>{% if o.manual %}<small class="muted">{{ _("chosen by hand") }}</small>{% endif %}</span>
+  <span class="cat-fields" {% if oi != sel %}hidden{% endif %} style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;padding-left:28px">
+    {% for f in o.fields %}<label class="field"><span style="font-size:12px">{{ f.label }}</span><select name="o{{ oi }}_{{ f.code }}" style="padding:7px 10px;font-size:13px;background-color:var(--surface)"><option value="">–</option>{% for code, label in f['values'] %}<option value="{{ code }}" {% if code == f.selected %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endfor %}
+  </span>
+</label>
 {% endfor %}
-<details class="wh-catpick" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}"
-         data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" {% if not plan.options %}open{% endif %}>
-  <summary><small>{{ _("Choose another category") }}</small></summary>
-  <input type="search" data-catq autocomplete="off" placeholder="{{ _('Search willhaben categories, e.g. speaker') }}">
-  <small class="muted" data-catmsg data-empty="{{ _('No category found.') }}" data-fail="{{ _('Search failed: {error}') }}"></small>
-  <ul data-catres style="list-style:none;padding-left:0;margin:0"></ul>
+<details class="wh-catpick muted" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}" data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" {% if not plan.options %}open{% endif %} style="font-size:13px">
+  <summary style="cursor:pointer">{{ _("Choose another category") }}</summary>
+  <div style="display:flex;flex-direction:column;gap:6px;padding-top:8px">
+    <input type="search" data-catq autocomplete="off" placeholder="{{ _('Search willhaben categories, e.g. speaker') }}" style="padding:8px 10px;font-size:13px">
+    <small data-catmsg data-empty="{{ _('No category found.') }}" data-fail="{{ _('Search failed: {error}') }}"></small>
+    <ul data-catres style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:4px"></ul>
+  </div>
 </details>
 <script>
   (() => {
@@ -53,7 +47,7 @@
         if (!data.results.length) msg.textContent = msg.dataset.empty;
         for (const c of data.results) {
           const li = document.createElement('li'), b = document.createElement('button');
-          b.type = 'button'; b.className = 'secondary outline small'; b.style.textAlign = 'left';
+          b.type = 'button'; b.className = 'btn secondary sm'; b.style.textAlign = 'left';
           b.style.margin = '.15rem 0'; b.textContent = c.path; b.dataset.code = c.code;
           b.addEventListener('click', () => { b.setAttribute('aria-busy', 'true'); pick(box, c.code); });
           li.appendChild(b); list.appendChild(li);

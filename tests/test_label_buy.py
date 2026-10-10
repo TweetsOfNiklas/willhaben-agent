@@ -110,8 +110,8 @@ def test_card_settings_routes(card_file):
     with TestClient(app) as c:
         r = c.post("/settings/shipping/card", data={"holder": CARD[0], "number": CARD[1], "expiry": CARD[2], "cvc": CARD[3]},
                    follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].startswith("/settings?msg=") and "#shipping" in r.headers["location"]
-        html = c.get("/settings").text
+        assert r.status_code == 303 and r.headers["location"].startswith("/settings/shipping?msg=")
+        html = c.get("/settings/shipping").text
         assert "•••• 1111" in html and "4111 1111 1111 1111" not in html and "4111111111111111" not in html
         c.post("/settings/shipping/card/delete", follow_redirects=False)
         assert not label_buy.card_status()["stored"]
@@ -521,7 +521,7 @@ def test_reset_playbook_route_removes_it(tmp_path, monkeypatch):
     label_buy._save_playbook("gls", [{"url_pattern": "x", "fills": [], "action": None, "done": True, "replay": True}])
     assert label_buy.load_playbook("gls")["steps"]
     with TestClient(app) as c:
-        assert "Reset playbook" in c.get("/settings").text
+        assert "Reset playbook" in c.get("/settings/shipping").text
         r = c.post("/settings/shipping/playbook/gls/reset", follow_redirects=False)
         assert r.status_code == 303 and "msg=" in r.headers["location"]
         assert c.post("/settings/shipping/playbook/nope/reset", follow_redirects=False).status_code == 303

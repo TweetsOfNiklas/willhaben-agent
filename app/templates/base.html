@@ -1,476 +1,298 @@
+{# willhaben Agent — base layout (1b design). Replaces the Pico top-nav shell.
+   Expects: ui_lang(), _(), session_status, app_version, app_author, auth_enabled(), wh_limiter(), wh_used(), wh_budget(),
+   purchase_notice(), ui_lang_pref(), ui_langs, embed, msg, error — all as in the previous base.html.
+   Optional (new): nav_counts = {"hits": n, "chats": n, "purchases": n}, claude_usage = {"used": tokens, "limit": tokens},
+   current_user = display name. All guarded with `is defined`. #}
 <!doctype html>
 <html lang="{{ ui_lang() }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}willhaben Agent{% endblock %}</title>
-  {% block head %}{% endblock %}
   <script>
-    // theme before first paint: stored choice (light/dark) or follow the system
-    try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+          const r = localStorage.getItem('rail'); if (r === 'expanded') document.documentElement.dataset.rail = 'expanded'; } catch (e) {}
   </script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.cyan.min.css">
+  <link rel="stylesheet" href="/static/ui.css">
+  <link rel="stylesheet" href="/static/legacy.css">{# pages not ported yet set main_class "page legacy" #}
   <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-  <script>
-    // Buy dialog (_buy_dialog.html): three steps in one form. The maximum includes the shipping of the chosen mode and, with
-    // PayLivery, willhaben's buyer protection fee (form data-fee = {pct, min, max}: pct % of the item price, at least min, at
-    // most max; fee()/costs()/item() mirror purchase._fee_cents/costs_of/_item_for_cents in integer cents). The field
-    // always holds a number, the default (asking price plus shipping and fee) until the user changes it; max_default is "1" while
-    // the value is that default (the server may then use its own exact figure), "" once it was changed. A cleared field
-    // is refilled with the default when it loses focus or the step is left. Next to the field one pill rates the value -
-    // percent below the asking price incl. shipping, and the level of the item price (maximum minus shipping) among
-    // the comparable ads. The rating reads the same scale as deals.position(): form data-fair = {pos: where the ad's own
-    // price lies, scale: [[price, 0..1]] (deals.anchors), levels: [[bound, name]], labels: {name: text}}; without it
-    // (no comparable ads) there is no pill, no ring, no bar to drag and no chips. Dragging the ring on the bar (.bd-drag)
-    // sets the item price through unplace() (the inverse of place()) plus the shipping. Formatted like eur.
-    window.wbBuy = {
-      ship: function (f) { var m = f.querySelector('input[name=mode]:checked'); if (!m) return 0;
-        try { return +(JSON.parse(f.dataset.ship || '{}')[m.value] || 0); } catch (e) { return 0; } },
-      // the PayLivery fee rule {pct, min, max} of the form while PayLivery is the chosen mode, else null (no fee)
-      rule: function (f) { var m = f.querySelector('input[name=mode]:checked'); if (!m || m.value !== 'paylivery') return null;
-        try { var r = JSON.parse(f.dataset.fee || 'null'); return r && r.pct > 0 ? r : null; } catch (e) { return null; } },
-      // the fee of an item price in cents (integer maths as purchase._fee_cents: percent rounded half up, then min and max)
-      feeCents: function (c, r) { if (!(c > 0)) return 0;
-        return Math.min(Math.max(Math.floor((c * Math.round(r.pct * 10) + 500) / 1000), Math.round(r.min * 100)), Math.round(r.max * 100)); },
-      // the buyer protection fee of an item price in euro (0 without PayLivery or a fee rule)
-      fee: function (f, item) { var r = this.rule(f); return r ? this.feeCents(Math.round(item * 100), r) / 100 : 0; },
-      // what an item price costs: shipping of the mode, the fee and the total (the maximum that fits exactly this item price)
-      costs: function (f, item) { var s = this.ship(f), e = this.fee(f, item);
-        return {ship: s, fee: e, total: Math.round(item * 100 + s * 100 + e * 100) / 100}; },
-      // the inverse of costs().total: the largest item price whose item + shipping + fee is at most the total (cents; the
-      // mirror of purchase._item_for_cents). Without PayLivery just total minus shipping; 0 when nothing is left.
-      item: function (f, total) {
-        var self = this, r = this.rule(f), avail = Math.round(total * 100) - Math.round(this.ship(f) * 100);
-        if (!r) return avail / 100;
-        if (avail <= 0) return 0;
-        var pm = Math.round(r.pct * 10), lo = Math.round(r.min * 100), hi = Math.round(r.max * 100), c;
-        if (avail <= lo * 1000 / pm + lo) c = avail - lo;
-        else if (avail >= hi * 1000 / pm + hi) c = avail - hi;
-        else c = Math.round(avail * 1000 / (1000 + pm));
-        c = Math.max(c, 0);
-        while (c + self.feeCents(c + 1, r) + 1 <= avail) c++;
-        while (c > 0 && c + self.feeCents(c, r) > avail) c--;
-        return c / 100;
-      },
-      base: function (f) { var a = +f.dataset.ask; return a > 0 ? this.costs(f, a).total : 0; },
-      eur: function (v) { var whole = Math.abs(v - Math.round(v)) < 0.005;
-        return '€ ' + v.toLocaleString('de-AT', {minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2}); },
-      val: function (f) { return parseFloat(f.elements.max_price.value); },
-      // percent below the asking price incl. shipping and fee (negative: above it); null without a maximum or an asking price
-      percent: function (f) { var b = this.base(f), v = this.val(f); return b > 0 && v > 0 ? Math.round((b - v) * 100 / b) : null; },
-      fair: function (f) { try { return JSON.parse(f.dataset.fair || 'null'); } catch (e) { return null; } },
-      // the scale as sorted [price, position] points, equal prices merged (as deals._interp does)
-      points: function (scale) {
-        var m = {};
-        scale.forEach(function (a) { (m[a[0]] = m[a[0]] || []).push(a[1]); });
-        return Object.keys(m).map(Number).sort(function (a, b) { return a - b; }).map(function (v) {
-          return [v, m[v].reduce(function (s, q) { return s + q; }, 0) / m[v].length]; });
-      },
-      // 0..1 position of a price on the scale: the mirror of deals._interp (outside = the ends)
-      place: function (scale, x) {
-        var pts = this.points(scale);
-        if (x < pts[0][0]) return 0;
-        if (x > pts[pts.length - 1][0]) return 1;
-        for (var i = 0; i + 1 < pts.length; i++)
-          if (pts[i][0] <= x && x <= pts[i + 1][0]) return pts[i][1] + (pts[i + 1][1] - pts[i][1]) * (x - pts[i][0]) / (pts[i + 1][0] - pts[i][0]);
-        return pts[pts.length - 1][1];
-      },
-      // the inverse of place(): the price at a 0..1 position (clamped to the bar, so the cheapest and the dearest price at most)
-      unplace: function (scale, q) {
-        var pts = this.points(scale), last = pts.length - 1;
-        if (!(q > pts[0][1])) return pts[0][0];
-        if (q >= pts[last][1]) return pts[last][0];
-        for (var i = 0; i + 1 < pts.length; i++)
-          if (pts[i][1] <= q && q <= pts[i + 1][1])
-            return pts[i + 1][1] === pts[i][1] ? pts[i][0] : pts[i][0] + (pts[i + 1][0] - pts[i][0]) * (q - pts[i][1]) / (pts[i + 1][1] - pts[i][1]);
-        return pts[last][0];
-      },
-      // {pos, level} of the item price at the maximum, or null (no scale, no maximum, no asking price)
-      rate: function (f) {
-        var fair = this.fair(f), v = this.val(f), c = this.item(f, v);
-        if (!fair || !fair.scale || !(this.base(f) > 0) || !(c > 0)) return null;
-        var pos = this.place(fair.scale, c), lv = fair.levels.find(function (l) { return pos < l[0]; }) || fair.levels[fair.levels.length - 1];
-        return {pos: pos, level: lv[1], label: (fair.labels || {})[lv[1]] || ''};
-      },
-      fill: function (el, text, tone) {
-        if (!el) return;
-        el.textContent = text; el.hidden = !text;
-        ['bargain', 'cheap', 'fair', 'expensive', 'very_expensive'].forEach(function (t) { el.classList.remove('lvl-' + t); });
-        el.classList.remove('deal-lvl');
-        if (tone) { el.classList.add('deal-lvl'); el.classList.add('lvl-' + tone); }
-      },
-      // the pill(s), the ring on the bar (always shown with a rating, also on the needle) and the suggestion chips
-      lines: function (f) {
-        var self = this, p = this.percent(f), r = this.rate(f), v = this.val(f);
-        f.querySelectorAll('.bd-live').forEach(function (pill) {
-          var sign = p > 0 ? '−' : p < 0 ? '+' : '';
-          self.fill(pill, r ? pill.dataset.tpl.replace('{n}', sign + Math.abs(p)).replace('{level}', r.label) : '', r && r.level);
-        });
-        f.querySelectorAll('.bd-pin').forEach(function (pin) {
-          pin.hidden = !r;
-          if (r) pin.style.left = (r.pos * 100).toFixed(1) + '%';
-        });
-        f.querySelectorAll('.bd-sugg button').forEach(function (btn) {   // item price of the comparable + shipping and fee of the mode
-          var t = self.costs(f, +btn.dataset.v).total;
-          btn.textContent = btn.dataset.tpl.replace('{x}', self.eur(t));
-          btn.classList.toggle('on', v > 0 && Math.abs(v - t) < 0.005);
-        });
-      },
-      sum: function (f) {
-        var x = f.querySelector('.bd-summary'); if (!x) return;
-        var self = this, m = f.querySelector('input[name=mode]:checked'), v = this.val(f), b = this.base(f), t = f.elements.pickup_window.value.trim();
-        var s = function (k) { return x.querySelector('[data-s=' + k + ']'); };
-        s('mode').textContent = m ? m.dataset.label : '';
-        // PayLivery: the shipping text plus the fee of the item price at the maximum (else of the asking price)
-        var item = v > 0 ? self.item(f, v) : +f.dataset.ask, extra = '';
-        if (m && self.rule(f) && item > 0 && x.dataset.feeTpl) extra = ' · ' + x.dataset.feeTpl.replace('{amount}', self.eur(self.fee(f, item)));
-        s('ship').textContent = m ? m.dataset.shipText + extra : '';
-        s('time').textContent = t || x.dataset.empty;
-        s('timerow').hidden = !(m && m.value === 'pickup');
-        // the default while the field is empty, or - the ad has no price - "no price in the ad"
-        s('max').textContent = v > 0 ? self.eur(v) : b > 0 ? self.eur(b) : (x.dataset.noprice || '');
-      },
-      cur: function (f) { return +(f.dataset.step || 1); },
-      // step 1: a mode is chosen; step 2: the maximum may be empty (= default), else at least 1 (€) and what the browser accepts
-      // (cents only; a half-typed "12,5" counts as bad input, not as empty); step 3 has nothing to check
-      valid: function (f, n) {
-        if (n === 1) return !!f.querySelector('input[name=mode]:checked');
-        if (n === 2) { var el = f.elements.max_price; return (!el.value || this.val(f) >= 1) && (!el.checkValidity || el.checkValidity()); }
-        return true;
-      },
-      // the step chips (done = ticked, current, upcoming = disabled) and the Next buttons
-      nav: function (f) {
-        var self = this, n = this.cur(f);
-        f.querySelectorAll('.bd-chip').forEach(function (c) {
-          var k = +c.dataset.n;
-          c.disabled = k > n;
-          c.classList.toggle('on', k === n);
-          c.classList.toggle('done', k < n);
-          if (k === n) c.setAttribute('aria-current', 'step'); else c.removeAttribute('aria-current');
-        });
-        f.querySelectorAll('.bd-next').forEach(function (b) { b.disabled = !self.valid(f, n); });
-      },
-      refresh: function (f) { this.lines(f); this.sum(f); this.nav(f); },
-      show: function (f) {
-        var n = this.cur(f);
-        f.querySelectorAll('.bd-step').forEach(function (s) { s.hidden = +s.dataset.step !== n; });
-        this.refresh(f);
-      },
-      // once per fresh form: JavaScript on, step 1 shown
-      init: function (f) { f.classList.add('bd-js'); if (!f.dataset.step) f.dataset.step = '1'; this.bind(f); this.show(f); },
-      // pointer (mouse, pen, finger) on the bar moves the ring: down, move while pressed, up; once per gauge
-      bind: function (f) {
-        var self = this;
-        f.querySelectorAll('.bd-drag').forEach(function (g) {
-          if (g.dataset.bound) return;
-          g.dataset.bound = '1';
-          var on = false;
-          var at = function (e) { var r = g.getBoundingClientRect(); self.drag(f, r.width > 0 ? (e.clientX - r.left) / r.width : 0); };
-          var end = function () { on = false; g.classList.remove('drag'); };
-          g.addEventListener('pointerdown', function (e) {
-            if (e.pointerType === 'mouse' && e.button !== 0) return;
-            on = true; g.classList.add('drag');
-            try { g.setPointerCapture(e.pointerId); } catch (x) {}
-            if (e.preventDefault) e.preventDefault();
-            at(e);
-          });
-          g.addEventListener('pointermove', function (e) { if (on) at(e); });
-          g.addEventListener('pointerup', end);
-          g.addEventListener('pointercancel', end);
-          g.addEventListener('lostpointercapture', end);
-        });
-      },
-      // the ring at q (0..1, clamped to the bar): the item price there (whole euros, cents below € 10) plus shipping and fee of the mode
-      drag: function (f, q) {
-        var fair = this.fair(f);
-        if (!fair || !fair.scale || !(this.base(f) > 0)) return false;
-        var c = this.unplace(fair.scale, Math.min(1, Math.max(0, q)));
-        c = c >= 10 ? Math.round(c) : Math.round(c * 10) / 10;
-        this.put(f, this.costs(f, Math.max(c, 0.01)).total);
-        return true;
-      },
-      // to step n; a jump forward stops at the first step that is not valid yet
-      go: function (f, n) {
-        this.refill(f);
-        for (var k = 1; k < n; k++) if (!this.valid(f, k)) { n = k; break; }
-        f.dataset.step = n;
-        this.show(f);
-        var dlg = f.closest('dialog');
-        if (dlg) dlg.querySelector('article').scrollTop = 0; else f.scrollIntoView({block: 'start'});
-        var chip = f.querySelector('.bd-chip.on'); if (chip) chip.focus({preventScroll: true});
-      },
-      next: function (f) { this.refill(f); var n = this.cur(f); if (n < 3 && this.valid(f, n)) this.go(f, n + 1); },
-      back: function (f) { var n = this.cur(f); if (n > 1) this.go(f, n - 1); },
-      // Enter in a field goes to the next step, never submits before the last one; links and summaries keep Enter
-      enter: function (e) {
-        var t = e.target, f = t.form;
-        if (e.key !== 'Enter' || !f || t.tagName !== 'INPUT' || this.cur(f) === 3) return;
-        e.preventDefault();
-        if (t.type === 'text' || t.type === 'number') this.next(f);
-      },
-      // the field holds a number: the default (asking price plus shipping), unless the ad has no price (then it may stay empty)
-      refill: function (f) {
-        var el = f.elements.max_price, b = this.base(f);
-        if (!el.value && b > 0) { el.value = b.toFixed(2); f.elements.max_default.value = '1'; this.refresh(f); }
-      },
-      // writes the value and its flag: "1" (default, the server may use its own figure) when empty or equal to the default, else ""
-      put: function (f, v) {
-        var el = f.elements.max_price, b = this.base(f);
-        el.value = v > 0 ? (+v).toFixed(2) : '';
-        f.elements.max_default.value = !el.value || (b > 0 && Math.abs(v - b) < 0.005) ? '1' : '';
-        this.refresh(f);
-      },
-      // the untouched default follows the mode; a changed value stays
-      mode: function (f) { if (f.elements.max_default.value === '1') { var b = this.base(f); f.elements.max_price.value = b ? b.toFixed(2) : ''; } this.refresh(f); },
-      input: function (f) { var el = f.elements.max_price, v = this.val(f), b = this.base(f);
-        f.elements.max_default.value = !el.value || (b > 0 && Math.abs(v - b) < 0.005) ? '1' : ''; this.refresh(f); },
-      blur: function (f) { this.refill(f); },
-      pick: function (f, v) { this.put(f, this.costs(f, v).total); }
-    };
-  </script>
-  <style>
-    :root { --pico-font-size: 95%; --brand: #0e9fb5; --ok: #2f9e44; --warn: #f59f00; --bad: #e5484d;
-            --placeholder: var(--pico-card-sectioning-background-color); }
-    a { text-decoration: none; } a:hover { text-decoration: underline; }
-    a[role=button]:hover, nav a:hover, .card a:hover, a.card:hover, .chip:hover { text-decoration: none; }
-    nav.top a[aria-current=page] { color: var(--pico-color); font-weight: 600; box-shadow: inset 0 -2px 0 var(--brand); border-radius: 0; }
-    .theme-toggle { background:none; border:1px solid var(--pico-muted-border-color); color: var(--pico-muted-color); width:2.1rem; height:2.1rem;
-                    padding:0; margin:0; border-radius:50%; font-size:1rem; line-height:1; cursor:pointer; display:inline-grid; place-items:center; }
-    .theme-toggle:hover { border-color: var(--brand); color: var(--brand); }
-    @media (max-width: 760px) {
-      nav.top { flex-wrap: wrap; }
-      nav.top ul:last-child { width: 100%; overflow-x: auto; flex-wrap: nowrap; white-space: nowrap; margin: 0; padding-bottom: .2rem;
-                              scrollbar-width: none; }
-      nav.top ul:last-child li { padding: .4rem .5rem; }
-      nav.top ul:last-child li:last-child { margin-left: auto; }
-      .stats { grid-template-columns: repeat(2, 1fr); gap: .6rem; }
-      .stats .num { font-size: 1.6rem; }
-      footer.site .container { flex-direction: column; align-items: flex-start; }
-    }
-    nav.top { border-bottom: 1px solid var(--pico-muted-border-color); margin-bottom: 1rem; }
-    nav.top ul:first-child li strong { color: var(--brand); }
-    .badge { display:inline-block; min-width:1.4em; padding:0 .45em; border-radius:1em; background:#e5484d; color:#fff; font-size:.75em; text-align:center; }
-    .badge.ok { background:#2f9e44; } .badge.muted { background: var(--pico-muted-color); }
-    .grid-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 1rem; }
-    .card { border:1px solid var(--pico-muted-border-color); border-radius: .5rem; overflow:hidden; display:flex; flex-direction:column; }
-    .card img { width:100%; height:170px; object-fit:cover; background:var(--placeholder); }
-    .card .body { padding:.6rem .7rem; flex:1; display:flex; flex-direction:column; gap:.25rem; }
-    .card .price { font-weight:700; } .card .old { text-decoration: line-through; color: var(--pico-muted-color); font-weight:400; margin-left:.4em; }
-    .card .meta { font-size:.8em; color: var(--pico-muted-color); }
-    .card .actions { display:flex; gap:.3rem; padding:.4rem .6rem .6rem; }
-    .card .actions button { padding:.2rem .5rem; font-size:.8em; margin:0; }
-    .stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:1rem; }
-    .stats article { margin:0; text-align:center; } .stats .num { font-size:2rem; font-weight:700; }
-    .msg { padding:.4rem .7rem; border-left: 4px solid var(--brand); background: var(--pico-card-background-color); margin-bottom: 1rem; white-space: pre-line; }
-    .chat { display:flex; flex-direction:column; gap:.4rem; }
-    .bubble { max-width: 75%; padding:.45rem .7rem; border-radius:.8rem; white-space: pre-wrap; }
-    .bubble.in { align-self:flex-start; background: var(--pico-card-sectioning-background-color); }
-    .bubble.out { align-self:flex-end; background:var(--brand); color:#fff; }
-    .bubble.unknown { align-self:center; background: var(--pico-muted-border-color); }
-    .bubble small { display:block; opacity:.7; font-size:.72em; }
-    table td, table th { vertical-align: top; }
-    .row-actions form { display:inline; } .row-actions button { padding:.15rem .5rem; font-size:.8em; margin:0 .15rem 0 0; }
-    .muted { color: var(--pico-muted-color); }
-    textarea { font-family: inherit; }
-    .remote-bar { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; margin-bottom:.5rem; }
-    .remote-bar button, .remote-bar input { margin:0; padding:.25rem .6rem; font-size:.85em; width:auto; }
-    .remote-text { display:flex; gap:.3rem; margin:0; flex:1; min-width:14rem; } .remote-text input { flex:1; }
-    .remote-screen { outline:2px solid var(--pico-muted-border-color); border-radius:.3rem; overflow:hidden; line-height:0; }
-    .remote-screen:focus { outline-color:var(--brand); }
-    .remote-screen img { width:100%; cursor:pointer; user-select:none; -webkit-user-drag:none; }
-    .builder-search { display:flex; gap:.5rem; } .builder-search input { flex:1; margin:0; } .builder-search button { width:auto; margin:0; }
-    .builder { display:grid; grid-template-columns: minmax(220px, 300px) 1fr; gap:1.2rem; margin-top:1rem; }
-    @media (max-width: 760px) { .builder { grid-template-columns: 1fr; } }
-    .flt { margin-bottom:.4rem; padding-bottom:.4rem; border-bottom:1px solid var(--pico-muted-border-color); }
-    .flt summary { font-weight:600; font-size:.9em; }
-    .chip { display:inline-block; margin:.12rem .1rem; padding:.1rem .5rem; border:1px solid var(--pico-muted-border-color);
-            border-radius:1rem; font-size:.8em; text-decoration:none; color:inherit; }
-    .chip small { color: var(--pico-muted-color); } .chip:hover { border-color:var(--brand); }
-    .chip.on { background:var(--brand); border-color:var(--brand); color:#fff; }
-    .range { display:flex; gap:.3rem; margin:.3rem 0 0; } .range input, .range button { margin:0; padding:.25rem .5rem; font-size:.85em; }
-    .range button { width:auto; }
-    .create form { align-items:end; margin-bottom:.3rem; }
-    dl.specs { display:grid; grid-template-columns: max-content 1fr; gap:.15rem .8rem; font-size:.85em; margin:.4rem 0 0; }
-    dl.specs dt { color: var(--pico-muted-color); } dl.specs dd { margin:0; }
-    tr.auto-row td { border-top: none; padding-top: 0; }
-    tr.auto-row textarea { margin-bottom: .3rem; } tr.auto-row button { width:auto; padding:.2rem .7rem; font-size:.85em; }
-    body { min-height:100vh; display:flex; flex-direction:column; } body > main { flex:1; }
-    .brand { display:inline-flex; align-items:center; gap:.45rem; text-decoration:none; }
-    .brand .logo { width:1.6rem; height:1.6rem; border-radius:.45rem; background:var(--brand); color:#fff; display:grid; place-items:center;
-                   font-weight:800; font-size:.95rem; }
-    footer.site { border-top:1px solid var(--pico-muted-border-color); padding:.9rem 0; font-size:.8em; color: var(--pico-muted-color); }
-    footer.site .container { display:flex; flex-wrap:wrap; gap:.4rem 1rem; justify-content:space-between; align-items:center; }
-    footer.site strong { color: var(--pico-color); font-weight:600; }
-    .meter { display:inline-block; width:4.5rem; height:.4rem; border-radius:.2rem; background: var(--pico-muted-border-color);
-             vertical-align:middle; overflow:hidden; margin-left:.3rem; }
-    .meter span { display:block; height:100%; background:#2f9e44; } .meter.warn span { background:#f59f00; } .meter.full span { background:#e5484d; }
-    /* layout polish */
-    .badge.muted { color:#fff; }
-    .row-actions { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; }
-    .row-actions button, .row-actions [role=button] { width:auto; margin:0; padding:.35rem .8rem; font-size:.85em; }
-    label:has(> input[type=checkbox]) small, label:has(> input[type=radio]) small { display:inline; }
-    .stats { margin-bottom:1.5rem; }
-    .stats a.stat { display:block; text-decoration:none; color:inherit; }
-    .stats a.stat:hover article { border-color: var(--brand); }
-    .stats article { border:1px solid transparent; transition:border-color .15s; }
-    .stats .num { color: var(--brand); line-height:1.1; }
-    .stats .label { color: var(--pico-muted-color); font-size:.9em; }
-    .card { background: var(--pico-card-background-color); box-shadow: var(--pico-card-box-shadow); }
-    .card a { color: inherit; } .card .body > a, .card .body > span:first-child { font-weight:600; line-height:1.3; }
-    table.activity td { padding:.45rem .5rem; } table.activity td:first-child { white-space:nowrap; color: var(--pico-muted-color); }
-    h3 { margin-bottom: .8rem; }
-    .lang-switch { display:inline; margin:0 0 0 .6rem; }
-    .lang-switch select { display:inline-block; width:auto; margin:0; padding:.1rem 1.8rem .1rem .5rem; font-size:.95em; height:auto;
-                          background-position:center right .4rem; }
-    /* ---- visual pass: one type scale, one button scale, aligned forms, mobile layouts ---- */
-    :root { --pico-font-size: 100%; --radius: .55rem; }
-    @media (min-width: 1280px) { :root { --pico-font-size: 102%; } }
-    small, .muted small, .meta { font-size: .875rem; }
-    h3 { font-size: 1.5rem; } h4 { font-size: 1.2rem; } h5, h6 { font-size: 1.05rem; }
-    article > header { font-weight: 600; }
-    /* buttons: regular and compact, never tiny, never full-height blocks */
-    button, [role=button], input[type=submit] { font-size: .95rem; padding: .55rem 1.1rem; line-height: 1.3; border-radius: var(--radius); }
-    .row-actions button, .row-actions [role=button], .card .actions button, table button, tr.auto-row button,
-    .range button, .remote-bar button { font-size: .875rem; padding: .42rem .9rem; width: auto; }
-    .row-actions { gap: .5rem; margin: .4rem 0; }
-    form.grid, .grid:has(> form) { align-items: end; }
-    form.grid > button, form.grid > [role=button], form.grid > label > button { height: auto; align-self: end; margin-bottom: var(--pico-spacing); }
-    form.grid > button { width: 100%; }
-    td > form { margin: 0; } table button { margin: 0; }
-    /* cards (hits, previews) */
-    .grid-cards { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1.1rem; }
-    .card { border-radius: var(--radius); }
-    .card img { height: 180px; }
-    .card img:not([src]), .card img[src=""] { background: var(--placeholder) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='1.5'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='9' cy='11' r='2'/%3E%3Cpath d='m21 17-5-5-9 7'/%3E%3C/svg%3E") center no-repeat; }
-    .card .body { padding: .75rem .85rem .5rem; gap: .3rem; font-size: .95rem; }
-    .card .price { font-size: 1.05rem; }
-    .card .actions { flex-wrap: wrap; gap: .4rem; padding: .25rem .85rem .85rem; }
-    .card .actions button { flex: 1 1 auto; }
-    .badge { font-size: .78rem; padding: .05rem .5rem; line-height: 1.5; vertical-align: middle; }
-    /* tables */
-    table { font-size: .95rem; } th { font-weight: 600; }
-    @media (max-width: 760px) {
-      nav.top ul:last-child { flex-wrap: wrap; white-space: normal; overflow: visible; gap: 0 .2rem; }
-      nav.top ul:last-child li { padding: .3rem .45rem; }
-      nav.top ul:last-child li:last-child { margin-left: 0; }
-      table.stack thead { display: none; }
-      table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
-      table.stack tr { border: 1px solid var(--pico-muted-border-color); border-radius: var(--radius); padding: .6rem .8rem; margin-bottom: .7rem;
-                       background: var(--pico-card-background-color); }
-      table.stack td { border: none; padding: .2rem 0; }
-      table.stack td:empty { display: none; }
-      table.stack td:has(> form:only-child) { display: inline-block; width: auto; margin-right: .4rem; }
-      table.stack tr:has(+ tr.auto-row) { border-bottom: none; border-radius: var(--radius) var(--radius) 0 0; margin-bottom: 0; }
-      table.stack tr.auto-row { border-top: 1px dashed var(--pico-muted-border-color); border-radius: 0 0 var(--radius) var(--radius); }
-      .grid-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .7rem; }
-      .card img { height: 130px; }
-      .bubble { max-width: 88%; }
-      /* chat list: the whole card opens the chat */
-      table.chat-list tr { position: relative; }
-      table.chat-list a.rowlink::after { content: ""; position: absolute; inset: 0; }
-      table.chat-list td.open-btn { display: none; }
-      /* hide/remove menu: a small button top right, above the row link */
-      table.chat-list td.chat-actions { position: absolute; top: .4rem; right: .4rem; z-index: 1; width: auto; padding: 0; }
-      table.chat-list td.chat-actions details.dropdown, table.chat-list td.chat-actions summary { width: auto; }
-      table.chat-list td.chat-actions summary::after { display: none; }
-      table.chat-list td.chat-actions ul { right: 0; left: auto; min-width: 14rem; }
-      table.chat-list td:first-child { padding-right: 3rem; }
-      /* activity feed: long entries clamped */
-      table.activity td:last-child small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-      table.activity td { padding: .35rem .25rem; }
-    }
-    /* inside the overlay iframe: tight chrome so the browser picture gets the space */
-  body.embed main.container { padding: .4rem .6rem 0; max-width: none; }
-  body.embed article { padding: .4rem .5rem; margin-bottom: .4rem; }
-  body.embed .embed-status { margin: 0 0 .35rem; gap: .35rem; align-items: center; }
-  body.embed .embed-status button, body.embed .remote-bar button, body.embed .remote-bar input {
-    padding: .2rem .55rem; font-size: .82rem; line-height: 1.3; }
-  body.embed .remote-bar { gap: .3rem; margin-bottom: .35rem; flex-wrap: nowrap; }
-  body.embed .remote-text { min-width: 8rem; }
-  body.embed details { display: none; }
-    .buy-pay { margin: .6rem 0; padding: .55rem .75rem; border-left: 4px solid #f08c00; background: var(--pico-card-sectioning-background-color); border-radius: .3rem; }
-    .buy-pay p { margin: .3rem 0; }
-    button.linklike { background:none; border:none; padding:0; margin:0; width:auto; color:var(--pico-primary); font-size:inherit; cursor:pointer; }
-    .deal-lvl { display: inline-block; padding: .05rem .55rem; border-radius: 1em; font-size: .8rem; font-weight: 600; color: #fff; line-height: 1.5; }
-    .lvl-bargain { background: #2f9e44; } .lvl-cheap { background: #66a80f; } .lvl-fair { background: #e8a600; color: #222; }
-    .lvl-expensive { background: #f76707; } .lvl-very_expensive { background: #e5484d; }
-    .htmx-indicator { display:none; } .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display:inline; }
-  </style>
+  {% block head %}{% endblock %}
+  {# window.wbBuy (buy dialog maths) moved verbatim from the old base.html into this include #}
+  {% include "_buy_script.html" ignore missing %}
 </head>
-<body{% if embed %} class="embed"{% endif %}>
-<main class="container">
-  {% if not embed %}
-  <nav class="top">
-    <ul><li><a href="/" class="brand"><span class="logo">w</span><strong>willhaben Agent</strong></a></li></ul>
-    <ul>
-      <li><a href="/agents">{{ _("Search agents") }}</a></li>
-      <li><a href="/hits">{{ _("Hits") }}</a></li>
-      <li><a href="/deals">{{ _("Product search") }}</a></li>
-      <li><a href="/purchases">{{ _("Purchases") }}</a></li>
-      <li><a href="/chats">{{ _("Chats") }}</a></li>
-      <li><a href="/myads">{{ _("My ads") }}</a></li>
-      <li><a href="/new-ad">{{ _("New ad") }}</a></li>
-      <li><a href="/settings">{{ _("Settings") }}
-        {% if session_status.started and not session_status.logged_in %}<span class="badge" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}</a></li>
-      <li><button type="button" class="theme-toggle" id="theme-toggle" aria-label="{{ _('Toggle light/dark') }}" title="{{ _('Toggle light/dark') }}">◐</button></li>
-    </ul>
-  </nav>
-  {% endif %}
-  {% set notice_text = purchase_notice() %}{% if notice_text %}<div class="msg">{{ notice_text }}</div>{% endif %}
-  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
-  {% if error %}<div class="msg" style="border-color:#e5484d">{{ error }}</div>{% endif %}
-  {% block content %}{% endblock %}
-</main>
+<body class="{% if embed %}embed{% else %}app{% endif %}">
 {% if not embed %}
-{% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
-<footer class="site">
-  <div class="container">
-    <span><strong>willhaben Agent</strong> v{{ app_version }} · {{ _("by {author}", author=app_author) }}
-      · <a href="/bugreport">{{ _("Report a bug") }}</a>
-      {% if auth_enabled() %}· <form method="post" action="/logout" style="display:inline;margin:0"><button class="linklike">{{ _("Log out") }}</button></form>{% endif %}
-      <form method="post" action="/lang" class="lang-switch">
-        <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()">
-          {% set pref = ui_lang_pref() %}
-          <option value="auto" {% if pref not in ui_langs %}selected{% endif %}>🌐 {{ _("Automatic (browser)") }}</option>
-          {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
-        </select>
-      </form></span>
-    <a href="/stats/willhaben" class="muted" title="{% if budget %}{{ _('All requests to willhaben run one after another with a pause in between and at most {n} per hour.', n=budget) }}{% else %}{{ _('All requests to willhaben run one after another with a pause in between.') }}{% endif %}">
-      {% if lim.cooling_down_s %}{{ _("willhaben pause: {n} min left", n=(lim.cooling_down_s / 60)|round(0, 'ceil')|int) }}
-      {% elif budget %}{{ _("{used} / {budget} willhaben requests in the last hour", used=used, budget=budget) }}
-      {% else %}{{ _("{used} willhaben requests in the last hour", used=used) }}{% endif %}
-      {% if budget %}{% set pct = [100, (used * 100 / budget)|round|int]|min %}
-        <span class="meter {{ 'full' if pct >= 90 or lim.cooling_down_s else 'warn' if pct >= 60 else '' }}"><span style="width:{{ 100 if lim.cooling_down_s else pct }}%"></span></span>{% endif %}
+{% set counts = nav_counts if nav_counts is defined else {} %}
+{% set wh_bad = session_status.started and not session_status.logged_in %}
+{% macro ico(name) -%}
+  {%- if name == 'home' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>
+  {%- elif name == 'search' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 21l-4.3-4.3"/><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z"/></svg>
+  {%- elif name == 'target' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+  {%- elif name == 'box' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v9"/></svg>
+  {%- elif name == 'cart' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h2l2.4 12.4a2 2 0 0 0 2 1.6h9.2a2 2 0 0 0 2-1.6L22 7H6"/><path d="M9 21h.01"/><path d="M18 21h.01"/></svg>
+  {%- elif name == 'chat' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  {%- elif name == 'tag' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><path d="M7 7h.01"/></svg>
+  {%- elif name == 'plus' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+  {%- elif name == 'settings' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.2 14H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.2V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.8 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 20.8 10h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+  {%- elif name == 'bell' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+  {%- elif name == 'bot' %}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>
+  {%- elif name == 'globe' %}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/></svg>
+  {%- elif name == 'monitor' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12"/><path d="M8 20h8M12 16v4"/></svg>
+  {%- elif name == 'bug' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9"/><path d="M9 7h6a4 4 0 0 1 4 4v3a7 7 0 0 1-14 0v-3a4 4 0 0 1 4-4z"/><path d="M3 13h2M19 13h2M12 7v14"/></svg>
+  {%- elif name == 'logout' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+  {%- elif name == 'collapse' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6M3 4v16"/></svg>
+  {%- elif name == 'expand' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6M21 4v16"/></svg>
+  {%- elif name == 'moon' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  {%- elif name == 'sun' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  {%- endif -%}
+{%- endmacro %}
+{% macro item(href, icon, label, count=0) -%}
+  <a class="rail-item" href="{{ href }}" title="{{ label }}" data-nav>
+    <span class="ico">{{ ico(icon) }}</span><span class="lbl">{{ label }}</span>
+    {% if count %}<span class="badge dot">{{ count }}</span>{% endif %}
+  </a>
+{%- endmacro %}
+
+<aside class="rail" aria-label="{{ _('Navigation') }}">
+  <a href="/" class="brand"><span class="logo">w</span><span class="lbl">willhaben Agent</span></a>
+  {{ item('/', 'home', _("Home")) }}
+  {{ item('/agents', 'search', _("Search agents")) }}
+  {{ item('/hits', 'target', _("Hits"), counts.get('hits', 0)) }}
+  {{ item('/deals', 'box', _("Product search")) }}
+  {{ item('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)) }}
+  {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0)) }}
+  {{ item('/myads', 'tag', _("My ads")) }}
+  {{ item('/new-ad', 'plus', _("New ad")) }}
+  <div class="spacer"></div>
+
+  {# ---- meters: Claude tokens (optional) + willhaben requests ---- #}
+  {% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
+  {% set pct = ([100, (used * 100 / budget)|round|int]|min) if budget else 0 %}
+  {% set tone = 'full' if (budget and (pct >= 90 or lim.cooling_down_s)) else ('warn' if pct >= 60 else '') %}
+  <div class="meters">
+    {% if claude_usage is defined and claude_usage %}
+      {% set cu = claude_usage %}{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
+      <a class="meter" href="/settings/claude" data-pop="claude" title="{{ _('Claude tokens this month') }}">
+        <span class="ico">{{ ico('bot') }}</span><span>Claude</span>
+        <span class="val num">{{ '%.1f'|format(cu.used / 1e6) }} M<span> / {{ (cu.limit / 1e6)|round|int }} M</span></span>
+        <span class="bar brand {{ 'full' if cpct >= 90 else 'warn' if cpct >= 60 else '' }}"><span style="width:{{ cpct }}%"></span></span>
+      </a>
+    {% endif %}
+    <a class="meter" href="/stats/willhaben" data-pop="usage" title="{% if budget %}{{ _('{used} / {budget} willhaben requests in the last hour', used=used, budget=budget) }}{% else %}{{ _('{used} willhaben requests in the last hour', used=used) }}{% endif %}">
+      <span class="ico">{{ ico('globe') }}</span><span>willhaben / h</span>
+      <span class="val num">{{ used }}{% if budget %}<span> / {{ budget }}</span>{% endif %}</span>
+      {% if budget %}<span class="bar {{ tone }}"><span style="width:{{ 100 if lim.cooling_down_s else pct }}%"></span></span>{% endif %}
     </a>
   </div>
-</footer>
+  {% if claude_usage is defined and claude_usage %}{% set cu = claude_usage %}{% set cfrac = ([1, cu.used / cu.limit]|min) if cu.limit else 0 %}
+  <a class="gauge" href="/settings/claude" data-pop="claude" title="{{ _('Claude usage this month: {used} M of your {limit} M token limit (covered by the subscription)', used='%.1f'|format(cu.used / 1e6), limit=(cu.limit / 1e6)|round|int) }}" style="position:relative;height:40px">
+    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/>
+      <circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if cfrac >= 0.9 else 'warn' if cfrac >= 0.6 else 'brand' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - cfrac))|round(1) }}"/></svg>
+    <span class="n" style="display:grid;place-items:center">{{ ico('bot') }}</span>
+  </a>
+  {% endif %}
+  <a class="gauge" href="/stats/willhaben" data-pop="usage" title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}" style="position:relative">
+    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/>
+      <circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if tone == 'full' else 'warn' if tone == 'warn' else 'ok' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - pct / 100))|round(1) }}"/></svg>
+    <span class="n">{{ used }}</span>
+  </a>
+
+  <button class="rail-item sm" type="button" id="rail-toggle" title="{{ _('Expand / collapse sidebar') }}"><span class="ico"><span class="x-only">{{ ico('collapse') }}</span><span class="c-only">{{ ico('expand') }}</span></span><span class="lbl">{{ _("Collapse") }}</span></button>
+
+  <div class="rail-foot">
+    <button class="rail-item sm" type="button" id="inbox-toggle" title="{{ _('Inbox') }}"><span class="ico">{{ ico('bell') }}</span><span class="lbl">{{ _("Inbox") }}</span>{% if inbox_unread is defined and inbox_unread %}<span class="badge dot">{{ inbox_unread }}</span>{% endif %}</button>
+    <button class="account" type="button" id="account-toggle" aria-haspopup="menu" aria-expanded="false">
+      <span class="avatar">{{ ((current_user if current_user is defined else (session_status.user.nickname if session_status.user else 'w')) or 'w')[:1]|upper }}</span>
+      <span class="lbl"><span style="display:block;font-weight:550">{{ current_user if current_user is defined else (session_status.user.nickname if session_status.user else 'willhaben Agent') }}</span>
+        <span style="display:block;color:var(--muted);font-size:12px">{% if wh_bad %}<span style="color:var(--bad)">{{ _("not logged in") }}</span>{% elif session_status.logged_in %}willhaben · {{ _("logged in") }}{% else %}v{{ app_version }}{% endif %}</span></span>
+      {% if wh_bad %}<span class="badge warn" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}
+    </button>
+  </div>
+</aside>
+
+{# ---- account menu (popover) ---- #}
+<div class="layer" id="account-menu" hidden>
+  <div class="backdrop" data-close></div>
+  <div class="popover" role="menu">
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 8px 10px;border-bottom:1px solid var(--border);margin-bottom:4px">
+      <span class="avatar" style="width:36px;height:36px;font-size:14px">{{ ((current_user if current_user is defined else 'w') or 'w')[:1]|upper }}</span>
+      <span style="min-width:0"><span style="display:block;font-weight:600">{{ current_user if current_user is defined else 'willhaben Agent' }}</span>
+        <span style="display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px"><span style="width:6px;height:6px;border-radius:50%;background:var(--{{ 'bad' if wh_bad else 'ok' }})"></span>{% if wh_bad %}{{ _("not logged in to willhaben") }}{% else %}willhaben {{ _("logged in") }}{% endif %}</span></span>
+    </div>
+    <a class="menu-item" href="/settings/willhaben" role="menuitem"><span class="ico">{{ ico('tag') }}</span><span style="flex:1">{{ _("willhaben account") }}</span></a>
+    <a class="menu-item" href="/session" data-remote role="menuitem"><span class="ico">{{ ico('monitor') }}</span><span style="flex:1">{{ _("Browser window") }}</span><span style="width:6px;height:6px;border-radius:50%;background:var(--{{ 'bad' if wh_bad else 'ok' }})"></span></a>
+    <a class="menu-item" href="/settings/claude" role="menuitem"><span class="ico">{{ ico('bot') }}</span><span style="flex:1">{{ _("Claude & usage") }}</span></a>
+    <a class="menu-item" href="/settings" role="menuitem"><span class="ico">{{ ico('settings') }}</span><span style="flex:1">{{ _("Settings") }}</span></a>
+    <form method="post" action="/lang" class="menu-item" style="cursor:default">
+      <span class="ico">{{ ico('globe') }}</span><span style="flex:1">{{ _("Language") }}</span>
+      <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()" style="width:auto;max-width:112px;min-width:0;padding:2px 22px 2px 6px;font-size:12.5px;background-color:var(--bg);text-overflow:ellipsis">
+        {% set pref = ui_lang_pref() %}
+        <option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic") }}</option>
+        {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select>
+    </form>
+    <button class="menu-item" type="button" id="theme-toggle" role="menuitem"><span class="ico" id="theme-icon">{{ ico('moon') }}</span><span style="flex:1" id="theme-label">{{ _("Dark mode") }}</span></button>
+    <a class="menu-item" href="/bugreport" role="menuitem"><span class="ico">{{ ico('bug') }}</span><span style="flex:1">{{ _("Report a bug") }}</span></a>
+    {% if auth_enabled() %}
+    <div class="menu-sep"></div>
+    <form method="post" action="/logout" style="margin:0"><button class="menu-item danger" role="menuitem"><span class="ico">{{ ico('logout') }}</span><span style="flex:1">{{ _("Log out") }}</span></button></form>
+    {% endif %}
+        <div style="padding:6px 10px 4px;color:var(--muted);font-size:11.5px" class="row"><span style="flex:1">willhaben Agent v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span><a href="/credits">{{ _("Credits") }}</a></div>
+  </div>
+</div>
+
+{# ---- willhaben usage popover (prototype "willhaben usage popup"): last hour per channel, last 6 h, hourly budget ---- #}
+{% set wp = wh_popup() %}
+<div class="layer" id="usage-pop" hidden>
+  <div class="backdrop" data-close></div>
+  <div class="popover wide">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="position:relative;width:30px;height:30px;display:grid;place-items:center;flex:none"><svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate(-90deg)"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/><circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if tone == 'full' else 'warn' if tone == 'warn' else 'ok' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - pct / 100))|round(1) }}"/></svg></span>
+      <div style="flex:1;min-width:0"><div style="font-weight:600">{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _("willhaben requests") }}</div>
+        <div class="muted" style="font-size:12.5px">{% if lim.cooling_down_s %}{{ _("willhaben pause: {n} min left", n=(lim.cooling_down_s / 60)|round(0, 'ceil')|int) }}{% else %}{{ _("in the last hour") }}{% if budget %} · {{ _("{n} % of the budget", n=pct) }}{% endif %}{% endif %}</div></div>
+      <button class="icon-btn" type="button" data-close aria-label="{{ _('Close') }}">✕</button>
+    </div>
+    <div style="height:6px;border-radius:3px;background:var(--border);overflow:hidden;display:flex">{% set denom = budget if budget and budget > wp.total else (wp.total or 1) %}{% for c in wp.channels if c.n %}<span title="{{ c.label }} {{ c.n }}" style="width:{{ [c.n * 100 / denom, 1.5]|max|round(1) }}%;height:100%;background:{{ c.color }}"></span>{% endfor %}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12.5px">{% for c in wp.channels %}<div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:{{ c.color }};flex:none"></span><span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.label }}</span><span class="num" style="margin-left:auto">{{ c.n }}</span></div>{% endfor %}</div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="muted" style="display:flex;justify-content:space-between;font-size:12px"><span>{{ _("Last 6 hours") }}</span><span>{{ _("per 15 min") }}</span></div>
+      <div style="display:flex;align-items:flex-end;gap:2px;height:40px;border-bottom:1px solid var(--border)">{% for b in wp.bars %}<span title="{{ b.title }}" style="flex:1;height:{{ [b.h, 2 if b.total else 0]|max }}%;display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden">{% for c, share in b.parts %}{% if share %}<span style="height:{{ share }}%;background:{{ (wp.channels|selectattr('key', 'equalto', c)|first).color }}"></span>{% endif %}{% endfor %}</span>{% endfor %}</div>
+    </div>
+    <form method="post" action="/settings/willhaben" style="display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border);padding-top:12px;margin:0">
+      <input type="hidden" name="next" value="" data-next>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span style="font-weight:550;font-size:13px">{{ _("Hourly budget") }}</span><a href="/stats/willhaben" style="font-size:12.5px">{{ _("Full statistics") }} →</a></div>
+      <div style="display:flex;align-items:center;gap:10px"><input type="range" min="0" max="600" step="10" value="{{ budget }}" style="flex:1" oninput="this.form.requests_per_hour.value = this.value" aria-label="{{ _('Hourly budget') }}"><span style="display:flex;align-items:center;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding-right:8px;color:var(--muted);font-size:13px"><input name="requests_per_hour" value="{{ budget }}" inputmode="numeric" style="width:52px;border:0;background:none;padding:6px 4px 6px 8px;font-weight:600;text-align:right" aria-label="{{ _('Hourly budget') }}">/ h</span><button class="btn secondary sm">{{ _("Save") }}</button></div>
+      <span class="muted" style="font-size:12px">{{ _("All requests run one after another with a pause. When the budget is used up, agents wait for the next hour; product search and price checks count too.") }}</span>
+    </form>
+  </div>
+</div>
+
+{# ---- Claude usage popover (needs claude_usage; optional claude_usage.by_task = [{label, tokens, color}]) ---- #}
+{% if claude_usage is defined and claude_usage %}{% set cu = claude_usage %}{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
+<div class="layer" id="claude-pop" hidden>
+  <div class="backdrop" data-close></div>
+  <div class="popover wide">
+    <div style="display:flex;align-items:center;gap:10px"><span style="position:relative;width:30px;height:30px;display:grid;place-items:center;flex:none"><svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate(-90deg)"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/><circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if cpct >= 90 else 'warn' if cpct >= 60 else 'brand' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - cpct / 100))|round(1) }}"/></svg><span style="position:absolute;display:grid;place-items:center;color:var(--text)">{{ ico('bot') }}</span></span><div style="flex:1;min-width:0"><div style="font-weight:600">Claude · {{ ('%.1f M'|format(cu.used / 1e6)) if cu.used >= 1e6 else ('%d k'|format((cu.used / 1e3)|round|int)) }} {{ _("tokens this month") }}</div><div class="muted" style="font-size:12.5px">{{ cpct }} % {{ _("of your {n} M token limit", n=(cu.limit / 1e6)|round|int) }}{% if cu.calls is defined %} · {{ cu.calls }} {{ _("calls") }}{% endif %}</div></div><button class="icon-btn" type="button" data-close aria-label="{{ _('Close') }}">✕</button></div>
+    <div class="bar brand" style="height:6px;display:flex;background:var(--border)">{% for t in cu.by_task if cu.by_task is defined %}<span style="width:{{ [t.tokens * 100 / cu.limit, 1.5]|max|round(1) }}%;height:100%;background:{{ t.color }};display:block" title="{{ t.label }}"></span>{% else %}<span style="width:{{ cpct }}%"></span>{% endfor %}</div>
+    {% if cu.by_task is defined %}<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12.5px">{% for t in cu.by_task %}<div class="row" style="gap:6px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:2px;background:{{ t.color }};flex:none"></span><span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.label }}</span><span class="num" style="margin-left:auto">{{ ('%.1f M'|format(t.tokens / 1e6)) if t.tokens >= 1e6 else ('%d k'|format((t.tokens / 1e3)|round|int)) }}</span></div>{% endfor %}</div>{% endif %}
+    <div class="row muted" style="justify-content:space-between;font-size:12.5px;border-top:1px solid var(--border);padding-top:12px"><span>{{ _("Limit {n} M", n=(cu.limit / 1e6)|round|int) }} · {{ _("covered by your subscription") }}</span><a href="/settings/claude">{{ _("Limit & statistics") }} →</a></div>
+  </div>
+</div>
+{% endif %}
+
+{# ---- Inbox popover (needs inbox_items = [{kind, title, text, time, url, unread}]) ---- #}
+<div class="layer" id="inbox-pop" hidden>
+  <div class="backdrop" data-close></div>
+  <div class="popover" style="width:400px;max-width:calc(100vw - 100px);padding:0;max-height:calc(100vh - 100px);overflow:hidden">
+    <div class="row" style="padding:12px 14px;border-bottom:1px solid var(--border);flex-wrap:nowrap"><span style="font-weight:650">{{ _("Inbox") }}</span><small class="muted">{% if inbox_unread is defined and inbox_unread %}{{ _("{n} unread", n=inbox_unread) }}{% else %}{{ _("all read") }}{% endif %}</small><span style="flex:1"></span>{% if inbox_items is defined %}<form method="post" action="/inbox/read-all" style="margin:0"><button class="btn ghost xs" style="color:var(--brand)">{{ _("Mark all read") }}</button></form>{% endif %}<button class="icon-btn" type="button" data-close aria-label="{{ _('Close') }}">✕</button></div>
+    <div style="overflow:auto">
+      {% set kinds = {'hit': ('target', 'brand'), 'price_drop': ('target', 'ok'), 'message': ('chat', 'brand'), 'auto_reply_pending': ('bot', 'ok'), 'auto_reply': ('bot', 'ok'), 'pay': ('cart', 'warn'), 'ad_expiring': ('tag', 'warn'), 'ad_expired': ('tag', 'bad'), 'health': ('bell', 'bad')} %}
+      {% for n in inbox_items if inbox_items is defined %}{% set k = kinds.get(n.kind, ('bell', '')) %}
+      <a href="{{ n.url or '/' }}" class="menu-item" style="display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:start;padding:10px 14px;border-radius:0;border-bottom:1px solid var(--border);{% if n.unread %}background:var(--brand-soft){% endif %}">
+        <span class="avatar" style="width:28px;height:28px;border-radius:8px;background:var(--{{ k[1] }}-soft);color:var(--{{ k[1] }})">{{ ico(k[0]) }}</span>
+        <span style="min-width:0"><span style="display:block;font-weight:{{ 600 if n.unread else 500 }}">{{ n.title }}</span><span class="muted" style="display:block;font-size:12.5px">{{ n.text }}</span></span>
+        <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><small class="muted" style="white-space:nowrap">{{ n.time }}</small>{% if n.unread %}<span style="width:8px;height:8px;border-radius:50%;background:var(--brand)"></span>{% endif %}</span></a>
+      {% else %}<p class="muted" style="padding:18px 14px;text-align:center">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }} <a href="/#activity">{{ _("Activity") }}</a></p>{% endfor %}
+    </div>
+    <div class="muted" style="padding:8px 14px;border-top:1px solid var(--border);font-size:12px">{{ _("Pushes go to Home Assistant") }} · <a href="/settings/ha">{{ _("Notification settings") }}</a></div>
+  </div>
+</div>
+
+{# ---- Command palette (⌘K / Ctrl K / "/") — built from the nav links and settings sections, no server round-trip ---- #}
+<div class="layer dim" id="cmdk" hidden style="z-index:95;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh">
+  <div class="backdrop" data-close></div>
+  <div class="card" style="position:relative;width:min(560px,calc(100% - 32px));border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
+    <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:nowrap"><span class="muted">{{ ico('search') }}</span><input id="cmdk-q" placeholder="{{ _('Jump to a page, setting or action…') }}" autocomplete="off" style="border:0;background:none;font-size:16px;padding:4px 0"><kbd class="muted" style="font-size:11.5px;border:1px solid var(--border);border-radius:5px;padding:1px 6px">esc</kbd></div>
+    <div id="cmdk-list" style="max-height:52vh;overflow:auto;padding:6px"></div>
+    <div class="row muted" style="gap:14px;padding:8px 16px;border-top:1px solid var(--border);font-size:11.5px"><span>↵ {{ _("open") }}</span><span>⌘K / Ctrl K</span><span>/ {{ _("opens") }}</span></div>
+  </div>
+</div>
+<template id="cmdk-items">{# label|hint|href per line; extend freely #}
+{{ _("Home") }}||/
+{{ _("Search agents") }}||/agents
+{{ _("New search agent") }}|{{ _("action") }}|/agents/new
+{{ _("Hits") }}||/hits
+{{ _("Product search") }}||/deals
+{{ _("Purchases") }}||/purchases
+{{ _("Chats") }}||/chats
+{{ _("My ads") }}||/myads
+{{ _("New ad") }}|{{ _("action") }}|/new-ad
+{{ _("Browser window") }}|{{ _("action") }}|/session
+{{ _("willhaben requests") }}|{{ _("statistics") }}|/stats/willhaben
+{{ _("Report a bug") }}||/bugreport
+{% for id, label in [('willhaben', _("willhaben account")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
+{% endfor %}</template>
+
+{# ---- mobile tab bar ---- #}
+<nav class="tabbar" aria-label="{{ _('Navigation') }}">
+  <a href="/" data-nav>{{ ico('home') }}{{ _("Home") }}</a>
+  <a href="/hits" data-nav>{{ ico('target') }}{{ _("Hits") }}{% if counts.get('hits') %}<span class="badge">{{ counts.hits }}</span>{% endif %}</a>
+  <a href="/chats" data-nav>{{ ico('chat') }}{{ _("Chats") }}{% if counts.get('chats') %}<span class="badge">{{ counts.chats }}</span>{% endif %}</a>
+  <a href="/myads" data-nav>{{ ico('tag') }}{{ _("My ads") }}</a>
+  <a href="#" id="tab-more">{{ ico('settings') }}{{ _("More") }}</a>
+</nav>
+{% endif %}
+
+<main class="{% block main_class %}page{% endblock %}">
+  {% set notice_text = purchase_notice() %}{% if notice_text %}<div class="msg">{{ notice_text }}</div>{% endif %}
+  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+  {% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+{% if not embed %}
 {% include "_ad_panel.html" %}
 {% include "_buy_panel.html" %}
 {% include "_remote_overlay.html" %}
 {% endif %}
 <script>
 (() => {
-  // mark the current section in the top nav
+  const root = document.documentElement, body = document.body;
+  // current section
   const path = location.pathname;
-  document.querySelectorAll('nav.top ul:last-child a[href]').forEach(a => {
+  document.querySelectorAll('[data-nav]').forEach(a => {
     const h = a.getAttribute('href');
-    if (path === h || path.startsWith(h + '/') || (h === '/new-ad' && path.startsWith('/ad-'))) a.setAttribute('aria-current', 'page');
+    if (path === h || (h !== '/' && path.startsWith(h + '/')) || (h === '/new-ad' && path.startsWith('/ad-')) || (h === '/agents' && path.startsWith('/agents'))) a.setAttribute('aria-current', 'page');
   });
-  // light/dark toggle: remembers the choice, otherwise follows the system setting
-  const btn = document.getElementById('theme-toggle'), root = document.documentElement;
+  // sidebar expand / collapse (remembered)
+  body.dataset.rail = root.dataset.rail || 'collapsed';
+  const railBtn = document.getElementById('rail-toggle');
+  const paintRail = () => { const x = body.dataset.rail === 'expanded'; body.querySelectorAll('.rail .x-only').forEach(e => e.hidden = !x); body.querySelectorAll('.rail .c-only').forEach(e => e.hidden = x); };
+  railBtn?.addEventListener('click', () => { body.dataset.rail = body.dataset.rail === 'expanded' ? 'collapsed' : 'expanded'; try { localStorage.setItem('rail', body.dataset.rail); } catch (e) {} paintRail(); });
+  paintRail();
+  // theme (remembered, else system)
   const sysDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
   const current = () => root.dataset.theme || (sysDark() ? 'dark' : 'light');
-  const SUN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
-  const MOON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
-  const paint = () => { btn.innerHTML = current() === 'dark' ? SUN : MOON; };
-  btn.addEventListener('click', () => {
-    const next = current() === 'dark' ? 'light' : 'dark';
-    root.dataset.theme = next;
-    try { localStorage.setItem('theme', next); } catch (e) {}
-    paint();
+  const themeBtn = document.getElementById('theme-toggle');
+  const paintTheme = () => { const d = current() === 'dark'; const l = document.getElementById('theme-label'); if (l) l.textContent = d ? {{ _("Light mode")|tojson }} : {{ _("Dark mode")|tojson }}; };
+  themeBtn?.addEventListener('click', () => { const next = current() === 'dark' ? 'light' : 'dark'; root.dataset.theme = next; try { localStorage.setItem('theme', next); } catch (e) {} paintTheme(); });
+  paintTheme();
+  // popovers: account menu, usage, "More" tab
+  const layers = { account: document.getElementById('account-menu'), usage: document.getElementById('usage-pop'), claude: document.getElementById('claude-pop'), inbox: document.getElementById('inbox-pop'), cmdk: document.getElementById('cmdk') };
+  const closeAll = () => Object.values(layers).forEach(l => l && (l.hidden = true));
+  const open = k => { closeAll(); if (layers[k]) layers[k].hidden = false; };
+  document.getElementById('account-toggle')?.addEventListener('click', () => layers.account.hidden ? open('account') : closeAll());
+  document.getElementById('inbox-toggle')?.addEventListener('click', () => layers.inbox.hidden ? open('inbox') : closeAll());
+  document.getElementById('tab-more')?.addEventListener('click', e => { e.preventDefault(); open('account'); });
+  document.querySelectorAll('[data-pop]').forEach(a => a.addEventListener('click', e => { if (e.ctrlKey || e.metaKey || !layers[a.dataset.pop]) return; e.preventDefault(); open(a.dataset.pop); }));
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeAll));
+  document.querySelectorAll('input[data-next]').forEach(i => { i.value = location.pathname + location.search; });
+  // command palette
+  const items = (document.getElementById('cmdk-items')?.content.textContent || '').trim().split('\n').map(l => l.split('|')).filter(p => p.length === 3).map(([label, hint, href]) => ({label: label.trim(), hint: hint.trim(), href: href.trim()}));
+  const q = document.getElementById('cmdk-q'), list = document.getElementById('cmdk-list');
+  const paintCmd = () => { const s = q.value.trim().toLowerCase(); const hits = items.filter(i => !s || (i.label + ' ' + i.hint).toLowerCase().includes(s)).slice(0, 9);
+    list.replaceChildren(...hits.map((i, n) => { const a = document.createElement('a'); a.href = i.href; a.className = 'menu-item'; a.style.cssText = n === 0 && s ? 'background:var(--hover)' : ''; a.innerHTML = `<span style="flex:1"><span style="display:block;font-weight:500"></span>${i.hint ? '<span class="muted" style="display:block;font-size:12.5px"></span>' : ''}</span><span class="muted" style="font-size:11.5px"></span>`; a.querySelector('span span').textContent = i.label; if (i.hint) a.querySelectorAll('span span')[1].textContent = i.hint; return a; }));
+    if (!hits.length) { const p = document.createElement('p'); p.className = 'muted'; p.style.cssText = 'padding:18px 12px;text-align:center'; p.textContent = {{ _("Nothing matches")|tojson }} + ' „' + q.value + '“'; list.replaceChildren(p); } };
+  const openCmd = () => { open('cmdk'); q.value = ''; paintCmd(); setTimeout(() => q.focus(), 0); };
+  q?.addEventListener('input', paintCmd);
+  q?.addEventListener('keydown', e => { if (e.key === 'Enter') { const a = list.querySelector('a'); if (a) location.href = a.href; } });
+  document.addEventListener('keydown', e => {
+    const inField = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable;
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); layers.cmdk.hidden ? openCmd() : closeAll(); return; }
+    if (e.key === '/' && !inField && layers.cmdk.hidden && !document.querySelector('dialog[open]')) { e.preventDefault(); openCmd(); return; }
+    if (e.key === 'Escape') closeAll();
   });
-  paint();
-  // shift-click on a selection checkbox (class "sel") sets every one in between of the same form, like a file manager
+  // shift-click on selection checkboxes (class "sel") selects the range, like a file manager
   let last = null;
   document.addEventListener('click', e => {
     const box = e.target;
@@ -478,12 +300,22 @@
     if (e.shiftKey && last && last !== box && last.form === box.form && last.isConnected) {
       const all = [...document.querySelectorAll('input.sel')].filter(b => b.form === box.form);
       const [i, j] = [all.indexOf(last), all.indexOf(box)].sort((a, b) => a - b);
-      all.slice(i, j + 1).forEach(b => {
-        if (b.checked !== box.checked) { b.checked = box.checked; b.dispatchEvent(new Event('change', {bubbles: true})); }
-      });
-      getSelection()?.removeAllRanges();   // shift-click also selects text
+      all.slice(i, j + 1).forEach(b => { if (b.checked !== box.checked) { b.checked = box.checked; b.dispatchEvent(new Event('change', {bubbles: true})); } });
+      getSelection()?.removeAllRanges();
     }
     last = box;
+  });
+  // resizable split columns: <main class="split" data-resize="key"> with a .resizer inside .list
+  document.querySelectorAll('main.split[data-resize]').forEach(m => {
+    const key = 'col:' + m.dataset.resize, list = m.querySelector('.list'); if (!list) return;
+    const apply = w => { m.style.gridTemplateColumns = w + 'px minmax(0,1fr)'; };
+    try { const w = +localStorage.getItem(key); if (w) apply(w); } catch (e) {}
+    const grip = document.createElement('div'); grip.className = 'resizer'; list.style.position = 'relative'; list.appendChild(grip);
+    grip.addEventListener('mousedown', e => { e.preventDefault(); const x0 = e.clientX, w0 = list.getBoundingClientRect().width; grip.classList.add('drag'); body.style.cursor = 'col-resize'; body.style.userSelect = 'none';
+      const mv = ev => apply(Math.min(640, Math.max(260, w0 + ev.clientX - x0)));
+      const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); grip.classList.remove('drag'); body.style.cursor = ''; body.style.userSelect = ''; try { localStorage.setItem(key, parseInt(list.getBoundingClientRect().width)); } catch (e) {} };
+      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); });
+    grip.addEventListener('dblclick', () => { m.style.gridTemplateColumns = ''; try { localStorage.removeItem(key); } catch (e) {} });
   });
 })();
 </script>

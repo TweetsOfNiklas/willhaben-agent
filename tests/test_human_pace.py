@@ -56,4 +56,7 @@ def test_settings_form_saves_and_reschedules(monkeypatch):
     with TestClient(app) as c:
         c.post("/settings/human-pace", data={"variance_pct": "40"})
         assert human_pace.config() == {"variance_pct": 40, "breaks": False} and calls
-        assert 'name="variance_pct" value="40"' in c.get("/settings").text
+        page = c.get("/settings/quiet").text
+        assert "±40 %" in page and 'name="jitter" checked' in page
+        c.post("/settings/quiet", data={"pace": "1", "start": "01:00", "end": "07:00", "mode": "slow", "interval_min": "60"})
+        assert human_pace.config() == {"variance_pct": 0, "breaks": False}       # jitter switch off = no variance

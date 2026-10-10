@@ -256,10 +256,10 @@ async def test_run_agent_flags_new_hits_and_warns(responses, ha):  # noqa: F811
     assert fine.scam_flags is None
 
     events = {b["ad_id"]: b for p, b in ha if p.endswith("willhaben_hit")}
-    assert events["1000000101"]["title"].startswith("⚠️ ")
-    assert "\n⚠️ " in events["1000000101"]["message"]
+    assert events["1000000101"]["title"].startswith("! ")
+    assert "\n! " in events["1000000101"]["message"]
     assert events["1000000101"]["scam_level"] == "high" and "money_transfer" in events["1000000101"]["scam_flags"]
-    assert not events["1000000102"]["title"].startswith("⚠️") and "scam_level" not in events["1000000102"]
+    assert not events["1000000102"]["title"].startswith("! ") and "scam_level" not in events["1000000102"]
 
 
 async def test_flags_are_set_before_screening(responses, ha, monkeypatch):  # noqa: F811

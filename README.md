@@ -20,7 +20,8 @@ It runs on your own server, from your home internet connection, and you control 
   searches on every check and drops new ads over the plan's budget or with an exclusion word before they are stored.
 - **Chats**: your willhaben conversations, synced live. Claude drafts replies in your style and nothing is sent
   until you click. For your own ads you can opt in to automatic answers to simple questions, with a minimum price
-  Claude never goes below, human-like timing and read receipts; your 👍/👎 feedback goes into later answers.
+  Claude never goes below, human-like timing and read receipts; your thumbs-up/down feedback goes into later answers. Chats you are done with can
+  be hidden or removed from the app (willhaben keeps them; they come back when the other person writes again).
 - **Create ads quickly**: drop in notes and photos and Claude writes the title, description and category. You also get
   a price suggestion from comparable listings and the product's spec sheet from Geizhals. Upload photos of several
   items at once and Claude sorts them into one draft per item. Publish directly on willhaben (free private ads; the
@@ -35,7 +36,7 @@ It runs on your own server, from your home internet connection, and you control 
   search agent created from the search. Toggles for unusual names (misspellings, nicknames, generic descriptions) and other categories
   (mis-categorised ads, bundles) dig for hidden deals; the depth (≈3 / 6 / 12 searches) is the number of willhaben
   requests, Claude is called two or three times (plan, ranking, photo check).
-- **Purchase orders** ("🛒 Buy" on a product search result or in the ad viewer opens the buy dialog): the ad on the
+- **Purchase orders** ("Buy" on a product search result or in the ad viewer opens the buy dialog): the ad on the
   left, on the right a three-step buy dialog (step chips: how to buy, the maximum, start): how to buy (PayLivery with
   the ad's shipping price, a bank transfer or pickup, the PayLivery card is preselected when the setting asks for it),
   the maximum including shipping and, with PayLivery, willhaben's buyer protection fee of 4.5 % (min. € 0.99, max.
@@ -55,9 +56,12 @@ It runs on your own server, from your home internet connection, and you control 
   green-to-red bar against comparable listings of the **same kind of item** (same willhaben category, without accessories,
   other variants and extreme prices; you can pick another category), the Geizhals new price and, on click, Claude's verdict.
   Also in the hit viewer.
-- **Your ads**: imported from your account, with a reminder before they expire. Per ad: auto-renew when it expires,
-  edit text and photos (Claude can propose a better text), deactivate, delete, mark sold or reserved (other buyers get a
-  notice draft).
+- **Your ads**: imported from your account, with a reminder before they expire. A list with a detail pane per ad and
+  three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
+  automatic answers with an instruction and a minimum price (switches and text save as you type), edit text and photos
+  (Claude can propose a better text), deactivate, delete, mark sold or reserved (other buyers get a notice draft).
+  Ads that expired longer ago than a cutoff (Settings → My ads, 30 days by default) move to Deactivated; the old copy
+  of a renewed ad is never listed again and its chats use the new ad's settings.
 - **Shipping**: when a buyer sends an address, the app compares parcel prices of Post, GLS, Hermes and DPD and shows
   the nearest drop-off points. The label is bought only after the buyer has paid: you mark the payment (a buyer's
   "I have paid" only becomes a reminder to check your account), then approve the purchase on the chat page or with a
@@ -80,6 +84,10 @@ It runs on your own server, from your home internet connection, and you control 
 - **Polite by design**: every willhaben request goes through one shared rate limiter (minimum gap plus an
   hourly budget). Quiet hours slow the agents down at night. Nothing is ever written to willhaben without your approval.
 - **MCP server**, so Claude Desktop or Claude Code can use the agent as a tool.
+- **Interface**: a collapsible sidebar with badges (new hits, unread chats, payments due), a notification inbox, live
+  meters for Claude tokens this month and willhaben requests in the last hour (each with a popup: per task / per
+  channel, the last 6 hours, the hourly budget), a command palette (Ctrl K or `/`), light and dark theme, and a phone
+  layout with a bottom tab bar and list → detail screens.
 
 Claude runs through the Claude Code CLI with your Claude subscription. You don't need an API key.
 
@@ -126,24 +134,28 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
    get pushes.
 4. **Settings → Telegram** (optional): create a bot with @BotFather (`/newbot`) and paste its token. Then open the bot
    in Telegram on any device (link or QR code) and press Start; the chat shows up in Settings and you confirm it with
-   one tap. Settings → Chats decides whether pushes go to Home Assistant, Telegram or both.
+   one tap; compare the 4-digit code the bot sent you, since anyone can write to a bot. Settings → Automatic answers
+   decides whether pushes go to Home Assistant, Telegram or both.
 5. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
    Optionally switch on "Claude screening" and describe exactly what you want.
 
-Settings → Claude also shows the token usage per job and lets you pick a model per job (default: Opus for writing
-listings, Sonnet for chat replies, screening and the product search).
+Settings → Claude & usage shows the token usage per task, lets you pick a model per task (default: Opus for writing
+listings, Sonnet for chat replies, screening and the product search) and sets a monthly token limit (10 M by default)
+for the sidebar meter. When the limit is reached the app can pause hit screening, switch every task to Haiku or only
+notify you; chat drafts you ask for are never blocked. Your subscription is not billed per token either way.
 
-The interface follows your browser's language (English or German). You can switch it in the footer or under
-Settings → Language.
+The interface follows your browser's language (English or German). You can switch it in the account menu (the
+avatar at the bottom of the sidebar) or under Settings → Language & appearance.
 
-**Settings → Backup** downloads everything (database, tokens, ad photos, optionally the willhaben login) as one
+**Settings → Backup & restore** downloads everything (database, tokens, ad photos, optionally the willhaben login) as one
 ZIP, optionally encrypted with a passphrase, and restores such a file after a preview and a confirm click. The file
 contains your logins: keep it private.
 
-**willhaben requests:** the counter in the footer links to `/stats/willhaben`, a chart of every request the app
+**willhaben requests:** the meter in the sidebar opens a summary (last hour per channel, the last 6 hours, the hourly
+budget, which you can change right there) and links to `/stats/willhaben`, a chart of every request the app
 sent to willhaben in the last 1 h / 6 h / 24 h / 7 days (anonymous searches vs. the logged-in account vs. live chat,
 blocked answers highlighted). Only counts per minute are stored (no addresses, ids or texts), for 8 days. Home
-Assistant can read the same numbers from `GET /api/stats/willhaben?range=24h`. The footer leaves out failed live-chat reconnects, which
+Assistant can read the same numbers from `GET /api/stats/willhaben?range=24h`. The meter leaves out failed live-chat reconnects, which
 the rate limit does not pace; on the account channel a 403 ("blocked") is often just an expired login.
 
 That's it. Setting a dashboard password is strongly recommended, because the app can send messages in your name
@@ -169,7 +181,7 @@ a `compose.override.yaml`. Compose merges it automatically, and it is git-ignore
 
 ### Reporting a bug
 
-The footer link **Report a bug** opens a page where you describe what happened and click **Create report**. The app
+**Report a bug** in the account menu opens a page where you describe what happened and click **Create report**. The app
 builds an anonymised report from its own state: version, connection states, counts, recent warnings and errors
 (with tracebacks) and, optionally, harmless settings. Tokens, passwords, e-mail addresses, phone numbers, IP addresses,
 your server's host names (including other subdomains of your domain), people's names, carrier logins, chat

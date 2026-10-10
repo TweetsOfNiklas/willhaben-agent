@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
 {% block content %}
 <p><a href="/myads#ad-{{ a.ad_id }}">← {{ _("My ads") }}</a></p>
 <h3>{{ _("Edit ad") }}</h3>
@@ -7,7 +8,7 @@
 
 {% if proposal %}
 <article style="border-left:4px solid var(--brand)">
-  <strong>🤖 {{ _("Claude's proposal – not saved yet") }}</strong>
+  <strong>{{ _("Claude's proposal – not saved yet") }}</strong>
   {% if proposal.note %}<p style="margin:.4rem 0"><small>{{ proposal.note }}</small></p>{% endif %}
   <small class="muted">{{ _("Check the text below, change it if you like, then save on willhaben – or discard it.") }}</small>
   <a href="/myads/{{ a.ad_id }}/edit" class="secondary" style="margin-left:.5rem"><small>{{ _("Discard proposal") }}</small></a>
@@ -33,7 +34,7 @@
   <small class="muted">{{ _("Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.") }}</small>
 
   <fieldset style="margin-top:1.4rem">
-    <legend><strong>🤖 {{ _("Revise with Claude") }}</strong></legend>
+    <legend><strong>{{ _("Revise with Claude") }}</strong></legend>
     <fieldset role="group">
       <input name="instruction" value="{{ instruction or '' }}"
              placeholder="{{ _('e.g. shorter, more convincing title, mention that the battery is new') }}">
@@ -45,7 +46,7 @@
 </form>
 
 <article id="photos" style="margin-top:1.6rem">
-  <header><strong>📷 {{ _("Photos") }}</strong>
+  <header><strong>{{ _("Photos") }}</strong>
     <small class="muted">· {{ _("the first photo is the cover") }}</small></header>
   {% if cur.images_error %}
     <p><small style="color:#e5484d">{{ _("Could not load the photos from willhaben: {error}", error=cur.images_error) }}</small></p>
@@ -58,9 +59,9 @@
         <img src="{{ img.thumb }}" alt="" loading="lazy" referrerpolicy="no-referrer">
         <span class="badge ok cover-badge">{{ _("Cover") }}</span>
         <div class="photo-tools">
-          <button type="button" class="secondary outline" data-move="-1" title="{{ _('Move left') }}" aria-label="{{ _('Move left') }}">◀</button>
-          <button type="button" class="secondary outline" data-cover title="{{ _('Make cover photo') }}" aria-label="{{ _('Make cover photo') }}">★</button>
-          <button type="button" class="secondary outline" data-move="1" title="{{ _('Move right') }}" aria-label="{{ _('Move right') }}">▶</button>
+          <button type="button" class="secondary outline" data-move="-1" title="{{ _('Move left') }}" aria-label="{{ _('Move left') }}"></button>
+          <button type="button" class="secondary outline" data-cover title="{{ _('Make cover photo') }}" aria-label="{{ _('Make cover photo') }}"></button>
+          <button type="button" class="secondary outline" data-move="1" title="{{ _('Move right') }}" aria-label="{{ _('Move right') }}"></button>
           <button type="button" class="secondary outline" data-remove title="{{ _('Remove') }}" aria-label="{{ _('Remove') }}">✕</button>
         </div>
       </div>

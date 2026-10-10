@@ -426,7 +426,7 @@ def test_page_renders_each_range(client, rng):
     r = client.get(f"/stats/willhaben?range={rng}")
     assert r.status_code == 200
     assert "<svg viewBox" in r.text and "<title>" in r.text and 'aria-current="true">' + rng in r.text
-    assert "class=\"blocked\"" in r.text
+    assert 'data-outcome="blocked"' in r.text
 
 
 def test_page_empty_state(client):

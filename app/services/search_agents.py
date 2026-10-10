@@ -319,12 +319,12 @@ def _mark_scam_issue(h: Hit) -> None:
 
 
 def _scam_prefix(h: Hit) -> str:
-    return "⚠️ " if scam.warnings(h.scam_flags) else ""
+    return "! " if scam.warnings(h.scam_flags) else ""
 
 
 def _scam_line(h: Hit) -> str:
     top = scam.headline(h.scam_flags)
-    return f"\n⚠️ {top}" if top else ""
+    return f"\n! {top}" if top else ""
 
 
 def _scam_data(h: Hit) -> dict:

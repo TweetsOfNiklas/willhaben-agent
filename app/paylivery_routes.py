@@ -37,4 +37,4 @@ async def chat_paylivery_action(conversation_id: str, action: str, amount: str =
 @router.post("/settings/paylivery")
 async def settings_paylivery(notify: str | None = Form(None)):
     paylivery.save_settings(notify=bool(notify))
-    return _back("/settings", t("Changes saved"), "#paylivery")
+    return _back("/settings/paylivery", t("Changes saved"), "")

@@ -1,0 +1,46 @@
+{# Settings → Telegram (handoff design). Pairing keeps the 4-digit code per request (anyone can write to the bot). #}
+<style>.tg-qr svg { display:block; width:96px; height:96px; background:#fff; border-radius:8px; padding:4px; } @media (max-width:575px) { .tg-qr { display:none } }</style>
+<form method="post" action="/settings/telegram/token" class="card pad" style="display:flex;flex-direction:column;gap:14px">
+  <div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:var(--{{ 'ok' if tg.linked else 'warn' if tg.configured else 'off' }})"></span><div><div style="font-weight:600">{% if tg.linked %}{{ _("Linked") }} · {{ tg.chat_name }}{% elif tg.configured %}{{ _("Waiting for /start") }} · @{{ tg.username }}{% else %}{{ _("Not set up") }}{% endif %}</div><div class="muted" style="font-size:12.5px">{{ _("Optional — pushes also work via Home Assistant.") }}{% if tg.source == 'env' %} {{ _("(token from .env)") }}{% endif %}</div></div></div>
+  {% if not tg.linked %}
+  <ol class="muted" style="margin:0;padding-left:18px;font-size:13px;display:flex;flex-direction:column;gap:4px"><li>{{ _("Create a bot with @BotFather (/newbot) and copy the token.") }} <a href="https://t.me/BotFather" target="_blank" rel="noopener">{{ _("Open BotFather") }} ↗</a></li><li>{{ _("Paste the token below and save.") }}</li><li>{{ _("Open the bot in Telegram – on any device – and tap “Start” or send any message. The chat then appears here for you to confirm.") }}</li></ol>
+  {% endif %}
+  {% if not tg.configured %}
+  <label class="field"><span>{{ _("Bot token") }}</span><input name="token" type="password" required placeholder="123456789:AAH…" pattern="[0-9]+:[A-Za-z0-9_\-]+" autocomplete="off" style="font-family:var(--mono);font-size:13px"></label>
+  <div class="row"><button class="btn" onclick="this.setAttribute('aria-busy','true')">{{ _("Connect bot") }}</button></div>
+  {% endif %}
+  {% if tg.configured and not tg.linked %}
+  <div class="card pad tg-pair" data-tg-fp="{{ tg.candidates|map(attribute='chat_id')|join(',') }}" style="background:var(--bg);display:flex;gap:16px;align-items:center;padding:12px 14px">
+    <figure class="tg-qr" aria-label="QR" style="margin:0">{{ tg_qr|safe }}</figure>
+    <div style="font-size:13px"><div style="font-weight:600">{{ _("Open the bot and press Start") }}</div><a href="{{ tg.bot_url }}" target="_blank" rel="noopener" id="tg-link">@{{ tg.username }} {{ _("in Telegram") }} ↗</a><div class="muted" style="font-size:12.5px;margin-top:4px">{{ _("On a computer without Telegram: scan the code with your phone.") }} {{ _("The chat shows up here; confirm it with one tap.") }}</div></div>
+  </div>
+  {% for c in tg.candidates %}
+  <div class="row" style="gap:8px;border:1px solid var(--brand);border-radius:10px;padding:10px 12px"><span style="font-size:13px">{{ _("New chat: {name} — is that you?", name=c.name) }} <span class="muted">· {{ _("code {code}", code=c.code) }}</span></span><span style="flex:1"></span><button class="btn sm" formaction="/settings/telegram/link" name="chat_id" value="{{ c.chat_id }}" formnovalidate>{{ _("Yes, link") }}</button></div>
+  {% else %}<small class="muted" aria-busy="true">{{ _("Waiting for a message to the bot …") }}</small>{% endfor %}
+  {% if tg.candidates %}<small class="muted">{{ _("Only link the one whose code the bot sent you in Telegram – anyone can write to the bot.") }}</small>{% endif %}
+  {% endif %}
+  {% if tg.linked %}
+  <div class="row"><button class="btn secondary" formaction="/settings/telegram/test" formnovalidate>{{ _("Send test message") }}</button><button class="btn danger" formaction="/settings/telegram/relink" formnovalidate>{{ _("Unlink") }}</button></div>
+  {% endif %}
+  {% if tg.source == 'login' %}<div><button class="btn ghost sm" formaction="/settings/telegram/forget" formnovalidate onclick='return confirm({{ _("Remove the Telegram bot from the app?")|tojson }})'>{{ _("Remove bot") }}</button></div>{% endif %}
+</form>
+{% if tg.linked %}
+<form method="post" action="/settings/telegram/kinds" class="card pad" style="display:flex;flex-direction:column;gap:12px">
+  <label class="switch-row"><span><span class="t">{{ _("Send notifications to Telegram") }}</span><span class="d">{{ _("Home Assistant events keep firing either way. To avoid getting every push twice, choose “events only” under Home Assistant.") }}</span></span><input type="checkbox" class="switch" name="enabled" {% if tg.enabled %}checked{% endif %}></label>
+  <div class="field"><span>{{ _("Which notifications") }}</span><div class="row" style="gap:6px">{% for k, label in tg_kinds.items() %}<label class="chip {{ 'on' if k in tg.kinds }}" style="cursor:pointer"><input type="checkbox" name="kind" value="{{ k }}" {% if k in tg.kinds %}checked{% endif %} style="width:14px;height:14px" onchange="this.parentNode.classList.toggle('on', this.checked)">{{ label }}</label>{% endfor %}</div></div>
+  <div><button class="btn">{{ _("Save") }}</button></div>
+  <small class="muted"><code>/drafts</code> {{ _("Open answer drafts") }} · <code>/auto</code> {{ _("Automatic answers per ad") }} · <code>/status</code> {{ _("Session and counters") }}</small>
+</form>
+{% endif %}
+{% if tg.configured and not tg.linked %}
+<script>
+  (() => {   // chats that write to the bot show up as buttons: reload when the list (or the link) changes
+    const fp = () => document.querySelector('.tg-pair')?.dataset.tgFp ?? '';
+    const timer = setInterval(async () => {
+      const r = await fetch('/settings/telegram/status').then(r => r.json()).catch(() => null);
+      if (!r) return;
+      if (r.linked || r.candidates.map(c => c.chat_id).join(',') !== fp()) { clearInterval(timer); location.reload(); }
+    }, 3000);
+  })();
+</script>
+{% endif %}

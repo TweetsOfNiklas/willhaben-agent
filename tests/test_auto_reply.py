@@ -181,8 +181,8 @@ def test_settings_and_myads_forms():
         db.add(MyAd(ad_id="222", heading="Rad"))
         db.commit()
     with TestClient(app) as c:
-        assert "General instruction for automatic replies" in c.get("/settings").text
-        assert "Answer buyers automatically" in c.get("/myads?show_inactive=1").text
+        assert "General instruction for automatic answers" in c.get("/settings/chats").text
+        assert "Automatic answers" in c.get("/myads?show_inactive=1").text
         c.post("/myads/222/auto-reply", data={"on": "1", "instructions": "Preis fix\r\nAbholung Wien"})
         c.post("/settings", data={"auto_reply_rules": "nur Verfügbarkeit"})
     with session() as db:
@@ -379,3 +379,31 @@ def test_existing_duplicate_is_cleaned_up():
         db.commit()
         ids = sorted(m.ext_id for m in db.exec(select(Message).where(Message.conversation_id == "c1")))
     assert ids == ["draft-4", "srv-9"]
+
+
+def test_myads_autosave_answers_json_and_runs_pending_only_when_switched_on(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    runs = []
+
+    async def fake_pending(ad_id=None):
+        runs.append(ad_id)
+        return 0
+
+    monkeypatch.setattr(chats, "process_pending_auto", fake_pending)
+    with session() as db:
+        db.add(MyAd(ad_id="333", heading="Lampe"))
+        db.commit()
+    auto = {"X-Autosave": "1"}
+    with TestClient(app) as c:
+        r = c.post("/myads/333/auto-reply", data={"on": "1", "instructions": "Preis fix"}, headers=auto)
+        assert r.status_code == 200 and r.json() == {"ok": True, "error": None}
+        c.post("/myads/333/auto-reply", data={"on": "1", "instructions": "Preis fix, Abholung"}, headers=auto)   # typing on
+        r = c.post("/myads/333/auto-reply", data={"on": "1", "min_price": "x"}, headers=auto)
+        assert r.json()["ok"] is False and "number" in r.json()["error"]
+        assert c.post("/myads/333/auto-renew", data={"on": "1"}, headers=auto).json() == {"ok": True}
+    assert runs == ["333"]                                   # once, when the switch went on - not per keystroke
+    with session() as db:
+        ad = db.get(MyAd, "333")
+    assert ad.auto_reply and ad.auto_renew

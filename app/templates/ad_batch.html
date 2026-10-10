@@ -1,132 +1,69 @@
 {% extends "base.html" %}
-{% block head %}{% if b.status == 'sorting' %}<meta http-equiv="refresh" content="5">{% endif %}
-<style>
-  .tiles { display:flex; flex-wrap:wrap; gap:.4rem; min-height:96px; padding:.4rem; border:1px dashed var(--pico-muted-border-color); border-radius:.4rem; }
-  .tiles.over { border-color:#13a3bc; background: var(--pico-card-sectioning-background-color); }
-  .tile { width:118px; cursor:grab; } .tile.locked { cursor:default; }
-  .tile img { width:118px; height:96px; object-fit:cover; border-radius:.3rem; display:block; background:#eee; }
-  .tile select { margin:.2rem 0 0; padding:.1rem .3rem; font-size:.72em; height:auto; }
-  .tiles .tile:first-child img { outline:2px solid #13a3bc; }
-  .tiles.plain .tile:first-child img { outline:none; }
-  .bgroup header { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
-  .bgroup header input[type=text] { flex:1; min-width:14rem; margin:0; }
-  .bgroup header label { margin:0; white-space:nowrap; }
-  .question { border-left:4px solid #f59f00; padding:.2rem .6rem; margin:.4rem 0; }
-  .bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; } .bar input { flex:1; min-width:14rem; margin:0; }
-  .bar button { width:auto; margin:0; }
-  .bdraft header { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
-  .bdraft.published { border-left:4px solid #2f9e44; } .bdraft.discarded { opacity:.6; }
-  .bdraft-body { display:grid; grid-template-columns: 170px 1fr; gap:1rem; }
-  @media (max-width: 760px) { .bdraft-body { grid-template-columns: 1fr; } }
-  .bdraft-photos { display:flex; flex-wrap:wrap; gap:.3rem; align-content:flex-start; }
-  .bdraft-photos img { width:82px; height:82px; object-fit:cover; border-radius:.3rem; display:block; }
-  .bdraft-photos a:first-child img { width:170px; height:130px; }
-  .bdraft .small, .bdraft footer button { width:auto; padding:.3rem .8rem; font-size:.85em; margin:0; }
-  .bdraft-refine { display:flex; gap:.4rem; margin:.4rem 0 0; } .bdraft-refine input { flex:1; margin:0; }
-  .bdraft footer { display:flex; gap:.4rem; flex-wrap:wrap; align-items:center; }
-  .bdraft footer form { margin:0; }
-  .progress-line { display:flex; gap:1rem; flex-wrap:wrap; align-items:center; }
-</style>
-{% endblock %}
+{% block head %}{% if b.status == 'sorting' %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
 {% block content %}
-<p><a href="/new-ad">← {{ _("New ad") }}</a></p>
-<h3>{{ _("Batch #{id}", id=b.id) }} <small class="muted">{{ _("{n} photos", n=b.image_paths|length) }}</small></h3>
-{% if b.status == 'sorting' %}
-  <article aria-busy="true">{{ _("Claude is looking at the photos and sorting them by item … with {n} photos this takes about {min} min. The page reloads by itself.", n=b.image_paths|length, min=1 + b.image_paths|length // 6) }}</article>
-{% elif b.status == 'creating' %}
-  <article aria-busy="true" id="creating" data-drafts="{{ drafts|length }}">{{ _("Claude is writing the drafts, {n} still open.", n=pending|length) }}
-    {{ _("Finished ones appear below as soon as they are ready – you can already edit them.") }}
-    <span id="reload-hint" hidden><br><a href="" role="button" class="secondary" style="margin-top:.5rem">{{ _("Show new drafts") }}</a>
-      <small class="muted">({{ _("Save unsaved changes first") }})</small></span></article>
-{% endif %}
-{% if b.error %}<p class="msg" style="border-color:#e5484d">{{ b.error }}</p>{% endif %}
-{% if b.notes %}<p><small class="muted">{{ _("For all items:") }} {{ b.notes }}</small></p>{% endif %}
-{% if b.note and b.status != 'sorting' %}<p><small><strong>{{ _("Note from Claude:") }}</strong> {{ b.note }}</small></p>{% endif %}
-
 {% set open_groups = b.groups|rejectattr('draft_id')|list %}
+{% set dl = drafts.values()|list if drafts else [] %}
+{% set step = request.query_params.get('step', 'review' if dl else 'sort') if request is defined else ('review' if dl else 'sort') %}
+<div class="page-head">
+  <div><a href="/new-ad" class="muted" style="font-size:13px">← {{ _("New ad") }}</a><h1 style="margin-top:6px">{{ _("Batch #{id}", id=b.id) }} <span class="muted" style="font-weight:400;font-size:15px">· {{ _("{n} photos", n=b.image_paths|length) }} · {{ _("{n} items", n=b.groups|length) }}</span></h1>{% if b.notes %}<p>{{ _("For all items:") }} {{ b.notes }}</p>{% endif %}</div>
+  <nav class="seg"><a href="?step=sort" {% if step == 'sort' %}aria-current="true"{% endif %}>{{ _("Sort photos") }} <small>{{ open_groups|length }}</small></a><a href="?step=review" {% if step == 'review' %}aria-current="true"{% endif %}>{{ _("Review & publish") }} <small>{{ dl|length }}</small></a></nav>
+</div>
+{% if b.status == 'sorting' %}<div class="msg row" style="gap:10px"><span class="btn" aria-busy="true" style="background:none;color:inherit;padding:0;height:auto"></span>{{ _("Claude is looking at the photos and sorting them by item … with {n} photos this takes about {min} min. The page reloads by itself.", n=b.image_paths|length, min=1 + b.image_paths|length // 6) }}</div>
+{% elif b.status == 'creating' %}<div class="msg row" id="creating" data-drafts="{{ dl|length }}" style="gap:10px">{{ _("Claude is writing the drafts, {n} still open.", n=pending|length) }} {{ _("Finished ones appear below as soon as they are ready – you can already edit them.") }}<span id="reload-hint" hidden><a href="" class="btn secondary xs">{{ _("Show new drafts") }}</a> <small class="muted">({{ _("Save unsaved changes first") }})</small></span></div>{% endif %}
+{% if b.error %}<div class="msg error">{{ b.error }}</div>{% endif %}
+{% if b.note and b.status != 'sorting' %}<div class="msg" style="display:flex;gap:10px"><span style="color:var(--brand)"></span><span><strong>{{ _("Note from Claude:") }}</strong> {{ b.note }}</span></div>{% endif %}
+
 {% macro target_select(idx, current) %}
-  <select name="img_{{ idx }}" {% if busy %}disabled{% endif %} aria-label="{{ _("Assign photo {n}", n=idx + 1) }}">
-    {% for g in open_groups %}<option value="{{ g.id }}" {% if g.id == current %}selected{% endif %}>{{ loop.index }} · {{ (g.product or _('Item'))[:28] }}</option>{% endfor %}
-    <option value="new" {% if current == 'new' %}selected{% endif %}>+ {{ _("new item") }}</option>
-    <option value="" {% if current == '' %}selected{% endif %}>{{ _("do not use") }}</option>
-  </select>
+<select name="img_{{ idx }}" {% if busy %}disabled{% endif %} aria-label="{{ _('Assign photo {n}', n=idx + 1) }}" style="padding:3px 22px 3px 6px;font-size:11.5px;border-radius:6px">
+  {% for g in open_groups %}<option value="{{ g.id }}" {% if g.id == current %}selected{% endif %}>{{ loop.index }} · {{ (g.product or _('Item'))[:26] }}</option>{% endfor %}
+  <option value="new" {% if current == 'new' %}selected{% endif %}>+ {{ _("new item") }}</option><option value="" {% if current == '' %}selected{% endif %}>{{ _("do not use") }}</option>
+</select>
 {% endmacro %}
-{% macro tile(idx, current) %}
-  <div class="tile" draggable="{{ 'false' if busy else 'true' }}">
-    <a href="/ad-batches/{{ b.id }}/image/{{ idx }}" target="_blank" draggable="false">
-      <img src="/ad-batches/{{ b.id }}/image/{{ idx }}" alt="{{ _("Photo {n}", n=idx + 1) }}" loading="lazy" draggable="false"></a>
-    {{ target_select(idx, current) }}
-  </div>
+{% macro tile(idx, current, cover=false) %}
+<div class="tile-photo" draggable="{{ 'false' if busy else 'true' }}" style="width:118px;display:flex;flex-direction:column;gap:4px;cursor:grab">
+  <a href="/ad-batches/{{ b.id }}/image/{{ idx }}" target="_blank" draggable="false" style="position:relative;display:block"><img src="/ad-batches/{{ b.id }}/image/{{ idx }}" alt="{{ _('Photo {n}', n=idx + 1) }}" loading="lazy" draggable="false" style="width:118px;height:92px;object-fit:cover;border-radius:6px;{% if cover %}outline:2px solid var(--brand);outline-offset:-2px{% endif %}">
+    {% if cover %}<span style="position:absolute;left:6px;top:6px;padding:1px 6px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-size:10.5px">{{ _("cover") }}</span>{% endif %}<span style="position:absolute;right:6px;bottom:6px;padding:0 5px;border-radius:4px;background:rgba(0,0,0,.45);color:#fff;font-size:10.5px">{{ idx + 1 }}</span></a>
+  {{ target_select(idx, current) }}
+</div>
 {% endmacro %}
 
-{% if drafts %}
-  {% set dl = drafts.values()|list %}
-  {% set n_pub = dl|selectattr('status', 'equalto', 'published')|list|length %}
-  {% set n_disc = dl|selectattr('status', 'equalto', 'discarded')|list|length %}
-  <h4 id="drafts">{{ _("Review and publish drafts") }}</h4>
-  <p class="progress-line"><progress value="{{ n_pub + n_disc }}" max="{{ dl|length }}" style="flex:1;min-width:10rem;margin:0"></progress>
-    <span><strong>{{ n_pub }}</strong> {{ _("of {total} published", total=dl|length) }}{% if n_disc %}, {{ _("{n} discarded", n=n_disc) }}{% endif %}</span></p>
-  <p><small class="muted">{{ _("To publish: click “Prepare for willhaben” on a draft, check the category and the required fields, then “Publish on willhaben” – the free ad goes live right away.") }}</small></p>
-  {% for g in b.groups if g.draft_id and drafts.get(g.draft_id) %}
-    {% with d = drafts[g.draft_id], saved = False %}{% include "_batch_draft.html" %}{% endwith %}
-  {% endfor %}
-{% endif %}
-
-{% if b.status != 'sorting' %}
-<details {% if open_groups or not drafts %}open{% endif %}>
-<summary><strong>{{ _("Sort photos") }}</strong> <small class="muted">({{ _("{n} items without a draft, {m} photos not used", n=open_groups|length, m=unassigned|length) }})</small></summary>
-<form method="post" action="/new-ad/batch/{{ b.id }}" id="batch-form">
-  {% for g in b.groups if not g.draft_id %}
-      {% set n = (open_groups|map(attribute='id')|list).index(g.id) + 1 %}
-      <article class="bgroup">
-        <header>
-          <strong>{{ n }}</strong>
-          <input type="text" name="product_{{ g.id }}" value="{{ g.product }}" placeholder="{{ _("What is it?") }}" {% if busy %}disabled{% endif %}>
-          {% if g.confidence %}<span class="badge {{ {'hoch': 'ok', 'mittel': 'muted'}.get(g.confidence, '') }}" title="{{ _("Claude's confidence") }}">{{ {'hoch': _('high'), 'mittel': _('medium'), 'niedrig': _('low')}.get(g.confidence, g.confidence) }}</span>{% endif %}
-          <label><input type="checkbox" name="include_{{ g.id }}" value="1" {% if g.include %}checked{% endif %} {% if busy %}disabled{% endif %}> {{ _("Create draft") }}</label>
-        </header>
-        {% if g.question %}<p class="question"><small><strong>{{ _("Question:") }}</strong> {{ g.question }}</small></p>{% endif %}
-        {% if g.observations %}<p><small class="muted">{{ g.observations }}</small></p>{% endif %}
-        {% if g.error %}<p><small style="color:#e5484d">{{ _("Last attempt:") }} {{ g.error }}</small></p>{% endif %}
-        <div class="tiles" data-gid="{{ g.id }}">{% for i in g.photos %}{{ tile(i, g.id) }}{% endfor %}</div>
-        {% if g.photos|length > max_images %}<small class="muted">{{ _("Only the first {n} photos go into the draft; the first one is the cover photo.", n=max_images) }}</small>{% endif %}
-        <label style="margin-top:.5rem">{{ _("Comment for Claude") }}
-          <textarea name="comment_{{ g.id }}" rows="2" {% if busy %}disabled{% endif %}
-            placeholder="{{ _("e.g. bought in 2021, battery still lasts 3 h, receipt available, €80 or best offer") }}">{{ g.comment }}</textarea></label>
-      </article>
-  {% endfor %}
-
-  <article>
-    <header><strong>{{ _("New item") }}</strong> <small class="muted">{{ _("Drag photos here (or choose “+ new item” below the photo)") }}</small></header>
-    <div class="tiles plain" data-gid="new"></div>
-  </article>
-  <article>
-    <header><strong>{{ _("Not used") }}</strong> <small class="muted">({{ unassigned|length }})</small></header>
-    <div class="tiles plain" data-gid="">{% for i in unassigned %}{{ tile(i, '') }}{% endfor %}</div>
-  </article>
-
-  {% if not busy %}
-  <article>
-    <div class="bar">
-      <button name="action" value="save" class="secondary">{{ _("Save") }}</button>
-      <input name="hint" placeholder="{{ _("Hint for re-sorting, e.g. “photos 7–9 are one set”") }}">
-      <button name="action" value="resort" class="secondary outline" onclick="this.setAttribute('aria-busy','true')">{{ _("Sort again") }}</button>
+{% if step == 'review' and dl %}
+{% set n_pub = dl|selectattr('status', 'equalto', 'published')|list|length %}{% set n_disc = dl|selectattr('status', 'equalto', 'discarded')|list|length %}
+<div class="row" style="gap:14px;margin-bottom:14px"><span class="bar" style="flex:1;min-width:160px;height:6px;grid-column:auto"><span style="width:{{ ((n_pub + n_disc) * 100 / dl|length)|round|int }}%;background:var(--ok)"></span></span><span style="font-size:13px"><strong>{{ n_pub }}</strong> {{ _("of {total} published", total=dl|length) }}{% if n_disc %}, {{ _("{n} discarded", n=n_disc) }}{% endif %}</span></div>
+<div id="drafts" style="display:flex;flex-direction:column;gap:12px">
+  {% for g in b.groups if g.draft_id and drafts.get(g.draft_id) %}{% with d = drafts[g.draft_id], saved = False %}{% include "_batch_draft.html" %}{% endwith %}{% endfor %}
+</div>
+{% elif b.status != 'sorting' %}
+<form method="post" action="/new-ad/batch/{{ b.id }}" id="batch-form" style="display:flex;flex-direction:column;gap:12px">
+  {% for g in open_groups %}
+  <section class="card pad" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;{{ '' if g.include else 'opacity:.7' }}">
+    <div class="row" style="flex-wrap:nowrap">
+      <span class="avatar" style="width:26px;height:26px;border-radius:8px;background:var(--hover);color:var(--text)">{{ loop.index }}</span>
+      <input type="text" name="product_{{ g.id }}" value="{{ g.product }}" placeholder="{{ _('What is it?') }}" {% if busy %}disabled{% endif %} style="flex:1;font-weight:600;padding:8px 12px">
+      {% if g.confidence %}<span class="pill plain {{ {'hoch': 'ok', 'mittel': 'warn', 'niedrig': 'bad'}.get(g.confidence, '') }}" title="{{ _("Claude's confidence") }}">{{ {'hoch': _('high'), 'mittel': _('medium'), 'niedrig': _('low')}.get(g.confidence, g.confidence) }}</span>{% endif %}
+      <label class="row" style="gap:8px;white-space:nowrap"><input type="checkbox" name="include_{{ g.id }}" value="1" {% if g.include %}checked{% endif %} {% if busy %}disabled{% endif %}>{{ _("Create draft") }}</label>
     </div>
-    <p style="margin-top:1rem">
-      <button name="action" value="create" onclick="this.setAttribute('aria-busy','true')">{{ _("Create drafts for all ticked items") }}</button>
-      <br><small class="muted">{{ _("Each item goes through the same steps as “New ad”: Claude writes the title and description, plus comparable prices and the Geizhals spec sheet. Takes 1–3 minutes per item, {n} at a time. Finished drafts stay linked here.", n=parallel) }}</small>
-    </p>
-  </article>
+    {% if g.question %}<div style="border-left:3px solid var(--warn);background:var(--warn-soft);border-radius:6px;padding:8px 12px;font-size:13px"><strong style="color:var(--warn)">{{ _("Question:") }}</strong> {{ g.question }}</div>{% endif %}
+    {% if g.observations %}<div class="muted" style="font-size:12.5px">{{ g.observations }}</div>{% endif %}
+    {% if g.error %}<div style="color:var(--bad);font-size:12.5px">{{ _("Last attempt:") }} {{ g.error }}</div>{% endif %}
+    <div class="tiles" data-gid="{{ g.id }}" style="display:flex;flex-wrap:wrap;gap:8px;min-height:110px;padding:8px;border:1px dashed var(--border);border-radius:10px">{% for i in g.photos %}{{ tile(i, g.id, loop.first) }}{% endfor %}</div>
+    {% if g.photos|length > max_images %}<small class="muted">{{ _("Only the first {n} photos go into the draft; the first one is the cover photo.", n=max_images) }}</small>{% endif %}
+    <input name="comment_{{ g.id }}" value="{{ g.comment }}" {% if busy %}disabled{% endif %} placeholder="{{ _('Comment for Claude, e.g. bought in 2021, battery still lasts 3 h, receipt available, €80 or best offer') }}" style="font-size:13px;padding:8px 12px">
+  </section>
+  {% endfor %}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <section class="card pad" style="border-style:dashed;padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-height:120px"><div style="font-weight:600">{{ _("New item") }} <small class="muted" style="font-weight:400">· {{ _("Drag photos here (or choose “+ new item” below the photo)") }}</small></div><div class="tiles plain" data-gid="new" style="flex:1;display:flex;flex-wrap:wrap;gap:8px;min-height:60px"></div></section>
+    <section class="card pad" style="border-style:dashed;padding:14px 16px;display:flex;flex-direction:column;gap:8px"><div style="font-weight:600">{{ _("Not used") }} <small class="muted" style="font-weight:400">· {{ unassigned|length }}</small></div><div class="tiles plain" data-gid="" style="display:flex;flex-wrap:wrap;gap:8px;min-height:60px">{% for i in unassigned %}{{ tile(i, '') }}{% endfor %}</div></section>
+  </div>
+  {% if not busy %}
+  <section class="card pad" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="row"><button name="action" value="save" class="btn secondary">{{ _("Save") }}</button><input name="hint" placeholder="{{ _('Hint for re-sorting, e.g. “photos 7–9 are one set”') }}" style="flex:1;min-width:220px;font-size:13px;padding:8px 12px"><button name="action" value="resort" class="btn secondary" onclick="this.setAttribute('aria-busy','true')">{{ _("Sort again") }}</button></div>
+    <div class="row" style="gap:12px;border-top:1px solid var(--border);padding-top:12px"><button name="action" value="create" class="btn" onclick="this.setAttribute('aria-busy','true')">{{ _("Create drafts for all ticked items") }}</button><small class="muted">{{ _("Each item goes through the same steps as “New ad”: Claude writes the title and description, plus comparable prices and the Geizhals spec sheet. Takes 1–3 minutes per item, {n} at a time. Finished drafts stay linked here.", n=parallel) }}</small></div>
+  </section>
   {% endif %}
 </form>
-</details>
-{% if not busy %}
-<form method="post" action="/new-ad/batch/{{ b.id }}/delete" onsubmit="return confirm({{ _('Delete this batch? Finished drafts are kept.')|tojson|forceescape }})">
-  <button class="secondary outline">{{ _("Delete batch") }}</button>
-</form>
 {% endif %}
-{% endif %}
-
+{% if not busy and b.status != 'sorting' %}<form method="post" action="/new-ad/batch/{{ b.id }}/delete" style="margin-top:16px" onsubmit="return confirm({{ _('Delete this batch? Finished drafts are kept.')|tojson|forceescape }})"><button class="btn danger sm">{{ _("Delete batch") }} <span class="muted">· {{ _("finished drafts are kept") }}</span></button></form>{% endif %}
 <script>
 (() => {
   // ---- draft cards: title length, unsaved-changes flag
@@ -151,12 +88,11 @@
   }
 })();
 </script>
-{% if not busy %}
 <script>
 (() => {
   let dragged = null;
   const zoneFor = gid => document.querySelector(`.tiles[data-gid="${gid}"]`);
-  document.querySelectorAll('#batch-form .tile:not(.locked)').forEach(t => {
+  document.querySelectorAll('#batch-form .tile-photo:not(.locked)').forEach(t => {
     t.addEventListener('dragstart', e => { dragged = t; e.dataTransfer.effectAllowed = 'move'; });
     t.addEventListener('dragend', () => { dragged = null; });
     t.querySelector('select').addEventListener('change', e => {
@@ -170,7 +106,7 @@
     z.addEventListener('drop', e => {
       e.preventDefault(); z.classList.remove('over');
       if (!dragged) return;
-      const before = e.target.closest('.tile');
+      const before = e.target.closest('.tile-photo');
       if (before && before !== dragged && before.parentNode === z) z.insertBefore(dragged, before);
       else z.appendChild(dragged);
       dragged.querySelector('select').value = z.dataset.gid;
@@ -178,5 +114,4 @@
   });
 })();
 </script>
-{% endif %}
 {% endblock %}

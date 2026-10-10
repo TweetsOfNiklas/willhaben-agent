@@ -19,7 +19,7 @@ _restore_lock = asyncio.Lock()
 
 
 def _back(msg: str) -> RedirectResponse:
-    return RedirectResponse(f"/settings?msg={quote(msg, safe='')}#backup", status_code=303)
+    return RedirectResponse(f"/settings/backup?msg={quote(msg, safe='')}", status_code=303)
 
 
 def downloads_allowed() -> bool:

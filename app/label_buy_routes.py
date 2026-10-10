@@ -19,7 +19,7 @@ def panel() -> dict:
 
 
 def _settings(msg: str) -> RedirectResponse:
-    return RedirectResponse(f"/settings?msg={quote(msg, safe='')}#shipping", status_code=303)
+    return RedirectResponse(f"/settings/shipping?msg={quote(msg, safe='')}", status_code=303)
 
 
 def _session(next_url: str | None, msg: str) -> RedirectResponse:

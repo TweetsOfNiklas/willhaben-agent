@@ -1,183 +1,68 @@
-{# Buy dialog of one ad (the body of _buy_panel.html; /purchases/new/<ad id> is the same page without JavaScript).
-   ad_id, search_id, query, on (purchases switched on), d (AdDetail), res (price check or None), ship (€ per mode),
-   fair (the one price-fairness hint: purchase_routes._fair, or None without a price position), pre (mode preselected or
-   None), prefill (the maximum it starts with), wh_error / gone. One form posting to /purchases in three steps (window.wbBuy
-   in base.html; without JavaScript all three panels show). The maximum field always holds a number: the default (asking
-   price plus shipping of the mode and, with PayLivery, the buyer protection fee), which max_default=1 marks as untouched
-   so the server may use its own exact figure. fee (the rule: pct, min, max) and fee_of (fee of an item price) come from
-   purchase_routes; the form carries the rule as data-fee for window.wbBuy.
-   The ring on the bar can be dragged to change it. Long texts are tooltips (title). #}
+{# Buy dialog body — markup for window.wbBuy (unchanged JS from _buy_script.html; the bd-* hooks are kept). #}
 {% if not on %}
-<div class="msg">
-  <p>{{ _("Purchase orders are switched off. Turn them on in Settings.") }}</p>
-  <p><a href="/settings#purchase">{{ _("Turn on purchases in Settings") }}</a></p>
-</div>
-{% elif wh_error %}
-  <p class="msg" style="border-color:#e5484d">{{ _("willhaben error: {error}", error=wh_error) }}</p>
-{% elif gone or not d %}
-  <p class="muted">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
+<div class="msg warn"><p>{{ _("Purchase orders are switched off. Turn them on in Settings.") }}</p><a href="/settings/purchase">{{ _("Turn on purchases in Settings") }}</a></div>
+{% elif wh_error %}<p class="msg error">{{ _("willhaben error: {error}", error=wh_error) }}</p>
+{% elif gone or not d %}<p class="muted">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
 {% else %}
-{% set ask = d.price or 0 %}
-{% set seller = ((d.seller_name or '').split() or [''])[0] %}
+{% set ask = d.price or 0 %}{% set seller = ((d.seller_name or '').split() or [''])[0] %}
 {% set pl_fact = _("Shipping {amount}", amount=ship.paylivery|eur) if d.shipping_price is not none else _("Shipping about {amount}", amount=ship.paylivery|eur) %}
 {% set fee_pct = ("%g"|format(fee.pct))|replace('.', ',') %}
-{% set pl_fee_fact = _("Buyer protection from {pct} %", pct=fee_pct) %}
-{% set pl_fee_tip = _("The buyer protection fee of willhaben is paid by the buyer: {pct} % of the item price, at least {min}, at most {max}. It can vary by category and item price.", pct=fee_pct, min=fee.min|eur, max=fee.max|eur) %}
-{% set pl_tip = (_("You pay through willhaben and confirm the payment on your phone.") ~ ' ' ~ pl_fee_tip) if d.paylivery_enabled else _("This ad has no willhaben PayLivery.") %}
-{% set bank_tip = _("The agent negotiates the shipping. Your address goes to the seller only after he agrees.") %}
-{% set pickup_tip = _("Pick up at the seller and pay cash.") %}
-{% set max_tip = _("Includes the shipping and, with PayLivery, the buyer protection fee. Starts at the asking price plus these costs. The pill shows how far below the asking price incl. these costs the maximum lies and how its item price rates among comparable ads.") %}
-{% set fair_tip = _("The stroke is the asking price among the comparable ads (cheap on the left, expensive on the right), the ring is your maximum without shipping and fee - drag it to change the price. The ends are the cheapest and the most expensive comparable ad.") %}
-{% set paid_tip = _("Nothing is paid automatically. The agent contacts the seller and negotiates within your maximum. With PayLivery you confirm the payment on your phone.") %}
-{# one line: level badge, distance to the median, number of comparable ads (as on the product search card) #}
-{% set fair_line %}{% if fair %}<span class="deal-lvl lvl-{{ fair.level }}">{{ deal_level_label(fair.level) }}</span>
-  {% if fair.diff is not none %}<span>{% if fair.diff < 0 %}{{ _("{n} % below the median", n=-fair.diff) }}{% elif fair.diff > 0 %}{{ _("{n} % above the median", n=fair.diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% if fair.count %} ({{ _("{n} comparable ads", n=fair.count) }}){% endif %}</span>{% endif %}{% endif %}{% endset %}
+{% set fair_line %}{% if fair %}<span class="deal-lvl lvl-{{ fair.level }}">{{ deal_level_label(fair.level) }}</span> <span class="muted" style="font-size:12.5px">{% if fair.diff is not none %}{% if fair.diff < 0 %}{{ _("{n} % below the median", n=-fair.diff) }}{% elif fair.diff > 0 %}{{ _("{n} % above the median", n=fair.diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% if fair.count %} · {{ _("{n} comparable ads", n=fair.count) }}{% endif %}{% endif %}</span>{% endif %}{% endset %}
 <form method="post" action="/purchases" class="bd-form" data-ask="{{ ask }}" data-ship='{{ ship|tojson }}' data-fee='{{ fee|tojson }}' data-empty="–"{% if fair and fair.js %} data-fair='{{ fair.js|tojson }}'{% endif %}
-      onkeydown="wbBuy.enter(event)"
-      onsubmit="this.elements.back.value = location.pathname + location.search + location.hash">
-  <input type="hidden" name="ad_id" value="{{ ad_id }}">
-  <input type="hidden" name="title" value="{{ d.heading or '' }}">
-  <input type="hidden" name="url" value="{{ d.url or '' }}">
-  <input type="hidden" name="image_url" value="{{ d.images[0] if d.images else '' }}">
-  <input type="hidden" name="price" value="{{ d.price if d.price is not none else '' }}">
-  <input type="hidden" name="search_id" value="{{ search_id or '' }}">
-  <input type="hidden" name="query" value="{{ query }}">
-  <input type="hidden" name="back" value="">
-  <input type="hidden" name="max_default" value="1">
-  <div class="bd-grid">
-    <aside class="bd-ad">
-      {% if d.images %}<img class="bd-img" src="{{ d.images[0] }}" alt="">
-      {% else %}<div class="bd-img bd-noimg" aria-hidden="true"></div>{% endif %}
-      <h4 class="bd-title">{{ d.heading }}</h4>
-      <p class="bd-price">{{ d.price_display or (d.price|eur) }}</p>
-      <p class="bd-badges">
-        {% if d.paylivery_enabled %}<span class="badge ok">PayLivery</span>{% endif %}
-        {% if d.buy_now %}<span class="badge brand">{{ _("Buy now") }}</span>{% endif %}
-        {% if d.is_private == false %}<span class="badge muted">{{ _("dealer") }}</span>{% elif d.is_private %}<span class="badge muted">{{ _("private") }}</span>{% endif %}
-      </p>
-      <p class="meta">{% if d.location %}📍 {{ d.location }}{% endif %}{% if seller %}{% if d.location %} · {% endif %}{{ seller }}{% endif %}</p>
-      {% if d.description %}
-      <details class="bd-desc"><summary>{{ _("Description") }}</summary><p>{{ d.description[:280] }}{% if d.description|length > 280 %} …{% endif %}</p></details>
+      onkeydown="wbBuy.enter(event)" onsubmit="this.elements.back.value = location.pathname + location.search + location.hash" style="display:grid;grid-template-columns:240px minmax(0,1fr)">
+  {% for k, v in [('ad_id', ad_id), ('title', d.heading or ''), ('url', d.url or ''), ('image_url', d.images[0] if d.images else ''), ('price', d.price if d.price is not none else ''), ('search_id', search_id or ''), ('query', query), ('back', ''), ('max_default', '1')] %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <aside style="background:var(--bg);border-right:1px solid var(--border);padding:18px;display:flex;flex-direction:column;gap:10px">
+    {% if d.images %}<img src="{{ d.images[0] }}" alt="" style="aspect-ratio:4/3;object-fit:cover;border-radius:8px">{% else %}<div style="aspect-ratio:4/3;border-radius:8px;background:var(--hover)"></div>{% endif %}
+    <div style="font-weight:600;line-height:1.3">{{ d.heading }}</div>
+    <div style="font-size:20px;font-weight:700;letter-spacing:-.02em">{{ d.price_display or (d.price|eur) }}</div>
+    <div class="row" style="gap:6px">{% if d.paylivery_enabled %}<span class="pill ok plain">PayLivery</span>{% endif %}{% if d.buy_now %}<span class="pill brand plain">{{ _("Buy now") }}</span>{% endif %}{% if d.is_private == false %}<span class="pill plain">{{ _("dealer") }}</span>{% elif d.is_private %}<span class="pill plain">{{ _("private") }}</span>{% endif %}</div>
+    <div class="muted" style="font-size:13px">{{ d.location or '' }}{% if seller %} · {{ seller }}{% endif %}</div>
+    {% if d.description %}<details class="muted" style="font-size:13px"><summary style="cursor:pointer">{{ _("Description") }}</summary><p style="margin-top:6px">{{ d.description[:280] }}{% if d.description|length > 280 %} …{% endif %}</p></details>{% endif %}
+    <span style="flex:1"></span>
+    <div class="row" style="gap:8px"><a href="{{ d.url }}" data-ad="{{ ad_id }}" class="btn secondary xs">{{ _("Viewer") }}</a><a href="{{ d.url }}" target="_blank" rel="noopener" class="btn secondary xs">willhaben ↗</a></div>
+  </aside>
+  <div class="bd-steps" style="padding:18px 22px 20px;display:flex;flex-direction:column;gap:16px;min-width:0">
+    <h2 style="font-size:17px">{{ _("Buy with the agent") }}</h2>
+    <ol class="bd-chips step-chips">
+      {% for n, label in [(1, _("How to buy")), (2, _("Maximum")), (3, _("Start"))] %}<li><button type="button" class="bd-chip" data-n="{{ n }}" onclick="wbBuy.go(this.form, {{ n }})"><span class="bd-n">{{ n }}</span>{{ label }}</button></li>{% endfor %}
+    </ol>
+    <section class="bd-step" data-step="1" style="display:flex;flex-direction:column;gap:8px">
+      {% for val, label, fact, tip, enabled, pre_ok in [
+        ('paylivery', _("With PayLivery"), (pl_fact ~ ' · ' ~ _("Buyer protection from {pct} %", pct=fee_pct)) if d.paylivery_enabled else _("Not available"), _("You pay through willhaben and confirm the payment on your phone."), d.paylivery_enabled, pre == 'paylivery'),
+        ('direct', _("Bank transfer"), _("Shipping about {amount}", amount=ship.direct|eur), _("The agent negotiates the shipping. Your address goes to the seller only after he agrees."), true, pre == 'direct'),
+        ('pickup', _("Pickup"), _("cash, no shipping"), _("Pick up at the seller and pay cash."), true, pre == 'pickup')] %}
+      <label class="bd-mode card" style="display:grid;grid-template-columns:20px 1fr;gap:12px;align-items:center;padding:12px 14px;border-radius:10px;cursor:pointer;{{ 'opacity:.55' if not enabled else '' }}" title="{{ tip }}">
+        <input type="radio" name="mode" value="{{ val }}" required {% if not enabled %}disabled{% endif %} {% if pre_ok %}checked{% endif %} data-label="{{ label }}" data-ship-text="{{ fact if enabled else '' }}" onchange="wbBuy.mode(this.form)">
+        <span><span style="display:block;font-weight:600">{{ label }}</span><span class="muted" style="font-size:12.5px">{{ fact }}</span></span>
+      </label>
+      {% endfor %}
+      <label class="bd-time field" style="margin-top:4px"><span>{{ _("Preferred time") }}</span><input type="text" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}"></label>
+      <div class="bd-nav row" style="justify-content:flex-end"><button type="button" class="btn bd-next" onclick="wbBuy.next(this.form)">{{ _("Next") }}</button></div>
+    </section>
+    <section class="bd-step" data-step="2" style="display:flex;flex-direction:column;gap:12px">
+      <label class="bd-max field"><span class="bd-lab">{{ _("Maximum incl. shipping & fee") }}{% if not ask %} <small class="muted">({{ _("optional") }})</small>{% endif %}</span>
+        <span class="bd-field row" style="flex-wrap:nowrap"><span class="row" style="border:1px solid var(--border);border-radius:8px;background:var(--bg);padding-left:12px;color:var(--muted);flex-wrap:nowrap;gap:0"><span class="bd-eur">€</span><input type="number" name="max_price" min="1" step="0.01" value="{{ '%.2f'|format(prefill) if prefill else '' }}" inputmode="decimal" oninput="wbBuy.input(this.form)" onblur="wbBuy.blur(this.form)" style="width:120px;border:0;background:none;font-size:16px;font-weight:600"></span>
+          {% if fair and fair.js %}<span class="bd-pill bd-live deal-lvl" data-tpl="{{ _('{n} % · {level}') }}" hidden></span>{% endif %}</span></label>
+      {% if fair %}
+      <div class="bd-fair" style="display:flex;flex-direction:column;gap:6px">
+        <p class="bd-fairline row" style="gap:8px">{{ fair_line }}</p>
+        <div class="bd-gauge{% if fair.js %} bd-drag{% endif %}" role="img" style="position:relative;padding:10px 0;cursor:{{ 'ew-resize' if fair.js else 'default' }}"><div class="deal-track"></div><span class="deal-needle" style="left:{{ (fair.pos * 100)|round(1) }}%;top:6px"></span>{% if fair.js %}<span class="bd-pin" hidden style="position:absolute;top:3px;width:22px;height:22px;margin-left:-11px;border-radius:50%;border:3px solid var(--text);background:var(--surface);box-shadow:0 1px 4px rgba(0,0,0,.3)"></span>{% endif %}</div>
+        {% if fair.js and fair.min is not none %}<div class="bd-ends row muted" style="justify-content:space-between;font-size:11.5px"><span>{{ fair.min|eur }}</span><span>{{ fair.max|eur }}</span></div>{% endif %}
+        {% if fair.chips %}<div class="bd-sugg row" style="gap:6px">{% for c in fair.chips %}{% set tpl = _('Cheapest · {x}') if c.key == 'min' else _('Cheap · {x}') if c.key == 'cheap' else _('Market price · {x}') %}<button type="button" class="chip k-{{ c.key }}" data-v="{{ '%.2f'|format(c.v) }}" data-tpl="{{ tpl }}" onclick="wbBuy.pick(this.form, +this.dataset.v)">{{ tpl.replace('{x}', ((c.v + (ship[pre] if pre else 0) + (fee_of(c.v) if pre == 'paylivery' else 0))|round(2)|eur)) }}</button>{% endfor %}</div>{% endif %}
+      </div>
       {% endif %}
-      <p class="bd-links">
-        <a href="{{ d.url }}" data-ad="{{ ad_id }}" role="button" class="secondary outline">{{ _("Viewer") }}</a>
-        <a href="{{ d.url }}" target="_blank" rel="noopener" role="button" class="secondary outline">willhaben ↗</a>
-      </p>
-    </aside>
-
-    <div class="bd-steps">
-      <ol class="bd-chips">
-        <li><button type="button" class="bd-chip" data-n="1" onclick="wbBuy.go(this.form, 1)"><span class="bd-n">1</span>{{ _("How to buy") }}</button></li>
-        <li><button type="button" class="bd-chip" data-n="2" onclick="wbBuy.go(this.form, 2)"><span class="bd-n">2</span>{{ _("Maximum") }}</button></li>
-        <li><button type="button" class="bd-chip" data-n="3" onclick="wbBuy.go(this.form, 3)"><span class="bd-n">3</span>{{ _("Start") }}</button></li>
-      </ol>
-
-      <section class="bd-step" data-step="1">
-        <div class="bd-modes">   {# cards as wide as the column: Pico shrinks a label with a radio to fit-content, .bd-mode undoes that #}
-          <label class="bd-mode{% if not d.paylivery_enabled %} off{% endif %}">
-            <input type="radio" name="mode" value="paylivery" required{% if not d.paylivery_enabled %} disabled{% endif %}{% if pre == 'paylivery' %} checked{% endif %}
-                   data-label="{{ _('With PayLivery') }}" data-ship-text="{{ pl_fact if d.paylivery_enabled else '' }}" onchange="wbBuy.mode(this.form)">
-            <span class="bd-mode-text"><strong>{{ _("With PayLivery") }}</strong>
-              <small>{{ (pl_fact ~ ' · ' ~ pl_fee_fact) if d.paylivery_enabled else _("Not available") }}</small></span>
-            <span class="bd-info" role="img" title="{{ pl_tip }}" aria-label="{{ pl_tip }}">ⓘ</span>
-          </label>
-          <label class="bd-mode">
-            <input type="radio" name="mode" value="direct" required{% if pre == 'direct' %} checked{% endif %}
-                   data-label="{{ _('Bank transfer') }}" data-ship-text="{{ _('Shipping about {amount}', amount=ship.direct|eur) }}" onchange="wbBuy.mode(this.form)">
-            <span class="bd-mode-text"><strong>{{ _("Bank transfer") }}</strong>
-              <small>{{ _("Shipping about {amount}", amount=ship.direct|eur) }}</small></span>
-            <span class="bd-info" role="img" title="{{ bank_tip }}" aria-label="{{ bank_tip }}">ⓘ</span>
-          </label>
-          <label class="bd-mode">
-            <input type="radio" name="mode" value="pickup" required{% if pre == 'pickup' %} checked{% endif %}
-                   data-label="{{ _('Pickup') }}" data-ship-text="{{ _('cash, no shipping') }}" onchange="wbBuy.mode(this.form)">
-            <span class="bd-mode-text"><strong>{{ _("Pickup") }}</strong>
-              <small>{{ _("cash, no shipping") }}</small></span>
-            <span class="bd-info" role="img" title="{{ pickup_tip }}" aria-label="{{ pickup_tip }}">ⓘ</span>
-          </label>
-          <label class="bd-time">{{ _("Preferred time") }}
-            <input type="text" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}"></label>
-        </div>
-        <div class="bd-nav">
-          <button type="button" class="bd-next" onclick="wbBuy.next(this.form)">{{ _("Next") }}</button>
-        </div>
-      </section>
-
-      <section class="bd-step" data-step="2">
-        <label class="bd-max">
-          <span class="bd-lab">{{ _("Maximum incl. shipping & fee") }}{% if not ask %} <small class="muted">({{ _("optional") }})</small>{% endif %}
-            <span class="bd-info" role="img" title="{{ max_tip }}" aria-label="{{ max_tip }}">ⓘ</span></span>
-          <span class="bd-field">
-            <span class="bd-eur" aria-hidden="true">€</span>
-            <input type="number" name="max_price" min="1" step="0.01" value="{{ '%.2f'|format(prefill) if prefill else '' }}" inputmode="decimal"
-                   oninput="wbBuy.input(this.form)" onblur="wbBuy.blur(this.form)">
-            {% if fair and fair.js %}<span class="bd-pill bd-live" data-tpl="{{ _('{n} % · {level}') }}" hidden></span>{% endif %}
-          </span>
-        </label>
-        {% if fair %}
-        <div class="bd-fair">
-          <p class="bd-fairline">{{ fair_line }}{% if fair.js %}
-            <span class="bd-info" role="img" title="{{ fair_tip }}" aria-label="{{ fair_tip }}">ⓘ</span>{% endif %}</p>
-          <div class="bd-gauge{% if fair.js %} bd-drag{% endif %}" role="img" aria-label="{{ deal_level_label(fair.level) }}">
-            <div class="deal-track"></div>
-            <span class="deal-needle" style="left: {{ (fair.pos * 100)|round(1) }}%"></span>
-            {% if fair.js %}<span class="bd-pin" hidden></span>{% endif %}
-          </div>
-          {% if fair.js and fair.min is not none %}<div class="bd-ends"><span>{{ fair.min|eur }}</span><span>{{ fair.max|eur }}</span></div>{% endif %}
-          {% if fair.chips %}
-          <div class="bd-sugg">
-            {% for c in fair.chips %}
-            {% set label = _("Cheapest · {x}") if c.key == 'min' else _("Cheap · {x}") if c.key == 'cheap' else _("Market price · {x}") %}
-            {% set tip = _("Cheapest comparable ad plus shipping") if c.key == 'min' else _("Lower quartile of the comparable ads plus shipping") if c.key == 'cheap' else _("Median of the comparable ads plus shipping") %}
-            <button type="button" class="k-{{ c.key }}" data-v="{{ '%.2f'|format(c.v) }}" title="{{ tip }}"
-                    data-tpl="{{ _('Cheapest · {x}') if c.key == 'min' else _('Cheap · {x}') if c.key == 'cheap' else _('Market price · {x}') }}"
-                    onclick="wbBuy.pick(this.form, +this.dataset.v)">{{ label.replace('{x}', ((c.v + (ship[pre] if pre else 0) + (fee_of(c.v) if pre == 'paylivery' else 0))|round(2)|eur)) }}</button>
-            {% endfor %}
-          </div>
-          {% endif %}
-        </div>
-        {% endif %}
-        <div class="bd-nav">
-          <button type="button" class="outline secondary bd-back" onclick="wbBuy.back(this.form)">{{ _("Back") }}</button>
-          <button type="button" class="bd-next" onclick="wbBuy.next(this.form)">{{ _("Next") }}</button>
-        </div>
-      </section>
-
-      <section class="bd-step" data-step="3">
-        <ul class="bd-summary" data-empty="–" data-noprice="{{ _('no price in the ad') }}" data-fee-tpl="{{ _('Buyer protection {amount}') }}">
-          <li class="bd-row">
-            <span class="bd-k">{{ _("How to buy") }}</span>
-            <span class="bd-v"><strong data-s="mode"></strong><small data-s="ship"></small></span>
-            <button type="button" class="linklike" onclick="wbBuy.go(this.form, 1)">{{ _("Change") }}</button>
-          </li>
-          <li class="bd-row" data-s="timerow" hidden>
-            <span class="bd-k">{{ _("Preferred time") }}</span>
-            <span class="bd-v" data-s="time"></span>
-            <button type="button" class="linklike" onclick="wbBuy.go(this.form, 1)">{{ _("Change") }}</button>
-          </li>
-          <li class="bd-row">
-            <span class="bd-k">{{ _("Maximum") }}</span>
-            <span class="bd-v"><strong class="bd-inl" data-s="max"></strong>
-              {% if fair and fair.js %}<span class="bd-pill bd-live" data-tpl="{{ _('{n} % · {level}') }}" hidden></span>{% endif %}</span>
-            <button type="button" class="linklike" onclick="wbBuy.go(this.form, 2)">{{ _("Change") }}</button>
-          </li>
-          {% if fair %}
-          <li class="bd-row">
-            <span class="bd-k">{{ _("Rating") }}</span>
-            <span class="bd-v bd-fairline">{{ fair_line }}</span>
-          </li>
-          {% endif %}
-        </ul>
-        <div class="bd-nav">
-          <button type="button" class="outline secondary bd-back" onclick="wbBuy.back(this.form)">{{ _("Back") }}</button>
-          <button type="submit" class="bd-start">{{ _("Start purchase") }}</button>
-        </div>
-        <p class="bd-foot">
-          <span class="bd-info" role="img" title="{{ paid_tip }}" aria-label="{{ paid_tip }}">ⓘ</span>
-          <a href="/settings#purchase" title="{{ _('Settings → Buying rules') }}" aria-label="{{ _('Settings → Buying rules') }}">⚙</a>
-        </p>
-      </section>
-    </div>
+      <div class="bd-nav row" style="justify-content:space-between"><button type="button" class="btn secondary bd-back" onclick="wbBuy.back(this.form)">{{ _("Back") }}</button><button type="button" class="btn bd-next" onclick="wbBuy.next(this.form)">{{ _("Next") }}</button></div>
+    </section>
+    <section class="bd-step" data-step="3" style="display:flex;flex-direction:column;gap:12px">
+      <ul class="bd-summary card" data-empty="–" data-noprice="{{ _('no price in the ad') }}" data-fee-tpl="{{ _('Buyer protection {amount}') }}" style="list-style:none;margin:0;padding:0;overflow:hidden">
+        <li class="bd-row" style="display:grid;grid-template-columns:120px 1fr auto;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);align-items:center"><span class="bd-k muted" style="font-size:13px">{{ _("How to buy") }}</span><span class="bd-v"><strong data-s="mode"></strong> <small class="muted" data-s="ship"></small></span><button type="button" class="btn ghost xs" onclick="wbBuy.go(this.form, 1)">{{ _("Change") }}</button></li>
+        <li class="bd-row" data-s="timerow" hidden style="display:grid;grid-template-columns:120px 1fr auto;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);align-items:center"><span class="bd-k muted" style="font-size:13px">{{ _("Preferred time") }}</span><span class="bd-v" data-s="time"></span><button type="button" class="btn ghost xs" onclick="wbBuy.go(this.form, 1)">{{ _("Change") }}</button></li>
+        <li class="bd-row" style="display:grid;grid-template-columns:120px 1fr auto;gap:12px;padding:10px 14px;{% if fair %}border-bottom:1px solid var(--border);{% endif %}align-items:center"><span class="bd-k muted" style="font-size:13px">{{ _("Maximum") }}</span><span class="bd-v row" style="gap:8px"><strong class="bd-inl" data-s="max"></strong>{% if fair and fair.js %}<span class="bd-pill bd-live deal-lvl" data-tpl="{{ _('{n} % · {level}') }}" hidden></span>{% endif %}</span><button type="button" class="btn ghost xs" onclick="wbBuy.go(this.form, 2)">{{ _("Change") }}</button></li>
+        {% if fair %}<li class="bd-row" style="display:grid;grid-template-columns:120px 1fr;gap:12px;padding:10px 14px;align-items:center"><span class="bd-k muted" style="font-size:13px">{{ _("Rating") }}</span><span class="bd-v bd-fairline row" style="gap:8px">{{ fair_line }}</span></li>{% endif %}
+      </ul>
+      <p class="muted" style="font-size:12.5px">{{ _("Nothing is paid automatically. The agent contacts the seller and negotiates within your maximum. With PayLivery you confirm the payment on your phone.") }} <a href="/settings/purchase">{{ _("Settings → Buying rules") }}</a></p>
+      <div class="bd-nav row" style="justify-content:space-between"><button type="button" class="btn secondary bd-back" onclick="wbBuy.back(this.form)">{{ _("Back") }}</button><button type="submit" class="btn bd-start">{{ _("Start purchase") }}</button></div>
+    </section>
   </div>
 </form>
 {% endif %}

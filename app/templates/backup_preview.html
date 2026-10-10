@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
 {% block content %}
 <h3>{{ _("Restore backup") }}</h3>
 <article class="card">
@@ -13,7 +14,7 @@
     <tr><th>{{ _("Parcel labels") }}</th><td>{{ _("{n} files", n=p.labels) }}</td></tr>
     <tr><th>{{ _("willhaben login (browser profile)") }}</th><td>{% if p.profile %}{{ _("{n} files", n=p.profile_files) }} · {{ p.profile_size|filesizeformat }}{% else %}<span class="muted">{{ _("not included – the current login stays") }}</span>{% endif %}</td></tr>
   </table>
-  <p class="msg">⚠ {{ _("Restoring replaces the database, tokens, ad photos and labels of this installation with the backup. The current state is saved first in data/backups/. Afterwards the app restarts.") }}</p>
+  <p class="msg">{{ _("Restoring replaces the database, tokens, ad photos and labels of this installation with the backup. The current state is saved first in data/backups/. Afterwards the app restarts.") }}</p>
   <form method="post" action="/settings/backup/restore">
     <input type="hidden" name="token" value="{{ token }}">
     <label><input type="checkbox" name="confirm" required> {{ _("Yes, replace the current data with this backup") }}</label>

@@ -118,7 +118,9 @@ def willhaben_limiter() -> RateLimiter:
     global _limiter
     if _limiter is None:
         s = get_settings()
-        _limiter = RateLimiter(s.request_min_gap_s, s.requests_per_hour)
+        from app.db import requests_per_hour   # the budget may be changed in Settings
+
+        _limiter = RateLimiter(s.request_min_gap_s, requests_per_hour())
     return _limiter
 
 

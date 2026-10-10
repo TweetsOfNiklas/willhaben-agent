@@ -187,8 +187,8 @@ def test_defaults_enabled_and_saving_through_the_settings_route():
             "crop_gls_left": "0.05", "crop_gls_top": "0.1", "crop_gls_width": "0.9", "crop_gls_height": "0.4",
             "label_carrier_media_hermes": "other", "label_carrier_media_hermes_other": "custom_100x150mm_100x150mm"},
             follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].endswith("#printers") and "saved" in r.headers["location"]
-        page = c.get("/settings").text
+        assert r.status_code == 303 and "/settings/printers?" in r.headers["location"] and "saved" in r.headers["location"]
+        page = c.get("/settings/printers").text
         assert 'id="printers"' in page and 'name="label_uri"' in page and "Test page" in page
     cfg = printing.config()
     assert cfg["auto"] is True and cfg["printers"]["label"]["media"] == "custom_100x200mm_100x200mm"
@@ -363,7 +363,7 @@ def test_test_and_check_routes_redirect_back_to_the_printers(printer):
     from app.main import app
     with TestClient(app) as c:
         r = c.post("/settings/printers/test/label", follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].endswith("#printers") and "job" in r.headers["location"]
+        assert r.status_code == 303 and "/settings/printers?" in r.headers["location"] and "job" in r.headers["location"]
         r = c.post("/settings/printers/check/normal", follow_redirects=False)
         assert r.status_code == 303 and "PDF" in r.headers["location"]
 

@@ -1,98 +1,86 @@
 {% extends "base.html" %}
-{% block head %}
-<style>
-  .agents-head { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
-  .agents-head h3 { margin:0; } .agents-head a[role=button] { margin:0; }
-  .agent-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1rem; }
-  .agent { margin:0; padding:0; overflow:hidden; display:flex; flex-direction:column; }
-  .agent .strip { display:grid; grid-template-columns: repeat(4, 1fr); gap:2px; height:110px; background: var(--pico-muted-border-color); }
-  .agent .strip img { width:100%; height:110px; object-fit:cover; display:block; }
-  .agent .strip .empty { grid-column: 1 / -1; display:grid; place-items:center; color: var(--pico-muted-color); font-size:.85em;
-                         background: var(--pico-card-sectioning-background-color); }
-  .agent .body { padding:.8rem 1rem; flex:1; display:flex; flex-direction:column; gap:.35rem; }
-  .agent .title { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; }
-  .agent .title a { font-weight:700; text-decoration:none; }
-  .agent .facts { font-size:.9rem; color: var(--pico-muted-color); line-height:1.45; }
-  .agent .err { font-size:.9rem; color:#e5484d; }
-  .agent footer { margin:0; padding:.5rem 1rem .8rem; display:flex; gap:.35rem; flex-wrap:wrap; align-items:center;
-                  background:none; border-top:1px solid var(--pico-muted-border-color); }
-  .agent footer form { margin:0; } .agent footer button { padding:.42rem .9rem; font-size:.875rem; margin:0; width:auto; }
-  .agent footer { gap:.5rem; } .agent footer > a { font-size:.9rem; }
-  .agent details { margin:0; width:100%; } .agent details summary { font-size:.9rem; }
-  .agent details form { margin-top:.5rem; } .agent details input { margin-bottom:.4rem; }
-  .agent.paused { opacity:.7; }
-  .agent .queries { font-size:.85rem; margin:.2rem 0 .5rem; padding-left:1.1rem; } .agent .queries li { margin:0; }
-  .empty-state { text-align:center; padding:2.5rem 1rem; }
-</style>
-{% endblock %}
 {% block content %}
-<div class="agents-head">
-  <h3>{{ _("Search agents") }}</h3>
-  <a href="/agents/new" role="button">+ {{ _("New search agent") }}</a>
+<div class="page-head">
+  <div><h1>{{ _("Search agents") }}</h1><p>{{ _("Built from willhaben's own filters. Checks run at irregular, human-like intervals and slow down at night.") }}</p></div>
+  <a href="/agents/new" class="btn">+ {{ _("New search agent") }}</a>
 </div>
-
 {% if quiet and quiet.active and agents %}
-<p class="msg">🌙 {{ _("Quiet hours until {time}:", time=quiet.end.strftime('%H:%M')) }}
-  {{ _("search agents are paused.") if quiet_cfg.mode == 'pause' else _("search agents only check every {n} min.", n=quiet_cfg.interval_min) }}
-  <a href="/settings#quiet">{{ _("Change") }}</a></p>
+<div class="msg warn row" style="gap:10px"><span>{{ _("Quiet hours until {time}:", time=quiet.end.strftime('%H:%M')) }}
+  {{ _("search agents are paused.") if quiet_cfg.mode == 'pause' else _("search agents only check every {n} min.", n=quiet_cfg.interval_min) }}</span>
+  <a href="/settings/quiet" style="margin-left:auto;font-weight:600;color:inherit">{{ _("Change") }}</a></div>
 {% endif %}
 {% if agents %}
-<div class="agent-cards">
+<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
   {% for a in agents %}
-  <article class="agent {{ '' if a.enabled else 'paused' }}">
-    <div class="strip">
-      {% for h in thumbs.get(a.id, []) %}<a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" title="{{ h.heading }}"><img src="{{ h.image_url }}" alt="{{ h.heading }}" loading="lazy"></a>
+  <article class="tile" style="{{ '' if a.enabled else 'opacity:.7' }}">
+    <div class="agent-strip">
+      {% for h in thumbs.get(a.id, []) %}<a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" title="{{ h.heading }}"><img src="{{ h.image_url }}" alt="" loading="lazy"></a>
       {% else %}<a class="empty" href="/hits?agent_id={{ a.id }}&state=all">{{ _("No hits yet") }}</a>{% endfor %}
     </div>
-    <div class="body">
-      <div class="title">
-        <a href="/hits?agent_id={{ a.id }}&state=all">{{ a.name }}</a>
-        {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}"><span class="badge">{{ _("{n} new", n=counts.get(a.id)) }}</span></a>
-        {% elif not a.enabled %}<span class="badge muted">{{ _("paused") }}</span>{% endif %}
+    <div class="body" style="padding:14px 16px 12px">
+      <div class="row" style="justify-content:space-between;flex-wrap:nowrap">
+        <a href="/hits?agent_id={{ a.id }}&state=all" style="color:var(--text);font-weight:650;font-size:15px">{{ a.name }}</a>
+        {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}" class="pill brand plain" style="background:var(--brand);color:#fff">{{ _("{n} new", n=counts.get(a.id)) }}</a>
+        {% elif not a.enabled %}<span class="pill plain">{{ _("paused") }}</span>{% endif %}
       </div>
-      <div class="facts">
-        {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}
-        {% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
-        {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}
-          <span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
+      <div class="muted" style="font-size:13px;line-height:1.5">
+        {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
+        {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
         {% if a.last_rows_found is not none %}{{ _("{n} matching ads on willhaben", n='{:,}'.format(a.last_rows_found).replace(',', '.')) }}{% endif %}
         {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
-        {% if a.screen %} · <span title="{{ a.screen_brief or '' }}">🤖 {{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</span>{% endif %}
       </div>
-      {% if a.last_error %}<div class="err">{{ a.last_error }}</div>{% endif %}
+      {% if a.screen %}<div style="color:var(--brand);font-size:13px" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
+      {% if a.last_error %}<div style="color:var(--bad);font-size:13px">{{ a.last_error }}</div>{% endif %}
     </div>
-    <footer>
-      <form method="post" action="/agents/{{ a.id }}/run"><button onclick="this.setAttribute('aria-busy','true')">{{ _("Check now") }}</button></form>
-      <form method="post" action="/agents/{{ a.id }}/toggle"><button class="secondary">{{ _("Pause") if a.enabled else _("Resume") }}</button></form>
-      <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="secondary" style="font-size:.8em">{{ _("on willhaben") }} ↗</a>
-      <details>
-        <summary>{{ _("Edit") }}</summary>
-        <form method="post" action="/agents/{{ a.id }}/edit">
-          <input name="name" value="{{ a.name }}" aria-label="{{ _('Name') }}">
-          <label>{{ _("Check every (minutes)") }}
-            <input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
-          <label><input type="checkbox" name="notify_on" {% if a.notify %}checked{% endif %}> {{ _("Notify") }}</label>
-          <label><input type="checkbox" name="drops_on" {% if a.notify_price_drops %}checked{% endif %}> {{ _("Report price drops") }}</label>
-          {% if a.queries %}
-            <small>{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }}</small>
-            <ul class="queries">{% for q in a.queries %}<li><a href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</li>{% endfor %}</ul>
-          {% endif %}
-          {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}
-          <div style="display:flex;gap:.4rem">
-            <button>{{ _("Save") }}</button>
-            <button class="contrast outline" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete") }}</button>
-          </div>
-        </form>
-      </details>
+    <footer class="actions" style="padding:10px 12px;align-items:center;flex-wrap:wrap;row-gap:8px">
+      <form method="post" action="/agents/{{ a.id }}/run" style="margin:0;flex:0"><button class="btn secondary sm" onclick="this.setAttribute('aria-busy','true')">{{ _("Check now") }}</button></form>
+      <form method="post" action="/agents/{{ a.id }}/toggle" style="margin:0;flex:0"><button class="btn secondary sm">{{ _("Pause") if a.enabled else _("Resume") }}</button></form>
+      <span style="flex:1"></span>
+      <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="muted" style="font-size:13px;white-space:nowrap;flex:none">{{ _("on willhaben") }} ↗</a>
+      <button class="btn ghost sm" type="button" data-drawer="agent-{{ a.id }}" style="flex:none">{{ _("Settings") }}</button>
     </footer>
   </article>
+  {# edit drawer #}
+  <div class="drawer" id="agent-{{ a.id }}" hidden>
+    <div class="backdrop" data-drawer-close></div>
+    <div class="panel">
+      <header class="row" style="padding:18px 20px 14px;border-bottom:1px solid var(--border);flex-wrap:nowrap">
+        <div style="flex:1;min-width:0"><div class="eyebrow">{{ _("Search agent") }}</div><h2 style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.name }}</h2></div>
+        <a href="{{ a.source_url }}" target="_blank" rel="noopener" style="font-size:13px;white-space:nowrap">{{ _("Filters on willhaben") }} ↗</a>
+        <button class="icon-btn" type="button" data-drawer-close aria-label="{{ _('Close') }}">✕</button>
+      </header>
+      <form method="post" action="/agents/{{ a.id }}/edit" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;flex:1">
+        <label class="field"><span>{{ _("Name") }}</span><input name="name" value="{{ a.name }}"></label>
+        <label class="field"><span>{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+        <label class="switch-row" style="padding:10px 0;border-top:1px solid var(--border)"><span><span class="t">{{ _("Notify") }}</span><span class="d">{{ _("Push to phone / Telegram for new hits") }}</span></span><input type="checkbox" class="switch" name="notify_on" {% if a.notify %}checked{% endif %}></label>
+        <label class="switch-row" style="padding:10px 0;border-top:1px solid var(--border)"><span><span class="t">{{ _("Report price drops") }}</span><span class="d">{{ _("Also when an already seen ad gets cheaper") }}</span></span><input type="checkbox" class="switch" name="drops_on" {% if a.notify_price_drops %}checked{% endif %}></label>
+        {% if a.queries %}
+          <div class="card pad" style="padding:12px 14px"><div class="eyebrow" style="margin-bottom:6px">{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }}</div>
+          {% for q in a.queries %}<div style="font-size:13px"><a href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</div>{% endfor %}</div>
+        {% endif %}
+        <div class="card pad" style="background:var(--bg);padding:14px 16px">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}</div>
+        <div style="flex:1"></div>
+        <footer class="row" style="padding-top:14px;border-top:1px solid var(--border)">
+          <button class="btn">{{ _("Save") }}</button>
+          <button type="button" class="btn ghost" data-drawer-close>{{ _("Cancel") }}</button>
+          <span style="flex:1"></span>
+          <button class="btn danger" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete agent") }}</button>
+        </footer>
+      </form>
+    </div>
+  </div>
   {% endfor %}
 </div>
+<script>
+  document.querySelectorAll('[data-drawer]').forEach(b => b.addEventListener('click', () => { document.getElementById(b.dataset.drawer).hidden = false; }));
+  document.querySelectorAll('[data-drawer-close]').forEach(b => b.addEventListener('click', () => { b.closest('.drawer').hidden = true; }));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.drawer').forEach(d => d.hidden = true); });
+</script>
 {% else %}
-<article class="empty-state">
-  <h4>{{ _("No search agents yet") }}</h4>
-  <p class="muted">{{ _("Type what you are looking for and click your filters together – the agent reports new ads and price drops faster than the willhaben emails.") }}</p>
-  <a href="/agents/new" role="button">{{ _("Create your first search agent") }}</a>
-</article>
+<div class="card empty-state">
+  <h3>{{ _("No search agents yet") }}</h3>
+  <p class="muted" style="max-width:460px">{{ _("Type what you are looking for and click your filters together – the agent reports new ads and price drops faster than the willhaben emails.") }}</p>
+  <a href="/agents/new" class="btn" style="margin-top:6px">{{ _("Create your first search agent") }}</a>
+</div>
 {% endif %}
 {% endblock %}

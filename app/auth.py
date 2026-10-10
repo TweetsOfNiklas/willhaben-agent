@@ -18,7 +18,8 @@ from app.config import get_settings
 COOKIE = "wh_session"
 REMEMBER_S = 30 * 86400      # "stay logged in"
 SESSION_S = 12 * 3600        # otherwise: browser session, at most 12 h
-PUBLIC_PATHS = {"/healthz", "/login"}
+PUBLIC_PATHS = {"/healthz", "/login", "/lang"}    # /lang: the language switch on the login page
+PUBLIC_PREFIXES = ("/static/",)    # stylesheets: the login page needs them before any login
 
 MAX_FAILS, FAIL_WINDOW_S = 10, 15 * 60
 _fails: dict[str, deque[float]] = defaultdict(deque)

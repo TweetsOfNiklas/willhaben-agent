@@ -2,27 +2,17 @@
    Opens for: links to /session or /settings#willhaben (when not already on Settings), [data-remote] links,
    and pages loaded with ?remote=1 (e.g. after "Create label"). The iframe only loads while the overlay is
    open, so the screenshot polling stops when it closes. Closing reloads the page to show the new state. #}
-<dialog id="remote-overlay" aria-label="{{ _('Browser window') }}">
-  <article class="remote-overlay">
-    <header>
-      <strong>{{ _("Browser window") }}</strong>
-      <small class="muted">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
-      <button type="button" class="secondary outline" data-close aria-label="{{ _('Close') }}" title="{{ _('Close') }}">✕</button>
+<dialog id="remote-overlay" class="modal" aria-label="{{ _('Browser window') }}">
+  <article class="panel remote-overlay" style="--w:1280px;height:calc(100vh - 32px)">
+    <header class="panel-head">
+      <span class="title">{{ _("Browser window") }}</span>
+      <small class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
+      <span style="flex:1"></span>
+      <button type="button" class="icon-btn" data-close aria-label="{{ _('Close') }}" title="{{ _('Close') }}">×</button>
     </header>
-    <iframe title="{{ _('Browser window') }}" src="about:blank"></iframe>
+    <iframe title="{{ _('Browser window') }}" src="about:blank" style="flex:1;width:100%;border:0;background:var(--bg)"></iframe>
   </article>
 </dialog>
-<style>
-  #remote-overlay { padding: 0; }
-  #remote-overlay > article.remote-overlay { width: min(1280px, 96vw); max-width: none; height: 92vh; margin: 0;
-    padding: 0; display: flex; flex-direction: column; overflow: hidden; }
-  #remote-overlay header { display: flex; gap: .6rem; align-items: center; margin: 0; padding: .25rem .4rem .25rem .8rem;
-    font-size: .9rem; min-height: 0; }
-  #remote-overlay header small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  @media (max-width: 900px) { #remote-overlay header small { display: none; } }
-  #remote-overlay header button { margin-left: auto; width: auto; padding: .1rem .55rem; font-size: .95rem; line-height: 1.4; }
-  #remote-overlay iframe { flex: 1; width: 100%; border: 0; background: var(--pico-background-color); }
-</style>
 <script>
 (() => {
   const dlg = document.getElementById('remote-overlay'), frame = dlg.querySelector('iframe');
@@ -48,7 +38,7 @@
     if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || a.target === '_blank') return;
     const href = a.getAttribute('href');
     const remote = a.hasAttribute('data-remote') || href === '/session' ||
-                   (href === '/settings#willhaben' && location.pathname !== '/settings');
+                   ((href === '/settings/willhaben' || href === '/settings#willhaben') && !location.pathname.startsWith('/settings'));
     if (!remote) return;
     e.preventDefault();
     open(a.dataset.remote && a.dataset.remote.startsWith('/session') ? a.dataset.remote : '/session?embed=1');

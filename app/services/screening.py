@@ -90,11 +90,11 @@ def passes(agent: SearchAgent, hit: Hit) -> bool:
 
 
 def summary(hit: Hit) -> str:
-    """One line for the push text, e.g. "🤖 good price – 30 % under the usual used price"."""
+    """One line for the push text, e.g. "Claude: good price – 30 % under the usual used price"."""
     if hit.screen_relevant is None:
         return ""
     head = " · ".join(verdict_labels(hit))
-    return f"🤖 {head}: {short_reason(hit.screen_reason)}" if hit.screen_reason else f"🤖 {head}"
+    return f"Claude: {head}: {short_reason(hit.screen_reason)}" if hit.screen_reason else f"Claude: {head}"
 
 
 def short_reason(reason: str | None, limit: int = 140) -> str:

@@ -26,7 +26,7 @@ def shipment_panel(shipment) -> dict:
 
 
 def _settings_back(msg: str) -> RedirectResponse:
-    return RedirectResponse(f"/settings?msg={quote(msg, safe='')}#printers", status_code=303)
+    return RedirectResponse(f"/settings/printers?msg={quote(msg, safe='')}", status_code=303)
 
 
 @router.post("/settings/printers")

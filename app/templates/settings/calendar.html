@@ -1,0 +1,86 @@
+{# Settings → calendar: the old section of settings.html, markup unchanged (not ported yet: transitional styles) #}
+<div class="legacy">
+<p class="lead">{{ _("Claude suggests pickup times that fit your calendar, and agreed appointments go into your calendar with one click.") }}</p>
+{% if gcal.connected %}
+  <p><span class="badge ok">{{ _("connected") }}</span> {{ gcal.account or '' }}
+    {% if gcal_error %}<br><span class="badge">{{ _("Connection failed") }}</span> {{ gcal_error }}{% endif %}</p>
+  <form method="post" action="/settings/gcal">
+    {% if gcal_cals %}
+    <fieldset><legend><small>{{ _("Calendars that count as busy") }}</small></legend>
+      {% for c in gcal_cals %}
+        <label><input type="checkbox" name="calendar" value="{{ c.id }}"
+          {% if c.id in gcal_cfg.calendars or (c.primary and 'primary' in gcal_cfg.calendars) %}checked{% endif %}> {{ c.name }}</label>
+      {% endfor %}
+    </fieldset>
+    <label>{{ _("New appointments go into") }}
+      <select name="target">
+        {% for c in gcal_cals if c.writable %}
+          <option value="{{ 'primary' if c.primary else c.id }}" {% if gcal_cfg.target == c.id or (c.primary and gcal_cfg.target == 'primary') %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select></label>
+    {% else %}
+      {% for c in gcal_cfg.calendars %}<input type="hidden" name="calendar" value="{{ c }}">{% endfor %}
+      <input type="hidden" name="target" value="{{ gcal_cfg.target }}">
+    {% endif %}
+    <div class="grid">
+      <label>{{ _("Handovers possible from") }} <input type="time" name="window_start" value="{{ gcal_cfg.window_start }}"></label>
+      <label>{{ _("until") }} <input type="time" name="window_end" value="{{ gcal_cfg.window_end }}"></label>
+    </div>
+    <div class="grid">
+      <label>{{ _("Look ahead (days)") }} <input type="number" name="days" value="{{ gcal_cfg.days }}" min="1" max="21"></label>
+      <label>{{ _("Default length of an appointment (minutes)") }} <input type="number" name="duration" value="{{ gcal_cfg.duration }}" min="5" max="480" step="5"></label>
+    </div>
+    <label>{{ _("Buffer before and after each appointment (minutes, e.g. travel time)") }}
+      <input type="number" name="buffer" value="{{ gcal_cfg.buffer }}" min="0" max="240" step="5"></label>
+    <label><input type="checkbox" role="switch" name="in_drafts" {% if gcal_cfg.in_drafts %}checked{% endif %}>
+      {{ _("Use my free times in reply drafts") }}</label>
+    <label><input type="checkbox" role="switch" name="in_auto" {% if gcal_cfg.in_auto %}checked{% endif %}>
+      {{ _("Also in automatic answers") }}
+      <small class="muted">· {{ _("only proposes times; your rules for automatic answers still decide whether appointments may be promised") }}</small></label>
+    <button>{{ _("Save") }}</button>
+  </form>
+  <p><small class="muted">{{ _("Only free/busy blocks are read – titles of your appointments never reach Claude.") }}</small></p>
+  <div class="row-actions">
+    <form method="post" action="/settings/gcal/test"><button class="secondary">{{ _("Show free times") }}</button></form>
+    <form method="post" action="/settings/gcal/disconnect" onsubmit='return confirm({{ _("Disconnect Google Calendar?")|tojson }})'><button class="secondary outline">{{ _("Disconnect") }}</button></form>
+  </div>
+{% else %}
+  <ol>
+    <li>{{ _("In Google Cloud Console, create a project and enable the “Google Calendar API”.") }}
+      <a href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">{{ _("Open") }} ↗</a></li>
+    <li>{{ _("Google Auth Platform → Audience: user type “External”, add yourself as test user, then “Publish app” (otherwise Google ends the access after 7 days).") }}
+      <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noopener">{{ _("Open") }} ↗</a></li>
+    <li>{{ _("Clients → Create client → application type") }} <strong>{{ _("“Desktop app”") }}</strong> {{ _("(not “Web application”), download the JSON file.") }}
+      <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">{{ _("Open") }} ↗</a>
+      <form method="post" action="/settings/gcal/client" enctype="multipart/form-data" style="margin-top:.4rem">
+        <input type="file" name="client_file" accept=".json,application/json">
+        <details><summary><small>{{ _("or enter ID and secret") }}</small></summary>
+          <input name="client_id" placeholder="…apps.googleusercontent.com" autocomplete="off" value="{{ gcal.client_id }}">
+          <input name="client_secret" placeholder="{{ _('Client secret') }}" autocomplete="off">
+        </details>
+        <button class="{{ 'secondary' if gcal.client else '' }}">{{ _("Save client") }}</button>
+        {% if gcal.client %}<span class="badge ok">✓</span>
+          <small class="muted">{{ _("Active client:") }} <code>{{ gcal.client_id[:24] }}…</code>
+            {{ {'desktop': _('“Desktop app”'), 'web': _('Web application'), 'web-unregistered': _('Web application')}.get(gcal.kind, _('type unknown')) }}</small>{% endif %}
+      </form>
+      {% if gcal.kind == 'web-unregistered' %}
+        <p class="msg" style="border-color:#e5484d">{{ _("This is a “Web application” client – Google will refuse the sign-in (redirect_uri_mismatch). Create a “Desktop app” client instead, or add this exact address under “Authorized redirect URIs” and upload the JSON again:") }}
+          <code>{{ gcal_redirect }}</code></p>
+      {% elif gcal.client %}
+        <small class="muted">{{ _("Google answers “redirect_uri_mismatch”? Then the client is a “Web application”: create a “Desktop app” client, or add {url} under “Authorized redirect URIs”.", url=gcal_redirect) }}</small>
+      {% endif %}</li>
+    {% if gcal.client %}
+    <li>{{ _("Sign in with Google:") }}
+      <a href="/settings/gcal/authorize" target="_blank" rel="noopener" role="button">{{ _("Connect Google Calendar") }} ↗</a>
+      <br><small class="muted">{{ _("Google says the app is unverified – it is your own: “Advanced” → “Go to …”. Afterwards the browser shows an error page at {url} – that is expected.", url=gcal_redirect) }}</small></li>
+    <li>{{ _("Copy the whole address from that error page and paste it here:") }}
+      <form method="post" action="/settings/gcal/code" style="margin-top:.4rem">
+        <fieldset role="group">
+          <input name="pasted" required autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:53682/?state=…&code=…">
+          <button style="white-space:nowrap">{{ _("Finish") }}</button>
+        </fieldset>
+      </form></li>
+    {% endif %}
+  </ol>
+{% endif %}
+</div>

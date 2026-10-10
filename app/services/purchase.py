@@ -763,7 +763,7 @@ async def _meetup_agreed(row: Purchase, m: dict[str, Any], reason: str) -> None:
 
 async def _push_paylivery_pay(row: Purchase) -> None:
     amount = _price_line(row)
-    await _push(row, t("💳 Pay now!"),
+    await _push(row, t("Pay now!"),
                 t("{title}, {amount}. Pay in the willhaben app ({link}) or with Buy now & pay in the PayLivery card "
                   "here – the app fills in your saved card, you approve 3-D Secure on your phone, then it continues by itself.",
                   title=row.ad_title or row.ad_id, amount=amount, link=WH_CHAT.format(cid=row.conversation_id)))
@@ -776,7 +776,7 @@ async def _push_direct_pay(row: Purchase) -> None:
              reference=p.get("reference") or "-")
     if shipping_of(row)[1] != "none":
         text += "\n" + t("Price: {price}", price=_price_line(row))
-    await _push(row, t("💳 Pay now!"), text)
+    await _push(row, t("Pay now!"), text)
 
 
 # ------------------------------------------------------------------ pauses, failures and user buttons

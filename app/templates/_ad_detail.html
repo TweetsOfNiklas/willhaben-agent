@@ -1,60 +1,34 @@
-{# Fragment for the ad viewer (_ad_panel.html). d = AdDetail or None, h = Hit or None #}
-{% if error %}
-  <p class="msg" style="border-color:#e5484d">{{ _("willhaben error: {error}", error=error) }}</p>
-{% elif not d %}
-  <p class="muted">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
+{# Fragment for the ad viewer. d = AdDetail or None, h = Hit or None #}
+{% if error %}<div class="msg error" style="margin:16px">{{ _("willhaben error: {error}", error=error) }}</div>
+{% elif not d %}<p class="muted" style="padding:24px">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
 {% else %}
 <div class="adv">
   <div class="adv-gallery">
-    {% if d.images %}
-      <img class="adv-main" src="{{ d.images[0] }}" alt="">
-      {% if d.images|length > 1 %}
-        <div class="adv-thumbs">
-          {% for img in d.images[:12] %}<img src="{{ img }}" alt="" loading="lazy" data-full="{{ img }}"{% if loop.first %} class="on"{% endif %}>{% endfor %}
-        </div>
-      {% endif %}
+    {% if d.images %}<img class="adv-main" src="{{ d.images[0] }}" alt="">
+      {% if d.images|length > 1 %}<div class="adv-thumbs">{% for img in d.images[:12] %}<img src="{{ img }}" alt="" loading="lazy" data-full="{{ img }}"{% if loop.first %} class="on"{% endif %}>{% endfor %}</div>{% endif %}
     {% else %}<div class="adv-main adv-empty">{{ _("No photos") }}</div>{% endif %}
+    {% if d.description %}<div class="adv-desc" style="margin-top:8px">{{ d.description }}</div>{% endif %}
   </div>
   <div class="adv-info">
-    <h4>{{ d.heading }}</h4>
-    <p class="adv-price">{{ d.price_display or (d.price|eur) }}
-      {% if h and h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span>{% endif %}</p>
-    {% set scam_f = scam_for_viewer(d, h) %}{% if scam_f %}
-    <p class="meta" title="{{ _('Scam check (rules, no AI)') }}">{{ '⚠️' if scam_f[0].severity != 'info' else 'ℹ️' }}
-      {% for f in scam_f %}<span class="badge{{ ' muted' if f.severity == 'info' }}"{% if f.severity == 'warn' %} style="background:#f08c00"{% endif %}>{{ f.label }}</span> {% endfor %}</p>{% endif %}
-    <p class="meta">
-      {% if d.location %}📍 {{ d.location }}<br>{% endif %}
-      {% if d.published_at %}{{ _("published {ago}", ago=d.published_at|ago) }}{% endif %}
-      {% if d.first_published_at and d.published_at and d.first_published_at < d.published_at %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}
-      {% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}
-      {% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}
-    </p>
-    <div class="deal-slot" hx-get="/hits/ad/{{ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML">
-      <p><small class="muted" aria-busy="true">{{ _("Checking the price …") }}</small></p></div>
-    {% if h and h.screen_relevant is not none %}
-      <div class="adv-claude">
-        <p><strong>🤖 {{ _("Claude's assessment") }}</strong>
-          {% for lbl in screen_labels(h) %}<span class="badge {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else 'muted' if h.screen_relevant else '') }}">{{ lbl }}</span> {% endfor %}
-          {% if h.screen_at %}<small class="muted">· {{ h.screen_at|ago }}</small>{% endif %}</p>
-        {% if h.screen_reason %}<p class="adv-reason">{{ h.screen_reason }}</p>{% endif %}
-      </div>
-    {% endif %}
-    <div class="adv-actions">
-      {% if h %}
-        {% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}
-          <button type="button" class="{{ '' if s == 'saved' else 'secondary outline' }}" data-state="{{ s }}" data-hit="{{ h.id }}"
-                  {% if h.state == s %}disabled{% endif %}>{{ '✓ ' if h.state == s }}{{ label }}</button>
-        {% endfor %}
-      {% endif %}
-      <a href="{{ d.url }}" target="_blank" rel="noopener" role="button" class="secondary outline">{{ _("Open on willhaben") }} ↗</a>
-      {% if purchase_enabled() %}
-        <a role="button" data-buy="{{ d.ad_id }}" href="/purchases/new/{{ d.ad_id }}">🛒 {{ _("Buy") }}</a>
-      {% else %}
-        <button type="button" class="secondary outline" disabled>🛒 {{ _("Buy") }}</button>
-        <small class="muted"><a href="/settings#purchase">{{ _("Turn on purchases in Settings") }}</a></small>
-      {% endif %}
+    <div>
+      <h2 style="font-size:18px;line-height:1.3;margin-bottom:6px">{{ d.heading }}</h2>
+      <div class="adv-price">{{ d.price_display or (d.price|eur) }}{% if h and h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span><span style="color:var(--ok);font-size:12.5px;font-weight:600">{{ _("price drop") }}</span>{% endif %}</div>
+      <div class="muted" style="font-size:13px;margin-top:6px;line-height:1.5">{% if d.location %}{{ d.location }}{% endif %}{% if d.published_at %} · {{ _("published {ago}", ago=d.published_at|ago) }}{% endif %}{% if d.first_published_at and d.published_at and d.first_published_at < d.published_at %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}{% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}{% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}</div>
+      {% set scam_f = scam_for_viewer(d, h) %}{% if scam_f %}<div class="row" style="gap:6px;margin-top:8px" title="{{ _('Scam check (rules, no AI)') }}">{% for f in scam_f %}<span class="pill plain {{ 'bad' if f.severity == 'warn' else '' if f.severity == 'info' else 'warn' }}">{{ f.label }}</span>{% endfor %}</div>{% endif %}
     </div>
-    {% if d.description %}<div class="adv-desc">{{ d.description }}</div>{% endif %}
+    <div class="row">
+      {% if purchase_enabled() %}<a class="btn" data-buy="{{ d.ad_id }}" href="/purchases/new/{{ d.ad_id }}">{{ _("Buy") }}…</a>{% else %}<button type="button" class="btn secondary" disabled title="{{ _('Turn on purchases in Settings') }}">{{ _("Buy") }}</button>{% endif %}
+      {% if h %}{% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}<button type="button" class="btn secondary" data-state="{{ 'new' if h.state == s else s }}" data-hit="{{ h.id }}" {% if h.state == s %}style="background:var(--brand-soft);border-color:var(--brand);color:var(--brand)"{% endif %}>{{ '✓ ' if h.state == s }}{{ label }}</button>{% endfor %}{% endif %}
+      <a href="/deals/ad/{{ d.ad_id }}" class="btn secondary">{{ _("Check price closely") }}</a>
+      <a href="{{ d.url }}" target="_blank" rel="noopener" class="btn secondary">willhaben ↗</a>
+    </div>
+    <div class="deal-slot" hx-get="/hits/ad/{{ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML"><small class="muted" aria-busy="true">{{ _("Checking the price …") }}</small></div>
+    {% if h and h.screen_relevant is not none %}
+    <div class="adv-claude">
+      <div class="row" style="gap:8px"><strong style="color:var(--brand)">{{ _("Claude's assessment") }}</strong>{% for lbl in screen_labels(h) %}<span class="pill plain {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else 'brand' if h.screen_relevant else '') }}">{{ lbl }}</span>{% endfor %}{% if h.screen_at %}<small class="muted">· {{ h.screen_at|ago }}</small>{% endif %}</div>
+      {% if h.screen_reason %}<p class="adv-reason">{{ h.screen_reason }}</p>{% endif %}
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endif %}

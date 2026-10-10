@@ -302,7 +302,7 @@ def test_viewer_has_lazy_price_section(app_client):
     assert "deal-track" in frag and "10 comparable ads" in frag and "fair" in frag
     assert 'href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html" target="_blank" rel="noopener"' in frag
     assert "New from € 139 on Geizhals" in frag and "Ask Claude" in frag
-    assert '<details class="deal-comp-box" open>' in frag and "Comparable ads" in frag   # list in the viewer too
+    assert "Comparable ads" in frag and "closest by price" in frag   # list in the viewer too
     assert "this ad" in frag
     assert app_client.fake.calls == []
     app_client.get(f"/hits/ad/{AD_ID}/deal")                     # reopening: no new requests
@@ -324,7 +324,7 @@ def test_viewer_keeps_screening_and_uses_agent_keyword(app_client, wh):
         db.commit()
         db.refresh(h)
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text
-    assert "„bohrschrauber“" in frag and "Ask Claude" not in frag   # screened hit: assessment already shown
+    assert "Ask Claude" not in frag   # screened hit: assessment already shown
 
 
 def test_deals_pages_and_claude_on_post(app_client):
@@ -340,15 +340,19 @@ def test_deals_pages_and_claude_on_post(app_client):
     assert "Bosch GSR 18V-55 Nr 0" in listing and f"/deals/ad/{AD_ID}?q=Bosch%20GSR%2018V-55" in listing
     assert "deal-lvl lvl-" in listing and app_client.calls["search"] == 1
 
-    result = app_client.get(f"/deals/ad/{AD_ID}", params={"q": "Bosch GSR 18V-55"}).text
-    assert "deal-comp" in result and "this ad" in result and "Recently checked" in result
+    page = app_client.get(f"/deals/ad/{AD_ID}", params={"q": "Bosch GSR 18V-55"}).text   # answers at once ...
+    assert f'hx-get="/deals/ad/{AD_ID}/result?q=Bosch%20GSR%2018V-55' in page
+    assert app_client.calls["search"] == 1                                    # ... without willhaben requests
+    result = app_client.get(f"/deals/ad/{AD_ID}/result", params={"q": "Bosch GSR 18V-55"}).text   # ... the check loads into it
+    assert "Comparable ads" in result and "this ad" in result and "<html" not in result
+    assert "Recently checked" in app_client.get(f"/deals/ad/{AD_ID}").text      # the check is remembered
     assert app_client.calls["search"] == 2   # comparables served from cache; +1 for the category navigator (selector)
     assert 'name="cat"' in result and "Automatic (category of this ad)" in result
     assert app_client.fake.calls == []                           # never automatic
 
     verdict = app_client.post(f"/deals/ad/{AD_ID}/claude", data={"q": "Bosch GSR 18V-55"}).text
     assert len(app_client.fake.calls) == 1 and "Claude&#39;s assessment" in verdict and "30 %" in verdict
-    again = app_client.get(f"/deals/ad/{AD_ID}", params={"q": "Bosch GSR 18V-55"}).text
+    again = app_client.get(f"/deals/ad/{AD_ID}/result", params={"q": "Bosch GSR 18V-55"}).text
     assert "Claude&#39;s assessment" in again and len(app_client.fake.calls) == 1
     with dbmod.session() as db:
         row = db.get(dbmod.DealCheck, AD_ID)

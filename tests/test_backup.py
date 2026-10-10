@@ -316,10 +316,10 @@ def test_web_flow(ddir, monkeypatch):
     import base64
     basic = base64.b64encode(f"{get_settings().dashboard_user}:pw-test".encode()).decode()
     with TestClient(app, headers={"Authorization": f"Basic {basic}"}) as c:
-        page = c.get("/settings").text
-        assert 'id="backup"' in page and "/settings/backup/export" in page
+        page = c.get("/settings/backup").text
+        assert "/settings/backup/export" in page
         r = c.post("/settings/backup/export", data={"passphrase": "abc", "passphrase2": "abd"}, follow_redirects=False)
-        assert r.status_code == 303 and "#backup" in r.headers["location"]
+        assert r.status_code == 303 and "/settings/backup?" in r.headers["location"]
         r = c.post("/settings/backup/export", data={})
         assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
         assert "attachment" in r.headers["content-disposition"]
@@ -349,11 +349,11 @@ def test_downloads_need_dashboard_password(ddir, monkeypatch):
     backup.safety_backup(include_profile=False)
     name = backup.safety_backups()[0]["name"]
     with TestClient(app) as c:
-        page = c.get("/settings").text
+        page = c.get("/settings/backup").text
         assert "Download backup" not in page and "DASHBOARD_PASSWORD" in page
         assert f"/settings/backup/file/{name}" not in page
         r = c.post("/settings/backup/export", data={}, follow_redirects=False)
-        assert r.status_code == 303 and "#backup" in r.headers["location"]
+        assert r.status_code == 303 and "/settings/backup?" in r.headers["location"]
         assert c.get(f"/settings/backup/file/{name}").status_code == 403
     assert not [p for p in backup.backups_dir().iterdir() if p.name.startswith("export-")]
 

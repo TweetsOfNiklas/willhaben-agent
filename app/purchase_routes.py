@@ -293,7 +293,7 @@ def _row_view(p, now_open: set[int]) -> dict[str, Any]:
     tone = {"agreed": "ok", "meetup": "ok", "paid": "ok", "shipped": "ok", "done": "ok", "cancelled": "muted",
             "failed": "muted", "new": "muted", "contacting": "muted", "negotiating": "muted"}.get(p.status, "")
     return {"id": p.id, "title": p.ad_title or p.ad_id, "image": p.image_url, "mode": purchase.mode_label(p.mode),
-            "status": purchase.status_label(p.status), "tone": tone, "query": p.query, "asking": p.asking_price,
+            "status": purchase.status_label(p.status), "status_key": p.status, "tone": tone, "query": p.query, "asking": p.asking_price,
             "max": p.max_price, "agreed": p.agreed_price, "ad_url": p.ad_url, "open": p.id in now_open,
             "chat": f"/chats/{p.conversation_id}" if p.conversation_id else None,
             "wh_chat": purchase.WH_CHAT.format(cid=p.conversation_id) if p.conversation_id else None}
@@ -303,10 +303,13 @@ def _row_view(p, now_open: set[int]) -> dict[str, Any]:
 async def purchases_page(request: Request):
     from app.main import render
 
+    return render(request, "purchases.html", rows=_rows(), row=None, pcard=None)
+
+
+def _rows() -> list[dict[str, Any]]:
     open_rows = purchase.active()
     open_ids = {r.id for r in open_rows}
-    rows = [_row_view(r, open_ids) for r in open_rows + [r for r in purchase.recent(40) if r.id not in open_ids][:20]]
-    return render(request, "purchases.html", rows=rows, row=None, pcard=None)
+    return [_row_view(r, open_ids) for r in open_rows + [r for r in purchase.recent(40) if r.id not in open_ids][:20]]
 
 
 @router.get("/purchases/{pid}", response_class=HTMLResponse)
@@ -316,7 +319,7 @@ async def purchase_detail(request: Request, pid: int):
     row = purchase.get(pid)
     if row is None:
         raise HTTPException(404)
-    return render(request, "purchases.html", rows=None, row=row, pcard=purchase.card_for(row, log_limit=None),
+    return render(request, "purchases.html", rows=_rows(), row=row, pcard=purchase.card_for(row, log_limit=None),
                   chat_url=f"/chats/{row.conversation_id}" if row.conversation_id else None)
 
 
@@ -326,10 +329,10 @@ async def settings_purchase(enabled_: str | None = Form(None, alias="enabled"), 
                             discount_pct: str = Form(""), prefer_paylivery: str | None = Form(None)):
     raw = _float(discount_pct) if discount_pct.strip() else float(purchase.DEFAULT_DISCOUNT_PCT)
     if raw is None:
-        return _go("/settings#purchase", t("Enter a discount between 0 and 50 %."))
+        return _go("/settings/purchase", t("Enter a discount between 0 and 50 %."))
     pct = min(max(raw, 0.0), 50.0)
     set_setting(purchase.SETTING_ENABLED, "1" if enabled_ else "0")
     set_setting(purchase.SETTING_PREFER_PAYLIVERY, "1" if (enabled_ and prefer_paylivery) else "0")   # only with orders on
     set_setting(purchase.SETTING_RULES, rules.strip()[:4000])
     set_setting(purchase.SETTING_DISCOUNT, f"{pct:g}")
-    return _go("/settings#purchase", t("Changes saved"))
+    return _go("/settings/purchase", t("Changes saved"))

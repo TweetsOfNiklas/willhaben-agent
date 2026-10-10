@@ -1,46 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>{{ _("Hits") }} {% if agent_id and agents.get(agent_id) %}· {{ agents[agent_id].name }}{% endif %}</h3>
-<form method="get" action="/hits" class="grid">
-  <select name="agent_id" onchange="this.form.submit()">
+<div class="page-head">
+  <div><h1>{{ _("Hits") }}{% if agent_id and agents.get(agent_id) %} <span class="muted" style="font-weight:400;font-size:16px">· {{ agents[agent_id].name }}</span>{% endif %}</h1>
+    <p>{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens willhaben.") }}</p></div>
+  {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" style="margin:0"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn secondary">{{ _("Mark all as seen") }}</button></form>{% endif %}
+</div>
+<form method="get" action="/hits" class="row" style="margin-bottom:14px;gap:10px">
+  <nav class="seg" aria-label="{{ _('State') }}">
+    {% for s, label in [('new', _('New')), ('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('all', _('All'))] %}
+      <a href="/hits?state={{ s }}{% if agent_id %}&agent_id={{ agent_id }}{% endif %}" {% if s == state %}aria-current="true"{% endif %}>{{ label }}{% if state_counts is defined %} <small>{{ state_counts.get(s, '') }}</small>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  <input type="hidden" name="state" value="{{ state }}">
+  <select name="agent_id" onchange="this.form.submit()" style="width:auto;background-color:var(--surface)">
     <option value="">{{ _("All search agents") }}</option>
     {% for a in agents.values() %}<option value="{{ a.id }}" {% if a.id == agent_id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
   </select>
-  <select name="state" onchange="this.form.submit()">
-    {% for s, label in [('new', _('New')), ('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('all', _('All'))] %}
-      <option value="{{ s }}" {% if s == state %}selected{% endif %}>{{ label }}</option>
-    {% endfor %}
-  </select>
 </form>
-{% if state == 'new' and hits %}
-<form method="post" action="/hits/mark-seen"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="secondary outline">{{ _("Mark all as seen") }}</button></form>
-{% endif %}
 
-<p><small class="muted">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens willhaben.") }}</small></p>
-<style>.card.viewed { opacity: .75; }</style>
-<div class="grid-cards">
+{% if hits %}
+<div class="cards">
 {% for h in hits %}
-  <div class="card" id="hit-{{ h.id }}">
-    <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}">{% if h.image_url %}<img src="{{ h.image_url }}" loading="lazy" alt="">{% else %}<img alt="">{% endif %}</a>
+  <article class="tile" id="hit-{{ h.id }}" style="{{ 'opacity:.75' if h.state in ('seen', 'ignored') else '' }}">
+    <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" style="position:relative;display:block">
+      <img src="{{ h.image_url or '' }}" loading="lazy" alt="">
+      {% if not agent_id and agents.get(h.agent_id) %}<span class="pill plain" style="position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;font-weight:500">{{ agents[h.agent_id].name }}</span>{% endif %}
+    </a>
     <div class="body">
-      <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}">{{ h.heading }}</a>
-      <div class="price">{{ h.price_display or (h.price|eur) }}{% if h.old_price and h.price and h.old_price > h.price %}<span class="old">{{ h.old_price|eur }}</span>{% endif %}</div>
-      {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}<div class="meta" title="{{ _('Scam check (rules, no AI)') }}">⚠️
-        {% for f in scam_w %}<span class="badge"{% if f.severity == 'warn' %} style="background:#f08c00"{% endif %}>{{ f.label }}</span> {% endfor %}</div>{% endif %}
-      {% if h.screen_relevant is not none %}<div class="meta" title="{{ h.screen_reason or '' }}">🤖
-        {% for lbl in screen_labels(h) %}<span class="badge {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else 'muted' if h.screen_relevant else '') }}">{{ lbl }}</span> {% endfor %} {{ (h.screen_reason or '')[:90] }}</div>{% endif %}
-      <div class="meta">{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}</div>
-      <div class="meta">{{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
-      {% if not agent_id %}<div class="meta">{{ agents[h.agent_id].name if agents.get(h.agent_id) else '' }}</div>{% endif %}
+      <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" style="color:var(--text);font-weight:600;line-height:1.3">{{ h.heading }}</a>
+      <div class="row" style="gap:8px;align-items:baseline"><span style="font-weight:650;font-size:16px">{{ h.price_display or (h.price|eur) }}</span>
+        {% if h.old_price and h.price and h.old_price > h.price %}<span class="muted" style="text-decoration:line-through;font-size:13px">{{ h.old_price|eur }}</span><span style="color:var(--ok);font-size:12.5px;font-weight:600">{{ _("price drop") }}</span>{% endif %}</div>
+      {% if h.screen_relevant is not none %}
+      <div class="row" style="gap:6px;align-items:flex-start;font-size:12.5px;color:var(--muted);flex-wrap:nowrap" title="{{ h.screen_reason or '' }}">
+        {% set good = h.screen_relevant and h.screen_deal in ('great', 'good') %}
+        <span class="pill plain {{ 'ok' if good else 'brand' if h.screen_relevant else '' }}" style="flex:none">{{ screen_labels(h)|first }}</span><span>{{ (h.screen_reason or '')[:90] }}</span>
+      </div>
+      {% endif %}
+      {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
+      <div class="pill bad plain" style="align-self:flex-start;border-radius:6px" title="{{ _('Scam check (rules, no AI)') }}">{{ scam_w|map(attribute='label')|join(' · ') }}</div>{% endif %}
+      <div class="muted" style="font-size:12.5px">{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
     </div>
     <div class="actions">
-      {% for s, label in [('saved', _('Save for later')), ('seen', _('Seen')), ('ignored', _('Ignore'))] if s != h.state %}
-        <button class="outline secondary" hx-post="/hits/{{ h.id }}/state" hx-vals='{"state":"{{ s }}"}' hx-target="#hit-{{ h.id }}" hx-swap="outerHTML">{{ label }}</button>
+      {% for s, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}
+        <button class="btn secondary sm {{ 'on' if s == h.state else '' }}" {% if s == h.state %}style="background:var(--brand-soft);border-color:var(--brand);color:var(--brand)"{% endif %} hx-post="/hits/{{ h.id }}/state" hx-vals='{"state":"{{ 'new' if s == h.state else s }}"}' hx-target="#hit-{{ h.id }}" hx-swap="outerHTML">{{ label }}{% if s == h.state %} ✓{% endif %}</button>
       {% endfor %}
     </div>
-  </div>
-{% else %}
-  <p class="muted">{{ _("No hits in this view.") }}</p>
+  </article>
 {% endfor %}
 </div>
+{% else %}
+<div class="card empty-state">
+  <h3>{{ _("No hits in this view.") }}</h3>
+  <p class="muted" style="max-width:420px">{{ _("New ads appear here within minutes of being published; you get a push if the agent has it switched on.") }}</p>
+  <div class="row" style="margin-top:6px"><a class="btn secondary" href="/agents">{{ _("Search agents") }}</a>{% if state != 'all' %}<a class="btn ghost" href="/hits?state=all{% if agent_id %}&agent_id={{ agent_id }}{% endif %}">{{ _("Show all hits") }}</a>{% endif %}</div>
+</div>
+{% endif %}
 {% endblock %}

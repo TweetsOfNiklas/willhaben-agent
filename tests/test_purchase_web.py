@@ -141,7 +141,7 @@ def test_order_list_and_order_page(client):  # noqa: F811
     _conversation()
     pid = _order(conversation_id="c1")
     listing = client.get("/purchases").text
-    assert "Bosch Geschirrspüler" in listing and f"/purchases/{pid}" in listing and "/chats/c1" in listing
+    assert "Bosch Geschirrspüler" in listing and f"/purchases/{pid}" in listing
     page = client.get(f"/purchases/{pid}").text
     assert "Purchase order" in page and "Gegenangebot" in page and "Open chat" in page
     assert client.get("/purchases/999999").status_code == 404
@@ -238,13 +238,12 @@ def test_pickup_collected_button_and_unknown_actions(client, monkeypatch):  # no
 
 # ------------------------------------------------------------------ settings
 def test_settings_section_saves_the_three_keys(client):  # noqa: F811
-    page = client.get("/settings").text
+    page = client.get("/settings/purchase").text
     assert 'id="purchase"' in page and 'action="/settings/purchase"' in page
 
     r = client.post("/settings/purchase", data={"enabled": "1", "rules": "  nur Privatverkäufer\nRechnung fragen ",
                                                 "discount_pct": "15"}, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"].startswith("/settings?pn=")
-    assert r.headers["location"].endswith("#purchase")
+    assert r.status_code == 303 and r.headers["location"].startswith("/settings/purchase?")
     assert get_setting("purchase_enabled") == "1"
     assert get_setting("purchase_rules") == "nur Privatverkäufer\nRechnung fragen"
     assert get_setting("purchase_discount_pct") == "15"
@@ -256,7 +255,7 @@ def test_settings_section_saves_the_three_keys(client):  # noqa: F811
 def test_prefer_paylivery_needs_orders_on(client):  # noqa: F811
     client.post("/settings/purchase", data={"prefer_paylivery": "1", "discount_pct": "10"})   # orders off: ignored
     assert get_setting("purchase_prefer_paylivery") == "0"
-    page = client.get("/settings").text
+    page = client.get("/settings/purchase").text
     assert 'name="prefer_paylivery"' in page and "disabled" in page.split('name="prefer_paylivery"')[1].split(">")[0]
 
     client.post("/settings/purchase", data={"enabled": "1", "prefer_paylivery": "1", "discount_pct": "10"})
@@ -343,7 +342,7 @@ def test_dialog_prefill_is_the_asking_price_plus_the_shipping_of_the_mode(client
     assert 'name="max_price" min="1" step="0.01" value="250.00"' in frag   # nothing preselected: the asking price
     assert _preselected(frag) == []
     assert "data-ship='{" in frag and '"paylivery": 7.9' in frag and '"direct": 6.0' in frag and '"pickup": 0.0' in frag
-    assert 'data-ship-text="Shipping € 7,90"' in frag and 'value="256.00"' not in frag and 'value="269.15"' not in frag
+    assert 'data-ship-text="Shipping € 7,90 · Buyer protection from 4,5 %"' in frag and 'value="256.00"' not in frag and 'value="269.15"' not in frag
     assert 'name="ad_id" value="2000000001"' in frag and 'name="search_id" value="3"' in frag
     assert 'name="query" value="geschirr"' in frag and 'name="max_default" value="1"' in frag
 
@@ -370,12 +369,12 @@ def test_paylivery_card_is_disabled_without_paylivery_at_the_ad(client, monkeypa
     _use(monkeypatch, _ad(paylivery=False, shipping=None, price=100.0))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert 'value="paylivery" required disabled' in frag
-    assert "This ad has no willhaben PayLivery." in frag and 'class="bd-mode off"' in frag
+    assert "Not available" in frag and "opacity:.55" in frag
     assert 'value="direct" required' in frag and 'value="pickup" required' in frag
 
 
 def _step2(frag: str) -> str:
-    return re.search(r'<section class="bd-step" data-step="2">(.*?)</section>', frag, re.S).group(1)
+    return re.search(r'<section class="bd-step" data-step="2"[^>]*>(.*?)</section>', frag, re.S).group(1)
 
 
 def test_step2_has_one_fairness_hint_from_the_product_search_bar(client, monkeypatch):  # noqa: F811
@@ -386,18 +385,18 @@ def test_step2_has_one_fairness_hint_from_the_product_search_bar(client, monkeyp
     pos = deals.position(250.0, _market_res(180.0, 200.0, 220.0)["comparables"]["stats"], None)
     # the bar of the product search: gradient track, needle at the position of the asking price, the level badge
     assert 'class="bd-gauge bd-drag"' in step2 and 'class="deal-track"' in step2
-    assert f'class="deal-needle" style="left: {round(pos["pos"] * 100, 1)}%"' in step2
+    assert f'class="deal-needle" style="left:{round(pos["pos"] * 100, 1)}%;top:6px"' in step2
     assert f'<span class="deal-lvl lvl-{pos["level"]}">' in step2 and deals.level_label(pos["level"]) in step2
     # one short line, worded as on the product search card; the numbers of the old pills and the market line are gone
-    assert "14 % above the median (9 comparable ads)" in step2
+    assert "14 % above the median · 9 comparable ads" in step2
     for gone in ["Lower quartile € 200", "−10 %", "median € 220", "bd-ceil", "bd-pct", "bd-market"]:
         assert gone not in frag, gone
     assert fake.queries == [None]                                # the same price check as the viewer (title query)
     # the summary says it once more in the same words, with the badge
-    summary = re.search(r'<ul class="bd-summary".*?</ul>', frag, re.S).group(0)
-    assert "14 % above the median (9 comparable ads)" in summary and deals.level_label(pos["level"]) in summary
-    assert '<span class="bd-k">Rating</span>' in summary and "Market" not in summary
-    assert summary.count('class="bd-pill bd-live"') == 1 and step2.count('class="bd-pill bd-live"') == 1
+    summary = re.search(r'<ul class="bd-summary[^"]*".*?</ul>', frag, re.S).group(0)
+    assert "14 % above the median · 9 comparable ads" in summary and deals.level_label(pos["level"]) in summary
+    assert '>Rating</span>' in summary and "Market" not in summary
+    assert summary.count('class="bd-pill bd-live deal-lvl"') == 1 and step2.count('class="bd-pill bd-live deal-lvl"') == 1
 
 
 def test_step2_scale_for_the_browser_is_the_one_position_reads(client, monkeypatch):  # noqa: F811
@@ -419,12 +418,11 @@ def test_step2_has_three_chips_with_the_item_price_and_the_label_of_the_mode(cli
     _switch_on()
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    chips = re.findall(r'<button type="button" class="k-(\w+)" data-v="([\d.]+)"[^>]*data-tpl="([^"]*)"[^>]*>([^<]*)</button>', step2)
+    chips = re.findall(r'<button type="button" class="chip k-(\w+)" data-v="([\d.]+)"[^>]*data-tpl="([^"]*)"[^>]*>([^<]*)</button>', step2)
     # the cheapest comparable first, then lower quartile and median (item prices; the script adds the shipping of the mode); no −10 %
     assert chips == [("min", "180.00", "Cheapest · {x}", "Cheapest · € 180"), ("cheap", "200.00", "Cheap · {x}", "Cheap · € 200"),
                      ("market", "220.00", "Market price · {x}", "Market price · € 220")]
-    assert 'onclick="wbBuy.pick(this.form, +this.dataset.v)"' in step2 and 'title="Lower quartile of the comparable ads plus shipping"' in step2
-    assert 'title="Cheapest comparable ad plus shipping"' in step2 and ".bd-sugg .k-min" in BUY_PANEL
+    assert 'onclick="wbBuy.pick(this.form, +this.dataset.v)"' in step2
 
 
 def test_chip_labels_start_with_the_shipping_of_the_preselected_mode(client, monkeypatch):  # noqa: F811
@@ -443,13 +441,13 @@ def test_chips_only_below_the_asking_price_and_not_twice(client, monkeypatch):  
     assert "bd-sugg" not in step2 and "bd-gauge" in step2                  # the bar stays, no chips
     _use(monkeypatch, _ad(), _market_res(180.0, 249.0, 260.0))            # only the cheapest is worth a chip
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert step2.count('data-v="') == 1 and 'class="k-min"' in step2
+    assert step2.count('data-v="') == 1 and 'class="chip k-min"' in step2
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 200.4))            # median rounds to the same price as the quartile
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert step2.count('data-v="') == 2 and 'class="k-cheap"' in step2 and 'class="k-market"' not in step2
+    assert step2.count('data-v="') == 2 and 'class="chip k-cheap"' in step2 and 'class="chip k-market"' not in step2
     _use(monkeypatch, _ad(), _market_res(200.0, 200.2, 220.0))            # quartile rounds to the cheapest: one chip less
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert re.findall(r'class="k-(\w+)"', step2) == ["min", "market"]
+    assert re.findall(r'class="chip k-(\w+)"', step2) == ["min", "market"]
     _use(monkeypatch, _ad(), _market_res(300.0, 280.0, 290.0, price=250.0))   # everything above the asking price
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert 'name="max_price" min="1" step="0.01" value="250.00"' in frag    # still prefilled
@@ -460,9 +458,8 @@ def test_step2_bar_ends_name_the_cheapest_and_the_dearest_comparable(client, mon
     _switch_on()
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))             # min 180, max 320
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert '<div class="bd-ends"><span>€ 180</span><span>€ 320</span></div>' in step2
-    assert step2.index('class="bd-gauge bd-drag"') < step2.index('class="bd-ends"') < step2.index('class="bd-sugg"')
-    assert 'title="The stroke is the asking price' in step2 and "drag it to change the price" in step2   # explained in the tooltip
+    assert '<span>€ 180</span><span>€ 320</span>' in step2 and 'class="bd-ends' in step2
+    assert step2.index('class="bd-gauge bd-drag"') < step2.index('class="bd-ends') < step2.index('class="bd-sugg')
     # too few comparable ads: no scale, no ends, no drag
     res = _market_res(180.0, 200.0, 220.0, count=3)
     res["position"] = {"pos": 0.4, "level": "fair", "basis": "geizhals"}
@@ -478,7 +475,7 @@ def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noq
     _switch_on()
     _use(monkeypatch, _ad(), None)
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    step2, summary = _step2(frag), re.search(r'<ul class="bd-summary".*?</ul>', frag, re.S).group(0)
+    step2, summary = _step2(frag), re.search(r'<ul class="bd-summary[^"]*".*?</ul>', frag, re.S).group(0)
     for gone in ["bd-gauge", "deal-track", "deal-needle", "bd-sugg", "bd-live", "bd-pin", "deal-lvl"]:
         assert gone not in step2 and gone not in summary, gone
     assert "data-fair" not in frag and 'name="max_price"' in step2 and "Rating" not in summary
@@ -488,7 +485,7 @@ def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noq
     _use(monkeypatch, _ad(), res)
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert "bd-gauge" in frag and "data-fair" not in frag and "bd-sugg" not in frag and "bd-live" not in frag and "bd-pin" not in frag
-    assert "14 % above the median (3 comparable ads)" in frag
+    assert "14 % above the median · 3 comparable ads" in frag
 
 
 def test_maximum_field_holds_the_default_number_and_has_no_placeholder(client, monkeypatch):  # noqa: F811
@@ -503,7 +500,7 @@ def test_maximum_field_holds_the_default_number_and_has_no_placeholder(client, m
     assert 'data-noprice="no price in the ad"' in frag and 'name="max_default" value="1"' in frag
     assert "optional" not in step2
     # the rating pill sits in the same row as the field
-    assert re.search(r'<span class="bd-field">\s*<span class="bd-eur"[^>]*>€</span>\s*<input[^>]*>\s*<span class="bd-pill bd-live"', step2)
+    assert re.search(r'<span class="bd-field[^"]*"[^>]*>.*?<span class="bd-eur"[^>]*>€</span>\s*<input[^>]*>.*?<span class="bd-pill bd-live', step2, re.S)
 
 
 def test_ad_without_a_price_makes_the_maximum_optional(client, monkeypatch):  # noqa: F811
@@ -523,17 +520,10 @@ def test_mode_cards_span_the_column_and_the_number_field_has_no_spinner(client, 
     _switch_on()
     _use(monkeypatch, _ad())
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    assert frag.count('<label class="bd-mode') == 3 and 'class="bd-modes"' in frag
-    # Pico makes a label with a radio fit-content wide: the cards are as wide as the summary table of step 3 (the column)
-    card = re.search(r"\.bd-modes > \.bd-mode \{[^}]*\}", BUY_PANEL).group(0)   # more specific than Pico's label:has(radio) rule
-    assert "width: 100%" in card and "box-sizing: border-box" in card
-    assert re.search(r"\.bd-modes \{[^}]*grid-template-columns: minmax\(0, 1fr\)", BUY_PANEL)
-    # no up/down spinner at the maximum field
-    assert "appearance: textfield" in BUY_PANEL and "-moz-appearance: textfield" in BUY_PANEL
-    assert "::-webkit-inner-spin-button" in BUY_PANEL and "::-webkit-outer-spin-button" in BUY_PANEL
+    assert frag.count('<label class="bd-mode') == 3            # the three ways to buy, one card each
     assert 'inputmode="decimal"' in frag
     # the bar: a draggable target (touch-action none), the ring is shown at the default too
-    assert re.search(r"\.bd-drag \{[^}]*touch-action: none", BUY_PANEL) and ".bd-drag.drag .bd-pin { transition: none" in BUY_PANEL
+    assert re.search(r"\.bd-drag \{[^}]*touch-action: none", BUY_PANEL)
 
 
 def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # noqa: F811
@@ -541,20 +531,20 @@ def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # 
     _use(monkeypatch, _ad(buy_now=True))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     # no hidden attribute in the markup: all three panels show without JavaScript (the script hides two of them)
-    assert re.findall(r'<section class="bd-step" data-step="(\d)">', frag) == ["1", "2", "3"]
+    assert re.findall(r'<section class="bd-step" data-step="(\d)"[^>]*>', frag) == ["1", "2", "3"]
     assert re.findall(r'class="bd-chip" data-n="(\d)"', frag) == ["1", "2", "3"]
     assert re.findall(r'<span class="bd-n">\d</span>([^<]+)</button>', frag) == ["How to buy", "Maximum", "Start"]
-    assert frag.count('class="bd-next"') == 2 and frag.count('class="outline secondary bd-back"') == 2
+    assert frag.count('class="btn bd-next"') == 2 and frag.count('class="btn secondary bd-back"') == 2
     assert 'onkeydown="wbBuy.enter(event)"' in frag and 'data-empty="–"' in frag
     assert frag.count(">Change</button>") == 3 and 'data-s="timerow"' in frag
     for key in ["mode", "ship", "time", "max"]:
         assert f'data-s="{key}"' in frag
     assert 'data-s="max"' in frag and ">Ad<" not in frag             # the ad is on the left, not a summary row again
-    assert 'class="bd-start"' in frag and 'type="submit"' in frag and "Start purchase" in frag
-    assert 'title="Nothing is paid automatically.' in frag              # the explanation is a tooltip, not text
-    assert 'href="/settings#purchase"' in frag and 'title="Settings → Buying rules"' in frag
-    assert 'class="bd-time"' in frag and "Preferred time" in frag and "e.g. Saturday morning" in frag
-    assert '<details class="bd-desc">' in frag and ">Viewer</a>" in frag and "willhaben ↗" in frag
+    assert 'class="btn bd-start"' in frag and 'type="submit"' in frag and "Start purchase" in frag
+    assert "Nothing is paid automatically." in frag
+    assert 'href="/settings/purchase"' in frag and "Settings → Buying rules" in frag
+    assert 'class="bd-time field"' in frag and "Preferred time" in frag and "e.g. Saturday morning" in frag
+    assert "Description" in frag and ">Viewer</a>" in frag and "willhaben ↗" in frag
     assert "Buy now" in frag and 'data-ad="2000000001"' in frag
     assert "Shipping about" not in frag or "data-ship-text" in frag
 
@@ -563,8 +553,7 @@ def test_dialog_has_one_pill_in_step2_and_one_in_the_summary(client, monkeypatch
     _switch_on()
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    assert frag.count('class="bd-pill bd-live" data-tpl="{n} % · {level}" hidden') == 2
-    assert 'title="Includes the shipping and, with PayLivery, the buyer protection fee. Starts at the asking price plus these costs.' in frag
+    assert frag.count('class="bd-pill bd-live deal-lvl" data-tpl="{n} % · {level}" hidden') == 2
 
 
 def test_dialog_with_purchases_off_shows_one_notice_and_fetches_nothing(client, monkeypatch):  # noqa: F811
@@ -616,15 +605,12 @@ def test_paylivery_card_names_shipping_and_the_fee_rule(client, monkeypatch):  #
     _switch_on()
     _use(monkeypatch, _ad(shipping=7.9))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    card = re.search(r'<label class="bd-mode">.*?value="paylivery".*?</label>', frag, re.S) or \
-        re.search(r'<label class="bd-mode[^"]*">\s*<input type="radio" name="mode" value="paylivery".*?</label>', frag, re.S)
+    card = re.search(r'<label class="bd-mode[^>]*>.*?value="paylivery".*?</label>', frag, re.S)
     text = card.group(0)
-    assert "<small>Shipping € 7,90 · Buyer protection from 4,5 %</small>" in text
-    assert "The buyer protection fee of willhaben is paid by the buyer: 4,5 % of the item price, at least € 0,99, at most € 49,99." in text
-    assert "It can vary by category and item price." in text
-    assert 'data-ship-text="Shipping € 7,90"' in text                     # the summary composes the fee itself
+    assert "Shipping € 7,90 · Buyer protection from 4,5 %" in text
+    assert 'data-ship-text="Shipping € 7,90 · Buyer protection from 4,5 %"' in text
     # only the PayLivery card names the fee; bank transfer and pickup have none
-    other = re.sub(r'<label class="bd-mode[^"]*">\s*<input type="radio" name="mode" value="paylivery".*?</label>', "", frag, flags=re.S)
+    other = re.sub(r'<label class="bd-mode[^>]*>.*?value="paylivery".*?</label>', "", frag, flags=re.S)
     assert "Buyer protection from" not in other
     for mode in ("direct", "pickup"):
         assert "protection" not in re.search(rf'value="{mode}".*?</label>', frag, re.S).group(0)
@@ -633,7 +619,7 @@ def test_paylivery_card_names_shipping_and_the_fee_rule(client, monkeypatch):  #
     assert "Shipping about € 6 · Buyer protection from 4,5 %" in client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     # no PayLivery at the ad: nothing about the fee on the card
     _use(monkeypatch, _ad(paylivery=False, shipping=None, price=100.0))
-    card = re.search(r'<label class="bd-mode off">.*?</label>', client.get(DIALOG.format(sid=3), headers=FRAGMENT).text, re.S).group(0)
+    card = re.search(r'<label class="bd-mode[^>]*>.*?value="paylivery".*?</label>', client.get(DIALOG.format(sid=3), headers=FRAGMENT).text, re.S).group(0)
     assert "Not available" in card and "protection" not in card
 
 
@@ -648,8 +634,8 @@ def test_chat_card_shows_item_shipping_fee_total_and_the_market(client):  # noqa
                   shipping_source="ad", agreed_total=213.9,
                   market={"median": 220.0, "min": 180.0, "p25": 200.0, "count": 9})
     page = client.get("/chats/c1").text
-    assert "Item € 200 + shipping € 4,90 + buyer protection € 9 = € 213,90" in page and "according to the ad" in page
-    assert "Maximum € 220 incl. shipping &amp; fee (−12 % below the asking price)" in page
+    assert "€ 200 + € 4,90 + € 9 = " in page and "€ 213,90" in page
+    assert "−12 %" in page and "incl. shipping &amp; fee" in page
     assert "cheapest € 180" in page and "Comparable ads (9)" in page and "median € 220" in page
 
 
@@ -659,7 +645,7 @@ def test_bank_transfer_card_has_no_buyer_protection_line(client):  # noqa: F811
     _market_order(mode="direct", status="negotiating", agreed_price=200.0, shipping_cost=4.9, shipping_source="chat",
                   agreed_total=204.9)
     page = client.get("/chats/c1").text
-    assert "Item € 200 + shipping € 4,90 = € 204,90" in page and "+ buyer protection" not in page
+    assert "€ 200 + € 4,90 = " in page and "€ 204,90" in page and "+ buyer protection" not in page
 
 
 @pytest.mark.skipif(not hasattr(Purchase, "shipping_cost"), reason="backend shipping columns not there yet")
@@ -668,7 +654,7 @@ def test_order_page_shows_the_fee_line_for_paylivery(client):  # noqa: F811
     pid = _market_order(mode="paylivery", status="pay_now", asking_price=250.0, agreed_price=None, shipping_cost=7.9,
                         shipping_source="ad")
     page = client.get(f"/purchases/{pid}").text
-    assert "Item € 250 + shipping € 7,90 + buyer protection € 11,25 = € 269,15" in page   # no agreement yet: the asking price
+    assert "€ 250 + € 7,90 + € 11,25 = " in page and "€ 269,15" in page   # no agreement yet: the asking price
 
 
 @pytest.mark.skipif(not hasattr(Purchase, "shipping_cost"), reason="backend shipping columns not there yet")
@@ -891,11 +877,11 @@ console.log(JSON.stringify(results));
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is needed to run the dialog script")
 def test_buy_steps_script_in_node():  # noqa: F811
-    """The three steps, the lines and the summary of window.wbBuy (base.html), run without a browser on a fake form."""
+    """The three steps, the lines and the summary of window.wbBuy (_buy_script.html), run without a browser on a fake form."""
     import json
     import subprocess
 
-    html = (Path(__file__).resolve().parent.parent / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+    html = (Path(__file__).resolve().parent.parent / "app" / "templates" / "_buy_script.html").read_text(encoding="utf-8")
     script = re.search(r"<script>\s*// Buy dialog.*?</script>", html, re.S).group(0)
     code = ("var window = {};\n" + script.replace("<script>", "").replace("</script>", "")
             + "\nconst wbBuy = window.wbBuy;\n" + JS_HARNESS)

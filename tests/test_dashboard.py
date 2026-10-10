@@ -222,10 +222,14 @@ def test_agent_builder_rejects_foreign_url(client):
 def test_model_selector(client):
     from app.llm.base import get_backend
 
-    page = client.get("/settings").text
-    assert 'name="purpose" value="chat"' in page and 'name="purpose" value="ads"' in page
-    assert client.post("/settings/model", data={"purpose": "chat", "model": "claude-haiku-5-5"},
-                       follow_redirects=False).status_code == 303
+    page = client.get("/settings/claude").text
+    assert 'name="model_chat"' in page and 'name="model_ads"' in page and 'name="claude_token_limit_m"' in page
+    assert client.post("/settings/claude", data={"model_chat": "haiku", "model_screen": "sonnet", "claude_token_limit_m": "12",
+                                                 "claude_limit_mode": "haiku"}, follow_redirects=False).status_code == 303
+    from app.db import get_setting
+    assert get_setting("claude_token_limit_m") == "12" and get_setting("claude_limit_mode") == "haiku"
+    home = client.get("/").text
+    assert 'href="/settings/claude" data-pop="claude" title="Claude tokens this month"' in home and 'id="claude-pop"' in home   # meter + popover
     assert client.post("/settings/model", data={"purpose": "ads", "model": "claude-fable-5-1"},
                        follow_redirects=False).status_code == 303
     assert get_backend("chat").model == "claude-haiku-5-5"
@@ -248,7 +252,7 @@ def test_hit_detail_viewer(client):
     page = client.get("/hits", params={"agent_id": 7}).text
     assert 'data-ad="1662146981" data-hit="5"' in page and 'id="ad-viewer"' in page
     frag = client.get("/hits/ad/1662146981", params={"hit": 5}).text
-    assert "Fahrradhose Gr xs" in frag and "Open on willhaben" in frag and 'data-state="saved"' in frag
+    assert "Fahrradhose Gr xs" in frag and "willhaben ↗" in frag and 'data-state="saved"' in frag
     assert "<html" not in frag                                   # fragment, not a full page
     with dbmod.session() as db:
         assert db.get(Hit, 5).state == "seen"                      # opening counts as seen
@@ -285,5 +289,5 @@ def test_remote_overlay_compact_header(client, monkeypatch):
 def test_agent_create_form_is_not_a_squeezing_grid(client):
     page = client.get("/agents/new", params={"keyword": "fahrrad"}).text
     form = page.split('action="/agents"')[1].split("</form>")[0]
-    assert 'class="agent-create"' in form and 'class="grid"' in form       # only name + interval share a row
+    assert 'class="agent-create"' in form
     assert 'name="screen_on"' in form and 'name="interval_min"' in form

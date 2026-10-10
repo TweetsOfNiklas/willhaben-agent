@@ -1,56 +1,42 @@
 {% extends "base.html" %}
+{% block main_class %}split{% if row is defined and row %} has-detail{% endif %}{% endblock %}
 {% block content %}
-{% if row %}
-<p><a href="/purchases">← {{ _("Purchases") }}</a></p>
-<h3>{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}</h3>
-<div class="grid">
-  <section>
-    {% include "_purchase.html" %}
-  </section>
-  <section>
-    <article>
-      {% if row.image_url %}<img src="{{ row.image_url }}" alt="" style="max-height:200px">{% endif %}
-      <dl class="specs">
-        <dt>{{ _("Mode") }}</dt><dd>{{ pcard.mode_label }}</dd>
-        <dt>{{ _("Status") }}</dt><dd>{{ pcard.status_label }}</dd>
-        <dt>{{ _("Started") }}</dt><dd>{{ row.created_at|local }}</dd>
-        <dt>{{ _("Updated") }}</dt><dd>{{ row.updated_at|local }}</dd>
-        {% if row.query %}<dt>{{ _("Search") }}</dt><dd>„{{ row.query }}“{% if row.search_id %} · <a href="/deals?search={{ row.search_id }}#ps-result">{{ _("Product search") }}</a>{% endif %}</dd>{% endif %}
-      </dl>
-      <div class="row-actions">
-        {% if row.ad_url %}<a role="button" class="secondary outline" href="{{ row.ad_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>{% endif %}
-        {% if chat_url %}<a role="button" class="outline" href="{{ chat_url }}">{{ _("Open chat") }}</a>{% endif %}
-      </div>
-    </article>
-  </section>
+{# /purchases renders the list with `rows`; /purchases/<id> additionally passes `row`, `pcard`, `chat_url`. Pass `rows` on both. #}
+{% set show = request.query_params.get('show', 'open') if request is defined else 'open' %}
+{% set tone = {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad', 'new': 'brand', 'contacting': 'brand', 'negotiating': 'brand'} %}
+<div class="list" style="display:flex;flex-direction:column;min-width:0" data-resize="purchases">
+  <div style="padding:22px 20px 12px">
+    <h1 style="font-size:20px;margin-bottom:6px">{{ _("Purchases") }}</h1>
+    <p class="muted" style="font-size:13px;margin-bottom:12px">{{ _("The agent contacts the seller and negotiates within your maximum price. Nothing is paid automatically.") }}</p>
+    <nav class="seg" style="font-size:13px"><a href="/purchases?show=open" {% if show == 'open' %}aria-current="true"{% endif %}>{{ _("Open") }}</a><a href="/purchases?show=done" {% if show == 'done' %}aria-current="true"{% endif %}>{{ _("Finished") }}</a><a href="/purchases?show=all" {% if show == 'all' %}aria-current="true"{% endif %}>{{ _("All") }}</a></nav>
+  </div>
+  <div style="display:flex;flex-direction:column;padding:0 10px 16px;gap:2px">
+    {% for r in rows if show == 'all' or (show == 'open') == (r.status_key not in ('done', 'cancelled', 'failed') if r.status_key is defined else true) %}
+    <a class="list-item {{ 'on' if row is defined and row and row.id == r.id else '' }}" href="/purchases/{{ r.id }}" style="grid-template-columns:52px 1fr">
+      <img class="thumb" src="{{ r.image or '' }}" alt="">
+      <span style="min-width:0"><span class="title">{{ r.title }}</span>
+        <span class="row" style="gap:8px;margin-top:3px"><span class="pill {{ tone.get(r.tone, r.tone) }}">{{ r.status }}</span><span class="muted" style="font-size:12.5px">{{ r.mode }}{% if r.query %} · „{{ r.query }}“{% endif %}</span></span></span>
+    </a>
+    {% else %}<p class="muted" style="padding:14px 10px">{{ _("No purchase orders yet. Start one with Buy in the product search.") }}</p>{% endfor %}
+  </div>
 </div>
+<div class="detail">
+{% if row %}
+  <div style="display:flex;gap:16px;align-items:flex-start">
+    <img src="{{ row.image_url or '' }}" alt="" style="width:112px;height:84px;border-radius:10px;object-fit:cover;background:var(--hover);flex:none">
+    <div style="flex:1;min-width:0">
+      <div class="row" style="gap:10px"><h2 style="font-size:19px;letter-spacing:-.01em">{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}</h2><span class="pill {{ tone.get(pcard.status, '') }}">{{ pcard.status_label }}</span></div>
+      <div class="muted" style="margin-top:4px">{{ pcard.mode_label }} · {{ _("Started") }} {{ row.created_at|local }} · {{ _("Updated") }} {{ row.updated_at|local }}{% if row.query %} · „{{ row.query }}“{% if row.search_id %} (<a href="/deals?search={{ row.search_id }}#ps-result">{{ _("Product search") }}</a>){% endif %}{% endif %}</div>
+      <div class="row" style="margin-top:12px">
+        {% if chat_url %}<a class="btn secondary" href="{{ chat_url }}">{{ _("Open chat") }}</a>{% endif %}
+        {% if row.ad_url %}<a class="btn secondary" href="{{ row.ad_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>{% endif %}
+      </div>
+    </div>
+  </div>
+  {# the order card (next step, pay-now, prices, actions, history) — restyle _purchase.html with .card / .btn / .pill #}
+  {% include "_purchase.html" %}
 {% else %}
-<h3>{{ _("Purchases") }}</h3>
-<p class="lead">{{ _("Purchase orders from the product search and the ad viewer: the agent contacts the seller and negotiates within your maximum price. Nothing is paid automatically.") }}</p>
-{% if not rows %}
-  <p class="muted">{{ _("No purchase orders yet. Start one with Buy in the product search.") }}</p>
-{% else %}
-  <table class="stack purchase-list">
-    <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Prices") }}</th><th>{{ _("Links") }}</th></tr></thead>
-    <tbody>
-    {% for r in rows %}
-      <tr>
-        <td>{% if r.image %}<img src="{{ r.image }}" alt="" loading="lazy" style="width:4rem;height:4rem;object-fit:cover;border-radius:.4rem">{% endif %}</td>
-        <td><a href="/purchases/{{ r.id }}">{{ r.title }}</a><br><small class="muted">{{ r.mode }}{% if r.query %} · „{{ r.query }}“{% endif %}</small></td>
-        <td><span class="badge {{ r.tone }}">{{ r.status }}</span></td>
-        <td><small>{% if r.asking %}{{ _("Asking {price}", price=r.asking|eur) }}{% endif %}
-          {% if r.max %}<br>{{ _("Maximum {price} incl. shipping & fee", price=r.max|eur) }}{% endif %}
-          {% if r.agreed %}<br>{{ _("Agreed {price}", price=r.agreed|eur) }}{% endif %}</small></td>
-        <td><small>
-          <a href="/purchases/{{ r.id }}">{{ _("Details") }}</a>
-          {% if r.chat %} · <a href="{{ r.chat }}">{{ _("Chat") }}</a>{% endif %}
-          {% if r.wh_chat %} · <a href="{{ r.wh_chat }}" target="_blank" rel="noopener">willhaben ↗</a>{% endif %}
-          {% if r.ad_url %} · <a href="{{ r.ad_url }}" target="_blank" rel="noopener">{{ _("Ad") }} ↗</a>{% endif %}
-        </small></td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <p class="muted">{{ _("Pick a purchase on the left.") }}</p>
 {% endif %}
-{% endif %}
+</div>
 {% endblock %}

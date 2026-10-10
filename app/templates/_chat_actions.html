@@ -1,12 +1,13 @@
 {# hide / remove one chat, only in this app (willhaben is not touched); needs `c` (Conversation) #}
-<details class="dropdown" style="margin:0">
-  <summary role="button" class="secondary outline" style="padding:.2rem .6rem" aria-label="{{ _('Actions') }}">⋯</summary>
-  <ul dir="rtl">
-    <li><form method="post" action="/chats/{{ c.id }}/hide" style="margin:0" dir="ltr">
+<details class="menu" style="position:relative">
+  <summary class="btn secondary sm" style="list-style:none" aria-label="{{ _('Actions') }}">⋯</summary>
+  <div class="card" style="position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:15rem;padding:6px;display:flex;flex-direction:column;gap:2px;box-shadow:0 12px 32px rgba(0,0,0,.18)">
+    <form method="post" action="/chats/{{ c.id }}/hide" style="margin:0">
       <input type="hidden" name="hidden" value="{{ '0' if c.hidden_at else '1' }}">
-      <button class="secondary outline" style="width:100%;margin:0">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form></li>
-    <li><form method="post" action="/chats/{{ c.id }}/remove" style="margin:0" dir="ltr"
+      <button class="btn ghost sm" style="width:100%;justify-content:flex-start">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form>
+    <form method="post" action="/chats/{{ c.id }}/remove" style="margin:0"
           onsubmit='return confirm({{ (_("Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.") ~ "\n\n" ~ (c.partner_name or _("unknown")) ~ " · " ~ (c.ad_title or ""))|tojson }})'>
-      <button class="btn-danger" style="width:100%;margin:0">🗑 {{ _("Remove from the app") }}</button></form></li>
-  </ul>
+      <button class="btn danger sm" style="width:100%;justify-content:flex-start">{{ _("Remove from the app") }}</button></form>
+  </div>
 </details>
+<style>details.menu > summary::-webkit-details-marker { display:none; }</style>

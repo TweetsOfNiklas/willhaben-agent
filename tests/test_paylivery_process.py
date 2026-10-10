@@ -319,9 +319,9 @@ def test_settings_route_saves_switches():
 
     with TestClient(app) as c:
         r = c.post("/settings/paylivery", data={}, follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].endswith("#paylivery")
+        assert r.status_code == 303 and "/settings/paylivery?" in r.headers["location"]
         assert get_setting("paylivery_notify") == "0"
-        page = c.get("/settings")
+        page = c.get("/settings/paylivery")
     assert page.status_code == 200 and 'id="paylivery"' in page.text
 
 

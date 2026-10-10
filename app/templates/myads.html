@@ -1,152 +1,139 @@
 {% extends "base.html" %}
+{% block main_class %}split{% if request is defined and request.query_params.get('ad') %} has-detail{% endif %}{% endblock %}
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
-  <h3 style="margin:0">{{ _("My ads") }}</h3>
-  <form method="post" action="/myads/check" style="margin:0"><button class="secondary" style="margin:0" onclick="this.setAttribute('aria-busy','true')">⟳ {{ _("Update from willhaben") }}</button></form>
+{# List → detail. `cur` = the ad whose settings are open (route: /myads?ad=<id>, default first). #}
+{% set cur_id = request.query_params.get('ad') if request is defined else none %}
+{% set ns = namespace(cur=none) %}
+{% for a in ads %}{% if (cur_id and a.ad_id|string == cur_id) or (not cur_id and ns.cur is none and not a.replaced_by) %}{% set ns.cur = a %}{% endif %}{% endfor %}
+{% set cur = ns.cur %}
+{% set keep = ('&show_active=1' if show_active and (show_inactive or show_sold) else '') ~ ('&show_inactive=1' if show_inactive else '') ~ ('&show_sold=1' if show_sold else '') ~ ('&show_hidden=1' if show_hidden else '') %}
+{% macro chip_href(a_on, i_on, s_on) -%}
+  /myads?{{ 'show_active=1&' if a_on and (i_on or s_on) else '' }}{{ 'show_inactive=1&' if i_on else '' }}{{ 'show_sold=1&' if s_on else '' }}{{ 'show_hidden=1' if show_hidden else '' }}
+{%- endmacro %}
+<div class="list" style="display:flex;flex-direction:column;min-width:0" data-resize="myads">
+  <div style="padding:22px 20px 12px">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px;flex-wrap:nowrap">
+      <h1 style="font-size:20px">{{ _("My ads") }} <span class="muted" style="font-weight:400;font-size:15px">· {{ ads|length }}</span></h1>
+      <div class="row" style="gap:6px;flex-wrap:nowrap">
+        <button class="btn secondary sm" type="button" id="sel-toggle">{{ _("Select") }}</button>
+        <form method="post" action="/myads/check" style="margin:0"><button class="btn secondary sm" title="{{ _('Update from willhaben') }}" onclick="this.setAttribute('aria-busy','true')">↻ {{ _("Update") }}</button></form>
+      </div>
+    </div>
+    <form method="get" action="/myads" class="row" style="gap:6px">
+      {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+      <a class="chip {{ 'on' if show_active }}" href="{{ chip_href(not show_active, show_inactive, show_sold) }}">{{ _("Active") }} <small>{{ active_count }}</small></a>
+      <a class="chip {{ 'on' if show_inactive }}" href="{{ chip_href(show_active, not show_inactive, show_sold) }}">{{ _("Deactivated") }} <small>{{ inactive_count }}</small></a>
+      <a class="chip {{ 'on' if show_sold }}" href="{{ chip_href(show_active, show_inactive, not show_sold) }}">{{ _("Sold / reserved") }} <small>{{ sold_count }}</small></a>
+    </form>
+  </div>
+  <form id="bulk" method="post" class="bulkbar" hidden>
+    {% if show_active and (show_inactive or show_sold) %}<input type="hidden" name="show_active" value="1">{% endif %}{% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}{% if show_sold %}<input type="hidden" name="show_sold" value="1">{% endif %}{% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
+    <label class="row" style="gap:8px"><input type="checkbox" id="select-all" aria-label="{{ _('Select all') }}"><span class="lbl" id="sel-count">{{ _("Select all") }}</span></label>
+    <span style="flex:1"></span>
+    <button class="btn secondary xs" formaction="/myads/bulk/activate" data-act="activate" disabled>{{ _("Activate") }}</button>
+    <button class="btn secondary xs" formaction="/myads/bulk/deactivate" data-act="deactivate" disabled>{{ _("Deactivate") }}</button>
+    <button class="btn outline-danger xs" formaction="/myads/bulk/delete" data-act="delete" disabled>{{ _("Delete") }}</button>
+    <button type="button" class="btn ghost xs" id="sel-done">{{ _("Done") }}</button>
+  </form>
+  <div style="display:flex;flex-direction:column;padding:0 10px 16px;gap:2px">
+    {% for a in ads %}
+    {% if loop.index0 in sections %}<div class="eyebrow" style="padding:12px 10px 4px">{{ sections[loop.index0] }}</div>{% endif %}
+    <a class="list-item {{ 'on' if cur and cur.ad_id == a.ad_id else '' }}" href="/myads?ad={{ a.ad_id }}{{ keep }}" id="row-{{ a.ad_id }}">
+      {% if not a.replaced_by %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel" data-title="{{ a.heading or a.ad_id }}" hidden onclick="event.stopPropagation()">{% endif %}
+      <img class="thumb" src="{{ a.image_url or '' }}" alt="">
+      <span style="min-width:0"><span class="title">{{ a.heading or a.ad_id }}</span>
+        <span class="sub">{% if a.price_display is defined %}{{ a.price_display }} · {% endif %}<span style="color:{{ 'var(--bad)' if a.status == 'expired' else 'var(--warn)' if a.expires_soon is defined and a.expires_soon else 'var(--muted)' }}">{{ a.end_date|ago }}</span></span></span>
+      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+        {% if a.replaced_by %}<span class="pill">{{ _("renewed") }}</span>{% elif a.status == 'active' %}<span class="pill ok">{{ _("active") }}</span>{% elif a.status == 'expired' %}<span class="pill bad">{{ _("expired") }}</span>{% elif a.status in ('sold', 'reserved') or a.sale_status %}<span class="pill warn">{{ _("sold") if (a.status == 'sold' or a.sale_status == 'sold') else _("reserved") }}</span>{% else %}<span class="pill">{{ a.status if a.status and a.status != 'unknown' else '?' }}</span>{% endif %}
+        <span class="row" style="gap:4px"><span title="{{ _('Auto-renew') }}" class="mark" style="width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font-size:10px;background:{{ 'var(--brand-soft)' if a.auto_renew else 'var(--hover)' }};color:{{ 'var(--brand)' if a.auto_renew else 'var(--off)' }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></span><span title="{{ _('Automatic answers') }}" style="width:18px;height:18px;border-radius:5px;display:grid;place-items:center;font-size:10px;background:{{ 'var(--ok-soft)' if a.auto_reply else 'var(--hover)' }};color:{{ 'var(--ok)' if a.auto_reply else 'var(--off)' }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg></span></span>
+      </span>
+    </a>
+    {% else %}
+    <p class="muted" style="padding:14px 10px">{{ _("No own ads yet") }}{% if not session_status.logged_in %} – {{ _("first") }} <a href="/settings/willhaben">{{ _("log in to willhaben") }}</a>{% endif %}.</p>
+    {% endfor %}
+    {% if hidden_count %}<a class="muted" style="font-size:12.5px;padding:10px" href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_active=1&' if show_active and (show_inactive or show_sold) else '' }}{{ 'show_sold=1&' if show_sold else '' }}{{ 'show_inactive=1' if show_inactive else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a>{% endif %}
+  </div>
 </div>
-<p><small class="muted">{{ _("Your ads are imported automatically from your willhaben account once a day. Before an ad expires you get a reminder on your phone, with a link straight to") }}
-  <a href="{{ myadverts_url }}" target="_blank" rel="noopener">{{ _("My ads on willhaben") }}</a>.</small></p>
-<style>
-  .btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
-  .btn-danger:hover, .btn-danger:focus { background: #c93c40; border-color: #c93c40; color: #fff; }
-  .bulkbar { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-bottom:.6rem; }
-  .bulkbar button { width:auto; margin:0; padding:.3rem .8rem; }
-  details.auto-reply { margin:0; } details.auto-reply summary { font-size:.9em; }
-  details.auto-reply[open] summary { margin-bottom:.5rem; }
-  details.dropdown summary { width:auto; display:inline-block; }
-  /* the page keeps its scroll position after an action, so the message stays in view */
-  .msg { position:sticky; top:.5rem; z-index:5; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.15); }
-</style>
-<form id="bulk" method="post" class="bulkbar">
-  {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
-  {% if show_sold %}<input type="hidden" name="show_sold" value="1">{% endif %}
-  {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-  <label style="margin:0"><input type="checkbox" id="select-all" aria-label="{{ _('Select all') }}"> <small id="sel-count">{{ _("Select ads") }}</small></label>
-  <button type="submit" class="secondary outline" formaction="/myads/bulk/activate" data-act="activate" disabled>{{ _("Activate") }}</button>
-  <button type="submit" class="secondary outline" formaction="/myads/bulk/deactivate" data-act="deactivate" disabled>{{ _("Deactivate") }}</button>
-  <button type="submit" class="btn-danger" formaction="/myads/bulk/delete" data-act="delete" disabled>🗑 {{ _("Delete") }}</button>
-  <a href="/myads/cleanup" role="button" class="secondary outline" style="padding:.3rem .8rem">🧹 {{ _("Clean up…") }}</a>
-</form>
-<form method="get" action="/myads" class="bulkbar">
-  {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-  <label style="margin:0"><input type="checkbox" role="switch" name="show_inactive" value="1" {% if show_inactive %}checked{% endif %} onchange="this.form.submit()">
-    <small>{{ _("Show deactivated ads ({n})", n=inactive_count) }}</small></label>
-  <label style="margin:0"><input type="checkbox" role="switch" name="show_sold" value="1" {% if show_sold %}checked{% endif %} onchange="this.form.submit()">
-    <small>{{ _("Show sold ads ({n})", n=sold_count) }}</small></label>
-  <noscript><button class="secondary">{{ _("Apply") }}</button></noscript>
-</form>
-<table class="stack">
-  <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Expires") }}</th><th title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">{{ _("Auto-renew") }}</th><th></th></tr></thead>
-  <tbody>
-  {% for a in ads %}
-  {% if loop.index0 in sections %}<tr class="section"><th colspan="6">{{ sections[loop.index0] }}</th></tr>{% endif %}
-  <tr>
-    <td><label style="display:flex;gap:.4rem;align-items:center;margin:0">
-      {% if not a.replaced_by %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel" data-title="{{ a.heading or a.ad_id }}" aria-label="{{ _('Select') }}">{% endif %}
-      {% if a.image_url %}<img src="{{ a.image_url }}" alt="" style="width:70px;height:52px;object-fit:cover">{% endif %}</label></td>
-    <td>{% if a.url %}<a href="{{ a.url }}" target="_blank">{{ a.heading or a.ad_id }}</a>{% else %}{{ a.ad_id }}{% endif %}
-      <br><small class="muted">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %}</small>
-      {% if a.last_error %}<br><small style="color:#e5484d">{{ a.last_error }}</small>{% endif %}
-      <br><small>{% if a.sale_status %}<span class="badge ok">{{ _("sold") if a.sale_status == 'sold' else _("reserved") }}</span> {% endif %}<a href="/sold/{{ a.ad_id }}?kind=sold{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Sold…") }}</a> · <a href="/sold/{{ a.ad_id }}?kind=reserved{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Reserved…") }}</a></small></td>
-    <td>{% if a.replaced_by %}<span class="badge muted">{{ _("renewed") }}</span>{% elif a.status == 'active' %}<span class="badge ok">{{ _("active") }}</span>{% elif a.status == 'expired' %}<span class="badge">{{ _("expired") }}</span>{% elif a.status in ('sold', 'reserved') %}<span class="badge muted">{{ _("sold") if a.status == 'sold' else _("reserved") }}</span>{% elif a.status and a.status != 'unknown' %}<span class="badge muted">{{ a.status }}</span>{% else %}<span class="badge muted">?</span>{% endif %}</td>
-    <td>{{ a.end_date|local('%d.%m.%Y %H:%M') }}<br><small class="muted">{{ a.end_date|ago }}</small></td>
-    <td>{% if a.replaced_by %}<small class="muted">{{ _("renewed as") }} <a href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></small>
-      {% else %}<form method="post" action="/myads/{{ a.ad_id }}/auto-renew"><input type="hidden" name="on" value="{{ '0' if a.auto_renew else '1' }}">
-        <label style="margin:0" title="{{ _('When the ad expires, the app puts it online again (free ad, nothing is ever paid).') }}">
-          <input type="checkbox" role="switch" {% if a.auto_renew %}checked{% endif %} onchange="this.form.submit()" aria-label="{{ _('Auto-renew') }}">
-          <small>{{ _('on') if a.auto_renew else _('off') }}</small></label>
-        <noscript><button class="secondary">{{ _("Save") }}</button></noscript></form>{% endif %}</td>
-    <td><details class="dropdown" style="margin:0">
-        <summary role="button" class="secondary outline" style="padding:.2rem .6rem" aria-label="{{ _('Actions') }}">⋯</summary>
-        <ul dir="rtl">
-          {% if not a.replaced_by %}
-          <li><form method="get" action="/myads/{{ a.ad_id }}/edit" style="margin:0" dir="ltr">
-            <button class="secondary outline" style="width:100%;margin:0">✎ {{ _("Edit on willhaben") }}</button></form></li>
-          {% endif %}
-          {% if a.status not in ('active', 'sold', 'reserved') and not a.replaced_by %}
-          <li><form method="post" action="/myads/bulk/activate" style="margin:0" dir="ltr"
-                onsubmit='return confirm({{ (_("Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.") ~ "\n\n„" ~ (a.heading or a.ad_id) ~ "“")|tojson }})'>
-            <input type="hidden" name="ids" value="{{ a.ad_id }}">
-            {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
-            {% if show_sold %}<input type="hidden" name="show_sold" value="1">{% endif %}
-            {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
-            <button class="secondary outline" style="width:100%;margin:0">{{ _("Activate on willhaben") }}</button></form></li>
-          {% endif %}
-          {% if a.status == 'active' and not a.replaced_by %}
-          <li><form method="post" action="/myads/{{ a.ad_id }}/deactivate" style="margin:0" dir="ltr"
-                onsubmit='return confirm({{ (_("Take this ad offline on willhaben? You can activate it again there.") ~ "\n\n„" ~ (a.heading or a.ad_id) ~ "“")|tojson }})'>
-            <button class="secondary outline" style="width:100%;margin:0">{{ _("Deactivate on willhaben") }}</button></form></li>
-          {% endif %}
-          {% if not a.replaced_by %}
-          <li><form method="post" action="/myads/{{ a.ad_id }}/delete" style="margin:0" dir="ltr"
-                onsubmit='return confirm({{ (_("Delete this ad on willhaben for good? This cannot be undone.") ~ "\n\n„" ~ (a.heading or a.ad_id) ~ "“")|tojson }})'>
-            <button class="btn-danger" style="width:100%;margin:0">🗑 {{ _("Delete on willhaben") }}</button></form></li>
-          {% endif %}
-          <li><form method="post" action="/myads/{{ a.ad_id }}/hide" style="margin:0" dir="ltr">
-            <input type="hidden" name="hidden" value="{{ '0' if a.hidden else '1' }}">
-            <button class="secondary outline" style="width:100%;margin:0">{{ _("Show in list again") if a.hidden else _("Hide from this list only") }}</button></form></li>
-        </ul>
-      </details></td>
-  </tr>
-  <tr id="ad-{{ a.ad_id }}" class="auto-row">
-    <td></td>
-    <td colspan="5">
-      <details class="auto-reply" {% if a.auto_reply %}open{% endif %}>
-      <summary><strong>{{ _("Answer buyers automatically") }}</strong>
-        {% if a.auto_reply %}<span class="badge ok">{{ _("on") }}</span>{% else %}<small class="muted">{{ _("off") }}</small>{% endif %}</summary>
-      <form method="post" action="/myads/{{ a.ad_id }}/auto-reply">
-        <label><input type="checkbox" name="on" {% if a.auto_reply %}checked{% endif %}>
-          {{ _("Answer buyers automatically") }}</label>
-        <textarea name="instructions" rows="2" placeholder="{{ _('Instruction for this ad, e.g.: Fixed price €20. Power supply included, battery lasts about 4 h. Pickup in Vienna 15 in the evening, shipping €5 extra.') }}">{{ a.auto_reply_instructions or '' }}</textarea>
-        <label>{{ _("Minimum (€)") }}
-          <input type="text" inputmode="decimal" name="min_price" value="{{ ('%.2f'|format(a.min_price)).rstrip('0').rstrip('.') if a.min_price is not none else '' }}" placeholder="{{ _('none') }}" style="max-width:9rem"
-                 title="{{ _('Automatic answers never agree to less. Leave empty: price talks stay with you.') }}"></label>
-        <button class="secondary">{{ _("Save") }}</button>
-        <small class="muted">{{ _("The general instruction also applies, see") }} <a href="/settings">{{ _("Settings") }}</a>.
-          {{ _("Uncertain cases (price negotiation, open questions, suspected scam) end up as a draft, with a push via Home Assistant.") }}</small>
-      </form>
-      </details>
-    </td>
-  </tr>
-  {% else %}
-  <tr><td colspan="6" class="muted">{{ _("No own ads yet") }}{% if not session_status.logged_in %} – {{ _("first") }} <a href="/settings#willhaben">{{ _("log in to willhaben") }}</a>{% endif %}.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+
+<div class="detail">
+{% if cur %}{% set a = cur %}
+  <div style="display:flex;gap:16px;align-items:flex-start">
+    <img src="{{ a.image_url or '' }}" alt="" style="width:112px;height:84px;border-radius:10px;object-fit:cover;background:var(--hover);flex:none">
+    <div style="flex:1;min-width:0">
+      <div class="row" style="gap:10px"><h2 style="font-size:19px;letter-spacing:-.01em">{{ a.heading or a.ad_id }}</h2>
+        {% if a.status == 'active' %}<span class="pill ok">{{ _("active") }}</span>{% elif a.status == 'expired' %}<span class="pill bad">{{ _("expired") }}</span>{% elif a.sale_status %}<span class="pill warn">{{ _("sold") if a.sale_status == 'sold' else _("reserved") }}</span>{% endif %}</div>
+      <div class="muted" style="margin-top:4px">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %} · <a href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}</a></div>
+      {% if a.last_error %}<div style="color:var(--bad);font-size:13px;margin-top:4px">{{ a.last_error }}</div>{% endif %}
+      <div class="row" style="margin-top:12px">
+        <a class="btn secondary" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a>
+        {% if a.status == 'active' %}<form method="post" action="/myads/{{ a.ad_id }}/deactivate" style="margin:0" onsubmit='return confirm({{ _("Take this ad offline on willhaben? You can activate it again there.")|tojson }})'><button class="btn secondary">{{ _("Deactivate") }}</button></form>
+        {% elif a.status not in ('sold', 'reserved') %}<form method="post" action="/myads/bulk/activate" style="margin:0" onsubmit='return confirm({{ _("Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.")|tojson }})'><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="btn secondary">{{ _("Activate") }}</button></form>{% endif %}
+        <a class="btn secondary" href="/sold/{{ a.ad_id }}?kind=sold{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Mark sold…") }}</a>
+        <a class="btn secondary" href="/sold/{{ a.ad_id }}?kind=reserved{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Reserve…") }}</a>
+        <span style="flex:1"></span>
+        <form method="post" action="/myads/{{ a.ad_id }}/delete" style="margin:0" onsubmit='return confirm({{ _("Delete this ad on willhaben for good? This cannot be undone.")|tojson }})'><button class="btn danger">{{ _("Delete") }}</button></form>
+      </div>
+    </div>
+  </div>
+  <section class="card">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 20px;border-bottom:1px solid var(--border)">
+      <div><div class="eyebrow" style="margin-bottom:4px">{{ _("Expires") }}</div><div class="num" style="font-size:16px">{{ a.end_date|local('%d.%m.%Y %H:%M') }}</div><div class="muted" style="font-size:13px">{{ a.end_date|ago }}</div></div>
+      <form method="post" action="/myads/{{ a.ad_id }}/auto-renew" class="switch-row" data-autosave style="margin:0;align-items:flex-start"><input type="hidden" name="on" value="{{ '1' if a.auto_renew else '0' }}">
+        <div><div class="eyebrow" style="margin-bottom:4px">{{ _("Auto-renew") }}</div><div style="font-size:16px">{{ _("On — renews automatically") if a.auto_renew else _("Off") }}</div><div class="muted" style="font-size:13px">{{ _("When the ad expires, the app puts it online again (free ad, nothing is ever paid).") }}</div></div>
+        <input type="checkbox" class="switch" {% if a.auto_renew %}checked{% endif %} onchange="this.form.elements.on.value = this.checked ? '1' : '0'" aria-label="{{ _('Auto-renew') }}" style="margin-top:22px"></form>
+    </div>
+    <form method="post" action="/myads/{{ a.ad_id }}/auto-reply" id="ad-{{ a.ad_id }}" data-autosave style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+      <label class="switch-row" style="align-items:flex-start"><div><div class="eyebrow" style="margin-bottom:4px">{{ _("Automatic answers") }}</div><div style="font-size:16px">{{ _("On — Claude answers simple questions") if a.auto_reply else _("Off") }}</div><div class="muted" style="font-size:13px">{{ _("Uncertain cases (price negotiation, open questions, suspected scam) end up as a draft, with a push via Home Assistant.") }}</div></div><input type="checkbox" class="switch" name="on" {% if a.auto_reply %}checked{% endif %} style="margin-top:22px"></label>
+      <div style="display:grid;grid-template-columns:1fr 180px;gap:12px;align-items:start">
+        <label class="field"><span>{{ _("Instruction for this ad") }}</span><textarea name="instructions" rows="3" placeholder="{{ _('e.g. Fixed price €20. Power supply included, battery lasts about 4 h. Pickup in Vienna 15 in the evening, shipping €5 extra.') }}">{{ a.auto_reply_instructions or '' }}</textarea></label>
+        <label class="field"><span>{{ _("Minimum (€)") }}</span><input type="text" inputmode="decimal" name="min_price" value="{{ ('%.2f'|format(a.min_price)).rstrip('0').rstrip('.') if a.min_price is not none else '' }}" placeholder="{{ _('none') }}"><small class="muted" style="font-size:12px">{{ _("Automatic answers never agree to less. Leave empty: price talks stay with you.") }}</small></label>
+      </div>
+      <div class="row"><small class="muted">{{ _("The general instruction also applies, see") }} <a href="/settings/chats">{{ _("Settings") }}</a>.</small><span style="flex:1"></span><small class="autosave-state muted" aria-live="polite"></small><noscript><button class="btn sm">{{ _("Save") }}</button></noscript></div>
+    </form>
+  </section>
+  <div class="row muted" style="font-size:12.5px">
+    <form method="post" action="/myads/{{ a.ad_id }}/hide" style="margin:0"><input type="hidden" name="hidden" value="{{ '0' if a.hidden else '1' }}"><button class="btn ghost xs" style="padding:0">{{ _("Show in list again") if a.hidden else _("Hide from this list") }}</button></form>
+    {% if a.replaced_by %}<span>· {{ _("renewed as") }} <a href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></span>{% endif %}
+  </div>
+{% else %}
+  <p class="muted">{{ _("Pick an ad on the left.") }}</p>
+{% endif %}
+</div>
 <script>
 (() => {
-  const form = document.getElementById('bulk'), all = document.getElementById('select-all'),
-        count = document.getElementById('sel-count'), boxes = [...document.querySelectorAll('input.sel')];
-  const T = {none: {{ _("Select ads")|tojson }}, n: {{ _("{n} selected")|tojson }},
-             activate: {{ _("Put these ads online again on willhaben?")|tojson }},
-             deactivate: {{ _("Take these ads offline on willhaben? You can activate them again.")|tojson }},
-             delete: {{ _("Delete these ads on willhaben for good? This cannot be undone.")|tojson }}};
+  const form = document.getElementById('bulk'), all = document.getElementById('select-all'), count = document.getElementById('sel-count'),
+        boxes = [...document.querySelectorAll('input.sel')], rows = [...document.querySelectorAll('.list .list-item')];
+  const T = {none: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}, activate: {{ _("Put these ads online again on willhaben?")|tojson }},
+             deactivate: {{ _("Take these ads offline on willhaben? You can activate them again.")|tojson }}, delete: {{ _("Delete these ads on willhaben for good? This cannot be undone.")|tojson }}};
   const picked = () => boxes.filter(b => b.checked);
-  const update = () => {
-    const n = picked().length;
-    count.textContent = n ? T.n.replace('{n}', n) : T.none;
-    form.querySelectorAll('button[data-act]').forEach(b => b.disabled = !n);
-    all.checked = n && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length;
-  };
+  const update = () => { const n = picked().length; count.textContent = n ? T.n.replace('{n}', n) : T.none; form.querySelectorAll('button[data-act]').forEach(b => b.disabled = !n); all.checked = n && n === boxes.length; all.indeterminate = n > 0 && n < boxes.length; };
+  const mode = on => { form.hidden = !on; boxes.forEach(b => { b.hidden = !on; if (!on) b.checked = false; }); rows.forEach(r => r.style.gridTemplateColumns = on ? '24px 52px 1fr auto' : ''); update(); };
+  document.getElementById('sel-toggle').addEventListener('click', () => mode(form.hidden));
+  document.getElementById('sel-done').addEventListener('click', () => mode(false));
+  rows.forEach(r => r.addEventListener('click', e => { if (form.hidden) return; e.preventDefault(); const b = r.querySelector('.sel'); if (b && e.target !== b) { b.checked = !b.checked; b.dispatchEvent(new Event('change', {bubbles: true})); } }));
   boxes.forEach(b => b.addEventListener('change', update));
   all.addEventListener('change', () => { boxes.forEach(b => b.checked = all.checked); update(); });
-  form.addEventListener('submit', e => {
-    const act = e.submitter && e.submitter.dataset.act, list = picked().map(b => '• ' + b.dataset.title).join('\n');
-    if (!act || !confirm(T[act] + '\n\n' + list)) { e.preventDefault(); return; }
-    e.submitter.setAttribute('aria-busy', 'true');
-  });
+  form.addEventListener('submit', e => { const act = e.submitter && e.submitter.dataset.act, list = picked().map(b => '• ' + b.dataset.title).join('\n'); if (!act || !confirm(T[act] + '\n\n' + list)) { e.preventDefault(); return; } e.submitter.setAttribute('aria-busy', 'true'); });
   update();
-  // every action posts and comes back here: keep the scroll position instead of jumping to the top
-  const KEY = 'myads-scroll';
-  addEventListener('pagehide', () => { try { sessionStorage.setItem(KEY, String(scrollY)); } catch (e) {} });
-  let from = '';
-  try { from = new URL(document.referrer).pathname; } catch (e) {}
-  if (from === location.pathname && !location.hash) {
-    try { const y = Number(sessionStorage.getItem(KEY)); if (y) scrollTo(0, y); } catch (e) {}
-  }
-  const msg = document.querySelector('.msg');
-  if (msg) { msg.title = {{ _("Click to close")|tojson }}; msg.addEventListener('click', () => msg.remove()); }
+  // auto-save: switches at once, text fields a moment after typing stops (and when leaving the field); no reload
+  const AS = {saving: {{ _("Saving …")|tojson }}, saved: {{ _("Changes saved")|tojson }}, failed: {{ _("Not saved – check the connection")|tojson }}};
+  document.querySelectorAll('form[data-autosave]').forEach(f => {
+    const state = f.querySelector('.autosave-state') || document.querySelector('form[data-autosave] .autosave-state');
+    let timer = null, last = new URLSearchParams(new FormData(f)).toString();
+    const save = async () => {
+      clearTimeout(timer); const body = new URLSearchParams(new FormData(f));
+      if (body.toString() === last) return;
+      last = body.toString(); if (state) state.textContent = AS.saving;
+      try { const r = await fetch(f.action, {method: 'POST', body, headers: {'X-Autosave': '1'}});
+            const j = r.ok ? await r.json() : {ok: false};
+            if (state) state.textContent = j.ok ? AS.saved : (j.error || AS.failed); }
+      catch (e) { if (state) state.textContent = AS.failed; last = ''; }
+    };
+    f.addEventListener('change', save);
+    f.addEventListener('input', e => { if (e.target.matches('textarea, input[type=text], input:not([type])')) { clearTimeout(timer); timer = setTimeout(save, 900); } });
+    f.addEventListener('submit', e => { e.preventDefault(); save(); });
+  });
+  const msg = document.querySelector('.msg'); if (msg) { msg.title = {{ _("Click to close")|tojson }}; msg.style.cursor = 'pointer'; msg.addEventListener('click', () => msg.remove()); }
 })();
 </script>
-{% if hidden_count %}<p><small class="muted"><a href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_sold=1&' if show_sold else '' }}{{ 'show_inactive=1' if show_inactive else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a></small></p>{% endif %}
 {% endblock %}

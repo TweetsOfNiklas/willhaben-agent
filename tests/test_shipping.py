@@ -283,7 +283,7 @@ async def test_chat_page_sorted_by_nearest(chat, finders):
         near = c.get("/chats/c1?sort=near").text
         cheap = c.get("/chats/c1?sort=price").text
     assert "Trafik" in near and "55 m" in near
-    first = lambda html: html.split('<table class="striped">')[1].split("</td>")[0]   # noqa: E731
+    first = lambda html: html.split("grid-template-columns:1fr auto auto")[1][:400]   # noqa: E731  the first option row
     assert "GLS" in first(near)                                               # 55 m beats Post (1.1 km)
     assert "GLS" in first(cheap)                                              # GLS S → Shop is also cheapest
 
@@ -313,7 +313,7 @@ def test_carrier_logins_are_private(tmp_path, monkeypatch):
     shipping.save_login("gls", "max@example.com", "")                      # empty password keeps the old one
     assert shipping.carrier_logins()["gls"]["password"] == "geheim-123"
     with TestClient(app) as c:
-        html = c.get("/settings").text
+        html = c.get("/settings/shipping").text
         assert "max@example.com" in html and "geheim-123" not in html
         c.post("/settings/shipping/login/gls", data={"user": "", "password": ""})
     assert "gls" not in shipping.carrier_logins()                          # cleared user = login removed

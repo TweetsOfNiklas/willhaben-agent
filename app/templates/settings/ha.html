@@ -1,0 +1,14 @@
+{# Settings → Home Assistant (handoff design). Connect = sign-in to HA (it creates the token); push target = notify service. #}
+{% set connected = ha.ok %}
+<form method="post" action="/settings/ha" class="card pad" style="display:flex;flex-direction:column;gap:14px">
+  <div class="row" style="justify-content:space-between">
+    <div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:var(--{{ 'ok' if connected else 'bad' if ha_source else 'off' }})"></span><div><div style="font-weight:600">{{ _("Connected") if connected else _("Connection failed") if ha_source else _("Not set up") }}</div><div class="muted" style="font-size:12.5px">{{ ha_url or '' }}{% if ha_source %} · {{ _("(signed in here)") if ha_source == 'login' else _("(token from .env)") }}{% endif %}{% if not connected and ha.error %} · {{ ha.error }}{% endif %}</div></div></div>
+    <div class="row" style="gap:8px">{% if connected %}<button class="btn secondary" formaction="/settings/ha/test">{{ _("Send test event") }}</button>{% endif %}<button class="btn {{ 'secondary' if connected else '' }}" formaction="/settings/ha/connect">{{ _("Reconnect") if connected else _("Connect") }}</button>{% if ha_source == 'login' %}<button class="btn ghost" formaction="/settings/ha/disconnect" onclick='return confirm({{ _("Disconnect from Home Assistant?")|tojson }})'>{{ _("Disconnect") }}</button>{% endif %}</div>
+  </div>
+  <label class="field"><span>URL</span><input name="ha_url" type="url" value="{{ ha_url or settings.ha_url or '' }}" placeholder="http://homeassistant.local:8123"><small class="muted">{{ _("You sign in to Home Assistant and are brought back here automatically.") }} {{ _("The app creates a token “willhaben Agent” in your HA profile.") }}</small></label>
+  {% if connected %}
+  <label class="field"><span>{{ _("Phone for pushes") }}</span><select name="service"><option value="-" {% if not ha_service %}selected{% endif %}>{{ _("– events only, no push –") }}</option>{% for s in ha.services %}<option value="{{ s }}" {% if s == ha_service %}selected{% endif %}>{{ s.replace('mobile_app_', '') }}</option>{% endfor %}</select></label>
+  {% endif %}
+  <div class="card pad" style="background:var(--bg);padding:12px 14px;font-size:13px;display:flex;flex-direction:column;gap:6px"><span style="font-weight:600">{{ _("Events the app fires") }}</span><span class="muted"><code>willhaben_hit</code> · <code>willhaben_price_drop</code> · <code>willhaben_message</code> · <code>willhaben_ad_expiring</code> · <code>willhaben_ad_expired</code> · <code>willhaben_test</code></span></div>
+  {% if connected %}<div><button class="btn" formaction="/settings/ha/push">{{ _("Save") }}</button></div>{% endif %}
+</form>

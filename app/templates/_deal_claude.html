@@ -3,16 +3,16 @@
 <div class="deal-claude">
   {% if cl.deal %}
     <div class="adv-claude">
-      <p><strong>🤖 {{ _("Claude's assessment") }}</strong>
-        <span class="badge {{ 'ok' if cl.deal in ('great', 'good') else 'muted' }}">{{ deal_label(cl.deal) }}</span></p>
+      <p><strong>{{ _("Claude's assessment") }}</strong>
+        <span class="pill plain {{ 'ok' if cl.deal in ('great', 'good') else '' }}">{{ deal_label(cl.deal) }}</span></p>
       {% if cl.reason %}<p class="adv-reason">{{ cl.reason }}</p>{% endif %}
     </div>
   {% elif res %}
     {% if cl.error or error %}<p class="deal-note muted">{{ _("Claude failed: {error}", error=cl.error or error) }}</p>{% endif %}
-    <button type="button" class="secondary outline" hx-post="/deals/ad/{{ res.ad.ad_id }}/claude"
+    <button type="button" class="btn secondary sm" hx-post="/deals/ad/{{ res.ad.ad_id }}/claude"
             hx-vals='{"q": {{ (q or '')|tojson }}, "hit": {{ (hit or '')|string|tojson }}, "cat": {{ (res.category_url or '')|tojson }}}'
             hx-target="closest .deal-claude" hx-swap="outerHTML" hx-disabled-elt="this">
-      <span class="htmx-indicator" aria-busy="true"></span> 🤖 {{ _("Ask Claude") }}</button>
+      <span class="htmx-indicator" aria-busy="true"></span> {{ _("Ask Claude") }}</button>
   {% elif error %}
     <p class="deal-note muted">{{ error }}</p>
   {% endif %}

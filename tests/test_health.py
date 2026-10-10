@@ -425,17 +425,17 @@ def test_broken_check_does_not_hide_others(monkeypatch):
 # ------------------------------------------------------------------ home page tiles
 def test_home_page_tiles(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(health, "CHECKS", [
-        lambda: Status("ha", "Home Assistant", "problem", "Push buttons not connected", "/settings#ha"),
-        lambda: Status("claude", "Claude", "ok", "Signed in", "/settings#claude"),
-        lambda: Status("gcal", "Google Calendar", "off", "Not set up", "/settings#calendar"),
+        lambda: Status("ha", "Home Assistant", "problem", "Push buttons not connected", "/settings/ha"),
+        lambda: Status("claude", "Claude", "ok", "Signed in", "/settings/claude"),
+        lambda: Status("gcal", "Google Calendar", "off", "Not set up", "/settings/calendar"),
         lambda: Status("disk", "Disk", "ok", "12.0 GB free"),
     ])
     html = client.get("/").text
     assert 'id="connections"' in html
-    assert 'href="/settings#ha" class="conn problem" data-health="ha"' in html
-    assert 'href="/settings#claude" class="conn ok"' in html
-    assert 'class="conn off" data-health="gcal"' in html
-    assert '<div class="conn ok" data-health="disk"' in html and "12.0 GB free" in html
+    assert 'href="/settings/ha" class="card conn problem" data-health="ha"' in html
+    assert 'href="/settings/claude" class="card conn ok"' in html
+    assert 'class="card conn off" data-health="gcal"' in html
+    assert 'class="card conn ok" data-health="disk"' in html and "12.0 GB free" in html
     assert "new hits" in html                         # existing layout still there
     html = client.get("/", headers={"accept-language": "de"}).text
     assert "Verbindungen" in html

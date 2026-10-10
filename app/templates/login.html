@@ -1,68 +1,33 @@
 <!doctype html>
 <html lang="{{ ui_lang() }}">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ _("Log in") }} · willhaben Agent</title>
-  <script>
-    try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
-  </script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.cyan.min.css">
-  <style>
-    :root { --brand: #0e9fb5; --bad: #e5484d; }
-    body { min-height: 100vh; display: grid; place-items: center; padding: 1rem;
-           background: radial-gradient(60rem 30rem at 50% -10%, color-mix(in srgb, var(--brand) 18%, transparent), transparent),
-                       var(--pico-background-color); }
-    .login { width: 100%; max-width: 24rem; margin: 0; padding: 2rem 1.75rem 1.5rem; }
-    .brand { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.5rem; }
-    .logo { width: 2.4rem; height: 2.4rem; border-radius: .65rem; background: var(--brand); color: #fff;
-            display: grid; place-items: center; font-weight: 700; font-size: 1.3rem; }
-    .brand strong { color: var(--brand); font-size: 1.2rem; display: block; line-height: 1.2; }
-    .brand small { color: var(--pico-muted-color); }
-    .error { border-left: 4px solid var(--bad); padding: .45rem .75rem; margin-bottom: 1rem; font-size: .9rem;
-             background: color-mix(in srgb, var(--bad) 10%, transparent); border-radius: .25rem; }
-    .pw { position: relative; display: block; margin-bottom: var(--pico-spacing); }
-    .pw input { padding-right: 4.5rem; margin-bottom: 0; }
-    .pw button { position: absolute; right: .35rem; top: 50%; transform: translateY(-50%); width: auto; margin: 0; padding: .35rem .6rem;
-                 background: none; border: none; color: var(--pico-muted-color); font-size: .8rem; }
-    .pw button:hover { color: var(--brand); }
-    label.remember { margin: .25rem 0 1.25rem; font-size: .9rem; }
-    button[type=submit] { width: 100%; margin: 0; }
-    footer { margin-top: 1.25rem; text-align: center; font-size: .78rem; color: var(--pico-muted-color); }
-  </style>
+  <script>try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <link rel="stylesheet" href="/static/ui.css">
 </head>
-<body>
-<main>
-  <article class="login">
-    <div class="brand">
-      <span class="logo">w</span>
-      <span><strong>willhaben Agent</strong><small>{{ _("Log in to the dashboard") }}</small></span>
+<body class="login-wrap">
+  <div style="width:min(400px,100%);display:flex;flex-direction:column;gap:14px">
+    <div class="card" style="border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.05),0 16px 48px rgba(0,0,0,.08);padding:28px 28px 22px;display:flex;flex-direction:column;gap:20px">
+      <div class="row" style="gap:12px;flex-wrap:nowrap"><span class="logo" style="width:40px;height:40px;border-radius:11px;font-size:21px">w</span><div><div style="font-weight:650;font-size:17px;letter-spacing:-.01em">willhaben Agent</div><div class="muted" style="font-size:13px">{{ _("Log in to the dashboard") }}</div></div></div>
+      {% if error %}<div class="msg error" role="alert" style="margin:0;font-size:13px">{{ error }}</div>{% endif %}
+      <form method="post" action="/login" style="display:flex;flex-direction:column;gap:14px">
+        <input type="hidden" name="next" value="{{ next }}">
+        <label class="field"><span>{{ _("User name") }}</span><input name="username" value="{{ user or '' }}" autocomplete="username" autocapitalize="none" spellcheck="false" required style="font-size:15px"></label>
+        <label class="field"><span>{{ _("Password") }}</span><span style="position:relative;display:flex"><input type="password" name="password" id="pw" autocomplete="current-password" required {% if user %}autofocus{% endif %} style="padding-right:68px;font-size:15px"><button type="button" id="pw-toggle" class="btn ghost xs" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)">{{ _("Show") }}</button></span></label>
+        <label class="switch-row" style="margin-top:2px"><span style="font-size:13.5px">{{ _("Stay logged in for 30 days") }}</span><input type="checkbox" class="switch" name="remember" checked></label>
+        <button class="btn" style="height:42px;font-size:15px;font-weight:600;margin-top:4px" onclick="this.setAttribute('aria-busy','true')">{{ _("Log in") }}</button>
+      </form>
+      <div class="muted" style="font-size:12px;text-align:center;border-top:1px solid var(--border);padding-top:14px">{{ _("The password is DASHBOARD_PASSWORD from the .env file.") }}</div>
     </div>
-    {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
-    <form method="post" action="/login">
-      <input type="hidden" name="next" value="{{ next }}">
-      <label>{{ _("User name") }}
-        <input name="username" value="{{ user or '' }}" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
-      <label>{{ _("Password") }}
-        <span class="pw">
-          <input type="password" name="password" id="pw" autocomplete="current-password" required {% if user %}autofocus{% endif %}>
-          <button type="button" id="pw-toggle" aria-label="{{ _('Show password') }}">{{ _("Show") }}</button>
-        </span></label>
-      <label class="remember"><input type="checkbox" role="switch" name="remember" checked> {{ _("Stay logged in for 30 days") }}</label>
-      <button type="submit" onclick="this.setAttribute('aria-busy','true')">{{ _("Log in") }}</button>
-    </form>
-    <footer>{{ _("The password is DASHBOARD_PASSWORD from the .env file.") }}</footer>
-  </article>
-</main>
-<script>
-  const pw = document.getElementById('pw'), b = document.getElementById('pw-toggle');
-  const T = {show: {{ _("Show")|tojson }}, hide: {{ _("Hide")|tojson }}};
-  b.addEventListener('click', () => {
-    const show = pw.type === 'password';
-    pw.type = show ? 'text' : 'password';
-    b.textContent = show ? T.hide : T.show;
-    pw.focus();
-  });
-</script>
+    <div class="row muted" style="justify-content:space-between;font-size:12px;padding:0 6px"><span>v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span>
+      <form method="post" action="/lang" style="margin:0"><select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()" style="width:auto;padding:2px 26px 2px 6px;font-size:12px;background-color:var(--surface)">
+        {% set pref = ui_lang_pref() %}<option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic (browser)") }}</option>
+        {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></form></div>
+  </div>
+  <script>
+    const pw = document.getElementById('pw'), b = document.getElementById('pw-toggle'), T = {show: {{ _("Show")|tojson }}, hide: {{ _("Hide")|tojson }}};
+    b.addEventListener('click', () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; b.textContent = show ? T.hide : T.show; pw.focus(); });
+  </script>
 </body>
 </html>

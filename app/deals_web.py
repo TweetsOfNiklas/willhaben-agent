@@ -231,10 +231,22 @@ async def deals_ad(request: Request, ad_id: str, q: str = "", cat: str = ""):
 
     if not ad_id.isdigit():
         raise HTTPException(400)
+    # the page answers at once; the analysis (willhaben requests) loads into it: /deals/ad/<id>/result
+    return render(request, "deals.html", q=q.strip(), results=None, spread=None, error=None, recent=deals.recent(),
+                  res=None, pending_ad=ad_id, pending_cat=cat, quote=quote, **_search_ctx())
+
+
+@router.get("/deals/ad/{ad_id}/result", response_class=HTMLResponse)
+async def deals_ad_result(request: Request, ad_id: str, q: str = "", cat: str = ""):
+    """The price check of one ad as a fragment (_deal_result.html), loaded by /deals/ad/<id>."""
+    from app.main import templates
+
+    if not ad_id.isdigit():
+        raise HTTPException(400)
     res, error = await _analysis(ad_id, q.strip() or None, cat=_cat(cat))
     choices = None
     if res is not None:
         deals.remember(res)
         choices = await deals.category_choices(res.get("query") or "", _cat(cat))   # willhaben's category navigator
-    return render(request, "deals.html", q=q.strip(), results=None, spread=None, error=error,
-                  recent=deals.recent(), res=res, quote=quote, choices=choices, **_search_ctx())
+    return templates.TemplateResponse(request, "_deal_result.html", {"res": res, "error": error, "choices": choices,
+                                                                     "q": q.strip(), "quote": quote})

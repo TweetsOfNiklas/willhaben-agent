@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
 {% block content %}
 <p><a href="/myads">← {{ _("My ads") }}</a></p>
 <h3>{{ _("Clean up old ads") }}</h3>
@@ -20,7 +21,7 @@
   </tbody>
 </table>
 <p><small class="muted">{{ _("Shift-click selects or clears every ad in between.") }}</small></p>
-<button class="btn-danger" style="width:auto">🗑 {{ _("Delete selected on willhaben") }}</button>
+<button class="btn-danger" style="width:auto">{{ _("Delete selected on willhaben") }}</button>
 </form>
 <p><small class="muted">{{ _("The app no longer answers buyers of a deleted ad automatically.") }}</small></p>
 {% else %}

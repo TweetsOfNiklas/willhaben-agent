@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import col, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -22,13 +23,13 @@ from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
 from app.config import get_settings
 from app.db import (
-    AdBatch, AdDraft, Conversation, Draft, Hit, MyAd, SearchAgent, get_setting, init_db, recent_events,
-    session, set_setting, utcnow,
+    AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, MyAd, Purchase, SearchAgent, get_setting, init_db, recent_events,
+    requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage
 from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
-from app.services import ad_batch, ad_creator, chats, my_ads, screening, sold
+from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import health, human_pace
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI):
 
 _background: set[asyncio.Task] = set()
 app = FastAPI(title="willhaben Agent", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 app.include_router(backup_routes.router)   # Settings → Backup
 app.include_router(label_buy_routes.router)   # Settings → Shipping → payment card, checkout
 app.include_router(printing_routes.router)    # Settings → Printers, print buttons
@@ -106,7 +108,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 class DashboardAuth(BaseHTTPMiddleware):
     """Login cookie for browsers (see /login), HTTP Basic auth still accepted for scripts and the MCP server."""
     async def dispatch(self, request: Request, call_next):
-        if not auth.enabled() or request.url.path in auth.PUBLIC_PATHS:
+        if not auth.enabled() or request.url.path in auth.PUBLIC_PATHS or request.url.path.startswith(auth.PUBLIC_PREFIXES):
             return await call_next(request)
         if auth.valid_token(request.cookies.get(auth.COOKIE)) or auth.valid_basic(request.headers.get("authorization", "")):
             return await call_next(request)
@@ -168,8 +170,9 @@ def _eur(v: float | None) -> str:
 
 templates.env.filters.update(local=_local, ago=_ago, eur=_eur)
 from app.services.price_gauge import gauge as _price_gauge  # noqa: E402
+from app.services.deals import level_label as _level_label  # noqa: E402
 
-templates.env.globals.update(price_gauge=_price_gauge)
+templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_label)
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -180,11 +183,39 @@ templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=p
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
-                             wh_budget=lambda: get_settings().requests_per_hour)
+                             wh_budget=requests_per_hour, wh_popup=access_stats.popup)
+
+
+def _inbox_seen_at() -> datetime:
+    raw = get_setting("inbox_seen_at")
+    try:
+        return datetime.fromisoformat(raw) if raw else datetime(2000, 1, 1, tzinfo=timezone.utc)
+    except ValueError:
+        return datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+
+def _nav_counts() -> dict[str, int]:
+    """Badges in the sidebar: new hits, unread messages (hidden chats left out), purchases waiting for your payment,
+    and notifications since the inbox was last opened."""
+    with session() as db:
+        return {"inbox": db.exec(select(func.count()).select_from(EventLog).where(EventLog.ts > _inbox_seen_at())).one(),
+                "hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
+                "chats": db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))
+                                 .where(col(Conversation.hidden_at).is_(None))).one(),
+                "purchases": db.exec(select(func.count()).select_from(Purchase).where(Purchase.status == "pay_now")).one()}
 
 
 def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
     ctx.setdefault("session_status", get_session().status())
+    if not ctx.get("embed"):
+        ctx.setdefault("nav_counts", _nav_counts())
+        lim = llm_usage.limit()
+        if lim["limit"]:       # the Claude meter + popover in the sidebar (monthly limit from Settings → Claude)
+            ctx.setdefault("claude_usage", {**lim, "by_task": llm_usage.month_by_task()})
+        ctx.setdefault("inbox_items", _inbox_items())
+        ctx.setdefault("inbox_unread", ctx["nav_counts"].get("inbox", 0))
+        if auth.enabled():
+            ctx.setdefault("current_user", get_settings().dashboard_user)
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -398,7 +429,10 @@ async def hits_page(request: Request, agent_id: int | None = None, state: str = 
             q = q.where(Hit.state == state)
         hits = list(db.exec(q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc()).limit(200)))
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
-    return render(request, "hits.html", hits=hits, agents=agents, agent_id=agent_id, state=state)
+        counts_q = select(Hit.state, func.count()).group_by(Hit.state)
+        state_counts = dict(db.exec(counts_q.where(Hit.agent_id == agent_id) if agent_id else counts_q).all())
+    state_counts["all"] = sum(state_counts.values())
+    return render(request, "hits.html", hits=hits, agents=agents, agent_id=agent_id, state=state, state_counts=state_counts)
 
 
 @app.get("/hits/ad/{ad_id}", response_class=HTMLResponse)
@@ -451,8 +485,8 @@ async def hits_mark_seen(agent_id: int | None = Form(None)):
 
 
 # ------------------------------------------------------------------ chats
-@app.get("/chats", response_class=HTMLResponse)
-async def chats_page(request: Request, msg: str | None = None, show_hidden: bool = False):
+def _chat_list(show_hidden: bool) -> dict[str, Any]:
+    """The conversation list (chats.html); the open chat (chat.html) shows it next to the thread."""
     with session() as db:
         convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
                              .order_by(col(Conversation.last_message_at).desc().nulls_last())))
@@ -460,8 +494,34 @@ async def chats_page(request: Request, msg: str | None = None, show_hidden: bool
     hidden_count = sum(1 for c in convs if c.hidden_at)
     if not show_hidden:
         convs = [c for c in convs if not c.hidden_at]
-    return render(request, "chats.html", convs=convs, open_drafts=open_drafts, msg=msg,
-                  hidden_count=hidden_count, show_hidden=show_hidden)
+    return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden}
+
+
+@app.get("/chats", response_class=HTMLResponse)
+async def chats_page(request: Request, msg: str | None = None, show_hidden: bool = False):
+    return render(request, "chats.html", msg=msg, **_chat_list(show_hidden))
+
+
+@app.post("/chats/bulk/{action}")
+async def chats_bulk(request: Request, action: str):
+    """Selected chats: mark read (read receipts on willhaben, best effort) or hide here."""
+    if action not in ("read", "hide"):
+        raise HTTPException(404)
+    ids = [str(i) for i in (await request.form()).getlist("ids")]
+    for cid in ids:
+        if action == "hide":
+            chats.hide(cid)
+        else:
+            if get_session().logged_in:
+                await chats.mark_read(cid)
+            with session() as db:
+                conv = db.get(Conversation, cid)
+                if conv and conv.unread_count:
+                    conv.unread_count = 0
+                    db.add(conv)
+                    db.commit()
+    msg = t("{n} chats hidden", n=len(ids)) if action == "hide" else t("{n} chats marked read", n=len(ids))
+    return back(f"/chats?msg={quote(msg, safe='')}")
 
 
 @app.post("/chats/{conversation_id}/hide")
@@ -487,7 +547,8 @@ async def chats_sync():
 
 
 @app.get("/chats/{conversation_id}", response_class=HTMLResponse)
-async def chat_page(request: Request, conversation_id: str, msg: str | None = None, sort: str | None = None):
+async def chat_page(request: Request, conversation_id: str, msg: str | None = None, sort: str | None = None,
+                    show_hidden: bool = False):
     with session() as db:
         conv = db.get(Conversation, conversation_id)
     if conv is None:
@@ -500,7 +561,8 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
                   sale=sold.state_for(conv),
-                  gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort))
+                  gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort),
+                  **_chat_list(show_hidden or bool(conv.hidden_at)))
 
 
 async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | None = None) -> dict[str, Any]:
@@ -573,7 +635,7 @@ async def draft_discard(draft_id: int):
 
 
 # ------------------------------------------------------------------ my ads
-_MYADS_FILTERS = ("show_inactive", "show_sold", "show_hidden")
+_MYADS_FILTERS = ("show_active", "show_inactive", "show_sold", "show_hidden")
 
 
 def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = None) -> RedirectResponse:
@@ -581,12 +643,15 @@ def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = N
     src = form if form is not None and any(form.get(k) for k in _MYADS_FILTERS) else \
         dict(parse_qsl(urlsplit(request.headers.get("referer") or "").query))
     keep = "".join(f"&{k}=1" for k in _MYADS_FILTERS if src.get(k))
+    ad = anchor[4:] if anchor.startswith("#ad-") else str((form.get("ad") if form is not None else None) or src.get("ad") or "")
+    if ad:
+        keep += f"&ad={quote(ad, safe='')}"   # the ad whose detail is open (myads.html list -> detail)
     return back(f"/myads?msg={quote(msg, safe='')}{keep}{anchor}")
 
 
 @app.get("/myads", response_class=HTMLResponse)
 async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False, show_sold: bool = False,
-                     show_inactive: bool = False):
+                     show_inactive: bool = False, show_active: bool = False):
     with session() as db:
         empty = db.exec(select(MyAd).limit(1)).first() is None
     if empty and get_session().logged_in:
@@ -601,15 +666,20 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
     ads = rows if show_hidden else [a for a in rows if not a.hidden]
     # sections: active on top, then expired (ran out recently, always shown: they need renewing), then the rest;
     # sold / given away and inactive (deactivated, expired before the cutoff) ads are hidden unless asked for
+    # The filter chips toggle three groups on and off: Active (active + recently expired: they need renewing),
+    # Deactivated (deactivated, expired before the cutoff), Sold / reserved (sold, given away, reserved).
+    # Nothing switched on: Active.
     cutoff = int(get_setting("myads_expired_days") or 0)
-    sold = [a for a in ads if my_ads.is_sold(a)]
-    active = [a for a in ads if not my_ads.is_sold(a) and a.status in ("active", "reserved")]
-    expired = [a for a in ads if my_ads.is_expired(a, cutoff)]
-    inactive = [a for a in ads if not my_ads.is_sold(a) and a not in active and a not in expired]
-    rest = [a for a in ads if a not in active and a not in expired and (show_sold or a not in sold)
-            and (show_inactive or a not in inactive)]
-    groups = [g for g in ((t("Active ({n})", n=len(active)), active), (t("Expired ({n})", n=len(expired)), expired),
-                          (t("Other ads"), rest)) if g[1]]
+    reserved = lambda a: a.status == "reserved" or a.sale_status == "reserved"   # noqa: E731
+    sold = [a for a in ads if my_ads.is_sold(a) or reserved(a)]
+    active = [a for a in ads if a not in sold and a.status == "active"]
+    expired = [a for a in ads if a not in sold and my_ads.is_expired(a, cutoff)]
+    inactive = [a for a in ads if a not in sold and a not in active and a not in expired]
+    show_active = show_active or not (show_inactive or show_sold)
+    groups = [g for g in ((t("Active ({n})", n=len(active)), active if show_active else []),
+                          (t("Expired ({n})", n=len(expired)), expired if show_active else []),
+                          (t("Deactivated ({n})", n=len(inactive)), inactive if show_inactive else []),
+                          (t("Sold / reserved ({n})", n=len(sold)), sold if show_sold else [])) if g[1]]
     sections = {}    # list index -> section heading; only when there is more than one section
     if len(groups) > 1:
         i = 0
@@ -618,6 +688,7 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
             i += len(group)
     ads = [a for _, group in groups for a in group]
     return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
+                  show_active=show_active, active_count=len(active) + len(expired),
                   hidden_count=len(hidden), show_hidden=show_hidden, sold_count=len(sold), show_sold=show_sold,
                   inactive_count=len(inactive), show_inactive=show_inactive, sections=sections)
 
@@ -635,6 +706,8 @@ async def myads_check_all(request: Request):
 @app.post("/myads/{ad_id}/auto-renew")
 async def myads_auto(request: Request, ad_id: str, on: str = Form("0")):
     my_ads.set_auto_renew(ad_id, on == "1")
+    if request.headers.get("x-autosave"):          # My ads saves switches as you flip them (no reload)
+        return JSONResponse({"ok": True})
     return _myads_back(request)
 
 
@@ -642,12 +715,21 @@ async def myads_auto(request: Request, ad_id: str, on: str = Form("0")):
 async def myads_auto_reply(request: Request, ad_id: str, on: str | None = Form(None), instructions: str = Form(""),
                            min_price: str = Form("")):
     error = None
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        was_on = bool(row and row.auto_reply)
     try:
         floor = min_price_svc.parse_form(min_price)     # empty = no floor
         my_ads.set_auto_reply(ad_id, bool(on), instructions, floor)
     except ValueError:  # bad floor: still save on/off + instructions, keep the stored floor
         error = t('Minimum price must be a number, e.g. 25 or 25,50')
         my_ads.set_auto_reply(ad_id, bool(on), instructions)
+    if request.headers.get("x-autosave"):          # auto-save while typing: no reload, no reply run per keystroke
+        if on and not was_on:
+            task = asyncio.create_task(chats.process_pending_auto(ad_id))
+            _background.add(task)
+            task.add_done_callback(_background.discard)
+        return JSONResponse({"ok": error is None, "error": error})
     if on:  # answer buyers who are already waiting, in the background (Claude takes a few seconds)
         task = asyncio.create_task(chats.process_pending_auto(ad_id))
         _background.add(task)
@@ -1295,21 +1377,140 @@ async def capture_download(name: str):
 
 
 # ------------------------------------------------------------------ settings
+SETTINGS_SECTIONS = ("willhaben", "shipping", "calendar", "purchase", "paylivery", "printers", "myads",
+                     "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "language")   # settings.html groups
+
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, msg: str | None = None):
+    return await settings_section(request, "willhaben", msg)
+
+
+INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "message": "New message", "auto_reply": "Answered automatically",
+               "auto_reply_pending": "Reply waiting for you", "ad_expiring": "Ad expiring soon", "ad_expired": "Ad expired",
+               "ad_renewed": "Ad renewed", "paylivery": "Pay now!", "purchase": "Purchase order", "health": "Connections", "test": "Test"}
+
+
+def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
+    """The inbox popover (base.html): the latest events, unread = newer than the last "Mark all read"."""
+    seen = _inbox_seen_at()
+    out = []
+    for e in recent_events(limit):
+        ts = e.ts if e.ts.tzinfo else e.ts.replace(tzinfo=timezone.utc)
+        out.append({"kind": "pay" if e.kind == "paylivery" else e.kind, "title": t(INBOX_KINDS.get(e.kind, "Notification")),
+                    "text": e.message, "time": _ago(ts), "url": e.url, "unread": ts > seen})
+    return out
+
+
+CONTRIBUTORS_URL = "https://api.github.com/repos/lumascet/willhaben-agent/contributors"
+_contributors_cache: dict[str, Any] = {"at": 0.0, "list": None}
+
+
+async def _contributors() -> list[dict[str, Any]] | None:
+    """The repository's contributors from the GitHub API (public, no token), without the author and bots;
+    cached for a day. None when GitHub cannot be reached and nothing is cached."""
+    import time
+
+    if _contributors_cache["list"] is not None and time.time() - _contributors_cache["at"] < 86400:
+        return _contributors_cache["list"]
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(CONTRIBUTORS_URL, headers={"Accept": "application/vnd.github+json"})
+            r.raise_for_status()
+            data = r.json()
+    except (httpx.HTTPError, ValueError) as e:
+        log.info("GitHub contributors not available: %s", e)
+        return _contributors_cache["list"]
+    people = [{"login": c.get("login") or "", "html_url": c.get("html_url") or "", "avatar_url": c.get("avatar_url") or "",
+               "contributions": int(c.get("contributions") or 0)}
+              for c in data if isinstance(c, dict) and c.get("type") == "User" and not str(c.get("login", "")).endswith("[bot]")
+              and str(c.get("login", "")).lower() != AUTHOR.lower()]
+    _contributors_cache.update(at=time.time(), list=people)
+    return people
+
+
+@app.get("/credits", response_class=HTMLResponse)
+async def credits_page(request: Request):
+    people = await _contributors()
+    return render(request, "credits.html", **({"contributors": people} if people is not None else {}))
+
+
+@app.post("/inbox/read-all")
+async def inbox_read_all(request: Request):
+    set_setting("inbox_seen_at", utcnow().isoformat())
+    ref = request.headers.get("referer") or "/"
+    return back(ref if ref.startswith(str(request.base_url)) or ref.startswith("/") else "/")
+
+
+def _claude_section() -> dict[str, Any]:
+    """Context of settings/claude.html (handoff design): models per task, the monthly limit, usage per task and model."""
+    from app.llm.base import last_call
+
+    lim = llm_usage.limit()
+    rows = []
+    fmt = lambda n: "{:,}".format(n or 0).replace(",", ".")   # noqa: E731
+    for g in (llm_usage.summary().get("groups") or []):
+        rows.append({"label": t(PURPOSES[g["purpose"]][1]) if g["purpose"] in PURPOSES else t("Other (tests, misc.)"),
+                     "model": g["model"], "calls": g["calls"], "tokens_in": fmt(g["input"]), "tokens_out": fmt(g["output"]),
+                     "cost": g["cost_usd"]})
+    return {"models": {p: model_for(p).split("-")[1] for p in PURPOSES}, "claude_usage": {"used": lim["used"], "limit": lim["limit"]},
+            "claude_limit_mode": lim["mode"], "token_usage": rows,
+            **({"claude_last_call": last_call["at"]} if last_call.get("at") else {})}
+
+
+@app.post("/settings/claude")
+async def settings_claude(request: Request):
+    """Model per task and the monthly token limit (Settings → Claude & usage)."""
+    form = await request.form()
+    ids = {m[0] for m in MODELS}
+    short = {m[0].split("-")[1]: m[0] for m in MODELS}         # haiku / sonnet / opus / fable -> model id
+    for purpose, (key, _label, _hint) in PURPOSES.items():
+        m = str(form.get(f"model_{purpose}") or "")
+        m = short.get(m, m)
+        if m in ids:
+            set_setting(key, m)
+    try:
+        lim = min(max(0.0, float(str(form.get("claude_token_limit_m") or "0").replace(",", "."))), 1000.0)
+    except ValueError:
+        lim = 0.0
+    set_setting("claude_token_limit_m", f"{lim:g}" if lim else "")
+    if form.get("claude_limit_mode") in llm_usage.LIMIT_MODES:
+        set_setting("claude_limit_mode", str(form.get("claude_limit_mode")))
+    return back(f"/settings/claude?msg={quote(t('Changes saved'), safe='')}")
+
+
+@app.post("/settings/willhaben")
+async def settings_willhaben(requests_per_hour_: int = Form(0, alias="requests_per_hour"), next: str = Form("")):
+    """The hourly willhaben request budget (REQUESTS_PER_HOUR from .env until changed here; 0 = none). `next`: the page
+    of the usage popover the slider was moved on."""
+    n = min(max(0, requests_per_hour_), 2000)
+    set_setting("requests_per_hour", str(n))
+    willhaben_limiter().per_hour = n
+    target = next if next.startswith("/") and not next.startswith("//") else "/settings/willhaben"
+    sep = "&" if "?" in target else "?"
+    return back(f"{target}{sep}msg={quote(t('Changes saved'), safe='')}")
+
+
+@app.get("/settings/{section}", response_class=HTMLResponse)
+async def settings_section(request: Request, section: str, msg: str | None = None):
+    """One settings section per page (settings.html index + settings/<section>.html)."""
+    if section not in SETTINGS_SECTIONS:
+        raise HTTPException(404)
     keys = ["reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
-    return render(request, "settings.html", values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
-                  claude_source=token_source(), claude_login=get_login(), models=MODELS,
+    return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
+                  **(_claude_section() if section == "claude" else {}),
+                  values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
+                  claude_source=token_source(), claude_login=get_login(),
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
                   llm_usage=llm_usage.summary(), purpose_labels={p: label for p, (_, label, _h) in PURPOSES.items()},
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
-                  tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **await _gcal_ctx(),
+                  tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **(await _gcal_ctx() if section == "calendar" else {}),
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
-                  label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel(),
+                  label_form=label_fill.active(), session_next="/settings/willhaben", backup=backup_routes.panel(),
                   **label_buy_routes.panel(), **printing_routes.panel())
 
 
@@ -1335,41 +1536,58 @@ async def set_language(request: Request, lang: str = Form("auto"), next: str = F
 
 @app.post("/settings/quiet")
 async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01:00"), end: str = Form("07:00"),
-                         mode: str = Form("slow"), interval_min: int = Form(60)):
+                         mode: str = Form("slow"), interval_min: int = Form(60), jitter: str | None = Form(None),
+                         breaks: str | None = Form(None), pace: str | None = Form(None)):
     quiet_hours.save(bool(enabled), start, end, mode, interval_min)
-    return back(f"/settings?msg={quote(t('Quiet hours saved'), safe='')}#quiet")
+    if pace:      # the section's "Human-like timing" switches (Settings → Quiet hours)
+        cur = human_pace.config()
+        human_pace.save((cur["variance_pct"] or 30) if jitter else 0, bool(breaks))
+        scheduler.reschedule_agents()
+    return back(f"/settings/quiet?msg={quote(t('Quiet hours saved'), safe='')}")
 
 
 @app.post("/settings")
-async def settings_save(reply_rules: str = Form(""), auto_draft: str | None = Form(None),
-                        notify_messages: str | None = Form(None), expiry_warn_days: int = Form(3),
-                        myads_expired_days: int = Form(30),
-                        chat_sync_limit: int = Form(10), chat_sync_since: str = Form(""),
-                        push_channel: str = Form(""),
-                        auto_reply_rules: str = Form(""), reply_humanize: str | None = Form(None),
-                        reply_delay_min_s: int = Form(40), reply_delay_max_s: int = Form(180),
-                        reply_fast_min_s: int = Form(5), reply_fast_max_s: int = Form(20)):
-    set_setting("reply_rules", reply_rules.strip())
-    set_setting("auto_reply_rules", auto_reply_rules.strip())
-    set_setting("auto_draft", "1" if auto_draft else "0")
-    set_setting("notify_messages", "1" if notify_messages else "0")
-    set_setting("chat_sync_limit", str(min(max(1, chat_sync_limit), 50)))
-    try:
-        set_setting("chat_sync_since", date.fromisoformat(chat_sync_since.strip()).isoformat() if chat_sync_since.strip() else "")
-    except ValueError:
-        pass
-    if push_channel in PUSH_CHANNELS:
-        set_setting("push_channel", push_channel)
-    set_setting("expiry_warn_days", str(max(0, expiry_warn_days)))
-    set_setting("myads_expired_days", str(max(0, myads_expired_days)))
-    set_setting("reply_humanize", "1" if reply_humanize else "0")
-    lo = min(max(0, reply_delay_min_s), 3600)
-    set_setting("reply_delay_min_s", str(lo))
-    set_setting("reply_delay_max_s", str(min(max(lo, reply_delay_max_s), 3 * 3600)))
-    fast_lo = min(max(0, reply_fast_min_s), 300)
-    set_setting("reply_fast_min_s", str(fast_lo))
-    set_setting("reply_fast_max_s", str(min(max(fast_lo, reply_fast_max_s), 600)))
-    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}")
+async def settings_save(request: Request):
+    """The general settings. Each section posts only its own fields (hidden "section"); without it, all of them."""
+    form = await request.form()
+    groups = {"rules": ("reply_rules",),
+              "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "auto_reply_rules",
+                        "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
+              "myads": ("expiry_warn_days", "myads_expired_days")}
+    section = str(form.get("section") or "")
+    todo = set(groups.get(section) or [k for g in groups.values() for k in g])
+
+    def num(key: str, default: int) -> int:
+        try:
+            return int(str(form.get(key, default)))
+        except ValueError:
+            return default
+
+    if "reply_rules" in todo:
+        set_setting("reply_rules", str(form.get("reply_rules", "")).strip())
+    if "auto_reply_rules" in todo:
+        set_setting("auto_reply_rules", str(form.get("auto_reply_rules", "")).strip())
+        set_setting("auto_draft", "1" if form.get("auto_draft") else "0")
+        set_setting("notify_messages", "1" if form.get("notify_messages") else "0")
+        set_setting("chat_sync_limit", str(min(max(1, num("chat_sync_limit", 10)), 50)))
+        since = str(form.get("chat_sync_since", "")).strip()
+        try:
+            set_setting("chat_sync_since", date.fromisoformat(since).isoformat() if since else "")
+        except ValueError:
+            pass
+        if form.get("push_channel") in PUSH_CHANNELS:
+            set_setting("push_channel", str(form.get("push_channel")))
+        set_setting("reply_humanize", "1" if form.get("reply_humanize") else "0")
+        lo = min(max(0, num("reply_delay_min_s", 40)), 3600)
+        set_setting("reply_delay_min_s", str(lo))
+        set_setting("reply_delay_max_s", str(min(max(lo, num("reply_delay_max_s", 180)), 3 * 3600)))
+        fast_lo = min(max(0, num("reply_fast_min_s", 5)), 300)
+        set_setting("reply_fast_min_s", str(fast_lo))
+        set_setting("reply_fast_max_s", str(min(max(fast_lo, num("reply_fast_max_s", 20)), 600)))
+    if "expiry_warn_days" in todo:
+        set_setting("expiry_warn_days", str(max(0, num("expiry_warn_days", 3))))
+        set_setting("myads_expired_days", str(max(0, num("myads_expired_days", 30))))
+    return back(f"/settings{'/' + section if section in groups else ''}?msg={quote(t('Changes saved'), safe='')}")
 
 
 def _alias(model: str) -> str:
@@ -1383,9 +1601,10 @@ async def settings_model(purpose: str = Form(...), model: str = Form(...)):
         raise HTTPException(400, t("unknown model"))
     set_setting(PURPOSES[purpose][0], model)
     label = next(lbl for m, lbl, _ in MODELS if m == model)
-    return back(f"/settings?msg={quote(f'{t(PURPOSES[purpose][1])}: {label}', safe='')}#claude")
+    return back(f"/settings/claude?msg={quote(f'{t(PURPOSES[purpose][1])}: {label}', safe='')}")
 
 
+@app.post("/settings/claude/test")
 @app.post("/settings/test-llm")
 async def settings_test_llm():
     try:
@@ -1396,35 +1615,36 @@ async def settings_test_llm():
         msg = t("Claude OK ({model}, {ms} ms): {status}", model=r.model, ms=r.duration_ms, status=r.data.get("status"))
     except LLMError as e:
         msg = t("Claude error: {error}", error=e)
-    return back(f"/settings?msg={quote(msg, safe='')}")
+    return back(f"/settings/claude?msg={quote(msg, safe='')}")
 
 
+@app.get("/settings/claude/login")
 @app.post("/settings/claude/start")
 async def claude_login_start():
     try:
         await get_login().start()
     except RuntimeError as e:
-        return back(f"/settings?msg={quote(t('Claude login: {error}', error=e), safe='')}#claude")
-    return back("/settings#claude")
+        return back(f"/settings/claude?msg={quote(t('Claude login: {error}', error=e), safe='')}")
+    return back("/settings/claude")
 
 
 @app.post("/settings/claude/code")
 async def claude_login_code(code: str = Form(...), attempt: str | None = Form(None)):
     if not await get_login().submit_code(code, attempt):
-        return back(f"/settings?msg={quote(t('Claude login failed: {error}', error=get_login().error), safe='')}#claude")
+        return back(f"/settings/claude?msg={quote(t('Claude login failed: {error}', error=get_login().error), safe='')}")
     return await settings_test_llm()
 
 
 @app.post("/settings/claude/cancel")
 async def claude_login_cancel():
     await get_login().cancel()
-    return back("/settings#claude")
+    return back("/settings/claude")
 
 
 @app.post("/settings/claude/logout")
 async def claude_logout():
     forget_token()
-    return back(f"/settings?msg={quote(t('Claude sign-in removed'), safe='')}#claude")
+    return back(f"/settings/claude?msg={quote(t('Claude sign-in removed'), safe='')}")
 
 
 @app.post("/settings/ha/connect")
@@ -1432,7 +1652,7 @@ async def ha_connect(request: Request, ha_url: str = Form(...)):
     try:
         url = ha_auth.authorize_url(ha_url, str(request.base_url))
     except ha_auth.HAError as e:
-        return back(f"/settings?msg={quote(str(e), safe='')}#ha")
+        return back(f"/settings/ha?msg={quote(str(e), safe='')}")
     return RedirectResponse(url, status_code=303)
 
 
@@ -1440,12 +1660,12 @@ async def ha_connect(request: Request, ha_url: str = Form(...)):
 async def ha_callback(code: str | None = None, state: str = "", error: str | None = None):
     if not code:
         reason = error or t("cancelled")
-        return back(f"/settings?msg={quote(t('Home Assistant: {reason}', reason=reason), safe='')}#ha")
+        return back(f"/settings/ha?msg={quote(t('Home Assistant: {reason}', reason=reason), safe='')}")
     try:
         await ha_auth.finish(code, state)
     except ha_auth.HAError as e:
-        return back(f"/settings?msg={quote(t('Home Assistant: {reason}', reason=e), safe='')}#ha")
-    return back(f"/settings?msg={quote(t('Home Assistant connected – now choose a push target'), safe='')}#ha")
+        return back(f"/settings/ha?msg={quote(t('Home Assistant: {reason}', reason=e), safe='')}")
+    return back(f"/settings/ha?msg={quote(t('Home Assistant connected – now choose a push target'), safe='')}")
 
 
 @app.post("/settings/ha/push")
@@ -1453,13 +1673,13 @@ async def ha_push(service: str = Form("")):
     if service and service != ha_auth.NO_PUSH and not re.fullmatch(r"[a-z0-9_]+", service):
         raise HTTPException(400, t("invalid service"))
     set_setting("ha_notify_service", service or ha_auth.NO_PUSH)
-    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#ha")
+    return back(f"/settings/ha?msg={quote(t('Changes saved'), safe='')}")
 
 
 @app.post("/settings/ha/disconnect")
 async def ha_disconnect():
     ha_auth.disconnect()
-    return back(f"/settings?msg={quote(t('Home Assistant disconnected (delete the token in HA under Profile → Security)'), safe='')}#ha")
+    return back(f"/settings/ha?msg={quote(t('Home Assistant disconnected (delete the token in HA under Profile → Security)'), safe='')}")
 
 
 @app.post("/settings/test-chat")
@@ -1471,12 +1691,12 @@ async def settings_test_chat():
             t("Chat connection: {error}", error=f"{res.get('status')} {res.get('code') or ''}")
     except (SessionUnavailable, NotLoggedIn) as e:
         msg = t("Chat connection: {error}", error=e)
-    return back(f"/settings?msg={quote(msg.strip(), safe='')}#chats")
+    return back(f"/settings/chats?msg={quote(msg.strip(), safe='')}")
 
 
 # ------------------------------------------------------------------ google calendar
 def _gcal_back(msg: str) -> RedirectResponse:
-    return back(f"/settings?msg={quote(msg, safe='')}#calendar")
+    return back(f"/settings/calendar?msg={quote(msg, safe='')}")
 
 
 @app.post("/settings/gcal/client")
@@ -1585,7 +1805,7 @@ async def settings_shipping(request: Request):
     shipping.save_sender({k: str(f.get(k) or "") for k in shipping.ADDRESS_FIELDS})
     shipping.save_carriers([str(c) for c in f.getlist("carrier")])
     set_setting("ship_detect", "1" if f.get("detect") else "0")
-    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+    return back(f"/settings/shipping?msg={quote(t('Changes saved'), safe='')}")
 
 
 @app.post("/settings/shipping/auto")
@@ -1594,20 +1814,20 @@ async def settings_shipping_auto(request: Request):
     shipping.save_auto({"on": f.get("on"), "max_price": f.get("max_price"), "need_sold": f.get("need_sold"),
                         "need_parcel": f.get("need_parcel"), "carriers": f.getlist("auto_carrier"),
                         "grace_min": f.get("grace_min"), "daily": f.get("daily")})
-    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+    return back(f"/settings/shipping?msg={quote(t('Changes saved'), safe='')}")
 
 
 @app.post("/settings/human-pace")
 async def settings_human_pace(variance_pct: int = Form(30), breaks: str | None = Form(None)):
     human_pace.save(variance_pct, bool(breaks))
     scheduler.reschedule_agents()                # new timing applies from the next check on
-    return back(f"/settings?msg={quote(t('Search agents now check irregularly'), safe='')}#quiet")
+    return back(f"/settings/quiet?msg={quote(t('Search agents now check irregularly'), safe='')}")
 
 
 @app.post("/settings/listings")
 async def settings_listings(geizhals_auto_specs: str | None = Form(None)):
     set_setting("geizhals_auto_specs", "1" if geizhals_auto_specs else "0")
-    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#rules")
+    return back(f"/settings/rules?msg={quote(t('Changes saved'), safe='')}")
 
 
 @app.post("/settings/shipping/login/{carrier}")
@@ -1615,8 +1835,8 @@ async def settings_shipping_login(carrier: str, user: str = Form(""), password: 
     try:
         shipping.save_login(carrier, user, password)
     except shipping.ShippingError as e:
-        return back(f"/settings?msg={quote(str(e), safe='')}#shipping")
-    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+        return back(f"/settings/shipping?msg={quote(str(e), safe='')}")
+    return back(f"/settings/shipping?msg={quote(t('Changes saved'), safe='')}")
 
 
 @app.post("/settings/shipping/open/{carrier}")
@@ -1624,8 +1844,8 @@ async def settings_shipping_open(carrier: str):
     try:
         msg = await label_fill.open_carrier(carrier)
     except shipping.ShippingError as e:
-        return back(f"/settings?msg={quote(str(e), safe='')}#shipping")
-    return back(f"/settings?remote=1&msg={quote(msg, safe='')}#shipping")   # shows the page in the overlay
+        return back(f"/settings/shipping?msg={quote(str(e), safe='')}")
+    return back(f"/settings/shipping?remote=1&msg={quote(msg, safe='')}")   # shows the page in the overlay
 
 
 @app.post("/chats/{conversation_id}/shipping/detect")
@@ -1775,7 +1995,7 @@ async def shipment_cancel_auto(shipment_id: int):
 
 # ------------------------------------------------------------------ telegram
 def _tg_back(msg: str) -> RedirectResponse:
-    return back(f"/settings?msg={quote(msg, safe='')}#telegram")
+    return back(f"/settings/telegram?msg={quote(msg, safe='')}")
 
 
 @app.post("/settings/telegram/token")
@@ -1825,11 +2045,12 @@ async def settings_telegram_test():
     return _tg_back(t("Test message sent") if ok else t("Telegram not linked or error (see log)"))
 
 
+@app.post("/settings/ha/test")
 @app.post("/settings/test-notify")
 async def settings_test_notify():
     ok = await notify("test", "willhaben Agent", t("Test notification"), url=get_settings().public_url)
     msg = t("HA event sent") if ok else t("HA not configured or error (see log)")
-    return back(f"/settings?msg={quote(msg, safe='')}#ha")
+    return back(f"/settings/ha?msg={quote(msg, safe='')}")
 
 
 # ------------------------------------------------------------------ JSON API (for MCP)

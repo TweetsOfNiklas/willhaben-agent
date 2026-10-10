@@ -9,5 +9,20 @@
  "Language": "Sprache",
  "Automatic (browser)": "Automatisch (Browser)",
  "by {author}": "von {author}",
- "Error: {error}": "Fehler: {error}"
+ "Error: {error}": "Fehler: {error}",
+ " and at most {n} per hour": " und höchstens {n} pro Stunde",
+ "All requests to willhaben run one after another with a pause in between{budget}.": "Alle Anfragen an willhaben laufen nacheinander mit einer Pause dazwischen{budget}.",
+ "Claude & usage": "Claude & Verbrauch",
+ "Claude tokens this month": "Claude-Tokens in diesem Monat",
+ "Collapse": "Einklappen",
+ "Dark mode": "Dunkler Modus",
+ "Expand / collapse sidebar": "Seitenleiste aus-/einklappen",
+ "Full statistics": "Alle Statistiken",
+ "Home": "Start",
+ "Inbox": "Eingang",
+ "Light mode": "Heller Modus",
+ "More": "Mehr",
+ "Navigation": "Navigation",
+ "not logged in to willhaben": "nicht bei willhaben eingeloggt",
+ "willhaben requests in the last hour": "willhaben-Anfragen in der letzten Stunde"
 }

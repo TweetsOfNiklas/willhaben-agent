@@ -504,6 +504,6 @@ def test_settings_route_stores_the_rules():
         assert get_setting("ship_auto_grace_min") == "15" and get_setting("ship_auto_daily") == "2"
         assert get_setting("ship_auto_need_sold") == "1" and get_setting("ship_auto_need_parcel") == "0"
         assert get_setting("ship_auto_carriers") == "gls,post"
-        assert "Automatic label purchase" in c.get("/settings").text
+        assert "Automatic label purchase" in c.get("/settings/shipping").text
         c.post("/settings/shipping/auto", data={"max_price": "x"}, follow_redirects=False)
         assert get_setting("ship_auto") == "0" and get_setting("ship_auto_carriers") == "-"

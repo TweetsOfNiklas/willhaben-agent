@@ -1,43 +1,23 @@
-{# PayLivery card on the chat page: paylivery_card(conv) from app/paylivery_routes.py; nothing is shown when None #}
+{# PayLivery card on the chat page — paylivery_card(conv) as before. #}
 {% set pl = paylivery_card(conv) %}
 {% if pl %}
-<article id="paylivery">
-  <header>
-    PayLivery
-    <small class="muted">· {{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</small>
-    <span class="badge {{ 'ok' if pl.stage in ('paid_out', 'received') else 'muted' }}">{{ pl.stage_label }}</span>
-    {% if pl.busy %}<span class="badge">{{ _("working in the browser…") }} {{ pl.busy_label }}</span>{% endif %}
-  </header>
-  <p>{{ pl.next }}</p>
-  {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}
-  <p><small class="muted">
-    {% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}
-    {% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}
-    {% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}
-    {% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}
-  </small></p>
-  {% endif %}
-  <div class="row-actions">
+<section class="card" id="paylivery">
+  <div class="row" style="justify-content:space-between"><h3>PayLivery <span style="font-weight:400;text-transform:none;letter-spacing:0">· {{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span></h3><span class="pill {{ 'ok' if pl.stage in ('paid_out', 'received') else 'warn' if pl.actions else '' }}">{{ pl.stage_label }}</span></div>
+  {% if pl.busy %}<span class="pill brand plain" style="align-self:flex-start">{{ _("working in the browser…") }} {{ pl.busy_label }}</span>{% endif %}
+  <p style="font-size:13px">{{ pl.next }}</p>
+  {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<div class="muted" style="font-size:12.5px">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</div>{% endif %}
+  <div class="row" style="gap:6px">
     {% for a in pl.actions %}
-    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" style="margin:0;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-      {% if a.input %}
-      <input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required
-             placeholder="€" aria-label="{{ _('Offer amount in euros') }}" style="width:8rem;margin:0" {% if a.disabled %}disabled{% endif %}>
-      {% endif %}
-      <button type="submit" {% if a.disabled %}disabled{% endif %}
-              {% if a.confirm %}data-confirm="{{ a.confirm }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
+    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" class="row" style="margin:0;gap:6px;flex-wrap:nowrap">
+      {% if a.input %}<input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required placeholder="€" aria-label="{{ _('Offer amount in euros') }}" style="width:90px;padding:6px 8px;font-size:13px" {% if a.disabled %}disabled{% endif %}>{% endif %}
+      <button class="btn sm {{ '' if a.name == 'buy' else 'secondary' }}" {% if a.disabled %}disabled{% endif %} {% if a.confirm %}data-confirm="{{ a.confirm }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
       {% if a.disabled %}<small class="muted">{{ a.note }}</small>{% endif %}
     </form>
     {% endfor %}
-    {% if pl.label_saved and pl.shipment_id %}<a role="button" class="secondary outline" href="/shipments/{{ pl.shipment_id }}/label.pdf" target="_blank">📄 {{ _("Label") }}</a>{% endif %}
-    <a role="button" class="secondary outline" href="{{ pl.open_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}</a>
+    {% if pl.label_saved and pl.shipment_id %}<a class="btn secondary sm" href="/shipments/{{ pl.shipment_id }}/label.pdf" target="_blank">{{ _("Label") }}</a>{% endif %}
+    <a class="btn secondary sm" href="{{ pl.open_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>
   </div>
-  {% if pl.history %}
-  <details>
-    <summary>{{ _("History") }}</summary>
-    <ul>{% for h in pl.history %}<li><small>{{ h.at[:16]|replace('T', ' ') }} · {{ h.text }}</small></li>{% endfor %}</ul>
-  </details>
-  {% endif %}
-  <p><small class="muted">{{ _("Each step runs on willhaben in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet.") }}</small></p>
-</article>
+  {% if pl.history %}<details class="muted" style="font-size:12px"><summary style="cursor:pointer">{{ _("History") }}</summary><div style="padding-top:6px;display:flex;flex-direction:column;gap:3px">{% for h in pl.history %}<span>{{ h.at[:16]|replace('T', ' ') }} · {{ h.text }}</span>{% endfor %}</div></details>{% endif %}
+  <p class="muted" style="font-size:11.5px">{{ _("Each step runs on willhaben in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet.") }}</p>
+</section>
 {% endif %}

@@ -65,9 +65,14 @@ def model_for(purpose: str | None) -> str:
     from app.config import get_settings
     from app.db import get_setting
 
+    from app.llm import usage
+
     key = PURPOSES[purpose][0] if purpose in PURPOSES else None
-    return ((key and get_setting(key)) or PURPOSE_DEFAULTS.get(purpose or "")
-            or get_setting("llm_model") or get_settings().llm_model)
+    model = ((key and get_setting(key)) or PURPOSE_DEFAULTS.get(purpose or "")
+             or get_setting("llm_model") or get_settings().llm_model)
+    if get_setting("claude_limit_mode") == "haiku" and usage.limit()["over"]:
+        return usage.HAIKU    # monthly token limit reached (Settings → Claude): everything on Haiku
+    return model
 
 
 class LLMBackend(Protocol):
@@ -81,7 +86,15 @@ def get_backend(purpose: str | None = None) -> LLMBackend:
     """Backend for one job ("chat" or "ads"), using the model chosen for it in Settings."""
     from app.config import get_settings
 
+    from app.db import get_setting
+    from app.llm import usage
+
     s = get_settings()
+    if purpose == "screen" and get_setting("claude_limit_mode") == "pause" \
+            and usage.limit()["over"]:
+        from app.i18n import t
+
+        raise LLMError(t("Monthly Claude token limit reached: hit screening is paused (Settings → Claude)."))
     if s.llm_backend == "claude_cli":
         from app.llm.claude_cli import ClaudeCLI
 

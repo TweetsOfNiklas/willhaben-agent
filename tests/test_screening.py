@@ -81,7 +81,7 @@ async def test_screening_limits_pushes_but_keeps_events(responses, ha, images, m
     assert rejected["screen_relevant"] is False and rejected["screen_reason"] == "Nur ein Schlauch"
     pushes = _pushes(ha)
     assert len(pushes) == 1 and "Rennrad Shimano 105" in pushes[0]["message"]
-    assert "🤖 good price: 30 % unter üblichem Preis" in pushes[0]["message"]
+    assert "Claude: good price: 30 % unter üblichem Preis" in pushes[0]["message"]
     with dbmod.session() as db:
         tube = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == "999000112")).one()
     assert (tube.screen_relevant, tube.screen_deal) == (False, "unknown")
@@ -127,8 +127,8 @@ def test_agent_form_settings_and_hit_badge(client):  # noqa: F811
         db.commit()
     assert a_screen == (True, "RH 56\nkein E-Bike", "fair")
     page = client.get("/agents").text
-    assert "🤖" in page and 'name="screen_brief"' in page and "only fair or better prices" in page
-    assert 'name="purpose" value="screen"' in client.get("/settings").text
+    assert "Claude screening" in page and 'name="screen_brief"' in page and "only fair or better prices" in page
+    assert 'name="model_screen"' in client.get("/settings/claude").text
     assert "wrong item" in client.get(f"/hits?agent_id={agent.id}").text
     client.post(f"/agents/{agent.id}/edit", data={"name": "Rennrad", "interval_min": "5", "screen_min": "bogus"})
     with dbmod.session() as db:
@@ -139,5 +139,5 @@ def test_agent_form_settings_and_hit_badge(client):  # noqa: F811
 def test_push_line_uses_first_sentence_only():
     hit = dbmod.Hit(agent_id=1, ad_id="1", heading="x", url="u", screen_relevant=True, screen_deal="good",
                     screen_reason="Guter Preis für ein gepflegtes Rad. Neu kostet es 900 €, gebraucht meist 500–600 €.")
-    assert screening.summary(hit) == "🤖 good price: Guter Preis für ein gepflegtes Rad."
+    assert screening.summary(hit) == "Claude: good price: Guter Preis für ein gepflegtes Rad."
     assert screening.short_reason("x" * 300).endswith("…") and len(screening.short_reason("x" * 300)) == 140

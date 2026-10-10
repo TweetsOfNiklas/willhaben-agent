@@ -12,8 +12,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import func, select
 
-from app.config import get_settings
-from app.db import AccessCount, session
+from app.db import AccessCount, requests_per_hour, session
 from app.i18n import t
 from app.willhaben import access_log
 from app.willhaben.access_log import CHANNELS, KINDS, OUTCOMES
@@ -118,7 +117,7 @@ def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]
             b["blocked"] += cnt
     total = sum(by_channel.values())
     peak = max(buckets, key=lambda b: b["total"])
-    budget = get_settings().requests_per_hour
+    budget = requests_per_hour()
     return {
         "range": rng, "ranges": list(RANGES), "bucket_s": bucket_s, "from": _iso(first_ts), "to": _iso(now),
         "channels": list(CHANNELS), "buckets": buckets, "total": total,
@@ -197,3 +196,27 @@ def chart(data: dict[str, Any]) -> dict[str, Any]:
                for i, b in enumerate(buckets) if i % every == 0]
     return {"w": W, "h": H, "bars": bars, "yticks": yticks, "xlabels": xlabels, "x0": PAD_L, "x1": W - PAD_R,
             "base_y": PAD_T + plot_h, "budget_y": y(line) if line else None, "budget": f"{line:g}" if line else None}
+
+
+CHANNEL_COLORS = {"anonymous": "#2a78d6", "account": "#eb6834", "chat": "#1baf7a"}
+
+
+def popup(now: float | None = None) -> dict[str, Any]:
+    """The willhaben usage popover in the sidebar: the last hour per channel and the last 6 hours in 15-min bars."""
+    hour = series("1h", now)
+    six = series("6h", now)                           # 5-min buckets, merged into 15-min bars
+    bars = []
+    for i in range(0, len(six["buckets"]), 3):
+        group = six["buckets"][i:i + 3]
+        bar = {c: sum(b.get(c, 0) for b in group) for c in six["channels"]}
+        bar["total"] = sum(bar.values())
+        bar["title"] = f"{group[0]['label']}–{group[-1]['end_label']}: " + ", ".join(
+            f"{channel_label(c)} {bar[c]}" for c in six["channels"] if bar[c]) if bar["total"] else f"{group[0]['label']}: 0"
+        bars.append(bar)
+    top = max([b["total"] for b in bars] + [1])
+    for b in bars:
+        b["h"] = round(b["total"] * 100 / top)
+        b["parts"] = [(c, round(b[c] * 100 / b["total"]) if b["total"] else 0) for c in six["channels"]]
+    return {"channels": [{"key": c, "label": channel_label(c), "n": hour["by_channel"].get(c, 0),
+                          "color": CHANNEL_COLORS.get(c, "var(--muted)")} for c in hour["channels"]],
+            "total": hour["total"], "bars": bars}

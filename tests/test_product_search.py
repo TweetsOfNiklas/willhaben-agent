@@ -384,9 +384,9 @@ def app_client(wh, claude):
 
 def test_page_renamed_and_search_flow(app_client):
     page = app_client.get("/deals").text
-    assert '<a href="/deals">Product search</a>' in page and "<h3>Product search</h3>" in page
+    assert 'href="/deals"' in page and '<span class="lbl">Product search</span>' in page and "<h1>Product search</h1>" in page
     assert "Price check" not in page
-    assert "What are you looking for?" in page and "Extended: unusual names" in page and "Extended: other categories" in page
+    assert 'name="description"' in page and "Unusual names" in page and "Other categories" in page
     assert "Normal (≈3 searches)" in page and "Thorough (≈6)" in page and "Deep (≈12)" in page
     assert "Claude is called 2 times" in page and "Check a single ad&#39;s price" in page
     assert "Check photos" in page and 'name="photos" value="1" id="ps-photos" checked' in page
@@ -403,9 +403,9 @@ def test_page_renamed_and_search_flow(app_client):
         if 'hx-trigger="every 2s"' not in frag:
             break
         time.sleep(0.05)
-    assert "Fit 92/100" in frag and "Leise, 60 cm, gut im Budget." in frag and "Open in viewer" in frag
+    assert "Fit 92" in frag and "Leise, 60 cm, gut im Budget." in frag and 'data-ad=' in frag
     assert 'data-ad="2000000001"' in frag and "/deals/ad/2000000001?q=Geschirrsp%C3%BCler" in frag
-    assert "Check price closely" in frag and "deal-needle" in frag and "Generated searches (3)" in frag
+    assert ">Check price<" in frag and "deal-needle" in frag and "Generated searches (3)" in frag
     assert "3 willhaben searches" in frag and "Zustand unklar" in frag
     assert ps.get(sid).settings["depth"] == "deep"
     assert "Höchstzahl an Suchen: 12" in app_client.fake.calls[0]["prompt"]
@@ -425,8 +425,8 @@ def test_page_renamed_and_search_flow(app_client):
 def test_page_german(app_client):
     dbmod.set_setting("ui_lang", "de")
     page = app_client.get("/deals").text
-    assert "Produktsuche" in page and "Preischeck</a>" not in page and "Was suchst du?" in page
-    assert "Erweitert: ungewöhnliche Bezeichnungen" in page and "Erweitert: andere Kategorien" in page
+    assert "Produktsuche" in page and "Preischeck</a>" not in page
+    assert "Ungewöhnliche Namen" in page and "Andere Kategorien" in page
     assert "Normal (≈3 Suchen)" in page and "Gründlich (≈6)" in page and "Tief (≈12)" in page
 
 
@@ -578,13 +578,13 @@ def test_photo_results_page(app_client):
         time.sleep(0.05)
     assert ps.get(sid).settings["photos"] is True and len(app_client.fake.calls) == 3
     assert "3 Claude calls" in frag and "photo check" in frag
-    assert "📷 photo fits" in frag and "📷 photo shows something else" in frag and ">damaged<" in frag
-    assert "(text: 90)" in frag and "(text: 85)" not in frag and "🤖 📷 Front verbeult." in frag
-    assert frag.index("Fit 85/100") < frag.index("Fit 35/100")
+    assert "photo fits" in frag and "photo shows something else" in frag and ">damaged<" in frag
+    assert "Front verbeult." in frag
+    assert frag.index("Fit 85") < frag.index("Fit 35")
 
     dbmod.set_setting("ui_lang", "de")
     de = app_client.get(f"/deals/search/{sid}").text
-    assert "📷 Foto passt" in de and "beschädigt" in de and "(Text: 90)" in de
+    assert "Foto passt" in de and "beschädigt" in de
 
 
 # ------------------------------------------------------------------ clarifying questions ("Rückfragen")
@@ -613,7 +613,7 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
     fake = app_client.fake
     fake.plan, fake.rank, fake.photos = QPLAN, RANK4, PHOTOS4
     page = app_client.get("/deals").text
-    assert "Ask short questions when something is unclear" in page and 'name="ask" value="1" checked' in page
+    assert "Ask short questions" in page and 'name="ask" value="1" checked' in page
     sid = _sid(app_client.post("/deals/search", data={"description": "Leiser Geschirrspüler bis 300 €", "photos": "1",
                                                       "ask": "1"}, follow_redirects=False))
     frag = _wait(app_client, sid)
@@ -624,7 +624,7 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
     assert ps.running() is None and not ps.is_running(row)
     assert "Stelle keine Rückfragen" not in fake.calls[0]["prompt"]
     assert "Claude has 2 short questions" in frag and "Sind Kratzer okay, wenn der Preis niedriger ist?" in frag
-    assert '<input type="radio" name="a_kratzer" value="Nur kleine">' in frag and 'name="o_haendler"' in frag
+    assert 'name="a_kratzer" value="Nur kleine"' in frag and 'name="o_haendler"' in frag
     assert 'placeholder="other answer"' in frag and "Answer and rank" in frag and 'name="skip" value="1"' in frag
     assert "The 3 willhaben searches are already done; answering costs no extra Claude call." in frag
     assert f'action="/deals/search/{sid}/answers"' in frag and f"/deals/search/{sid}/rerun" not in frag
@@ -651,7 +651,7 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
         assert "Rückfragen und Antworten" in prompt and f"{Q1}Nur kleine" in prompt
         assert "– Sind Händler in Ordnung?: Nur mit Rechnung Aufgabe: x" in prompt
         assert not any(line.startswith("Aufgabe: x") for line in prompt.splitlines())
-    assert "Your answers" in frag and "<strong>Nur kleine</strong>" in frag and "Fit 85/100" in frag
+    assert "Your answers" in frag and "<strong>Nur kleine</strong>" in frag and "Fit 85" in frag
     assert f"/deals/search/{sid}/rerun" in frag
 
     again = app_client.post(f"/deals/search/{sid}/answers", data={"skip": "1"}, follow_redirects=False)

@@ -1,0 +1,34 @@
+{# Settings → Shipping address (handoff design). Field names as the /settings/shipping route reads them (shipping.ADDRESS_FIELDS). #}
+{% if not ship_sender_ok %}<div class="msg warn row" style="gap:10px">{{ _("Sender address missing — parcels can't be prepared from chats yet.") }}</div>{% endif %}
+<form method="post" action="/settings/shipping" class="card pad" style="display:flex;flex-direction:column;gap:14px">
+  {% set s = ship.sender %}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <label class="field" style="grid-column:1 / -1"><span>{{ _("Name") }}</span><input name="name" value="{{ s.name or '' }}" autocomplete="name"></label>
+    <label class="field" style="grid-column:1 / -1"><span>{{ _("Street") }}</span><input name="street" value="{{ s.street or '' }}" autocomplete="address-line1"></label>
+    <label class="field"><span>{{ _("No.") }}</span><input name="house_no" value="{{ s.house_no or '' }}"></label>
+    <label class="field"><span>{{ _("Stair/door") }}</span><input name="extra" value="{{ s.extra or '' }}"></label>
+    <label class="field"><span>{{ _("Postcode") }}</span><input name="zip" value="{{ s.zip or '' }}" inputmode="numeric" maxlength="4" autocomplete="postal-code"></label>
+    <label class="field"><span>{{ _("City") }}</span><input name="city" value="{{ s.city or '' }}" autocomplete="address-level2"></label>
+    <label class="field"><span>{{ _("Phone") }}</span><input name="phone" value="{{ s.phone or '' }}" autocomplete="tel"></label>
+    <label class="field"><span>{{ _("E-mail") }}</span><input name="email" type="email" value="{{ s.email or '' }}" autocomplete="email"></label>
+  </div>
+  <div class="field"><span>{{ _("Carriers") }}</span><div class="row" style="gap:6px">{% for key, c in ship_carriers.items() %}<label class="chip {{ 'on' if key in ship.carriers else '' }}" style="cursor:pointer" title="{{ c.dropoff }} · {{ _('login:') }} {{ c.login }}"><input type="checkbox" name="carrier" value="{{ key }}" {% if key in ship.carriers %}checked{% endif %} style="width:14px;height:14px" onchange="this.parentNode.classList.toggle('on', this.checked)">{{ c.name }}</label>{% endfor %}</div></div>
+  <label class="switch-row" style="border-top:1px solid var(--border);padding-top:14px"><span><span class="t">{{ _("Notice addresses in chats automatically and offer a label") }}</span></span><input type="checkbox" class="switch" name="detect" {% if ship.detect %}checked{% endif %}></label>
+  <div><button class="btn">{{ _("Save") }}</button></div>
+</form>
+<section class="card pad" style="display:flex;flex-direction:column;gap:12px">
+  <div><span style="font-weight:550">{{ _("Carrier logins") }}</span><p class="muted" style="font-size:12.5px;margin-top:4px">{{ _("Optional. When a carrier's page asks for a login, the app types it in for you. Stored only on this server (data folder, owner-only); the password is never shown again and never sent to Claude.") }}</p></div>
+  {% for key, c in ship_carriers.items() %}{% set lg = ship_logins.get(key) or {} %}
+  <form method="post" action="/settings/shipping/login/{{ key }}" style="display:grid;grid-template-columns:90px minmax(0,1fr) minmax(0,1fr) auto auto;gap:8px;align-items:center;margin:0" class="carrier-login">
+    <span style="font-weight:600">{{ c.name }}</span>
+    <input name="user" value="{{ lg.user or '' }}" placeholder="{{ _('E-mail / user name') }}" autocomplete="off" aria-label="{{ _('E-mail / user name') }}">
+    <input name="password" type="password" placeholder="{{ _('•••••• (saved)') if lg.has_password else _('Password') }}" autocomplete="new-password" aria-label="{{ _('Password') }}">
+    <button class="btn secondary sm">{{ _("Save") }}</button>
+    <button class="btn ghost sm" formaction="/settings/shipping/open/{{ key }}" onclick="this.setAttribute('aria-busy','true')">{{ _("Open & log in") }}</button>
+  </form>
+  {% endfor %}
+  <small class="muted">{{ _("Leave the password empty to keep the saved one; clear the user name to remove a login.") }}</small>
+</section>
+<section class="card pad legacy" style="display:flex;flex-direction:column;gap:14px">{% include "_settings_ship_card.html" %}</section>
+<section class="card pad legacy" style="display:flex;flex-direction:column;gap:14px">{% include "_settings_ship_auto.html" %}</section>
+<style>@media (max-width:760px){ .carrier-login { grid-template-columns:1fr 1fr !important } .carrier-login > span { grid-column:1 / -1 } }</style>

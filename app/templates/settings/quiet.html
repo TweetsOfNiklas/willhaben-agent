@@ -1,0 +1,16 @@
+{# Settings → Quiet hours (handoff design). quiet_cfg from quiet_hours.config(); the jitter switch is the human-pace variance. #}
+<form method="post" action="/settings/quiet" class="card pad" style="display:flex;flex-direction:column;gap:14px">
+  <input type="hidden" name="pace" value="1">
+  <label class="switch-row"><span><span class="t">{{ _("Quiet hours") }}{% if quiet and quiet.active %} <span class="pill ok">{{ _("active right now") }}</span>{% endif %}</span><span class="d">{{ _("Fewer requests to willhaben at night, so the app behaves like a human.") }}</span></span><input type="checkbox" class="switch" name="enabled" {% if quiet_cfg.enabled %}checked{% endif %}></label>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px" class="quiet-grid">
+    <label class="field"><span>{{ _("From") }}</span><input type="time" name="start" value="{{ quiet_cfg.start.strftime('%H:%M') }}"></label>
+    <label class="field"><span>{{ _("Until") }}</span><input type="time" name="end" value="{{ quiet_cfg.end.strftime('%H:%M') }}"></label>
+    <label class="field"><span>{{ _("During quiet hours") }}</span><select name="mode"><option value="slow" {% if quiet_cfg.mode != 'pause' %}selected{% endif %}>{{ _("check every {n} min", n=quiet_cfg.interval_min) }}</option><option value="pause" {% if quiet_cfg.mode == 'pause' %}selected{% endif %}>{{ _("pause agents") }}</option></select></label>
+  </div>
+  <label class="field" style="max-width:240px"><span>{{ _("Interval during quiet hours (min)") }}</span><input type="number" name="interval_min" value="{{ quiet_cfg.interval_min }}" min="15" step="5"></label>
+  <small class="muted">{% if quiet %}{% if quiet.active %}{{ _("Active until {time}.", time=quiet.end.strftime('%H:%M')) }}{% else %}{{ _("Next quiet hours {start}–{end}.", start=quiet.start.strftime('%d.%m. %H:%M'), end=quiet.end.strftime('%H:%M')) }}{% endif %}{% endif %} {{ _("Start and end shift randomly by up to 20 minutes every night. “Check now” always works.") }}</small>
+  <label class="switch-row" style="border-top:1px solid var(--border);padding-top:14px"><span><span class="t">{{ _("Human-like timing") }}</span><span class="d">{{ _("Random ±{n} % jitter on every interval so checks don't look automated.", n=human.variance_pct or 30) }}</span></span><input type="checkbox" class="switch" name="jitter" {% if human.variance_pct %}checked{% endif %}></label>
+  <label class="switch-row"><span><span class="t">{{ _("Take a break now and then (skip about one check in twelve)") }}</span></span><input type="checkbox" class="switch" name="breaks" {% if human.breaks %}checked{% endif %}></label>
+  <div><button class="btn">{{ _("Save") }}</button></div>
+</form>
+<style>@media (max-width:760px){ .quiet-grid { grid-template-columns:1fr 1fr !important } }</style>

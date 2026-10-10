@@ -56,9 +56,9 @@ def test_settings_panel_shows_usage(monkeypatch):
     from app.main import app
     usage.record("chat", "claude-sonnet-5-5", CLI_RESULT, ok=True)
     with TestClient(app) as c:
-        page = c.get("/settings").text
+        page = c.get("/settings/claude").text
     assert "Token usage" in page or "Token-Verbrauch" in page
-    assert "claude-sonnet-5-5" in page and "1.500" in page
+    assert "claude-sonnet-5-5" in page and "1.200" in page   # tokens in of the chat call
 
 
 def test_recording_never_raises(monkeypatch):

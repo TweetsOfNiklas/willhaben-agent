@@ -21,7 +21,7 @@ def test_attach_only_when_enabled_and_once(client):  # noqa: F811
     d = _draft()
     assert ad_creator.attach_specs_if_wanted(d.id).description == "Gut erhalten."          # setting off
     client.post("/settings/listings", data={"geizhals_auto_specs": "on"})
-    assert get_setting("geizhals_auto_specs") == "1" and "checked" in client.get("/settings").text.split(
+    assert get_setting("geizhals_auto_specs") == "1" and "checked" in client.get("/settings/rules").text.split(
         'name="geizhals_auto_specs"')[1][:80]
     block = geizhals.spec_block(MATCH)
     assert ad_creator.attach_specs_if_wanted(d.id).description == f"Gut erhalten.\n\n{block}"

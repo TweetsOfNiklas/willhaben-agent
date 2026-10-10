@@ -1,41 +1,31 @@
-{# Ad viewer: any <a data-ad="<ad id>" [data-hit="<hit id>"]> opens here instead of on willhaben.
-   Ctrl/Cmd/Shift-click and middle-click keep the normal link. ← / → step through the ads on the page. #}
-<dialog id="ad-viewer" data-loading="{{ _('Loading ad …') }}" data-error="{{ _('Error {status}') }}"
-        data-offline="{{ _('Connection failed') }}">
-  <article>
-    <header>
-      <button type="button" class="adv-nav" data-step="-1" title="{{ _('Previous (←)') }}">‹</button>
-      <span class="adv-pos muted"></span>
-      <button type="button" class="adv-nav" data-step="1" title="{{ _('Next (→)') }}">›</button>
-      <button type="button" class="adv-close" aria-label="{{ _('Close') }}" title="{{ _('Close (Esc)') }}">✕</button>
+{# Ad viewer dialog. The <script> block from the old file is unchanged (hooks: #ad-viewer, .adv-body, .adv-pos, [data-step], .adv-close, .adv-thumbs img, button[data-state]). #}
+<dialog id="ad-viewer" data-loading="{{ _('Loading ad …') }}" data-error="{{ _('Error {status}') }}" data-offline="{{ _('Connection failed') }}" style="width:min(1120px,96vw);max-width:none;max-height:100vh;padding:24px 0">
+  <article class="card" style="margin:0 auto;max-height:92vh;overflow:auto;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.35);display:flex;flex-direction:column">
+    <header style="display:flex;align-items:center;gap:8px;padding:10px 12px 10px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;font-weight:400">
+      <button type="button" class="adv-nav btn secondary sm" data-step="-1" title="{{ _('Previous (←)') }}" style="width:32px;padding:0">‹</button>
+      <button type="button" class="adv-nav btn secondary sm" data-step="1" title="{{ _('Next (→)') }}" style="width:32px;padding:0">›</button>
+      <span class="adv-pos muted" style="font-size:13px"></span>
+      <button type="button" class="adv-close icon-btn" aria-label="{{ _('Close') }}" title="{{ _('Close (Esc)') }}" style="margin-left:auto">✕</button>
     </header>
     <div class="adv-body"></div>
   </article>
 </dialog>
 <style>
-  #ad-viewer { padding: 0; border: none; background: transparent; max-width: min(1280px, 96vw); width: 96vw; }
-  #ad-viewer::backdrop { background: rgba(0, 0, 0, .55); }
-  #ad-viewer > article { margin: 0 auto; max-height: 92vh; overflow: auto; width: min(1180px, 94vw); max-width: none; }   /* Pico caps dialog articles at ~700px */
-  #ad-viewer header { display: flex; align-items: center; gap: .5rem; position: sticky; top: 0; z-index: 1; }
-  #ad-viewer header button { width: auto; margin: 0; padding: .15rem .7rem; }
-  #ad-viewer .adv-close { margin-left: auto; }
-  .adv { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 1.2rem; }
-  @media (max-width: 760px) { .adv { grid-template-columns: 1fr; } }
-  .adv-main { width: 100%; max-height: 60vh; object-fit: contain; background: #111; border-radius: .4rem; }
-  .adv-empty { display: grid; place-items: center; height: 240px; color: #aaa; }
-  .adv-thumbs { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
-  .adv-thumbs img { width: 64px; height: 48px; object-fit: cover; border-radius: .25rem; cursor: pointer; opacity: .6; }
-  .adv-thumbs img.on, .adv-thumbs img:hover { opacity: 1; outline: 2px solid #13a3bc; }
-  .adv-info h4 { margin-bottom: .3rem; }
-  .adv-price { font-size: 1.4rem; font-weight: 700; margin-bottom: .4rem; }
-  .adv-price .old { text-decoration: line-through; color: var(--pico-muted-color); font-size: .9rem; margin-left: .5rem; font-weight: 400; }
-  .adv-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0; }
-  .adv-actions button, .adv-actions [role=button] { width: auto; margin: 0; padding: .3rem .8rem; font-size: .9em; }
-  .adv-desc { white-space: pre-wrap; font-size: .92em; line-height: 1.45; }
-  .adv-claude { border-left: 3px solid var(--brand, #13a3bc); background: var(--pico-card-sectioning-background-color);
-                padding: .55rem .8rem; border-radius: .35rem; margin: .4rem 0 .6rem; }
-  .adv-claude p { margin: 0 0 .3rem; } .adv-claude p:last-child { margin-bottom: 0; }
-  .adv-reason { white-space: pre-wrap; font-size: .92em; line-height: 1.45; }
+  #ad-viewer::backdrop { background: rgba(10,14,20,.55); }
+  .adv { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(320px,1fr); }
+  .adv-gallery { padding:16px; background:var(--bg); display:flex; flex-direction:column; gap:8px; }
+  .adv-info { padding:18px 20px 20px; display:flex; flex-direction:column; gap:14px; border-left:1px solid var(--border); min-width:0; }
+  .adv-main { width:100%; aspect-ratio:4/3; object-fit:contain; background:#111; border-radius:10px; }
+  .adv-empty { display:grid; place-items:center; color:#aaa; }
+  .adv-thumbs { display:flex; flex-wrap:wrap; gap:6px; }
+  .adv-thumbs img { width:64px; height:48px; object-fit:cover; border-radius:6px; cursor:pointer; opacity:.6; }
+  .adv-thumbs img.on, .adv-thumbs img:hover { opacity:1; outline:2px solid var(--brand); }
+  .adv-price { font-size:24px; font-weight:700; letter-spacing:-.02em; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .adv-price .old { text-decoration:line-through; color:var(--muted); font-size:14px; font-weight:400; }
+  .adv-desc { white-space:pre-wrap; font-size:13.5px; line-height:1.5; }
+  .adv-claude { border-left:3px solid var(--brand); background:var(--brand-soft); border-radius:8px; padding:10px 14px; display:flex; flex-direction:column; gap:6px; }
+  .adv-reason { white-space:pre-wrap; font-size:13.5px; line-height:1.5; }
+  @media (max-width:760px) { .adv { grid-template-columns:1fr; } .adv-info { border-left:0; } #ad-viewer { width:100vw; padding:0; } #ad-viewer > article { border-radius:0; max-height:100vh; } }
 </style>
 <script>
 (() => {

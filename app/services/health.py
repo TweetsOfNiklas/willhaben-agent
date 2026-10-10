@@ -64,7 +64,7 @@ def _willhaben() -> Status:
     from app.willhaben.session import get_session
 
     s = get_settings()
-    st = Status("willhaben", "willhaben", "unknown", href="/settings#willhaben")
+    st = Status("willhaben", "willhaben", "unknown", href="/settings/willhaben")
     if not s.browser_enabled:
         st.state, st.reason = "off", t("Browser switched off")
         return st
@@ -92,7 +92,7 @@ def _claude() -> Status:
     from app.llm import base
     from app.llm.claude_login import claude_token
 
-    st = Status("claude", "Claude", "unknown", href="/settings#claude")
+    st = Status("claude", "Claude", "unknown", href="/settings/claude")
     if not claude_token():
         st.state, st.reason = "problem", t("Not signed in")
         return st
@@ -112,7 +112,7 @@ def _ha() -> Status:
     from app.services import ha_actions
     from app.services.ha_auth import ha_token, ha_url
 
-    st = Status("ha", "Home Assistant", "ok", href="/settings#ha")
+    st = Status("ha", "Home Assistant", "ok", href="/settings/ha")
     base, token = ha_url(), ha_token()
     if not base and not token:
         st.state, st.reason = "off", t("Not set up")
@@ -131,7 +131,7 @@ def _ha() -> Status:
 def _telegram() -> Status:
     from app.services import telegram
 
-    st = Status("telegram", "Telegram", "ok", href="/settings#telegram")
+    st = Status("telegram", "Telegram", "ok", href="/settings/telegram")
     if not telegram.token() or get_setting("telegram_enabled") == "0":
         st.state, st.reason = "off", t("Not set up")
         return st
@@ -154,7 +154,7 @@ def _live_chat() -> Status:
     from app.willhaben.session import get_session
 
     s = get_settings()
-    st = Status("live_chat", t("Live chat"), "ok", href="/settings#chats")
+    st = Status("live_chat", t("Live chat"), "ok", href="/settings/chats")
     sess = get_session()
     if not (s.chat_live and s.browser_enabled):
         st.state, st.reason = "off", t("Switched off")
@@ -172,7 +172,7 @@ def _live_chat() -> Status:
 def _gcal() -> Status:
     from app.services import gcal
 
-    st = Status("gcal", "Google Calendar", "ok", href="/settings#calendar")
+    st = Status("gcal", "Google Calendar", "ok", href="/settings/calendar")
     if not gcal.has_client():
         st.state, st.reason = "off", t("Not set up")
     elif not gcal.connected():

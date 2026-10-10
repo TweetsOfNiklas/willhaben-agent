@@ -402,7 +402,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "chat_sync_limit": "10",    # sync only the N latest conversations
     "chat_sync_since": "",      # YYYY-MM-DD: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",
-    "myads_expired_days": "30",  # My ads: expired ads older than this are listed with the inactive ones; 0 = always shown
+    "myads_expired_days": "30",
+    "claude_token_limit_m": "10",   # Settings → Claude: monthly token limit in millions (sidebar meter); empty/0 = none
+    "claude_limit_mode": "notify",  # My ads: expired ads older than this are listed with the inactive ones; 0 = always shown
     "auto_reply_rules": (
         "- Automatisch nur einfache Fragen beantworten: ob der Artikel noch da ist, Abholung/Versand, Zustand laut Inserat.\n"
         "- Keine Preiszusagen und kein Handeln: bei Preisfragen auf den Inseratspreis verweisen oder nicht automatisch antworten.\n"
@@ -435,6 +437,12 @@ def current_ad(db: Session, ad_id: str) -> MyAd | None:
         seen.add(newer.ad_id)
         ad = newer
     return ad
+
+
+def requests_per_hour() -> int:
+    """The hourly willhaben request budget: set in Settings → willhaben, else REQUESTS_PER_HOUR from .env (0 = none)."""
+    raw = get_setting("requests_per_hour")
+    return int(raw) if raw.isdigit() else get_settings().requests_per_hour
 
 
 def get_setting(key: str) -> str:

@@ -10,9 +10,9 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from sqlmodel import select
+from sqlmodel import col, func, select
 
-from app.db import LLMCall, session, utcnow
+from app.db import LLMCall, get_setting, session, set_setting, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -50,8 +50,75 @@ def record(purpose: str | None, model: str, data: dict[str, Any] | None, *, ok: 
                                output_tokens=r["output"], cache_read_tokens=r["cache_read"],
                                cache_write_tokens=r["cache_write"], cost_usd=r["cost_usd"], call_part=i))
             db.commit()
+        if rows:
+            _limit_reached_push()
     except Exception as e:  # noqa: BLE001 - statistics must never break a Claude call
         log.warning("could not record LLM usage: %s", e)
+
+
+LIMIT_MODES = ("pause", "haiku", "notify")   # over the limit: pause hit screening / everything on Haiku / only a push
+HAIKU = "claude-haiku-5-5"
+
+
+def month_start():
+    now = utcnow()
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def month_tokens() -> int:
+    """Input + output tokens of all Claude calls since the 1st of this month (UTC)."""
+    with session() as db:
+        return int(db.exec(select(func.coalesce(func.sum(col(LLMCall.input_tokens) + col(LLMCall.output_tokens)), 0))
+                           .where(LLMCall.ts >= month_start())).one() or 0)
+
+
+def limit() -> dict[str, Any]:
+    """The monthly token limit (Settings → Claude): {"used", "limit", "mode", "over"}; limit 0 = none."""
+    try:
+        lim = int(float(get_setting("claude_token_limit_m") or 0) * 1_000_000)
+    except ValueError:
+        lim = 0
+    mode = get_setting("claude_limit_mode") or "notify"
+    used = month_tokens()
+    return {"used": used, "limit": lim, "mode": mode if mode in LIMIT_MODES else "notify", "over": bool(lim) and used >= lim}
+
+
+TASK_COLORS = {"chat": "var(--brand)", "ads": "#8b5cf6", "screen": "#eb6834", "search": "#1baf7a"}
+
+
+def month_by_task() -> list[dict[str, Any]]:
+    """This month's tokens per task for the Claude popover: [{label, tokens, color}], biggest first."""
+    from app.i18n import t
+    from app.llm.base import PURPOSES
+
+    with session() as db:
+        rows = db.exec(select(LLMCall.purpose, func.coalesce(func.sum(col(LLMCall.input_tokens) + col(LLMCall.output_tokens)), 0))
+                       .where(LLMCall.ts >= month_start()).group_by(LLMCall.purpose)).all()
+    out = [{"label": t(PURPOSES[p][1]) if p in PURPOSES else t("Other (tests, misc.)"), "tokens": int(n or 0),
+            "color": TASK_COLORS.get(p, "var(--muted)")} for p, n in rows if n]
+    return sorted(out, key=lambda r: -r["tokens"])
+
+
+def _limit_reached_push() -> None:
+    """Once per month: a push when the token limit is reached (whatever the mode)."""
+    import asyncio
+
+    st = limit()
+    month = month_start().strftime("%Y-%m")
+    if not st["over"] or get_setting("claude_limit_notified") == month:
+        return
+    set_setting("claude_limit_notified", month)
+    from app.i18n import t
+    from app.services.notify import notify
+
+    text = {"pause": t("Hit screening is paused until next month."), "haiku": t("All tasks now use Haiku until next month."),
+            "notify": t("Nothing is throttled.")}[st["mode"]]
+    try:
+        asyncio.get_running_loop().create_task(notify(
+            "health", t("Claude token limit reached"), t("{used} M of {limit} M tokens this month.", used=f"{st['used'] / 1e6:.1f}",
+                                                         limit=f"{st['limit'] / 1e6:g}") + " " + text, url="/settings/claude"))
+    except RuntimeError:
+        pass    # no event loop (scripts, tests): the dashboard meter still shows it
 
 
 def summary() -> dict[str, Any]:

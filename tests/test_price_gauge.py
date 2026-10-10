@@ -22,4 +22,4 @@ def test_gauge_renders_in_batch_draft_and_viewer():
     d = AdDraft(id=1, input_text="", title="T", description="D", image_paths=[], price_suggestion=957,
                 price_stats=STATS)
     html = templates.env.get_template("_batch_draft.html").render(d=d, saved=False, insert_url="", _=lambda s, **k: s.format(**k) if k else s)
-    assert "pgauge" in html and "13 % below the median" in html and "Low price" in html
+    assert "deal-track" in html and "13 % below the median" in html and "cheap" in html

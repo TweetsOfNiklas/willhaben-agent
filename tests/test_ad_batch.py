@@ -91,7 +91,7 @@ def test_batch_sort_review_and_create(client, monkeypatch):  # noqa: F811
     assert [g.get("draft_id") for g in b.groups] == [drafts[0].id, None, drafts[1].id]
     page = client.get(f"/new-ad/batch/{batch_id}").text
     assert f'href="/new-ad/{drafts[0].id}"' in page and "KTM Kinderrad 20 Zoll blau" in page
-    assert f'/new-ad/batch/{batch_id}">← Batch' in client.get(f"/new-ad/{drafts[0].id}").text
+    assert f'href="/new-ad/batch/{batch_id}"' in client.get(f"/new-ad/{drafts[0].id}").text
 
     # drafts are locked: a later save cannot move their photos, a re-sort only gets the rest
     client.post(f"/new-ad/batch/{batch_id}", data={"img_0": "g2", "action": "save"})
@@ -129,7 +129,7 @@ def test_batch_inline_review_and_publish(client, monkeypatch):  # noqa: F811
         d1, d2 = db.exec(select(dbmod.AdDraft).order_by(dbmod.AdDraft.id)).all()
 
     page = client.get(f"/new-ad/batch/{batch_id}").text
-    assert "Review and publish drafts" in page and page.count('class="bdraft ') == 2
+    assert "Review &amp; publish" in page and page.count('class="bdraft ') == 2
     assert f'hx-post="/ad-drafts/{d1.id}/inline"' in page and "0</strong> of 2 published" in page
 
     card = client.post(f"/ad-drafts/{d1.id}/inline", data={"title": "Bohrschrauber", "description": "Top\r\nZustand",

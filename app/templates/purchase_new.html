@@ -1,7 +1,8 @@
 {# The buy dialog as a page: the link of a "Buy" button when JavaScript is off (same content as _buy_dialog.html). #}
 {% extends "base.html" %}
+{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
 {% block title %}{{ _("Buy") }} · willhaben Agent{% endblock %}
 {% block content %}
-<h3>🛒 {{ _("Buy") }}</h3>
+<h3>{{ _("Buy") }}</h3>
 {% include "_buy_dialog.html" %}
 {% endblock %}

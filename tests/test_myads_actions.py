@@ -216,7 +216,7 @@ async def test_bulk_route(account):
         assert r.status_code == 303 and "1" in r.headers["location"]
         assert c.post("/myads/bulk/nuke", data={"ids": ["1"]}).status_code == 404
         page = c.get("/myads?show_inactive=1").text
-        assert "btn-danger" in page and 'name="ids"' in page and "Activate on willhaben" in page
+        assert "outline-danger" in page and 'name="ids"' in page and ">Activate<" in page
 
 
 async def test_hide_only_survives_import_and_routes(account):
@@ -227,8 +227,8 @@ async def test_hide_only_survives_import_and_routes(account):
         assert c.post("/myads/1000000001/hide", data={"hidden": "1"}, follow_redirects=False).status_code == 303
         page = c.get("/myads?show_inactive=1").text
         assert "Anzeige 1000000001" not in page and "Show 1 hidden ads" in page
-        assert "Anzeige 1000000001" in c.get("/myads?show_hidden=1&show_inactive=1").text
-        assert "Delete on willhaben" in page and "Activate on willhaben" in page   # the visible ad is deactivated
+        assert "Anzeige 1000000001" in c.get("/myads?show_hidden=1").text   # an active ad: in the Active view
+        assert "/delete" in page and ">Activate<" in page   # the visible ad is deactivated
     await my_ads.import_from_account()
     with session() as db:
         rows = {r.ad_id: r for r in db.exec(select(MyAd))}
@@ -456,17 +456,27 @@ def test_myads_filters_and_order():
         # long expired (past the 30-day cutoff) and the old copy of a renewed ad are not "expired"
         for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert", "Uralt", "Erneuert"):
             assert gone not in page
-        assert "Show deactivated ads (2)" in page and "Show sold ads (3)" in page
+        assert "Deactivated <small>2</small>" in page and "Sold / reserved <small>3</small>" in page
         # expired ads always show, in their own section above the others
         assert page.index("Active (2)") < page.index("Lange") < page.index("Bald") < page.index("Expired (1)") \
             < page.index("Ausgelaufen")    # active ads on top, then the expired ones
-        assert "Activate on willhaben" in page    # an expired ad can be put online again by hand (republished)
+        assert ">Activate<" in c.get("/myads?ad=7").text    # an expired ad can be put online again by hand (republished)
+        # the chips are exclusive views: only that group, nothing of the active list
         page = c.get("/myads?show_inactive=1").text
         assert "Deaktiviert" in page and "Uralt" in page and "Weg" not in page
         assert "Erneuert" not in page     # a renewed ad's old copy is never listed: its chats use the new copy
-        assert page.index("Bald") < page.index("Ausgelaufen") < page.index("Other ads") < page.index("Deaktiviert")
+        assert "Bald" not in page and "Ausgelaufen" not in page
         page = c.get("/myads?show_sold=1").text
-        assert "Weg" in page and "Geschenkt" in page and "Deaktiviert" not in page
+        assert "Weg" in page and "Geschenkt" in page and "Reserviert" in page
+        assert "Deaktiviert" not in page and "Bald" not in page
+        assert "/myads/cleanup" not in page          # the Clean up button is gone
+        # toggles combine: Active + Sold, with a count on every chip
+        page = c.get("/myads?show_active=1&show_sold=1").text
+        assert "Bald" in page and "Weg" in page and "Deaktiviert" not in page
+        assert "Active <small>3</small>" in page                              # 2 active + 1 recently expired
+        import re
+        active_href = re.search(r'href="([^"]*)">Active <small>', page).group(1)
+        assert "show_sold=1" in active_href and "show_active" not in active_href          # the Active chip turns Active off
 
 
 async def test_cleanup_deletes_old_ads_and_never_active_ones(account):
@@ -520,6 +530,6 @@ def test_row_actions_keep_the_list_filters():
         r = c.post("/myads/1000000001/auto-renew", data={"on": "1"}, headers=ref, follow_redirects=False)
         assert r.headers["location"] == "/myads?msg=&show_inactive=1&show_sold=1"
         r = c.post("/myads/1000000001/auto-reply", data={"on": ""}, headers=ref, follow_redirects=False)
-        assert r.headers["location"].endswith("&show_inactive=1&show_sold=1#ad-1000000001")
+        assert r.headers["location"].endswith("&show_inactive=1&show_sold=1&ad=1000000001#ad-1000000001")
         r = c.post("/myads/1000000001/hide", data={"hidden": "0"}, follow_redirects=False)   # no referer: plain list
         assert r.headers["location"] == "/myads?msg="

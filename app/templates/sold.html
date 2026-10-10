@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
 {% block content %}
 {% set is_sold = kind == 'sold' %}
 <p>{% if buyer %}<a href="/chats/{{ buyer.id }}">← {{ _("Chat with {name}", name=buyer.partner_name or _('unknown')) }}</a> · {% endif %}<a href="/myads#ad-{{ ad_id }}">{{ _("My ads") }}</a></p>
