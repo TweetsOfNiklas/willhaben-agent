@@ -186,6 +186,17 @@ templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lan
                              wh_budget=requests_per_hour, wh_popup=access_stats.popup)
 
 
+def _asset_version() -> str:
+    """Cache key for /static/app.css: changes whenever the stylesheet is rebuilt."""
+    try:
+        return str(int((BASE_DIR / "static" / "app.css").stat().st_mtime))
+    except OSError:
+        return __version__
+
+
+templates.env.globals.update(asset_version=_asset_version)
+
+
 def _inbox_seen_at() -> datetime:
     raw = get_setting("inbox_seen_at")
     try:
@@ -294,8 +305,9 @@ async def agents_page(request: Request, error: str | None = None):
     with session() as db:
         agents = list(db.exec(select(SearchAgent).order_by(SearchAgent.created_at)))
         counts = dict(db.exec(select(Hit.agent_id, func.count()).where(Hit.state == "new").group_by(Hit.agent_id)).all())
+        # all hits, pictures or not: the template shows a placeholder for a hit without one
         thumbs: dict[int, list[Hit]] = {}
-        for h in db.exec(select(Hit).where(col(Hit.image_url).is_not(None)).order_by(col(Hit.first_seen_at).desc())):
+        for h in db.exec(select(Hit).order_by(col(Hit.first_seen_at).desc())):
             row = thumbs.setdefault(h.agent_id, [])
             if len(row) < 4:
                 row.append(h)

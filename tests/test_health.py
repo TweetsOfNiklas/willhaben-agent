@@ -432,10 +432,10 @@ def test_home_page_tiles(client, monkeypatch):  # noqa: F811
     ])
     html = client.get("/").text
     assert 'id="connections"' in html
-    assert 'href="/settings/ha" class="card conn problem" data-health="ha"' in html
-    assert 'href="/settings/claude" class="card conn ok"' in html
-    assert 'class="card conn off" data-health="gcal"' in html
-    assert 'class="card conn ok" data-health="disk"' in html and "12.0 GB free" in html
+    assert 'href="/settings/ha" class=' in html and 'data-health="ha" data-state="problem"' in html
+    assert 'href="/settings/claude" class=' in html and 'data-state="ok"' in html
+    assert 'data-health="gcal" data-state="off"' in html
+    assert 'data-health="disk" data-state="ok"' in html and "12.0 GB free" in html
     assert "new hits" in html                         # existing layout still there
     html = client.get("/", headers={"accept-language": "de"}).text
     assert "Verbindungen" in html

@@ -1,35 +1,36 @@
 {# Price position of one ad. res = deals.analyze() or None, compact = inside the ad viewer, h = Hit or None #}
-{% if error and not res %}<p class="muted" style="font-size:13px">{{ _("Price check failed: {error}", error=error) }}</p>
+{% import "_ui.html" as ui %}
+{% if error and not res %}<p class="text-[13px] text-muted">{{ _("Price check failed: {error}", error=error) }}</p>
 {% elif res %}
 {% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set gh = res.geizhals %}{% set ad = res.ad or {} %}{% set path = res.category_path or [] %}{% set fl = c.filtered or {} %}
-<section class="card pad deal" style="background:var(--bg);padding:14px 16px;display:flex;flex-direction:column;gap:10px">
-  <div class="row" style="justify-content:space-between;align-items:baseline">
-    <span class="row" style="gap:8px"><strong>{{ _("Price") }}</strong>{% if p.pos is not none %}<span class="deal-lvl lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}</span>
-    <small class="muted">{% if c.median and ad.price %}{% set diff = ((ad.price - c.median) * 100 / c.median)|round|int %}{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% endif %}{% if c.count %} · {{ _("{n} comparable ads", n=c.count) }}{% endif %}</small>
+<section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-200 px-4 py-3.5">
+  <div class="flex flex-wrap items-baseline justify-between gap-2">
+    <span class="flex items-center gap-2"><strong>{{ _("Price") }}</strong>{% if p.pos is not none %}{{ ui.deal_lvl(p.level, deal_level_label(p.level)) }}{% endif %}</span>
+    <small class="text-muted">{% if c.median and ad.price %}{% set diff = ((ad.price - c.median) * 100 / c.median)|round|int %}{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% endif %}{% if c.count %} · {{ _("{n} comparable ads", n=c.count) }}{% endif %}</small>
   </div>
   {% if p.pos is not none %}{% set pct = (p.pos * 100)|round(1) %}
-  <div style="position:relative;padding:18px 4px 18px">
-    <span style="position:absolute;top:0;left:{{ pct }}%;transform:translateX(-{{ pct }}%);font-size:12.5px;font-weight:700;white-space:nowrap">{{ ad.price|eur }}</span>
-    <span class="deal-needle" style="top:16px;left:{{ pct }}%;box-shadow:0 0 0 2px var(--bg)"></span>
+  <div class="relative px-1 pt-[18px] pb-[18px]">
+    <span class="absolute top-0 whitespace-nowrap text-[12.5px] font-bold" style="left:{{ pct }}%;transform:translateX(-{{ pct }}%)">{{ ad.price|eur }}</span>
+    <span class="absolute top-4 h-4 w-[3px] -translate-x-1/2 rounded-sm bg-base-content shadow-[0_0_0_2px_var(--color-base-200)]" style="left:{{ pct }}%"></span>
     <div class="deal-track"></div>
-    <div style="position:relative;height:16px;font-size:11.5px;color:var(--muted);margin-top:4px">{% for pos, v in p.ticks %}<span style="position:absolute;left:{{ (pos * 100)|round(1) }}%;transform:translateX(-50%);white-space:nowrap">{{ v|eur }}</span>{% endfor %}</div>
+    <div class="relative mt-1 h-4 text-[11.5px] text-muted">{% for pos, v in p.ticks %}<span class="absolute -translate-x-1/2 whitespace-nowrap" style="left:{{ (pos * 100)|round(1) }}%">{{ v|eur }}</span>{% endfor %}</div>
   </div>
-  {% if p.suspicious %}<div class="pill bad plain" style="align-self:flex-start;border-radius:6px">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</div>{% endif %}
-  {% else %}<p class="muted" style="font-size:12.5px">{{ deal_explain(res) }}</p>{% endif %}
-  <p class="muted" style="font-size:12.5px">
+  {% if p.suspicious %}<div class="self-start rounded-md bg-bad-soft px-2 py-1 text-[12.5px] font-semibold text-error">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</div>{% endif %}
+  {% else %}<p class="text-[12.5px] text-muted">{{ deal_explain(res) }}</p>{% endif %}
+  <p class="text-[12.5px] text-muted">
     {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% elif c.scope == 'leaf' and path %}{{ _("Compared within „{category}“.", category=path[-1]) }}{% elif c.scope == 'parent' and path|length > 1 %}{{ _("Compared within „{category}“ (too few ads in „{leaf}“).", category=path[-2], leaf=path[-1]) }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
     {% if fl.kind %} {{ _("{n} accessories/parts or other variants left out.", n=fl.kind) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
     {% if p.pos is not none %} {% if p.basis == 'comparables' %}{{ _("Cheapest to most expensive comparable ad; marks at 25 %, median and 75 %.") }}{% else %}{{ _("Few comparable ads: estimated from the new price (used items usually sell for 40–70 %).") }}{% endif %}{% endif %}
-    {% if compact %} <a href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
-  {% if gh %}<a href="{{ gh.url }}" target="_blank" rel="noopener" style="font-size:13px">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="muted">· {{ _("this ad is {n} % of new", n=(ad.price * 100 / gh.price_from)|round|int) }}</span>{% endif %}</a>{% endif %}
+    {% if compact %} <a class="link link-primary no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
+  {% if gh %}<a href="{{ gh.url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=(ad.price * 100 / gh.price_from)|round|int) }}</span>{% endif %}</a>{% endif %}
   {% if not (compact and h and h.screen_relevant is not none) %}{% with q=res.asked_query or '', hit=(h.id if h else '') %}{% include "_deal_claude.html" %}{% endwith %}{% endif %}
   {% if c.closest %}
-  <details {% if not compact %}open{% endif %} style="font-size:13px"><summary class="row" style="cursor:pointer;justify-content:space-between;font-weight:600">{{ _("Comparable ads") }} <small class="muted" style="font-weight:400">{{ _("closest by price") }}</small></summary>
-    <div style="display:flex;flex-direction:column;margin-top:6px">
+  <details {% if not compact %}open{% endif %} class="text-[13px]"><summary class="flex cursor-pointer items-center justify-between gap-2 font-semibold">{{ _("Comparable ads") }} <small class="font-normal text-muted">{{ _("closest by price") }}</small></summary>
+    <div class="mt-1.5 flex flex-col">
       {% set ns = namespace(done=ad.price is none or ad.price <= 0) %}
-      {% macro this_row() %}<div class="num" style="display:grid;grid-template-columns:1fr auto auto;gap:12px;padding:6px 8px;border-radius:6px;background:var(--hover);font-weight:650"><span>→ {{ _("this ad") }}</span><span></span><span>{{ ad.price|eur }}</span></div>{% endmacro %}
+      {% macro this_row() %}<div class="grid grid-cols-[1fr_auto_auto] gap-3 rounded-md bg-hover px-2 py-1.5 font-semibold tabular-nums"><span>→ {{ _("this ad") }}</span><span></span><span>{{ ad.price|eur }}</span></div>{% endmacro %}
       {% for a in c.closest %}{% if not ns.done and a.price > ad.price %}{% set ns.done = true %}{{ this_row() }}{% endif %}
-      <div class="num" style="display:grid;grid-template-columns:1fr auto auto;gap:12px;padding:6px 8px"><a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}" style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.title }}</a><span class="muted">{{ a.location or '' }}</span><span>{{ a.price|eur }}</span></div>{% endfor %}
+      <div class="grid grid-cols-[1fr_auto_auto] gap-3 px-2 py-1.5 tabular-nums"><a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}" class="truncate text-base-content no-underline hover:underline">{{ a.title }}</a><span class="text-muted">{{ a.location or '' }}</span><span>{{ a.price|eur }}</span></div>{% endfor %}
       {% if not ns.done %}{{ this_row() }}{% endif %}
     </div></details>
   {% endif %}

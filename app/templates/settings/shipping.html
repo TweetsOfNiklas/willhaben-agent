@@ -1,34 +1,38 @@
 {# Settings → Shipping address (handoff design). Field names as the /settings/shipping route reads them (shipping.ADDRESS_FIELDS). #}
-{% if not ship_sender_ok %}<div class="msg warn row" style="gap:10px">{{ _("Sender address missing — parcels can't be prepared from chats yet.") }}</div>{% endif %}
-<form method="post" action="/settings/shipping" class="card pad" style="display:flex;flex-direction:column;gap:14px">
+{% import "_ui.html" as ui %}
+{% if not ship_sender_ok %}{{ ui.msg(_("Sender address missing — parcels can't be prepared from chats yet."), 'warn') }}{% endif %}
+<form method="post" action="/settings/shipping" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   {% set s = ship.sender %}
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    <label class="field" style="grid-column:1 / -1"><span>{{ _("Name") }}</span><input name="name" value="{{ s.name or '' }}" autocomplete="name"></label>
-    <label class="field" style="grid-column:1 / -1"><span>{{ _("Street") }}</span><input name="street" value="{{ s.street or '' }}" autocomplete="address-line1"></label>
-    <label class="field"><span>{{ _("No.") }}</span><input name="house_no" value="{{ s.house_no or '' }}"></label>
-    <label class="field"><span>{{ _("Stair/door") }}</span><input name="extra" value="{{ s.extra or '' }}"></label>
-    <label class="field"><span>{{ _("Postcode") }}</span><input name="zip" value="{{ s.zip or '' }}" inputmode="numeric" maxlength="4" autocomplete="postal-code"></label>
-    <label class="field"><span>{{ _("City") }}</span><input name="city" value="{{ s.city or '' }}" autocomplete="address-level2"></label>
-    <label class="field"><span>{{ _("Phone") }}</span><input name="phone" value="{{ s.phone or '' }}" autocomplete="tel"></label>
-    <label class="field"><span>{{ _("E-mail") }}</span><input name="email" type="email" value="{{ s.email or '' }}" autocomplete="email"></label>
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <label class="flex min-w-0 flex-col gap-1.5 sm:col-span-2"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ s.name or '' }}" autocomplete="name" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5 sm:col-span-2"><span class="text-[12.5px] text-muted">{{ _("Street") }}</span><input name="street" value="{{ s.street or '' }}" autocomplete="address-line1" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("No.") }}</span><input name="house_no" value="{{ s.house_no or '' }}" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Stair/door") }}</span><input name="extra" value="{{ s.extra or '' }}" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Postcode") }}</span><input name="zip" value="{{ s.zip or '' }}" inputmode="numeric" maxlength="4" autocomplete="postal-code" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("City") }}</span><input name="city" value="{{ s.city or '' }}" autocomplete="address-level2" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Phone") }}</span><input name="phone" value="{{ s.phone or '' }}" autocomplete="tel" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("E-mail") }}</span><input name="email" type="email" value="{{ s.email or '' }}" autocomplete="email" class="input w-full min-w-0 bg-base-200"></label>
   </div>
-  <div class="field"><span>{{ _("Carriers") }}</span><div class="row" style="gap:6px">{% for key, c in ship_carriers.items() %}<label class="chip {{ 'on' if key in ship.carriers else '' }}" style="cursor:pointer" title="{{ c.dropoff }} · {{ _('login:') }} {{ c.login }}"><input type="checkbox" name="carrier" value="{{ key }}" {% if key in ship.carriers %}checked{% endif %} style="width:14px;height:14px" onchange="this.parentNode.classList.toggle('on', this.checked)">{{ c.name }}</label>{% endfor %}</div></div>
-  <label class="switch-row" style="border-top:1px solid var(--border);padding-top:14px"><span><span class="t">{{ _("Notice addresses in chats automatically and offer a label") }}</span></span><input type="checkbox" class="switch" name="detect" {% if ship.detect %}checked{% endif %}></label>
-  <div><button class="btn">{{ _("Save") }}</button></div>
+  <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Carriers") }}</span>
+    <div class="flex flex-wrap gap-1.5">{% for key, c in ship_carriers.items() %}
+      <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary" title="{{ c.dropoff }} · {{ _('login:') }} {{ c.login }}">
+        <input type="checkbox" name="carrier" value="{{ key }}" {% if key in ship.carriers %}checked{% endif %} class="checkbox checkbox-primary checkbox-xs">{{ c.name }}</label>
+    {% endfor %}</div></div>
+  <label class="flex cursor-pointer items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="min-w-0 font-medium">{{ _("Notice addresses in chats automatically and offer a label") }}</span><input type="checkbox" class="toggle toggle-primary" name="detect" {% if ship.detect %}checked{% endif %}></label>
+  <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
 </form>
-<section class="card pad" style="display:flex;flex-direction:column;gap:12px">
-  <div><span style="font-weight:550">{{ _("Carrier logins") }}</span><p class="muted" style="font-size:12.5px;margin-top:4px">{{ _("Optional. When a carrier's page asks for a login, the app types it in for you. Stored only on this server (data folder, owner-only); the password is never shown again and never sent to Claude.") }}</p></div>
+<section class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <div><span class="font-medium">{{ _("Carrier logins") }}</span><p class="mt-1 text-[12.5px] text-muted">{{ _("Optional. When a carrier's page asks for a login, the app types it in for you. Stored only on this server (data folder, owner-only); the password is never shown again and never sent to Claude.") }}</p></div>
   {% for key, c in ship_carriers.items() %}{% set lg = ship_logins.get(key) or {} %}
-  <form method="post" action="/settings/shipping/login/{{ key }}" style="display:grid;grid-template-columns:90px minmax(0,1fr) minmax(0,1fr) auto auto;gap:8px;align-items:center;margin:0" class="carrier-login">
-    <span style="font-weight:600">{{ c.name }}</span>
-    <input name="user" value="{{ lg.user or '' }}" placeholder="{{ _('E-mail / user name') }}" autocomplete="off" aria-label="{{ _('E-mail / user name') }}">
-    <input name="password" type="password" placeholder="{{ _('•••••• (saved)') if lg.has_password else _('Password') }}" autocomplete="new-password" aria-label="{{ _('Password') }}">
-    <button class="btn secondary sm">{{ _("Save") }}</button>
-    <button class="btn ghost sm" formaction="/settings/shipping/open/{{ key }}" onclick="this.setAttribute('aria-busy','true')">{{ _("Open & log in") }}</button>
+  <form method="post" action="/settings/shipping/login/{{ key }}" class="grid grid-cols-1 min-w-0 items-center gap-2 sm:grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+    <span class="font-semibold">{{ c.name }}</span>
+    <input name="user" value="{{ lg.user or '' }}" placeholder="{{ _('E-mail / user name') }}" autocomplete="off" aria-label="{{ _('E-mail / user name') }}" class="input w-full min-w-0 bg-base-200">
+    <input name="password" type="password" placeholder="{{ _('•••••• (saved)') if lg.has_password else _('Password') }}" autocomplete="new-password" aria-label="{{ _('Password') }}" class="input w-full min-w-0 bg-base-200">
+    <button class="btn btn-sm">{{ _("Save") }}</button>
+    <button class="btn btn-ghost btn-sm" formaction="/settings/shipping/open/{{ key }}">{{ _("Open & log in") }}</button>
   </form>
   {% endfor %}
-  <small class="muted">{{ _("Leave the password empty to keep the saved one; clear the user name to remove a login.") }}</small>
+  <small class="text-[12.5px] text-muted">{{ _("Leave the password empty to keep the saved one; clear the user name to remove a login.") }}</small>
 </section>
-<section class="card pad legacy" style="display:flex;flex-direction:column;gap:14px">{% include "_settings_ship_card.html" %}</section>
-<section class="card pad legacy" style="display:flex;flex-direction:column;gap:14px">{% include "_settings_ship_auto.html" %}</section>
-<style>@media (max-width:760px){ .carrier-login { grid-template-columns:1fr 1fr !important } .carrier-login > span { grid-column:1 / -1 } }</style>
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">{% include "_settings_ship_card.html" %}</section>
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">{% include "_settings_ship_auto.html" %}</section>

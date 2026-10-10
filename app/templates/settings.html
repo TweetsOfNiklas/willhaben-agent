@@ -1,7 +1,8 @@
 {% extends "base.html" %}
-{# Grouped settings index. Move each existing <section id="…"> from the old settings.html into app/templates/settings/<id>.html
-   (the Buying/PayLivery/Printers sections already live in _settings_purchase / _settings_paylivery / _settings_printing).
-   `section` = active id (route: /settings/<id> or /settings?s=<id>; keep #anchors working by mapping the hash → s in JS below). #}
+{% import "_ui.html" as ui %}
+{# Grouped settings: section nav on the left (desktop), a select on phones; the selected section on the right.
+   `section` = active id (route: /settings/<id>; /settings = willhaben). A #hash in the URL is mapped to the path below.
+   Flags on the nav: bad / warn = a dot next to the label (not connected, missing data). #}
 {% set groups = [
   (_("Account"), [("willhaben", _("willhaben account"), ('bad' if session_status.started and not session_status.logged_in else '')), ("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("calendar", "Google Calendar", '')]),
   (_("Buying & selling"), [("purchase", _("Buying rules"), ''), ("paylivery", "PayLivery", ''), ("printers", _("Printers"), ''), ("myads", _("My ads"), '')]),
@@ -9,34 +10,39 @@
   (_("Notifications"), [("ha", "Home Assistant", ''), ("telegram", "Telegram", ''), ("quiet", _("Quiet hours"), '')]),
   (_("System"), [("backup", _("Backup & restore"), ''), ("language", _("Language & appearance"), '')]),
 ] %}
+{% set dot = {'bad': 'bg-error', 'warn': 'bg-warning'} %}
 {% set section = section if section is defined and section else 'willhaben' %}
 {% set ns = namespace(title='', group='') %}
 {% for g, items in groups %}{% for id, label, flag in items %}{% if id == section %}{% set ns.title = label %}{% set ns.group = g %}{% endif %}{% endfor %}{% endfor %}
 {% block content %}
-<div class="page-head"><div><h1>{{ _("Settings") }}</h1><p>{{ _("Changes are saved per section.") }}</p></div></div>
-<div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;align-items:start" class="settings-grid">
-  <select class="settings-select" onchange="location.href='/settings/'+this.value" hidden>
+{{ ui.head(_("Settings"), _("Changes are saved per section.")) }}
+<div class="grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)] md:items-start">
+  {# phone: one select instead of the nav #}
+  <select aria-label="{{ _('Settings') }}" class="select w-full bg-base-100 md:hidden" onchange="location.href='/settings/'+this.value">
     {% for g, items in groups %}<optgroup label="{{ g }}">{% for id, label, flag in items %}<option value="{{ id }}" {% if id == section %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}
   </select>
-  <nav style="display:flex;flex-direction:column;gap:14px;position:sticky;top:24px" class="settings-nav">
+
+  <nav aria-label="{{ _('Settings') }}" class="hidden md:sticky md:top-6 md:flex md:flex-col md:gap-3.5">
     {% for g, items in groups %}
-    <div style="display:flex;flex-direction:column;gap:2px">
-      <div style="padding:0 10px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.55">{{ g }}</div>
+    <div class="flex flex-col gap-0.5">
+      {{ ui.eyebrow(g, 'px-2.5 pb-1.5') }}
       {% for id, label, flag in items %}
-      <a href="/settings/{{ id }}" class="rail-item" style="height:auto;padding:7px 10px 7px 14px;border-radius:8px" {% if id == section %}aria-current="page"{% endif %}><span class="lbl">{{ label }}</span>{% if flag %}<span style="width:8px;height:8px;border-radius:50%;background:var(--{{ flag }})"></span>{% endif %}</a>
+      <a href="/settings/{{ id }}" class="flex h-[34px] items-center justify-between gap-2 rounded-field px-2.5 pl-3.5 text-base-content no-underline {{ 'bg-brand-soft font-semibold text-primary' if id == section else 'hover:bg-hover' }}"{% if id == section %} aria-current="page"{% endif %}>
+        <span class="truncate">{{ label }}</span>
+        {% if flag %}<span class="size-2 shrink-0 rounded-full {{ dot[flag] }}"></span>{% endif %}
+      </a>
       {% endfor %}
     </div>
     {% endfor %}
   </nav>
-  <div style="display:flex;flex-direction:column;gap:16px;min-width:0;max-width:720px">
-    <div><div class="eyebrow" style="margin-bottom:2px">{{ ns.group }}</div><h2>{{ ns.title }}</h2></div>
-    {# the sections keep their old markup until they are ported: transitional styles (legacy.css) #}
-    {% if section == 'purchase' %}<div class="legacy">{% include "_settings_purchase.html" %}</div>
-    {% elif section == 'paylivery' %}<div class="legacy">{% include "_settings_paylivery.html" %}</div>
-    {% elif section == 'printers' %}<div class="legacy">{% include "_settings_printing.html" %}</div>
+
+  <div class="flex min-w-0 max-w-[720px] flex-col gap-4">
+    <div>{{ ui.eyebrow(ns.group, 'mb-0.5') }}<h2>{{ ns.title }}</h2></div>
+    {% if section == 'purchase' %}{% include "_settings_purchase.html" %}
+    {% elif section == 'paylivery' %}{% include "_settings_paylivery.html" %}
+    {% elif section == 'printers' %}{% include "_settings_printing.html" %}
     {% else %}{% include "settings/" ~ section ~ ".html" %}{% endif %}
   </div>
 </div>
-<style>@media (max-width:760px){ .settings-grid{grid-template-columns:1fr !important} .settings-nav{display:none !important} .settings-select{display:block !important} }</style>
 <script>if (location.hash && location.pathname === '/settings') location.replace('/settings/' + location.hash.slice(1) + location.search);</script>
 {% endblock %}

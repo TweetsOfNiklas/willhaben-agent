@@ -1,36 +1,38 @@
 {# Label purchases: the payment card (typed here once, never shown again) and the learned checkout playbooks #}
-<fieldset id="payment-card" style="margin-top:1rem">
-  <legend><small>{{ _("Payment card and checkout playbooks") }}</small></legend>
-  {% if card.stored %}<p><small>{{ _("stored:") }} •••• {{ card.last4 }}, {{ card.expiry }}</small></p>{% endif %}
-  <form method="post" action="/settings/shipping/card" autocomplete="off">
-    <div class="grid">
-      <label>{{ _("Name on card") }} <input name="holder" value="{{ card.holder }}" autocomplete="off"></label>
-      <label>{{ _("Card number") }} <input name="number" type="password" inputmode="numeric" autocomplete="off" placeholder="1234 5678 9012 3456"></label>
+<div id="payment-card" class="flex flex-col gap-3">
+  <div class="flex flex-col gap-0.5"><span class="font-medium">{{ _("Payment card and checkout playbooks") }}</span>
+    {% if card.stored %}<small class="text-[12.5px] text-muted">{{ _("stored:") }} •••• {{ card.last4 }}, {{ card.expiry }}</small>{% endif %}</div>
+  <form method="post" action="/settings/shipping/card" autocomplete="off" class="flex flex-col gap-3">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name on card") }}</span><input name="holder" value="{{ card.holder }}" autocomplete="off" class="input w-full min-w-0 bg-base-200"></label>
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Card number") }}</span><input name="number" type="password" inputmode="numeric" autocomplete="off" placeholder="1234 5678 9012 3456" class="input w-full min-w-0 bg-base-200"></label>
     </div>
-    <div class="grid">
-      <label>{{ _("Expiry (MM/YY)") }} <input name="expiry" value="{{ card.expiry }}" placeholder="MM/YY" autocomplete="off" maxlength="5"></label>
-      <label>{{ _("CVC") }} <input name="cvc" type="password" inputmode="numeric" autocomplete="off" maxlength="4"></label>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Expiry (MM/YY)") }}</span><input name="expiry" value="{{ card.expiry }}" placeholder="MM/YY" autocomplete="off" maxlength="5" class="input w-full min-w-0 bg-base-200"></label>
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("CVC") }}</span><input name="cvc" type="password" inputmode="numeric" autocomplete="off" maxlength="4" class="input w-full min-w-0 bg-base-200"></label>
     </div>
-    <p><small class="muted">{{ _("Most checkouts ask for the CVC; without it the app stops and asks you.") }}</small></p>
-    <p><small class="muted">{{ _("Stored only on this server (data folder, owner-only). The app types it into the carrier's payment form, never shows it again and never sends it to Claude.") }}</small></p>
-    <button class="secondary">{{ _("Save") }}</button>
+    <p class="text-[12.5px] text-muted">{{ _("Most checkouts ask for the CVC; without it the app stops and asks you.") }}</p>
+    <p class="text-[12.5px] text-muted">{{ _("Stored only on this server (data folder, owner-only). The app types it into the carrier's payment form, never shows it again and never sends it to Claude.") }}</p>
+    <div><button class="btn">{{ _("Save") }}</button></div>
   </form>
   {% if card.stored %}
   <form method="post" action="/settings/shipping/card/delete">
-    <button class="secondary outline">{{ _("Remove card") }}</button>
+    <button class="btn btn-outline btn-error">{{ _("Remove card") }}</button>
   </form>
   {% endif %}
-  <h6 style="margin-top:1rem">{{ _("Learned checkouts") }}</h6>
-  <p><small class="muted">{{ _("A carrier's steps are learned from the first purchase and repeated without Claude. Claude is asked again only when a page changed. Only field names and button texts are stored, never your data.") }}</small></p>
-  {% for key, pb in playbooks.items() %}
-  <div class="row-actions" style="align-items:center;margin-bottom:.3rem">
-    <strong>{{ pb.name }}</strong>
-    {% if pb.learned %}
-      <small class="muted">{{ _("learned") }} {{ pb.learned_at|replace("T", " ") }} · {{ pb.steps }} {{ _("steps") }} · {{ _("last success") }} {{ (pb.last_success_at or "–")|replace("T", " ") }}</small>
-      <form method="post" action="/settings/shipping/playbook/{{ key }}/reset"><button class="secondary outline" style="width:auto">{{ _("Reset playbook") }}</button></form>
-    {% else %}
-      <small class="muted">{{ _("not learned yet") }}</small>
-    {% endif %}
+  <div class="mt-1 flex flex-col gap-1.5 border-t border-base-300 pt-3.5">
+    <span class="font-medium">{{ _("Learned checkouts") }}</span>
+    <p class="text-[12.5px] text-muted">{{ _("A carrier's steps are learned from the first purchase and repeated without Claude. Claude is asked again only when a page changed. Only field names and button texts are stored, never your data.") }}</p>
+    {% for key, pb in playbooks.items() %}
+    <div class="flex flex-wrap items-center gap-2 text-[13px]">
+      <strong>{{ pb.name }}</strong>
+      {% if pb.learned %}
+        <small class="text-[12.5px] text-muted">{{ _("learned") }} {{ pb.learned_at|replace("T", " ") }} · {{ pb.steps }} {{ _("steps") }} · {{ _("last success") }} {{ (pb.last_success_at or "–")|replace("T", " ") }}</small>
+        <form method="post" action="/settings/shipping/playbook/{{ key }}/reset"><button class="btn btn-outline btn-sm">{{ _("Reset playbook") }}</button></form>
+      {% else %}
+        <small class="text-[12.5px] text-muted">{{ _("not learned yet") }}</small>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
-</fieldset>
+</div>

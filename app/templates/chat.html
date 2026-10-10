@@ -1,103 +1,121 @@
 {% extends "chats.html" %}
-{# The thread renders inside the list→detail split of chats.html. The route for /chats/<id> must also pass the list context
-   (convs, open_drafts, hidden_count, show_hidden) — or render chats.html's list from a shared helper. #}
+{% import "_ui.html" as ui %}
+{# The thread fills the detail column of chats.html (list → detail). The route for /chats/<id> passes the list context too
+   (convs, open_drafts, hidden_count, show_hidden). Phones: a back link to the list; the context column goes below the thread. #}
 {% block thread %}
 {% set ad = conv.ad_context or {} %}
 {% set selling = conv.role == 'seller' %}
-<div style="display:flex;flex-wrap:wrap;min-width:0;height:100vh;overflow:auto;align-content:flex-start" data-resize="chat-ctx">
-  <div style="display:flex;flex-direction:column;min-width:0;flex:1 1 380px;min-height:100vh">
-    <div class="row" style="justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface)">
-      <div class="row" style="gap:10px;min-width:0;flex-wrap:nowrap">
-        <a href="/chats" class="icon-btn" style="margin-left:-8px" aria-label="{{ _('Chats') }}">←</a>
-        <div style="min-width:0"><div style="font-weight:650;font-size:16px">{{ conv.partner_name or _('unknown') }}{% if conv.hidden_at %} <span class="pill plain">{{ _("hidden") }}</span>{% endif %}</div>
-          <div class="row" style="gap:6px;color:var(--muted);font-size:13px;flex-wrap:nowrap"><span class="tag {{ '' if selling else 'buy' }}">{{ _("Selling") if selling else _("Buying") }}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ conv.ad_title or '' }}</span></div></div>
-      </div>
-      <div class="row" style="gap:6px;flex-wrap:nowrap">
-        <form method="post" action="/chats/{{ conv.id }}/refresh" style="margin:0"><button class="btn secondary sm">↻ {{ _("Reload") }}</button></form>
-        <a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" class="btn secondary sm">willhaben ↗</a>
-        {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
+<div class="flex min-w-0 flex-1 basis-full flex-col md:basis-[380px]">
+  <div class="sticky top-0 z-[2] flex flex-wrap items-center justify-between gap-2.5 border-b border-base-300 bg-base-100 px-5 py-3.5">
+    <div class="flex min-w-0 items-center gap-2.5">
+      <a href="/chats" class="btn btn-ghost btn-sm btn-square -ml-2 md:hidden" aria-label="{{ _('Chats') }}">{{ ui.icon('back', 18) }}</a>
+      <div class="min-w-0">
+        <div class="truncate text-base font-semibold">{{ conv.partner_name or _('unknown') }}{% if conv.hidden_at %} {{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}</div>
+        <div class="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}<span class="truncate">{{ conv.ad_title or '' }}</span></div>
       </div>
     </div>
-    <div class="thread">
-      {% for m in messages %}
-        {% if m.kind %}<div class="bubble unknown">{{ m.text or _("willhaben notice") }} · <small style="display:inline;margin:0">{{ m.created_at|local }}</small></div>
-        {% else %}<div class="bubble {{ m.direction }}">{{ m.text }}<small>{{ m.created_at|local }}</small></div>{% endif %}
-      {% else %}<p class="muted">{{ _("No history stored.") }}</p>{% endfor %}
-    </div>
-    <div class="composer">
-      {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
-      {% if open %}{% set d = open|last %}
-      <div class="row" style="justify-content:space-between">
-        <div class="row" style="gap:8px"><span class="pill brand plain">{{ _("Draft") }}</span><span class="muted" style="font-size:12.5px">{{ d.created_at|local('%H:%M') }}{% if d.intent %} · {{ d.intent }}{% endif %}{% if d.suggested_price %} · {{ _("Price {price}", price=d.suggested_price|eur) }}{% endif %}{% if d.auto %} · {{ _("automatic") }}{% endif %}</span></div>
-        <form method="post" action="/chats/{{ conv.id }}/draft" class="row" style="margin:0;gap:6px;flex-wrap:nowrap" hx-disabled-elt="find button"><input name="hint" placeholder="{{ _('Guidance, e.g. counter-offer €180, pickup Saturday') }}" style="width:260px;padding:6px 10px;font-size:13px"><button class="btn secondary sm">{{ _("Redraft") }}</button></form>
-      </div>
-      {% if d.intent == 'scam_suspect' %}<div class="msg error" style="margin:0">{{ _("Caution: possible scam attempt.") }}</div>{% endif %}
-      {% if d.needs_info %}<ul class="muted" style="margin:0;padding-left:18px;font-size:12.5px">{% for n in d.needs_info %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
-      {% if d.meetup %}<div class="muted" style="font-size:12.5px">{{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}</div>{% endif %}
-      <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" style="display:flex;flex-direction:column;gap:10px">
-        <textarea name="text" rows="3" id="t{{ d.id }}" style="border-radius:10px">{{ d.text }}</textarea>
-        {% if d.error %}<small style="color:var(--bad)">{{ d.error }}</small>{% endif %}
-        <div class="row">
-          <button type="button" class="btn ghost sm" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ _("Copy") }}</button>
-          <button class="btn secondary sm" formaction="/drafts/{{ d.id }}/mark-sent">{{ _("Sent manually") }}</button>
-          <button class="btn ghost sm" formaction="/drafts/{{ d.id }}/discard">{{ _("Discard") }}</button>
-          <span style="flex:1"></span>
-          <button class="btn" data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Send") }}</button>
-        </div>
-      </form>
-      {% else %}
-      <form method="post" action="/chats/{{ conv.id }}/draft" class="row" style="margin:0;flex-wrap:nowrap" hx-disabled-elt="find button">
-        <input name="hint" placeholder="{{ _('Guidance for this answer (optional), e.g. counter-offer €180, pickup Saturday from 10 am') }}">
-        <button class="btn" style="white-space:nowrap">{{ _("Prepare answer with Claude") }}</button>
-      </form>
-      <small class="muted">{{ _("Takes 10–60 seconds.") }}</small>
-      {% endif %}
-      {% set sent = drafts|selectattr('status', 'equalto', 'sent')|list %}
-      {% if sent %}<details class="muted" style="font-size:12.5px"><summary style="cursor:pointer">{{ _("{n} earlier drafts", n=sent|length) }}</summary>{% for d in sent %}<p style="white-space:pre-wrap;margin-top:6px">{{ d.sent_at|local }} · {{ d.text }}</p>{% endfor %}</details>{% endif %}
+    <div class="flex flex-wrap items-center gap-1.5">
+      <form method="post" action="/chats/{{ conv.id }}/refresh"><button class="btn btn-sm">{{ ui.icon('refresh', 14) }}{{ _("Reload") }}</button></form>
+      <a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" rel="noopener" class="btn btn-sm">willhaben{{ ui.icon('external', 14) }}</a>
+      {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
     </div>
   </div>
 
-  <aside class="ctx">
-    {% if ad %}
-    <section class="card" style="padding:0;overflow:hidden">
-      {% if ad.images %}<img src="{{ ad.images[0] }}" alt="" style="height:110px;width:100%;object-fit:cover">{% endif %}
-      <div style="padding:12px 14px"><div class="row" style="gap:6px;margin-bottom:4px"><span class="tag {{ '' if selling else 'buy' }}">{{ _("Selling") if selling else _("Buying") }}</span><span class="muted" style="font-size:12.5px">{{ _("Your ad") if selling else _("Someone else's ad") }}</span></div>
-        <a href="{{ ad.url }}" target="_blank" style="color:var(--text);font-weight:600">{{ ad.title }}</a>
-        <div class="muted" style="font-size:13px;margin-top:2px">{{ ad.price or '' }} · {{ ad.location or '' }} · {{ ad.status or '' }}</div>
-        <details style="margin-top:8px;font-size:13px"><summary style="cursor:pointer;color:var(--brand)">{{ _("Description") }}</summary><p style="white-space:pre-wrap;margin-top:6px">{{ ad.description or '' }}</p></details></div>
-    </section>
-    {% endif %}
-    {% if selling and conv.ad_id %}
-    <section class="card" id="sale">
-      <h3>{{ _("This buyer") }}</h3>
-      {% if sale %}<div class="row" style="gap:8px"><span class="pill {{ 'ok' if sale.is_buyer else '' }}">{{ _("sold") if sale.kind == 'sold' else _("reserved") }}</span><small class="muted">{% if sale.is_buyer %}{{ _("to this buyer") }}{% elif sale.kind == 'sold' %}{{ _("No automatic answers in this chat any more.") }}{% endif %}</small></div>{% endif %}
-      <a class="btn secondary sm" style="justify-content:flex-start" href="/sold/{{ conv.ad_id }}?kind=sold&buyer={{ conv.id }}">{{ _("Sold to {name}", name=conv.partner_name or _('unknown')) }}…</a>
-      <a class="btn secondary sm" style="justify-content:flex-start" href="/sold/{{ conv.ad_id }}?kind=reserved&buyer={{ conv.id }}">{{ _("Reserved for {name}", name=conv.partner_name or _('unknown')) }}…</a>
-      <p class="muted" style="font-size:12px">{{ _("Next page: mark it on willhaben, tell the other buyers, switch off automatic answers – each step only on your click.") }}</p>
-    </section>
-    {% endif %}
-    {% include "_purchase.html" %}
-    {% include "_paylivery.html" %}
-    {% if ship_on %}{% include "_shipping.html" %}{% endif %}
-    {% if gcal_on %}
-    <section class="card" id="meetup">
-      <h3>{{ _("Calendar") }}</h3>
-      {% if meetup and meetup.event_id %}
-        <div style="font-size:13px"><strong>{{ _("In your calendar") }}</strong> · {{ meetup.start.replace('T', ' ') }}{% if meetup.location %} · {{ meetup.location }}{% endif %} {% if meetup.event_link %}<a href="{{ meetup.event_link }}" target="_blank" rel="noopener">{{ _("Open") }} ↗</a>{% endif %}</div>
-        <form method="post" action="/chats/{{ conv.id }}/calendar/forget" style="margin:0"><button class="btn secondary xs">{{ _("New appointment") }}</button></form>
-      {% elif meetup %}
-        <form method="post" action="/chats/{{ conv.id }}/calendar" style="display:flex;flex-direction:column;gap:8px">
-          <label class="field"><span>{{ _("When") }}</span><input type="datetime-local" name="start" value="{{ meetup.start }}" required></label>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label class="field"><span>{{ _("Minutes") }}</span><input type="number" name="minutes" value="{{ meetup.minutes or gcal_duration }}" min="5" max="480" step="5"></label><label class="field"><span>{{ _("Where") }}</span><input name="location" value="{{ meetup.location or '' }}"></label></div>
-          <input type="hidden" name="summary" value="{{ meetup.summary or '' }}">
-          <div class="row"><button class="btn sm">{{ _("Add to calendar") }}</button>{% if conv.meetup %}<button class="btn ghost sm" formaction="/chats/{{ conv.id }}/calendar/forget">{{ _("Not an appointment") }}</button>{% endif %}</div>
-        </form>
+  <div class="flex flex-col gap-2 px-5 py-5">
+    {% for m in messages %}
+      {% if m.kind %}
+      <div data-notice class="mx-auto max-w-[80%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
       {% else %}
-        <form method="post" action="/chats/{{ conv.id }}/calendar/find" style="margin:0" hx-disabled-elt="find button"><button class="btn secondary sm" style="justify-content:flex-start;width:100%">{{ _("Find appointment in this chat") }}</button></form>
-        <p class="muted" style="font-size:12px">{{ _("Claude reads the chat and fills in the calendar entry for you to check.") }}</p>
+      <div class="chat {{ 'chat-end' if m.direction == 'out' else 'chat-start' }}">
+        <div class="chat-bubble max-w-[72%] whitespace-pre-wrap [overflow-wrap:anywhere] {{ 'chat-bubble-primary' if m.direction == 'out' else 'border border-base-300 bg-base-100 text-base-content' }}">{{ m.text }}<small class="mt-1 block text-right text-[11.5px] opacity-70">{{ m.created_at|local }}</small></div>
+      </div>
       {% endif %}
-    </section>
+    {% else %}<p class="text-muted">{{ _("No history stored.") }}</p>{% endfor %}
+  </div>
+
+  <div class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[64px]">
+    {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
+    {% if open %}{% set d = open|last %}
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex min-w-0 flex-wrap items-center gap-2">{{ ui.pill(_("Draft"), 'brand', dot=false) }}<span class="text-[12.5px] text-muted">{{ d.created_at|local('%H:%M') }}{% if d.intent %} · {{ d.intent }}{% endif %}{% if d.suggested_price %} · {{ _("Price {price}", price=d.suggested_price|eur) }}{% endif %}{% if d.auto %} · {{ _("automatic") }}{% endif %}</span></div>
+      <form method="post" action="/chats/{{ conv.id }}/draft" class="flex min-w-0 flex-wrap items-center gap-1.5" hx-disabled-elt="find button">
+        <input name="hint" placeholder="{{ _('Guidance, e.g. counter-offer €180, pickup Saturday') }}" class="input input-sm w-64 max-w-full bg-base-200">
+        <button class="btn btn-sm">{{ _("Redraft") }}</button>
+      </form>
+    </div>
+    {% if d.intent == 'scam_suspect' %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error">{{ _("Caution: possible scam attempt.") }}</div>{% endif %}
+    {% if d.needs_info %}<ul class="list-disc pl-[18px] text-[12.5px] text-muted">{% for n in d.needs_info %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+    {% if d.meetup %}<div class="text-[12.5px] text-muted">{{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}</div>{% endif %}
+    <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" class="flex flex-col gap-2.5">
+      <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea w-full rounded-[10px] bg-base-200">{{ d.text }}</textarea>
+      {% if d.error %}<small class="text-error">{{ d.error }}</small>{% endif %}
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ _("Copy") }}</button>
+        <button class="btn btn-sm" formaction="/drafts/{{ d.id }}/mark-sent">{{ _("Sent manually") }}</button>
+        <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/discard">{{ _("Discard") }}</button>
+        <span class="flex-1"></span>
+        <button class="btn btn-primary" data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Send") }}</button>
+      </div>
+    </form>
+    {% else %}
+    <form method="post" action="/chats/{{ conv.id }}/draft" class="flex flex-wrap items-center gap-1.5" hx-disabled-elt="find button">
+      <input name="hint" placeholder="{{ _('Guidance for this answer (optional), e.g. counter-offer €180, pickup Saturday from 10 am') }}" class="input min-w-0 flex-1 bg-base-200">
+      <button class="btn btn-primary whitespace-nowrap">{{ _("Prepare answer with Claude") }}</button>
+    </form>
+    <small class="text-muted">{{ _("Takes 10–60 seconds.") }}</small>
     {% endif %}
-  </aside>
+    {% set sent = drafts|selectattr('status', 'equalto', 'sent')|list %}
+    {% if sent %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("{n} earlier drafts", n=sent|length) }}</summary>{% for d in sent %}<p class="mt-1.5 break-words whitespace-pre-wrap">{{ d.sent_at|local }} · {{ d.text }}</p>{% endfor %}</details>{% endif %}
+  </div>
 </div>
+
+<aside class="flex w-full min-w-0 shrink-0 flex-col gap-4 border-t border-base-300 bg-base-200 px-[18px] py-5 md:w-[280px] md:border-t-0 md:border-l">
+  {% if ad %}
+  <section class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100">
+    {% if ad.images %}{{ ui.thumb(ad.images[0], 'h-[110px] w-full', '', '') }}{% endif %}
+    <div class="flex min-w-0 flex-col gap-1 px-3.5 py-3">
+      <div class="flex min-w-0 flex-wrap items-center gap-1.5">{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}<span class="text-[12.5px] text-muted">{{ _("Your ad") if selling else _("Someone else's ad") }}</span></div>
+      <a href="{{ ad.url }}" target="_blank" rel="noopener" class="break-words font-semibold text-base-content no-underline hover:underline">{{ ad.title }}</a>
+      <div class="break-words text-[13px] text-muted">{{ ad.price or '' }} · {{ ad.location or '' }} · {{ ad.status or '' }}</div>
+      <details class="mt-1.5 text-[13px]"><summary class="cursor-pointer text-primary">{{ _("Description") }}</summary><p class="mt-1.5 break-words whitespace-pre-wrap">{{ ad.description or '' }}</p></details>
+    </div>
+  </section>
+  {% endif %}
+  {% if selling and conv.ad_id %}
+  {% set sold_lbl = _("Sold to {name}", name=conv.partner_name or _('unknown')) ~ '…' %}
+  {% set reserved_lbl = _("Reserved for {name}", name=conv.partner_name or _('unknown')) ~ '…' %}
+  <section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="sale">
+    <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("This buyer") }}</h3>
+    {% if sale %}<div class="flex min-w-0 flex-wrap items-center gap-2">{{ ui.pill(_("sold") if sale.kind == 'sold' else _("reserved"), 'ok' if sale.is_buyer else '') }}<small class="text-muted">{% if sale.is_buyer %}{{ _("to this buyer") }}{% elif sale.kind == 'sold' %}{{ _("No automatic answers in this chat any more.") }}{% endif %}</small></div>{% endif %}
+    <a class="btn btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left font-normal whitespace-normal break-words" href="/sold/{{ conv.ad_id }}?kind=sold&buyer={{ conv.id }}" title="{{ sold_lbl }}">{{ sold_lbl }}</a>
+    <a class="btn btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left font-normal whitespace-normal break-words" href="/sold/{{ conv.ad_id }}?kind=reserved&buyer={{ conv.id }}" title="{{ reserved_lbl }}">{{ reserved_lbl }}</a>
+    <p class="text-[12px] text-muted">{{ _("Next page: mark it on willhaben, tell the other buyers, switch off automatic answers – each step only on your click.") }}</p>
+  </section>
+  {% endif %}
+  {% include "_purchase.html" %}
+  {% include "_paylivery.html" %}
+  {% if ship_on %}{% include "_shipping.html" %}{% endif %}
+  {% if gcal_on %}
+  <section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="meetup">
+    <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Calendar") }}</h3>
+    {% if meetup and meetup.event_id %}
+      <div class="break-words text-[13px]"><strong>{{ _("In your calendar") }}</strong> · {{ meetup.start.replace('T', ' ') }}{% if meetup.location %} · {{ meetup.location }}{% endif %} {% if meetup.event_link %}<a class="link link-primary" href="{{ meetup.event_link }}" target="_blank" rel="noopener">{{ _("Open") }}{{ ui.icon('external', 13) }}</a>{% endif %}</div>
+      <form method="post" action="/chats/{{ conv.id }}/calendar/forget"><button class="btn btn-xs">{{ _("New appointment") }}</button></form>
+    {% elif meetup %}
+      <form method="post" action="/chats/{{ conv.id }}/calendar" class="flex flex-col gap-2">
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("When") }}</span><input type="datetime-local" name="start" value="{{ meetup.start }}" required class="input input-sm w-full bg-base-200"></label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minutes") }}</span><input type="number" name="minutes" value="{{ meetup.minutes or gcal_duration }}" min="5" max="480" step="5" class="input input-sm w-full bg-base-200"></label>
+          <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Where") }}</span><input name="location" value="{{ meetup.location or '' }}" class="input input-sm w-full bg-base-200"></label>
+        </div>
+        <input type="hidden" name="summary" value="{{ meetup.summary or '' }}">
+        <div class="flex flex-wrap items-center gap-1.5"><button class="btn btn-primary btn-sm">{{ _("Add to calendar") }}</button>{% if conv.meetup %}<button class="btn btn-ghost btn-sm" formaction="/chats/{{ conv.id }}/calendar/forget">{{ _("Not an appointment") }}</button>{% endif %}</div>
+      </form>
+    {% else %}
+      <form method="post" action="/chats/{{ conv.id }}/calendar/find" hx-disabled-elt="find button"><button class="btn btn-sm w-full justify-start">{{ _("Find appointment in this chat") }}</button></form>
+      <p class="text-[12px] text-muted">{{ _("Claude reads the chat and fills in the calendar entry for you to check.") }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</aside>
 {% endblock %}

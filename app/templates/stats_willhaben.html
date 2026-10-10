@@ -1,48 +1,55 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}{{ _("willhaben requests") }} · willhaben Agent{% endblock %}
 {% block content %}
-<div class="page-head">
-  <div><a href="/settings/willhaben" class="muted" style="font-size:13px">← {{ _("willhaben account") }}</a><h1 style="margin-top:6px">{{ _("willhaben requests") }}</h1></div>
-  <nav class="seg" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/willhaben?range={{ r }}" {% if r == data.range %}aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
+{# channel colours: chart fills and legend swatches (the theme colours bg-ch-* / fill-ch-*) #}
+{% set fill_ch = {'anonymous': 'fill-ch-anonymous', 'account': 'fill-ch-account', 'chat': 'fill-ch-chat'} %}
+{% set bg_ch = {'anonymous': 'bg-ch-anonymous', 'account': 'bg-ch-account', 'chat': 'bg-ch-chat'} %}
+<div class="mb-5 flex flex-wrap items-start justify-between gap-6">
+  <div class="min-w-0"><a href="/settings/willhaben" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("willhaben account") }}</a><h1 class="mt-1.5">{{ _("willhaben requests") }}</h1></div>
+  <nav class="inline-flex flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px]" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/willhaben?range={{ r }}" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1 no-underline {{ 'bg-brand-soft font-semibold text-primary' if r == data.range else 'hover:bg-hover' }}"{% if r == data.range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
 </div>
-<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px">
-  <div class="card stat"><div class="n">{{ data.total }}</div><div class="l">{{ _("requests in this range") }}</div></div>
-  <div class="card stat"><div class="n" style="color:var(--ok)">{{ data.last_hour }}{% if data.budget %}<span class="muted" style="font-size:14px;font-weight:400"> / {{ data.budget }}</span>{% endif %}</div><div class="l">{{ _("in the last hour") }}</div></div>
-  <div class="card stat"><div class="n">{{ data.peak.total if data.peak else 0 }}</div><div class="l">{% if data.peak %}{{ _("peak at {time}", time=data.peak.label) }}{% else %}{{ _("peak") }}{% endif %}</div></div>
-  <div class="card stat"><div class="n" {% if data.blocked %}style="color:var(--bad)"{% endif %}>{{ data.blocked }}</div><div class="l">{{ _("blocked (403/429)") }}</div></div>
-  <div class="card stat"><div class="n">{{ data.cached }}</div><div class="l">{{ _("from cache (no access)") }}</div></div>
+<div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
+  <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums">{{ data.total }}</div><div class="mt-1 text-muted">{{ _("requests in this range") }}</div></div>
+  <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight text-success tabular-nums">{{ data.last_hour }}{% if data.budget %}<span class="text-sm font-normal text-muted"> / {{ data.budget }}</span>{% endif %}</div><div class="mt-1 text-muted">{{ _("in the last hour") }}</div></div>
+  <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums">{{ data.peak.total if data.peak else 0 }}</div><div class="mt-1 text-muted">{% if data.peak %}{{ _("peak at {time}", time=data.peak.label) }}{% else %}{{ _("peak") }}{% endif %}</div></div>
+  <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums {{ 'text-error' if data.blocked else '' }}">{{ data.blocked }}</div><div class="mt-1 text-muted">{{ _("blocked (403/429)") }}</div></div>
+  <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums">{{ data.cached }}</div><div class="mt-1 text-muted">{{ _("from cache (no access)") }}</div></div>
 </div>
 {% if not data.total and not data.cached %}
-<div class="card empty-state"><h3>{{ _("No willhaben requests logged in this range yet.") }}</h3><p class="muted">{{ _("Counting starts with this version; every request to willhaben is logged per minute from now on.") }}</p></div>
+{% call ui.empty(_("No willhaben requests logged in this range yet."), _("Counting starts with this version; every request to willhaben is logged per minute from now on.")) %}{% endcall %}
 {% else %}
-<section class="card pad acc-chart" style="margin-bottom:16px">
-  <style>.acc-chart text{fill:var(--muted);font-size:11px;font-family:inherit}.acc-chart .grid{stroke:var(--border)}.acc-chart .axis{stroke:var(--muted)}.acc-chart .budget{stroke:var(--text);stroke-width:1.5;stroke-dasharray:5 4;opacity:.5}.acc-chart .seg-anonymous{fill:var(--s-anonymous)}.acc-chart .seg-account{fill:var(--s-account)}.acc-chart .seg-chat{fill:var(--s-chat)}.acc-chart .hit{fill:transparent}.acc-chart g.bar:hover .hit{fill:var(--border);opacity:.45}.acc-chart .blk{fill:var(--bad)}@media(max-width:760px){.acc-chart text{font-size:20px}.acc-chart text.alt{display:none}}</style>
-  <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" style="width:100%;height:auto;display:block;overflow:visible" aria-label="{{ _('Stacked bar chart of willhaben requests per {m} min', m=(data.bucket_s // 60)) }}">
-    {% for tk in chart.yticks %}<line class="grid" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ tk.y }}" y2="{{ tk.y }}"/><text x="{{ chart.x0 - 6 }}" y="{{ tk.y + 4 }}" text-anchor="end">{{ tk.label }}</text>{% endfor %}
-    {% for b in chart.bars %}<g class="bar"><title>{{ b.title }}</title><rect class="hit" x="{{ b.x }}" y="{{ b.hit_y }}" width="{{ b.w }}" height="{{ b.hit_h }}"/>{% for s in b.segs %}<rect class="seg-{{ s.channel }}" x="{{ b.x }}" y="{{ s.y }}" width="{{ b.w }}" height="{{ s.h }}" rx="1"/>{% endfor %}{% if b.blocked %}<rect class="blk" x="{{ b.x }}" y="{{ chart.base_y + 2 }}" width="{{ b.w }}" height="3"/>{% endif %}</g>{% endfor %}
-    {% if chart.budget_y is not none %}<line class="budget" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.budget_y }}" y2="{{ chart.budget_y }}"><title>{{ _("Budget pace: {n} per bar = {h} per hour", n=chart.budget, h=data.budget) }}</title></line>{% endif %}
-    <line class="axis" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.base_y }}" y2="{{ chart.base_y }}"/>
-    {% for xl in chart.xlabels %}<text x="{{ chart.x0 if loop.first else xl.x }}" y="{{ chart.h - 6 }}" text-anchor="{{ 'start' if loop.first else 'middle' }}"{% if loop.index0 is odd %} class="alt"{% endif %}>{{ xl.label }}</text>{% endfor %}
+<section class="mb-4 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" class="block h-auto w-full overflow-visible" aria-label="{{ _('Stacked bar chart of willhaben requests per {m} min', m=(data.bucket_s // 60)) }}">
+    {% for tk in chart.yticks %}<line class="stroke-base-300" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ tk.y }}" y2="{{ tk.y }}"/><text class="fill-muted text-[20px] md:text-[13px] lg:text-[9.5px] xl:text-[8px]" x="{{ chart.x0 - 6 }}" y="{{ tk.y + 4 }}" text-anchor="end">{{ tk.label }}</text>{% endfor %}
+    {% for b in chart.bars %}<g class="group"><title>{{ b.title }}</title><rect class="fill-transparent group-hover:fill-base-300 group-hover:opacity-45" x="{{ b.x }}" y="{{ b.hit_y }}" width="{{ b.w }}" height="{{ b.hit_h }}"/>{% for s in b.segs %}<rect class="{{ fill_ch.get(s.channel, '') }}" x="{{ b.x }}" y="{{ s.y }}" width="{{ b.w }}" height="{{ s.h }}" rx="1"/>{% endfor %}{% if b.blocked %}<rect class="fill-error" x="{{ b.x }}" y="{{ chart.base_y + 2 }}" width="{{ b.w }}" height="3"/>{% endif %}</g>{% endfor %}
+    {% if chart.budget_y is not none %}<line class="stroke-base-content opacity-50" stroke-width="1.5" stroke-dasharray="5 4" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.budget_y }}" y2="{{ chart.budget_y }}"><title>{{ _("Budget pace: {n} per bar = {h} per hour", n=chart.budget, h=data.budget) }}</title></line>{% endif %}
+    <line class="stroke-muted" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.base_y }}" y2="{{ chart.base_y }}"/>
+    {% for xl in chart.xlabels %}<text class="fill-muted text-[20px] md:text-[13px] lg:text-[9.5px] xl:text-[8px]{{ ' max-md:hidden' if loop.index0 is odd else '' }}" x="{{ chart.x0 if loop.first else xl.x }}" y="{{ chart.h - 6 }}" text-anchor="{{ 'start' if loop.first else 'middle' }}">{{ xl.label }}</text>{% endfor %}
   </svg>
-  <div class="row muted" style="gap:4px 14px;font-size:12.5px;margin-top:8px">
-    {% for ch in data.channels %}<span class="row" style="gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:var(--s-{{ ch }})"></span>{{ channel_label(ch) }}</span>{% endfor %}
-    {% if chart.budget_y is not none %}<span class="row" style="gap:5px"><span style="width:14px;border-top:1.5px dashed var(--text);opacity:.5"></span>{{ _("budget pace ({n} per bar)", n=chart.budget) }}</span>{% endif %}
-    {% if data.blocked %}<span class="row" style="gap:5px"><span style="width:10px;height:3px;background:var(--bad)"></span>{{ _("blocked (403/429)") }}</span>{% endif %}
-    <span style="margin-left:auto">{{ _("One bar = {m} min, local time. Hover a bar for details.", m=(data.bucket_s // 60)) }}</span>
+  <div class="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px] text-muted">
+    {% for ch in data.channels %}<span class="flex items-center gap-1.5"><span class="size-2.5 rounded-[3px] {{ bg_ch.get(ch, '') }}"></span>{{ channel_label(ch) }}</span>{% endfor %}
+    {% if chart.budget_y is not none %}<span class="flex items-center gap-1.5"><span class="w-3.5 border-t-[1.5px] border-dashed border-base-content opacity-50"></span>{{ _("budget pace ({n} per bar)", n=chart.budget) }}</span>{% endif %}
+    {% if data.blocked %}<span class="flex items-center gap-1.5"><span class="h-[3px] w-2.5 bg-error"></span>{{ _("blocked (403/429)") }}</span>{% endif %}
+    <span class="ml-auto">{{ _("One bar = {m} min, local time. Hover a bar for details.", m=(data.bucket_s // 60)) }}</span>
   </div>
 </section>
 {% endif %}
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+<div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
   {% for title, col, rows in [(_("Channel"), _("Requests"), data.by_channel.items()|list), (_("Kind"), _("Requests"), data.by_kind.items()|list), (_("Outcome"), _("Count"), data.by_outcome.items()|list)] %}
-  <section class="card"><header style="font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:8px 12px"><span>{{ title }}</span><span>{{ col }}</span></header>
-    {% for k, n in rows %}<div class="row num"{% if title == _("Outcome") and k == 'blocked' and n %} data-outcome="blocked"{% endif %} style="justify-content:space-between;padding:6px 12px;font-size:13px;border-bottom:1px solid var(--border);{% if title == _("Outcome") and k == 'blocked' and n %}color:var(--bad);font-weight:600{% endif %}"><span class="row" style="gap:6px">{% if title == _("Channel") %}<span style="width:8px;height:8px;border-radius:2px;background:var(--s-{{ k }})"></span>{% endif %}{{ channel_label(k) if title == _("Channel") else kind_label(k) if title == _("Kind") else outcome_label(k) }}</span><span>{{ n }}</span></div>{% else %}<div class="muted" style="padding:8px 12px">–</div>{% endfor %}
+  <section class="overflow-hidden rounded-box border border-base-300 bg-base-100">
+    <header class="flex justify-between px-3 py-2 text-[11.5px] tracking-wide text-muted uppercase"><span>{{ title }}</span><span>{{ col }}</span></header>
+    {% for k, n in rows %}
+    {% set blocked_row = title == _("Outcome") and k == 'blocked' and n %}
+    <div class="flex items-center justify-between gap-1.5 border-t border-base-300 px-3 py-1.5 text-[13px] tabular-nums {{ 'font-semibold text-error' if blocked_row else '' }}"{% if blocked_row %} data-outcome="blocked"{% endif %}><span class="flex min-w-0 items-center gap-1.5">{% if title == _("Channel") %}<span class="size-2 rounded-[2px] {{ bg_ch.get(k, '') }}"></span>{% endif %}{{ channel_label(k) if title == _("Channel") else kind_label(k) if title == _("Kind") else outcome_label(k) }}</span><span>{{ n }}</span></div>
+    {% else %}<div class="border-t border-base-300 px-3 py-2 text-muted">–</div>{% endfor %}
   </section>
   {% endfor %}
 </div>
 {% if data.total or data.cached %}
-<details style="margin-top:16px"><summary class="muted" style="cursor:pointer">{{ _("Table view") }}</summary>
-  <table style="margin-top:8px"><thead><tr><th>{{ _("Time") }}</th>{% for ch in data.channels %}<th>{{ channel_label(ch) }}</th>{% endfor %}<th>{{ _("Total") }}</th><th>{{ _("blocked (403/429)") }}</th><th>{{ _("from cache (no access)") }}</th></tr></thead>
-  <tbody>{% for b in data.buckets|reverse if b.total or b.cached %}<tr class="num"><td>{{ b.label }}–{{ b.end_label }}</td>{% for ch in data.channels %}<td>{{ b[ch] }}</td>{% endfor %}<td>{{ b.total }}</td><td>{{ b.blocked }}</td><td>{{ b.cached }}</td></tr>{% endfor %}</tbody></table></details>
+<details class="mt-4"><summary class="cursor-pointer text-muted">{{ _("Table view") }}</summary>
+  <div class="mt-2 overflow-x-auto"><table class="table table-sm tabular-nums"><thead><tr><th>{{ _("Time") }}</th>{% for ch in data.channels %}<th>{{ channel_label(ch) }}</th>{% endfor %}<th>{{ _("Total") }}</th><th>{{ _("blocked (403/429)") }}</th><th>{{ _("from cache (no access)") }}</th></tr></thead>
+  <tbody>{% for b in data.buckets|reverse if b.total or b.cached %}<tr><td>{{ b.label }}–{{ b.end_label }}</td>{% for ch in data.channels %}<td>{{ b[ch] }}</td>{% endfor %}<td>{{ b.total }}</td><td>{{ b.blocked }}</td><td>{{ b.cached }}</td></tr>{% endfor %}</tbody></table></div></details>
 {% endif %}
-<p class="muted" style="font-size:12.5px;margin-top:16px">{{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }} {{ _("Answers served from the app's short cache are listed separately and are not willhaben requests. Counts are kept for 8 days; times are local.") }} <a href="/api/stats/willhaben?range={{ data.range }}">JSON</a></p>
+<p class="mt-4 text-[12.5px] text-muted">{{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }} {{ _("Answers served from the app's short cache are listed separately and are not willhaben requests. Counts are kept for 8 days; times are local.") }} <a class="link link-primary" href="/api/stats/willhaben?range={{ data.range }}">JSON</a></p>
 {% endblock %}

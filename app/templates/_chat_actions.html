@@ -1,13 +1,14 @@
+{% import "_ui.html" as ui %}
 {# hide / remove one chat, only in this app (willhaben is not touched); needs `c` (Conversation) #}
-<details class="menu" style="position:relative">
-  <summary class="btn secondary sm" style="list-style:none" aria-label="{{ _('Actions') }}">⋯</summary>
-  <div class="card" style="position:absolute;right:0;top:calc(100% + 4px);z-index:30;min-width:15rem;padding:6px;display:flex;flex-direction:column;gap:2px;box-shadow:0 12px 32px rgba(0,0,0,.18)">
-    <form method="post" action="/chats/{{ c.id }}/hide" style="margin:0">
+<div class="relative" x-data="{ open: false }" @click.outside="open = false" @keydown.escape.window="open = false">
+  <button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="{{ _('Actions') }}" aria-haspopup="menu" :aria-expanded="open" @click="open = !open">{{ ui.icon('dots', 16) }}</button>
+  <div x-cloak x-show="open" role="menu"
+       class="absolute top-full right-0 z-30 mt-1 flex min-w-60 flex-col gap-0.5 rounded-box border border-base-300 bg-base-100 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,.18)]">
+    <form method="post" action="/chats/{{ c.id }}/hide">
       <input type="hidden" name="hidden" value="{{ '0' if c.hidden_at else '1' }}">
-      <button class="btn ghost sm" style="width:100%;justify-content:flex-start">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form>
-    <form method="post" action="/chats/{{ c.id }}/remove" style="margin:0"
+      <button class="btn btn-ghost btn-sm w-full justify-start font-normal">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form>
+    <form method="post" action="/chats/{{ c.id }}/remove"
           onsubmit='return confirm({{ (_("Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.") ~ "\n\n" ~ (c.partner_name or _("unknown")) ~ " · " ~ (c.ad_title or ""))|tojson }})'>
-      <button class="btn danger sm" style="width:100%;justify-content:flex-start">{{ _("Remove from the app") }}</button></form>
+      <button class="btn btn-ghost btn-sm w-full justify-start text-error hover:bg-bad-soft">{{ _("Remove from the app") }}</button></form>
   </div>
-</details>
-<style>details.menu > summary::-webkit-details-marker { display:none; }</style>
+</div>

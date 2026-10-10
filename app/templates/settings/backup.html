@@ -1,30 +1,30 @@
 {# Settings → Backup & restore (handoff design). Download = one ZIP of everything; restore shows a preview first. #}
+{% import "_ui.html" as ui %}
 {% set last = backup.safety[0] if backup.safety else none %}
-<section class="card pad" style="display:flex;flex-direction:column;gap:14px">
-  <div class="row" style="justify-content:space-between">
-    <div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:var(--{{ 'ok' if last else 'off' }})"></span><div><div style="font-weight:600">{% if last %}{{ _("Last automatic backup {t}", t=last.created_at|local('%d.%m.%Y %H:%M')) }}{% else %}{{ _("No automatic backup yet") }}{% endif %}</div><div class="muted" style="font-size:12.5px">{{ _("Save everything in one file and bring it back later, e.g. on a new server.") }}</div></div></div>
-  </div>
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <div class="flex items-center gap-2.5"><span class="size-2 shrink-0 rounded-full {{ 'bg-success' if last else 'bg-off' }}"></span>
+    <div class="min-w-0"><div class="font-semibold">{% if last %}{{ _("Last automatic backup {t}", t=last.created_at|local('%d.%m.%Y %H:%M')) }}{% else %}{{ _("No automatic backup yet") }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Save everything in one file and bring it back later, e.g. on a new server.") }}</div></div></div>
   {% if backup.downloads %}
-  <form method="post" action="/settings/backup/export" style="display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--border);padding-top:14px">
-    <div class="msg warn" style="margin:0">{{ _("The file contains your logins and tokens (Claude, Home Assistant, Telegram, Google) and all chats. Keep it private.") }}</div>
-    <label class="switch-row"><span><span class="t">{{ _("Include the willhaben login") }}</span><span class="d">{{ _("can be large; without it you log in to willhaben again after a restore") }}</span></span><input type="checkbox" class="switch" name="include_profile"></label>
+  <form method="post" action="/settings/backup/export" class="flex flex-col gap-3.5 border-t border-base-300 pt-3.5">
+    <div class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-[13px] whitespace-pre-line text-warning">{{ _("The file contains your logins and tokens (Claude, Home Assistant, Telegram, Google) and all chats. Keep it private.") }}</div>
+    {{ ui.switch_row(_("Include the willhaben login"), _("can be large; without it you log in to willhaben again after a restore"), false, 'name="include_profile"') }}
     {% if backup.crypto %}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <label class="field"><span>{{ _("Passphrase (optional, encrypts the ZIP)") }}</span><input type="password" name="passphrase" autocomplete="new-password" minlength="8"></label>
-      <label class="field"><span>{{ _("Repeat passphrase") }}</span><input type="password" name="passphrase2" autocomplete="new-password"></label>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Passphrase (optional, encrypts the ZIP)") }}</span><input type="password" name="passphrase" autocomplete="new-password" minlength="8" class="input w-full min-w-0 bg-base-200"></label>
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Repeat passphrase") }}</span><input type="password" name="passphrase2" autocomplete="new-password" class="input w-full min-w-0 bg-base-200"></label>
     </div>
     {% endif %}
-    <div class="row"><button class="btn">{{ _("Download backup") }}</button><small class="muted">{{ _("Contains: database, tokens, ad photos and parcel labels. Not included: API recordings.") }}</small></div>
+    <div class="flex flex-wrap items-center gap-2.5"><button class="btn btn-primary">{{ _("Download backup") }}</button><small class="text-[12.5px] text-muted">{{ _("Contains: database, tokens, ad photos and parcel labels. Not included: API recordings.") }}</small></div>
   </form>
-  {% else %}<div class="msg" style="margin:0">{{ _("Set DASHBOARD_PASSWORD to enable backup downloads.") }}</div>{% endif %}
-  <form method="post" action="/settings/backup/import" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding-top:14px">
-    <span style="font-weight:550">{{ _("Restore") }}</span>
-    <div class="row" style="gap:8px"><input type="file" name="file" accept=".zip,.enc" required style="flex:1;min-width:200px">{% if backup.crypto %}<input type="password" name="passphrase" autocomplete="off" placeholder="{{ _('Passphrase (only for encrypted backups)') }}" style="flex:1;min-width:180px">{% endif %}<button class="btn outline-danger">{{ _("Restore…") }}</button></div>
-    <small class="muted">{{ _("Nothing is changed yet: you see what the backup contains and confirm first.") }}</small>
+  {% else %}<div class="rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]">{{ _("Set DASHBOARD_PASSWORD to enable backup downloads.") }}</div>{% endif %}
+  <form method="post" action="/settings/backup/import" enctype="multipart/form-data" class="flex flex-col gap-2 border-t border-base-300 pt-3.5">
+    <span class="font-medium">{{ _("Restore") }}</span>
+    <div class="flex flex-wrap items-center gap-2"><input type="file" name="file" accept=".zip,.enc" required class="file-input min-w-0 flex-1 basis-[200px]">{% if backup.crypto %}<input type="password" name="passphrase" autocomplete="off" placeholder="{{ _('Passphrase (only for encrypted backups)') }}" class="input min-w-0 flex-1 basis-[180px] bg-base-200">{% endif %}<button class="btn btn-outline btn-error">{{ _("Restore…") }}</button></div>
+    <small class="text-[12.5px] text-muted">{{ _("Nothing is changed yet: you see what the backup contains and confirm first.") }}</small>
   </form>
   {% if backup.safety %}
-  <div style="display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border);padding-top:14px"><span style="font-weight:550">{{ _("Automatic backups before the last imports (newest {n} are kept):", n=backup.keep) }}</span>
-    {% for b in backup.safety %}<div class="row num" style="justify-content:space-between;font-size:13px"><span>{{ b.created_at|local("%d.%m.%Y %H:%M") }} <span class="muted">· {{ b.size|filesizeformat }}</span></span>{% if backup.downloads %}<a href="/settings/backup/file/{{ b.name }}" download>{{ _("Download") }}</a>{% endif %}</div>{% endfor %}
+  <div class="flex flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="font-medium">{{ _("Automatic backups before the last imports (newest {n} are kept):", n=backup.keep) }}</span>
+    {% for b in backup.safety %}<div class="flex flex-wrap items-center justify-between gap-2 text-[13px] tabular-nums"><span>{{ b.created_at|local("%d.%m.%Y %H:%M") }} <span class="text-muted">· {{ b.size|filesizeformat }}</span></span>{% if backup.downloads %}<a class="link link-primary no-underline" href="/settings/backup/file/{{ b.name }}" download>{{ _("Download") }}</a>{% endif %}</div>{% endfor %}
   </div>
   {% endif %}
 </section>

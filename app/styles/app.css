@@ -1,0 +1,155 @@
+/* willhaben Agent UI: Tailwind CSS + daisyUI with the 1b design tokens.
+   Build: scripts/build-css.sh -> app/static/app.css (committed). Guide: docs/ui-guide.md */
+@import "tailwindcss" source(none);
+@source "../templates";
+
+@plugin "../../build/css-tools/daisyui.mjs" {
+  themes: light --default, dark --prefersdark;
+}
+
+/* 1b tokens on daisyUI's names: base-100 = surface, base-200 = page background, base-300 = borders */
+@plugin "../../build/css-tools/daisyui-theme.mjs" {
+  name: "light";
+  default: true;
+  --color-base-100: #ffffff;
+  --color-base-200: #f5f7fa;
+  --color-base-300: #e3e7ee;
+  --color-base-content: #1f2430;
+  --color-primary: #0b8ea2;
+  --color-primary-content: #ffffff;
+  --color-secondary: #5c6472;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0b8ea2;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1f2430;
+  --color-neutral-content: #ffffff;
+  --color-info: #0b8ea2;
+  --color-info-content: #ffffff;
+  --color-success: #2b8a3e;
+  --color-success-content: #ffffff;
+  --color-warning: #9a5b00;
+  --color-warning-content: #ffffff;
+  --color-error: #d9383e;
+  --color-error-content: #ffffff;
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.225rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+@plugin "../../build/css-tools/daisyui-theme.mjs" {
+  name: "dark";
+  prefersdark: true;
+  --color-base-100: #171c26;
+  --color-base-200: #0f1218;
+  --color-base-300: #2a3240;
+  --color-base-content: #e6eaf0;
+  --color-primary: #3cc2d6;
+  --color-primary-content: #06262c;
+  --color-secondary: #9aa3b4;
+  --color-secondary-content: #0f1218;
+  --color-accent: #3cc2d6;
+  --color-accent-content: #06262c;
+  --color-neutral: #e6eaf0;
+  --color-neutral-content: #0f1218;
+  --color-info: #3cc2d6;
+  --color-info-content: #06262c;
+  --color-success: #6fd37f;
+  --color-success-content: #0b2412;
+  --color-warning: #f3b955;
+  --color-warning-content: #2b1d05;
+  --color-error: #f58b8e;
+  --color-error-content: #2e0d0e;
+  --radius-selector: 1rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.225rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* 1b colours daisyUI has no slot for: text-muted, bg-hover, bg-brand-soft, bg-ok-soft, … */
+@theme {
+  --color-muted: var(--wh-muted);
+  --color-hover: var(--wh-hover);
+  --color-off: var(--wh-off);
+  --color-brand-soft: var(--wh-brand-soft);
+  --color-ok-soft: var(--wh-ok-soft);
+  --color-warn-soft: var(--wh-warn-soft);
+  --color-bad-soft: var(--wh-bad-soft);
+  /* willhaben request channels (usage popup, statistics) */
+  --color-ch-anonymous: #2a78d6;
+  --color-ch-account: #eb6834;
+  --color-ch-chat: #1baf7a;
+  /* price gauge levels */
+  --color-lvl-bargain: #2f9e44;
+  --color-lvl-cheap: #66a80f;
+  --color-lvl-fair: #b38600;
+  --color-lvl-expensive: #f76707;
+  --color-lvl-very_expensive: #e5484d;
+  --font-sans: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --spacing-rail: 72px;
+  --spacing-rail-x: 232px;
+  --spacing-tabbar: 64px;
+}
+:root {
+  --wh-muted: #5c6472; --wh-hover: #eef1f6; --wh-off: #c9d0da;
+  --wh-brand-soft: #e1f4f7; --wh-ok-soft: #e4f4e8; --wh-warn-soft: #fff1d6; --wh-bad-soft: #fdeaea;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wh-muted: #9aa3b4; --wh-hover: #1f2633; --wh-off: #3d4654;
+    --wh-brand-soft: #123b43; --wh-ok-soft: #163a21; --wh-warn-soft: #3a2a10; --wh-bad-soft: #3f1d1f;
+  }
+}
+:root[data-theme="dark"] {
+  --wh-muted: #9aa3b4; --wh-hover: #1f2633; --wh-off: #3d4654;
+  --wh-brand-soft: #123b43; --wh-ok-soft: #163a21; --wh-warn-soft: #3a2a10; --wh-bad-soft: #3f1d1f;
+}
+
+/* busy: an element htmx is sending for (hx-indicator target) and everything inside it */
+@custom-variant busy (&:is(.htmx-request, .htmx-request *));
+/* rail-x: the sidebar is expanded (html[data-rail=expanded]) */
+@custom-variant rail-x (&:where([data-rail="expanded"] *));
+
+@layer base {
+  body { font-size: 14px; line-height: 1.45; }
+  h1 { font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  h2 { font-size: 18px; font-weight: 650; }
+  h3 { font-size: 15px; font-weight: 650; }
+  [x-cloak] { display: none !important; }
+}
+
+/* Tweaks to daisyUI components. daisyUI lives in sub-layers of `utilities`, so these sit directly in `utilities`
+   (stronger than daisyUI) and use :where() (specificity 0) so real Tailwind utilities such as text-error still win. */
+@layer utilities {
+  /* phone layout: the fixed tab bar is as wide as the window minus a classic scrollbar, so the track is always shown;
+     otherwise the tabs shift a few pixels between pages that scroll and pages that don't (overlay scrollbars show nothing) */
+  @media (max-width: 767px) { :where(html) { overflow-y: scroll; } }
+  /* 1b buttons: medium weight; a plain .btn is the 1b "secondary" button (surface + border), .btn-primary the filled one */
+  :where(.btn) { font-weight: 500; }
+  :where(.btn:not(:is(.btn-primary, .btn-secondary, .btn-accent, .btn-neutral, .btn-info, .btn-success, .btn-warning, .btn-error,
+                      .btn-ghost, .btn-link, .btn-outline, .btn-soft, .btn-dash, .btn-disabled, :disabled))) {
+    --btn-bg: var(--color-base-100); --btn-border: var(--color-base-300);
+  }
+  :where(.btn:not(:is(.btn-primary, .btn-secondary, .btn-accent, .btn-neutral, .btn-info, .btn-success, .btn-warning, .btn-error,
+                      .btn-ghost, .btn-link, .btn-outline, .btn-soft, .btn-dash, .btn-disabled, :disabled)):hover) {
+    --btn-border: var(--wh-muted);
+  }
+  :where(.btn-ghost:not(:hover)) { color: var(--wh-muted); }
+  :where(.btn-ghost:hover) { --btn-bg: var(--wh-hover); --btn-border: transparent; }
+}
+
+@layer components {
+  /* price gauge track (green -> red) */
+  .deal-track { height: 8px; border-radius: 4px; position: relative;
+                background: linear-gradient(90deg, #2f9e44 0%, #94c11f 28%, #f5c400 50%, #f76707 75%, #e5484d 100%); }
+  .htmx-indicator { display: none; }
+  .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
+}

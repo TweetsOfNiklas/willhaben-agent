@@ -1,8 +1,9 @@
-{# willhaben Agent — base layout (1b design). Replaces the Pico top-nav shell.
-   Expects: ui_lang(), _(), session_status, app_version, app_author, auth_enabled(), wh_limiter(), wh_used(), wh_budget(),
-   purchase_notice(), ui_lang_pref(), ui_langs, embed, msg, error — all as in the previous base.html.
-   Optional (new): nav_counts = {"hits": n, "chats": n, "purchases": n}, claude_usage = {"used": tokens, "limit": tokens},
-   current_user = display name. All guarded with `is defined`. #}
+{# willhaben Agent: page shell (1b design on Tailwind CSS + daisyUI, Alpine.js, htmx). Guide: docs/ui-guide.md
+   Expects: ui_lang(), _(), session_status, app_version, app_author, auth_enabled(), wh_limiter(), wh_used(), wh_budget(), wh_popup(),
+   purchase_notice(), ui_lang_pref(), ui_langs, embed, msg, error. Optional: nav_counts, claude_usage, inbox_items, inbox_unread, current_user.
+   Pages choose the layout with top-level sets: {% set layout = "split" %} (list → detail) and {% set has_detail = true %}
+   (phone: show the detail instead of the list). Default: one centered column. #}
+{% import "_ui.html" as ui %}
 <!doctype html>
 <html lang="{{ ui_lang() }}">
 <head>
@@ -11,50 +12,51 @@
   <title>{% block title %}willhaben Agent{% endblock %}</title>
   <script>
     try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
-          const r = localStorage.getItem('rail'); if (r === 'expanded') document.documentElement.dataset.rail = 'expanded'; } catch (e) {}
+          document.documentElement.dataset.rail = localStorage.getItem('rail') === 'expanded' ? 'expanded' : 'collapsed'; } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/static/ui.css">
-  <link rel="stylesheet" href="/static/legacy.css">{# pages not ported yet set main_class "page legacy" #}
-  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_version() }}">
+  <script src="/static/vendor/htmx-2.0.11.min.js" defer></script>
+  <script src="/static/vendor/alpinejs-3.17.4.min.js" defer></script>
   {% block head %}{% endblock %}
-  {# window.wbBuy (buy dialog maths) moved verbatim from the old base.html into this include #}
+  {# window.wbBuy (buy dialog maths) #}
   {% include "_buy_script.html" ignore missing %}
 </head>
-<body class="{% if embed %}embed{% else %}app{% endif %}">
+<body class="min-h-screen bg-base-200 text-base-content" {% if embed %}data-embed{% endif %} x-data="shell" @keydown.window="keys($event)">
+{% set split = layout is defined and layout == 'split' %}
+{% set detail = has_detail is defined and has_detail %}
 {% if not embed %}
 {% set counts = nav_counts if nav_counts is defined else {} %}
-{% set wh_bad = session_status.started and not session_status.logged_in %}
-{% macro ico(name) -%}
-  {%- if name == 'home' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg>
-  {%- elif name == 'search' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 21l-4.3-4.3"/><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z"/></svg>
-  {%- elif name == 'target' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-  {%- elif name == 'box' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v9"/></svg>
-  {%- elif name == 'cart' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h2l2.4 12.4a2 2 0 0 0 2 1.6h9.2a2 2 0 0 0 2-1.6L22 7H6"/><path d="M9 21h.01"/><path d="M18 21h.01"/></svg>
-  {%- elif name == 'chat' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-  {%- elif name == 'tag' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><path d="M7 7h.01"/></svg>
-  {%- elif name == 'plus' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-  {%- elif name == 'settings' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.2 14H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.2V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.8 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 20.8 10h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-  {%- elif name == 'bell' %}<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
-  {%- elif name == 'bot' %}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>
-  {%- elif name == 'globe' %}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/></svg>
-  {%- elif name == 'monitor' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12"/><path d="M8 20h8M12 16v4"/></svg>
-  {%- elif name == 'bug' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9"/><path d="M9 7h6a4 4 0 0 1 4 4v3a7 7 0 0 1-14 0v-3a4 4 0 0 1 4-4z"/><path d="M3 13h2M19 13h2M12 7v14"/></svg>
-  {%- elif name == 'logout' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
-  {%- elif name == 'collapse' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 6l-6 6 6 6M3 4v16"/></svg>
-  {%- elif name == 'expand' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6M21 4v16"/></svg>
-  {%- elif name == 'moon' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-  {%- elif name == 'sun' %}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-  {%- endif -%}
+{% set path = request.url.path if request is defined else '' %}
+{# willhaben login: off = browser not running, bad = running but logged out, ok = logged in #}
+{% set wh_state = 'off' if not session_status.started else ('ok' if session_status.logged_in else 'bad') %}
+{% set who = current_user if current_user is defined else (session_status.user.nickname if session_status.user else '') %}
+{% macro is_current(href) -%}
+  {{- 'page' if path == href or (href != '/' and path.startswith(href + '/')) or (href == '/new-ad' and path.startswith('/ad-')) else '' -}}
 {%- endmacro %}
 {% macro item(href, icon, label, count=0) -%}
-  <a class="rail-item" href="{{ href }}" title="{{ label }}" data-nav>
-    <span class="ico">{{ ico(icon) }}</span><span class="lbl">{{ label }}</span>
-    {% if count %}<span class="badge dot">{{ count }}</span>{% endif %}
+  <a href="{{ href }}" title="{{ label }}" {% if is_current(href) %}aria-current="page"{% endif %}
+     class="relative flex h-11 w-full shrink-0 items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-base-content no-underline hover:bg-hover aria-[current=page]:bg-brand-soft aria-[current=page]:font-semibold aria-[current=page]:text-primary">
+    {{ ui.icon(icon) }}<span class="hidden min-w-0 flex-1 truncate rail-x:block">{{ label }}</span>
+    {% if count %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static rail-x:min-w-[18px] rail-x:text-[11px] rail-x:leading-[18px]" data-count="{{ count }}">{{ count }}</span>{% endif %}
   </a>
 {%- endmacro %}
+{% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
+{% set pct = ([100, (used * 100 / budget)|round|int]|min) if budget else 0 %}
+{% set tone = 'full' if (budget and (pct >= 90 or lim.cooling_down_s)) else ('warn' if pct >= 60 else 'ok') %}
+{% set ring_tone = {'full': 'bad', 'warn': 'warn'}.get(tone, 'ok') %}
+{% set cu = claude_usage if claude_usage is defined and claude_usage else none %}
+{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu and cu.limit else 0 %}
+{% set ctone = 'bad' if cpct >= 90 else 'warn' if cpct >= 60 else 'brand' %}
+{% macro tokens(n) -%}{{ ('%.1f M'|format(n / 1e6)) if n >= 1e6 else ('%d k'|format((n / 1e3)|round|int)) }}{%- endmacro %}
+{% set layer_box = "absolute bottom-4 left-[84px] rail-x:left-[244px] max-md:inset-x-3 max-md:bottom-[76px] max-md:w-auto rounded-box border border-base-300 bg-base-100 shadow-[0_12px_32px_rgba(0,0,0,.18)]" %}
 
-<aside class="rail" aria-label="{{ _('Navigation') }}">
-  <a href="/" class="brand"><span class="logo">w</span><span class="lbl">willhaben Agent</span></a>
+<div class="min-h-screen md:grid md:grid-cols-[72px_minmax(0,1fr)] md:transition-[grid-template-columns] md:duration-200 rail-x:md:grid-cols-[232px_minmax(0,1fr)]">
+<aside id="rail" aria-label="{{ _('Navigation') }}"
+       class="sticky top-0 hidden h-screen flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-base-300 bg-base-100 px-3 py-4 md:flex">
+  <a href="/" class="mb-3.5 flex h-8 shrink-0 items-center gap-2.5 px-1.5 text-[15px] font-semibold whitespace-nowrap text-base-content no-underline">
+    <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-primary text-[17px] font-extrabold text-primary-content">w</span>
+    <span class="hidden rail-x:inline">willhaben Agent</span>
+  </a>
   {{ item('/', 'home', _("Home")) }}
   {{ item('/agents', 'search', _("Search agents")) }}
   {{ item('/hits', 'target', _("Hits"), counts.get('hits', 0)) }}
@@ -63,151 +65,211 @@
   {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0)) }}
   {{ item('/myads', 'tag', _("My ads")) }}
   {{ item('/new-ad', 'plus', _("New ad")) }}
-  <div class="spacer"></div>
+  <div class="min-h-4 flex-1"></div>
 
-  {# ---- meters: Claude tokens (optional) + willhaben requests ---- #}
-  {% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
-  {% set pct = ([100, (used * 100 / budget)|round|int]|min) if budget else 0 %}
-  {% set tone = 'full' if (budget and (pct >= 90 or lim.cooling_down_s)) else ('warn' if pct >= 60 else '') %}
-  <div class="meters">
-    {% if claude_usage is defined and claude_usage %}
-      {% set cu = claude_usage %}{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
-      <a class="meter" href="/settings/claude" data-pop="claude" title="{{ _('Claude tokens this month') }}">
-        <span class="ico">{{ ico('bot') }}</span><span>Claude</span>
-        <span class="val num">{{ '%.1f'|format(cu.used / 1e6) }} M<span> / {{ (cu.limit / 1e6)|round|int }} M</span></span>
-        <span class="bar brand {{ 'full' if cpct >= 90 else 'warn' if cpct >= 60 else '' }}"><span style="width:{{ cpct }}%"></span></span>
-      </a>
+  {# meters (expanded rail) / ring gauges (collapsed rail): Claude tokens and willhaben requests #}
+  <div class="mx-1.5 mb-1.5 hidden shrink-0 flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-200 px-2.5 pt-2.5 pb-2 rail-x:flex">
+    {% if cu %}
+    <a href="/settings/claude" data-pop="claude" title="{{ _('Claude tokens this month') }}" @click="pop($event, 'claude')"
+       class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content">
+      {{ ui.icon('bot', 12, 2.5) }}<span>Claude</span>
+      <span class="font-semibold text-base-content tabular-nums">{{ '%.1f'|format(cu.used / 1e6) }} M<span class="font-normal text-muted"> / {{ (cu.limit / 1e6)|round|int }} M</span></span>
+      {{ ui.bar(cpct, {'bad': 'full', 'warn': 'warn'}.get(ctone, 'brand'), 'col-span-3 h-1') }}
+    </a>
     {% endif %}
-    <a class="meter" href="/stats/willhaben" data-pop="usage" title="{% if budget %}{{ _('{used} / {budget} willhaben requests in the last hour', used=used, budget=budget) }}{% else %}{{ _('{used} willhaben requests in the last hour', used=used) }}{% endif %}">
-      <span class="ico">{{ ico('globe') }}</span><span>willhaben / h</span>
-      <span class="val num">{{ used }}{% if budget %}<span> / {{ budget }}</span>{% endif %}</span>
-      {% if budget %}<span class="bar {{ tone }}"><span style="width:{{ 100 if lim.cooling_down_s else pct }}%"></span></span>{% endif %}
+    <a href="/stats/willhaben" data-pop="usage" @click="pop($event, 'usage')"
+       title="{% if budget %}{{ _('{used} / {budget} willhaben requests in the last hour', used=used, budget=budget) }}{% else %}{{ _('{used} willhaben requests in the last hour', used=used) }}{% endif %}"
+       class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content">
+      {{ ui.icon('globe', 12) }}<span>willhaben / h</span>
+      <span class="font-semibold text-base-content tabular-nums">{{ used }}{% if budget %}<span class="font-normal text-muted"> / {{ budget }}</span>{% endif %}</span>
+      {% if budget %}{{ ui.bar(100 if lim.cooling_down_s else pct, tone, 'col-span-3 h-1') }}{% endif %}
     </a>
   </div>
-  {% if claude_usage is defined and claude_usage %}{% set cu = claude_usage %}{% set cfrac = ([1, cu.used / cu.limit]|min) if cu.limit else 0 %}
-  <a class="gauge" href="/settings/claude" data-pop="claude" title="{{ _('Claude usage this month: {used} M of your {limit} M token limit (covered by the subscription)', used='%.1f'|format(cu.used / 1e6), limit=(cu.limit / 1e6)|round|int) }}" style="position:relative;height:40px">
-    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/>
-      <circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if cfrac >= 0.9 else 'warn' if cfrac >= 0.6 else 'brand' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - cfrac))|round(1) }}"/></svg>
-    <span class="n" style="display:grid;place-items:center">{{ ico('bot') }}</span>
+  {% if cu %}
+  <a href="/settings/claude" @click="pop($event, 'claude')" class="relative grid h-10 shrink-0 place-items-center text-muted rail-x:hidden"
+     title="{{ _('Claude usage this month: {used} M of your {limit} M token limit (covered by the subscription)', used='%.1f'|format(cu.used / 1e6), limit=(cu.limit / 1e6)|round|int) }}">
+    {{ ui.ring(cpct / 100, ctone) }}<span class="absolute inset-0 grid place-items-center text-base-content">{{ ui.icon('bot', 12, 2.5) }}</span>
   </a>
   {% endif %}
-  <a class="gauge" href="/stats/willhaben" data-pop="usage" title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}" style="position:relative">
-    <svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/>
-      <circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if tone == 'full' else 'warn' if tone == 'warn' else 'ok' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - pct / 100))|round(1) }}"/></svg>
-    <span class="n">{{ used }}</span>
+  <a href="/stats/willhaben" @click="pop($event, 'usage')" class="relative grid h-11 shrink-0 place-items-center text-muted rail-x:hidden"
+     title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}">
+    {{ ui.ring(pct / 100, ring_tone) }}<span class="absolute inset-0 grid place-items-center text-[9px] font-bold text-base-content">{{ used }}</span>
   </a>
 
-  <button class="rail-item sm" type="button" id="rail-toggle" title="{{ _('Expand / collapse sidebar') }}"><span class="ico"><span class="x-only">{{ ico('collapse') }}</span><span class="c-only">{{ ico('expand') }}</span></span><span class="lbl">{{ _("Collapse") }}</span></button>
+  <button type="button" @click="rail = !rail" title="{{ _('Expand / collapse sidebar') }}"
+          class="flex h-10 w-full shrink-0 items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-muted hover:bg-hover hover:text-base-content">
+    <span class="hidden rail-x:inline">{{ ui.icon('collapse', 16) }}</span><span class="rail-x:hidden">{{ ui.icon('expand', 16) }}</span>
+    <span class="hidden rail-x:inline">{{ _("Collapse") }}</span>
+  </button>
 
-  <div class="rail-foot">
-    <button class="rail-item sm" type="button" id="inbox-toggle" title="{{ _('Inbox') }}"><span class="ico">{{ ico('bell') }}</span><span class="lbl">{{ _("Inbox") }}</span>{% if inbox_unread is defined and inbox_unread %}<span class="badge dot">{{ inbox_unread }}</span>{% endif %}</button>
-    <button class="account" type="button" id="account-toggle" aria-haspopup="menu" aria-expanded="false">
-      <span class="avatar">{{ ((current_user if current_user is defined else (session_status.user.nickname if session_status.user else 'w')) or 'w')[:1]|upper }}</span>
-      <span class="lbl"><span style="display:block;font-weight:550">{{ current_user if current_user is defined else (session_status.user.nickname if session_status.user else 'willhaben Agent') }}</span>
-        <span style="display:block;color:var(--muted);font-size:12px">{% if wh_bad %}<span style="color:var(--bad)">{{ _("not logged in") }}</span>{% elif session_status.logged_in %}willhaben · {{ _("logged in") }}{% else %}v{{ app_version }}{% endif %}</span></span>
-      {% if wh_bad %}<span class="badge warn" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}
+  <div class="mt-1 shrink-0 border-t border-base-300 pt-2">
+    <button type="button" @click="toggle('inbox')" title="{{ _('Inbox') }}"
+            class="relative flex h-10 w-full items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-muted hover:bg-hover hover:text-base-content">
+      {{ ui.icon('bell', 18) }}<span class="hidden flex-1 text-left rail-x:inline">{{ _("Inbox") }}</span>
+      {% if inbox_unread is defined and inbox_unread %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static" data-count="{{ inbox_unread }}">{{ inbox_unread }}</span>{% endif %}
+    </button>
+    <button type="button" id="account-toggle" @click="toggle('account')" aria-haspopup="menu" :aria-expanded="layer === 'account'"
+            class="flex h-11 w-full items-center gap-2.5 rounded-[10px] px-1.5 text-left whitespace-nowrap hover:bg-hover">
+      <span class="relative grid size-8 shrink-0 place-items-center rounded-full bg-brand-soft text-[13px] font-bold text-primary">{{ (who or 'w')[:1]|upper }}
+        {% if wh_state == 'bad' %}<span class="absolute -top-1 -right-1 min-w-4 rounded-full bg-error px-1 text-center text-[10px] leading-4 font-bold text-error-content rail-x:hidden" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}</span>
+      <span class="hidden min-w-0 flex-1 rail-x:block">
+        <span class="block truncate font-medium">{{ who or 'willhaben Agent' }}</span>
+        <span class="block truncate text-xs {{ {'bad': 'text-error', 'off': 'text-muted'}.get(wh_state, 'text-muted') }}">{% if wh_state == 'bad' %}{{ _("not logged in") }}{% elif wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben · {{ _("logged in") }}{% endif %}</span>
+      </span>
+      {% if wh_state == 'bad' %}<span class="hidden min-w-[18px] rounded-full bg-error px-1.5 text-center text-[11px] leading-[18px] font-bold text-error-content rail-x:inline" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}
     </button>
   </div>
 </aside>
 
-{# ---- account menu (popover) ---- #}
-<div class="layer" id="account-menu" hidden>
-  <div class="backdrop" data-close></div>
-  <div class="popover" role="menu">
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 8px 10px;border-bottom:1px solid var(--border);margin-bottom:4px">
-      <span class="avatar" style="width:36px;height:36px;font-size:14px">{{ ((current_user if current_user is defined else 'w') or 'w')[:1]|upper }}</span>
-      <span style="min-width:0"><span style="display:block;font-weight:600">{{ current_user if current_user is defined else 'willhaben Agent' }}</span>
-        <span style="display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px"><span style="width:6px;height:6px;border-radius:50%;background:var(--{{ 'bad' if wh_bad else 'ok' }})"></span>{% if wh_bad %}{{ _("not logged in to willhaben") }}{% else %}willhaben {{ _("logged in") }}{% endif %}</span></span>
+<main class="{% if split %}grid min-w-0 pb-[64px] md:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] md:pb-0{% else %}mx-auto w-full max-w-[1240px] min-w-0 px-4 pt-5 pb-[80px] md:px-9 md:pt-7 md:pb-10{% endif %}"
+      {% if split %}data-split{% endif %}>
+  {% set notice_text = purchase_notice() %}
+  {% if not split %}
+    {% if notice_text %}{{ ui.msg(notice_text) }}{% endif %}
+    {% if msg %}{{ ui.msg(msg) }}{% endif %}
+    {% if error %}{{ ui.msg(error, 'error') }}{% endif %}
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</div>
+
+{# split pages have no room for a message bar: messages come as toasts #}
+{% if split and (notice_text or msg or error) %}
+<div class="toast toast-end toast-bottom z-50 max-md:bottom-[72px]" x-data>
+  {% for text, bad in [(notice_text, false), (msg, false), (error, true)] if text %}
+  <div role="status" class="alert max-w-sm text-sm whitespace-pre-line shadow-lg {{ 'alert-error' if bad else 'border-base-300 bg-base-100' }}"
+       x-init="setTimeout(() => $el.remove(), {{ 12000 if bad else 7000 }})">{{ text }}<button class="btn btn-ghost btn-xs btn-square" @click="$el.parentElement.remove()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 14) }}</button></div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ---- account menu ---- #}
+<div id="account-menu" x-cloak x-show="layer === 'account'" class="fixed inset-0 z-[90]" @click.self="close()">
+  <div class="{{ layer_box }} flex w-[248px] flex-col gap-0.5 p-1.5" role="menu">
+    <div class="mb-1 flex items-center gap-2.5 border-b border-base-300 px-2 pt-2 pb-2.5">
+      <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-sm font-bold text-primary">{{ (who or 'w')[:1]|upper }}</span>
+      <span class="min-w-0"><span class="block truncate font-semibold">{{ who or 'willhaben Agent' }}</span>
+        <span class="flex items-center gap-1.5 text-xs text-muted"><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span>{% if wh_state == 'bad' %}{{ _("not logged in to willhaben") }}{% elif wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben {{ _("logged in") }}{% endif %}</span></span>
     </div>
-    <a class="menu-item" href="/settings/willhaben" role="menuitem"><span class="ico">{{ ico('tag') }}</span><span style="flex:1">{{ _("willhaben account") }}</span></a>
-    <a class="menu-item" href="/session" data-remote role="menuitem"><span class="ico">{{ ico('monitor') }}</span><span style="flex:1">{{ _("Browser window") }}</span><span style="width:6px;height:6px;border-radius:50%;background:var(--{{ 'bad' if wh_bad else 'ok' }})"></span></a>
-    <a class="menu-item" href="/settings/claude" role="menuitem"><span class="ico">{{ ico('bot') }}</span><span style="flex:1">{{ _("Claude & usage") }}</span></a>
-    <a class="menu-item" href="/settings" role="menuitem"><span class="ico">{{ ico('settings') }}</span><span style="flex:1">{{ _("Settings") }}</span></a>
-    <form method="post" action="/lang" class="menu-item" style="cursor:default">
-      <span class="ico">{{ ico('globe') }}</span><span style="flex:1">{{ _("Language") }}</span>
-      <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()" style="width:auto;max-width:112px;min-width:0;padding:2px 22px 2px 6px;font-size:12.5px;background-color:var(--bg);text-overflow:ellipsis">
+    <ul class="menu w-full gap-0.5 p-0">
+      <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}{{ _("willhaben account") }}</a></li>
+      <li><a href="/session" data-remote role="menuitem">{{ ui.icon('monitor', 16) }}<span class="flex-1">{{ _("Browser window") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
+      <li><a href="/settings/claude" role="menuitem">{{ ui.icon('bot', 16) }}{{ _("Claude & usage") }}</a></li>
+      <li><a href="/settings" role="menuitem">{{ ui.icon('settings', 16) }}{{ _("Settings") }}</a></li>
+      <li><form method="post" action="/lang" class="flex cursor-default items-center gap-2 hover:bg-transparent">
+        {{ ui.icon('globe', 16) }}<span class="flex-1">{{ _("Language") }}</span>
         {% set pref = ui_lang_pref() %}
-        <option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic") }}</option>
-        {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
-      </select>
-    </form>
-    <button class="menu-item" type="button" id="theme-toggle" role="menuitem"><span class="ico" id="theme-icon">{{ ico('moon') }}</span><span style="flex:1" id="theme-label">{{ _("Dark mode") }}</span></button>
-    <a class="menu-item" href="/bugreport" role="menuitem"><span class="ico">{{ ico('bug') }}</span><span style="flex:1">{{ _("Report a bug") }}</span></a>
-    {% if auth_enabled() %}
-    <div class="menu-sep"></div>
-    <form method="post" action="/logout" style="margin:0"><button class="menu-item danger" role="menuitem"><span class="ico">{{ ico('logout') }}</span><span style="flex:1">{{ _("Log out") }}</span></button></form>
-    {% endif %}
-        <div style="padding:6px 10px 4px;color:var(--muted);font-size:11.5px" class="row"><span style="flex:1">willhaben Agent v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span><a href="/credits">{{ _("Credits") }}</a></div>
+        <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()" class="select select-xs w-auto max-w-[112px] bg-base-200">
+          <option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic") }}</option>
+          {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select>
+      </form></li>
+      <li><button type="button" @click="toggleTheme()" role="menuitem">
+        <span x-show="!dark">{{ ui.icon('moon', 16) }}</span><span x-show="dark" x-cloak>{{ ui.icon('sun', 16) }}</span>
+        <span x-text="dark ? {{ _('Light mode')|tojson|forceescape }} : {{ _('Dark mode')|tojson|forceescape }}">{{ _("Dark mode") }}</span></button></li>
+      <li><a href="/bugreport" role="menuitem">{{ ui.icon('bug', 16) }}{{ _("Report a bug") }}</a></li>
+      {% if auth_enabled() %}
+      <li class="mt-1 border-t border-base-300 pt-1"><form method="post" action="/logout" class="p-0"><button class="flex w-full items-center gap-2 px-3 py-1.5 text-error" role="menuitem">{{ ui.icon('logout', 16) }}{{ _("Log out") }}</button></form></li>
+      {% endif %}
+    </ul>
+    <div class="flex items-center gap-2 px-2.5 pt-1.5 pb-1 text-[11.5px] text-muted"><span class="flex-1">willhaben Agent v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span><a class="link link-primary no-underline" href="/credits">{{ _("Credits") }}</a></div>
   </div>
 </div>
 
-{# ---- willhaben usage popover (prototype "willhaben usage popup"): last hour per channel, last 6 h, hourly budget ---- #}
+{# ---- willhaben usage: last hour per channel, last 6 h, hourly budget ---- #}
 {% set wp = wh_popup() %}
-<div class="layer" id="usage-pop" hidden>
-  <div class="backdrop" data-close></div>
-  <div class="popover wide">
-    <div style="display:flex;align-items:center;gap:10px">
-      <span style="position:relative;width:30px;height:30px;display:grid;place-items:center;flex:none"><svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate(-90deg)"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/><circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if tone == 'full' else 'warn' if tone == 'warn' else 'ok' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - pct / 100))|round(1) }}"/></svg></span>
-      <div style="flex:1;min-width:0"><div style="font-weight:600">{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _("willhaben requests") }}</div>
-        <div class="muted" style="font-size:12.5px">{% if lim.cooling_down_s %}{{ _("willhaben pause: {n} min left", n=(lim.cooling_down_s / 60)|round(0, 'ceil')|int) }}{% else %}{{ _("in the last hour") }}{% if budget %} · {{ _("{n} % of the budget", n=pct) }}{% endif %}{% endif %}</div></div>
-      <button class="icon-btn" type="button" data-close aria-label="{{ _('Close') }}">✕</button>
+<div id="usage-pop" x-cloak x-show="layer === 'usage'" class="fixed inset-0 z-[90]" @click.self="close()">
+  <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5">
+    <div class="flex items-center gap-2.5">
+      {{ ui.ring(pct / 100, ring_tone) }}
+      <div class="min-w-0 flex-1"><div class="font-semibold">{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _("willhaben requests") }}</div>
+        <div class="text-[12.5px] text-muted">{% if lim.cooling_down_s %}{{ _("willhaben pause: {n} min left", n=(lim.cooling_down_s / 60)|round(0, 'ceil')|int) }}{% else %}{{ _("in the last hour") }}{% if budget %} · {{ _("{n} % of the budget", n=pct) }}{% endif %}{% endif %}</div></div>
+      <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
     </div>
-    <div style="height:6px;border-radius:3px;background:var(--border);overflow:hidden;display:flex">{% set denom = budget if budget and budget > wp.total else (wp.total or 1) %}{% for c in wp.channels if c.n %}<span title="{{ c.label }} {{ c.n }}" style="width:{{ [c.n * 100 / denom, 1.5]|max|round(1) }}%;height:100%;background:{{ c.color }}"></span>{% endfor %}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:12.5px">{% for c in wp.channels %}<div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:{{ c.color }};flex:none"></span><span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.label }}</span><span class="num" style="margin-left:auto">{{ c.n }}</span></div>{% endfor %}</div>
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <div class="muted" style="display:flex;justify-content:space-between;font-size:12px"><span>{{ _("Last 6 hours") }}</span><span>{{ _("per 15 min") }}</span></div>
-      <div style="display:flex;align-items:flex-end;gap:2px;height:40px;border-bottom:1px solid var(--border)">{% for b in wp.bars %}<span title="{{ b.title }}" style="flex:1;height:{{ [b.h, 2 if b.total else 0]|max }}%;display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden">{% for c, share in b.parts %}{% if share %}<span style="height:{{ share }}%;background:{{ (wp.channels|selectattr('key', 'equalto', c)|first).color }}"></span>{% endif %}{% endfor %}</span>{% endfor %}</div>
+    {% set denom = budget if budget and budget > wp.total else (wp.total or 1) %}
+    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for c in wp.channels if c.n %}<span title="{{ c.label }} {{ c.n }}" class="h-full" style="width:{{ [c.n * 100 / denom, 1.5]|max|round(1) }}%;background:{{ c.color }}"></span>{% endfor %}</div>
+    <div class="grid grid-cols-3 gap-2 text-[12.5px]">{% for c in wp.channels %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ c.color }}"></span><span class="truncate text-muted">{{ c.label }}</span><span class="ml-auto tabular-nums">{{ c.n }}</span></div>{% endfor %}</div>
+    <div class="flex flex-col gap-1">
+      <div class="flex justify-between text-xs text-muted"><span>{{ _("Last 6 hours") }}</span><span>{{ _("per 15 min") }}</span></div>
+      <div class="flex h-10 items-end gap-0.5 border-b border-base-300">{% for b in wp.bars %}<span title="{{ b.title }}" class="flex flex-1 flex-col-reverse overflow-hidden rounded-t-xs" style="height:{{ [b.h, 2 if b.total else 0]|max }}%">{% for c, share in b.parts %}{% if share %}<span style="height:{{ share }}%;background:{{ (wp.channels|selectattr('key', 'equalto', c)|first).color }}"></span>{% endif %}{% endfor %}</span>{% endfor %}</div>
     </div>
-    <form method="post" action="/settings/willhaben" style="display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--border);padding-top:12px;margin:0">
-      <input type="hidden" name="next" value="" data-next>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span style="font-weight:550;font-size:13px">{{ _("Hourly budget") }}</span><a href="/stats/willhaben" style="font-size:12.5px">{{ _("Full statistics") }} →</a></div>
-      <div style="display:flex;align-items:center;gap:10px"><input type="range" min="0" max="600" step="10" value="{{ budget }}" style="flex:1" oninput="this.form.requests_per_hour.value = this.value" aria-label="{{ _('Hourly budget') }}"><span style="display:flex;align-items:center;border:1px solid var(--border);border-radius:8px;background:var(--bg);padding-right:8px;color:var(--muted);font-size:13px"><input name="requests_per_hour" value="{{ budget }}" inputmode="numeric" style="width:52px;border:0;background:none;padding:6px 4px 6px 8px;font-weight:600;text-align:right" aria-label="{{ _('Hourly budget') }}">/ h</span><button class="btn secondary sm">{{ _("Save") }}</button></div>
-      <span class="muted" style="font-size:12px">{{ _("All requests run one after another with a pause. When the budget is used up, agents wait for the next hour; product search and price checks count too.") }}</span>
+    <form method="post" action="/settings/willhaben" class="flex flex-col gap-1.5 border-t border-base-300 pt-3" x-data="{ v: {{ budget|int }} }">
+      <input type="hidden" name="next" :value="location.pathname + location.search">
+      <div class="flex items-center justify-between gap-2.5"><span class="text-[13px] font-medium">{{ _("Hourly budget") }}</span><a class="link link-primary text-[12.5px] no-underline" href="/stats/willhaben">{{ _("Full statistics") }} →</a></div>
+      <div class="flex items-center gap-2.5">
+        <input type="range" min="0" max="600" step="10" x-model.number="v" class="range range-primary range-xs flex-1" aria-label="{{ _('Hourly budget') }}">
+        <label class="input input-sm w-[86px] gap-1 bg-base-200 pr-2"><input name="requests_per_hour" x-model.number="v" inputmode="numeric" class="text-right font-semibold" aria-label="{{ _('Hourly budget') }}"><span class="text-muted">/ h</span></label>
+        <button class="btn btn-sm">{{ _("Save") }}</button>
+      </div>
+      <span class="text-xs text-muted">{{ _("All requests run one after another with a pause. When the budget is used up, agents wait for the next hour; product search and price checks count too.") }}</span>
     </form>
   </div>
 </div>
 
-{# ---- Claude usage popover (needs claude_usage; optional claude_usage.by_task = [{label, tokens, color}]) ---- #}
-{% if claude_usage is defined and claude_usage %}{% set cu = claude_usage %}{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
-<div class="layer" id="claude-pop" hidden>
-  <div class="backdrop" data-close></div>
-  <div class="popover wide">
-    <div style="display:flex;align-items:center;gap:10px"><span style="position:relative;width:30px;height:30px;display:grid;place-items:center;flex:none"><svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate(-90deg)"><circle cx="15" cy="15" r="12" fill="none" stroke="var(--border)" stroke-width="3"/><circle cx="15" cy="15" r="12" fill="none" stroke="var(--{{ 'bad' if cpct >= 90 else 'warn' if cpct >= 60 else 'brand' }})" stroke-width="3" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="{{ (75.4 * (1 - cpct / 100))|round(1) }}"/></svg><span style="position:absolute;display:grid;place-items:center;color:var(--text)">{{ ico('bot') }}</span></span><div style="flex:1;min-width:0"><div style="font-weight:600">Claude · {{ ('%.1f M'|format(cu.used / 1e6)) if cu.used >= 1e6 else ('%d k'|format((cu.used / 1e3)|round|int)) }} {{ _("tokens this month") }}</div><div class="muted" style="font-size:12.5px">{{ cpct }} % {{ _("of your {n} M token limit", n=(cu.limit / 1e6)|round|int) }}{% if cu.calls is defined %} · {{ cu.calls }} {{ _("calls") }}{% endif %}</div></div><button class="icon-btn" type="button" data-close aria-label="{{ _('Close') }}">✕</button></div>
-    <div class="bar brand" style="height:6px;display:flex;background:var(--border)">{% for t in cu.by_task if cu.by_task is defined %}<span style="width:{{ [t.tokens * 100 / cu.limit, 1.5]|max|round(1) }}%;height:100%;background:{{ t.color }};display:block" title="{{ t.label }}"></span>{% else %}<span style="width:{{ cpct }}%"></span>{% endfor %}</div>
-    {% if cu.by_task is defined %}<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:12.5px">{% for t in cu.by_task %}<div class="row" style="gap:6px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:2px;background:{{ t.color }};flex:none"></span><span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.label }}</span><span class="num" style="margin-left:auto">{{ ('%.1f M'|format(t.tokens / 1e6)) if t.tokens >= 1e6 else ('%d k'|format((t.tokens / 1e3)|round|int)) }}</span></div>{% endfor %}</div>{% endif %}
-    <div class="row muted" style="justify-content:space-between;font-size:12.5px;border-top:1px solid var(--border);padding-top:12px"><span>{{ _("Limit {n} M", n=(cu.limit / 1e6)|round|int) }} · {{ _("covered by your subscription") }}</span><a href="/settings/claude">{{ _("Limit & statistics") }} →</a></div>
+{# ---- Claude usage (needs claude_usage; optional claude_usage.by_task = [{label, tokens, color}]) ---- #}
+{% if cu %}
+<div id="claude-pop" x-cloak x-show="layer === 'claude'" class="fixed inset-0 z-[90]" @click.self="close()">
+  <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5">
+    <div class="flex items-center gap-2.5">
+      <span class="relative grid size-[30px] shrink-0 place-items-center">{{ ui.ring(cpct / 100, ctone) }}<span class="absolute inset-0 grid place-items-center">{{ ui.icon('bot', 12, 2.5) }}</span></span>
+      <div class="min-w-0 flex-1"><div class="font-semibold">Claude · {{ tokens(cu.used) }} {{ _("tokens this month") }}</div>
+        <div class="text-[12.5px] text-muted">{{ cpct }} % {{ _("of your {n} M token limit", n=(cu.limit / 1e6)|round|int) }}{% if cu.calls is defined %} · {{ cu.calls }} {{ _("calls") }}{% endif %}</div></div>
+      <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
+    </div>
+    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for t in cu.by_task if cu.by_task is defined %}<span class="block h-full" style="width:{{ [t.tokens * 100 / cu.limit, 1.5]|max|round(1) }}%;background:{{ t.color }}" title="{{ t.label }}"></span>{% else %}<span class="block h-full bg-primary" style="width:{{ cpct }}%"></span>{% endfor %}</div>
+    {% if cu.by_task is defined %}<div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">{% for t in cu.by_task %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ t.color }}"></span><span class="truncate text-muted">{{ t.label }}</span><span class="ml-auto tabular-nums">{{ tokens(t.tokens) }}</span></div>{% endfor %}</div>{% endif %}
+    <div class="flex flex-wrap justify-between gap-2 border-t border-base-300 pt-3 text-[12.5px] text-muted"><span>{{ _("Limit {n} M", n=(cu.limit / 1e6)|round|int) }} · {{ _("covered by your subscription") }}</span><a class="link link-primary no-underline" href="/settings/claude">{{ _("Limit & statistics") }} →</a></div>
   </div>
 </div>
 {% endif %}
 
-{# ---- Inbox popover (needs inbox_items = [{kind, title, text, time, url, unread}]) ---- #}
-<div class="layer" id="inbox-pop" hidden>
-  <div class="backdrop" data-close></div>
-  <div class="popover" style="width:400px;max-width:calc(100vw - 100px);padding:0;max-height:calc(100vh - 100px);overflow:hidden">
-    <div class="row" style="padding:12px 14px;border-bottom:1px solid var(--border);flex-wrap:nowrap"><span style="font-weight:650">{{ _("Inbox") }}</span><small class="muted">{% if inbox_unread is defined and inbox_unread %}{{ _("{n} unread", n=inbox_unread) }}{% else %}{{ _("all read") }}{% endif %}</small><span style="flex:1"></span>{% if inbox_items is defined %}<form method="post" action="/inbox/read-all" style="margin:0"><button class="btn ghost xs" style="color:var(--brand)">{{ _("Mark all read") }}</button></form>{% endif %}<button class="icon-btn" type="button" data-close aria-label="{{ _('Close') }}">✕</button></div>
-    <div style="overflow:auto">
-      {% set kinds = {'hit': ('target', 'brand'), 'price_drop': ('target', 'ok'), 'message': ('chat', 'brand'), 'auto_reply_pending': ('bot', 'ok'), 'auto_reply': ('bot', 'ok'), 'pay': ('cart', 'warn'), 'ad_expiring': ('tag', 'warn'), 'ad_expired': ('tag', 'bad'), 'health': ('bell', 'bad')} %}
-      {% for n in inbox_items if inbox_items is defined %}{% set k = kinds.get(n.kind, ('bell', '')) %}
-      <a href="{{ n.url or '/' }}" class="menu-item" style="display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:start;padding:10px 14px;border-radius:0;border-bottom:1px solid var(--border);{% if n.unread %}background:var(--brand-soft){% endif %}">
-        <span class="avatar" style="width:28px;height:28px;border-radius:8px;background:var(--{{ k[1] }}-soft);color:var(--{{ k[1] }})">{{ ico(k[0]) }}</span>
-        <span style="min-width:0"><span style="display:block;font-weight:{{ 600 if n.unread else 500 }}">{{ n.title }}</span><span class="muted" style="display:block;font-size:12.5px">{{ n.text }}</span></span>
-        <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><small class="muted" style="white-space:nowrap">{{ n.time }}</small>{% if n.unread %}<span style="width:8px;height:8px;border-radius:50%;background:var(--brand)"></span>{% endif %}</span></a>
-      {% else %}<p class="muted" style="padding:18px 14px;text-align:center">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }} <a href="/#activity">{{ _("Activity") }}</a></p>{% endfor %}
+{# ---- inbox (inbox_items = [{kind, title, text, time, url, unread}]) ---- #}
+{% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
+                'auto_reply_pending': ('bot', 'bg-ok-soft text-success'), 'auto_reply': ('bot', 'bg-ok-soft text-success'), 'pay': ('cart', 'bg-warn-soft text-warning'),
+                'ad_expiring': ('tag', 'bg-warn-soft text-warning'), 'ad_expired': ('tag', 'bg-bad-soft text-error'), 'health': ('bell', 'bg-bad-soft text-error')} %}
+<div id="inbox-pop" x-cloak x-show="layer === 'inbox'" class="fixed inset-0 z-[90]" @click.self="close()">
+  <div class="{{ layer_box }} flex max-h-[calc(100vh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
+    <div class="flex items-center gap-2 border-b border-base-300 px-3.5 py-3">
+      <span class="font-semibold">{{ _("Inbox") }}</span>
+      <small class="text-muted">{% if inbox_unread is defined and inbox_unread %}{{ _("{n} unread", n=inbox_unread) }}{% else %}{{ _("all read") }}{% endif %}</small>
+      <span class="flex-1"></span>
+      {% if inbox_items is defined and inbox_items %}<form method="post" action="/inbox/read-all"><button class="btn btn-ghost btn-xs text-primary">{{ _("Mark all read") }}</button></form>{% endif %}
+      <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
     </div>
-    <div class="muted" style="padding:8px 14px;border-top:1px solid var(--border);font-size:12px">{{ _("Pushes go to Home Assistant") }} · <a href="/settings/ha">{{ _("Notification settings") }}</a></div>
+    <div class="overflow-auto">
+      {% for n in inbox_items if inbox_items is defined %}{% set k = kinds.get(n.kind, ('bell', 'bg-hover text-muted')) %}
+      <a href="{{ n.url or '/' }}" class="grid grid-cols-[28px_1fr_auto] items-start gap-2.5 border-b border-base-300 px-3.5 py-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if n.unread else '' }}">
+        <span class="grid size-7 place-items-center rounded-lg {{ k[1] }}">{{ ui.icon(k[0], 14) }}</span>
+        <span class="min-w-0"><span class="block {{ 'font-semibold' if n.unread else 'font-medium' }}">{{ n.title }}</span><span class="block text-[12.5px] text-muted">{{ n.text }}</span></span>
+        <span class="flex flex-col items-end gap-1.5"><small class="whitespace-nowrap text-muted">{{ n.time }}</small>{% if n.unread %}<span class="size-2 rounded-full bg-primary"></span>{% endif %}</span>
+      </a>
+      {% else %}<p class="px-3.5 py-4.5 text-center text-muted">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }} <a class="link link-primary no-underline" href="/#activity">{{ _("Activity") }}</a></p>{% endfor %}
+    </div>
+    <div class="border-t border-base-300 px-3.5 py-2 text-xs text-muted">{{ _("Pushes go to Home Assistant") }} · <a class="link link-primary no-underline" href="/settings/ha">{{ _("Notification settings") }}</a></div>
   </div>
 </div>
 
-{# ---- Command palette (⌘K / Ctrl K / "/") — built from the nav links and settings sections, no server round-trip ---- #}
-<div class="layer dim" id="cmdk" hidden style="z-index:95;display:flex;justify-content:center;align-items:flex-start;padding-top:12vh">
-  <div class="backdrop" data-close></div>
-  <div class="card" style="position:relative;width:min(560px,calc(100% - 32px));border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden">
-    <div class="row" style="padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:nowrap"><span class="muted">{{ ico('search') }}</span><input id="cmdk-q" placeholder="{{ _('Jump to a page, setting or action…') }}" autocomplete="off" style="border:0;background:none;font-size:16px;padding:4px 0"><kbd class="muted" style="font-size:11.5px;border:1px solid var(--border);border-radius:5px;padding:1px 6px">esc</kbd></div>
-    <div id="cmdk-list" style="max-height:52vh;overflow:auto;padding:6px"></div>
-    <div class="row muted" style="gap:14px;padding:8px 16px;border-top:1px solid var(--border);font-size:11.5px"><span>↵ {{ _("open") }}</span><span>⌘K / Ctrl K</span><span>/ {{ _("opens") }}</span></div>
+{# ---- command palette (Ctrl K, ⌘K, "/"): nav links and settings sections, no server round-trip ---- #}
+<div id="cmdk" x-cloak x-show="layer === 'cmdk'" class="fixed inset-0 z-[95] flex items-start justify-center bg-black/50 pt-[12vh]" @click.self="close()">
+  <div class="w-[min(560px,calc(100%-32px))] overflow-hidden rounded-[14px] border border-base-300 bg-base-100 shadow-[0_24px_80px_rgba(0,0,0,.35)]">
+    <div class="flex items-center gap-2 border-b border-base-300 px-4 py-3">
+      <span class="text-muted">{{ ui.icon('search') }}</span>
+      <input x-ref="cmdkq" x-model="q" @input="sel = 0" @keydown.down.prevent="sel = Math.min(sel + 1, found.length - 1)" @keydown.up.prevent="sel = Math.max(sel - 1, 0)"
+             @keydown.enter.prevent="go()" placeholder="{{ _('Jump to a page, setting or action…') }}" autocomplete="off" class="min-w-0 flex-1 bg-transparent py-1 text-base outline-none">
+      <kbd class="kbd kbd-xs text-muted">esc</kbd>
+    </div>
+    <div class="max-h-[52vh] overflow-auto p-1.5">
+      <template x-for="(i, n) in found" :key="i.href + i.label">
+        <a :href="i.href" @mouseenter="sel = n" class="flex items-center gap-2.5 rounded-field px-2.5 py-2 text-base-content no-underline" :class="n === sel && 'bg-hover'">
+          <span class="flex-1"><span class="block font-medium" x-text="i.label"></span><span class="block text-[12.5px] text-muted" x-show="i.hint" x-text="i.hint"></span></span>
+        </a>
+      </template>
+      <p x-show="!found.length" class="px-3 py-4.5 text-center text-muted" x-text="{{ _('Nothing matches')|tojson|forceescape }} + ' „' + q + '“'"></p>
+    </div>
+    <div class="flex gap-3.5 border-t border-base-300 px-4 py-2 text-[11.5px] text-muted"><span>↵ {{ _("open") }}</span><span>⌘K / Ctrl K</span><span>/ {{ _("opens") }}</span></div>
   </div>
 </div>
-<template id="cmdk-items">{# label|hint|href per line; extend freely #}
+<template id="cmdk-items">{# label|hint|href per line #}
 {{ _("Home") }}||/
 {{ _("Search agents") }}||/agents
 {{ _("New search agent") }}|{{ _("action") }}|/agents/new
@@ -223,22 +285,22 @@
 {% for id, label in [('willhaben', _("willhaben account")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
 {% endfor %}</template>
 
-{# ---- mobile tab bar ---- #}
-<nav class="tabbar" aria-label="{{ _('Navigation') }}">
-  <a href="/" data-nav>{{ ico('home') }}{{ _("Home") }}</a>
-  <a href="/hits" data-nav>{{ ico('target') }}{{ _("Hits") }}{% if counts.get('hits') %}<span class="badge">{{ counts.hits }}</span>{% endif %}</a>
-  <a href="/chats" data-nav>{{ ico('chat') }}{{ _("Chats") }}{% if counts.get('chats') %}<span class="badge">{{ counts.chats }}</span>{% endif %}</a>
-  <a href="/myads" data-nav>{{ ico('tag') }}{{ _("My ads") }}</a>
-  <a href="#" id="tab-more">{{ ico('settings') }}{{ _("More") }}</a>
+{# ---- phone tab bar ---- #}
+<nav aria-label="{{ _('Navigation') }}" class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-base-300 bg-base-100 px-1 pt-1.5 pb-[calc(6px+env(safe-area-inset-bottom))] md:hidden">
+  {% for href, icon, label, count in [('/', 'home', _("Home"), 0), ('/hits', 'target', _("Hits"), counts.get('hits', 0)), ('/chats', 'chat', _("Chats"), counts.get('chats', 0)), ('/myads', 'tag', _("My ads"), 0)] %}
+  <a href="{{ href }}" {% if is_current(href) %}aria-current="page"{% endif %}
+     class="relative flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted no-underline aria-[current=page]:font-semibold aria-[current=page]:text-primary">
+    {{ ui.icon(icon) }}{{ label }}{% if count %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ count }}</span>{% endif %}</a>
+  {% endfor %}
+  <button type="button" @click="toggle('account')" class="flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted">{{ ui.icon('settings') }}{{ _("More") }}</button>
 </nav>
-{% endif %}
-
-<main class="{% block main_class %}page{% endblock %}">
-  {% set notice_text = purchase_notice() %}{% if notice_text %}<div class="msg">{{ notice_text }}</div>{% endif %}
-  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
-  {% if error %}<div class="msg error">{{ error }}</div>{% endif %}
-  {% block content %}{% endblock %}
+{% else %}
+<main class="min-w-0 px-2.5 pt-1.5">
+  {% if msg %}{{ ui.msg(msg) }}{% endif %}
+  {% if error %}{{ ui.msg(error, 'error') }}{% endif %}
+  {{ self.content() }}
 </main>
+{% endif %}
 
 {% if not embed %}
 {% include "_ad_panel.html" %}
@@ -246,53 +308,101 @@
 {% include "_remote_overlay.html" %}
 {% endif %}
 <script>
+document.addEventListener('alpine:init', () => {
+  Alpine.data('shell', () => ({
+    layer: null, q: '', sel: 0, items: [],
+    rail: document.documentElement.dataset.rail === 'expanded',
+    theme: document.documentElement.dataset.theme || '',
+    sysDark: matchMedia('(prefers-color-scheme: dark)').matches,
+    init() {
+      const raw = document.getElementById('cmdk-items')?.content.textContent || '';
+      this.items = raw.trim().split('\n').map(l => l.split('|')).filter(p => p.length === 3)
+        .map(([label, hint, href]) => ({label: label.trim(), hint: hint.trim(), href: href.trim()}));
+      this.$watch('rail', v => {
+        document.documentElement.dataset.rail = v ? 'expanded' : 'collapsed';
+        try { localStorage.setItem('rail', v ? 'expanded' : 'collapsed'); } catch (e) {}
+      });
+    },
+    get dark() { return (this.theme || (this.sysDark ? 'dark' : 'light')) === 'dark'; },
+    toggleTheme() {
+      this.theme = this.dark ? 'light' : 'dark';
+      document.documentElement.dataset.theme = this.theme;
+      try { localStorage.setItem('theme', this.theme); } catch (e) {}
+    },
+    open(k) {
+      this.layer = k;
+      if (k === 'cmdk') { this.q = ''; this.sel = 0; setTimeout(() => this.$refs.cmdkq?.focus(), 30); }   // after x-show made it visible
+    },
+    close() { this.layer = null; },
+    toggle(k) { this.layer === k ? this.close() : this.open(k); },
+    pop(e, k) { if (e.ctrlKey || e.metaKey) return; e.preventDefault(); this.toggle(k); },   // Ctrl-click still opens the page
+    get found() {
+      const s = this.q.trim().toLowerCase();
+      return this.items.filter(i => !s || (i.label + ' ' + i.hint).toLowerCase().includes(s)).slice(0, 9);
+    },
+    go() { const hit = this.found[this.sel]; if (hit) location.href = hit.href; },
+    keys(e) {
+      const inField = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); this.toggle('cmdk'); return; }
+      if (e.key === '/' && !inField && this.layer !== 'cmdk' && !document.querySelector('dialog[open]')) { e.preventDefault(); this.open('cmdk'); return; }
+      if (e.key === 'Escape' && this.layer) this.close();
+    },
+  }));
+
+  // auto-save: <form x-data="autosave" …> posts with X-Autosave (server answers {"ok", "error"}): switches at once,
+  // text a moment after typing stops. Show the state with <small x-text="state"></small>.
+  Alpine.data('autosave', () => ({
+    state: '', last: '', timer: null,
+    init() {
+      this.last = new URLSearchParams(new FormData(this.$el)).toString();
+      this.$el.addEventListener('change', () => this.save());
+      this.$el.addEventListener('input', e => {
+        if (e.target.matches('textarea, input[type=text], input:not([type])')) { clearTimeout(this.timer); this.timer = setTimeout(() => this.save(), 900); }
+      });
+      this.$el.addEventListener('submit', e => { e.preventDefault(); this.save(); });
+    },
+    async save() {
+      clearTimeout(this.timer);
+      const body = new URLSearchParams(new FormData(this.$el));
+      if (body.toString() === this.last) return;
+      this.last = body.toString(); this.state = {{ _("Saving …")|tojson }};
+      try {
+        const r = await fetch(this.$el.action, {method: 'POST', body, headers: {'X-Autosave': '1'}});
+        const j = r.ok ? await r.json() : {ok: false};
+        this.state = j.ok ? {{ _("Changes saved")|tojson }} : (j.error || {{ _("Not saved – check the connection")|tojson }});
+        this.$dispatch('autosaved', {ok: j.ok});
+      } catch (e) { this.state = {{ _("Not saved – check the connection")|tojson }}; this.last = ''; }
+    },
+  }));
+
+});
+
+// split pages: the list column calls x-init="splitResize($el, 'key')"; drag its right edge, double-click resets
+function splitResize(list, key) {
+  const main = list.closest('[data-split]');
+  if (!main || matchMedia('(max-width: 767px)').matches) return;
+  const apply = w => { main.style.gridTemplateColumns = w + 'px minmax(0,1fr)'; };
+  try { const w = +localStorage.getItem('col:' + key); if (w) apply(w); } catch (e) {}
+  const grip = document.createElement('div');
+  grip.className = 'absolute inset-y-0 -right-1 z-[3] w-2 cursor-col-resize hover:bg-brand-soft';
+  list.classList.add('relative'); list.append(grip);
+  grip.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = list.getBoundingClientRect().width;
+    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+    const mv = ev => apply(Math.min(640, Math.max(260, w0 + ev.clientX - x0)));
+    const up = () => {
+      document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+      document.body.style.cursor = ''; document.body.style.userSelect = '';
+      try { localStorage.setItem('col:' + key, parseInt(list.getBoundingClientRect().width)); } catch (e) {}
+    };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  });
+  grip.addEventListener('dblclick', () => { main.style.gridTemplateColumns = ''; try { localStorage.removeItem('col:' + key); } catch (e) {} });
+}
+
+// shift-click on selection checkboxes (class "sel") selects the range, like a file manager
 (() => {
-  const root = document.documentElement, body = document.body;
-  // current section
-  const path = location.pathname;
-  document.querySelectorAll('[data-nav]').forEach(a => {
-    const h = a.getAttribute('href');
-    if (path === h || (h !== '/' && path.startsWith(h + '/')) || (h === '/new-ad' && path.startsWith('/ad-')) || (h === '/agents' && path.startsWith('/agents'))) a.setAttribute('aria-current', 'page');
-  });
-  // sidebar expand / collapse (remembered)
-  body.dataset.rail = root.dataset.rail || 'collapsed';
-  const railBtn = document.getElementById('rail-toggle');
-  const paintRail = () => { const x = body.dataset.rail === 'expanded'; body.querySelectorAll('.rail .x-only').forEach(e => e.hidden = !x); body.querySelectorAll('.rail .c-only').forEach(e => e.hidden = x); };
-  railBtn?.addEventListener('click', () => { body.dataset.rail = body.dataset.rail === 'expanded' ? 'collapsed' : 'expanded'; try { localStorage.setItem('rail', body.dataset.rail); } catch (e) {} paintRail(); });
-  paintRail();
-  // theme (remembered, else system)
-  const sysDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
-  const current = () => root.dataset.theme || (sysDark() ? 'dark' : 'light');
-  const themeBtn = document.getElementById('theme-toggle');
-  const paintTheme = () => { const d = current() === 'dark'; const l = document.getElementById('theme-label'); if (l) l.textContent = d ? {{ _("Light mode")|tojson }} : {{ _("Dark mode")|tojson }}; };
-  themeBtn?.addEventListener('click', () => { const next = current() === 'dark' ? 'light' : 'dark'; root.dataset.theme = next; try { localStorage.setItem('theme', next); } catch (e) {} paintTheme(); });
-  paintTheme();
-  // popovers: account menu, usage, "More" tab
-  const layers = { account: document.getElementById('account-menu'), usage: document.getElementById('usage-pop'), claude: document.getElementById('claude-pop'), inbox: document.getElementById('inbox-pop'), cmdk: document.getElementById('cmdk') };
-  const closeAll = () => Object.values(layers).forEach(l => l && (l.hidden = true));
-  const open = k => { closeAll(); if (layers[k]) layers[k].hidden = false; };
-  document.getElementById('account-toggle')?.addEventListener('click', () => layers.account.hidden ? open('account') : closeAll());
-  document.getElementById('inbox-toggle')?.addEventListener('click', () => layers.inbox.hidden ? open('inbox') : closeAll());
-  document.getElementById('tab-more')?.addEventListener('click', e => { e.preventDefault(); open('account'); });
-  document.querySelectorAll('[data-pop]').forEach(a => a.addEventListener('click', e => { if (e.ctrlKey || e.metaKey || !layers[a.dataset.pop]) return; e.preventDefault(); open(a.dataset.pop); }));
-  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeAll));
-  document.querySelectorAll('input[data-next]').forEach(i => { i.value = location.pathname + location.search; });
-  // command palette
-  const items = (document.getElementById('cmdk-items')?.content.textContent || '').trim().split('\n').map(l => l.split('|')).filter(p => p.length === 3).map(([label, hint, href]) => ({label: label.trim(), hint: hint.trim(), href: href.trim()}));
-  const q = document.getElementById('cmdk-q'), list = document.getElementById('cmdk-list');
-  const paintCmd = () => { const s = q.value.trim().toLowerCase(); const hits = items.filter(i => !s || (i.label + ' ' + i.hint).toLowerCase().includes(s)).slice(0, 9);
-    list.replaceChildren(...hits.map((i, n) => { const a = document.createElement('a'); a.href = i.href; a.className = 'menu-item'; a.style.cssText = n === 0 && s ? 'background:var(--hover)' : ''; a.innerHTML = `<span style="flex:1"><span style="display:block;font-weight:500"></span>${i.hint ? '<span class="muted" style="display:block;font-size:12.5px"></span>' : ''}</span><span class="muted" style="font-size:11.5px"></span>`; a.querySelector('span span').textContent = i.label; if (i.hint) a.querySelectorAll('span span')[1].textContent = i.hint; return a; }));
-    if (!hits.length) { const p = document.createElement('p'); p.className = 'muted'; p.style.cssText = 'padding:18px 12px;text-align:center'; p.textContent = {{ _("Nothing matches")|tojson }} + ' „' + q.value + '“'; list.replaceChildren(p); } };
-  const openCmd = () => { open('cmdk'); q.value = ''; paintCmd(); setTimeout(() => q.focus(), 0); };
-  q?.addEventListener('input', paintCmd);
-  q?.addEventListener('keydown', e => { if (e.key === 'Enter') { const a = list.querySelector('a'); if (a) location.href = a.href; } });
-  document.addEventListener('keydown', e => {
-    const inField = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable;
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); layers.cmdk.hidden ? openCmd() : closeAll(); return; }
-    if (e.key === '/' && !inField && layers.cmdk.hidden && !document.querySelector('dialog[open]')) { e.preventDefault(); openCmd(); return; }
-    if (e.key === 'Escape') closeAll();
-  });
-  // shift-click on selection checkboxes (class "sel") selects the range, like a file manager
   let last = null;
   document.addEventListener('click', e => {
     const box = e.target;
@@ -304,18 +414,6 @@
       getSelection()?.removeAllRanges();
     }
     last = box;
-  });
-  // resizable split columns: <main class="split" data-resize="key"> with a .resizer inside .list
-  document.querySelectorAll('main.split[data-resize]').forEach(m => {
-    const key = 'col:' + m.dataset.resize, list = m.querySelector('.list'); if (!list) return;
-    const apply = w => { m.style.gridTemplateColumns = w + 'px minmax(0,1fr)'; };
-    try { const w = +localStorage.getItem(key); if (w) apply(w); } catch (e) {}
-    const grip = document.createElement('div'); grip.className = 'resizer'; list.style.position = 'relative'; list.appendChild(grip);
-    grip.addEventListener('mousedown', e => { e.preventDefault(); const x0 = e.clientX, w0 = list.getBoundingClientRect().width; grip.classList.add('drag'); body.style.cursor = 'col-resize'; body.style.userSelect = 'none';
-      const mv = ev => apply(Math.min(640, Math.max(260, w0 + ev.clientX - x0)));
-      const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); grip.classList.remove('drag'); body.style.cursor = ''; body.style.userSelect = ''; try { localStorage.setItem(key, parseInt(list.getBoundingClientRect().width)); } catch (e) {} };
-      document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); });
-    grip.addEventListener('dblclick', () => { m.style.gridTemplateColumns = ''; try { localStorage.removeItem(key); } catch (e) {} });
   });
 })();
 </script>

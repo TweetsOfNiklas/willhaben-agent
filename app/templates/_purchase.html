@@ -1,49 +1,51 @@
 {# Purchase order card (chat page + order page). Same variables as before. #}
+{% import "_ui.html" as ui %}
 {% set pc = pcard if pcard is defined and pcard else purchase_card(conv) %}
 {% if pc %}
 {% set confirm_text = {"cancel": _("Cancel this purchase? The agent stops and writes no more."), "paid": _("Did you transfer the amount in your bank app? The seller is told in the chat."), "received": _("Did you receive the item?"), "collected": _("Did you collect the item and pay the cash?")} %}
 {% set tone = {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad'}.get(pc.status, 'brand') %}
-<section class="card" id="purchase">
-  <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
-    <div class="row" style="justify-content:space-between"><div class="eyebrow">{{ _("Purchase order") }} · {{ pc.mode_label }}</div><span class="pill {{ tone }}">{{ pc.status_label }}</span></div>
-    <p style="font-size:15px;line-height:1.5">{{ pc.next }}</p>
-    {% if pc.note %}<p class="muted" style="font-size:12.5px">{{ pc.note }}</p>{% endif %}
+<section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="purchase">
+  <div class="flex flex-col gap-2 border-b border-base-300 px-5 py-3.5">
+    <div class="flex flex-wrap items-center justify-between gap-2"><div class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Purchase order") }} · {{ pc.mode_label }}</div>{{ ui.pill(pc.status_label, tone) }}</div>
+    <p class="text-[15px] leading-normal">{{ pc.next }}</p>
+    {% if pc.note %}<p class="text-[12.5px] text-muted">{{ pc.note }}</p>{% endif %}
     {% if pc.pay_now %}
-    <div style="border-left:3px solid var(--warn);background:var(--warn-soft);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px">
-      <div style="font-weight:650;color:var(--warn)">{{ _("Pay now!") }}</div>
+    <div class="flex flex-col gap-2 rounded-lg border-l-[3px] border-warning bg-warn-soft px-3.5 py-3">
+      <div class="font-semibold text-warning">{{ _("Pay now!") }}</div>
       {% if pc.mode == 'direct' and pc.payment %}
-      <dl class="kv"><dt>{{ _("Recipient") }}</dt><dd>{{ pc.payment.holder or '–' }}</dd><dt>IBAN</dt><dd><code>{{ pc.payment.iban_group }}</code></dd><dt>{{ _("Amount") }}</dt><dd><strong>{{ pc.payment.amount|eur }}</strong></dd>{% if pc.get('agreed_total') is not none %}<dt>{{ _("Total incl. shipping") }}</dt><dd>{{ pc.get('agreed_total')|eur }}</dd>{% endif %}<dt>{{ _("Reference") }}</dt><dd>{{ pc.payment.reference or '–' }}</dd></dl>
-      <small class="muted">{{ _("Transfer it in your bank app, then press Paid. Nothing is paid automatically.") }}</small>
+      <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]"><dt class="text-muted">{{ _("Recipient") }}</dt><dd class="m-0 min-w-0 break-words">{{ pc.payment.holder or '–' }}</dd><dt class="text-muted">IBAN</dt><dd class="m-0 min-w-0 break-all"><code>{{ pc.payment.iban_group }}</code></dd><dt class="text-muted">{{ _("Amount") }}</dt><dd class="m-0"><strong>{{ pc.payment.amount|eur }}</strong></dd>{% if pc.get('agreed_total') is not none %}<dt class="text-muted">{{ _("Total incl. shipping") }}</dt><dd class="m-0">{{ pc.get('agreed_total')|eur }}</dd>{% endif %}<dt class="text-muted">{{ _("Reference") }}</dt><dd class="m-0 min-w-0 break-words">{{ pc.payment.reference or '–' }}</dd></dl>
+      <small class="text-muted">{{ _("Transfer it in your bank app, then press Paid. Nothing is paid automatically.") }}</small>
       {% elif pc.mode == 'paylivery' %}
-      <p style="font-size:13px">{{ _("Pay in the willhaben app, or on the chat page with the Buy now & pay button in the PayLivery card. The card fills in your saved card; you approve 3-D Secure on your phone, and the purchase then continues by itself. Nothing is paid automatically.") }}</p>
-      {% if pc.wh_url %}<a class="btn secondary sm" style="align-self:flex-start" href="{{ pc.wh_url }}" target="_blank" rel="noopener">{{ _("Open chat on willhaben") }} ↗</a>{% endif %}
+      <p class="text-[13px]">{{ _("Pay in the willhaben app, or on the chat page with the Buy now & pay button in the PayLivery card. The card fills in your saved card; you approve 3-D Secure on your phone, and the purchase then continues by itself. Nothing is paid automatically.") }}</p>
+      {% if pc.wh_url %}<a class="btn btn-sm self-start" href="{{ pc.wh_url }}" target="_blank" rel="noopener">{{ _("Open chat on willhaben") }} ↗</a>{% endif %}
       {% endif %}
     </div>
     {% endif %}
-    {% if pc.status == 'meetup' and pc.pickup %}<div style="border-left:3px solid var(--ok);background:var(--ok-soft);border-radius:8px;padding:10px 14px;font-size:13px"><strong>{{ _("Pickup") }}</strong> · {{ pc.pickup.start|replace('T', ' ') }}{% if pc.pickup.minutes %} · {{ _("{n} min", n=pc.pickup.minutes) }}{% endif %}{% if pc.pickup.location %} · {{ pc.pickup.location }}{% endif %} · {{ _("{price} cash", price=(pc.agreed or pc.asking)|eur) }}</div>{% endif %}
+    {% if pc.status == 'meetup' and pc.pickup %}<div class="rounded-lg border-l-[3px] border-success bg-ok-soft px-3.5 py-2.5 text-[13px]"><strong>{{ _("Pickup") }}</strong> · {{ pc.pickup.start|replace('T', ' ') }}{% if pc.pickup.minutes %} · {{ _("{n} min", n=pc.pickup.minutes) }}{% endif %}{% if pc.pickup.location %} · {{ pc.pickup.location }}{% endif %} · {{ _("{price} cash", price=(pc.agreed or pc.asking)|eur) }}</div>{% endif %}
     {% if pc.actions %}
-    <div class="row" style="margin-top:4px">
+    <div class="mt-1 flex flex-wrap items-center gap-2">
       {% for a in pc.actions %}
-      <form method="post" action="/purchases/{{ pc.id }}/{{ a.name }}" class="row" style="margin:0;gap:6px;flex-wrap:nowrap">
-        {% if a.input %}<input type="number" name="value" min="1" step="0.01" value="{{ pc.max_price or '' }}" required placeholder="€" aria-label="{{ _('Maximum price in euros') }}" style="width:100px;padding:6px 10px">{% endif %}
-        <button class="btn sm {{ 'secondary' if a.name in ('pause', 'resume', 'max_price') else 'danger' if a.name == 'cancel' else '' }}" {% if a.confirm %}data-confirm="{{ confirm_text[a.name] }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}</button>
+      {% set bcls = 'btn btn-sm btn-ghost text-error hover:bg-bad-soft' if a.name == 'cancel' else 'btn btn-sm' if a.name in ('pause', 'resume', 'max_price') else 'btn btn-sm btn-primary' %}
+      <form method="post" action="/purchases/{{ pc.id }}/{{ a.name }}" class="m-0 flex flex-wrap items-center gap-1.5">
+        {% if a.input %}<input type="number" name="value" min="1" step="0.01" value="{{ pc.max_price or '' }}" required placeholder="€" aria-label="{{ _('Maximum price in euros') }}" class="input input-sm w-[100px] bg-base-100">{% endif %}
+        <button class="{{ bcls }}" {% if a.confirm %}data-confirm="{{ confirm_text[a.name] }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}</button>
       </form>
       {% endfor %}
     </div>
     {% endif %}
   </div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:16px 20px;border-bottom:1px solid var(--border)">
-    <div><div class="eyebrow" style="margin-bottom:4px">{{ _("Asking") }}</div><div class="num" style="font-size:16px">{{ pc.asking|eur if pc.asking else '–' }}</div></div>
-    <div><div class="eyebrow" style="margin-bottom:4px">{{ _("Your maximum") }}</div><div class="num" style="font-size:16px">{{ pc.max_price|eur if pc.max_price else '–' }}</div><div class="muted" style="font-size:12.5px">{{ _("incl. shipping & fee") }}{% if pc.get('pct_below') is not none %} · −{{ pc.get('pct_below') }} %{% endif %}{% if pc.target %} · {{ _("Target {price}", price=pc.target|eur) }}{% endif %}</div></div>
-    <div><div class="eyebrow" style="margin-bottom:4px">{{ _("Agreed") }}</div><div class="num" style="font-size:16px;color:var(--{{ 'ok' if pc.agreed else 'muted' }})">{{ pc.agreed|eur if pc.agreed else '—' }}</div>
+  <div class="grid grid-cols-1 gap-4 border-b border-base-300 px-5 py-4 sm:grid-cols-3">
+    <div><div class="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Asking") }}</div><div class="text-base tabular-nums">{{ pc.asking|eur if pc.asking else '–' }}</div></div>
+    <div><div class="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Your maximum") }}</div><div class="text-base tabular-nums">{{ pc.max_price|eur if pc.max_price else '–' }}</div><div class="text-[12.5px] text-muted">{{ _("incl. shipping & fee") }}{% if pc.get('pct_below') is not none %} · −{{ pc.get('pct_below') }} %{% endif %}{% if pc.target %} · {{ _("Target {price}", price=pc.target|eur) }}{% endif %}</div></div>
+    <div><div class="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Agreed") }}</div><div class="text-base tabular-nums {{ 'text-success' if pc.agreed else 'text-muted' }}">{{ pc.agreed|eur if pc.agreed else '—' }}</div>
       {% set item = pc.agreed or pc.asking %}{% set ship = pc.get('shipping_cost') %}{% if item is not none and ship is not none and pc.mode != 'pickup' %}{% set fee = pc.get('fee') or 0 %}{% set total = pc.get('total') if pc.get('total') is not none else (pc.get('agreed_total') if pc.get('agreed_total') is not none else item + ship + fee) %}
-      <div class="muted" style="font-size:12.5px">{{ item|eur }} + {{ ship|eur }}{% if fee %} + {{ fee|eur }}{% endif %} = <strong style="color:var(--text)">{{ total|eur }}</strong></div>{% endif %}</div>
+      <div class="text-[12.5px] text-muted">{{ item|eur }} + {{ ship|eur }}{% if fee %} + {{ fee|eur }}{% endif %} = <strong class="text-base-content">{{ total|eur }}</strong></div>{% endif %}</div>
   </div>
   {% set mk = pc.get('market') %}
-  {% if mk or pc.median %}<div class="muted" style="padding:10px 20px;border-bottom:1px solid var(--border);font-size:12.5px">{% if mk %}{{ _("Comparable ads ({n})", n=mk.get('count') or 0) }}: {% if mk.get('min') is not none %}{{ _("cheapest {price}", price=mk.get('min')|eur) }}{% endif %}{% if mk.get('p25') is not none %} · {{ _("lower quartile {price}", price=mk.get('p25')|eur) }}{% endif %}{% if mk.get('median') is not none %} · {{ _("median {price}", price=mk.get('median')|eur) }}{% endif %}{% else %}{{ _("Comparable median {price}", price=pc.median|eur) }}{% endif %}</div>{% endif %}
+  {% if mk or pc.median %}<div class="border-b border-base-300 px-5 py-2.5 text-[12.5px] text-muted">{% if mk %}{{ _("Comparable ads ({n})", n=mk.get('count') or 0) }}: {% if mk.get('min') is not none %}{{ _("cheapest {price}", price=mk.get('min')|eur) }}{% endif %}{% if mk.get('p25') is not none %} · {{ _("lower quartile {price}", price=mk.get('p25')|eur) }}{% endif %}{% if mk.get('median') is not none %} · {{ _("median {price}", price=mk.get('median')|eur) }}{% endif %}{% else %}{{ _("Comparable median {price}", price=pc.median|eur) }}{% endif %}</div>{% endif %}
   {% if pc.log %}
-  <div style="padding:14px 20px 16px;display:flex;flex-direction:column;gap:6px"><div class="eyebrow" style="margin-bottom:4px">{{ _("History") }}</div>
-    {% for h in pc.log %}<div style="display:grid;grid-template-columns:120px 1fr;gap:12px;font-size:13px"><span class="muted num">{{ (h.at or '')[:16]|replace('T', ' ') }}</span><span>{{ h.text }}</span></div>{% endfor %}</div>
+  <div class="flex flex-col gap-1.5 px-5 pt-3.5 pb-4"><div class="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">{{ _("History") }}</div>
+    {% for h in pc.log %}<div class="grid grid-cols-[minmax(90px,120px)_minmax(0,1fr)] gap-3 text-[13px]"><span class="text-[12.5px] text-muted tabular-nums">{{ (h.at or '')[:16]|replace('T', ' ') }}</span><span class="min-w-0 break-words">{{ h.text }}</span></div>{% endfor %}</div>
   {% endif %}
 </section>
 {% endif %}

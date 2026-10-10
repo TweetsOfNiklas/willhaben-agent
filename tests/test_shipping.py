@@ -283,7 +283,7 @@ async def test_chat_page_sorted_by_nearest(chat, finders):
         near = c.get("/chats/c1?sort=near").text
         cheap = c.get("/chats/c1?sort=price").text
     assert "Trafik" in near and "55 m" in near
-    first = lambda html: html.split("grid-template-columns:1fr auto auto")[1][:400]   # noqa: E731  the first option row
+    first = lambda html: html.split("data-opt")[1][:400]   # noqa: E731  the first option row (marked data-opt)
     assert "GLS" in first(near)                                               # 55 m beats Post (1.1 km)
     assert "GLS" in first(cheap)                                              # GLS S → Shop is also cheapest
 
@@ -296,7 +296,7 @@ def test_remote_overlay_and_embed():
         page = c.get("/chats").text
         assert 'id="remote-overlay"' in page and 'src="about:blank"' in page    # iframe loads only when opened
         embed = c.get("/session?embed=1").text
-        assert 'class="embed"' in embed and 'nav class="top"' not in embed and 'id="remote-overlay"' not in embed
+        assert 'data-embed' in embed and 'nav class="top"' not in embed and 'id="remote-overlay"' not in embed
         assert 'value="/session?embed=1"' in embed or "Browser" in embed          # forms stay inside the overlay
 
 

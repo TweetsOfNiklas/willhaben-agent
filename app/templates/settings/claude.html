@@ -1,42 +1,51 @@
 {# Settings → Claude & usage. Replaces <section id="claude">. Field names to keep from the old settings.html: model per job, token limit (new: claude_token_limit_m, claude_limit_mode). #}
-<section class="card pad" style="display:flex;flex-direction:column;gap:14px">
-  <div class="row" style="justify-content:space-between">
-    <div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:var(--{{ 'ok' if llm_ok else 'bad' }})"></span><div><div style="font-weight:600">{{ _("Claude subscription") }}{% if claude_plan is defined %} · {{ claude_plan }}{% endif %}</div><div class="muted" style="font-size:12.5px">{% if llm_ok %}{{ _("Signed in") }}{% if claude_account is defined %} {{ _("as") }} {{ claude_account }}{% endif %}{% if claude_last_call is defined %} · {{ _("last call {t}", t=claude_last_call|ago) }}{% endif %}{% else %}{{ _("Claude is not signed in.") }}{% endif %}</div></div></div>
-    <div class="row" style="gap:8px"><form method="post" action="/settings/claude/test" style="margin:0"><button class="btn secondary">{{ _("Test") }}</button></form><a class="btn secondary" href="/settings/claude/login">{{ _("Sign in again…") }}</a></div>
+{% import "_ui.html" as ui %}
+{% set cu = claude_usage if claude_usage is defined else {'used': 0, 'limit': 10000000} %}
+{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex min-w-0 items-center gap-2.5"><span class="size-2 shrink-0 rounded-full {{ 'bg-success' if llm_ok else 'bg-error' }}"></span>
+      <div class="min-w-0"><div class="font-semibold">{{ _("Claude subscription") }}{% if claude_plan is defined %} · {{ claude_plan }}{% endif %}</div><div class="text-[12.5px] text-muted">{% if llm_ok %}{{ _("Signed in") }}{% if claude_account is defined %} {{ _("as") }} {{ claude_account }}{% endif %}{% if claude_last_call is defined %} · {{ _("last call {t}", t=claude_last_call|ago) }}{% endif %}{% else %}{{ _("Claude is not signed in.") }}{% endif %}</div></div></div>
+    <div class="flex flex-wrap gap-2"><form method="post" action="/settings/claude/test"><button class="btn">{{ _("Test") }}</button></form><a class="btn" href="/settings/claude/login">{{ _("Sign in again…") }}</a></div>
   </div>
   {% if claude_login.active and claude_login.state == 'need_code' %}
-  <div class="msg" style="display:flex;flex-direction:column;gap:10px;margin:0">
-    <div><a href="{{ claude_login.url }}" target="_blank" rel="noopener" class="btn sm">{{ _("Sign in to Claude ↗") }}</a> <small class="muted">{{ _("with the account of your Claude subscription · only this link matches the code field below") }}</small></div>
-    <form method="post" action="/settings/claude/code" class="row" style="margin:0;flex-wrap:nowrap"><input type="hidden" name="attempt" value="{{ claude_login.attempt }}"><input name="code" required autocomplete="off" placeholder="{{ _('Code from claude.com') }}"><button class="btn" onclick="this.setAttribute('aria-busy','true')">{{ _("Sign in") }}</button></form>
-    <form method="post" action="/settings/claude/cancel" style="margin:0"><button class="btn ghost sm">{{ _("Cancel") }}</button></form>
+  <div class="flex flex-col gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-3 text-[13px]">
+    <div class="flex flex-wrap items-center gap-2.5"><a href="{{ claude_login.url }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">{{ _("Sign in to Claude ↗") }}</a> <small class="text-[12.5px] text-muted">{{ _("with the account of your Claude subscription · only this link matches the code field below") }}</small></div>
+    <form method="post" action="/settings/claude/code" class="flex flex-wrap items-center gap-2"><input type="hidden" name="attempt" value="{{ claude_login.attempt }}"><input name="code" required autocomplete="off" placeholder="{{ _('Code from claude.com') }}" class="input min-w-0 flex-1 basis-[200px] bg-base-100"><button class="btn btn-primary">{{ _("Sign in") }}</button></form>
+    <form method="post" action="/settings/claude/cancel"><button class="btn btn-ghost btn-sm">{{ _("Cancel") }}</button></form>
   </div>
   {% endif %}
-  <form method="post" action="/settings/claude" style="display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--border);padding-top:14px">
-    <div class="row" style="justify-content:space-between"><span style="font-weight:550">{{ _("Model per task") }}</span><small class="muted">Haiku ≈ 1× · Sonnet ≈ 4× · Opus ≈ 20× {{ _("tokens cost") }}</small></div>
-    <div class="card" style="overflow:hidden">
+  <form method="post" action="/settings/claude" class="flex flex-col gap-3.5 border-t border-base-300 pt-3.5" x-data="{ limit: {{ (cu.limit / 1e6)|round|int }} }">
+    <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Model per task") }}</span><small class="text-[12.5px] text-muted">Haiku ≈ 1× · Sonnet ≈ 4× · Opus ≈ 20× {{ _("tokens cost") }}</small></div>
+    <div class="overflow-hidden rounded-box border border-base-300">
       {% for key, label, hint in [('screen', _("Hit screening"), _("Every new hit of an agent with screening on · many short calls")), ('chat', _("Chat answers & drafts"), _("Automatic answers and drafts in chats · tone matters")), ('search', _("Product search"), _("Planning searches and ranking the best offers")), ('ads', _("New ad"), _("Title, description, category and price from notes and photos"))] %}
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)"><div><div style="font-weight:550">{{ label }}</div><div class="muted" style="font-size:12.5px">{{ hint }}</div></div>
-        <select name="model_{{ key }}" style="padding:7px 26px 7px 10px;font-size:13px">{% for m, ml in [('haiku', 'Haiku — ' ~ _("fast, cheap")), ('sonnet', 'Sonnet — ' ~ _("balanced")), ('opus', 'Opus — ' ~ _("most careful"))] %}<option value="{{ m }}" {% if (models[key] if models is defined and key in models else 'sonnet') == m %}selected{% endif %}>{{ ml }}</option>{% endfor %}</select></div>
+      <div class="grid grid-cols-1 items-center gap-2.5 border-b border-base-300 px-3.5 py-2.5 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_190px]">
+        <div class="min-w-0"><div class="font-medium">{{ label }}</div><div class="text-[12.5px] text-muted">{{ hint }}</div></div>
+        <select name="model_{{ key }}" class="select w-full min-w-0 bg-base-200 text-[13px]">{% for m, ml in [('haiku', 'Haiku — ' ~ _("fast, cheap")), ('sonnet', 'Sonnet — ' ~ _("balanced")), ('opus', 'Opus — ' ~ _("most careful"))] %}<option value="{{ m }}" {% if (models[key] if models is defined and key in models else 'sonnet') == m %}selected{% endif %}>{{ ml }}</option>{% endfor %}</select></div>
       {% endfor %}
     </div>
-    {% set cu = claude_usage if claude_usage is defined else {'used': 0, 'limit': 10000000} %}{% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
-    <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--border);padding-top:14px">
-      <div class="row" style="justify-content:space-between"><span style="font-weight:550">{{ _("Monthly token limit") }}</span><small class="muted">{{ '%.1f'|format(cu.used / 1e6) }} M {{ _("used") }} · {{ '%.1f'|format((cu.limit - cu.used) / 1e6) }} M {{ _("left") }}</small></div>
-      <div class="bar brand" style="height:6px;grid-column:auto"><span style="width:{{ cpct }}%"></span></div>
-      <div class="row" style="gap:12px;flex-wrap:nowrap"><input type="range" name="claude_token_limit_m" min="1" max="50" step="1" value="{{ (cu.limit / 1e6)|round|int }}" oninput="this.form.limit_echo.value = this.value" style="flex:1"><span class="row" style="border:1px solid var(--border);border-radius:8px;background:var(--bg);padding-right:10px;color:var(--muted);font-size:13px;flex-wrap:nowrap;gap:0"><input name="limit_echo" value="{{ (cu.limit / 1e6)|round|int }}" style="width:52px;border:0;background:none;font-weight:600;text-align:right" oninput="this.form.claude_token_limit_m.value = this.value">M {{ _("tokens / month") }}</span></div>
-      <div class="row" style="gap:6px"><small class="muted">{{ _("When the limit is reached") }}</small>{% for v, l in [('pause', _("Pause optional tasks")), ('haiku', _("Switch to Haiku")), ('notify', _("Only notify me"))] %}<label class="chip {{ 'on' if (claude_limit_mode if claude_limit_mode is defined else 'pause') == v else '' }}" style="cursor:pointer"><input type="radio" name="claude_limit_mode" value="{{ v }}" {% if (claude_limit_mode if claude_limit_mode is defined else 'pause') == v %}checked{% endif %} hidden>{{ l }}</label>{% endfor %}</div>
-      <small class="muted">{{ _("Input + output tokens across all tasks. Covered by your Claude subscription — the limit only throttles the app, nothing is charged. Chat drafts you request by hand are never blocked.") }}</small>
+    <div class="flex flex-col gap-2.5 border-t border-base-300 pt-3.5">
+      <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Monthly token limit") }}</span><small class="text-[12.5px] text-muted">{{ '%.1f'|format(cu.used / 1e6) }} M {{ _("used") }} · {{ '%.1f'|format((cu.limit - cu.used) / 1e6) }} M {{ _("left") }}</small></div>
+      {{ ui.bar(cpct, 'brand', 'h-1.5') }}
+      <div class="flex min-w-0 flex-wrap items-center gap-3">
+        <input type="range" name="claude_token_limit_m" min="1" max="50" step="1" x-model.number="limit" class="range range-primary range-xs min-w-0 flex-1 basis-40">
+        <label class="input input-sm w-auto shrink-0 gap-1 bg-base-200 pr-2.5"><input name="limit_echo" x-model.number="limit" inputmode="numeric" class="w-12 text-right font-semibold" aria-label="{{ _('Monthly token limit') }}"><span class="text-muted">M {{ _("tokens / month") }}</span></label>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5"><small class="mr-1 text-[12.5px] text-muted">{{ _("When the limit is reached") }}</small>{% for v, l in [('pause', _("Pause optional tasks")), ('haiku', _("Switch to Haiku")), ('notify', _("Only notify me"))] %}<label class="inline-flex cursor-pointer items-center rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"><input type="radio" name="claude_limit_mode" value="{{ v }}" {% if (claude_limit_mode if claude_limit_mode is defined else 'pause') == v %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
+      <small class="text-[12.5px] text-muted">{{ _("Input + output tokens across all tasks. Covered by your Claude subscription — the limit only throttles the app, nothing is charged. Chat drafts you request by hand are never blocked.") }}</small>
     </div>
-    <div><button class="btn">{{ _("Save") }}</button></div>
+    <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
   </form>
   {% if token_usage is defined %}
-  <div style="display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--border);padding-top:14px">
-    <span style="font-weight:550">{{ _("Token usage") }}</span>
-    <div class="card" style="overflow:hidden">
-      <div style="display:grid;grid-template-columns:minmax(0,1.4fr) 1fr 1fr 1fr 1fr;gap:10px;padding:8px 14px" class="eyebrow"><span>{{ _("Task") }}</span><span style="text-align:right">{{ _("Calls") }}</span><span style="text-align:right">{{ _("Tokens in") }}</span><span style="text-align:right">{{ _("Tokens out") }}</span><span style="text-align:right">{{ _("API price") }}</span></div>
-      {% for row in token_usage %}<div class="num" style="display:grid;grid-template-columns:minmax(0,1.4fr) 1fr 1fr 1fr 1fr;gap:10px;padding:8px 14px;font-size:13px;border-top:1px solid var(--border)"><span>{{ row.label }} <span class="tag" style="background:var(--hover);color:var(--muted)">{{ row.model }}</span></span><span style="text-align:right">{{ row.calls }}</span><span style="text-align:right">{{ row.tokens_in }}</span><span style="text-align:right">{{ row.tokens_out }}</span><span style="text-align:right">{{ '$%.2f'|format(row.cost) }}</span></div>{% endfor %}
+  <div class="flex flex-col gap-2.5 border-t border-base-300 pt-3.5">
+    <span class="font-medium">{{ _("Token usage") }}</span>
+    <div class="overflow-x-auto rounded-box border border-base-300">
+      <table class="table table-sm min-w-[480px]">
+        <thead class="text-[11.5px] tracking-wide text-muted uppercase"><tr><th class="font-semibold">{{ _("Task") }}</th><th class="text-right font-semibold">{{ _("Calls") }}</th><th class="text-right font-semibold">{{ _("Tokens in") }}</th><th class="text-right font-semibold">{{ _("Tokens out") }}</th><th class="text-right font-semibold">{{ _("API price") }}</th></tr></thead>
+        <tbody class="tabular-nums">{% for row in token_usage %}<tr><td>{{ row.label }} <span class="ml-1 rounded bg-hover px-1.5 text-[11px] text-muted">{{ row.model }}</span></td><td class="text-right">{{ row.calls }}</td><td class="text-right">{{ row.tokens_in }}</td><td class="text-right">{{ row.tokens_out }}</td><td class="text-right">{{ '$%.2f'|format(row.cost) }}</td></tr>{% endfor %}</tbody>
+      </table>
     </div>
-    <small class="muted">{{ _("“API price” is what this usage would cost at pay-as-you-go rates — it's covered by your subscription, so nothing is charged.") }}</small>
+    <small class="text-[12.5px] text-muted">{{ _("“API price” is what this usage would cost at pay-as-you-go rates — it's covered by your subscription, so nothing is charged.") }}</small>
   </div>
   {% endif %}
 </section>

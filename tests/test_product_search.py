@@ -384,7 +384,7 @@ def app_client(wh, claude):
 
 def test_page_renamed_and_search_flow(app_client):
     page = app_client.get("/deals").text
-    assert 'href="/deals"' in page and '<span class="lbl">Product search</span>' in page and "<h1>Product search</h1>" in page
+    assert 'href="/deals"' in page and 'title="Product search"' in page and "<h1>Product search</h1>" in page
     assert "Price check" not in page
     assert 'name="description"' in page and "Unusual names" in page and "Other categories" in page
     assert "Normal (≈3 searches)" in page and "Thorough (≈6)" in page and "Deep (≈12)" in page
@@ -405,7 +405,7 @@ def test_page_renamed_and_search_flow(app_client):
         time.sleep(0.05)
     assert "Fit 92" in frag and "Leise, 60 cm, gut im Budget." in frag and 'data-ad=' in frag
     assert 'data-ad="2000000001"' in frag and "/deals/ad/2000000001?q=Geschirrsp%C3%BCler" in frag
-    assert ">Check price<" in frag and "deal-needle" in frag and "Generated searches (3)" in frag
+    assert ">Check price<" in frag and "deal-track" in frag and "Generated searches (3)" in frag
     assert "3 willhaben searches" in frag and "Zustand unklar" in frag
     assert ps.get(sid).settings["depth"] == "deep"
     assert "Höchstzahl an Suchen: 12" in app_client.fake.calls[0]["prompt"]

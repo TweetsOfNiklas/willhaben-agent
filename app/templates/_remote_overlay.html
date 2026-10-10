@@ -1,17 +1,18 @@
+{% import "_ui.html" as ui %}
 {# Remote browser view as an overlay on any page (instead of navigating to Settings or /session).
    Opens for: links to /session or /settings#willhaben (when not already on Settings), [data-remote] links,
    and pages loaded with ?remote=1 (e.g. after "Create label"). The iframe only loads while the overlay is
    open, so the screenshot polling stops when it closes. Closing reloads the page to show the new state. #}
-<dialog id="remote-overlay" class="modal" aria-label="{{ _('Browser window') }}">
-  <article class="panel remote-overlay" style="--w:1280px;height:calc(100vh - 32px)">
-    <header class="panel-head">
-      <span class="title">{{ _("Browser window") }}</span>
-      <small class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
-      <span style="flex:1"></span>
-      <button type="button" class="icon-btn" data-close aria-label="{{ _('Close') }}" title="{{ _('Close') }}">×</button>
+<dialog id="remote-overlay" class="modal backdrop:bg-[rgba(10,14,20,.55)]" aria-label="{{ _('Browser window') }}">
+  <div class="modal-box flex h-[calc(100vh-32px)] max-h-none w-[min(1280px,calc(100vw-32px))] max-w-none flex-col overflow-hidden p-0 max-md:h-screen max-md:w-screen max-md:rounded-none">
+    <header class="flex shrink-0 items-center gap-2 border-b border-base-300 bg-base-100 px-3.5 py-2.5">
+      <span class="font-semibold">{{ _("Browser window") }}</span>
+      <small class="min-w-0 truncate text-muted">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
+      <span class="flex-1"></span>
+      <button type="button" class="btn btn-ghost btn-sm btn-square" data-close aria-label="{{ _('Close') }}" title="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
     </header>
-    <iframe title="{{ _('Browser window') }}" src="about:blank" style="flex:1;width:100%;border:0;background:var(--bg)"></iframe>
-  </article>
+    <iframe title="{{ _('Browser window') }}" src="about:blank" class="min-h-0 w-full flex-1 border-0 bg-base-200"></iframe>
+  </div>
 </dialog>
 <script>
 (() => {

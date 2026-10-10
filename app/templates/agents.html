@@ -1,86 +1,98 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-  <div><h1>{{ _("Search agents") }}</h1><p>{{ _("Built from willhaben's own filters. Checks run at irregular, human-like intervals and slow down at night.") }}</p></div>
-  <a href="/agents/new" class="btn">+ {{ _("New search agent") }}</a>
-</div>
+{% call ui.head(_("Search agents"), _("Built from willhaben's own filters. Checks run at irregular, human-like intervals and slow down at night.")) %}
+  <a href="/agents/new" class="btn btn-primary">+ {{ _("New search agent") }}</a>
+{% endcall %}
 {% if quiet and quiet.active and agents %}
-<div class="msg warn row" style="gap:10px"><span>{{ _("Quiet hours until {time}:", time=quiet.end.strftime('%H:%M')) }}
+<div role="status" class="mb-4 flex flex-wrap items-center gap-2.5 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">
+  <span>{{ _("Quiet hours until {time}:", time=quiet.end.strftime('%H:%M')) }}
   {{ _("search agents are paused.") if quiet_cfg.mode == 'pause' else _("search agents only check every {n} min.", n=quiet_cfg.interval_min) }}</span>
-  <a href="/settings/quiet" style="margin-left:auto;font-weight:600;color:inherit">{{ _("Change") }}</a></div>
+  <a href="/settings/quiet" class="ml-auto font-semibold text-warning no-underline hover:underline">{{ _("Change") }}</a>
+</div>
 {% endif %}
 {% if agents %}
-<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+<div class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
   {% for a in agents %}
-  <article class="tile" style="{{ '' if a.enabled else 'opacity:.7' }}">
-    <div class="agent-strip">
-      {% for h in thumbs.get(a.id, []) %}<a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" title="{{ h.heading }}"><img src="{{ h.image_url }}" alt="" loading="lazy"></a>
-      {% else %}<a class="empty" href="/hits?agent_id={{ a.id }}&state=all">{{ _("No hits yet") }}</a>{% endfor %}
-    </div>
-    <div class="body" style="padding:14px 16px 12px">
-      <div class="row" style="justify-content:space-between;flex-wrap:nowrap">
-        <a href="/hits?agent_id={{ a.id }}&state=all" style="color:var(--text);font-weight:650;font-size:15px">{{ a.name }}</a>
-        {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}" class="pill brand plain" style="background:var(--brand);color:#fff">{{ _("{n} new", n=counts.get(a.id)) }}</a>
-        {% elif not a.enabled %}<span class="pill plain">{{ _("paused") }}</span>{% endif %}
+  {# the card and its settings dialog; the dialog is opened and closed from Alpine (x-ref dlg) #}
+  <div x-data class="flex min-w-0 flex-col">
+    <article class="flex flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 {{ '' if a.enabled else 'opacity-70' }}">
+      {# phone: a shorter strip, and a slim one when no hit has a picture #}
+      {% set has_pics = thumbs.get(a.id, [])|selectattr('image_url')|list|length > 0 %}
+      <div class="grid shrink-0 grid-cols-4 gap-px bg-base-300 sm:h-24 {{ 'h-16' if has_pics else 'h-9' }}">
+        {% for h in thumbs.get(a.id, []) %}
+        <a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" title="{{ h.heading }}" class="block min-w-0">{{ ui.thumb(h.image_url, 'h-full w-full', 'rounded-none') }}</a>
+        {% else %}
+        <a class="col-span-full grid place-items-center bg-hover text-[13px] text-muted no-underline hover:underline" href="/hits?agent_id={{ a.id }}&state=all">{{ _("No hits yet") }}</a>
+        {% endfor %}
       </div>
-      <div class="muted" style="font-size:13px;line-height:1.5">
-        {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
-        {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
-        {% if a.last_rows_found is not none %}{{ _("{n} matching ads on willhaben", n='{:,}'.format(a.last_rows_found).replace(',', '.')) }}{% endif %}
-        {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
+      <div class="flex flex-1 flex-col gap-1.5 px-4 pt-3.5 pb-3">
+        <div class="flex items-center justify-between gap-2.5">
+          <a href="/hits?agent_id={{ a.id }}&state=all" class="min-w-0 truncate text-[15px] font-semibold text-base-content no-underline hover:underline">{{ a.name }}</a>
+          {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}" class="badge badge-sm h-5 shrink-0 border-0 bg-primary font-semibold whitespace-nowrap text-primary-content no-underline">{{ _("{n} new", n=counts.get(a.id)) }}</a>
+          {% elif not a.enabled %}{{ ui.pill(_("paused"), '', false, 'shrink-0') }}{% endif %}
+        </div>
+        <div class="text-[13px] leading-relaxed text-muted">
+          {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
+          {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
+          {% if a.last_rows_found is not none %}{{ _("{n} matching ads on willhaben", n='{:,}'.format(a.last_rows_found).replace(',', '.')) }}{% endif %}
+          {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
+        </div>
+        {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
+        {% if a.last_error %}<div class="text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
       </div>
-      {% if a.screen %}<div style="color:var(--brand);font-size:13px" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
-      {% if a.last_error %}<div style="color:var(--bad);font-size:13px">{{ a.last_error }}</div>{% endif %}
-    </div>
-    <footer class="actions" style="padding:10px 12px;align-items:center;flex-wrap:wrap;row-gap:8px">
-      <form method="post" action="/agents/{{ a.id }}/run" style="margin:0;flex:0"><button class="btn secondary sm" onclick="this.setAttribute('aria-busy','true')">{{ _("Check now") }}</button></form>
-      <form method="post" action="/agents/{{ a.id }}/toggle" style="margin:0;flex:0"><button class="btn secondary sm">{{ _("Pause") if a.enabled else _("Resume") }}</button></form>
-      <span style="flex:1"></span>
-      <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="muted" style="font-size:13px;white-space:nowrap;flex:none">{{ _("on willhaben") }} ↗</a>
-      <button class="btn ghost sm" type="button" data-drawer="agent-{{ a.id }}" style="flex:none">{{ _("Settings") }}</button>
-    </footer>
-  </article>
-  {# edit drawer #}
-  <div class="drawer" id="agent-{{ a.id }}" hidden>
-    <div class="backdrop" data-drawer-close></div>
-    <div class="panel">
-      <header class="row" style="padding:18px 20px 14px;border-bottom:1px solid var(--border);flex-wrap:nowrap">
-        <div style="flex:1;min-width:0"><div class="eyebrow">{{ _("Search agent") }}</div><h2 style="font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.name }}</h2></div>
-        <a href="{{ a.source_url }}" target="_blank" rel="noopener" style="font-size:13px;white-space:nowrap">{{ _("Filters on willhaben") }} ↗</a>
-        <button class="icon-btn" type="button" data-drawer-close aria-label="{{ _('Close') }}">✕</button>
-      </header>
-      <form method="post" action="/agents/{{ a.id }}/edit" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;flex:1">
-        <label class="field"><span>{{ _("Name") }}</span><input name="name" value="{{ a.name }}"></label>
-        <label class="field"><span>{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
-        <label class="switch-row" style="padding:10px 0;border-top:1px solid var(--border)"><span><span class="t">{{ _("Notify") }}</span><span class="d">{{ _("Push to phone / Telegram for new hits") }}</span></span><input type="checkbox" class="switch" name="notify_on" {% if a.notify %}checked{% endif %}></label>
-        <label class="switch-row" style="padding:10px 0;border-top:1px solid var(--border)"><span><span class="t">{{ _("Report price drops") }}</span><span class="d">{{ _("Also when an already seen ad gets cheaper") }}</span></span><input type="checkbox" class="switch" name="drops_on" {% if a.notify_price_drops %}checked{% endif %}></label>
-        {% if a.queries %}
-          <div class="card pad" style="padding:12px 14px"><div class="eyebrow" style="margin-bottom:6px">{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }}</div>
-          {% for q in a.queries %}<div style="font-size:13px"><a href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</div>{% endfor %}</div>
-        {% endif %}
-        <div class="card pad" style="background:var(--bg);padding:14px 16px">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}</div>
-        <div style="flex:1"></div>
-        <footer class="row" style="padding-top:14px;border-top:1px solid var(--border)">
-          <button class="btn">{{ _("Save") }}</button>
-          <button type="button" class="btn ghost" data-drawer-close>{{ _("Cancel") }}</button>
-          <span style="flex:1"></span>
-          <button class="btn danger" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete agent") }}</button>
-        </footer>
-      </form>
-    </div>
+      {# actions: a 2 × 2 grid, so no button wraps alone onto a second row #}
+      <footer class="grid grid-cols-2 gap-2 border-t border-base-300 p-2.5">
+        <form method="post" action="/agents/{{ a.id }}/run" x-data="{ busy: false }" @submit="busy = true" class="flex">
+          <button class="btn btn-sm w-full whitespace-nowrap" :disabled="busy">
+            <span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Check now") }}</button>
+        </form>
+        <form method="post" action="/agents/{{ a.id }}/toggle" class="flex">
+          <button class="btn btn-sm w-full whitespace-nowrap">{{ _("Pause") if a.enabled else _("Resume") }}</button>
+        </form>
+        <button type="button" class="btn btn-ghost btn-sm w-full whitespace-nowrap" @click="$refs.dlg.showModal()">{{ _("Settings") }}</button>
+        <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm w-full whitespace-nowrap text-muted">{{ _("on willhaben") }} ↗</a>
+      </footer>
+    </article>
+
+    {# settings: a drawer from the right (daisyUI modal-end) #}
+    <dialog x-ref="dlg" class="modal modal-end" @click.self="$refs.dlg.close()" aria-label="{{ _('Settings') }}">
+      <div class="modal-box flex h-full max-h-none w-[min(460px,100%)] max-w-none flex-col gap-0 rounded-none p-0">
+        <header class="flex items-center gap-3 border-b border-base-300 px-5 pt-[18px] pb-3.5">
+          <div class="min-w-0 flex-1">
+            {{ ui.eyebrow(_("Search agent")) }}
+            <h2 class="truncate text-[17px]">{{ a.name }}</h2>
+          </div>
+          <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] whitespace-nowrap no-underline">{{ _("Filters on willhaben") }} ↗</a>
+          <button class="btn btn-ghost btn-sm btn-square" type="button" @click="$refs.dlg.close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
+        </header>
+        <form method="post" action="/agents/{{ a.id }}/edit" class="flex flex-1 flex-col gap-3.5 px-5 py-[18px]">
+          <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ a.name }}" class="input w-full bg-base-200"></label>
+          <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}" class="input w-full bg-base-200"></label>
+          <div class="border-t border-base-300 py-2.5">{{ ui.switch_row(_("Notify"), _("Push to phone / Telegram for new hits"), a.notify, 'name="notify_on"') }}</div>
+          <div class="border-t border-base-300 py-2.5">{{ ui.switch_row(_("Report price drops"), _("Also when an already seen ad gets cheaper"), a.notify_price_drops, 'name="drops_on"') }}</div>
+          {% if a.queries %}
+          <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">
+            {{ ui.eyebrow(_("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches"), 'mb-1.5') }}
+            {% for q in a.queries %}<div class="text-[13px]"><a class="link link-primary no-underline" href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="text-muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</div>{% endfor %}
+          </div>
+          {% endif %}
+          <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}</div>
+          <footer class="mt-auto flex flex-wrap items-center gap-2 border-t border-base-300 pt-3.5">
+            <button class="btn btn-primary">{{ _("Save") }}</button>
+            <button type="button" class="btn btn-ghost" @click="$refs.dlg.close()">{{ _("Cancel") }}</button>
+            <span class="flex-1"></span>
+            <button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete agent") }}</button>
+          </footer>
+        </form>
+      </div>
+    </dialog>
   </div>
   {% endfor %}
 </div>
-<script>
-  document.querySelectorAll('[data-drawer]').forEach(b => b.addEventListener('click', () => { document.getElementById(b.dataset.drawer).hidden = false; }));
-  document.querySelectorAll('[data-drawer-close]').forEach(b => b.addEventListener('click', () => { b.closest('.drawer').hidden = true; }));
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.drawer').forEach(d => d.hidden = true); });
-</script>
 {% else %}
-<div class="card empty-state">
-  <h3>{{ _("No search agents yet") }}</h3>
-  <p class="muted" style="max-width:460px">{{ _("Type what you are looking for and click your filters together – the agent reports new ads and price drops faster than the willhaben emails.") }}</p>
-  <a href="/agents/new" class="btn" style="margin-top:6px">{{ _("Create your first search agent") }}</a>
-</div>
+{% call ui.empty(_("No search agents yet"), _("Type what you are looking for and click your filters together – the agent reports new ads and price drops faster than the willhaben emails.")) %}
+  <a href="/agents/new" class="btn btn-primary mt-1.5">{{ _("Create your first search agent") }}</a>
+{% endcall %}
 {% endif %}
 {% endblock %}

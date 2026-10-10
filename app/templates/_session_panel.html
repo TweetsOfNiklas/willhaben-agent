@@ -1,35 +1,40 @@
+{% import "_ui.html" as ui %}
 {# willhaben browser session: status + live remote view + recorder. Used by /session and Settings → willhaben account (section settings/willhaben.html). JS unchanged (hooks .remote-screen, .remote-state, [data-act], [data-key], .remote-text kept). #}
 {% set logged = session_status.logged_in %}
 {% if embed and session_status.started %}
-<div class="embed-status row" style="margin-bottom:8px"><span class="pill {{ 'ok' if logged else '' if logged is none else 'bad' }}">{{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}</span>{% if logged and session_status.user %}<small class="muted">{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}
-  <span style="flex:1"></span><form method="post" action="/session/login" style="margin:0"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn secondary xs">{{ _("Open login page") }}</button></form><form method="post" action="/session/check" style="margin:0"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn secondary xs">{{ _("Check login") }}</button></form></div>
+<div class="embed-status mb-2 flex flex-wrap items-center gap-1.5">{{ ui.pill(_("logged in") if logged else _("unknown") if logged is none else _("not logged in"), 'ok' if logged else '' if logged is none else 'bad') }}{% if logged and session_status.user %}<small class="text-xs text-muted">{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}
+  <span class="flex-1"></span>
+  <form method="post" action="/session/login"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-xs">{{ _("Open login page") }}</button></form>
+  <form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-xs">{{ _("Check login") }}</button></form>
+</div>
 {% else %}
-<div class="row" style="justify-content:space-between;margin-bottom:14px">
-  <div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:8px;height:8px;border-radius:50%;background:var(--{{ 'ok' if logged else 'off' if not session_status.started else 'bad' }})"></span>
-    <div>{% if not session_status.started %}<div style="font-weight:600">{{ _("The browser is not running.") }}</div><div class="muted" style="font-size:12.5px">{{ session_status.error or '' }}</div>
-      {% else %}<div style="font-weight:600">{{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}{% if logged and session_status.user %} {{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}{% endif %}</div><div class="muted" style="font-size:12.5px">{{ _("Browser running") }} · {{ _("checked {t}", t=session_status.last_check|ago) }}</div>{% endif %}</div></div>
-  <div class="row" style="gap:8px">
-    {% if not session_status.started %}<form method="post" action="/session/start" style="margin:0"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn">{{ _("Start browser") }}</button></form>
-    {% else %}<form method="post" action="/session/login" style="margin:0"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn secondary">{{ _("Open login page") }}</button></form><form method="post" action="/session/check" style="margin:0"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn secondary">{{ _("Check login") }}</button></form>{% endif %}
+<div class="mb-3.5 flex flex-wrap items-center justify-between gap-3">
+  <div class="flex min-w-0 items-center gap-2.5">
+    <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if logged else 'bg-off' if not session_status.started else 'bg-error' }}"></span>
+    <div class="min-w-0">{% if not session_status.started %}<div class="font-semibold">{{ _("The browser is not running.") }}</div><div class="text-[12.5px] text-muted break-words">{{ session_status.error or '' }}</div>
+      {% else %}<div class="font-semibold">{{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}{% if logged and session_status.user %} {{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Browser running") }} · {{ _("checked {t}", t=session_status.last_check|ago) }}</div>{% endif %}</div>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if not session_status.started %}<form method="post" action="/session/start"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-primary">{{ _("Start browser") }}</button></form>
+    {% else %}<form method="post" action="/session/login"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn">{{ _("Open login page") }}</button></form><form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn">{{ _("Check login") }}</button></form>{% endif %}
   </div>
 </div>
-{% if session_status.started %}<p class="muted" style="font-size:12.5px;margin-bottom:14px">{{ _("You log in in the app's real browser window (below, right here in the dashboard).") }} {{ _("The session then stays stored in the browser profile and is renewed automatically as long as willhaben allows it.") }}</p>{% endif %}
+{% if session_status.started %}<p class="mb-3.5 text-[12.5px] text-muted">{{ _("You log in in the app's real browser window (below, right here in the dashboard).") }} {{ _("The session then stays stored in the browser profile and is renewed automatically as long as willhaben allows it.") }}</p>{% endif %}
 {% endif %}
 
 {% if session_status.started %}
   {% if label_form %}
-  <div class="msg row" style="gap:10px"><span>{{ _("Label form for this chat's parcel. After each step (“Weiter”), let the app fill the next page.") }}</span><form method="post" action="/session/label-fill" style="margin:0 0 0 auto"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn sm" onclick="this.setAttribute('aria-busy','true')">{{ _("Fill this page") }}</button></form>{% if not embed %}<a href="/shipments/{{ label_form.shipment_id }}/back" class="btn secondary sm">{{ _("Back to the chat") }}</a>{% endif %}</div>
+  <div class="mb-3 flex flex-wrap items-center gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]"><span class="min-w-0">{{ _("Label form for this chat's parcel. After each step (“Weiter”), let the app fill the next page.") }}</span><form method="post" action="/session/label-fill" class="ml-auto"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-primary btn-sm" onclick="this.setAttribute('aria-busy','true')">{{ _("Fill this page") }}</button></form>{% if not embed %}<a href="/shipments/{{ label_form.shipment_id }}/back" class="btn btn-sm">{{ _("Back to the chat") }}</a>{% endif %}</div>
   {% endif %}
-  <section id="remote" style="display:flex;flex-direction:column;gap:8px">
-    {% if not embed %}<div class="row" style="justify-content:space-between"><span class="row" style="gap:8px;font-weight:550">{{ _("Browser window") }} <span class="muted" style="font-weight:400;font-size:12.5px">· {{ _("click into the picture and type, paste with Ctrl+V") }}</span></span><span class="remote-state muted" style="font-size:12px"></span></div>{% endif %}
-    <div class="remote-bar row" style="gap:6px">
-      <button type="button" class="btn secondary xs" data-act="back">← {{ _("Back") }}</button><button type="button" class="btn secondary xs" data-act="reload">⟳ {{ _("Reload") }}</button>
-      <form class="remote-text row" autocomplete="off" style="margin:0;flex:1;min-width:200px;gap:6px;flex-wrap:nowrap"><input name="t" placeholder="{{ _('Send text (e.g. from a phone)') }}" autocomplete="off" style="height:30px;padding:0 10px;font-size:13px"><button class="btn xs">{{ _("Send") }}</button></form>
-      <button type="button" class="btn secondary xs" data-key="Tab" style="font-family:var(--mono)">Tab</button><button type="button" class="btn secondary xs" data-key="Enter" style="font-family:var(--mono)">Enter</button>
-      {% if embed %}<span class="remote-state muted" style="font-size:12px"></span>{% endif %}
+  <section id="remote" class="flex flex-col gap-2">
+    {% if not embed %}<div class="flex flex-wrap items-center justify-between gap-2"><span class="flex flex-wrap items-center gap-2 font-semibold">{{ _("Browser window") }} <span class="text-[12.5px] font-normal text-muted">· {{ _("click into the picture and type, paste with Ctrl+V") }}</span></span><span class="remote-state text-xs text-muted"></span></div>{% endif %}
+    <div class="remote-bar flex flex-wrap items-center gap-1.5">
+      <button type="button" class="btn btn-xs" data-act="back">{{ ui.icon('back', 12, 2.5) }}{{ _("Back") }}</button><button type="button" class="btn btn-xs" data-act="reload">{{ ui.icon('refresh', 12, 2.5) }}{{ _("Reload") }}</button>
+      <form class="remote-text flex min-w-[200px] flex-1 flex-nowrap items-center gap-1.5" autocomplete="off"><input name="t" placeholder="{{ _('Send text (e.g. from a phone)') }}" autocomplete="off" class="input input-sm min-w-0 flex-1 bg-base-200"><button class="btn btn-xs">{{ _("Send") }}</button></form>
+      <button type="button" class="btn btn-xs font-mono" data-key="Tab">Tab</button><button type="button" class="btn btn-xs font-mono" data-key="Enter">Enter</button>
+      {% if embed %}<span class="remote-state text-xs text-muted"></span>{% endif %}
     </div>
-    <div class="remote-screen" tabindex="0" title="{{ _('Click, then type') }}" style="border-radius:8px;border:2px solid var(--border);overflow:hidden;line-height:0;outline:none;background:#fff"><img alt="{{ _('Loading browser window …') }}" style="width:100%;cursor:pointer;user-select:none;-webkit-user-drag:none"></div>
-    <style>.remote-screen:focus{border-color:var(--brand)}</style>
+    <div class="remote-screen overflow-hidden rounded-lg border-2 border-base-300 bg-white leading-[0] outline-none focus:border-primary" tabindex="0" title="{{ _('Click, then type') }}"><img alt="{{ _('Loading browser window …') }}" draggable="false" class="w-full cursor-pointer select-none"></div>
   </section>
   <script>
   (() => {
@@ -99,19 +104,21 @@
     loop();
   })();
   </script>
-  <details class="advanced muted" style="font-size:12.5px;margin-top:12px"><summary style="cursor:pointer">{{ _("Advanced") }} · {{ _("API recording") }}{% if settings.novnc_url %} · noVNC{% endif %}</summary>
-    <div class="card pad" style="margin-top:8px;display:flex;flex-direction:column;gap:10px;color:var(--text)">
-      <small class="muted">{{ _("Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in") }} <code>data/captures</code>). {{ _("This captures the endpoints still missing for sending, My ads, reactivating and posting an ad.") }}</small>
-      {% if session_status.capturing %}<div class="row"><span class="pill bad">{{ _("recording") }}</span><span>{{ _("{n} requests", n=session_status.capture_count) }}</span><form method="post" action="/session/capture/stop" style="margin:0 0 0 auto"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn secondary sm">{{ _("Stop recording") }}</button></form></div>
+  {% if not embed %}
+  <details class="mt-3 text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("Advanced") }} · {{ _("API recording") }}{% if settings.novnc_url %} · noVNC{% endif %}</summary>
+    <div class="mt-2 flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-4 py-3 text-base-content">
+      <small class="text-muted">{{ _("Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in") }} <code class="font-mono">data/captures</code>). {{ _("This captures the endpoints still missing for sending, My ads, reactivating and posting an ad.") }}</small>
+      {% if session_status.capturing %}<div class="flex flex-wrap items-center gap-2">{{ ui.pill(_("recording"), 'bad') }}<span>{{ _("{n} requests", n=session_status.capture_count) }}</span><form method="post" action="/session/capture/stop" class="ml-auto"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-sm">{{ _("Stop recording") }}</button></form></div>
       {% else %}
-      <div class="row" style="gap:8px">
-        <form method="post" action="/session/capture/start" class="row" style="margin:0;gap:6px;flex-wrap:nowrap"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><select name="label" style="font-size:13px;padding:6px 26px 6px 10px;background-color:var(--surface)">{% for v, l in [('chat', _("open a conversation")), ('chat-senden', _("send a test message")), ('meine-anzeigen', _("open the list")), ('reaktivieren', _("reactivate an expired ad")), ('anzeige-aufgeben', _("the flow up to just before publishing"))] %}<option value="{{ v }}">{{ v }}: {{ l }}</option>{% endfor %}</select><button class="btn secondary sm">{{ _("Start recording") }}</button></form>
-        <span style="width:1px;height:20px;background:var(--border)"></span>
-        <form method="post" action="/session/open" class="row" style="margin:0;gap:6px;flex-wrap:nowrap"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><select name="url" style="font-size:13px;padding:6px 26px 6px 10px;background-color:var(--surface)"><option value="https://www.willhaben.at/iad/myprofile/chat">{{ _("Open chat") }}</option><option value="https://www.willhaben.at/iad/myprofile/myadverts">{{ _("Open My ads") }}</option><option value="https://www.willhaben.at/iad/anzeigenaufgabe">{{ _("Open “Post an ad”") }}</option></select><button class="btn secondary sm">{{ _("Open in the browser window") }}</button></form>
-        {% if settings.novnc_url %}<a href="{{ settings.novnc_url }}" target="_blank" rel="noopener" style="margin-left:auto">{{ _("noVNC in a new tab") }} ↗</a>{% endif %}
+      <div class="flex flex-wrap items-center gap-2">
+        <form method="post" action="/session/capture/start" class="flex flex-wrap items-center gap-1.5"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><select name="label" class="select select-sm bg-base-200 text-[13px]">{% for v, l in [('chat', _("open a conversation")), ('chat-senden', _("send a test message")), ('meine-anzeigen', _("open the list")), ('reaktivieren', _("reactivate an expired ad")), ('anzeige-aufgeben', _("the flow up to just before publishing"))] %}<option value="{{ v }}">{{ v }}: {{ l }}</option>{% endfor %}</select><button class="btn btn-sm">{{ _("Start recording") }}</button></form>
+        <span class="h-5 w-px bg-base-300"></span>
+        <form method="post" action="/session/open" class="flex flex-wrap items-center gap-1.5"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><select name="url" class="select select-sm bg-base-200 text-[13px]"><option value="https://www.willhaben.at/iad/myprofile/chat">{{ _("Open chat") }}</option><option value="https://www.willhaben.at/iad/myprofile/myadverts">{{ _("Open My ads") }}</option><option value="https://www.willhaben.at/iad/anzeigenaufgabe">{{ _("Open “Post an ad”") }}</option></select><button class="btn btn-sm">{{ _("Open in the browser window") }}</button></form>
+        {% if settings.novnc_url %}<a href="{{ settings.novnc_url }}" target="_blank" rel="noopener" class="link link-primary ml-auto">{{ _("noVNC in a new tab") }}{{ ui.icon('external', 13) }}</a>{% endif %}
       </div>
       {% endif %}
-      {% if captures %}<div class="row" style="gap:6px">{% for c in captures %}<a class="chip" href="/session/captures/{{ c }}">{{ c }}</a>{% endfor %}</div>{% endif %}
+      {% if captures %}<div class="flex flex-wrap gap-1.5">{% for c in captures %}{{ ui.chip('/session/captures/' ~ c, c) }}{% endfor %}</div>{% endif %}
     </div>
   </details>
+  {% endif %}
 {% endif %}

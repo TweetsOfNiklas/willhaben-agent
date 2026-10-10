@@ -313,7 +313,7 @@ def test_manual_category_saved_and_published(client, wh):  # noqa: F811
     assert (d2.status, d2.wh_ad_id, d2.error) == ("published", "1000000001", None)
 
     page = client.get(f"/new-ad/{d.id}").text
-    assert "https://www.willhaben.at/iad/object?adId=1000000001" in page and 'pill ok' in page
+    assert "https://www.willhaben.at/iad/object?adId=1000000001" in page and 'bg-ok-soft text-success' in page
     assert "/willhaben/publish" not in page
 
     client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "1"})               # never twice

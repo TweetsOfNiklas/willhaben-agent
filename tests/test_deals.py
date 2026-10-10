@@ -338,7 +338,7 @@ def test_deals_pages_and_claude_on_post(app_client):
 
     listing = app_client.get("/deals", params={"q": "Bosch GSR 18V-55"}).text
     assert "Bosch GSR 18V-55 Nr 0" in listing and f"/deals/ad/{AD_ID}?q=Bosch%20GSR%2018V-55" in listing
-    assert "deal-lvl lvl-" in listing and app_client.calls["search"] == 1
+    assert "bg-lvl-" in listing and app_client.calls["search"] == 1
 
     page = app_client.get(f"/deals/ad/{AD_ID}", params={"q": "Bosch GSR 18V-55"}).text   # answers at once ...
     assert f'hx-get="/deals/ad/{AD_ID}/result?q=Bosch%20GSR%2018V-55' in page

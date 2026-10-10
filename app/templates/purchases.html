@@ -1,42 +1,50 @@
 {% extends "base.html" %}
-{% block main_class %}split{% if row is defined and row %} has-detail{% endif %}{% endblock %}
+{% import "_ui.html" as ui %}
+{# List → detail. /purchases renders the list with `rows`; /purchases/<id> additionally passes `row`, `pcard`, `chat_url`. Pass `rows` on both. #}
+{% set layout = "split" %}
+{% set has_detail = row is defined and row %}
 {% block content %}
-{# /purchases renders the list with `rows`; /purchases/<id> additionally passes `row`, `pcard`, `chat_url`. Pass `rows` on both. #}
 {% set show = request.query_params.get('show', 'open') if request is defined else 'open' %}
 {% set tone = {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad', 'new': 'brand', 'contacting': 'brand', 'negotiating': 'brand'} %}
-<div class="list" style="display:flex;flex-direction:column;min-width:0" data-resize="purchases">
-  <div style="padding:22px 20px 12px">
-    <h1 style="font-size:20px;margin-bottom:6px">{{ _("Purchases") }}</h1>
-    <p class="muted" style="font-size:13px;margin-bottom:12px">{{ _("The agent contacts the seller and negotiates within your maximum price. Nothing is paid automatically.") }}</p>
-    <nav class="seg" style="font-size:13px"><a href="/purchases?show=open" {% if show == 'open' %}aria-current="true"{% endif %}>{{ _("Open") }}</a><a href="/purchases?show=done" {% if show == 'done' %}aria-current="true"{% endif %}>{{ _("Finished") }}</a><a href="/purchases?show=all" {% if show == 'all' %}aria-current="true"{% endif %}>{{ _("All") }}</a></nav>
+<div x-init="splitResize($el, 'purchases')" class="flex min-w-0 flex-col border-base-300 md:border-r {{ 'max-md:hidden' if has_detail else '' }}">
+  <div class="px-5 pt-[22px] pb-3">
+    <h1 class="mb-1.5 text-xl">{{ _("Purchases") }}</h1>
+    <p class="mb-3 text-[13px] text-muted">{{ _("The agent contacts the seller and negotiates within your maximum price. Nothing is paid automatically.") }}</p>
+    {{ ui.seg([('/purchases?show=open', _("Ongoing"), none, show == 'open'), ('/purchases?show=done', _("Finished"), none, show == 'done'), ('/purchases?show=all', _("All"), none, show == 'all')], 'text-[13px]') }}
   </div>
-  <div style="display:flex;flex-direction:column;padding:0 10px 16px;gap:2px">
+  <div class="flex flex-col gap-0.5 px-2.5 pb-4">
     {% for r in rows if show == 'all' or (show == 'open') == (r.status_key not in ('done', 'cancelled', 'failed') if r.status_key is defined else true) %}
-    <a class="list-item {{ 'on' if row is defined and row and row.id == r.id else '' }}" href="/purchases/{{ r.id }}" style="grid-template-columns:52px 1fr">
-      <img class="thumb" src="{{ r.image or '' }}" alt="">
-      <span style="min-width:0"><span class="title">{{ r.title }}</span>
-        <span class="row" style="gap:8px;margin-top:3px"><span class="pill {{ tone.get(r.tone, r.tone) }}">{{ r.status }}</span><span class="muted" style="font-size:12.5px">{{ r.mode }}{% if r.query %} · „{{ r.query }}“{% endif %}</span></span></span>
+    <a href="/purchases/{{ r.id }}" class="grid grid-cols-[52px_minmax(0,1fr)] items-center gap-3 rounded-[10px] p-2.5 text-base-content no-underline {{ 'bg-brand-soft' if row is defined and row and row.id == r.id else 'hover:bg-hover' }}">
+      {{ ui.thumb(r.image, 'h-10 w-[52px]') }}
+      <span class="min-w-0"><span class="block truncate font-semibold">{{ r.title }}</span>
+        <span class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"><span class="shrink-0">{{ ui.pill(r.status, tone.get(r.tone, r.tone)) }}</span><span class="min-w-0 truncate text-[12.5px] text-muted">{{ r.mode }}{% if r.query %} · „{{ r.query }}“{% endif %}</span></span></span>
     </a>
-    {% else %}<p class="muted" style="padding:14px 10px">{{ _("No purchase orders yet. Start one with Buy in the product search.") }}</p>{% endfor %}
+    {% else %}<p class="px-2.5 py-3.5 text-muted md:hidden">{{ _("No purchase orders yet. Start one with Buy in the product search.") }} <a class="link link-primary" href="/deals">{{ _("Product search") }}</a></p>{% endfor %}
   </div>
 </div>
-<div class="detail">
+<div class="flex min-w-0 max-w-[860px] flex-col gap-5 px-4 pt-5 pb-8 md:px-7 md:pt-[22px] {{ '' if has_detail else 'max-md:hidden' }}">
 {% if row %}
-  <div style="display:flex;gap:16px;align-items:flex-start">
-    <img src="{{ row.image_url or '' }}" alt="" style="width:112px;height:84px;border-radius:10px;object-fit:cover;background:var(--hover);flex:none">
-    <div style="flex:1;min-width:0">
-      <div class="row" style="gap:10px"><h2 style="font-size:19px;letter-spacing:-.01em">{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}</h2><span class="pill {{ tone.get(pcard.status, '') }}">{{ pcard.status_label }}</span></div>
-      <div class="muted" style="margin-top:4px">{{ pcard.mode_label }} · {{ _("Started") }} {{ row.created_at|local }} · {{ _("Updated") }} {{ row.updated_at|local }}{% if row.query %} · „{{ row.query }}“{% if row.search_id %} (<a href="/deals?search={{ row.search_id }}#ps-result">{{ _("Product search") }}</a>){% endif %}{% endif %}</div>
-      <div class="row" style="margin-top:12px">
-        {% if chat_url %}<a class="btn secondary" href="{{ chat_url }}">{{ _("Open chat") }}</a>{% endif %}
-        {% if row.ad_url %}<a class="btn secondary" href="{{ row.ad_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>{% endif %}
+  <a href="/purchases?show={{ show }}" class="btn btn-ghost btn-sm -ml-2 self-start md:hidden">{{ ui.icon('back', 16) }}{{ _("Purchases") }}</a>
+  <div class="flex items-start gap-4">
+    {{ ui.thumb(row.image_url, 'h-[84px] w-[112px]', 'rounded-[10px]') }}
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-2.5"><h2 class="min-w-0 text-[19px] tracking-tight break-words">{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}</h2>{{ ui.pill(pcard.status_label, tone.get(pcard.status, '')) }}</div>
+      <div class="mt-1 text-muted">{{ pcard.mode_label }} · {{ _("Started") }} {{ row.created_at|local }} · {{ _("Updated") }} {{ row.updated_at|local }}{% if row.query %} · „{{ row.query }}“{% if row.search_id %} (<a class="text-primary no-underline hover:underline" href="/deals?search={{ row.search_id }}#ps-result">{{ _("Product search") }}</a>){% endif %}{% endif %}</div>
+      {% if chat_url or row.ad_url %}
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        {% if chat_url %}<a class="btn" href="{{ chat_url }}">{{ _("Open chat") }}</a>{% endif %}
+        {% if row.ad_url %}<a class="btn" href="{{ row.ad_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>{% endif %}
       </div>
+      {% endif %}
     </div>
   </div>
-  {# the order card (next step, pay-now, prices, actions, history) — restyle _purchase.html with .card / .btn / .pill #}
   {% include "_purchase.html" %}
+{% elif rows %}
+  <p class="text-muted">{{ _("Pick a purchase on the left.") }}</p>
 {% else %}
-  <p class="muted">{{ _("Pick a purchase on the left.") }}</p>
+  {% call ui.empty(_("No purchase orders yet. Start one with Buy in the product search."), '', 'mt-6 bg-base-100') %}
+    <a class="btn btn-primary btn-sm mt-2" href="/deals">{{ ui.icon('box', 16) }}{{ _("Product search") }}</a>
+  {% endcall %}
 {% endif %}
 </div>
 {% endblock %}

@@ -1,56 +1,75 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-  <div><a href="/agents" class="muted" style="font-size:13px">← {{ _("Search agents") }}</a><h1 style="margin-top:6px">{{ _("New search agent") }}</h1><p>{{ _("Build the search with willhaben's own filters — the agent then checks it at human-like intervals.") }}</p></div>
+{# a filter chip that can carry a title (the "remove" hint); a local macro until _ui.html has one #}
+{% macro fchip(href, label, count=none, on=false, title='') -%}
+<a href="{{ href }}" class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12.5px] no-underline {{ 'border-primary bg-brand-soft text-primary' if on else 'border-base-300 bg-base-100 hover:border-primary' }}"{% if title %} title="{{ title }}"{% endif %}>{{ label }}{% if count is not none %} <small class="text-[11px] opacity-65">{{ count }}</small>{% endif %}</a>
+{%- endmacro %}
+<div class="mb-5">
+  <a href="/agents" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("Search agents") }}</a>
+  <h1 class="mt-1.5">{{ _("New search agent") }}</h1>
+  <p class="mt-1 max-w-[640px] text-muted">{{ _("Build the search with willhaben's own filters — the agent then checks it at human-like intervals.") }}</p>
 </div>
-<form method="get" action="/agents/new" class="row" style="margin-bottom:18px;flex-wrap:nowrap">
+<form method="get" action="/agents/new" class="mb-4 flex flex-nowrap items-center gap-2.5">
   <input type="hidden" name="url" value="{{ url }}">
-  <span class="row" style="flex:1;border:1px solid var(--border);border-radius:10px;background:var(--surface);padding:0 12px;flex-wrap:nowrap"><span class="muted"></span><input type="search" name="keyword" value="{{ (f.keyword if f else url_param(url, 'keyword')) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus style="border:0;background:none;font-size:15px"></span>
-  <button class="btn" style="height:42px;border-radius:10px">{{ _("Search") }}</button>
+  <label class="input h-[42px] flex-1 rounded-[10px] bg-base-100">
+    {{ ui.icon('search', 16, 2, 'text-muted') }}
+    <input type="search" name="keyword" value="{{ (f.keyword if f else url_param(url, 'keyword')) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus class="grow text-[15px]">
+  </label>
+  <button class="btn btn-primary h-[42px] rounded-[10px]">{{ _("Search") }}</button>
 </form>
 {% if f %}
-<div style="display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;align-items:start" class="builder">
-  <aside style="display:flex;flex-direction:column;gap:4px">
+<div class="grid grid-cols-1 items-start gap-5 md:grid-cols-[260px_minmax(0,1fr)]">
+  <aside class="flex flex-col">
     {% for label, filters in f.groups %}{% for flt in filters %}
-    <details {% if flt.selected or flt.kind in ('HIERARCHICAL', 'RANGE') or flt.id == 'state' %}open{% endif %} style="border-bottom:1px solid var(--border);padding:8px 0">
-      <summary class="row" style="cursor:pointer;font-weight:600;font-size:13.5px;list-style:none;flex-wrap:nowrap">{{ flt.label }}{% if flt.selected %}<span class="badge" style="background:var(--ok)">{{ flt.selected|length }}</span>{% endif %}<span class="muted" style="margin-left:auto">⌄</span></summary>
+    <details {% if flt.selected or flt.kind in ('HIERARCHICAL', 'RANGE') or flt.id == 'state' %}open{% endif %} class="group border-b border-base-300 py-2">
+      <summary class="flex cursor-pointer list-none items-center gap-2 text-[13.5px] font-semibold [&::-webkit-details-marker]:hidden">{{ flt.label }}{% if flt.selected %}<span class="badge badge-sm border-0 bg-success text-success-content">{{ flt.selected|length }}</span>{% endif %}<span class="ml-auto text-muted transition-transform group-open:rotate-180">{{ ui.icon('chevron-down', 14) }}</span></summary>
       {% if flt.kind == 'RANGE' %}
-        <form method="get" action="/agents/new" class="row" style="gap:6px;padding-top:8px;flex-wrap:nowrap"><input type="hidden" name="url" value="{{ url }}">
-          {% for p in flt.range_params %}<input name="r_{{ p }}" inputmode="numeric" value="{{ url_param(f.url, p) or '' }}" placeholder="{{ _('from') if p.endswith('FROM') else _('to') }}" style="padding:6px 8px;font-size:13px">{% endfor %}
-          <button class="btn secondary xs">{{ _("OK") }}</button></form>
+        <form method="get" action="/agents/new" class="flex flex-nowrap items-center gap-1.5 pt-2"><input type="hidden" name="url" value="{{ url }}">
+          {% for p in flt.range_params %}<input name="r_{{ p }}" inputmode="numeric" value="{{ url_param(f.url, p) or '' }}" placeholder="{{ _('from') if p.endswith('FROM') else _('to') }}" class="input input-sm min-w-0 flex-1 bg-base-200">{% endfor %}
+          <button class="btn btn-xs">{{ _("OK") }}</button></form>
       {% else %}
-        <div class="row" style="gap:4px;padding-top:8px">
-          {% for v in flt.selected %}<a class="chip on" href="/agents/new?url={{ v.url|urlencode }}" title="{{ _('remove') }}" style="font-size:12.5px;padding:3px 10px">{{ v.label }} ✕</a>{% endfor %}
-          {% if not flt.selected or flt.multi or flt.kind == 'HIERARCHICAL' %}{% for v in flt.values %}<a class="chip" href="/agents/new?url={{ v.url|urlencode }}" style="font-size:12.5px;padding:3px 10px">{{ v.label }}{% if v.hits is not none %} <small>{{ '{:,}'.format(v.hits).replace(',', '.') }}</small>{% endif %}</a>{% endfor %}{% endif %}
+        <div class="flex flex-wrap gap-1 pt-2">
+          {% for v in flt.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}
+          {% if not flt.selected or flt.multi or flt.kind == 'HIERARCHICAL' %}{% for v in flt.values %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label, ('{:,}'.format(v.hits).replace(',', '.') if v.hits is not none else none)) }}{% endfor %}{% endif %}
         </div>
       {% endif %}
     </details>
     {% endfor %}{% endfor %}
   </aside>
-  <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
-    <section class="card pad" style="display:flex;flex-direction:column;gap:14px">
-      <div class="row" style="gap:8px"><span style="font-weight:650;font-size:16px">{{ '{:,}'.format(f.rows_found).replace(',', '.') }} {{ _("ads") }}</span><span class="muted">{{ _("currently match") }}{% if f.selected %} ·{% endif %}</span>
-        {% for flt, v in f.selected %}<a class="chip on" href="/agents/new?url={{ v.url|urlencode }}" title="{{ _('remove') }}" style="font-size:12.5px;padding:2px 9px">{{ v.label }} ✕</a>{% endfor %}
-        <a href="{{ f.url }}" target="_blank" rel="noopener" style="margin-left:auto;font-size:12.5px;white-space:nowrap">{{ _("View this search on willhaben") }} ↗</a></div>
-      <form method="post" action="/agents" class="agent-create" style="display:flex;flex-direction:column;gap:14px">
+  <div class="flex min-w-0 flex-col gap-4">
+    <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-base font-semibold">{{ '{:,}'.format(f.rows_found).replace(',', '.') }} {{ _("ads") }}</span><span class="text-muted">{{ _("currently match") }}{% if f.selected %} ·{% endif %}</span>
+        {% for flt, v in f.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}
+        <a href="{{ f.url }}" target="_blank" rel="noopener" class="link link-primary ml-auto text-[12.5px] whitespace-nowrap no-underline">{{ _("View this search on willhaben") }} ↗</a>
+      </div>
+      <form method="post" action="/agents" class="flex flex-col gap-3.5">
         <input type="hidden" name="url" value="{{ f.url }}">
-        <div style="display:grid;grid-template-columns:1fr 160px;gap:12px">
-          <label class="field"><span>{{ _("Name") }}</span><input name="name" value="{{ f.suggested_name() }}"></label>
-          <label class="field"><span>{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ f.suggested_name() }}" class="input w-full bg-base-200"></label>
+          <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}" class="input w-full bg-base-200"></label>
         </div>
-        <div class="card pad" style="background:var(--bg);padding:12px 14px">{% with screen=False, brief='', minimum='match', hide=None %}{% include "_screen_fields.html" %}{% endwith %}</div>
-        <div class="row" style="gap:12px"><button class="btn" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>+ {{ _("Create search agent") }}</button><small class="muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}</small></div>
+        <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=False, brief='', minimum='match', hide=None %}{% include "_screen_fields.html" %}{% endwith %}</div>
+        <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>+ {{ _("Create search agent") }}</button><small class="text-muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}</small></div>
       </form>
     </section>
-    <div><div class="eyebrow" style="margin-bottom:8px">{{ _("Latest hits") }}</div>
-      <div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+    <div>
+      {{ ui.eyebrow(_("Latest hits"), 'mb-2') }}
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
         {% for a in f.ads %}
-        <a class="tile" href="{{ a.url }}" target="_blank" rel="noopener" style="color:var(--text)"><img src="{{ a.image_url or '' }}" alt="" loading="lazy" style="height:110px"><span class="body" style="padding:10px 12px;gap:3px"><span style="font-weight:600;line-height:1.3">{{ a.heading }}</span><span style="font-weight:650">{{ a.price_display or '–' }}{% if a.old_price %} <span class="muted" style="text-decoration:line-through;font-weight:400;font-size:13px">{{ a.old_price|eur }}</span>{% endif %}</span><span class="muted" style="font-size:12.5px">{{ a.location or '' }} · {{ a.published_at|ago }}</span></span></a>
-        {% else %}<p class="muted">{{ _("No hits – loosen the filters.") }}</p>{% endfor %}
+        <a class="flex flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 text-base-content no-underline hover:border-primary" href="{{ a.url }}" target="_blank" rel="noopener">
+          {{ ui.thumb(a.image_url, 'h-[110px] w-full', 'rounded-none') }}
+          <span class="flex min-w-0 flex-col gap-0.5 px-3 py-2.5">
+            <span class="leading-snug font-semibold">{{ a.heading }}</span>
+            <span class="font-semibold">{{ a.price_display or '–' }}{% if a.old_price %} <span class="text-[13px] font-normal text-muted line-through">{{ a.old_price|eur }}</span>{% endif %}</span>
+            <span class="text-[12.5px] text-muted">{{ a.location or '' }} · {{ a.published_at|ago }}</span>
+          </span>
+        </a>
+        {% else %}<p class="col-span-full text-muted">{{ _("No hits – loosen the filters.") }}</p>{% endfor %}
       </div>
     </div>
   </div>
 </div>
-<style>@media (max-width:760px){ .builder{grid-template-columns:1fr} }</style>
 {% endif %}
 {% endblock %}

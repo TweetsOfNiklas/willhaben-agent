@@ -289,5 +289,4 @@ def test_remote_overlay_compact_header(client, monkeypatch):
 def test_agent_create_form_is_not_a_squeezing_grid(client):
     page = client.get("/agents/new", params={"keyword": "fahrrad"}).text
     form = page.split('action="/agents"')[1].split("</form>")[0]
-    assert 'class="agent-create"' in form
-    assert 'name="screen_on"' in form and 'name="interval_min"' in form
+    assert 'name="name"' in form and 'name="screen_on"' in form and 'name="interval_min"' in form

@@ -1,72 +1,109 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head"><div><h1>{{ _("Home") }}</h1><p>{{ _("Last agent check {ago}", ago=last_check|ago) if last_check is defined else '' }}</p></div></div>
+{{ ui.head(_("Home"), _("Last agent check {ago}", ago=last_check|ago) if last_check is defined else '') }}
 
-<div class="stats" style="margin-bottom:24px">
-  <a class="card stat" href="/hits"><div class="n" style="color:var(--brand)">{{ stats.new_hits }}</div><div class="l">{{ _("new hits") }}</div></a>
-  <a class="card stat" href="/agents"><div class="n">{{ stats.agents }}</div><div class="l">{{ _("active search agents") }}</div></a>
-  <a class="card stat" href="/chats"><div class="n" style="color:var(--brand)">{{ stats.unread }}</div><div class="l">{{ _("unread messages") }}</div></a>
-  <a class="card stat" href="/chats"><div class="n">{{ stats.open_drafts }}</div><div class="l">{{ _("open drafts") }}</div></a>
-  <a class="card stat" href="/myads"><div class="n">{{ stats.myads }}</div><div class="l">{{ _("own ads") }}{% if stats.expired %} <span class="pill bad plain">{{ _("{n} expired", n=stats.expired) }}</span>{% endif %}</div></a>
+{# phone: one scrollable strip of small tiles (no orphan tile); wider: one row #}
+<div class="-mx-4 mb-6 flex gap-2.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] sm:gap-3 sm:overflow-visible sm:px-0">
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/hits">
+    <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight text-primary tabular-nums">{{ stats.new_hits }}</div>
+    <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("new hits") }}</div>
+  </a>
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/agents">
+    <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight tabular-nums">{{ stats.agents }}</div>
+    <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("active search agents") }}</div>
+  </a>
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/chats">
+    <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight text-primary tabular-nums">{{ stats.unread }}</div>
+    <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("unread messages") }}</div>
+  </a>
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/chats">
+    <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight tabular-nums">{{ stats.open_drafts }}</div>
+    <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("open drafts") }}</div>
+  </a>
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/myads">
+    <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight tabular-nums">{{ stats.myads }}</div>
+    <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("own ads") }}{% if stats.expired %} {{ ui.pill(_("{n} expired", n=stats.expired), 'bad', false, 'align-middle') }}{% endif %}</div>
+  </a>
 </div>
 
 {% if health %}
 {% set n_problem = health|selectattr('state', 'equalto', 'problem')|list|length %}
 {% set n_off = health|selectattr('state', 'equalto', 'off')|list|length %}
-<div class="row" style="justify-content:space-between;margin-bottom:10px"><h3>{{ _("Connections") }}</h3>
-  <small class="muted">{% if n_problem %}{{ _("{n} problem(s)", n=n_problem) }}{% else %}{{ _("No problems") }}{% endif %}{% if n_off %} · {{ _("{n} not set up", n=n_off) }}{% endif %}</small></div>
-<div class="conns" id="connections" style="margin-bottom:24px">
-  {% set marks = {'ok': '✓', 'problem': '!', 'off': '–', 'unknown': '?'} %}
+{% set marks = {'ok': '✓', 'problem': '!', 'off': '–', 'unknown': '?'} %}
+{% set mark_tone = {'ok': 'bg-ok-soft text-success', 'problem': 'bg-bad-soft text-error'}%}
+<div class="mb-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+  <h3>{{ _("Connections") }}</h3>
+  <small class="text-muted">{% if n_problem %}{{ _("{n} problem(s)", n=n_problem) }}{% else %}{{ _("No problems") }}{% endif %}{% if n_off %} · {{ _("{n} not set up", n=n_off) }}{% endif %}</small>
+</div>
+{# phone: one card with compact rows; wider: tile grid #}
+<div class="mb-6 flex flex-col max-sm:divide-y max-sm:divide-base-300 max-sm:overflow-hidden max-sm:rounded-box max-sm:border max-sm:border-base-300 max-sm:bg-base-100 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] sm:gap-2.5" id="connections">
   {% for c in health %}
-  {% set tag = 'a' if c.href else 'div' %}
-  <{{ tag }} {% if c.href %}href="{{ c.href }}"{% endif %} class="card conn {{ c.state }}" data-health="{{ c.key }}" title="{{ c.reason }}">
-    <span class="row" style="gap:8px;font-weight:600;flex-wrap:nowrap"><span class="mark">{{ marks[c.state] }}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.label }}</span></span>
-    <span class="reason">{{ c.reason }}</span>
-  </{{ tag }}>
+  {% set el = 'a' if c.href else 'div' %}
+  <{{ el }} {% if c.href %}href="{{ c.href }}" {% endif %}class="flex min-w-0 flex-col gap-1 text-base-content no-underline max-sm:flex-row max-sm:items-center max-sm:gap-3 max-sm:px-3.5 max-sm:py-2.5 max-sm:hover:bg-hover sm:rounded-box sm:border sm:bg-base-100 sm:px-3 sm:py-2.5 sm:hover:border-primary {{ 'max-sm:bg-bad-soft sm:border-error' if c.state == 'problem' else 'sm:border-base-300' }}" data-health="{{ c.key }}" data-state="{{ c.state }}" title="{{ c.reason }}">
+    <span class="flex min-w-0 items-start gap-2 font-semibold max-sm:shrink-0 max-sm:items-center">
+      <span class="mt-px grid size-[18px] shrink-0 place-items-center rounded-full text-[11px] font-extrabold {{ mark_tone.get(c.state, 'bg-hover text-muted') }}">{{ marks[c.state] }}</span>
+      <span class="min-w-0 break-words leading-snug">{{ c.label }}</span>
+    </span>
+    <span class="pl-7 text-[12.5px] leading-snug break-words max-sm:min-w-0 max-sm:flex-1 max-sm:pl-0 max-sm:text-right {{ 'text-error' if c.state == 'problem' else 'text-muted' }}">{{ c.reason }}</span>
+  </{{ el }}>
   {% endfor %}
 </div>
 {% endif %}
 
 {% if not session_status.logged_in or not llm_ok %}
-<div class="msg warn" style="display:flex;flex-direction:column;gap:4px">
+{# setup hints: links inside the bar #}
+<div role="status" class="mb-4 flex flex-col gap-1 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">
   <strong>{{ _("Setup") }}</strong>
-  {% if not session_status.started %}<span>{{ _("Browser is not running.") }} {{ session_status.error or '' }} <a href="/settings/willhaben">{{ _("Start") }}</a></span>
-  {% elif not session_status.logged_in %}<span>{{ _("Not logged in to willhaben: chats and reactivation are inactive.") }} <a href="/settings/willhaben">{{ _("Log in now") }}</a></span>{% endif %}
-  {% if not llm_ok %}<span>{{ _("Claude is not signed in.") }} <a href="/settings/claude">{{ _("Sign in now") }}</a></span>{% endif %}
+  {% if not session_status.started %}<span>{{ _("Browser is not running.") }} {{ session_status.error or '' }} <a class="link font-semibold" href="/settings/willhaben">{{ _("Start") }}</a></span>
+  {% elif not session_status.logged_in %}<span>{{ _("Not logged in to willhaben: chats and reactivation are inactive.") }} <a class="link font-semibold" href="/settings/willhaben">{{ _("Log in now") }}</a></span>{% endif %}
+  {% if not llm_ok %}<span>{{ _("Claude is not signed in.") }} <a class="link font-semibold" href="/settings/claude">{{ _("Sign in now") }}</a></span>{% endif %}
 </div>
 {% endif %}
 
-<div class="two-col">
-  <section class="card feed">
-    <header><h3>{{ _("Latest hits") }}</h3><a href="/hits" style="font-size:13px">{{ _("All hits") }}</a></header>
+<div class="grid grid-cols-1 items-start gap-5 md:grid-cols-2">
+  <section class="overflow-hidden rounded-box border border-base-300 bg-base-100">
+    <header class="flex items-center justify-between gap-2.5 border-b border-base-300 px-4 py-3 font-semibold">
+      <h3>{{ _("Latest hits") }}</h3>
+      <a href="/hits" class="text-[13px] whitespace-nowrap link link-primary no-underline">{{ _("All hits") }}</a>
+    </header>
     {% for h in latest %}
-      <a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}">
-        <img src="{{ h.image_url or '' }}" alt="" loading="lazy">
-        <span style="min-width:0"><span style="display:block;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.heading }}</span><span class="muted" style="font-size:12.5px">{{ h.location or '' }} · {{ h.published_at|ago }}</span></span>
-        <span class="num" style="font-weight:600">{{ h.price_display or (h.price|eur) }}</span>
-      </a>
-    {% else %}<p class="muted" style="padding:14px 16px">{{ _("No new hits.") }}</p>{% endfor %}
+    <a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}"
+       class="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 border-b border-base-300 px-4 py-2.5 text-base-content no-underline hover:bg-hover">
+      {{ ui.thumb(h.image_url, 'h-[38px] w-[52px]', 'rounded-md') }}
+      <span class="min-w-0">
+        <span class="block truncate font-medium">{{ h.heading }}</span>
+        <span class="block text-[12.5px] text-muted">{{ h.location or '' }} · {{ h.published_at|ago }}</span>
+      </span>
+      <span class="font-semibold whitespace-nowrap tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
+    </a>
+    {% else %}<p class="px-4 py-3.5 text-muted">{{ _("No new hits.") }}</p>{% endfor %}
   </section>
-  <div style="display:flex;flex-direction:column;gap:20px">
-    <section class="card" id="activity">
-      <header><h3>{{ _("Activity") }}</h3></header>
+
+  <div class="flex flex-col gap-5">
+    <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="activity">
+      <header class="border-b border-base-300 px-4 py-3 font-semibold"><h3>{{ _("Activity") }}</h3></header>
       {% set kinds = {'hit': _('New hit'), 'price_drop': _('Price drop'), 'message': _('New message'), 'auto_reply': _('Answered automatically'),
                       'auto_reply_pending': _('Reply waiting for you'), 'ad_expiring': _('Ad expiring soon'), 'ad_expired': _('Ad expired'), 'test': _('Test'), 'health': _('Connections')} %}
       {% for e in events %}
-      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--border)" title="{{ kinds.get(e.kind, e.kind) }}">
-        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{% if e.url %}<a href="{{ e.url }}" target="_blank" style="color:var(--text)">{{ e.message }}</a>{% else %}{{ e.message }}{% endif %}</span>
-        <span class="muted num" style="font-size:12.5px">{{ e.ts|local('%H:%M') }}</span>
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-base-300 px-4 py-2" title="{{ kinds.get(e.kind, e.kind) }}">
+        <span class="min-w-0 truncate">{% if e.url %}<a href="{{ e.url }}" target="_blank" class="text-base-content no-underline hover:underline">{{ e.message }}</a>{% else %}{{ e.message }}{% endif %}</span>
+        <span class="text-[12.5px] whitespace-nowrap text-muted tabular-nums">{{ e.ts|local('%H:%M') }}</span>
       </div>
-      {% else %}<p class="muted" style="padding:14px 16px">{{ _("Nothing has happened yet.") }}</p>{% endfor %}
+      {% else %}<p class="px-4 py-3.5 text-muted">{{ _("Nothing has happened yet.") }}</p>{% endfor %}
     </section>
-    <section class="card">
-      <header><h3>{{ _("Expiring soon") }}</h3><a href="/myads" style="font-size:13px">{{ _("My ads") }}</a></header>
+
+    <section class="overflow-hidden rounded-box border border-base-300 bg-base-100">
+      <header class="flex items-center justify-between gap-2.5 border-b border-base-300 px-4 py-3 font-semibold">
+        <h3>{{ _("Expiring soon") }}</h3>
+        <a href="/myads" class="text-[13px] whitespace-nowrap link link-primary no-underline">{{ _("My ads") }}</a>
+      </header>
       {% for a in soon %}
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border)">
-        <a href="{{ a.url }}" target="_blank" style="color:var(--text);font-weight:550">{{ a.heading or a.ad_id }}</a>
-        <span style="color:var(--warn);font-size:12.5px;white-space:nowrap">{{ a.end_date|ago }}</span>
+      <div class="flex items-center justify-between gap-2.5 border-b border-base-300 px-4 py-2.5">
+        <a href="{{ a.url }}" target="_blank" class="min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ a.heading or a.ad_id }}</a>
+        <span class="text-[12.5px] whitespace-nowrap text-warning">{{ a.end_date|ago }}</span>
       </div>
-      {% else %}<p class="muted" style="padding:14px 16px">{{ _("No own ads recorded.") }}</p>{% endfor %}
+      {% else %}<p class="px-4 py-3.5 text-muted">{{ _("No own ads recorded.") }}</p>{% endfor %}
     </section>
   </div>
 </div>

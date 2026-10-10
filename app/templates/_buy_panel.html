@@ -1,39 +1,16 @@
-{# Buy dialog: any plain click on <a data-buy="<ad id>" href="/purchases/new/<ad id>"> (product search, ad viewer) opens
+{# Buy dialog as a window: any plain click on <a data-buy="<ad id>" href="/purchases/new/<ad id>"> (product search, ad viewer) opens
    it and puts _buy_dialog.html in. Ctrl/Cmd/Shift-click and middle-click keep the normal link. Esc and ✕ close it; it can
-   open above the ad viewer. #}
+   open above the ad viewer. The steps, lines and chips are classed in _buy_dialog.html and _buy_script.html. #}
 <dialog id="buy-dialog" class="modal" data-loading="{{ _('Loading ad …') }}" data-error="{{ _('Error {status}') }}"
         data-offline="{{ _('Connection failed') }}">
-  <article class="panel bd-card" style="--w:960px">
-    <header class="panel-head">
-      <span class="title">{{ _("Buy") }}</span><span style="flex:1"></span>
-      <button type="button" class="icon-btn bd-close" aria-label="{{ _('Close') }}" title="{{ _('Close (Esc)') }}">×</button>
+  <article class="modal-box bd-card max-h-[calc(100vh-32px)] w-[min(960px,calc(100vw-32px))] max-w-none overflow-y-auto p-0 max-md:h-screen max-md:max-h-none max-md:w-screen max-md:rounded-none">
+    <header class="sticky top-0 z-10 flex items-center gap-2 border-b border-base-300 bg-base-100 px-3.5 py-2.5">
+      <span class="font-semibold">{{ _("Buy") }}</span><span class="flex-1"></span>
+      <button type="button" class="btn btn-ghost btn-sm btn-square bd-close" aria-label="{{ _('Close') }}" title="{{ _('Close (Esc)') }}">×</button>
     </header>
     <div class="bd-body"></div>
   </article>
 </dialog>
-<style>
-  /* step chips, the draggable ring and the no-JS fallback; the rest is inline in _buy_dialog.html */
-  .bd-body > .msg, .bd-body > p { margin: 16px 20px; }
-  .bd-chips li { display: flex; align-items: center; gap: 6px; }
-  .bd-chips li + li::before { content: "→"; color: var(--muted); font-size: 12px; }
-  .bd-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 4px; border: 1px solid var(--border);
-             border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; }
-  .bd-chip.done, .bd-chip.on { color: var(--text); }
-  .bd-chip.on { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); font-weight: 600; }
-  .bd-chip:disabled { cursor: default; opacity: .6; }
-  .bd-n { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--off);
-          color: #fff; font-size: 12px; font-weight: 700; }
-  .bd-chip.on .bd-n { background: var(--brand); }
-  .bd-chip.done .bd-n { background: var(--ok); font-size: 0; }
-  .bd-chip.done .bd-n::after { content: "✓"; font-size: 12px; }
-  .bd-step[hidden], .bd-pill[hidden], .bd-pin[hidden], .bd-row[hidden] { display: none !important; }
-  .bd-mode:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
-  .bd-field input[type=number] { -moz-appearance: textfield; appearance: textfield; }   /* no up/down spinner */
-  .bd-field input[type=number]::-webkit-inner-spin-button, .bd-field input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  .bd-drag { cursor: ew-resize; touch-action: none; user-select: none; -webkit-user-select: none; }
-  .bd-form:not(.bd-js) :is(.bd-chips, .bd-next, .bd-back, .bd-summary) { display: none; }
-  @media (max-width: 760px) { .bd-form { grid-template-columns: 1fr !important; } .bd-form > aside { border-right: 0 !important; border-bottom: 1px solid var(--border); } }
-</style>
 <script>
 (() => {
   const dlg = document.getElementById('buy-dialog'), body = dlg && dlg.querySelector('.bd-body');
@@ -47,7 +24,7 @@
 
   async function open(href) {
     const me = ++seq;
-    body.replaceChildren(msg('muted', T.loading));
+    body.replaceChildren(msg('mx-5 my-4 text-muted', T.loading));
     if (dlg.open) dlg.close();                 // already open (under the viewer): back to the front
     dlg.showModal();
     dlg.querySelector('article').scrollTop = 0;
@@ -55,11 +32,11 @@
       const r = await fetch(href, {headers: {'X-Requested-With': 'fetch'}});
       if (me !== seq) return;                                       // another ad was opened meanwhile
       if (r.ok || r.status === 404) body.innerHTML = await r.text(); // 404: the ad is gone, the fragment says so
-      else body.replaceChildren(msg('msg', T.error.replace('{status}', r.status)));
+      else body.replaceChildren(msg('mx-5 my-4 rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error', T.error.replace('{status}', r.status)));
       if (window.htmx) htmx.process(body);
       prepare();
     } catch (e) {
-      if (me === seq) body.replaceChildren(msg('msg', T.offline));
+      if (me === seq) body.replaceChildren(msg('mx-5 my-4 rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error', T.offline));
     }
   }
 

@@ -1,19 +1,20 @@
 {# Claude's price verdict for one ad, or the button that asks for it (never automatic). res, q, hit #}
+{% import "_ui.html" as ui %}
 {% set cl = (res or {}).get('claude') or {} %}
-<div class="deal-claude">
+<div data-deal-claude>
   {% if cl.deal %}
-    <div class="adv-claude">
-      <p><strong>{{ _("Claude's assessment") }}</strong>
-        <span class="pill plain {{ 'ok' if cl.deal in ('great', 'good') else '' }}">{{ deal_label(cl.deal) }}</span></p>
-      {% if cl.reason %}<p class="adv-reason">{{ cl.reason }}</p>{% endif %}
+    <div class="flex flex-col gap-1.5 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-2.5">
+      <p class="flex flex-wrap items-center gap-2"><strong class="text-primary">{{ _("Claude's assessment") }}</strong>
+        {{ ui.pill(deal_label(cl.deal), 'ok' if cl.deal in ('great', 'good') else '', false) }}</p>
+      {% if cl.reason %}<p class="text-[13.5px] leading-normal whitespace-pre-wrap">{{ cl.reason }}</p>{% endif %}
     </div>
   {% elif res %}
-    {% if cl.error or error %}<p class="deal-note muted">{{ _("Claude failed: {error}", error=cl.error or error) }}</p>{% endif %}
-    <button type="button" class="btn secondary sm" hx-post="/deals/ad/{{ res.ad.ad_id }}/claude"
+    {% if cl.error or error %}<p class="text-[12.5px] text-muted">{{ _("Claude failed: {error}", error=cl.error or error) }}</p>{% endif %}
+    <button type="button" class="btn btn-sm disabled:opacity-60" hx-post="/deals/ad/{{ res.ad.ad_id }}/claude"
             hx-vals='{"q": {{ (q or '')|tojson }}, "hit": {{ (hit or '')|string|tojson }}, "cat": {{ (res.category_url or '')|tojson }}}'
-            hx-target="closest .deal-claude" hx-swap="outerHTML" hx-disabled-elt="this">
-      <span class="htmx-indicator" aria-busy="true"></span> {{ _("Ask Claude") }}</button>
+            hx-target="closest [data-deal-claude]" hx-swap="outerHTML" hx-disabled-elt="this">
+      <span class="loading loading-spinner loading-xs hidden busy:inline-block"></span> {{ _("Ask Claude") }}</button>
   {% elif error %}
-    <p class="deal-note muted">{{ error }}</p>
+    <p class="text-[12.5px] text-muted">{{ error }}</p>
   {% endif %}
 </div>

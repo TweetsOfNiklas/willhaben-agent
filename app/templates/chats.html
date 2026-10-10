@@ -1,77 +1,100 @@
 {% extends "base.html" %}
-{% block main_class %}split{% if conv is defined and conv %} has-detail{% endif %}{% endblock %}
+{% import "_ui.html" as ui %}
+{# List → detail (docs/ui-guide.md). The thread (chat.html) fills the detail column when a conversation is open;
+   on phones the list shows alone without one. #}
+{% set layout = "split" %}
+{% set has_detail = conv is defined and conv %}
 {% block content %}
-{# List column; the thread (chat.html) renders in the detail column when a conversation is open. Without one, show a hint. #}
 {% set live = session_status.chat_live or {} %}
 {% set role_filter = request.query_params.get('role') if request is defined else none %}
-<div class="list" style="display:flex;flex-direction:column;min-width:0;overflow:auto;max-height:100vh">
-  <div style="padding:22px 20px 12px">
-    <div class="row" style="justify-content:space-between;margin-bottom:8px;flex-wrap:nowrap">
-      <h1 style="font-size:20px">{{ _("Chats") }}</h1>
-      <div class="row" style="gap:6px;flex-wrap:nowrap">
-        <button class="btn secondary sm" type="button" id="chat-select">{{ _("Select") }}</button>
-        <form method="post" action="/chats/sync" style="margin:0"><button class="btn secondary sm" onclick="this.setAttribute('aria-busy','true')">↻ {{ _("Sync") }}</button></form>
+{% set hid = '&show_hidden=1' if show_hidden else '' %}
+<div x-data="chatList" x-init="splitResize($el, 'chats')"
+     class="flex min-w-0 flex-col border-base-300 md:h-screen md:overflow-x-hidden md:overflow-y-auto md:border-r {{ 'max-md:hidden' if has_detail else '' }}">
+  <div class="px-5 pt-[22px] pb-3">
+    <div class="mb-2.5 flex items-center justify-between gap-2">
+      <h1 class="text-xl">{{ _("Chats") }}</h1>
+      <div class="flex shrink-0 gap-1.5">
+        <button type="button" class="btn btn-sm" id="chat-select" @click="mode(!selecting)">{{ _("Select") }}</button>
+        <form method="post" action="/chats/sync" x-data="{ busy: false }" @submit="busy = true">
+          <button class="btn btn-sm" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span><span x-show="!busy">{{ ui.icon('refresh', 14) }}</span>{{ _("Sync") }}</button>
+        </form>
       </div>
     </div>
-    {% if not session_status.logged_in %}<div class="msg warn" style="margin-bottom:10px">{{ _("Not logged in to willhaben.") }} <a href="/settings/willhaben">{{ _("Log in now") }}</a></div>{% endif %}
-    <div class="row" style="gap:7px;color:var(--muted);font-size:12.5px;margin-bottom:12px;flex-wrap:nowrap">
-      <span style="width:8px;height:8px;border-radius:50%;background:var(--{{ 'ok' if live.state == 'connected' else 'off' if live.state == 'off' else 'warn' }})"></span>
+    {% if not session_status.logged_in %}<div role="status" class="mb-2.5 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ _("Not logged in to willhaben.") }} <a class="font-semibold text-warning underline" href="/settings/willhaben">{{ _("Log in now") }}</a></div>{% endif %}
+    <div class="mb-3 flex items-center gap-2 text-[12.5px] text-muted">
+      <span class="size-2 shrink-0 rounded-full {{ {'connected': 'bg-success', 'off': 'bg-off'}.get(live.state, 'bg-warning') }}"></span>
       {% if live.state == 'connected' %}{{ _("Live since {time} · messages arrive instantly", time=live.since|local('%H:%M')) }}{% elif live.state == 'off' %}{{ _("Live chat off · polls every few minutes") }}{% else %}{{ live.state }} · {{ _("until then it polls every few minutes") }}{% endif %}
     </div>
-    <nav class="seg" style="font-size:13px">
-      {% set qs = ('&show_hidden=1' if show_hidden else '') %}
-      <a href="/chats?{{ qs[1:] }}" {% if not role_filter %}aria-current="true"{% endif %}>{{ _("All") }}</a>
-      <a href="/chats?role=seller{{ qs }}" {% if role_filter == 'seller' %}aria-current="true"{% endif %}>{{ _("Selling") }}</a>
-      <a href="/chats?role=buyer{{ qs }}" {% if role_filter == 'buyer' %}aria-current="true"{% endif %}>{{ _("Buying") }}</a>
-    </nav>
+    {{ ui.seg([
+         ('/chats' ~ ('?show_hidden=1' if show_hidden else ''), _("All"), none, not role_filter),
+         ('/chats?role=seller' ~ hid, _("Selling"), none, role_filter == 'seller'),
+         ('/chats?role=buyer' ~ hid, _("Buying"), none, role_filter == 'buyer')], 'text-[13px]') }}
   </div>
-  <form method="post" id="chat-bulk" class="bulkbar" hidden>
-    <label class="row" style="gap:8px"><input type="checkbox" id="chat-all"><span class="lbl" id="chat-count">{{ _("Select all") }}</span></label>
-    <span style="flex:1"></span>
-    <button class="btn secondary xs" formaction="/chats/bulk/read" disabled data-act>{{ _("Mark read") }}</button>
-    <button class="btn secondary xs" formaction="/chats/bulk/hide" disabled data-act>{{ _("Hide") }}</button>
-    <button type="button" class="btn ghost xs" id="chat-done">{{ _("Done") }}</button>
+
+  {# bulk bar: only in selection mode #}
+  <form method="post" id="chat-bulk" x-show="selecting" x-cloak
+        class="mx-5 mb-2.5 flex flex-wrap items-center gap-2 rounded-[10px] bg-brand-soft px-2.5 py-2">
+    <label class="flex items-center gap-2"><input type="checkbox" id="chat-all" class="checkbox checkbox-primary checkbox-sm" aria-label="{{ _('Select all') }}"
+           :checked="picked.length && picked.length === total" :indeterminate="picked.length > 0 && picked.length < total" @change="all($event.target.checked)">
+      <span class="font-semibold text-primary" id="chat-count" x-text="label()">{{ _("Select all") }}</span></label>
+    <span class="flex-1"></span>
+    <button class="btn btn-xs" formaction="/chats/bulk/read" :disabled="!picked.length">{{ _("Mark read") }}</button>
+    <button class="btn btn-xs" formaction="/chats/bulk/hide" :disabled="!picked.length">{{ _("Hide") }}</button>
+    <button type="button" class="btn btn-ghost btn-xs" id="chat-done" @click="mode(false)">{{ _("Done") }}</button>
   </form>
-  <div style="display:flex;flex-direction:column;padding:0 10px 16px;gap:2px">
+
+  <div class="flex flex-col gap-0.5 px-2.5 pb-4">
     {% for c in convs if not role_filter or c.role == role_filter %}
-    <a class="list-item {{ 'on' if conv is defined and conv and conv.id == c.id else '' }}" href="/chats/{{ c.id }}" style="grid-template-columns:36px 1fr auto;align-items:start">
-      <input type="checkbox" class="sel chat-sel" name="ids" value="{{ c.id }}" form="chat-bulk" hidden onclick="event.stopPropagation()">
-      <span class="avatar" style="width:36px;height:36px;background:var(--hover);color:var(--text)">{{ (c.partner_name or '?')[:1]|upper }}</span>
-      <span style="min-width:0">
-        <span class="row" style="justify-content:space-between;flex-wrap:nowrap"><span style="font-weight:{{ 650 if c.unread_count else 550 }}">{{ c.partner_name or _('unknown') }}</span><span class="muted" style="font-size:12px;white-space:nowrap">{{ c.last_message_at|ago }}</span></span>
-        <span class="row" style="gap:6px;flex-wrap:nowrap;color:var(--muted);font-size:12.5px"><span class="tag {{ 'buy' if c.role == 'buyer' else '' }}">{{ _("Buying") if c.role == 'buyer' else _("Selling") }}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.ad_title or c.ad_id or '–' }}</span></span>
-        <span style="display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;color:{{ 'var(--text)' if c.unread_count else 'var(--muted)' }}">{{ (c.last_message_text or '')[:120] }}</span>
+    <a href="/chats/{{ c.id }}" @click="rowClick($event)"
+       class="grid w-full items-start gap-3 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if conv is defined and conv and conv.id == c.id else '' }}"
+       :class="selecting ? 'grid-cols-[24px_36px_minmax(0,1fr)_auto]' : 'grid-cols-[36px_minmax(0,1fr)_auto]'">
+      <input type="checkbox" class="sel chat-sel checkbox checkbox-primary checkbox-sm mt-1" name="ids" value="{{ c.id }}" form="chat-bulk"
+             x-show="selecting" x-cloak x-model="picked" aria-label="{{ _('Select') }}">
+      <span class="grid size-9 shrink-0 place-items-center rounded-full bg-hover text-[13px] font-bold text-base-content">{{ (c.partner_name or '?')[:1]|upper }}</span>
+      <span class="min-w-0">
+        <span class="flex min-w-0 items-center justify-between gap-2">
+          <span class="truncate {{ 'font-bold' if c.unread_count else 'font-semibold' }}">{{ c.partner_name or _('unknown') }}</span>
+          <span class="shrink-0 whitespace-nowrap text-[12px] text-muted">{{ c.last_message_at|ago }}</span>
+        </span>
+        <span class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">{{ ui.tag(_("Buying") if c.role == 'buyer' else _("Selling"), c.role == 'buyer') }}<span class="truncate">{{ c.ad_title or c.ad_id or '–' }}</span></span>
+        <span class="mt-0.5 block truncate text-[13px] {{ 'text-base-content' if c.unread_count else 'text-muted' }}">{{ (c.last_message_text or '')[:120] }}</span>
       </span>
-      <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;padding-top:18px">
-        {% if c.unread_count %}<span class="badge">{{ c.unread_count }}</span>{% endif %}
-        {% if c.id in open_drafts %}<span class="pill ok plain" style="font-size:11px">{{ _("Draft") }}</span>{% endif %}
-        {% if c.hidden_at %}<span class="pill plain" style="font-size:11px">{{ _("hidden") }}</span>{% endif %}
+      <span class="flex flex-col items-end gap-1 pt-[18px]">
+        {% if c.unread_count %}<span class="badge badge-primary badge-sm">{{ c.unread_count }}</span>{% endif %}
+        {% if c.id in open_drafts %}{{ ui.pill(_("Draft"), 'ok', dot=false) }}{% endif %}
+        {% if c.hidden_at %}{{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}
       </span>
     </a>
     {% else %}
-    <p class="muted" style="padding:14px 10px">{{ _("No conversations synced yet.") }}</p>
+    <p class="px-2.5 py-3.5 text-muted">{{ _("No conversations synced yet.") }}</p>
     {% endfor %}
-    {% if hidden_count %}<a href="/chats?{% if not show_hidden %}show_hidden=1{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}" class="muted" style="font-size:12.5px;padding:10px">{{ _("Hide hidden chats") if show_hidden else _("Show {n} hidden chats", n=hidden_count) }}</a>{% endif %}
+    {% if hidden_count %}<a href="/chats?{% if not show_hidden %}show_hidden=1{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}" class="p-2.5 text-[12.5px] text-muted no-underline hover:underline">{{ _("Hide hidden chats") if show_hidden else _("Show {n} hidden chats", n=hidden_count) }}</a>{% endif %}
   </div>
 </div>
-<div class="detail" style="padding:0;max-width:none;display:flex;flex-direction:column">
+
+<div class="flex min-w-0 flex-wrap {{ '' if has_detail else 'max-md:hidden' }} md:h-screen md:overflow-y-auto">
   {% block thread %}
-  <div style="flex:1;display:grid;place-items:center;color:var(--muted);padding:40px;text-align:center">
-    <div><div style="font-weight:600;color:var(--text);margin-bottom:4px">{{ _("Pick a conversation") }}</div><div style="font-size:13px">{{ _("Claude drafts the answer, you send it.") }}</div></div>
+  <div class="grid min-w-0 flex-1 place-items-center p-10 text-center text-muted">
+    <div><div class="mb-1 font-semibold text-base-content">{{ _("Pick a conversation") }}</div><div class="text-[13px]">{{ _("Claude drafts the answer, you send it.") }}</div></div>
   </div>
   {% endblock %}
 </div>
 <script>
-(() => {
-  const list = document.currentScript.parentNode, bar = document.getElementById('chat-bulk'), boxes = [...document.querySelectorAll('.chat-sel')];
-  const all = document.getElementById('chat-all'), count = document.getElementById('chat-count'), T = {all: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}};
-  const update = () => { const n = boxes.filter(b => b.checked).length; count.textContent = n ? T.n.replace('{n}', n) : T.all; bar.querySelectorAll('[data-act]').forEach(b => b.disabled = !n); all.checked = n && n === boxes.length; };
-  const mode = on => { bar.hidden = !on; boxes.forEach(b => { b.hidden = !on; if (!on) b.checked = false; }); document.querySelectorAll('.list-item').forEach(a => a.style.gridTemplateColumns = on ? '24px 36px 1fr auto' : ''); update(); };
-  document.getElementById('chat-select').addEventListener('click', () => mode(bar.hidden));
-  document.getElementById('chat-done').addEventListener('click', () => mode(false));
-  all.addEventListener('change', () => { boxes.forEach(b => b.checked = all.checked); update(); });
-  boxes.forEach(b => b.addEventListener('change', update));
-  document.querySelectorAll('.list-item').forEach(a => a.addEventListener('click', e => { if (!bar.hidden) { e.preventDefault(); const b = a.querySelector('.chat-sel'); if (e.target !== b) { b.checked = !b.checked; b.dispatchEvent(new Event('change')); } } }));
-})();
+document.addEventListener('alpine:init', () => Alpine.data('chatList', () => ({
+  selecting: false, picked: [], total: 0,
+  T: {all: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}},
+  boxes() { return [...this.$root.querySelectorAll('input.chat-sel')]; },
+  init() { this.total = this.boxes().length; },
+  mode(on) { this.selecting = on; if (!on) this.picked = []; },
+  all(on) { this.picked = on ? this.boxes().map(b => b.value) : []; },
+  label() { return this.picked.length ? this.T.n.replace('{n}', this.picked.length) : this.T.all; },
+  // in selection mode a click on the row ticks it instead of opening the chat; a click on the box itself keeps its own toggle (and Shift-range)
+  rowClick(e) {
+    if (!this.selecting || e.target.tagName === 'INPUT') return;
+    e.preventDefault();
+    const b = e.currentTarget.querySelector('input.chat-sel');
+    if (b) { b.checked = !b.checked; b.dispatchEvent(new Event('change', {bubbles: true})); }
+  },
+})));
 </script>
 {% endblock %}

@@ -1,13 +1,16 @@
 {% extends "base.html" %}
-{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
+{% import "_ui.html" as ui %}
+{# Shown while the app restarts after a restore; the script polls /healthz and then goes to /settings#backup (redirects to /settings/backup). #}
 {% block content %}
-<h3>{{ _("App is restarting …") }}</h3>
-<article class="card">
-  {% if error %}<p class="msg" style="border-color:#e5484d">{{ error }}</p>{% else %}<p>{{ _("The backup was restored.") }}</p>{% endif %}
-  {% if safety %}<p><small class="muted">{{ _("Previous state saved as {name}.", name=safety) }}</small></p>{% endif %}
-  <p aria-busy="true">{{ _("The page reloads by itself when the app is back.") }}</p>
-  <p><small class="muted">{{ _("If nothing happens after a minute, restart the container.") }}</small></p>
-</article>
+{{ ui.head(_("App is restarting …")) }}
+<div class="flex min-w-0 max-w-[720px] flex-col gap-3.5">
+<section class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  {% if error %}<div class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-[13px] text-error">{{ error }}</div>{% else %}<p>{{ _("The backup was restored.") }}</p>{% endif %}
+  {% if safety %}<p class="text-[12.5px] text-muted">{{ _("Previous state saved as {name}.", name=safety) }}</p>{% endif %}
+  <p aria-busy="true" class="flex items-center gap-2.5"><span class="loading loading-spinner loading-sm text-primary"></span>{{ _("The page reloads by itself when the app is back.") }}</p>
+  <p class="text-[12.5px] text-muted">{{ _("If nothing happens after a minute, restart the container.") }}</p>
+</section>
+</div>
 <script>
 (() => {
   // wait until the old process is gone, then poll /healthz until the new one answers

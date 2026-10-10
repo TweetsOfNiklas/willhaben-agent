@@ -308,4 +308,4 @@ def test_chat_page_renders_notice_line():
     with TestClient(app) as c:
         r = c.get("/chats/c1")
     assert r.status_code == 200
-    assert 'class="bubble unknown"' in r.text and "Zahlung eingegangen: € 12,34" in r.text   # willhaben notice, centered
+    assert 'data-notice' in r.text and "Zahlung eingegangen: € 12,34" in r.text   # willhaben notice, centered

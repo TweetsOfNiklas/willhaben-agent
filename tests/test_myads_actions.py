@@ -1,5 +1,6 @@
 """Deactivate / delete own ads on willhaben via the ad's own action links, and hide-only."""
 import copy
+import re
 import json
 
 import pytest
@@ -216,7 +217,7 @@ async def test_bulk_route(account):
         assert r.status_code == 303 and "1" in r.headers["location"]
         assert c.post("/myads/bulk/nuke", data={"ids": ["1"]}).status_code == 404
         page = c.get("/myads?show_inactive=1").text
-        assert "outline-danger" in page and 'name="ids"' in page and ">Activate<" in page
+        assert 'data-act="delete"' in page and 'name="ids"' in page and ">Activate<" in page
 
 
 async def test_hide_only_survives_import_and_routes(account):
@@ -456,7 +457,7 @@ def test_myads_filters_and_order():
         # long expired (past the 30-day cutoff) and the old copy of a renewed ad are not "expired"
         for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert", "Uralt", "Erneuert"):
             assert gone not in page
-        assert "Deactivated <small>2</small>" in page and "Sold / reserved <small>3</small>" in page
+        assert re.search(r"Deactivated<small[^>]*>2</small>", page) and re.search(r"Sold / reserved<small[^>]*>3</small>", page)
         # expired ads always show, in their own section above the others
         assert page.index("Active (2)") < page.index("Lange") < page.index("Bald") < page.index("Expired (1)") \
             < page.index("Ausgelaufen")    # active ads on top, then the expired ones
@@ -473,9 +474,8 @@ def test_myads_filters_and_order():
         # toggles combine: Active + Sold, with a count on every chip
         page = c.get("/myads?show_active=1&show_sold=1").text
         assert "Bald" in page and "Weg" in page and "Deaktiviert" not in page
-        assert "Active <small>3</small>" in page                              # 2 active + 1 recently expired
-        import re
-        active_href = re.search(r'href="([^"]*)">Active <small>', page).group(1)
+        assert re.search(r"Active<small[^>]*>3</small>", page)                 # 2 active + 1 recently expired
+        active_href = re.search(r'href="([^"]*)" class="[^"]*">Active<small', page).group(1)
         assert "show_sold=1" in active_href and "show_active" not in active_href          # the Active chip turns Active off
 
 
