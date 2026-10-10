@@ -155,3 +155,18 @@ def test_jobs_endpoint_lists_every_waiting_element():
         page = c.get("/chats/c1").text
         assert f'data-pending-key="draft:{draft_id}"' in page and "Sending…" in page
         assert f'/drafts/{draft_id}/send"' not in page                           # nothing to send twice
+
+
+def test_api_never_sends_a_queued_answer_twice():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    draft_id = _conv_and_draft()
+    with TestClient(app) as c:
+        with session() as db:
+            d = db.get(Draft, draft_id)
+            d.status = "sending"
+            db.add(d)
+            db.commit()
+        r = c.post(f"/api/drafts/{draft_id}/send", json={"text": "nochmal"})
+    assert r.status_code == 409 and r.json()["sent"] is False

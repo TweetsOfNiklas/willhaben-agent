@@ -2183,6 +2183,10 @@ async def api_chat_save_draft(conversation_id: str, payload: dict[str, Any]):
 
 @app.post("/api/drafts/{draft_id}/send")
 async def api_draft_send(draft_id: int, payload: dict[str, Any]):
+    with session() as db:
+        current = db.get(Draft, draft_id)
+    if current is not None and current.status == "sending":    # queued from the dashboard: never twice
+        return JSONResponse({"sent": False, "reason": "already being sent in the background"}, status_code=409)
     try:
         d = await chats.send_draft(draft_id, payload["text"])
     except (EndpointUnknown, SendFailed, ValueError) as e:

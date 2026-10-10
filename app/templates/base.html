@@ -475,6 +475,11 @@ document.addEventListener('alpine:init', () => {
         const r = await fetch(this.$el.action, {method: 'POST', body, headers: {'X-Autosave': '1'}});
         const j = r.ok ? await r.json() : {ok: false};
         this.state = j.ok ? {{ _("Changes saved")|tojson }} : (j.error || {{ _("Not saved – check the connection")|tojson }});
+        if (j.ok) this.$el.querySelectorAll('input, textarea, select').forEach(f => {   // saved = no longer "edited"
+          if (f.tagName === 'SELECT') [...f.options].forEach(o => { o.defaultSelected = o.selected; });
+          else if (f.type === 'checkbox' || f.type === 'radio') f.defaultChecked = f.checked;
+          else f.defaultValue = f.value;
+        });
         this.$dispatch('autosaved', {ok: j.ok});
       } catch (e) { this.state = {{ _("Not saved – check the connection")|tojson }}; this.last = ''; }
     },
@@ -485,6 +490,12 @@ document.addEventListener('alpine:init', () => {
 // Replace elements by their fresh copy (same id) from the page fetched in the background (one request per URL);
 // gone there = removed here. An element you are typing in or have edited waits until you leave it.
 function refreshInPlace(els) {
+  // a hidden tab waits until it is shown again: fetching a chat page marks its messages read on willhaben
+  if (document.hidden) {
+    const later = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', later); refreshInPlace(els.filter(e => e.isConnected)); } };
+    document.addEventListener('visibilitychange', later);
+    return;
+  }
   const edited = el => {
     const a = document.activeElement;
     if (a && el.contains(a) && a.matches('input, textarea, select')) return true;

@@ -11,7 +11,7 @@ from app.db import MyAd, session
 from app.services import my_ads
 from app.willhaben.account import EndpointUnknown
 from app.willhaben.session import ApiResponse
-from tests.conftest import wait_jobs
+from tests.conftest import finish_jobs, wait_jobs
 from tests.test_my_ads import NEXT
 
 
@@ -569,3 +569,63 @@ def test_list_stays_on_the_page(monkeypatch):
     for part in ('id="myads-rows"', 'data-refresh-on-lane="ads"', 'hx-post="/myads/bulk/delete"', 'id="myads-detail"',
                  'hx-post="/myads/11/delete"', 'hx-post="/myads/check"', 'id="bg-jobs"'):
         assert part in page, part
+
+
+def _cleanup_account(account):
+    """1000000002 deactivated without a photo (deletable), 1000000003 sold with no delete link (only hidden here)."""
+    ads = account._ads()
+    ads[1]["advertImageList"] = {"advertImage": []}
+    sold = copy.deepcopy(ads[0])
+    sold.update(id="1000000003", description="Anzeige 1000000003", advertStatus={"id": "sold", "description": "Verkauft"},
+                advertEditStatusActionsList={"contextLinkList": {"contextLink": []}})
+    ads.append(sold)
+
+
+async def test_cleanup_is_queued_and_marks_at_once(account):
+    _cleanup_account(account)
+    await my_ads.import_from_account()
+    assert my_ads.enqueue_cleanup(["1000000002", "1000000003", "1000000001"]) == 3
+    with session() as db:                                                   # marked before willhaben is asked
+        assert {r.ad_id for r in db.exec(select(MyAd)) if r.pending_action == "delete"} == {"1000000001", "1000000002", "1000000003"}
+    await finish_jobs()
+    with session() as db:
+        rows = {r.ad_id: r for r in db.exec(select(MyAd))}
+    assert "1000000002" not in rows and rows["1000000003"].hidden is True
+    assert "1000000001" in rows                                             # active: never a candidate, never deleted
+    assert not any(r.pending_action for r in rows.values())
+    assert [p for m, p in account.calls if m == "DELETE"] == ["/webapi/myatz/bap/1000000002"]
+    from app.services import jobs
+    assert jobs.snapshot()["recent"][0]["result"] == "Deleted on willhaben: 1 · 1 only hidden here"
+
+
+def test_cleanup_route_returns_at_once(account):
+    from app.main import app
+
+    _cleanup_account(account)
+    with TestClient(app) as c:
+        c.portal.call(my_ads.import_from_account)
+        r = c.post("/myads/cleanup", data={"ids": ["1000000002"]}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/myads?msg=")
+        wait_jobs()
+        page = c.get("/myads/cleanup").text
+    with session() as db:
+        assert db.get(MyAd, "1000000002") is None
+    assert "Runs in the background" in page
+
+
+async def test_cleanup_logged_out_leaves_the_reason_on_the_ads(account, monkeypatch):
+    from app.services import jobs
+    from app.willhaben.session import NotLoggedIn
+
+    await my_ads.import_from_account()
+
+    async def logged_out(method, path, body=None, accept="application/json"):
+        raise NotLoggedIn("HTTP 401")
+
+    monkeypatch.setattr(account, "api", logged_out)
+    my_ads.enqueue_cleanup(["1000000002"])
+    await finish_jobs()
+    with session() as db:
+        row = db.get(MyAd, "1000000002")
+    assert row.pending_action is None and "401" in row.last_error
+    assert jobs.snapshot()["recent"][0]["status"] == "failed"

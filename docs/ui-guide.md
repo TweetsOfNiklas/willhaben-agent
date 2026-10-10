@@ -120,8 +120,28 @@ Messages (`msg`, `error`) appear as a bar on top of single-column pages and as t
 - **htmx** where a page swaps server-rendered fragments (`hx-get`/`hx-post` + `hx-target`/`hx-swap`).
   Keep the existing routes; existing `fetch()` code that already works may stay.
 - Range selection with Shift-click works for every checkbox with class `sel` (base.html).
-- Confirmations: `onsubmit='return confirm(…)'` as before.
+- Confirmations: `onsubmit='return confirm(…)'` on plain forms; on forms that send through htmx use `hx-confirm`
+  (an `onsubmit` would not stop htmx).
 - Keyboard: Ctrl K / ⌘K / `/` open the command palette, Esc closes popovers.
+
+## Background work and no reloads
+
+Anything that talks to the willhaben account (or takes long) runs as a background job (`app/services/jobs.py`,
+lanes `ads` and `chat`); the page never waits for it and never reloads for it.
+
+- **Send in the background:** the form gets `hx-post` plus `hx-target`/`hx-select` (same id) and `hx-swap="outerHTML"`;
+  the route keeps redirecting as before (plain forms still work), htmx follows the redirect and swaps in just that
+  part. More parts from the same answer: `hx-select-oob="#a,#b"`. Purely saving switches/text: `x-data="autosave"`.
+- **Waiting element:** the element (with an `id`) carries `data-pending-key="ad:123"` (`draft:5`, `addraft:7`; the
+  keys `/jobs` lists under `pending`) and shows `ui.pending(key, running_text, queued_text)`: a spinner while its job
+  works on it, a clock while it is queued. When its key is no longer pending, `base.html` replaces it by its fresh copy
+  (same id) from the page fetched in the background, or from `data-refresh="url"`; gone there = removed here.
+  `data-refresh-also="id …"` takes more elements along.
+- **Lists that jobs change:** `data-refresh-on-lane="ads"` refreshes the element whenever a job of that lane finished
+  (e.g. My ads after "Update").
+- An element the user is editing (focus, or a value different from the rendered one) is never replaced; a hidden tab
+  waits until it is shown (fetching a chat page marks its messages read on willhaben).
+- The rail (phones: a button above the tab bar) shows what runs, what is queued and the last results.
 
 ## Rules for templates
 
