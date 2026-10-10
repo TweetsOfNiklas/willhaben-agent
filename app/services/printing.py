@@ -2,7 +2,10 @@
 
 Contract used by `shipping` (the pipeline), the chat page and the settings page:
 - `config() -> dict`: {"auto": bool, "printers": {"label": {...}, "normal": {...}}, "by_carrier": {carrier: "label"|"normal"|"none"}}.
-- `enabled() -> bool`: automatic printing is on and the needed printer is configured.
+  `by_carrier` also has "paylivery": willhaben's PayLivery labels, whose carrier this app does not know.
+- `auto_choice(shipment) -> str | None`: the printer a label goes to on its own, or None. One switch ("auto") covers
+  every label: bought here, downloaded from a carrier form, or sent by willhaben PayLivery. `auto_missing(shipment)`
+  says why a label is not printed although the switch is on (its printer has no address).
 - `async print_label(shipment_id, which="auto") -> str`: prints the shipment's label on the printer chosen for its carrier
   (or on `which`). Label printers get the first page cropped to the label and fitted to the medium, normal printers the
   PDF as it is, fitted to the page. Stores `print_job` and `printed_at`, sets status "printed" when it was "labelled".
@@ -44,13 +47,14 @@ MEDIA = {"label": ["custom_100x150mm_100x150mm", "custom_100x200mm_100x200mm"], 
 MEDIA_NAMES = {"custom_100x150mm_100x150mm": "100 × 150 mm", "custom_100x200mm_100x200mm": "100 × 200 mm",
                "iso_a4_210x297mm": "A4", "iso_a5_148x210mm": "A5"}
 TRAYS = ["auto", "tray-1", "tray-2", "tray-3", "manual", "by-pass"]
+PAYLIVERY = "paylivery"     # printer row for willhaben's PayLivery labels (format unknown: normal printer, as it is)
 DEFAULTS: dict[str, Any] = {
     "auto": False,
     "printers": {
         "label": {"name": "", "uri": "", "media": MEDIA["label"][0], "tray": "auto", "carriers": {}},
         "normal": {"name": "", "uri": "", "media": MEDIA["normal"][0], "tray": "auto"},
     },
-    "by_carrier": {"post": "normal", "gls": "label", "hermes": "label", "dpd": "label"},
+    "by_carrier": {"post": "normal", "gls": "label", "hermes": "label", "dpd": "label", PAYLIVERY: "normal"},
 }
 _KEYWORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,79}$")
 _URI = re.compile(r"^(ipps?|https?)://[^\s/]+", re.I)
@@ -80,7 +84,7 @@ def config() -> dict[str, Any]:
             cfg["printers"][which].update({k: v for k, v in given.items() if k in cfg["printers"][which]})
     by_carrier = raw.get("by_carrier") if isinstance(raw.get("by_carrier"), dict) else {}
     for code, choice in by_carrier.items():
-        if code in CARRIERS and choice in CHOICES:
+        if code in cfg["by_carrier"] and choice in CHOICES:
             cfg["by_carrier"][code] = choice
     carriers = cfg["printers"]["label"]["carriers"]
     cfg["printers"]["label"]["carriers"] = {k: v for k, v in (carriers if isinstance(carriers, dict) else {}).items()
@@ -104,18 +108,37 @@ def _crop_of(cfg: dict[str, Any], carrier: str) -> dict[str, float] | None:
     return cfg["printers"]["label"]["carriers"].get(carrier, {}).get("crop")
 
 
-def enabled() -> bool:
+def carrier_of(shipment) -> str:
+    """The printer row of a shipment: "paylivery" for willhaben's labels, else the carrier of its tariff key."""
+    if shipment is None:
+        return ""
+    if shipment.paid_via == "paylivery":
+        return PAYLIVERY
+    return (shipment.option or "").split(":", 1)[0]
+
+
+def choice_for(shipment) -> str:
+    """Which printer the shipment's label goes to: label, normal or none."""
+    return config()["by_carrier"].get(carrier_of(shipment), "none")
+
+
+def auto_choice(shipment) -> str | None:
+    """The printer to print this label on without asking, or None: automatic printing off, "No printing" for its
+    carrier, or that printer has no address yet (then the print buttons on the chat page say what is missing)."""
     cfg = config()
-    if not cfg["auto"]:
-        return False
-    used = {c for c in cfg["by_carrier"].values() if c in PRINTERS}
-    return bool(used) and all(cfg["printers"][w].get("uri") for w in used)
+    choice = cfg["by_carrier"].get(carrier_of(shipment), "none")
+    if not cfg["auto"] or choice not in PRINTERS or not cfg["printers"][choice].get("uri"):
+        return None
+    return choice
 
 
-def choice_for(option: str | None) -> str:
-    """Which printer the carrier of a tariff key ("gls:S:shop") uses: label, normal or none."""
-    carrier = (option or "").split(":", 1)[0]
-    return config()["by_carrier"].get(carrier, "none")
+def auto_missing(shipment) -> str | None:
+    """Why automatic printing is on but this label is not printed: its printer has no address (None otherwise)."""
+    cfg = config()
+    choice = cfg["by_carrier"].get(carrier_of(shipment), "none")
+    if cfg["auto"] and choice in PRINTERS and not cfg["printers"][choice].get("uri"):
+        return t("Not printed: the {printer} has no address – Settings → Printers", printer=printer_name(choice))
+    return None
 
 
 def printer_name(which: str) -> str:
@@ -132,6 +155,7 @@ def form_options() -> dict[str, Any]:
         "media": {w: [(m, MEDIA_NAMES.get(m, m)) for m in MEDIA[w]] for w in PRINTERS},
         "trays": [(v, _tray_label(v)) for v in TRAYS],
         "carriers": [(code, c.name) for code, c in CARRIERS.items()],
+        "targets": [(code, c.name) for code, c in CARRIERS.items()] + [(PAYLIVERY, "willhaben PayLivery")],
         "choices": [("label", t("Label printer")), ("normal", t("Normal printer")), ("none", t("No printing"))],
         "carrier_media": [("", t("printer default"))] + [(m, MEDIA_NAMES.get(m, m)) for m in MEDIA["label"]]
                          + [("other", t("Other (type below)"))],
@@ -201,7 +225,7 @@ def save(form: Mapping[str, str]) -> None:
         p["media"] = _name(form, f"{which}_media", f"{which}_media_other", p["media"])
         p["tray"] = _name(form, f"{which}_tray", f"{which}_tray_other", "auto")
     cfg["printers"]["label"]["carriers"] = _carriers(form)
-    cfg["by_carrier"] = {code: form.get(f"carrier_{code}") or DEFAULTS["by_carrier"][code] for code in CARRIERS}
+    cfg["by_carrier"] = {code: form.get(f"carrier_{code}") or default for code, default in DEFAULTS["by_carrier"].items()}
     for choice in cfg["by_carrier"].values():
         if choice not in CHOICES:
             raise PrintError(t("Choose a printer for each carrier."))
@@ -303,7 +327,7 @@ async def print_label(shipment_id: int, which: str = "auto") -> str:
     if not s.label_path:
         raise PrintError(t("No label to print yet."))
     cfg = config()
-    carrier = (s.option or "").split(":", 1)[0]
+    carrier = carrier_of(s)
     choice = cfg["by_carrier"].get(carrier, "none") if which == "auto" else which
     if choice not in PRINTERS:
         raise PrintError(t("No printer is set for this carrier. Choose one under Settings → Printers."))

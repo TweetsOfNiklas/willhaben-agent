@@ -39,7 +39,6 @@
   "printed {at} (job {job})": "gedruckt {at} (Auftrag {job})",
   "Printers": "Drucker",
   "Paid labels go to a label printer or a normal printer, chosen per carrier.": "Bezahlte Paketscheine gehen je nach Paketdienst an einen Etikettendrucker oder einen Normaldrucker.",
-  "Print labels automatically after buying": "Paketscheine nach dem Kauf automatisch drucken",
   "e.g. Brother QL-820NWB": "z. B. Brother QL-820NWB",
   "IPP address": "IPP-Adresse",
   "Media": "Medium",
@@ -70,5 +69,9 @@
   "completed": "fertig",
   "canceled": "abgebrochen",
   "aborted": "abgebrochen",
-  "checking": "wird geprüft"
+  "checking": "wird geprüft",
+  "Print every label automatically": "Alle Paketscheine automatisch drucken",
+  "One switch for all labels: bought here, downloaded from a carrier form or sent by willhaben PayLivery. Off: nothing is printed on its own, the Print button on the chat page still works.": "Ein Schalter für alle Paketscheine: hier gekauft, aus dem Formular eines Paketdiensts heruntergeladen oder von willhaben PayLivery. Aus: nichts wird von selbst gedruckt, der Drucken-Knopf auf der Chat-Seite funktioniert weiterhin.",
+  "Label saved": "Paketschein gespeichert",
+  "Not printed: the {printer} has no address – Settings → Printers": "Nicht gedruckt: Für den {printer} fehlt die Adresse – Einstellungen → Drucker"
 }

@@ -174,9 +174,8 @@ async def test_printer_attributes_and_job_state_on_a_fake_printer(printer):
 def test_defaults_enabled_and_saving_through_the_settings_route():
     cfg = printing.config()
     assert cfg["auto"] is False
-    assert cfg["by_carrier"] == {"post": "normal", "gls": "label", "hermes": "label", "dpd": "label"}
+    assert cfg["by_carrier"] == {"post": "normal", "gls": "label", "hermes": "label", "dpd": "label", "paylivery": "normal"}
     assert cfg["printers"]["label"]["carriers"] == {} and cfg["printers"]["normal"]["media"] == "iso_a4_210x297mm"
-    assert printing.enabled() is False
 
     from app.main import app
     with TestClient(app) as c:
@@ -197,10 +196,8 @@ def test_defaults_enabled_and_saving_through_the_settings_route():
     assert cfg["printers"]["label"]["carriers"] == {
         "gls": {"crop": {"left": 0.05, "top": 0.1, "width": 0.9, "height": 0.4}},
         "hermes": {"media": "custom_100x150mm_100x150mm"}}
-    assert printing.enabled() is False                    # post goes to the normal printer, which has no address
-    configure(normal_uri="ipp://192.168.1.50/ipp/print", carrier_post="none", carrier_gls="label",
-              carrier_hermes="none", carrier_dpd="none")
-    assert printing.enabled() is True                     # only the label printer is used, and it has an address
+    assert cfg["by_carrier"]["paylivery"] == "normal"     # not in the form: the default
+    assert 'name="carrier_paylivery"' in page and "willhaben PayLivery" in page
 
 
 def test_invalid_settings_are_refused_and_nothing_changes():
@@ -435,3 +432,104 @@ def test_job_state_on_the_chat_page(monkeypatch, printer):
                 break
             time.sleep(0.02)
         assert "job state: in progress" in c.get("/chats/c1").text
+
+
+# ------------------------------------------------------------------ automatic printing: one switch for every label
+@pytest.fixture
+def pushes(monkeypatch):
+    calls = []
+
+    async def fake_notify(kind, title, message, **kw):
+        calls.append(title)
+        return True
+
+    monkeypatch.setattr("app.services.notify.notify", fake_notify)
+    return calls
+
+
+async def settle():
+    await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
+
+
+def test_auto_choice_follows_the_switch_the_carrier_and_the_address():
+    sid = make_shipment(option="gls:S:shop")
+    configure(auto=False)
+    assert printing.auto_choice(shipping.get(sid)) is None                     # switch off: nothing on its own
+    configure()
+    assert printing.auto_choice(shipping.get(sid)) == "label"
+    configure(carrier_gls="none")
+    assert printing.auto_choice(shipping.get(sid)) is None                     # "No printing" is no failure
+    configure(label_uri="")
+    assert printing.auto_choice(shipping.get(sid)) is None                     # printer without an address
+    shipping.update(sid, paid_via="paylivery")
+    configure()
+    assert printing.auto_choice(shipping.get(sid)) == "normal"                 # PayLivery: its own row, normal printer
+    configure(carrier_paylivery="label")
+    assert printing.auto_choice(shipping.get(sid)) == "label"
+
+
+async def test_paylivery_label_is_printed_when_it_arrives(printer, pushes):
+    configure()
+    label_file()
+    sid = make_shipment(option="gls:S:shop")                                     # the app's guess, not willhaben's carrier
+    shipping.update(sid, paid_via="paylivery")
+    shipping.label_arrived(sid)
+    await settle()
+    s = shipping.get(sid)
+    assert s.status == "printed" and s.print_job.startswith("ipp://192.168.1.50/ipp/print#")
+    assert printer.requests[-1].document.startswith(b"%PDF") and pushes == ["Label printed"]
+    shipping.label_arrived(sid)                                                  # printed already: not again
+    await settle()
+    assert len(printer.requests) == 1
+
+
+async def test_switch_off_prints_nothing_when_a_label_arrives(printer, pushes):
+    configure(auto=False)
+    label_file()
+    sid = make_shipment()
+    shipping.label_arrived(sid)
+    await settle()
+    assert printer.requests == [] and shipping.get(sid).status == "labelled" and pushes == []
+
+
+async def test_failed_automatic_print_keeps_the_label_and_tells_the_user(monkeypatch, pushes):
+    monkeypatch.setattr(printing, "_transport", httpx.MockTransport(FakePrinter(status=0x0500)))
+    configure()
+    label_file()
+    sid = make_shipment()
+    shipping.label_arrived(sid)
+    await settle()
+    s = shipping.get(sid)
+    assert s.status == "labelled" and "refused" in s.error and pushes == ["Printing failed"]
+
+
+async def test_label_from_a_carrier_form_download_is_printed(printer, pushes):
+    from app.services import label_fill
+
+    class Download:
+        suggested_filename = "Paketschein.pdf"
+
+        async def save_as(self, path):
+            path.write_bytes(a4_pdf())
+
+    configure()
+    sid = make_shipment(status="draft", label_path=None)
+    await label_fill._on_download(sid)(Download())
+    await settle()
+    s = shipping.get(sid)
+    assert s.label_path == f"shipment-{sid}-Paketschein.pdf" and s.status == "printed"
+    assert printer.requests[-1].get("printer-uri") == "ipp://cups:631/printers/Brother_QL"
+
+
+async def test_switch_on_but_printer_without_address_says_so(printer, pushes):
+    configure(normal_uri="")                                                     # only the label printer is set up
+    label_file()
+    sid = make_shipment()
+    shipping.update(sid, paid_via="paylivery")                                   # PayLivery goes to the normal printer
+    shipping.label_arrived(sid)
+    await settle()
+    assert printer.requests == [] and shipping.get(sid).status == "labelled"
+    assert pushes == ["Label saved"]
+    assert "Normal printer has no address" in printing.auto_missing(shipping.get(sid))
+    configure(normal_uri="", carrier_paylivery="none")                           # "No printing" chosen: no note
+    assert printing.auto_missing(shipping.get(sid)) is None

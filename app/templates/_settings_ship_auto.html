@@ -14,8 +14,7 @@
     {{ _("Only if the ad is marked as sold to this buyer") }}</label>
   <label><input type="checkbox" name="need_parcel" {% if a.need_parcel %}checked{% endif %}>
     {{ _("Only with a size you entered (not Claude's estimate)") }}</label>
-  <label><input type="checkbox" name="print" {% if a.print %}checked{% endif %}>
-    {{ _("Print the label after buying (if a printer is set up)") }}</label>
+  <p><small class="muted">{{ _("Printing: one switch for all labels under Settings → Printers.") }}</small></p>
   <fieldset>
     <legend><small>{{ _("Carriers allowed for automatic buying") }}</small></legend>
     {% for key, c in ship_carriers.items() %}

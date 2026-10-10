@@ -10,7 +10,7 @@ websocket subscription to that event (long-lived token from ha_auth) and acts on
   WH_CAL_<draft>_<sig>       add the appointment the (sent) answer agreed to Google Calendar
   WH_SHIP_<shipment>_<sig>   open the carrier's label form and fill it (the user pays in the remote view)
   WH_PAID_<shipment>_<sig>   the buyer has paid (marked by hand) -> ask for the go, or buy by the automatic rules
-  WH_BUY_ / WH_BUYNP_        approve: buy the label and print it / buy only (shipment ids)
+  WH_BUY_<shipment>_<sig>    approve: buy the label (printed when automatic printing is on)
   WH_DECL_ / WH_CANCEL_      decline the purchase / stop the automatic countdown (shipment ids)
 
 <sig> is an HMAC over verb+draft with a secret in DATA_DIR, so no other event source can make the app
@@ -35,8 +35,8 @@ log = logging.getLogger(__name__)
 EVENT = "mobile_app_notification_action"
 # Websocket listener state, read by the connection watchdog (app/services/health.py).
 listener: dict[str, Any] = {"running": False, "connected": False, "error": None}
-_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP|PAID|BUY|BUYNP|DECL|CANCEL)_(\d+)_([0-9a-f]{12})")
-SHIPMENT_VERBS = ("PAID", "BUY", "BUYNP", "DECL", "CANCEL")
+_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP|PAID|BUY|DECL|CANCEL)_(\d+)_([0-9a-f]{12})")
+SHIPMENT_VERBS = ("PAID", "BUY", "DECL", "CANCEL")
 
 
 def _secret() -> bytes:
@@ -102,7 +102,8 @@ def claim_actions(shipment_id: int) -> list[dict[str, Any]]:
 
 
 def approval_actions(shipment_id: int) -> list[dict[str, Any]]:
-    return [_ship_button("BUY", shipment_id, t("Buy & print")), _ship_button("BUYNP", shipment_id, t("Buy only")),
+    from app.services import shipping
+    return [_ship_button("BUY", shipment_id, shipping.buy_title(shipping.get(shipment_id))),
             _ship_button("DECL", shipment_id, t("Decline"))]
 
 
@@ -197,8 +198,7 @@ async def _shipment_action(verb: str, shipment_id: int) -> str | None:
     if s is None or s.status not in ("draft", "awaiting"):
         return None                              # already handled
     await clear_push(ship_tag(shipment_id))
-    done = {"PAID": s.paid_at is not None, "BUY": s.approval in ("approved", "buy_only"),
-            "BUYNP": s.approval in ("approved", "buy_only"), "DECL": s.approval == "declined",
+    done = {"PAID": s.paid_at is not None, "BUY": s.approval in ("approved", "buy_only"), "DECL": s.approval == "declined",
             "CANCEL": s.approval != "auto"}
     if done.get(verb):
         return None
@@ -206,8 +206,8 @@ async def _shipment_action(verb: str, shipment_id: int) -> str | None:
         if verb == "PAID":
             shipping.mark_paid(shipment_id, "manual")
             await shipping.after_paid(shipment_id)
-        elif verb in ("BUY", "BUYNP"):
-            shipping.approve(shipment_id, print_after=verb == "BUY")
+        elif verb == "BUY":
+            shipping.approve(shipment_id)
         elif verb == "DECL":
             shipping.decline(shipment_id)
         else:

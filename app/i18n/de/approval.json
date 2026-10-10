@@ -15,7 +15,6 @@
   "Paid – buy the label?": "Bezahlt – Paketschein kaufen?",
   "Not automatic because: {reasons}": "Nicht automatisch, weil: {reasons}",
   "Buy & print": "Kaufen & drucken",
-  "Buy only": "Nur kaufen",
   "Decline": "Ablehnen",
   "Another option can be chosen in the table below.": "Eine andere Option kannst du in der Tabelle unten wählen.",
   "You declined buying this label. Choose another option, or create the label by hand.": "Du hast den Kauf dieses Paketscheins abgelehnt. Wähle eine andere Option oder erstelle den Paketschein von Hand.",
@@ -32,7 +31,6 @@
   "Max. automatic purchases per day": "Max. automatische Käufe pro Tag",
   "Only if the ad is marked as sold to this buyer": "Nur wenn die Anzeige für diesen Käufer als verkauft markiert ist",
   "Only with a size you entered (not Claude's estimate)": "Nur mit einer Größe, die du eingetragen hast (nicht Claudes Schätzung)",
-  "Print the label after buying (if a printer is set up)": "Paketschein nach dem Kauf drucken (wenn ein Drucker eingerichtet ist)",
   "Carriers allowed for automatic buying": "Paketdienste für den automatischen Kauf erlaubt",
   "Paid, buy label": "Bezahlt, Paketschein kaufen",
   "Not possible": "Nicht möglich",
@@ -69,5 +67,7 @@
   "Automatic purchase cancelled – approve the label below": "Automatischer Kauf abgebrochen – bestätige den Paketschein unten",
   "Labels are made on the carrier's website inside the remote browser: the app fills in sender, recipient and size; you approve each purchase (or the rules below buy it). Log in there once if the carrier asks; the browser remembers it. The browser asks you when the carrier needs your confirmation.": "Paketscheine entstehen auf der Website des Paketdienstes im Fernbrowser: Die App füllt Absender, Empfänger und Größe aus; du bestätigst jeden Kauf (oder die Regeln unten kaufen ihn). Verlangt der Paketdienst einen Login, einmal dort einloggen; der Browser merkt ihn sich. Der Browser fragt dich, wenn der Paketdienst deine Bestätigung braucht.",
   "This shipment already has a label or a purchase is running": "Diese Sendung hat schon ein Etikett oder ein Kauf läuft gerade",
-  "A label purchase is running – cancel it in the browser window first": "Ein Etikettkauf läuft gerade – brich ihn zuerst im Browserfenster ab"
+  "A label purchase is running – cancel it in the browser window first": "Ein Etikettkauf läuft gerade – brich ihn zuerst im Browserfenster ab",
+  "Buy label": "Paketschein kaufen",
+  "Printing: one switch for all labels under Settings → Printers.": "Drucken: ein Schalter für alle Paketscheine unter Einstellungen → Drucker."
 }

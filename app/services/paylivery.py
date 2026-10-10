@@ -6,7 +6,7 @@ Three layers:
    tracking, history). The stage patterns are generous German regexes, NOT verified against live willhaben
    (docs/willhaben-api.md, "Chat system notices (PayLivery)").
 2. Seller shipments: a paid notice marks the chat's Shipment paid and a label link is downloaded through the
-   logged-in browser session. Buyer chats never create or mark a Shipment.
+   logged-in browser session (and printed when automatic printing is on, shipping.label_arrived). Buyer chats never create or mark a Shipment.
 3. Actions: buttons on the chat page. Local ones (download label, mark shipped) run here. The willhaben ones
    (accept, decline, offer, buy, confirm receipt, report a problem) are driven in the app's browser by Claude, one
    step at a time, with code guards on every click and fill, and the API recording switched on so the real calls
@@ -532,7 +532,9 @@ async def _record_label(conversation_id: str, urls: list[str]) -> tuple[Shipment
     name = await _download(s.id, urls)
     if name is None:
         return s, False
-    return shipping.update(s.id, label_path=name, status="labelled"), True
+    s = shipping.update(s.id, label_path=name, status="labelled")
+    shipping.label_arrived(s.id)
+    return s, True
 
 
 async def _download(shipment_id: int, urls: list[str]) -> str | None:
@@ -577,6 +579,7 @@ async def download_label(conversation_id: str) -> str:
         shipping.update(s.id, label_path=name)
     else:
         shipping.update(s.id, label_path=name, status="labelled")
+        shipping.label_arrived(s.id)
     return t("Label saved.")
 
 

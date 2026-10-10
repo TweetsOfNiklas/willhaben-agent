@@ -244,6 +244,7 @@ def _on_download(shipment_id: int):
         await download.save_as(path)
         shipping.update(shipment_id, label_path=path.name, status="labelled")
         log.info("label saved for shipment %s: %s", shipment_id, path.name)
+        shipping.label_arrived(shipment_id)
     return save
 
 

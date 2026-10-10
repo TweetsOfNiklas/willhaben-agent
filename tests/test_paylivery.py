@@ -169,6 +169,26 @@ async def test_label_link_is_downloaded_and_shipment_labelled(seller_chat, monke
     assert (get_settings().data_dir / "labels" / s.label_path).read_bytes() == b"%PDF-1.4 label"
 
 
+@pytest.mark.parametrize("auto", [True, False])
+async def test_downloaded_label_is_printed_with_automatic_printing(seller_chat, monkeypatch, auto):
+    import asyncio
+
+    from app.services import printing
+    printed = []
+
+    async def fake_print(sid, which="auto"):
+        printed.append(sid)
+        return "1"
+
+    monkeypatch.setattr(printing, "auto_choice", lambda s: "normal" if auto else None)
+    monkeypatch.setattr(printing, "print_label", fake_print)
+    _fake_session(monkeypatch, _Request(_Resp(b"%PDF-1.4 label")))
+    _notice("n2", "Dein Paketschein steht bereit", kind="system")
+    s = await paylivery.scan("c1", fresh=_label_msg())
+    await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
+    assert printed == ([s.id] if auto else [])
+
+
 @pytest.mark.parametrize("request_", [
     _Request(_Resp(b"<html>login</html>")),                 # answered, but no PDF
     _Request(_Resp(b"", ok=False, status=403)),              # refused

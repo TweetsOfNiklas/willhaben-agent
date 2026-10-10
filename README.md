@@ -43,9 +43,10 @@ It runs on your own server, from your home internet connection, and you control 
   your stored payment card, a per-carrier playbook learned from the first run, code guards (price check, never
   insurance/newsletter/account changes) and a stop for bank confirmations. The label goes to a label printer
   (100×150 / 100×200 mm) or a normal printer over IPP, per carrier, with tray and crop settings; the carrier form in the
-  remote browser stays as the manual fallback.
+  remote browser stays as the manual fallback. One switch prints every label automatically (bought, downloaded from
+  a carrier form, or from willhaben PayLivery), or none.
 - **PayLivery**: willhaben's own notices in a chat (paid, label, shipped, delivered, payout, offers) are tracked for
-  both roles, the willhaben label is downloaded, and each PayLivery step (accept or decline an offer, confirm receipt,
+  both roles, the willhaben label is downloaded (and printed when automatic printing is on), and each PayLivery step (accept or decline an offer, confirm receipt,
   buy or make an offer as a buyer, only with your confirmation) runs in the browser window with the API recording on,
   since willhaben's PayLivery calls are not documented yet.
 - **Google Calendar** (optional): free times go into reply drafts, agreed appointments become calendar entries on a tap.

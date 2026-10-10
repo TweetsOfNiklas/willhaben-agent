@@ -160,7 +160,7 @@ class Shipment(SQLModel, table=True):
     paid_amount: float | None = None           # amount seen by an automatic source (None for manual)
     payment_claimed_at: datetime | None = None # the buyer wrote "I have paid" (a hint, never a status)
     # --- approval and purchase ---
-    approval: str | None = None                # pending | approved | buy_only | auto | declined
+    approval: str | None = None                # pending | approved | auto | declined (buy_only: older rows)
     approved_at: datetime | None = None
     buy_log: list[Any] | None = Field(default=None, sa_column=Column(JSON))   # checkout steps [{step, url, action, note}]
     paid_price: float | None = None            # what the carrier's checkout actually charged

@@ -68,7 +68,7 @@ def pushes(monkeypatch):
 def buy(monkeypatch):
     """Stand-ins for the label purchase and the printer; `state` picks the outcome."""
     calls = {"buy": [], "print": []}
-    state = {"buy": "ok", "print": "ok"}
+    state = {"buy": "ok", "print": "ok", "auto": True, "hook": False}
 
     async def fake_buy(sid):
         calls["buy"].append(sid)
@@ -77,6 +77,8 @@ def buy(monkeypatch):
         if state["buy"] == "error":
             raise label_buy.BuyError("carrier down")
         shipping.update(sid, status="labelled", label_path=f"/data/labels/{sid}.pdf", paid_price=3.9)
+        if state["hook"]:                    # the download listener saw the label while the purchase runs
+            shipping.label_arrived(sid)
 
     async def fake_print(sid):
         calls["print"].append(sid)
@@ -86,7 +88,7 @@ def buy(monkeypatch):
         return "job-1"
 
     monkeypatch.setattr(label_buy, "buy", fake_buy)
-    monkeypatch.setattr(printing, "enabled", lambda: True)
+    monkeypatch.setattr(printing, "auto_choice", lambda s: "label" if state["auto"] else None)
     monkeypatch.setattr(printing, "print_label", fake_print)
     return calls, state
 
@@ -226,7 +228,7 @@ async def test_no_rules_met_asks_first(desk, pushes, buy):
     assert states(sid) == {"status": "awaiting", "approval": "pending", "error": None, "label": None}
     push = pushes[-1]
     assert push["title"] == "Paid – buy the label?"
-    assert [a["title"] for a in push["actions"]] == ["Buy & print", "Buy only", "Decline"]
+    assert [a["title"] for a in push["actions"]] == ["Buy & print", "Decline"]
     await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
     assert calls["buy"] == []
 
@@ -237,7 +239,7 @@ async def test_paylivery_is_never_bought(desk, pushes, buy):
     auto_on()
     shipping.mark_paid(sid, "paylivery")
     await shipping.after_paid(sid)
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     assert calls["buy"] == [] and pushes[-1]["title"] == "Paid via willhaben PayLivery"
 
 
@@ -245,7 +247,7 @@ async def test_unpaid_is_never_bought(desk, pushes, buy):
     calls, _ = buy
     sid = await draft()
     auto_on()
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     with pytest.raises(shipping.ShippingError):
         shipping.approve(sid)
     assert calls["buy"] == []
@@ -260,34 +262,44 @@ async def test_after_paid_is_idempotent(desk, pushes, buy):
 
 
 # ------------------------------------------------------------------ pipeline
-async def paid_and_approved(print_after: bool = True) -> int:
+async def paid_and_approved() -> int:
     sid = await draft()
     shipping.mark_paid(sid, "manual")
-    shipping.update(sid, approval="approved" if print_after else "buy_only", approved_at=utcnow(), status="awaiting")
+    shipping.update(sid, approval="approved", approved_at=utcnow(), status="awaiting")
     return sid
 
 
 async def test_pipeline_buys_then_prints(desk, pushes, buy):
     calls, _ = buy
     sid = await paid_and_approved()
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     assert calls["buy"] == [sid] and calls["print"] == [sid]
     assert shipping.get(sid).status == "printed" and pushes[-1]["title"] == "Label printed"
 
 
-async def test_pipeline_buy_only_does_not_print(desk, pushes, buy):
-    calls, _ = buy
-    sid = await paid_and_approved(print_after=False)
-    await shipping.run_pipeline(sid, shipping.print_wanted(shipping.get(sid)))
+async def test_pipeline_without_automatic_printing_only_buys(desk, pushes, buy):
+    calls, state = buy
+    state["auto"] = False                    # switch off, "No printing" for the carrier or no printer address
+    sid = await paid_and_approved()
+    await shipping.run_pipeline(sid)
     assert calls["buy"] == [sid] and calls["print"] == []
     assert shipping.get(sid).status == "labelled" and pushes[-1]["title"] == "Label bought"
+
+
+async def test_label_seen_during_the_purchase_is_printed_once(desk, pushes, buy):
+    calls, state = buy
+    state["hook"] = True
+    sid = await paid_and_approved()
+    await shipping.run_pipeline(sid)
+    await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
+    assert calls["buy"] == [sid] and calls["print"] == [sid] and shipping.get(sid).status == "printed"
 
 
 async def test_needs_human_keeps_buying_and_links_the_browser(desk, pushes, buy):
     calls, state = buy
     state["buy"] = "needs"
     sid = await paid_and_approved()
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     s = shipping.get(sid)
     assert s.status == "buying" and "bank app" in s.error
     push = pushes[-1]
@@ -299,7 +311,7 @@ async def test_buy_error_marks_failed(desk, pushes, buy):
     calls, state = buy
     state["buy"] = "error"
     sid = await paid_and_approved()
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     assert states(sid)["status"] == "failed" and states(sid)["error"] == "carrier down"
     assert pushes[-1]["title"] == "Label purchase failed"
 
@@ -308,7 +320,7 @@ async def test_retry_after_failed_print_only_prints(desk, pushes, buy):
     calls, state = buy
     state["print"] = "error"
     sid = await paid_and_approved()
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     assert shipping.get(sid).status == "failed" and shipping.get(sid).label_path
     state["print"] = "ok"
     shipping.retry(sid)
@@ -317,11 +329,24 @@ async def test_retry_after_failed_print_only_prints(desk, pushes, buy):
     assert calls["print"] == [sid, sid] and shipping.get(sid).status == "printed"
 
 
+async def test_retry_with_printing_switched_off_leaves_failed(desk, pushes, buy):
+    calls, state = buy
+    state["print"] = "error"
+    sid = await paid_and_approved()
+    await shipping.run_pipeline(sid)
+    assert shipping.get(sid).status == "failed"
+    state["auto"] = False
+    shipping.retry(sid)
+    await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
+    assert calls["buy"] == [sid] and calls["print"] == [sid]
+    assert states(sid)["status"] == "labelled" and states(sid)["error"] is None
+
+
 async def test_retry_after_failed_buy_buys_again(desk, pushes, buy):
     calls, state = buy
     state["buy"] = "error"
     sid = await paid_and_approved()
-    await shipping.run_pipeline(sid, True)
+    await shipping.run_pipeline(sid)
     state["buy"] = "ok"
     shipping.retry(sid)
     await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
@@ -330,8 +355,8 @@ async def test_retry_after_failed_buy_buys_again(desk, pushes, buy):
 
 async def test_pipeline_runs_once_per_shipment(desk, pushes, buy):
     calls, _ = buy
-    sid = await paid_and_approved(print_after=False)
-    await asyncio.gather(shipping.run_pipeline(sid, False), shipping.run_pipeline(sid, False))
+    sid = await paid_and_approved()
+    await asyncio.gather(shipping.run_pipeline(sid), shipping.run_pipeline(sid))
     assert calls["buy"] == [sid]
 
 
@@ -376,7 +401,8 @@ async def test_grace_countdown_buys_when_it_runs_out(desk, pushes, buy, monkeypa
 
 # ------------------------------------------------------------------ push buttons
 async def test_push_buttons_follow_the_rules(desk, pushes, buy):
-    calls, _ = buy
+    calls, state = buy
+    state["auto"] = False
 
     def act(verb, sid):
         return {"action": ha_actions.action_id(verb, sid)}
@@ -389,10 +415,12 @@ async def test_push_buttons_follow_the_rules(desk, pushes, buy):
     assert await ha_actions.handle(act("DECL", sid)) == "decl"
     assert states(sid)["approval"] == "declined" and shipping.get(sid).status == "draft"
     assert await ha_actions.handle(act("DECL", sid)) is None
-    assert await ha_actions.handle(act("BUYNP", sid)) == "buynp"               # changed my mind: buy only
+    assert ha_actions.parse_action(act("BUYNP", sid)["action"]) is None        # "buy only" is gone: one print switch
+    assert ha_actions.approval_actions(sid)[0]["title"] == "Buy label"         # automatic printing off
+    assert await ha_actions.handle(act("BUY", sid)) == "buy"                   # changed my mind
     await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
     assert calls["buy"] == [sid] and calls["print"] == [] and shipping.get(sid).status == "labelled"
-    assert await ha_actions.handle(act("BUYNP", sid)) is None
+    assert await ha_actions.handle(act("BUY", sid)) is None
     forged = {"action": ha_actions.action_id("BUY", sid)[:-12] + "0" * 12}
     assert await ha_actions.handle(forged) is None
 
@@ -412,7 +440,7 @@ def test_telegram_buttons_map_to_the_shipment_verbs(desk):
     rows = [b for row in kb["inline_keyboard"] for b in row]
     with session() as db:
         found = [db.get(TelegramAction, b["callback_data"][2:]) for b in rows]
-    assert [f.verb for f in found] == ["D_BUY", "D_BUYNP", "D_DECL"] and {f.ref for f in found} == {"5"}
+    assert [f.verb for f in found] == ["D_BUY", "D_DECL"] and {f.ref for f in found} == {"5"}
 
 
 # ------------------------------------------------------------------ chat page and routes
@@ -423,7 +451,7 @@ async def test_chat_page_shows_each_state(desk, pushes, buy):
         shipping.mark_paid(sid, "manual")
         await shipping.after_paid(sid)                                         # pending: the ask box
         page = c.get("/chats/c1").text
-        assert "Paid – buy the label?" in page and "Buy only" in page and "Decline" in page
+        assert "Paid – buy the label?" in page and "Buy &amp; print" in page and "Decline" in page
         shipping.update(sid, status="buying", error="confirm in your bank app", approval="approved")
         page = c.get("/chats/c1").text
         assert "Buying the label on the carrier" in page and "Finish in browser" in page and "Retry" in page
@@ -442,21 +470,21 @@ async def test_chat_page_restart_recovery_asks_again(desk, pushes, buy):
     shipping.update(sid, status="awaiting", approval="auto", approved_at=utcnow())   # no countdown: a restart
     with TestClient(app) as c:
         page = c.get("/chats/c1").text
-    assert "Buy only" in page and "Cancel" not in page
+    assert "Buy &amp; print" in page and "Cancel" not in page
 
 
 async def test_payment_routes(desk, pushes, buy, monkeypatch):
     from app.main import app
     started = []
-    monkeypatch.setattr(shipping, "start_pipeline", lambda sid, print_after: started.append((sid, print_after)))
+    monkeypatch.setattr(shipping, "start_pipeline", lambda sid: started.append(sid))
     sid = await draft()
     with TestClient(app) as c:
         r = c.post(f"/shipments/{sid}/paid", follow_redirects=False)
         assert r.status_code == 303 and "#shipping" in r.headers["location"]
         assert shipping.get(sid).paid_at and states(sid)["approval"] == "pending"
-        r = c.post(f"/shipments/{sid}/approve", data={"print": "0"}, follow_redirects=False)
-        assert r.status_code == 303 and started == [(sid, False)]
-        assert states(sid)["approval"] == "buy_only"
+        r = c.post(f"/shipments/{sid}/approve", follow_redirects=False)
+        assert r.status_code == 303 and started == [sid]
+        assert states(sid)["approval"] == "approved"
         r = c.post(f"/shipments/{sid}/decline", follow_redirects=False)        # already decided: nothing to decline
         assert r.status_code == 303 and "msg=" in r.headers["location"]
         r = c.post(f"/shipments/{sid}/unpaid", follow_redirects=False)
@@ -469,13 +497,13 @@ def test_settings_route_stores_the_rules():
     from app.main import app
     with TestClient(app) as c:
         r = c.post("/settings/shipping/auto", data={"on": "1", "max_price": "7,5", "grace_min": "15",
-                                                    "daily": "2", "need_sold": "1", "print": "1",
+                                                    "daily": "2", "need_sold": "1",
                                                     "auto_carrier": ["gls", "post"]}, follow_redirects=False)
         assert r.status_code == 303
         assert get_setting("ship_auto") == "1" and get_setting("ship_auto_max_price") == "7.5"
         assert get_setting("ship_auto_grace_min") == "15" and get_setting("ship_auto_daily") == "2"
         assert get_setting("ship_auto_need_sold") == "1" and get_setting("ship_auto_need_parcel") == "0"
-        assert get_setting("ship_auto_carriers") == "gls,post" and get_setting("ship_auto_print") == "1"
+        assert get_setting("ship_auto_carriers") == "gls,post"
         assert "Automatic label purchase" in c.get("/settings").text
         c.post("/settings/shipping/auto", data={"max_price": "x"}, follow_redirects=False)
         assert get_setting("ship_auto") == "0" and get_setting("ship_auto_carriers") == "-"

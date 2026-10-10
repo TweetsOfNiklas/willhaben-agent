@@ -94,12 +94,7 @@
         {% if ship_blockers %}<p><small class="muted">{{ _("Not automatic because: {reasons}", reasons=ship_blockers|join(', ')) }}</small></p>{% endif %}
         <div class="row-actions">
           <form method="post" action="/shipments/{{ shipment.id }}/approve" style="margin:0">
-            <input type="hidden" name="print" value="1">
-            <button {% if not ship_sender_ok or not ship_option %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ _("Buy & print") }}</button>
-          </form>
-          <form method="post" action="/shipments/{{ shipment.id }}/approve" style="margin:0">
-            <input type="hidden" name="print" value="0">
-            <button class="secondary" {% if not ship_sender_ok or not ship_option %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ _("Buy only") }}</button>
+            <button {% if not ship_sender_ok or not ship_option %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ ship_buy_title }}</button>
           </form>
           <form method="post" action="/shipments/{{ shipment.id }}/decline" style="margin:0">
             <button class="contrast outline">{{ _("Decline") }}</button>

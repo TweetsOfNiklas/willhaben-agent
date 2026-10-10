@@ -62,7 +62,8 @@
   <p class="lead">{{ _("Paid labels go to a label printer or a normal printer, chosen per carrier.") }}</p>
   <form method="post" action="/settings/printers">
     <label><input type="checkbox" role="switch" name="auto" value="1" {% if printing.auto %}checked{% endif %}>
-      {{ _("Print labels automatically after buying") }}</label>
+      {{ _("Print every label automatically") }}</label>
+    <p><small class="muted">{{ _("One switch for all labels: bought here, downloaded from a carrier form or sent by willhaben PayLivery. Off: nothing is printed on its own, the Print button on the chat page still works.") }}</small></p>
     <div class="grid">
       {{ printer_fields('label', _("Label printer"), printing.printers.label) }}
       {{ printer_fields('normal', _("Normal printer"), printing.printers.normal) }}
@@ -70,7 +71,7 @@
     <fieldset>
       <legend><strong>{{ _("Which printer per carrier") }}</strong></legend>
       <div class="grid">
-        {% for code, cname in print_opts.carriers %}
+        {% for code, cname in print_opts.targets %}
         <label>{{ cname }}
           <select name="carrier_{{ code }}">
             {% for v, label in print_opts.choices %}<option value="{{ v }}" {% if printing.by_carrier[code] == v %}selected{% endif %}>{{ label }}</option>{% endfor %}

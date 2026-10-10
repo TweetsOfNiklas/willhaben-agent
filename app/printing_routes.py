@@ -21,7 +21,7 @@ def shipment_panel(shipment) -> dict:
     """Template context for _shipping_print.html: the print buttons, and the printer's state of the job if printed
     within a day. The state comes from the last answer and is refreshed in the background (no waiting here)."""
     return {"printing": printing.config(),
-            "print_choice": printing.choice_for(shipment.option if shipment else None),
+            "print_choice": printing.choice_for(shipment),
             "print_state": printing.cached_job_state(shipment.print_job, shipment.printed_at) if shipment else None}
 
 

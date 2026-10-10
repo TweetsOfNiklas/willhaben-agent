@@ -405,7 +405,6 @@ def auto_config() -> dict[str, Any]:
         "carriers": [c for c in raw.split(",") if c in CARRIERS] if raw else enabled_carriers(),
         "grace_min": int(_num(get_setting("ship_auto_grace_min"), 10, 0, 120)),
         "daily": int(_num(get_setting("ship_auto_daily"), 3, 0, 50)),
-        "print": get_setting("ship_auto_print") != "0",
     }
 
 
@@ -418,7 +417,6 @@ def save_auto(data: dict[str, Any]) -> None:
     set_setting("ship_auto_carriers", ",".join(carriers) or "-")
     set_setting("ship_auto_grace_min", str(int(_num(data.get("grace_min"), 10, 0, 120))))
     set_setting("ship_auto_daily", str(int(_num(data.get("daily"), 3, 0, 50))))
-    set_setting("ship_auto_print", "1" if data.get("print") else "0")
 
 
 def auto_blockers(s: Shipment) -> list[str]:
@@ -463,14 +461,6 @@ def _bought_today(exclude_id: int) -> int:
     return sum(1 for r in rows if r.id != exclude_id and _aware(r.approved_at) and _aware(r.approved_at) >= start)
 
 
-def print_wanted(s: Shipment) -> bool:
-    if s.approval == "buy_only":
-        return False
-    if s.approval == "auto":
-        return auto_config()["print"]
-    return True
-
-
 # ------------------------------------------------------------------ after payment: ask or buy
 async def after_paid(shipment_id: int) -> None:
     """Payment arrived: ask the user for the go, or buy automatically when the rules allow it.
@@ -489,15 +479,15 @@ async def after_paid(shipment_id: int) -> None:
     cfg = auto_config()
     s = update(s.id, status="awaiting", approval="auto", approved_at=utcnow())
     if cfg["grace_min"] <= 0:
-        start_pipeline(s.id, cfg["print"])
+        start_pipeline(s.id)
         return
-    task = _spawn(_after_grace(s.id, cfg["grace_min"] * 60, cfg["print"]))
+    task = _spawn(_after_grace(s.id, cfg["grace_min"] * 60))
     _graces[s.id] = task
     await _notify(s, t("Label will be bought in {n} min", n=cfg["grace_min"]), _summary(s),
                   actions=_ha().cancel_actions(s.id))
 
 
-async def _after_grace(shipment_id: int, seconds: float, print_after: bool) -> None:
+async def _after_grace(shipment_id: int, seconds: float) -> None:
     try:
         await _wait(seconds)
     except asyncio.CancelledError:
@@ -507,7 +497,13 @@ async def _after_grace(shipment_id: int, seconds: float, print_after: bool) -> N
             _graces.pop(shipment_id, None)
     s = get(shipment_id)
     if s and s.approval == "auto" and s.status == "awaiting":
-        await run_pipeline(shipment_id, print_after)
+        await run_pipeline(shipment_id)
+
+
+def buy_title(s: Shipment | None) -> str:
+    """Text of the approval button: whether the label is printed right after buying."""
+    from app.services import printing
+    return t("Buy & print") if s and printing.auto_choice(s) else t("Buy label")
 
 
 def _cancel_grace(shipment_id: int) -> None:
@@ -524,8 +520,8 @@ def _grace_left(s: Shipment) -> int | None:
     return max(0, math.ceil((end - utcnow()).total_seconds() / 60))
 
 
-def approve(shipment_id: int, print_after: bool = True) -> Shipment:
-    """The user's go: buy the label now (and print it). Only for paid shipments."""
+def approve(shipment_id: int) -> Shipment:
+    """The user's go: buy the label now (printed when automatic printing is on). Only for paid shipments."""
     s = _require(shipment_id)
     if not s.paid_at:
         raise ShippingError(t("Mark the payment first – the label is only bought after the buyer has paid"))
@@ -541,8 +537,8 @@ def approve(shipment_id: int, print_after: bool = True) -> Shipment:
     if o is None or not o.online:
         raise ShippingError(t("This option has no online label – buy it at the counter"))
     _cancel_grace(s.id)
-    s = update(s.id, approval="approved" if print_after else "buy_only", approved_at=utcnow())
-    start_pipeline(s.id, print_after)
+    s = update(s.id, approval="approved", approved_at=utcnow())
+    start_pipeline(s.id)
     return s
 
 
@@ -571,26 +567,27 @@ def retry(shipment_id: int) -> None:
     if (not s.paid_at or s.paid_via == "paylivery" or s.status not in ("failed", "buying")
             or s.approval not in ("approved", "buy_only", "auto")):
         raise ShippingError(t("Nothing to retry"))
-    start_pipeline(s.id, print_wanted(s))
+    start_pipeline(s.id)
 
 
-def start_pipeline(shipment_id: int, print_after: bool) -> asyncio.Task:
-    return _spawn(run_pipeline(shipment_id, print_after))
+def start_pipeline(shipment_id: int) -> asyncio.Task:
+    return _spawn(run_pipeline(shipment_id))
 
 
 # ------------------------------------------------------------------ pipeline: buy, then print
-async def run_pipeline(shipment_id: int, print_after: bool) -> None:
-    """Buy the label in the carrier's checkout, then print it. Only paid and approved shipments; one run at a time."""
+async def run_pipeline(shipment_id: int) -> None:
+    """Buy the label in the carrier's checkout, then print it (automatic printing on). Only paid and approved
+    shipments; one run at a time."""
     if shipment_id in _running:
         return
     _running[shipment_id] = asyncio.current_task()
     try:
-        await _pipeline(shipment_id, print_after)
+        await _pipeline(shipment_id)
     finally:
         _running.pop(shipment_id, None)
 
 
-async def _pipeline(shipment_id: int, print_after: bool) -> None:
+async def _pipeline(shipment_id: int) -> None:
     from app.services import printing
     s = get(shipment_id)
     if (s is None or not s.paid_at or s.paid_via == "paylivery" or s.status not in ("draft", "awaiting", "failed", "buying")
@@ -599,12 +596,15 @@ async def _pipeline(shipment_id: int, print_after: bool) -> None:
     if not s.label_path and not await _buy(s):
         return
     s = get(shipment_id)
-    if print_after and printing.enabled():
+    if not s.printed_at and printing.auto_choice(s):
         if not await _print(s):
             return
         await _notify(get(shipment_id), t("Label printed"), _summary(s))
     else:
-        await _notify(s, t("Label bought"), _summary(s))
+        if s.status == "failed":                 # a retry after a failed print, with printing switched off since
+            s = update(s.id, status="labelled", error=None)
+        missing = printing.auto_missing(s)
+        await _notify(s, t("Label bought"), _summary(s) + (f"\n{missing}" if missing else ""))
 
 
 async def _buy(s: Shipment) -> bool:
@@ -644,6 +644,40 @@ async def _print(s: Shipment) -> bool:
     return True
 
 
+def label_arrived(shipment_id: int) -> None:
+    """A label came in outside the purchase pipeline (carrier form download, willhaben PayLivery): print it in the
+    background when automatic printing is on. The pipeline prints its own labels."""
+    from app.services import printing
+    s = get(shipment_id)
+    if s is None or shipment_id in _running or s.printed_at or not s.label_path:
+        return
+    if printing.auto_choice(s):
+        _spawn(_print_arrived(shipment_id))
+    elif missing := printing.auto_missing(s):
+        _spawn(_notify(s, t("Label saved"), missing))
+
+
+async def _print_arrived(shipment_id: int) -> None:
+    from app.services import printing
+    if shipment_id in _running:
+        return
+    _running[shipment_id] = asyncio.current_task()
+    try:
+        s = get(shipment_id)
+        if s is None or s.printed_at:
+            return
+        try:
+            await printing.print_label(s.id)
+        except Exception as e:  # noqa: BLE001 - the label is there: the error shows on the chat page, the status stays
+            if not isinstance(e, printing.PrintError):
+                log.exception("printing failed for shipment %s", s.id)
+            await _notify(s, t("Printing failed"), (str(e) or type(e).__name__)[:300])
+            return
+        await _notify(get(shipment_id) or s, t("Label printed"), _summary(s))
+    finally:
+        _running.pop(shipment_id, None)
+
+
 async def _fail(s: Shipment, title: str, msg: str) -> None:
     update(s.id, status="failed", error=msg[:500])
     await _notify(s, title, msg[:300])
@@ -661,7 +695,7 @@ def _ha():
 
 
 def _summary(s: Shipment) -> str:
-    o = by_key(s.option)
+    o = by_key(s.option) if s.paid_via != "paylivery" else None   # willhaben chose the carrier, not this app
     r = s.recipient or {}
     lines = [f"{o.label()} – {_eur(o.price)}"] if o else []
     lines.append(f"{r.get('name', '')}, {r.get('zip', '')} {r.get('city', '')}".strip(" ,"))
@@ -688,7 +722,8 @@ def page_state(s: Shipment) -> dict[str, Any]:
     """Approval state for the chat page: the ask box (also after a restart, when no countdown runs), blockers, countdown."""
     asks = s.status == "awaiting" and (s.approval == "pending" or (s.approval == "auto" and s.id not in _graces))
     blockers = auto_blockers(s) if asks and auto_config()["on"] else []
-    return {"ship_ask": asks, "ship_blockers": blockers, "ship_grace_left": _grace_left(s)}
+    return {"ship_ask": asks, "ship_blockers": blockers, "ship_grace_left": _grace_left(s),
+            "ship_buy_title": buy_title(s)}
 
 
 def offer_text(s: Shipment, conv_title: str | None) -> list[str]:

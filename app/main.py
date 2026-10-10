@@ -1512,7 +1512,7 @@ async def settings_shipping_auto(request: Request):
     f = await request.form()
     shipping.save_auto({"on": f.get("on"), "max_price": f.get("max_price"), "need_sold": f.get("need_sold"),
                         "need_parcel": f.get("need_parcel"), "carriers": f.getlist("auto_carrier"),
-                        "grace_min": f.get("grace_min"), "daily": f.get("daily"), "print": f.get("print")})
+                        "grace_min": f.get("grace_min"), "daily": f.get("daily")})
     return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
 
 
@@ -1653,10 +1653,10 @@ async def shipment_unpaid(shipment_id: int):
 
 
 @app.post("/shipments/{shipment_id}/approve")
-async def shipment_approve(shipment_id: int, print_: str = Form("1", alias="print")):
+async def shipment_approve(shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
-        shipping.approve(shipment_id, print_after=print_ == "1")
+        shipping.approve(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
     return _chat_back(s.conversation_id, t("Buying the label – this takes a moment"))
