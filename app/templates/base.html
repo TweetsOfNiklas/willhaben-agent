@@ -239,6 +239,21 @@
     paint();
   });
   paint();
+  // shift-click on a selection checkbox (class "sel") sets every one in between of the same form, like a file manager
+  let last = null;
+  document.addEventListener('click', e => {
+    const box = e.target;
+    if (!(box instanceof HTMLInputElement) || !box.classList.contains('sel')) return;
+    if (e.shiftKey && last && last !== box && last.form === box.form && last.isConnected) {
+      const all = [...document.querySelectorAll('input.sel')].filter(b => b.form === box.form);
+      const [i, j] = [all.indexOf(last), all.indexOf(box)].sort((a, b) => a - b);
+      all.slice(i, j + 1).forEach(b => {
+        if (b.checked !== box.checked) { b.checked = box.checked; b.dispatchEvent(new Event('change', {bubbles: true})); }
+      });
+      getSelection()?.removeAllRanges();   // shift-click also selects text
+    }
+    last = box;
+  });
 })();
 </script>
 </body>

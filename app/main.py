@@ -7,7 +7,7 @@ import re
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlsplit
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -543,6 +543,17 @@ async def draft_discard(draft_id: int):
 
 
 # ------------------------------------------------------------------ my ads
+_MYADS_FILTERS = ("show_inactive", "show_sold", "show_hidden")
+
+
+def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = None) -> RedirectResponse:
+    """Back to My ads with the filters the list was showing: from the posted form, else from the page that posted."""
+    src = form if form is not None and any(form.get(k) for k in _MYADS_FILTERS) else \
+        dict(parse_qsl(urlsplit(request.headers.get("referer") or "").query))
+    keep = "".join(f"&{k}=1" for k in _MYADS_FILTERS if src.get(k))
+    return back(f"/myads?msg={quote(msg, safe='')}{keep}{anchor}")
+
+
 @app.get("/myads", response_class=HTMLResponse)
 async def myads_page(request: Request, msg: str | None = None, show_hidden: bool = False, show_sold: bool = False,
                      show_inactive: bool = False):
@@ -567,23 +578,23 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
 
 
 @app.post("/myads/check")
-async def myads_check_all():
+async def myads_check_all(request: Request):
     res = await my_ads.check_all()
     msg = t("{checked} checked, {warned} warnings, {reactivated} reactivations",
             checked=res["checked"], warned=res["warned"], reactivated=res["reactivation"])
     if res["imported"]:
         msg = t("{n} loaded from willhaben", n=res["imported"]) + ", " + msg
-    return back(f"/myads?msg={quote(msg, safe='')}")
+    return _myads_back(request, msg)
 
 
 @app.post("/myads/{ad_id}/auto-renew")
-async def myads_auto(ad_id: str, on: str = Form("0")):
+async def myads_auto(request: Request, ad_id: str, on: str = Form("0")):
     my_ads.set_auto_renew(ad_id, on == "1")
-    return back("/myads")
+    return _myads_back(request)
 
 
 @app.post("/myads/{ad_id}/auto-reply")
-async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions: str = Form(""),
+async def myads_auto_reply(request: Request, ad_id: str, on: str | None = Form(None), instructions: str = Form(""),
                            min_price: str = Form("")):
     error = None
     try:
@@ -597,7 +608,7 @@ async def myads_auto_reply(ad_id: str, on: str | None = Form(None), instructions
         _background.add(task)
         task.add_done_callback(_background.discard)
     msg = error or (t('Automatic replies on') if on else t('Automatic replies off'))
-    return back(f"/myads?msg={quote(msg, safe='')}#ad-{ad_id}")
+    return _myads_back(request, msg, f"#ad-{ad_id}")
 
 
 @app.get("/myads/{ad_id}/edit", response_class=HTMLResponse)
@@ -672,44 +683,68 @@ async def myads_bulk(request: Request, action: str):
         raise HTTPException(404)
     form = await request.form()
     ids = [str(i) for i in form.getlist("ids") if str(i).isdigit()]
-    keep = "".join(f"&{k}=1" for k in ("show_inactive", "show_sold", "show_hidden") if form.get(k))   # list filters
     if not ids:
-        return back(f"/myads?msg={quote(t('No ads selected'), safe='')}{keep}")
+        return _myads_back(request, t("No ads selected"), form=form)
     try:
         res = await my_ads.bulk(action, ids)
     except (NotLoggedIn, SessionUnavailable, WillhabenError, RuntimeError, ValueError) as e:
-        return back(f"/myads?msg={quote(t('Failed: {error}', error=e), safe='')}{keep}")
+        return _myads_back(request, t("Failed: {error}", error=e), form=form)
     lines = [{"delete": t("Deleted on willhaben: {n}", n=len(res["done"])),
               "activate": t("Activated on willhaben: {n}", n=len(res["done"])),
               "deactivate": t("Deactivated on willhaben: {n}", n=len(res["done"]))}[action]]
     if res.get("republished"):
         lines.append(t("of which republished as a new ad (new willhaben id): {n}", n=len(res["republished"])))
     lines += [f"✗ {title}: {err}" for title, err in res["failed"]]
-    return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}{keep}")
+    return _myads_back(request, chr(10).join(lines), form=form)
+
+
+@app.get("/myads/cleanup", response_class=HTMLResponse)
+async def myads_cleanup_page(request: Request):
+    try:
+        cands = await my_ads.cleanup_candidates()
+    except (NotLoggedIn, SessionUnavailable, WillhabenError, ValueError) as e:
+        return back(f"/myads?msg={quote(t('Could not load ads: {error}', error=e), safe='')}")
+    return render(request, "myads_cleanup.html", cands=cands)
+
+
+@app.post("/myads/cleanup")
+async def myads_cleanup(request: Request):
+    ids = [str(i) for i in (await request.form()).getlist("ids") if str(i).isdigit()]
+    if not ids:
+        return back(f"/myads?msg={quote(t('No ads selected'), safe='')}")
+    try:
+        res = await my_ads.cleanup(ids)
+    except (NotLoggedIn, SessionUnavailable, WillhabenError, RuntimeError, ValueError) as e:
+        return back(f"/myads?msg={quote(t('Failed: {error}', error=e), safe='')}")
+    lines = [t("Deleted on willhaben: {n}", n=len(res["done"]))]
+    if res["hidden"]:
+        lines.append(t("Only hidden here (willhaben offers no deleting): {n}", n=len(res["hidden"])))
+    lines += [f"✗ {title}: {err}" for title, err in res["failed"]]
+    return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}")
 
 
 @app.post("/myads/{ad_id}/hide")
-async def myads_hide(ad_id: str, hidden: str = Form("1")):
+async def myads_hide(request: Request, ad_id: str, hidden: str = Form("1")):
     my_ads.set_hidden(ad_id, hidden == "1")
-    return back(f"/myads?msg={quote(t('Hidden from the list (still online on willhaben)') if hidden == '1' else '', safe='')}")
+    return _myads_back(request, t("Hidden from the list (still online on willhaben)") if hidden == "1" else "")
 
 
 @app.post("/myads/{ad_id}/deactivate")
-async def myads_deactivate(ad_id: str):
+async def myads_deactivate(request: Request, ad_id: str):
     try:
         await my_ads.deactivate(ad_id)
     except (EndpointUnknown, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
-        return back(f"/myads?msg={quote(t('Deactivating failed: {error}', error=e), safe='')}")
-    return back(f"/myads?msg={quote(t('Deactivated on willhaben – it can be activated again there'), safe='')}")
+        return _myads_back(request, t("Deactivating failed: {error}", error=e))
+    return _myads_back(request, t("Deactivated on willhaben – it can be activated again there"))
 
 
 @app.post("/myads/{ad_id}/delete")
-async def myads_delete(ad_id: str):
+async def myads_delete(request: Request, ad_id: str):
     try:
         await my_ads.delete(ad_id)
     except (EndpointUnknown, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
-        return back(f"/myads?msg={quote(t('Deleting failed: {error}', error=e), safe='')}")
-    return back(f"/myads?msg={quote(t('Deleted on willhaben'), safe='')}")
+        return _myads_back(request, t("Deleting failed: {error}", error=e))
+    return _myads_back(request, t("Deleted on willhaben"))
 
 
 # ------------------------------------------------------------------ sold / reserved workflow (app/services/sold.py)

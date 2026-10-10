@@ -456,3 +456,59 @@ def test_myads_filters_and_order():
         assert "Deaktiviert" in page and "Weg" not in page
         page = c.get("/myads?show_sold=1").text
         assert "Weg" in page and "Geschenkt" in page and "Deaktiviert" not in page
+
+
+async def test_cleanup_deletes_old_ads_and_never_active_ones(account):
+    from tests.test_my_ads import _ad
+
+    ads = account._ads()
+    ads[0]["advertImageList"] = {"advertImage": []}                  # active without photo: never a candidate
+    _make_passive(account, "1000000002")
+    ads[1]["advertImageList"] = {"advertImage": []}                  # passive without photo: deletable
+    sold = _ad("1000000003", "sold", "Verkauft", "2026-10-01T10:00:00+02:00")
+    sold["advertEditStatusActionsList"] = {"contextLinkList": {"contextLink": []}}   # no delete link: hidden only
+    kept = _ad("1000000004", "deactivated", "Deaktiviert", "2026-10-01T10:00:00+02:00")   # has a photo: stays
+    ads += [sold, kept]
+    account._relink(kept)
+    await my_ads.import_from_account()
+
+    cands = {c["ad_id"]: c for c in await my_ads.cleanup_candidates()}
+    assert set(cands) == {"1000000002", "1000000003"}
+    assert cands["1000000002"]["deletable"] and not cands["1000000003"]["deletable"]
+
+    res = await my_ads.cleanup(["1000000001", "1000000002", "1000000003", "1000000004"])
+    assert res["done"] == ["Anzeige 1000000002"] and res["hidden"] == ["Anzeige 1000000003"] and not res["failed"]
+    deleted = [p for m, p in account.calls if m == "DELETE"]
+    assert deleted == ["/webapi/myatz/bap/1000000002"]               # the active and the kept ad are untouched
+    with session() as db:
+        assert db.get(MyAd, "1000000002") is None and db.get(MyAd, "1000000003").hidden
+        assert db.get(MyAd, "1000000001") is not None and db.get(MyAd, "1000000004") is not None
+
+
+async def test_cleanup_page_and_route(account):
+    from app.main import app
+
+    account._ads()[1]["advertImageList"] = {"advertImage": []}
+    await my_ads.import_from_account()
+    with TestClient(app) as c:
+        page = c.get("/myads/cleanup").text
+        assert 'value="1000000002"' in page and 'value="1000000001"' not in page
+        r = c.post("/myads/cleanup", data={"ids": ["1000000002"]}, follow_redirects=False)
+        assert r.status_code == 303 and "/myads?msg=" in r.headers["location"]
+    assert ("DELETE", "/webapi/myatz/bap/1000000002") in account.calls
+
+
+def test_row_actions_keep_the_list_filters():
+    from app.main import app
+
+    with session() as db:
+        db.add(MyAd(ad_id="1000000001", heading="Rad", status="Passiv"))
+        db.commit()
+    ref = {"referer": "http://testserver/myads?show_inactive=1&show_sold=1&msg=x"}
+    with TestClient(app) as c:
+        r = c.post("/myads/1000000001/auto-renew", data={"on": "1"}, headers=ref, follow_redirects=False)
+        assert r.headers["location"] == "/myads?msg=&show_inactive=1&show_sold=1"
+        r = c.post("/myads/1000000001/auto-reply", data={"on": ""}, headers=ref, follow_redirects=False)
+        assert r.headers["location"].endswith("&show_inactive=1&show_sold=1#ad-1000000001")
+        r = c.post("/myads/1000000001/hide", data={"hidden": "0"}, follow_redirects=False)   # no referer: plain list
+        assert r.headers["location"] == "/myads?msg="
