@@ -42,8 +42,20 @@ It runs on your own server, from your home internet connection, and you control 
 - **Your ads**: imported from your account, with a reminder before they expire. Per ad: auto-renew when it expires,
   edit text and photos (Claude can propose a better text), deactivate, delete, mark sold or reserved (other buyers get a
   notice draft).
-- **Shipping**: when a buyer sends an address, the app compares parcel prices of Post, GLS, Hermes and DPD, shows the
-  nearest drop-off points and fills the carrier's label form in the built-in browser (you check and pay there).
+- **Shipping**: when a buyer sends an address, the app compares parcel prices of Post, GLS, Hermes and DPD and shows
+  the nearest drop-off points. The label is bought only after the buyer has paid: you mark the payment (a buyer's
+  "I have paid" only becomes a reminder to check your account), then approve the purchase on the chat page or with a
+  push button, or let the app buy automatically under your rules (ad marked sold to this buyer, confirmed parcel size,
+  price cap, chosen carriers, a grace period to cancel, a daily limit). The purchase runs in the app's own browser with
+  your stored payment card, a per-carrier playbook learned from the first run, code guards (price check, never
+  insurance/newsletter/account changes) and a stop for bank confirmations. The label goes to a label printer
+  (100×150 / 100×200 mm) or a normal printer over IPP, per carrier, with tray and crop settings; the carrier form in the
+  remote browser stays as the manual fallback. One switch prints every label automatically (bought, downloaded from
+  a carrier form, or from willhaben PayLivery), or none.
+- **PayLivery**: willhaben's own notices in a chat (paid, label, shipped, delivered, payout, offers) are tracked for
+  both roles, the willhaben label is downloaded (and printed when automatic printing is on), and each PayLivery step (accept or decline an offer, confirm receipt,
+  buy or make an offer as a buyer, only with your confirmation) runs in the browser window with the API recording on,
+  since willhaben's PayLivery calls are not documented yet.
 - **Google Calendar** (optional): free times go into reply drafts, agreed appointments become calendar entries on a tap.
 - **Notifications** through Home Assistant (events always, phone pushes with action buttons: send / revise with Claude /
   discard) and/or a **Telegram bot** with the same buttons, feedback buttons, commands and a typing indicator.
@@ -219,6 +231,8 @@ Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_sea
 | Price check and product search (Produktsuche) | done (comparables from the same category, category selectable) |
 | Home Assistant events, pushes with action buttons | done |
 | Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
+| Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet** |
+| PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → willhaben account → Advanced → API recording) |
 | Connection watchdog, backup, bug report, request statistics | done |
 | MCP server | done |
 

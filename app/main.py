@@ -34,7 +34,7 @@ from app.services import health, human_pace
 from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
-from app import backup_routes
+from app import backup_routes, label_buy_routes, paylivery_routes, printing_routes
 from app.services.search_agents import create_agent, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
@@ -92,6 +92,9 @@ async def lifespan(app: FastAPI):
 _background: set[asyncio.Task] = set()
 app = FastAPI(title="willhaben Agent", lifespan=lifespan)
 app.include_router(backup_routes.router)   # Settings → Backup
+app.include_router(label_buy_routes.router)   # Settings → Shipping → payment card, checkout
+app.include_router(printing_routes.router)    # Settings → Printers, print buttons
+app.include_router(paylivery_routes.router)   # PayLivery card on the chat page
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -166,6 +169,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
+templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
@@ -494,7 +498,8 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
             "fmt_dist": dropoff.fmt_dist,
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
-            "ship_all": shipping.all_options(s.parcel) if s else []}
+            "ship_all": shipping.all_options(s.parcel) if s else [], **(shipping.page_state(s) if s else {}),
+            **printing_routes.shipment_panel(s)}
 
 
 @app.post("/chats/{conversation_id}/refresh")
@@ -1264,7 +1269,8 @@ async def settings_page(request: Request, msg: str | None = None):
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
-                  label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel())
+                  label_form=label_fill.active(), session_next="/settings#willhaben", backup=backup_routes.panel(),
+                  **label_buy_routes.panel(), **printing_routes.panel())
 
 
 async def _gcal_ctx() -> dict[str, Any]:
@@ -1540,6 +1546,15 @@ async def settings_shipping(request: Request):
     return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
 
 
+@app.post("/settings/shipping/auto")
+async def settings_shipping_auto(request: Request):
+    f = await request.form()
+    shipping.save_auto({"on": f.get("on"), "max_price": f.get("max_price"), "need_sold": f.get("need_sold"),
+                        "need_parcel": f.get("need_parcel"), "carriers": f.getlist("auto_carrier"),
+                        "grace_min": f.get("grace_min"), "daily": f.get("daily")})
+    return back(f"/settings?msg={quote(t('Changes saved'), safe='')}#shipping")
+
+
 @app.post("/settings/human-pace")
 async def settings_human_pace(variance_pct: int = Form(30), breaks: str | None = Form(None)):
     human_pace.save(variance_pct, bool(breaks))
@@ -1607,6 +1622,8 @@ async def shipment_option(shipment_id: int, key: str = Form(...)):
 @app.post("/shipments/{shipment_id}/label")
 async def shipment_label(shipment_id: int, key: str = Form("")):
     s = _shipment_or_404(shipment_id)
+    if s.label_path or s.status in ("buying", "printed", "sent", "discarded"):
+        return _chat_back(s.conversation_id, t("This shipment already has a label or a purchase is running"))
     try:
         if key:
             shipping.choose(shipment_id, key)
@@ -1636,6 +1653,8 @@ async def shipment_status(shipment_id: int, status: str = Form(...), tracking: s
     s = _shipment_or_404(shipment_id)
     if status not in ("draft", "labelled", "sent", "discarded"):
         raise HTTPException(400)
+    if s.status == "buying" and shipment_id in shipping._running:
+        return _chat_back(s.conversation_id, t("A label purchase is running – cancel it in the browser window first"))
     shipping.update(shipment_id, status=status, tracking=tracking.strip() or s.tracking)
     return _chat_back(s.conversation_id)
 
@@ -1649,6 +1668,67 @@ async def shipment_label_file(shipment_id: int):
     if not p.exists():
         raise HTTPException(404)
     return FileResponse(p, filename=p.name)
+
+
+@app.post("/shipments/{shipment_id}/paid")
+async def shipment_paid(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.mark_paid(shipment_id, "manual")
+        await shipping.after_paid(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Marked as paid"))
+
+
+@app.post("/shipments/{shipment_id}/unpaid")
+async def shipment_unpaid(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.unmark_paid(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Payment mark removed"))
+
+
+@app.post("/shipments/{shipment_id}/approve")
+async def shipment_approve(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.approve(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Buying the label – this takes a moment"))
+
+
+@app.post("/shipments/{shipment_id}/decline")
+async def shipment_decline(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.decline(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Label not bought"))
+
+
+@app.post("/shipments/{shipment_id}/retry")
+async def shipment_retry(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.retry(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Trying again"))
+
+
+@app.post("/shipments/{shipment_id}/cancel-auto")
+async def shipment_cancel_auto(shipment_id: int):
+    s = _shipment_or_404(shipment_id)
+    try:
+        await shipping.cancel_auto(shipment_id)
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Automatic purchase cancelled – approve the label below"))
 
 
 # ------------------------------------------------------------------ telegram

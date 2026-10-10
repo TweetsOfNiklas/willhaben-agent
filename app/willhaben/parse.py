@@ -193,6 +193,8 @@ class AdDetail:
     category_path: list[str] = field(default_factory=list)
     edit_actions: Any = None
     category_id: str | None = None     # leaf category (same id space as AdSummary.category_ids)
+    paylivery_enabled: bool = False    # the ad offers willhaben PayLivery (attribute payliveryEnabled)
+    buy_now: bool = False              # "Sofort kaufen" (p2ppOptions.buyNowInformationDto.isBuyNowAd)
 
     def as_context(self) -> dict[str, Any]:
         return {
@@ -209,7 +211,18 @@ class AdDetail:
             "seller_uuid": self.seller_uuid,
             "url": self.url,
             "images": self.images[:5],
+            "paylivery": self.paylivery_enabled,
+            "buy_now": self.buy_now,
         }
+
+
+def _flag(*values: Any) -> bool:
+    """First set value of a willhaben flag ("true"/"false" as text, or a one-item list of it) is true."""
+    for v in values:
+        v = v[0] if isinstance(v, list) and v else v
+        if v is not None:
+            return str(v).lower() == "true"
+    return False
 
 
 def _price_from_display(v: str | None) -> float | None:
@@ -258,6 +271,9 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
         category_path=[c for c in crumbs if c],
         edit_actions=ad.get("advertEditStatusActionsList"),
         category_id=str(ad["categoryTreeId"]) if ad.get("categoryTreeId") is not None else None,
+        paylivery_enabled=_flag((ad.get("advertisingParameters") or {}).get("payliveryEnabled"),
+                                _first(a, "payliveryEnabled")),
+        buy_now=bool(((ad.get("p2ppOptions") or {}).get("buyNowInformationDto") or {}).get("isBuyNowAd")),
     )
 
 

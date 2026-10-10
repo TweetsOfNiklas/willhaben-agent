@@ -1,0 +1,107 @@
+{# Settings → Printers: which printer gets the labels, and per carrier which one (see printing_routes.py) #}
+{% macro printer_fields(which, title, p) %}
+<fieldset>
+  <legend><strong>{{ title }}</strong></legend>
+  <label>{{ _("Name") }}
+    <input name="{{ which }}_name" value="{{ p.name }}" placeholder="{{ _('e.g. Brother QL-820NWB') }}"></label>
+  <label>{{ _("IPP address") }}
+    <input name="{{ which }}_uri" value="{{ p.uri }}" placeholder="{{ 'ipp://192.168.1.50/ipp/print' if which == 'normal' else 'ipp://cups:631/printers/Brother_QL' }}" spellcheck="false"></label>
+  {% set known = print_opts.media[which] | map('first') | list %}
+  {% set custom = p.media not in known %}
+  <div class="grid">
+    <label>{{ _("Media") }}
+      <select name="{{ which }}_media">
+        {% for v, label in print_opts.media[which] %}<option value="{{ v }}" {% if v == p.media %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        <option value="other" {% if custom %}selected{% endif %}>{{ _("Other (type below)") }}</option>
+      </select></label>
+    <label>{{ _("Media name") }}
+      <input name="{{ which }}_media_other" value="{{ p.media if custom else '' }}" placeholder="custom_100x150mm_100x150mm" spellcheck="false"></label>
+  </div>
+  {% set trays = print_opts.trays | map('first') | list %}
+  {% set custom_tray = p.tray not in trays %}
+  <div class="grid">
+    <label>{{ _("Tray") }}
+      <select name="{{ which }}_tray">
+        {% for v, label in print_opts.trays %}<option value="{{ v }}" {% if v == p.tray %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        <option value="other" {% if custom_tray %}selected{% endif %}>{{ _("Other (type below)") }}</option>
+      </select></label>
+    <label>{{ _("Tray name") }}
+      <input name="{{ which }}_tray_other" value="{{ p.tray if custom_tray else '' }}" placeholder="tray-4" spellcheck="false"></label>
+  </div>
+  {% if which == 'label' %}
+  {% set known_media = print_opts.media['label'] | map('first') | list %}
+  <details>
+    <summary><small>{{ _("Per carrier: media and crop") }}</small></summary>
+    <p><small class="muted">{{ _("Media: empty uses the printer's medium (GLS labels are 100 × 200 mm). Crop: share of the page from the top left, as numbers from 0 to 1; empty prints the page as it is. Each carrier's PDF puts the label somewhere else.") }}</small></p>
+    {% for code, cname in print_opts.carriers %}
+      {% set e = (p.carriers or {}).get(code) or {} %}
+      {% set c = e.crop or {} %}
+      {% set own = e.media or '' %}
+      {% set custom_media = own != '' and own not in known_media %}
+      <p style="margin-bottom:.2rem"><small>{{ cname }}</small></p>
+      <div class="grid">
+        <select name="label_carrier_media_{{ code }}" aria-label="{{ _('Media') }}">
+          {% for v, label in print_opts.carrier_media %}<option value="{{ v }}" {% if v == own or (v == 'other' and custom_media) %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <input name="label_carrier_media_{{ code }}_other" value="{{ own if custom_media else '' }}" placeholder="custom_100x200mm_100x200mm" spellcheck="false" aria-label="{{ _('Media name') }}">
+      </div>
+      <div class="grid">
+        <input type="text" inputmode="decimal" name="crop_{{ code }}_left" value="{{ c.left if c.left is defined else '' }}" placeholder="{{ _('left') }}" aria-label="{{ _('left') }}">
+        <input type="text" inputmode="decimal" name="crop_{{ code }}_top" value="{{ c.top if c.top is defined else '' }}" placeholder="{{ _('top') }}" aria-label="{{ _('top') }}">
+        <input type="text" inputmode="decimal" name="crop_{{ code }}_width" value="{{ c.width if c.width is defined else '' }}" placeholder="{{ _('width') }}" aria-label="{{ _('width') }}">
+        <input type="text" inputmode="decimal" name="crop_{{ code }}_height" value="{{ c.height if c.height is defined else '' }}" placeholder="{{ _('height') }}" aria-label="{{ _('height') }}">
+      </div>
+    {% endfor %}
+  </details>
+  {% endif %}
+</fieldset>
+{% endmacro %}
+
+<section id="printers">
+  <h4>{{ _("Printers") }}</h4>
+  <p class="lead">{{ _("Paid labels go to a label printer or a normal printer, chosen per carrier.") }}</p>
+  <form method="post" action="/settings/printers">
+    <label><input type="checkbox" role="switch" name="auto" value="1" {% if printing.auto %}checked{% endif %}>
+      {{ _("Print every label automatically") }}</label>
+    <p><small class="muted">{{ _("One switch for all labels: bought here, downloaded from a carrier form or sent by willhaben PayLivery. Off: nothing is printed on its own, the Print button on the chat page still works.") }}</small></p>
+    <div class="grid">
+      {{ printer_fields('label', _("Label printer"), printing.printers.label) }}
+      {{ printer_fields('normal', _("Normal printer"), printing.printers.normal) }}
+    </div>
+    <fieldset>
+      <legend><strong>{{ _("Which printer per carrier") }}</strong></legend>
+      <div class="grid">
+        {% for code, cname in print_opts.targets %}
+        <label>{{ cname }}
+          <select name="carrier_{{ code }}">
+            {% for v, label in print_opts.choices %}<option value="{{ v }}" {% if printing.by_carrier[code] == v %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <button onclick="this.setAttribute('aria-busy','true')">{{ _("Save") }}</button>
+  </form>
+
+  <div class="grid" style="margin-top:1rem">
+    <div>
+      <small class="muted">{{ _("Label printer") }}</small>
+      <div class="row-actions">
+        <form method="post" action="/settings/printers/test/label"><button class="secondary" onclick="this.setAttribute('aria-busy','true')">{{ _("Test page") }}</button></form>
+        <form method="post" action="/settings/printers/check/label"><button class="secondary outline" onclick="this.setAttribute('aria-busy','true')">{{ _("Check") }}</button></form>
+      </div>
+    </div>
+    <div>
+      <small class="muted">{{ _("Normal printer") }}</small>
+      <div class="row-actions">
+        <form method="post" action="/settings/printers/test/normal"><button class="secondary" onclick="this.setAttribute('aria-busy','true')">{{ _("Test page") }}</button></form>
+        <form method="post" action="/settings/printers/check/normal"><button class="secondary outline" onclick="this.setAttribute('aria-busy','true')">{{ _("Check") }}</button></form>
+      </div>
+    </div>
+  </div>
+  <small class="muted">{{ _("Test page and check use the saved settings. Check asks the printer for its state and the media it supports.") }}</small>
+
+  <details style="margin-top:1rem"><summary><small>{{ _("How the printers are reached") }}</small></summary>
+    <p><small class="muted">{{ _("The app talks IPP, the printing protocol of AirPrint and IPP Everywhere printers: those take an address like ipp://192.168.1.50/ipp/print directly. A label printer without IPP, or one connected by USB, runs through a CUPS queue on a computer in your network: ipp://cups-host:631/printers/&lt;queue&gt;.") }}</small></p>
+    <p><small class="muted">{{ _("Media names: custom_100x150mm_100x150mm for 100 × 150 mm labels, custom_100x200mm_100x200mm for GLS labels, iso_a4_210x297mm for A4. A tray is only sent when the media name contains the size.") }}</small></p>
+  </details>
+</section>

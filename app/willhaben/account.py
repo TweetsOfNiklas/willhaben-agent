@@ -15,7 +15,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -64,6 +64,9 @@ class ChatMessage:
     created_at: datetime | None
     direction: str  # in | out | unknown
     read: bool | None = None  # willhaben's read flag (for incoming messages: did I read it)
+    kind: str | None = None   # system | integration: willhaben's own notice (PayLivery, status); None = a normal message
+    raw_links: list[str] = field(default_factory=list)  # every http(s) string inside the message object
+    params: dict[str, Any] | None = None  # willhaben's structured `parameters` of the message (notices carry them)
 
 
 def _pick(d: dict[str, Any] | None, *keys: str) -> Any:
@@ -123,12 +126,40 @@ def parse_conversations(data: Any) -> list[ConversationSummary]:
     return out
 
 
+def _notice_kind(m: dict[str, Any]) -> str | None:
+    """`system_message` / `integration_message` types are willhaben notices, not written by either side."""
+    kind = m.get("type")
+    if isinstance(kind, str) and kind.endswith("system_message"):
+        return "system"
+    if isinstance(kind, str) and kind.endswith("integration_message"):
+        return "integration"
+    return None
+
+
+def _links(obj: Any, depth: int = 0) -> list[str]:
+    """Every string starting with http(s) in a message object, structured fields included (deduplicated)."""
+    if depth > 6:
+        return []
+    if isinstance(obj, str):
+        found = [obj] if obj.startswith(("http://", "https://")) else []
+    elif isinstance(obj, dict):
+        found = [x for v in obj.values() for x in _links(v, depth + 1)]
+    elif isinstance(obj, list):
+        found = [x for v in obj for x in _links(v, depth + 1)]
+    else:
+        found = []
+    return list(dict.fromkeys(found))
+
+
 def parse_messages(data: Any, my_ids: set[str]) -> list[ChatMessage]:
     out = []
     for m in _list(data, "messages", "data", "items", "content", "conversation.messages"):
+        kind = _notice_kind(m)
         text = _pick(m, "text", "body", "message", "content", "messageText")
         if not isinstance(text, str):
-            continue
+            if kind is None:
+                continue
+            text = ""   # a notice without text still carries its links (see raw_links)
         created = _when(_pick(m, "created_at", "createdAt", "timestamp", "sentAt", "date", "created"))
         ext = _pick(m, "message_id", "id", "messageId", "uuid")
         if ext is None:
@@ -136,8 +167,7 @@ def parse_messages(data: Any, my_ids: set[str]) -> list[ChatMessage]:
         own = _pick(m, "is_mine", "isOwnMessage", "ownMessage", "own", "fromMe", "isMine")
         sender = _pick(m, "sender_id", "sender_uuid", "user_uuid", "senderId", "sender.id", "sender.uuid", "senderUuid", "userId", "from")
         direction = "unknown"
-        kind = m.get("type")
-        if isinstance(kind, str) and kind.endswith(("system_message", "integration_message")):
+        if kind is not None:
             pass  # willhaben notices (PayLivery, safety tips, status) - neither side wrote them
         elif isinstance(own, bool):
             direction = "out" if own else "in"
@@ -147,8 +177,10 @@ def parse_messages(data: Any, my_ids: set[str]) -> list[ChatMessage]:
             d = _pick(m, "direction", "type").lower()
             direction = "out" if d in ("out", "outgoing", "sent") else "in" if d in ("in", "incoming", "received") else "unknown"
         read = m.get("read")
+        params = m.get("parameters") if isinstance(m.get("parameters"), (dict, list)) else None
         out.append(ChatMessage(ext_id=str(ext), text=text, created_at=created, direction=direction,
-                               read=read if isinstance(read, bool) else None))
+                               read=read if isinstance(read, bool) else None, kind=kind, raw_links=_links(m),
+                               params=params))
     out.sort(key=lambda x: x.created_at or datetime.min.replace(tzinfo=timezone.utc))
     return out
 

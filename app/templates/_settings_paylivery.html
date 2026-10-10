@@ -1,0 +1,13 @@
+{# PayLivery settings: paylivery_card(None) gives the switch values (app/paylivery_routes.py) #}
+{% set pl = paylivery_card(None) %}
+<section id="paylivery">
+  <h4>PayLivery</h4>
+  <form method="post" action="/settings/paylivery">
+    <label><input type="checkbox" role="switch" name="buy_allowed" value="1" {% if pl.buy_allowed %}checked{% endif %}>
+      {{ _("Allow purchases and offers as a buyer from this app (with confirmation, never automatic)") }}</label>
+    <label><input type="checkbox" role="switch" name="notify" value="1" {% if pl.notify %}checked{% endif %}>
+      {{ _("Notify me about PayLivery stage changes") }}</label>
+    <p><small class="muted">{{ _("Every PayLivery action runs in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet. Send the recording file for verification.") }}</small></p>
+    <button type="submit">{{ _("Save") }}</button>
+  </form>
+</section>
