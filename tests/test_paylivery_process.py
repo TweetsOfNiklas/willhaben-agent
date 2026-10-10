@@ -386,6 +386,10 @@ class FakeSess:
     async def open_url(self, url):
         self.opened.append(url)
 
+    def ui_in_use(self):
+        from contextlib import nullcontext
+        return nullcontext()
+
     def start_capture(self, label):
         self.starts.append(label)
         self.capturing = True

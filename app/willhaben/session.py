@@ -6,7 +6,9 @@ run as `fetch()` inside a willhaben.at page of the same browser profile, so cook
 TLS fingerprint and headers are exactly those of the browser the user logged in with.
 
 Two pages are kept open:
-  ui_page  - visible in the noVNC window; used for login and for the request recorder
+  ui_page  - visible in the noVNC window; used for login and for the request recorder. Parked on about:blank
+             after UI_IDLE_S without use (park_idle_ui): a willhaben page keeps rendering ads and animations on
+             the virtual display, which was nearly all of the app's idle CPU.
   api_page - parked on https://www.willhaben.at/robots.txt (same origin, tiny) for fetch()
 """
 from __future__ import annotations
@@ -14,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +34,8 @@ log = logging.getLogger(__name__)
 ORIGIN = "https://www.willhaben.at"
 PARK_URL = f"{ORIGIN}/robots.txt"
 LOGIN_URL = f"{ORIGIN}/iad/myprofile/login?r=/iad/myprofile/myadverts"
+UI_IDLE_S = 15 * 60       # the visible page goes to about:blank after this long without use
+VNC_PORT = 5900           # x11vnc; websockify (noVNC) holds a connection to it while a viewer is open
 ME_PATH = "/webapi/userprofile-service/userprofile/me"
 _REDACT_HEADERS = {"cookie", "set-cookie", "authorization", "x-bbx-csrf-token"}
 # Special keys the remote view may press (printable characters go through keyboard.type).
@@ -75,6 +81,8 @@ class BrowserSession:
         self._capture: dict[str, Any] | None = None
         self._capture_tasks: set[asyncio.Task] = set()
         self._input_lock = asyncio.Lock()
+        self._ui_used_at = time.monotonic()   # last use of the visible page (see park_idle_ui)
+        self._ui_holds = 0
         # live chat: own page holding the chat WebSocket (see start_chat_listener)
         self.chat_page = None
         self._creating_internal = False
@@ -325,13 +333,42 @@ class BrowserSession:
             await self._goto(self.api_page, PARK_URL, wait_until="domcontentloaded")
         return await self._me() is not None
 
+    # ---------------------------------------------------------------- idle: park the visible page
+    def touch_ui(self) -> None:
+        self._ui_used_at = time.monotonic()
+
+    @contextmanager
+    def ui_in_use(self):
+        """A flow drives the visible page (e.g. PayLivery waiting for the bank): never park it meanwhile."""
+        self._ui_holds += 1
+        try:
+            yield
+        finally:
+            self._ui_holds -= 1
+            self.touch_ui()
+
+    async def park_idle_ui(self, idle_s: float = UI_IDLE_S) -> bool:
+        """Visible page unused for idle_s: go to about:blank. True if it was parked."""
+        page = self.ui_page
+        if (page is None or page.is_closed() or self._ui_holds or self.capturing or page.url in ("about:blank", "")
+                or time.monotonic() - self._ui_used_at < idle_s):
+            return False
+        if vnc_viewer_connected():
+            self.touch_ui()      # someone watches in noVNC
+            return False
+        await page.goto("about:blank")
+        log.info("visible browser page idle, parked on about:blank")
+        return True
+
     async def open_login(self) -> None:
         self._require()
+        self.touch_ui()
         await self.ui_page.bring_to_front()
         await self._goto(self.ui_page, LOGIN_URL, "login", wait_until="domcontentloaded")
 
     async def open_url(self, url: str) -> None:
         self._require()
+        self.touch_ui()
         await self.ui_page.bring_to_front()
         if url.startswith(ORIGIN):
             await self._goto(self.ui_page, url, wait_until="domcontentloaded")
@@ -340,6 +377,7 @@ class BrowserSession:
 
     async def screenshot(self, fmt: str = "png") -> bytes:
         self._require()
+        self.touch_ui()     # the dashboard's remote view polls this while it is open
         if fmt == "jpeg":
             return await self.ui_page.screenshot(type="jpeg", quality=70)
         return await self.ui_page.screenshot(type="png")
@@ -352,6 +390,7 @@ class BrowserSession:
         serialized so fast typing arrives in order.
         """
         self._require()
+        self.touch_ui()
         page = self.ui_page
         async with self._input_lock:
             kind = ev.get("type")
@@ -379,6 +418,7 @@ class BrowserSession:
         if page is self.api_page or self._creating_internal:
             return
         self.ui_page = page
+        self.touch_ui()
         page.on("close", self._on_page_closed)
 
     # ---------------------------------------------------------------- live chat (no polling)
@@ -552,6 +592,21 @@ class BrowserSession:
             "capture_count": len(self._capture["entries"]) if self._capture else 0,
             "chat_live": dict(self.chat_live),
         }
+
+
+def vnc_viewer_connected() -> bool:
+    """An established TCP connection to the VNC port (Linux /proc): a noVNC viewer is open."""
+    port = f":{VNC_PORT:04X}"
+    for name in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(name).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()
+            if len(f) > 3 and f[3] == "01" and f[1].endswith(port):   # state 01 = ESTABLISHED, local port
+                return True
+    return False
 
 
 def parse_me(data: Any) -> dict[str, Any] | None:

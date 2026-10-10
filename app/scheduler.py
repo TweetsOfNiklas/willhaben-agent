@@ -77,6 +77,15 @@ async def _session_check() -> None:
             log.warning("session check failed: %s", e)
 
 
+async def _park_idle_ui() -> None:
+    sess = get_session()
+    if sess.started:
+        try:
+            await sess.park_idle_ui()
+        except Exception as e:  # noqa: BLE001
+            log.warning("parking the idle browser page failed: %s", e)
+
+
 LIVE_FALLBACK = timedelta(minutes=15)
 
 
@@ -105,6 +114,8 @@ def start() -> None:
     scheduler.add_job(health.check, IntervalTrigger(seconds=health.CHECK_INTERVAL_S), id="health-check",
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=120))
+    scheduler.add_job(_park_idle_ui, IntervalTrigger(minutes=5), id="park-idle-ui",
+                      replace_existing=True, max_instances=1, coalesce=True)   # idle CPU: see session.park_idle_ui
     scheduler.add_job(access_log.flush_job, IntervalTrigger(seconds=access_log.FLUSH_INTERVAL_S), id="access-log",
                       replace_existing=True, max_instances=1, coalesce=True)   # write + prune willhaben access counts
     scheduler.add_job(my_ads.check_all, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",

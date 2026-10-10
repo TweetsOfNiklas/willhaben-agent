@@ -1113,6 +1113,11 @@ async def _bank_push(conv: Conversation, amount: float | None) -> None:
 
 async def _drive(sess, conv: Conversation, action: str, amount: float | None) -> tuple[bool, str]:
     """The Claude-guided step loop of one action. Returns (done, message for the user)."""
+    with sess.ui_in_use():      # can wait minutes for the bank: the visible page must not be parked meanwhile
+        return await _drive_steps(sess, conv, action, amount)
+
+
+async def _drive_steps(sess, conv: Conversation, action: str, amount: float | None) -> tuple[bool, str]:
     await sess.open_url(_start_url(conv, action))
     page = sess.ui_page
     await _settle(page)
