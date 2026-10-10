@@ -670,18 +670,22 @@ async def myads_photos_save(ad_id: str, order: list[str] = Form(default=[]),
 async def myads_bulk(request: Request, action: str):
     if action not in ("activate", "deactivate", "delete"):
         raise HTTPException(404)
-    ids = [str(i) for i in (await request.form()).getlist("ids") if str(i).isdigit()]
+    form = await request.form()
+    ids = [str(i) for i in form.getlist("ids") if str(i).isdigit()]
+    keep = "".join(f"&{k}=1" for k in ("show_inactive", "show_sold", "show_hidden") if form.get(k))   # list filters
     if not ids:
-        return back(f"/myads?msg={quote(t('No ads selected'), safe='')}")
+        return back(f"/myads?msg={quote(t('No ads selected'), safe='')}{keep}")
     try:
         res = await my_ads.bulk(action, ids)
     except (NotLoggedIn, SessionUnavailable, WillhabenError, RuntimeError, ValueError) as e:
-        return back(f"/myads?msg={quote(t('Failed: {error}', error=e), safe='')}")
+        return back(f"/myads?msg={quote(t('Failed: {error}', error=e), safe='')}{keep}")
     lines = [{"delete": t("Deleted on willhaben: {n}", n=len(res["done"])),
               "activate": t("Activated on willhaben: {n}", n=len(res["done"])),
               "deactivate": t("Deactivated on willhaben: {n}", n=len(res["done"]))}[action]]
+    if res.get("republished"):
+        lines.append(t("of which republished as a new ad (new willhaben id): {n}", n=len(res["republished"])))
     lines += [f"✗ {title}: {err}" for title, err in res["failed"]]
-    return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}")
+    return back(f"/myads?msg={quote(chr(10).join(lines), safe='')}{keep}")
 
 
 @app.post("/myads/{ad_id}/hide")

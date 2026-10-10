@@ -94,25 +94,33 @@ async def delete(ad_id: str) -> None:
 
 
 async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
-    """Deactivate or delete several selected ads, one by one with willhaben's per-ad links.
+    """Activate, deactivate or delete several selected ads, one by one with willhaben's per-ad links.
 
     One list request before and one after; every delete is confirmed against the account list before the
-    row goes. Returns {"done": [titles], "failed": [(title, error)]}.
+    row goes. Activating a passive or expired ad republishes it under a new id (like auto-renew).
+    Returns {"done": [titles], "republished": [titles], "failed": [(title, error)]}.
     """
     if action not in ("activate", "deactivate", "delete"):
         raise ValueError(action)
     acct = AccountClient(get_session())
     ads = await acct.my_adverts()
     titles = {a.ad_id: a.heading or a.ad_id for a in ads}
-    done, failed = [], []
+    done, failed, moved = [], [], {}
     queue = list(dict.fromkeys(ad_ids))
+    with session() as db:
+        sold_here = {x for x in queue if (r := db.get(MyAd, x)) and is_sold(r)}
     for i, ad_id in enumerate(queue):   # strictly one after another, each request through the shared limiter
         title = titles.get(ad_id, ad_id)
         try:
             if action == "delete":
                 await acct.delete_ad(ad_id, ads)
             elif action == "activate":
-                await acct.activate_ad(ad_id, ads)
+                if ad_id in sold_here:    # putting a sold ad online again would sell it twice
+                    failed.append((title, t("sold – not put online again")))
+                    continue
+                if (new_id := await acct.reactivate(ad_id, ads)) != ad_id:
+                    moved[ad_id] = new_id
+                    _move_to_new_id(ad_id, new_id)    # at once: a later error must not leave it re-activatable
             else:
                 await acct.deactivate_ad(ad_id, ads)
             done.append(ad_id)
@@ -120,7 +128,7 @@ async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
             failed.append((title, str(e)))
             failed += [(titles.get(x, x), t("not done (stopped after an error)")) for x in queue[i + 1:]]
             break
-        except (EndpointUnknown, RuntimeError) as e:
+        except (EndpointUnknown, RuntimeError) as e:    # InsertError of a republish is a RuntimeError
             failed.append((title, str(e)))
     if action == "delete":
         still = {a.ad_id for a in await acct.my_adverts()}
@@ -145,8 +153,9 @@ async def bulk(action: str, ad_ids: list[str]) -> dict[str, Any]:
                     db.add(row)
             db.commit()
         await import_from_account()
-    log.info("bulk %s: %d done, %d failed", action, len(done), len(failed))
-    return {"done": [titles.get(i, i) for i in done], "failed": failed}
+    log.info("bulk %s: %d done (%d republished), %d failed", action, len(done), len(moved), len(failed))
+    return {"done": [titles.get(i, i) for i in done], "republished": [titles.get(i, i) for i in moved],
+            "failed": failed}
 
 
 async def load_for_edit(ad_id: str) -> dict[str, Any]:

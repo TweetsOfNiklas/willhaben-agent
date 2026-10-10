@@ -37,6 +37,12 @@ class _Account:
                 {"id": "4", "description": "Aktivieren", "relativePath": f"/bap/activate/{ad['id']}", "serviceName": "myatz"},
                 {"id": "3", "description": "Löschen", "relativePath": f"/bap/{ad['id']}", "serviceName": "myatz"}]}}
 
+    async def api_json(self, method, path, body=None):
+        r = await self.api(method, path, body)
+        if not r.ok:
+            raise RuntimeError(f"{method} {path}: HTTP {r.status}")
+        return r.json()
+
     def _ads(self):
         return self.page["props"]["pageProps"]["initialUserAdsList"]["verticalList"][1]["advertDetails"]
 
@@ -127,6 +133,78 @@ async def test_bulk_deactivate_activate_delete(account):
     assert sum(1 for m, p in account.calls if m == "GET") - lists_before == 2   # one list before, one to confirm
     with session() as db:
         assert db.exec(select(MyAd)).first() is None
+
+
+def _make_passive(acct, ad_id):
+    """Like a real "Passiv" ad (live 2026-10-09): only Neu veröffentlichen, Rechnung anfordern and Löschen."""
+    for ad in acct._ads():
+        if ad["id"] == ad_id:
+            ad["advertStatus"] = {"id": "passive", "description": "Passiv", "statusId": 60}
+            ad["advertEditStatusActionsList"] = {"contextLinkList": {"contextLink": [
+                {"id": "6", "description": "Neu veröffentlichen", "relativePath": f"/bap/copy/{ad_id}", "serviceName": "iad"},
+                {"id": "requestBillLink", "description": "Rechnung anfordern", "relativePath": f"/payment/all/{ad_id}",
+                 "serviceName": "iad"},
+                {"id": "3", "description": "Löschen", "relativePath": f"/bap/{ad_id}", "serviceName": "myatz"}]}}
+
+
+async def test_bulk_activate_republishes_passive_ads(account, monkeypatch):
+    from app.willhaben import insert
+
+    _make_passive(account, "1000000002")
+    await my_ads.import_from_account()
+    with session() as db:
+        row = db.get(MyAd, "1000000002")
+        row.auto_reply, row.auto_reply_instructions = True, "Preis fix"
+        db.add(row)
+        db.commit()
+
+    async def get_own_ad(s, ad_id):
+        return {"adId": ad_id}
+
+    async def publish(s, base, photos, existing_ad_id=None):
+        account._ads().append({**account._ads()[0], "id": existing_ad_id, "description": "Neu",
+                               "advertStatus": {"id": "active", "description": "Aktiv"}})
+        return {"ad_id": existing_ad_id}
+
+    real_api = account.api
+
+    async def api(method, path, body=None, accept="application/json"):
+        if method == "POST" and path == "/webapi/iad/bap/copy/1000000002":
+            account.calls.append((method, path))
+            return ApiResponse(status=200, text='{"adId": 1000000009}', url=path)
+        return await real_api(method, path, body, accept)
+
+    monkeypatch.setattr(account, "api", api)
+    monkeypatch.setattr(insert, "get_own_ad", get_own_ad)
+    monkeypatch.setattr(insert, "publish", publish)
+    res = await my_ads.bulk("activate", ["1000000002"])
+    assert res["done"] == res["republished"] == ["Anzeige 1000000002"] and not res["failed"]
+    with session() as db:
+        old, new = db.get(MyAd, "1000000002"), db.get(MyAd, "1000000009")
+    assert old.replaced_by == "1000000009" and new.status == "active"
+    assert (new.auto_reply, new.auto_reply_instructions) == (True, "Preis fix")   # settings carried over
+
+
+async def test_bulk_activate_never_republishes_sold_ads(account):
+    _make_passive(account, "1000000002")
+    await my_ads.import_from_account()
+    with session() as db:
+        row = db.get(MyAd, "1000000002")
+        row.sale_status = "sold"
+        db.add(row)
+        db.commit()
+    res = await my_ads.bulk("activate", ["1000000002"])
+    assert not res["done"] and res["failed"][0][0] == "Anzeige 1000000002"
+    assert not any(m == "POST" for m, _ in account.calls)
+
+
+async def test_bulk_route_keeps_list_filters(account):
+    from app.main import app
+
+    await my_ads.import_from_account()
+    with TestClient(app) as c:
+        r = c.post("/myads/bulk/activate", data={"ids": ["1000000002"], "show_inactive": "1"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].endswith("&show_inactive=1")
 
 
 async def test_bulk_route(account):

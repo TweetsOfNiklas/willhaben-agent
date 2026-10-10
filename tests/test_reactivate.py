@@ -63,6 +63,25 @@ async def test_expired_ad_is_republished_and_finished(monkeypatch):
     assert paths[-1].endswith("/checkout") and "/webapi/iad/bap/1000000002" in paths
 
 
+async def test_passive_ad_is_republished(monkeypatch):
+    """Live 2026-10-09: "Passiv" ads offer only Neu veröffentlichen (6), Rechnung anfordern and Löschen, no 4."""
+    own = _own("passive", [])
+    own.actions = {"6": {"id": "6", "description": "Neu veröffentlichen", "relativePath": "/bap/6/1000000001",
+                         "serviceName": "iad"},
+                   "requestBillLink": {"id": "requestBillLink", "relativePath": "/payment/all/1000000001",
+                                       "serviceName": "iad"},
+                   "3": {"id": "3", "description": "Löschen", "relativePath": "/bap/1000000001", "serviceName": "myatz"}}
+    c, s = _client(monkeypatch, own)
+    assert await c.reactivate("1000000001", [own]) == "1000000002"
+    assert s.calls[0] == ("POST", "/webapi/iad/bap/6/1000000001") and s.calls[-1][1].endswith("/checkout")
+
+
+async def test_passive_ad_deactivated_by_hand_is_activated_in_place(monkeypatch):
+    c, s = _client(monkeypatch, _own("passive", ["4", "6"]))   # "Passiv" after Deaktivieren: Aktivieren wins
+    assert await c.reactivate("1000000001") == "1000000001"
+    assert s.calls == [("PUT", "/webapi/iad/bap/4/1000000001")]
+
+
 async def test_active_ad_is_never_republished(monkeypatch):
     c, s = _client(monkeypatch, _own("active", ["6"]))
     with pytest.raises(EndpointUnknown):

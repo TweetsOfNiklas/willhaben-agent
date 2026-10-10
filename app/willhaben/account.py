@@ -170,9 +170,12 @@ class OwnAdvert:
 
 # Link ids in an own ad's advertEditStatusActionsList (from the /bbx-adin myadverts bundle, 2026-10-09)
 ACTION_ACTIVATE = "4"     # deactivated ad back online: PUT, no body
-ACTION_REPUBLISH = "6"    # expired ad: POST -> new insertion draft (new adId), finished like a new ad
+ACTION_REPUBLISH = "6"    # expired / passive ad: POST -> new insertion draft (new adId), finished like a new ad
 ACTION_DEACTIVATE = "2"   # take a live ad offline (reversible via ACTIVATE): PUT, no body
 ACTION_DELETE = "3"       # delete the ad for good: DELETE, no body (the delete-reason survey is optional)
+# statuses whose ad may come back as a copy when there is no ACTIVATE; "passive" ("Passiv") covers both an ad
+# deactivated by hand (offers ACTIVATE) and one that ended (seen live 2026-10-09: only REPUBLISH and DELETE)
+REPUBLISHABLE = ("expired", "passive")
 
 
 def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
@@ -312,22 +315,23 @@ class AccountClient:
             raise NotLoggedIn(t("{page}: no ad list (HTTP {status}, logged in?)", page=MYADVERTS_PAGE, status=r.status))
         return parse_my_adverts(nd)
 
-    async def reactivate(self, ad_id: str) -> str:
+    async def reactivate(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> str:
         """Put an own ad online again, like the buttons in "Meine Anzeigen". Returns the ad id afterwards.
 
-        Deactivated ads offer ACTIVATE (same id). Expired ads offer REPUBLISH, which creates a new insertion
-        draft with a NEW id; it is finished like a new ad (save -> empty cart -> checkout, never paid).
+        Deactivated ads offer ACTIVATE (same id). Expired and passive ads offer REPUBLISH, which creates a new
+        insertion draft with a NEW id; it is finished like a new ad (save -> empty cart -> checkout, never paid).
+        `ads`: an account list fetched before (several ads in a row need only one list request).
         """
         from app.willhaben import insert
 
-        ad = next((a for a in await self.my_adverts() if a.ad_id == str(ad_id)), None)
+        ad = next((a for a in (ads if ads is not None else await self.my_adverts()) if a.ad_id == str(ad_id)), None)
         if ad is None:
             raise EndpointUnknown(t("Ad {id} is not in the account list", id=ad_id))
         links = ad.actions or {}
         if link := links.get(ACTION_ACTIVATE):
             await self.s.api_json("PUT", _link_path(link))
             return ad.ad_id
-        if (link := links.get(ACTION_REPUBLISH)) and ad.status == "expired":   # never duplicate a live ad
+        if (link := links.get(ACTION_REPUBLISH)) and ad.status in REPUBLISHABLE:   # never duplicate a live ad
             new = await self.s.api_json("POST", _link_path(link))
             new_id = str((new or {}).get("adId") or "")
             if not new_id:
@@ -359,9 +363,6 @@ class AccountClient:
 
     async def deactivate_ad(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> None:
         await self._ad_action(ad_id, ACTION_DEACTIVATE, "PUT", t("Deactivate"), ads)
-
-    async def activate_ad(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> None:
-        await self._ad_action(ad_id, ACTION_ACTIVATE, "PUT", t("Activate"), ads)
 
     async def delete_ad(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> None:
         await self._ad_action(ad_id, ACTION_DELETE, "DELETE", t("Delete"), ads)

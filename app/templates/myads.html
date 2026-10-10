@@ -16,6 +16,9 @@
   details.dropdown summary { width:auto; display:inline-block; }
 </style>
 <form id="bulk" method="post" class="bulkbar">
+  {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+  {% if show_sold %}<input type="hidden" name="show_sold" value="1">{% endif %}
+  {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
   <label style="margin:0"><input type="checkbox" id="select-all" aria-label="{{ _('Select all') }}"> <small id="sel-count">{{ _("Select ads") }}</small></label>
   <button type="submit" class="secondary outline" formaction="/myads/bulk/activate" data-act="activate" disabled>{{ _("Activate") }}</button>
   <button type="submit" class="secondary outline" formaction="/myads/bulk/deactivate" data-act="deactivate" disabled>{{ _("Deactivate") }}</button>
@@ -56,9 +59,13 @@
           <li><form method="get" action="/myads/{{ a.ad_id }}/edit" style="margin:0" dir="ltr">
             <button class="secondary outline" style="width:100%;margin:0">✎ {{ _("Edit on willhaben") }}</button></form></li>
           {% endif %}
-          {% if a.status not in ('active', 'expired') and not a.replaced_by %}
-          <li><form method="post" action="/myads/bulk/activate" style="margin:0" dir="ltr">
+          {% if a.status not in ('active', 'expired', 'sold', 'reserved') and not a.replaced_by %}
+          <li><form method="post" action="/myads/bulk/activate" style="margin:0" dir="ltr"
+                onsubmit='return confirm({{ (_("Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.") ~ "\n\n„" ~ (a.heading or a.ad_id) ~ "“")|tojson }})'>
             <input type="hidden" name="ids" value="{{ a.ad_id }}">
+            {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+            {% if show_sold %}<input type="hidden" name="show_sold" value="1">{% endif %}
+            {% if show_hidden %}<input type="hidden" name="show_hidden" value="1">{% endif %}
             <button class="secondary outline" style="width:100%;margin:0">{{ _("Activate on willhaben") }}</button></form></li>
           {% endif %}
           {% if a.status == 'active' and not a.replaced_by %}
