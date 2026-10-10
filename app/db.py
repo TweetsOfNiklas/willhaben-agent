@@ -33,6 +33,11 @@ class SearchAgent(SQLModel, table=True):
     screen_brief: str | None = None     # what exactly the owner is looking for (for the screening)
     screen_min: str | None = None       # match | fair | good: lowest result that still pushes
     screen_hide: str | None = None      # comma list of screening issues that keep a hit from pushing; None = defaults, "-" = none
+    # created from a product search: several keyword searches per check (source_url/webapi_url mirror the first)
+    # [{keyword, webapi_url, source_url, price_from, price_to, category_path, why}]
+    queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
+    plan: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {max_price, must_have, nice_to_have, exclude, summary}
+    search_id: int | None = None        # origin ProductSearch
 
 
 class Hit(SQLModel, table=True):
@@ -209,9 +214,11 @@ class ProductSearch(SQLModel, table=True):
     """Claude product search (Produktsuche tab): description -> planned willhaben searches -> ranked offers."""
     id: int | None = Field(default=None, primary_key=True)
     description: str = ""
-    settings: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {depth, unusual, categories, sort}
-    status: str = "planning"            # planning | searching | ranking | done | error
-    plan: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))       # summary, max_price, criteria, queries
+    settings: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {depth, unusual, categories, sort, photos, ask}
+    status: str = "planning"            # planning | searching | asking | ranking | photos | done | error
+    plan: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))       # summary, max_price, criteria, queries, questions
+    answers: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))    # {question id: answer}; {} = skipped
+    cards: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # candidates while "asking"
     queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # per query: found, error
     results: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # ranked offers
     progress: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {done, total}

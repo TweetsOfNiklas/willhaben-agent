@@ -3,24 +3,37 @@
 Flow of one search (a background task, the page polls its progress):
 1. plan   – ONE Claude call (purpose "search"): summary, budget, criteria and up to N keyword searches. The depth
             setting bounds N (3 / 6 / 12, hard cap MAX_QUERIES); two toggles widen the plan (unusual names, other
-            categories), they never raise the cap.
+            categories), they never raise the cap. The same call may add up to MAX_QUESTIONS short questions
+            ("Rückfragen") about things the description leaves open that matter for judging the offers (setting
+            "ask", on by default).
 2. search – the queries run strictly one after another through the anonymous client (get_public(), the shared
             willhaben RateLimiter + hourly budget): one request per query, nothing else. Ads are de-duplicated by
             ad id; "Suche"/"Tausch" ads, ads far above the budget and ads whose title has an exclusion word are
             dropped in code; at most MAX_CANDIDATES go on, taken round-robin so every query is represented.
             A block or an exhausted budget stops the searching; what was found so far is still ranked.
+            If the plan has questions, the cards are stored and the search waits in status "asking" (no task, no
+            Claude call) until the person answers or skips them (continue_run); the answers go into the ranking and
+            photo prompts and into the screening brief of a search agent made from the search.
 3. rank   – ONE more Claude call: the best TOP_N with a fit score, a short reason and red flags. The app adds the
             price position (deals.position against the other ads of the same query, no extra request) and the
             rule-based scam flags (scam.flags, pure function).
+4. photos – optional (setting "photos", on by default), ONE more Claude call: the thumbnails of the ranked results
+            (at most TOP_N, downloaded from the willhaben CDN) go to Claude with the text-stage fit and reason; it says
+            whether each photo shows the item and its condition and gives the new fit, weighed against what the
+            person cares about (no fixed caps; apply_photos only limits a raise). If it fails, the text-only fits
+            stay.
 
-Every search is stored in the ProductSearch table; a stored search can be re-run with its plan (no new plan call).
+Every search is stored in the ProductSearch table; a stored search can be re-run with its plan (no new plan call,
+no new questions; the stored answers are kept).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
+import tempfile
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 from sqlmodel import col, select
@@ -29,14 +42,17 @@ from app.db import ProductSearch, session, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
+    SEARCH_PHOTO_SCHEMA,
+    SEARCH_PHOTO_SYSTEM,
     SEARCH_PLAN_SCHEMA,
     SEARCH_PLAN_SYSTEM,
     SEARCH_RANK_SCHEMA,
     SEARCH_RANK_SYSTEM,
+    search_photo_prompt,
     search_plan_prompt,
     search_rank_prompt,
 )
-from app.services import deals, scam
+from app.services import ad_images, deals, scam
 from app.willhaben.parse import AdSummary, keyword_search_url
 from app.willhaben.public import Blocked, WillhabenError, get_public
 
@@ -52,13 +68,22 @@ OVER_BUDGET = 1.5            # ads above 1.5 × the budget are not worth a look
 TEXT_CHARS = 220             # ad text per candidate in the ranking prompt
 MAX_DESCRIPTION = 2000
 RECENT = 10
-RUNNING = ("planning", "searching", "ranking")
-CLAUDE_CALLS = 2
+RUNNING = ("planning", "searching", "ranking", "photos")    # "asking" waits for the person, no task runs
+CLAUDE_CALLS = 2             # plan + ranking; the templates add one when settings["photos"] is on
+MAX_PHOTOS = TOP_N           # photos sent in the photo check
+PHOTO_RAISE = 10             # the photo check may raise the text fit by at most this much
+PHOTO_VERDICTS = ("match", "unclear", "mismatch")
+CONDITIONS = ("good", "worn", "damaged", "unclear")
+MAX_QUESTIONS = 3            # clarifying questions from the plan call
+MAX_OPTIONS = 4
+MAX_ANSWER = 200             # chars of one answer (free text included)
+_ID_RE = re.compile(r"[^a-z0-9_]+")
 DEFAULT_PATH = "kaufen-und-verkaufen/marktplatz"
 _PATH_RE = re.compile(r"^kaufen-und-verkaufen/marktplatz/[a-z0-9-]+-\d+$")
 _LEVEL_DE = {"bargain": "Schnäppchen", "cheap": "günstig", "fair": "fair", "expensive": "teuer",
              "very_expensive": "sehr teuer"}
 
+_transport = None             # tests inject a mock transport for the photo downloads
 _tasks: set[asyncio.Task] = set()
 _active: set[int] = set()     # searches with a live background task in this process
 
@@ -69,9 +94,9 @@ class Busy(RuntimeError):
 
 # ------------------------------------------------------------------ settings + plan
 def make_settings(depth: str | None = "normal", unusual: bool = False, categories: bool = False,
-                  sort: str | None = "relevance") -> dict[str, Any]:
+                  sort: str | None = "relevance", photos: bool = True, ask: bool = True) -> dict[str, Any]:
     return {"depth": depth if depth in DEPTHS else "normal", "unusual": bool(unusual), "categories": bool(categories),
-            "sort": sort if sort in SORTS else "relevance"}
+            "sort": sort if sort in SORTS else "relevance", "photos": bool(photos), "ask": bool(ask)}
 
 
 def max_queries(settings: dict[str, Any] | None) -> int:
@@ -91,8 +116,37 @@ def _texts(v: Any, limit: int = 10, chars: int = 120) -> list[str]:
     return [x for x in out if x][:limit]
 
 
+def normalize_questions(v: Any) -> list[dict[str, Any]]:
+    """Claude's clarifying questions, cleaned: slug ids (a-z0-9_, unique), one-line text (≤ 120 chars), 2 to 4
+    unique options; malformed ones (no text, < 2 or > 4 options, empty or repeated id) are dropped; at most
+    MAX_QUESTIONS."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for q in v if isinstance(v, list) else []:
+        if not isinstance(q, dict) or not isinstance(q.get("id"), str) or not isinstance(q.get("text"), str):
+            continue
+        qid = _ID_RE.sub("_", q["id"].strip().lower()).strip("_")[:30]
+        text = _one_line(q["text"])[:120]
+        raw = q.get("options")
+        if not qid or qid in seen or not text or not isinstance(raw, list) or len(raw) > MAX_OPTIONS:
+            continue
+        options: list[str] = []
+        for o in raw:
+            o = _one_line(o)[:60] if isinstance(o, str) else ""
+            if o and o.lower() not in {x.lower() for x in options}:
+                options.append(o)
+        if len(options) < 2:
+            continue
+        seen.add(qid)
+        out.append({"id": qid, "text": text, "options": options})
+        if len(out) >= MAX_QUESTIONS:
+            break
+    return out
+
+
 def normalize_plan(data: dict[str, Any], limit: int) -> dict[str, Any]:
-    """Claude's plan, cleaned: valid numbers, short strings, unique keywords, at most `limit` (≤ 12) queries."""
+    """Claude's plan, cleaned: valid numbers, short strings, unique keywords, at most `limit` (≤ 12) queries, at
+    most MAX_QUESTIONS questions."""
     limit = max(1, min(limit, MAX_QUERIES))
     max_price = _num(data.get("max_price"))
     queries, seen = [], set()
@@ -117,16 +171,54 @@ def normalize_plan(data: dict[str, Any], limit: int) -> dict[str, Any]:
             break
     return {"summary": str(data.get("summary") or "").strip()[:500], "max_price": max_price or None,
             "must_have": _texts(data.get("must_have")), "nice_to_have": _texts(data.get("nice_to_have")),
-            "exclude": _texts(data.get("exclude")), "queries": queries}
+            "exclude": _texts(data.get("exclude")), "queries": queries,
+            "questions": normalize_questions(data.get("questions"))}
 
 
 async def make_plan(description: str, settings: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """(plan, model). Raises LLMError."""
     n = max_queries(settings)
+    ask = bool(settings.get("ask"))
     prompt = search_plan_prompt(description=description, max_queries=n, unusual_names=bool(settings.get("unusual")),
-                                other_categories=bool(settings.get("categories")))
+                                other_categories=bool(settings.get("categories")), ask=ask)
     out = await get_backend("search").complete(system=SEARCH_PLAN_SYSTEM, prompt=prompt, schema=SEARCH_PLAN_SCHEMA)
-    return normalize_plan(out.data or {}, n), out.model
+    plan = normalize_plan(out.data or {}, n)
+    if not ask:
+        plan["questions"] = []
+    return plan, out.model
+
+
+# ------------------------------------------------------------------ questions + answers
+def clean_answers(plan: dict[str, Any] | None, raw: dict[str, Any] | None) -> dict[str, str]:
+    """{question id: answer} for the plan's questions only, each answer on one line (it goes into prompts) and
+    short; empty answers are left out."""
+    ids = {q.get("id") for q in (plan or {}).get("questions") or [] if isinstance(q, dict)}
+    out = {}
+    for k, v in (raw or {}).items():
+        a = _one_line(v)[:MAX_ANSWER] if isinstance(v, str) else ""
+        if k in ids and a:
+            out[k] = a
+    return out
+
+
+def answer_pairs(plan: dict[str, Any] | None, answers: dict[str, Any] | None) -> list[tuple[str, str]]:
+    """(question text, answer) in question order; unanswered questions are left out."""
+    out = []
+    for q in (plan or {}).get("questions") or []:
+        if not isinstance(q, dict):
+            continue
+        a = (answers or {}).get(q.get("id"))
+        if isinstance(a, str) and _one_line(a):
+            out.append((_one_line(q.get("text"))[:120], _one_line(a)[:MAX_ANSWER]))
+    return out
+
+
+def preferences_text(plan: dict[str, Any] | None, answers: dict[str, Any] | None) -> str:
+    """The answers as plain German lines ("Rückfragen und Antworten:" + "– question: answer"), "" without any."""
+    pairs = answer_pairs(plan, answers)
+    if not pairs:
+        return ""
+    return "\n".join(["Rückfragen und Antworten:", *[f"– {q}: {a}" for q, a in pairs]])
 
 
 # ------------------------------------------------------------------ searching
@@ -279,11 +371,12 @@ def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int 
     return out[:top_n]
 
 
-async def rank(description: str, plan: dict[str, Any], cards: list[dict[str, Any]],
-               top_n: int = TOP_N) -> tuple[list[dict[str, Any]], str, str]:
-    """(results, note, model). Raises LLMError."""
+async def rank(description: str, plan: dict[str, Any], cards: list[dict[str, Any]], top_n: int = TOP_N,
+               answers: list[tuple[str, str]] | None = None) -> tuple[list[dict[str, Any]], str, str]:
+    """(results, note, model); answers = answer_pairs(...). Raises LLMError."""
     prompt = search_rank_prompt(description=description, plan=plan,
-                                candidates=[_rank_line(nr, c) for nr, c in enumerate(cards, 1)], top_n=top_n)
+                                candidates=[_rank_line(nr, c) for nr, c in enumerate(cards, 1)], top_n=top_n,
+                                answers=answers)
     out = await get_backend("search").complete(system=SEARCH_RANK_SYSTEM, prompt=prompt, schema=SEARCH_RANK_SCHEMA)
     return merge_ranking(out.data or {}, cards, top_n), str((out.data or {}).get("note") or "").strip()[:300], out.model
 
@@ -294,6 +387,76 @@ def unranked(cards: list[dict[str, Any]], top_n: int = TOP_N) -> list[dict[str, 
         p = (c.get("position") or {}).get("pos")
         return p if p is not None else 2.0
     return [{**c, "fit": None, "reason": "", "red_flags": []} for c in sorted(cards, key=key)[:top_n]]
+
+
+# ------------------------------------------------------------------ photo check
+def _fit(v: Any) -> int | None:
+    return max(0, min(100, int(v))) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def apply_photos(results: list[dict[str, Any]], data: dict[str, Any],
+                 nrs: set[int] | None = None) -> list[dict[str, Any]]:
+    """Claude's photo verdicts merged into the ranked results (nr = 1-based position; unknown, repeated or not sent
+    nr ignored), best fit first. The text fit is kept as fit_text; the photo may lower the fit freely but raise it
+    by at most PHOTO_RAISE (a guard against inflation). There are no fixed caps for a mismatch or damage: how much
+    that matters depends on the person (the prompt weighs it against the description and the answers). Results
+    without a verdict keep their fit and get photo=None."""
+    out = [{**r, "photo": None} for r in results]
+    used: set[int] = set()
+    for v in data.get("results") or []:
+        if not isinstance(v, dict):
+            continue
+        nr = v.get("nr")
+        if not isinstance(nr, int) or isinstance(nr, bool) or not 1 <= nr <= len(out) or nr in used \
+                or (nrs is not None and nr not in nrs):
+            continue
+        used.add(nr)
+        r = out[nr - 1]
+        text = r.get("fit")
+        photo = v.get("photo") if v.get("photo") in PHOTO_VERDICTS else "unclear"
+        condition = v.get("condition") if v.get("condition") in CONDITIONS else "unclear"
+        fit = _fit(v.get("fit"))
+        if fit is None:
+            fit = text
+        elif text is not None:
+            fit = min(fit, text + PHOTO_RAISE)
+        r.update(fit_text=text, fit=fit, photo=photo, condition=condition,
+                 photo_note=_one_line(str(v.get("photo_note") or ""))[:200])
+    out.sort(key=lambda c: -(c["fit"] if c["fit"] is not None else -1))
+    return out
+
+
+async def check_photos(description: str, plan: dict[str, Any], results: list[dict[str, Any]],
+                       answers: list[tuple[str, str]] | None = None) -> tuple[list[dict[str, Any]], str | None]:
+    """(results, warning): one Claude call with the thumbnails of the ranked results. On failure the results come
+    back unchanged with a warning."""
+    todo = [(nr, r) for nr, r in enumerate(results, 1) if r.get("image_url")][:MAX_PHOTOS]
+    if not todo:
+        return results, None
+    with tempfile.TemporaryDirectory(prefix="wh-search-") as tmp:
+        images: list[Path] = []
+        items = []
+        for nr, r in todo:
+            img = await ad_images.download(r["image_url"], Path(tmp), f"r{nr}", transport=_transport)
+            if img is None:
+                continue
+            images.append(img)
+            items.append({"nr": nr, "title": _one_line(r.get("title"))[:120],
+                          "price": r.get("price_display") or (f"{r['price']:g} €" if r.get("price") is not None else None),
+                          "level": _LEVEL_DE.get((r.get("position") or {}).get("level") or ""),
+                          "fit": r.get("fit"), "reason": _one_line(r.get("reason"))[:300],
+                          # the CLI wrapper copies photos in order as foto1, foto2, ...
+                          "photo": f"foto{len(images)}{img.suffix}"})
+        if not images:
+            return results, t("Claude could not check the photos ({error}); the fit scores are text-only.",
+                              error=t("no photo could be downloaded"))
+        prompt = search_photo_prompt(description=description, plan=plan, items=items, answers=answers)
+        try:
+            out = await get_backend("search").complete(system=SEARCH_PHOTO_SYSTEM, prompt=prompt,
+                                                       schema=SEARCH_PHOTO_SCHEMA, images=images)
+        except LLMError as e:
+            return results, t("Claude could not check the photos ({error}); the fit scores are text-only.", error=e)
+    return apply_photos(results, out.data or {}, {it["nr"] for it in items}), None
 
 
 # ------------------------------------------------------------------ stored searches + background task
@@ -354,22 +517,42 @@ def start(description: str, settings: dict[str, Any]) -> int:
 
 
 def rerun(search_id: int) -> None:
-    """Run a stored search again with its plan (only the ranking call goes to Claude); without a plan, re-plan."""
+    """Run a stored search again with its plan (only the ranking and the photo check go to Claude); without a plan,
+    re-plan."""
     if running():
         raise Busy(t("A product search is still running – wait for it to finish."))
     row = get(search_id)
     if row is None:
         raise KeyError(search_id)
     replan = not (row.plan and row.plan.get("queries"))
+    # a re-run never asks again: the stored answers stay, a search that has none gets {} (= questions skipped)
     _update(search_id, status="planning" if replan else "searching", results=None, queries=None, requests=None,
-            candidates=None, note=None, warning=None, error=None, started_at=utcnow(), finished_at=None,
+            candidates=None, note=None, warning=None, error=None, started_at=utcnow(), finished_at=None, cards=None,
+            answers=row.answers if row.answers is not None else {},
             progress={"done": 0, "total": len((row.plan or {}).get("queries") or []) or max_queries(row.settings)})
     _active.add(search_id)
     _spawn(run(search_id, replan=replan))
 
 
+def continue_run(search_id: int, answers: dict[str, Any] | None) -> bool:
+    """Continue a search waiting in "asking" with the person's answers ({} = skipped): ranking and photo check in
+    the background, from the stored cards (no willhaben request). False (nothing done) when the search is not
+    waiting for answers. Raises KeyError for an unknown search, Busy while another search runs."""
+    row = get(search_id)
+    if row is None:
+        raise KeyError(search_id)
+    if row.status != "asking":
+        return False
+    if running():
+        raise Busy(t("A product search is still running – wait for it to finish."))
+    _update(search_id, status="ranking", answers=clean_answers(row.plan, answers))
+    _active.add(search_id)
+    _spawn(_continue(search_id))
+    return True
+
+
 def recover() -> None:
-    """After a restart no search task is running any more."""
+    """After a restart no search task is running any more (a search in "asking" has none: it stays)."""
     with session() as db:
         for row in db.exec(select(ProductSearch).where(col(ProductSearch.status).in_(RUNNING))):
             row.status, row.error, row.finished_at = "error", t("Interrupted by a restart."), utcnow()
@@ -405,21 +588,56 @@ async def run(search_id: int, replan: bool = True) -> None:
                                                                              progress={"done": d, "total": total}))
         picked = pick_candidates(found["pools"])
         cards = [card(qi, ad, plan, found["prices"][qi]) for qi, ad in picked]
-        _update(search_id, status="ranking", queries=found["per_query"], requests=found["requests"],
-                candidates=len(cards), warning=found["warning"])
-        note, warning = "", found["warning"]
-        if not cards:
-            results = []
-        else:
-            try:
-                results, note, _model = await rank(row.description, plan, cards)
-            except LLMError as e:
-                results = unranked(cards)
-                msg = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
-                warning = f"{warning} {msg}" if warning else msg
-        _update(search_id, status="done", results=results, note=note or None, warning=warning, finished_at=utcnow())
+        searched = {"queries": found["per_query"], "requests": found["requests"], "candidates": len(cards),
+                    "warning": found["warning"]}
+        if cards and plan.get("questions") and row.answers is None and settings.get("ask"):
+            # wait for the answers: the cards are kept, nothing more runs until continue_run
+            _update(search_id, status="asking", cards=cards, **searched)
+            return
+        _update(search_id, status="ranking", **searched)
+        await _rank_and_finish(search_id, row.description, plan, settings, cards, row.answers, found["warning"])
     except Exception as e:  # noqa: BLE001 - a background task must leave a readable state behind
         log.exception("product search %s failed", search_id)
         _update(search_id, status="error", error=str(e) or e.__class__.__name__, finished_at=utcnow())
     finally:
         _active.discard(search_id)
+
+
+async def _continue(search_id: int) -> None:
+    """The rest of a search that waited for answers: ranking + photos from the stored cards."""
+    _active.add(search_id)
+    try:
+        row = get(search_id)
+        if row is None:
+            return
+        await _rank_and_finish(search_id, row.description, row.plan or {}, row.settings or make_settings(),
+                               list(row.cards or []), row.answers, row.warning)
+    except Exception as e:  # noqa: BLE001 - a background task must leave a readable state behind
+        log.exception("product search %s failed", search_id)
+        _update(search_id, status="error", error=str(e) or e.__class__.__name__, finished_at=utcnow())
+    finally:
+        _active.discard(search_id)
+
+
+async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any], settings: dict[str, Any],
+                           cards: list[dict[str, Any]], answers: dict[str, Any] | None, warning: str | None) -> None:
+    """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped (rows stay small)."""
+    pairs = answer_pairs(plan, answers)
+    note = ""
+    if not cards:
+        results = []
+    else:
+        try:
+            results, note, _model = await rank(description, plan, cards, answers=pairs)
+        except LLMError as e:
+            results = unranked(cards)
+            msg = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
+            warning = f"{warning} {msg}" if warning else msg
+        else:
+            if results and settings.get("photos"):
+                _update(search_id, status="photos")
+                results, msg = await check_photos(description, plan, results, answers=pairs)
+                if msg:
+                    warning = f"{warning} {msg}" if warning else msg
+    _update(search_id, status="done", results=results, note=note or None, warning=warning, finished_at=utcnow(),
+            cards=None)

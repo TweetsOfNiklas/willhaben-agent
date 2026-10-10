@@ -1,0 +1,17 @@
+{
+ "photo check": "Fotoprüfung",
+ "Claude is looking at the photos …": "Claude sieht sich die Fotos an …",
+ "Fit from the ad text alone, before Claude looked at the photo": "Bewertung nur nach dem Anzeigentext, bevor Claude das Foto angesehen hat",
+ "text: {n}": "Text: {n}",
+ "Claude looked at the photo": "Claude hat das Foto angesehen",
+ "photo fits": "Foto passt",
+ "photo unclear": "Foto unklar",
+ "photo shows something else": "Foto zeigt etwas anderes",
+ "worn": "abgenutzt",
+ "damaged": "beschädigt",
+ "One more Claude call: looks at the photos of the best offers, catches damage, wrong variants and stock photos; the fit score includes it": "Ein weiterer Claude-Aufruf: sieht sich die Fotos der besten Angebote an und erkennt Schäden, falsche Varianten und Katalogbilder; die Bewertung berücksichtigt das",
+ "Check photos": "Fotos prüfen",
+ "Claude is called {n} times (plan, ranking, photo check).": "Claude wird {n}-mal gefragt (Plan, Auswahl, Fotoprüfung).",
+ "Claude could not check the photos ({error}); the fit scores are text-only.": "Claude konnte die Fotos nicht prüfen ({error}); die Bewertungen beruhen nur auf den Anzeigentexten.",
+ "no photo could be downloaded": "kein Foto konnte geladen werden"
+}

@@ -16,6 +16,8 @@ It runs on your own server, from your home internet connection, and you control 
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
   predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
   only hits that pass reach your phone. Agents check at irregular, human-like intervals and slow down at night.
+  A search agent can also be created from a finished product search: it then runs all of that search's keyword
+  searches on every check and drops new ads over the plan's budget or with an exclusion word before they are stored.
 - **Chats**: your willhaben conversations, synced live. Claude drafts replies in your style and nothing is sent
   until you click. For your own ads you can opt in to automatic answers to simple questions, with a minimum price
   Claude never goes below, human-like timing and read receipts; your 👍/👎 feedback goes into later answers.
@@ -25,9 +27,14 @@ It runs on your own server, from your home internet connection, and you control 
   category comes from willhaben's suggestion or your own pick).
 - **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
   Claude plans a few willhaben searches, the app runs them anonymously and Claude picks the best offers, each with a
-  fit score, a short reason, red flags, the price bar and the scam check. Toggles for unusual names (misspellings,
-  nicknames, generic descriptions) and other categories (mis-categorised ads, bundles) dig for hidden deals; the
-  depth (≈3 / 6 / 12 searches) is the number of willhaben requests, Claude is called twice.
+  fit score, a short reason, red flags, the price bar and the scam check. An optional photo check (on by default)
+  shows Claude the photos of the best offers (at most 10) and weighs damage, wear, wrong variants, stock photos or a
+  different item against what you care about (a scratch barely counts if you prefer the lower price). When the
+  description leaves something open (e.g. whether scratches are fine for a lower price), Claude may ask up to three
+  short questions; the searches already run meanwhile, and the answers steer the ranking, the photo check and a
+  search agent created from the search. Toggles for unusual names (misspellings, nicknames, generic descriptions) and other categories
+  (mis-categorised ads, bundles) dig for hidden deals; the depth (≈3 / 6 / 12 searches) is the number of willhaben
+  requests, Claude is called two or three times (plan, ranking, photo check).
 - **Price check** (same tab): paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
   green-to-red bar against comparable listings of the **same kind of item** (same willhaben category, without accessories,
   other variants and extreme prices; you can pick another category), the Geizhals new price and, on click, Claude's verdict.

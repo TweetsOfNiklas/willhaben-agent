@@ -21,6 +21,7 @@
   .agent details { margin:0; width:100%; } .agent details summary { font-size:.9rem; }
   .agent details form { margin-top:.5rem; } .agent details input { margin-bottom:.4rem; }
   .agent.paused { opacity:.7; }
+  .agent .queries { font-size:.85rem; margin:.2rem 0 .5rem; padding-left:1.1rem; } .agent .queries li { margin:0; }
   .empty-state { text-align:center; padding:2.5rem 1rem; }
 </style>
 {% endblock %}
@@ -52,6 +53,8 @@
       <div class="facts">
         {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}
         {% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
+        {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}
+          <span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
         {% if a.last_rows_found is not none %}{{ _("{n} matching ads on willhaben", n='{:,}'.format(a.last_rows_found).replace(',', '.')) }}{% endif %}
         {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
         {% if a.screen %} · <span title="{{ a.screen_brief or '' }}">🤖 {{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</span>{% endif %}
@@ -70,6 +73,10 @@
             <input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
           <label><input type="checkbox" name="notify_on" {% if a.notify %}checked{% endif %}> {{ _("Notify") }}</label>
           <label><input type="checkbox" name="drops_on" {% if a.notify_price_drops %}checked{% endif %}> {{ _("Report price drops") }}</label>
+          {% if a.queries %}
+            <small>{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }}</small>
+            <ul class="queries">{% for q in a.queries %}<li><a href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</li>{% endfor %}</ul>
+          {% endif %}
           {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}
           <div style="display:flex;gap:.4rem">
             <button>{{ _("Save") }}</button>
