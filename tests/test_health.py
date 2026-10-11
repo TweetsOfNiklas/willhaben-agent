@@ -84,7 +84,7 @@ async def test_problem_at_baseline_and_off_are_silent(world):
     states["telegram"] = "off"
     await health.check()
     await health.check()
-    states["telegram"] = "problem"                # off -> problem (e.g. token added, chat not linked yet)
+    states["telegram"] = "problem"                # off -> problem (e.g. the Bot API became unreachable)
     await health.check()
     await health.check()
     assert sent == []
@@ -317,7 +317,7 @@ def test_ha_check(monkeypatch):
     monkeypatch.setattr(ha_auth, "ha_token", lambda: None)
     assert health._ha().state == "off"
     monkeypatch.setattr(ha_auth, "ha_url", lambda: "https://ha.example.com")
-    assert health._ha().state == "problem"
+    assert health._ha().state == "off"           # an address without signing in: not set up, no error
     monkeypatch.setattr(ha_auth, "ha_token", lambda: "tok")
     assert health._ha().state == "ok"            # listener not running (HA_LISTENER=0): token is enough
     monkeypatch.setattr(health, "get_settings", lambda: type("S", (), {"ha_listener": True})())
@@ -340,7 +340,7 @@ async def test_telegram_check_and_api_hook(monkeypatch):
     monkeypatch.setattr(telegram, "_transport", httpx.MockTransport(handler))
     monkeypatch.setattr(telegram, "token", lambda: "123:abc")
     monkeypatch.setattr(telegram, "active", lambda: False)
-    assert health._telegram().state == "problem"   # token but no chat linked
+    assert health._telegram().state == "off"       # token but no chat linked: setup unfinished, no error
     monkeypatch.setattr(telegram, "active", lambda: True)
     assert health._telegram().state == "unknown"   # no Bot API call since startup
     await telegram.api("getMe")
@@ -399,7 +399,7 @@ def test_gcal_check(monkeypatch):
     assert health._gcal().state == "off"
     monkeypatch.setattr(gcal, "has_client", lambda: True)
     monkeypatch.setattr(gcal, "connected", lambda: False)
-    assert health._gcal().state == "problem"
+    assert health._gcal().state == "off"         # client saved, sign-in not finished: not an error
     monkeypatch.setattr(gcal, "connected", lambda: True)
     assert health._gcal().state == "ok"
 

@@ -2,7 +2,7 @@
 {# Ad viewer dialog (included by base.html on every page). Script hooks: #ad-viewer, [data-adv-body], [data-adv-pos], [data-step],
    [data-adv-close], [data-adv-thumbs] img (data-on marks the picture shown), [data-adv-main], button[data-state]. #}
 <dialog id="ad-viewer" class="modal p-0 backdrop:bg-[rgba(10,14,20,.55)]" data-loading="{{ _('Loading ad …') }}" data-error="{{ _('Error {status}') }}" data-offline="{{ _('Connection failed') }}">
-  <article class="modal-box flex max-h-[92vh] w-[min(1120px,96vw)] max-w-none flex-col overflow-auto rounded-2xl border border-base-300 bg-base-100 p-0 shadow-[0_24px_80px_rgba(0,0,0,.35)] max-md:h-screen max-md:max-h-screen max-md:w-screen max-md:rounded-none">
+  <article class="modal-box flex max-h-[92vh] w-[min(1120px,96vw)] max-w-none flex-col overflow-auto rounded-2xl border border-base-300 bg-base-100 p-0 shadow-[0_24px_80px_rgba(0,0,0,.35)] max-md:h-dvh max-md:max-h-dvh max-md:w-screen max-md:rounded-none">
     <header class="sticky top-0 z-[1] flex items-center gap-2 border-b border-base-300 bg-base-100 py-2.5 pr-3 pl-4">
       <button type="button" class="btn btn-ghost btn-sm w-8 px-0" data-step="-1" title="{{ _('Previous (←)') }}" aria-label="{{ _('Previous (←)') }}">{{ ui.icon('chevron-right', 16, 2, 'rotate-180') }}</button>
       <button type="button" class="btn btn-ghost btn-sm w-8 px-0" data-step="1" title="{{ _('Next (→)') }}" aria-label="{{ _('Next (→)') }}">{{ ui.icon('chevron-right', 16) }}</button>

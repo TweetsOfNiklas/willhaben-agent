@@ -244,7 +244,7 @@
                 'auto_reply_pending': ('bot', 'bg-ok-soft text-success'), 'auto_reply': ('bot', 'bg-ok-soft text-success'), 'pay': ('cart', 'bg-warn-soft text-warning'),
                 'ad_expiring': ('tag', 'bg-warn-soft text-warning'), 'ad_expired': ('tag', 'bg-bad-soft text-error'), 'health': ('bell', 'bg-bad-soft text-error')} %}
 <div id="inbox-pop" x-cloak x-show="layer === 'inbox'" class="fixed inset-0 z-[90]" @click.self="close()">
-  <div class="{{ layer_box }} flex max-h-[calc(100vh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
+  <div class="{{ layer_box }} flex max-h-[calc(100dvh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
     <div class="flex items-center gap-2 border-b border-base-300 px-3.5 py-3">
       <span class="font-semibold">{{ _("Inbox") }}</span>
       <small class="text-muted">{% if inbox_unread is defined and inbox_unread %}{{ _("{n} unread", n=inbox_unread) }}{% else %}{{ _("all read") }}{% endif %}</small>
@@ -267,7 +267,7 @@
 
 {# ---- background jobs: running (step, progress), queued, finished in the last 15 minutes ---- #}
 <div id="jobs-pop" x-cloak x-show="layer === 'jobs'" class="fixed inset-0 z-[90]" @click.self="close()">
-  <div class="{{ layer_box }} flex max-h-[calc(100vh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
+  <div class="{{ layer_box }} flex max-h-[calc(100dvh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
     <div class="flex items-center gap-2 border-b border-base-300 px-3.5 py-3">
       <span class="font-semibold">{{ _("Background jobs") }}</span>
       <small class="text-muted" x-text="$store.jobs.summary()"></small>

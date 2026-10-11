@@ -13,6 +13,8 @@ disk – it makes no calls to willhaben, Claude, HA, Telegram or Google itself:
   Disk        free space of DATA_DIR
 
 Each item is "ok", "problem", "off" (not set up / switched off) or "unknown" (no data yet, ignored).
+Optional services (Home Assistant, Telegram, Google Calendar) are "off" while they are not (fully) set up; they are a
+"problem" only when a configured connection fails.
 A problem must be seen on DEBOUNCE consecutive checks before it counts; then one `notify(kind="health")`.
 Items whose source refreshes less often than this job runs (willhaben session check, Claude calls, Telegram
 API calls) carry a `sample` id; re-reading the same failed sample does not count as another check, so one
@@ -117,8 +119,8 @@ def _ha() -> Status:
     if not base and not token:
         st.state, st.reason = "off", t("Not set up")
         return st
-    if not (base and token):
-        st.state, st.reason = "problem", t("Not connected (token missing)")
+    if not (base and token):      # set up only half (e.g. HA_URL without signing in): optional, not an error
+        st.state, st.reason = "off", t("Not set up")
         return st
     lst = ha_actions.listener
     if get_settings().ha_listener and lst.get("running") and not lst.get("connected"):
@@ -135,8 +137,8 @@ def _telegram() -> Status:
     if not telegram.token() or get_setting("telegram_enabled") == "0":
         st.state, st.reason = "off", t("Not set up")
         return st
-    if not telegram.active():
-        st.state, st.reason = "problem", t("No chat linked")
+    if not telegram.active():     # bot added, no chat linked yet: setup unfinished, not a failure
+        st.state, st.reason = "off", t("Not linked yet")
         return st
     h = telegram.api_health
     if not h.get("ok_at") and not h.get("error_at"):
@@ -175,8 +177,8 @@ def _gcal() -> Status:
     st = Status("gcal", "Google Calendar", "ok", href="/settings/calendar")
     if not gcal.has_client():
         st.state, st.reason = "off", t("Not set up")
-    elif not gcal.connected():
-        st.state, st.reason = "problem", t("Not connected")
+    elif not gcal.connected():    # client saved, sign-in not finished: optional, not a failure
+        st.state, st.reason = "off", t("Not connected yet")
     else:
         st.reason = t("Connected")
     return st

@@ -4,7 +4,7 @@
    and pages loaded with ?remote=1 (e.g. after "Create label"). The iframe only loads while the overlay is
    open, so the screenshot polling stops when it closes. Closing reloads the page to show the new state. #}
 <dialog id="remote-overlay" class="modal backdrop:bg-[rgba(10,14,20,.55)]" aria-label="{{ _('Browser window') }}">
-  <div class="modal-box flex h-[calc(100vh-32px)] max-h-none w-[min(1280px,calc(100vw-32px))] max-w-none flex-col overflow-hidden p-0 max-md:h-screen max-md:w-screen max-md:rounded-none">
+  <div class="modal-box flex h-[calc(100vh-32px)] max-h-none w-[min(1280px,calc(100vw-32px))] max-w-none flex-col overflow-hidden p-0 max-md:h-dvh max-md:w-screen max-md:rounded-none">
     <header class="flex shrink-0 items-center gap-2 border-b border-base-300 bg-base-100 px-3.5 py-2.5">
       <span class="font-semibold">{{ _("Browser window") }}</span>
       <small class="min-w-0 truncate text-muted">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
