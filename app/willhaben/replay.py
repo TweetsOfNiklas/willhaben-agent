@@ -85,6 +85,16 @@ def as_httpx_response(rec, url: str) -> httpx.Response:
                           request=httpx.Request("GET", rec.final_url or url), extensions={"wh_replayed": rec.id})
 
 
+def as_fetch_response(rec, url: str):
+    """The recording as what app.platforms.httpclient transports return."""
+    from app.platforms.httpclient import FetchResponse
+
+    headers = {k: v for k, v in (json.loads(rec.resp_headers) if rec.resp_headers else {}).items()
+               if k.lower() not in _DROP_HEADERS and v != "<redacted>"}
+    return FetchResponse(rec.status or 200, headers, recorder.decode_body(rec.resp_body) or b"", rec.final_url or url,
+                         extensions={"wh_replayed": rec.id})
+
+
 def as_api_response(rec) -> tuple[int, str, str]:
     """(status, text, url) for session.ApiResponse."""
     return rec.status or 200, body_text(rec), rec.final_url or rec.url

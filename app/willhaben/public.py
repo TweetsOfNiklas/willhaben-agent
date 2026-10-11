@@ -5,16 +5,15 @@ Every request goes through one shared RateLimiter so all jobs together stay poli
 from __future__ import annotations
 
 import logging
-import time
 
 import httpx
 
 from app.config import get_settings
 from app.i18n import t
+from app.platforms import httpclient
 from app.platforms.base import Blocked as PlatformBlocked
 from app.platforms.base import PlatformError
 from app.platforms.ratelimit import RateLimiter  # noqa: F401 - re-exported, tests and geizhals import it from here
-from app.willhaben import access_log, recorder, replay
 from app.willhaben.parse import (
     AdDetail,
     SearchFilters,
@@ -52,82 +51,29 @@ def willhaben_limiter() -> RateLimiter:
     return _limiter
 
 
-NOT_FOUND_CACHE_S = 30
-ANON_SESSION_S = 6 * 3600   # fresh anonymous visitor every 6 h
+NOT_FOUND_CACHE_S = httpclient.NOT_FOUND_CACHE_S
+ANON_SESSION_S = httpclient.ANON_SESSION_S
 
 
-class PublicClient:
+class PublicClient(httpclient.HttpPlatformClient):
+    """The anonymous willhaben visitor: search JSON, filters and ad detail pages (app/platforms/httpclient.py does
+    the pacing, caching, recording and block handling).
+
+    Deliberately separate from the logged-in browser session (own cookie jar, never the account's cookies): search
+    agents, screening, price checks and the ad viewer must not be linkable to the owner's willhaben account. The jar
+    is reset regularly and after a block -> a fresh anonymous visitor.
+    """
+
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         s = get_settings()
-        self.limiter = willhaben_limiter()
-        self._cache: dict[str, tuple[float, httpx.Response]] = {}
-        # Anonymous visitor, deliberately separate from the logged-in browser session (own cookie jar, never the
-        # account's cookies): search agents, screening, price checks and the ad viewer must not be linkable to the
-        # owner's willhaben account. The jar is reset regularly and after a block -> a fresh anonymous visitor.
-        self._client = httpx.AsyncClient(
-            headers={"user-agent": s.user_agent, "accept-language": "de-AT,de;q=0.9,en;q=0.5"},
-            timeout=30,
-            follow_redirects=True,
-            transport=transport,
-            cookies=httpx.Cookies(),
-        )
-        self._jar_since = time.monotonic()
+        super().__init__("willhaben", willhaben_limiter(), name="willhaben",
+                         headers={"user-agent": s.user_agent, "accept-language": "de-AT,de;q=0.9,en;q=0.5"},
+                         httpx_transport=transport)
 
-    def new_anonymous_session(self) -> None:
-        """Forget willhaben's anonymous cookies; the next request starts as a new visitor."""
-        self._client.cookies.clear()
-        self._jar_since = time.monotonic()
-
-    async def aclose(self) -> None:
-        await self._client.aclose()
-
-    async def _get(self, url: str, *, json_api: bool, cache_s: float = 0, kind: str | None = None) -> httpx.Response:
-        """GET through the shared limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same URL.
-
-        Every call is counted in the access log (channel anonymous; `kind` defaults to one derived from the path).
-        """
-        kind = kind or access_log.classify(url)
-        key = f"{json_api}:{url}"
-        hit = self._cache.get(key)
-        # a 404 can turn into a live ad within minutes (freshly published or reactivated): keep it only briefly
-        if cache_s and hit and time.monotonic() - hit[0] < (min(cache_s, NOT_FOUND_CACHE_S) if hit[1].status_code == 404 else cache_s):
-            access_log.record("anonymous", kind, "cached")
-            recorder.record_http("anonymous", kind, "GET", url, status=hit[1].status_code, resp_headers=dict(hit[1].headers),
-                                 resp_body=hit[1].content, duration_ms=0, outcome="cached", cached=True,
-                                 final_url=str(hit[1].url), store_response=False)   # the body is stored once already
-            return hit[1]
-        if replay.enabled() and (rec := replay.find("GET", url)):     # WH_REPLAY=1: no request, no waiting
-            replay.note(rec, kind)
-            return replay.as_httpx_response(rec, url)
+    async def _get(self, url: str, *, json_api: bool, cache_s: float = 0, kind: str | None = None) -> httpclient.FetchResponse:  # type: ignore[override]
+        """GET through the shared limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same URL."""
         headers = {"accept": "application/json", "x-wh-client": WEB_CLIENT} if json_api else {"accept": "text/html"}
-        if time.monotonic() - self._jar_since > ANON_SESSION_S:
-            self.new_anonymous_session()
-        async with self.limiter:
-            with access_log.track("anonymous", kind) as tr:
-                started = time.monotonic()
-                try:
-                    r = await self._client.get(url, headers=headers)
-                except httpx.HTTPError as e:
-                    recorder.record_http("anonymous", kind, "GET", url, req_headers=headers, outcome="error", error=str(e),
-                                         duration_ms=int((time.monotonic() - started) * 1000))
-                    raise WillhabenError(t("Network error: {error}", error=e)) from e
-                tr.status = r.status_code
-        recorder.record_http("anonymous", kind, "GET", url, req_headers=headers, status=r.status_code,
-                             resp_headers=dict(r.headers), resp_body=r.content, final_url=str(r.url),
-                             duration_ms=int((time.monotonic() - started) * 1000))
-        if r.status_code in (403, 429):
-            self.new_anonymous_session()        # don't keep presenting the visitor that just got blocked
-            delay = self.limiter.penalize()
-            blocked = Blocked(t("willhaben responded {status}; pausing {s}s", status=r.status_code, s=f"{delay:.0f}"))
-            blocked.sent = True
-            raise blocked
-        self.limiter.reward()
-        if cache_s and r.status_code in (200, 404):
-            now = time.monotonic()
-            if len(self._cache) > 200:
-                self._cache = {k: v for k, v in self._cache.items() if now - v[0] < 600}
-            self._cache[key] = (now, r)
-        return r
+        return await super()._get(url, headers=headers, cache_s=cache_s, kind=kind)
 
     async def search(self, webapi_url: str, cache_s: float = 0) -> SearchPage:
         """Search results; agents poll uncached, one-off lookups may reuse a recent answer."""

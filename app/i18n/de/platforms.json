@@ -19,5 +19,6 @@
  "Type what you are looking for or paste a search link – the agent reports new ads and price drops faster than the sites' own e-mail alerts.": "Tipp ein, was du suchst, oder füge einen Suchlink ein – der Agent meldet neue Anzeigen und Preissenkungen schneller als die E-Mail-Benachrichtigungen der Seiten.",
  "Open on {platform}": "Auf {platform} öffnen",
  "Ad link, willhaben ad id or search text": "Anzeigenlink, willhaben-Anzeigen-ID oder Suchtext",
- "Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.": "Ein Klick auf einen Treffer öffnet die Anzeige hier; ← / → blättert, Strg-Klick öffnet die Anzeige auf ihrer Seite."
+ "Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.": "Ein Klick auf einen Treffer öffnet die Anzeige hier; ← / → blättert, Strg-Klick öffnet die Anzeige auf ihrer Seite.",
+ "{name} responded {status}; pausing {s}s": "{name} hat {status} geantwortet; Pause {s} s"
 }
