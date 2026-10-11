@@ -1,5 +1,5 @@
 {% import "_ui.html" as ui %}
-{# willhaben browser session: status + live remote view + recorder. Used by /session and Settings → willhaben account (section settings/willhaben.html). JS unchanged (hooks .remote-screen, .remote-state, [data-act], [data-key], .remote-text kept). #}
+{# willhaben browser session: status + live remote view + recorder. Used by /session and Settings → Platforms → willhaben (section settings/willhaben.html). JS unchanged (hooks .remote-screen, .remote-state, [data-act], [data-key], .remote-text kept). #}
 {% set logged = session_status.logged_in %}
 {% if embed and session_status.started %}
 <div class="embed-status mb-2 flex flex-wrap items-center gap-1.5">{{ ui.pill(_("logged in") if logged else _("unknown") if logged is none else _("not logged in"), 'ok' if logged else '' if logged is none else 'bad') }}{% if logged and session_status.user %}<small class="text-xs text-muted">{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}

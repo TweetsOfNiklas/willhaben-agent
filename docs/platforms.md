@@ -47,8 +47,9 @@ Give the client its own `get_client()/set_client()` so tests can hand in a fake 
   exist (default `willhaben,kleinanzeigen`).
 - `app/db.py` `DEFAULT_SETTINGS`: `platform_<id>_enabled` ("0": the user switches it on in Settings → Platforms),
   `platform_<id>_per_hour`, `platform_<id>_min_gap_s`, `platform_<id>_product_search`.
-- Settings → Platforms (`app/templates/settings/platforms.html`) shows every registered site; add fields there when
-  the site needs more (credentials, a login).
+- Settings → Platforms lists willhaben and then every other registered site as its own page, `/settings/<id>`
+  (`app/templates/settings/platform.html`, saved by `POST /settings/platform/<id>` in `app/main.py`): the on/off
+  switch, pacing, product-search use and status. Add fields there when the site needs more (credentials, a login).
 - `tests/test_anonymous_public.py` `ANONYMOUS_MODULES`: the new module must never import the logged-in session.
 
 ## Fixtures and tests

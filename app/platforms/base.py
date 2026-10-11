@@ -64,7 +64,7 @@ class Platform(ABC):
     image_hosts: tuple[str, ...] = ()    # CDN host suffixes of ad photos (counted as this platform's accesses)
     locale: str = "de-AT"
     capabilities: frozenset[str] = frozenset()
-    access: str = "http"                 # http | browser (how the site is reached; Settings → Platforms shows it)
+    access: str = "http"                 # http | browser (how the site is reached; its settings page shows it)
     min_interval_s: int = 0              # a floor for agent intervals (0 = the global minimum)
 
     def can(self, cap: str) -> bool:

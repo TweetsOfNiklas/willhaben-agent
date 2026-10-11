@@ -46,10 +46,7 @@
  "own filters": "eigene Filter",
  "keyword search": "Stichwortsuche",
  "ad details": "Anzeigendetails",
- "always on": "immer an",
  "Enabled": "Eingeschaltet",
- "Pacing: {gap} s between requests, {budget} per hour.": "Takt: {gap} s zwischen Anfragen, {budget} pro Stunde.",
- "Change in willhaben account": "Unter willhaben-Konto ändern",
  "Minimum gap between requests (s)": "Mindestabstand zwischen Anfragen (s)",
  "Request budget per hour (0 = none)": "Anfragebudget pro Stunde (0 = keines)",
  "App credentials (user:password) – only when the bundled ones stop working": "App-Zugangsdaten (Benutzer:Passwort) – nur, wenn die mitgelieferten nicht mehr gehen",
@@ -69,5 +66,6 @@
  "Site": "Seite",
  "Sites": "Seiten",
  "One agent per site:": "Ein Agent pro Seite:",
- "requests per site (one per search; {used} of {budget} willhaben requests used in the last hour)": "Anfragen pro Seite (eine pro Suche; {used} von {budget} willhaben-Anfragen in der letzten Stunde verbraucht)"
+ "requests per site (one per search; {used} of {budget} willhaben requests used in the last hour)": "Anfragen pro Seite (eine pro Suche; {used} von {budget} willhaben-Anfragen in der letzten Stunde verbraucht)",
+ "{platform} settings": "Einstellungen für {platform}"
 }

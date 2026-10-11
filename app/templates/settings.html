@@ -2,10 +2,13 @@
 {% import "_ui.html" as ui %}
 {# Grouped settings: section nav on the left (desktop), a select on phones; the selected section on the right.
    `section` = active id (route: /settings/<id>; /settings = willhaben). A #hash in the URL is mapped to the path below.
-   Flags on the nav: bad / warn = a dot next to the label (not connected, missing data). #}
+   Flags on the nav: bad / warn = a dot next to the label (not connected, missing data); off = a platform switched off. #}
+{# Platforms: willhaben (account, login, request budget) first, then one page per other site (settings/platform.html) #}
+{% set sites = [("willhaben", "willhaben", ('bad' if session_status.started and not session_status.logged_in else ''))] %}
+{% for p in platforms_all(false) %}{% if p.id != 'willhaben' %}{% set _x = sites.append((p.id, p.name, ('' if platform_enabled(p.id) else 'off'))) %}{% endif %}{% endfor %}
 {% set groups = [
-  (_("Account"), [("willhaben", _("willhaben account"), ('bad' if session_status.started and not session_status.logged_in else '')), ("platforms", _("Platforms"), ''), ("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("calendar", "Google Calendar", '')]),
-  (_("Buying & selling"), [("purchase", _("Buying rules"), ''), ("paylivery", "PayLivery", ''), ("printers", _("Printers"), ''), ("myads", _("My ads"), '')]),
+  (_("Platforms"), sites),
+  (_("Buying & selling"), [("purchase", _("Buying rules"), ''), ("paylivery", "PayLivery", ''), ("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("printers", _("Printers"), ''), ("calendar", "Google Calendar", ''), ("myads", _("My ads"), '')]),
   (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else '')), ("rules", _("My rules"), ''), ("chats", _("Automatic answers"), '')]),
   (_("Notifications"), [("ha", "Home Assistant", ''), ("telegram", "Telegram", ''), ("quiet", _("Quiet hours"), '')]),
   (_("System"), [("backup", _("Backup & restore"), ''), ("timeline", _("Timeline"), ''), ("web", _("Web address"), ('' if web is not defined or web.reachable else 'warn')), ("language", _("Language & appearance"), '')]),
@@ -29,7 +32,7 @@
       {% for id, label, flag in items %}
       <a href="/settings/{{ id }}" class="flex h-[34px] items-center justify-between gap-2 rounded-field px-2.5 pl-3.5 text-base-content no-underline {{ 'bg-brand-soft font-semibold text-primary' if id == section else 'hover:bg-hover' }}"{% if id == section %} aria-current="page"{% endif %}>
         <span class="truncate">{{ label }}</span>
-        {% if flag %}<span class="size-2 shrink-0 rounded-full {{ dot[flag] }}"></span>{% endif %}
+        {% if flag == 'off' %}<small class="shrink-0 text-[11.5px] text-muted">{{ _("off") }}</small>{% elif flag %}<span class="size-2 shrink-0 rounded-full {{ dot[flag] }}"></span>{% endif %}
       </a>
       {% endfor %}
     </div>
@@ -41,6 +44,7 @@
     {% if section == 'purchase' %}{% include "_settings_purchase.html" %}
     {% elif section == 'paylivery' %}{% include "_settings_paylivery.html" %}
     {% elif section == 'printers' %}{% include "_settings_printing.html" %}
+    {% elif site is defined %}{% include "settings/platform.html" %}
     {% else %}{% include "settings/" ~ section ~ ".html" %}{% endif %}
   </div>
 </div>

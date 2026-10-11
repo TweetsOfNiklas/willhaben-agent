@@ -154,7 +154,7 @@ the dashboard password.
 
 Open `http://<your-server>:8000` and finish the setup in the browser:
 
-1. **Settings → willhaben account → Log in to willhaben.** The app runs its own Chromium. You see it right on
+1. **Settings → Platforms → willhaben → Log in to willhaben.** The app runs its own Chromium. You see it right on
    the page and log in by clicking and typing into it. The session is stored in `data/` and survives restarts.
 2. **Settings → Claude → Sign in with Claude.** Open the link, sign in with your Claude account and paste
    the code shown back into the page. The token is valid for a year and stored in `data/`.
@@ -300,13 +300,13 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
 | Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet** |
 | Purchase orders (buyer side): contact, negotiation, PayLivery offer, pay-now push, pickup appointments | built and tested with fakes; **not yet live-tested** |
-| PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → willhaben account → Advanced → API recording) |
+| PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → Platforms → willhaben → Advanced → API recording) |
 | Connection watchdog, backup, bug report, request statistics | done |
 | Timeline (Claude prompts and answers, actions, jobs), willhaben request recording, offline replay, fixture export | built and tested with fakes; **not yet used against live willhaben** |
 | MCP server | done |
 
 willhaben's interfaces used by the app are documented in `docs/willhaben-api.md`. To check a response shape, the
-dashboard can record the built-in browser's requests (Settings → willhaben account → Advanced → API recording).
+dashboard can record the built-in browser's requests (Settings → Platforms → willhaben → Advanced → API recording).
 
 ## Development
 

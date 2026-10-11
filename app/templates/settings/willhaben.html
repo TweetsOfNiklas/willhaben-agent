@@ -1,4 +1,5 @@
-{# Settings → willhaben account: browser session (login) and the hourly request budget (REQUESTS_PER_HOUR from .env until it is changed here). #}
+{# Settings → Platforms → willhaben: browser session (login), the hourly request budget (REQUESTS_PER_HOUR from .env until it
+   is changed here) and whether the product search uses willhaben. The other sites: settings/platform.html. #}
 {% import "_ui.html" as ui %}
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   {% with session_next = '/settings/willhaben' %}{% include "_session_panel.html" %}{% endwith %}
@@ -11,8 +12,10 @@
       <input type="number" name="requests_per_hour" value="{{ budget }}" min="0" max="2000" class="input w-full min-w-0 bg-base-200"></label>
     <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Used this hour") }}</span>
       <div class="flex min-w-0 items-center gap-3 py-2"><span class="shrink-0 tabular-nums">{{ used }} / {{ budget }}</span>{{ ui.bar(pct, 'ok', 'h-1.5 min-w-0 flex-1') }}</div></div>
+    <input type="hidden" name="has_product_search" value="1">
+    <label class="flex cursor-pointer items-center justify-between gap-3 sm:col-span-2"><span class="min-w-0 font-medium">{{ _("Use for the product search") }}</span><input type="checkbox" class="toggle toggle-primary" name="product_search" {% if values.platform_willhaben_product_search != '0' %}checked{% endif %}></label>
     <div class="flex flex-wrap items-center gap-2.5 sm:col-span-2"><button class="btn btn-primary">{{ _("Save") }}</button><small class="text-[12.5px] text-muted">{{ _("When the budget is used up, agents wait until the next hour. Product search and price checks count too.") }} {{ _("0 = no budget.") }}</small></div>
   </form>
-  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="font-medium">{{ _("Requests to willhaben") }}</span><a href="/stats/willhaben" class="btn btn-sm">{{ _("Full statistics") }} →</a></div>
+  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="font-medium">{{ _("Requests to willhaben") }}</span><a href="/stats/requests?platform=willhaben" class="btn btn-sm">{{ _("Full statistics") }} →</a></div>
   {# optional inline preview: include the chart section of stats_willhaben.html via a macro, or embed <iframe src="/stats/willhaben?embed=1"> #}
 </section>

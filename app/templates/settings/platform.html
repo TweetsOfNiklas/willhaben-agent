@@ -1,0 +1,25 @@
+{# Settings → Platforms → <site>: one site other than willhaben (app/platforms). `site` from main._platform_row():
+   {p, enabled, status, per_hour, min_gap_s, product_search, last_hour, auth, auth_default}. willhaben has its own
+   page (settings/willhaben.html: login, request budget, product search). #}
+{% import "_ui.html" as ui %}
+{% set p = site.p %}
+<form method="post" action="/settings/platform/{{ p.id }}" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="min-w-0"><span class="text-muted">{{ p.host }} · {{ p.home_country }}</span>
+      <div class="mt-1.5 flex flex-wrap gap-1.5">{{ ui.pill(_("direct requests") if p.access == 'http' else _("uses the app's browser"), '', false) }}{% if p.can('filters') %}{{ ui.pill(_("own filters"), '', false) }}{% endif %}{% if p.can('keyword_search') %}{{ ui.pill(_("keyword search"), '', false) }}{% endif %}{% if p.can('detail') %}{{ ui.pill(_("ad details"), '', false) }}{% endif %}</div></div>
+    <label class="flex cursor-pointer items-center gap-2"><span class="font-medium">{{ _("Enabled") }}</span><input type="checkbox" class="toggle toggle-primary" name="enabled" {% if site.enabled %}checked{% endif %}></label>
+  </div>
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minimum gap between requests (s)") }}</span><input name="gap" value="{{ site.min_gap_s }}" inputmode="decimal" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none)") }}</span><input name="budget" value="{{ site.per_hour }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
+  </div>
+  {% if p.id == 'kleinanzeigen' %}
+  <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("App credentials (user:password) – only when the bundled ones stop working") }}</span><input name="auth" value="{{ site.auth or '' }}" placeholder="{{ _('bundled default in use') if site.auth_default else '' }}" autocomplete="off" class="input w-full min-w-0 bg-base-200"></label>
+  <small class="text-[12.5px] text-muted">{{ _("The search agents use the API of the Kleinanzeigen app. Its credentials are the app's own and public, but they can change; a 401/403 on an agent means they did.") }}</small>
+  {% endif %}
+  <label class="flex cursor-pointer items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="min-w-0 font-medium">{{ _("Use for the product search") }}</span><input type="checkbox" class="toggle toggle-primary" name="product_search" {% if site.product_search %}checked{% endif %}></label>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <button class="btn btn-primary">{{ _("Save") }}</button>
+    <span class="text-[12.5px] text-muted">{{ _("Requests in the last hour: {n}", n=site.last_hour) }}{% if site.status.cooling_down_s %} · {{ _("paused for {s} s after a block", s=site.status.cooling_down_s|round|int) }}{% endif %} · <a class="link link-primary" href="/stats/requests?platform={{ p.id }}">{{ _("Statistics") }}</a></span>
+  </div>
+</form>

@@ -217,7 +217,7 @@ def _platform_name(pid: str | None) -> str:
 
 # platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
-                             platforms_all=platforms.all, platform_get=platforms.get)
+                             platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled)
 
 
 def _inbox_seen_at() -> datetime:
@@ -1447,7 +1447,7 @@ async def ad_batch_image(batch_id: int, idx: int):
 
 # ------------------------------------------------------------------ session / capture
 def _session_back(next_url: str | None, msg: str | None = None) -> RedirectResponse:
-    """Back to where a session form was posted from (/session or Settings → willhaben account), with a message."""
+    """Back to where a session form was posted from (/session or Settings → Platforms → willhaben), with a message."""
     url = next_url if next_url and next_url.startswith("/") and not next_url.startswith("//") else "/session"
     path, _, frag = url.partition("#")
     if msg:
@@ -1548,8 +1548,13 @@ async def capture_download(name: str):
 
 
 # ------------------------------------------------------------------ settings
-SETTINGS_SECTIONS = ("willhaben", "platforms", "shipping", "calendar", "purchase", "paylivery", "printers", "myads",
+SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "shipping", "printers", "calendar", "myads",
                      "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "timeline", "web", "language")   # settings.html groups
+
+
+def _site_sections() -> dict[str, Any]:
+    """The other platforms' settings pages (/settings/<platform id>, group "Platforms" next to willhaben)."""
+    return {p.id: p for p in platforms.all(enabled_only=False) if p.id != "willhaben"}
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1669,12 +1674,16 @@ async def settings_claude(request: Request):
 
 
 @app.post("/settings/willhaben")
-async def settings_willhaben(requests_per_hour_: int = Form(0, alias="requests_per_hour"), next: str = Form("")):
-    """The hourly willhaben request budget (REQUESTS_PER_HOUR from .env until changed here; 0 = none). `next`: the page
-    of the usage popover the slider was moved on."""
+async def settings_willhaben(requests_per_hour_: int = Form(0, alias="requests_per_hour"), next: str = Form(""),
+                             product_search: str = Form(""), has_product_search: str = Form("")):
+    """The hourly willhaben request budget (REQUESTS_PER_HOUR from .env until changed here; 0 = none) and, from the
+    settings page (has_product_search), whether the product search uses willhaben. `next`: the page of the usage
+    popover the slider was moved on (that form has the budget only)."""
     n = min(max(0, requests_per_hour_), 2000)
     set_setting("requests_per_hour", str(n))
     willhaben_limiter().per_hour = n
+    if has_product_search:
+        set_setting("platform_willhaben_product_search", "1" if product_search else "0")
     target = next if next.startswith("/") and not next.startswith("//") else "/settings/willhaben"
     sep = "&" if "?" in target else "?"
     return back(f"{target}{sep}msg={quote(t('Changes saved'), safe='')}")
@@ -1682,15 +1691,19 @@ async def settings_willhaben(requests_per_hour_: int = Form(0, alias="requests_p
 
 @app.get("/settings/{section}", response_class=HTMLResponse)
 async def settings_section(request: Request, section: str, msg: str | None = None):
-    """One settings section per page (settings.html index + settings/<section>.html)."""
-    if section not in SETTINGS_SECTIONS:
+    """One settings section per page (settings.html index + settings/<section>.html); the other platforms each have
+    one (settings/platform.html). /settings/platforms, the former page of all sites, leads to the first of them."""
+    sites = _site_sections()
+    if section == "platforms":
+        return back(f"/settings/{next(iter(sites), 'willhaben')}")
+    if section not in SETTINGS_SECTIONS and section not in sites:
         raise HTTPException(404)
-    keys = ["reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
+    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
-                  **({"platform_rows": _platforms_section()} if section == "platforms" else {}),
+                  **({"site": _platform_row(sites[section])} if section in sites else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(),
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
@@ -1705,47 +1718,43 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   web=_web_address(), **label_buy_routes.panel(), **printing_routes.panel())
 
 
-def _platforms_section() -> list[dict[str, Any]]:
-    """Settings → Platforms: every registered site with its switch, pacing, status and (kleinanzeigen) credentials."""
+def _platform_row(p: Any) -> dict[str, Any]:
+    """Context of settings/platform.html: the site's switch, pacing, status and (kleinanzeigen) app credentials."""
     from app.db import platform_min_gap_s, platform_per_hour
 
-    rows = []
-    for p in platforms.all(enabled_only=False):
-        st = p.status()
-        rows.append({"p": p, "enabled": platforms.enabled(p.id), "status": st,
-                     "per_hour": platform_per_hour(p.id), "min_gap_s": platform_min_gap_s(p.id),
-                     "product_search": get_setting(f"platform_{p.id}_product_search") != "0",
-                     "last_hour": access_stats.last_hour(platform=p.id),
-                     "auth": get_setting(f"{p.id}_api_auth") if p.id == "kleinanzeigen" else None,
-                     "auth_default": st.get("auth_default")})
-    return rows
+    st = p.status()
+    return {"p": p, "enabled": platforms.enabled(p.id), "status": st,
+            "per_hour": platform_per_hour(p.id), "min_gap_s": platform_min_gap_s(p.id),
+            "product_search": get_setting(f"platform_{p.id}_product_search") != "0",
+            "last_hour": access_stats.last_hour(platform=p.id),
+            "auth": get_setting(f"{p.id}_api_auth") if p.id == "kleinanzeigen" else None,
+            "auth_default": st.get("auth_default")}
 
 
-@app.post("/settings/platforms")
-async def settings_platforms(request: Request):
-    """Switches, pacing, product-search use and credentials of the other platforms (willhaben's budget lives in its
-    own section)."""
+@app.post("/settings/platform/{pid}")
+async def settings_platform(request: Request, pid: str):
+    """One other platform's switch, pacing, product-search use and (kleinanzeigen) credentials. willhaben's settings
+    are posted to /settings/willhaben."""
     from app.db import platform_min_gap_s, platform_per_hour
 
+    p = _site_sections().get(pid)
+    if p is None:
+        raise HTTPException(404)
     form = await request.form()
-    for p in platforms.all(enabled_only=False):
-        if p.id == "willhaben":
-            set_setting("platform_willhaben_product_search", "1" if form.get("willhaben_product_search") else "0")
-            continue
-        set_setting(f"platform_{p.id}_enabled", "1" if form.get(f"{p.id}_enabled") else "0")
-        set_setting(f"platform_{p.id}_product_search", "1" if form.get(f"{p.id}_product_search") else "0")
-        gap = str(form.get(f"{p.id}_gap") or "").strip().replace(",", ".")
-        budget = str(form.get(f"{p.id}_budget") or "").strip()
-        set_setting(f"platform_{p.id}_min_gap_s", gap if re.fullmatch(r"\d+(\.\d+)?", gap) else "")
-        set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "")
-        p.limiter.min_gap_s, p.limiter.per_hour = platform_min_gap_s(p.id), platform_per_hour(p.id)
-        if p.id == "kleinanzeigen":
-            from app.platforms import kleinanzeigen as ka
-            auth = str(form.get("kleinanzeigen_auth") or "").strip()
-            if auth != get_setting("kleinanzeigen_api_auth"):
-                set_setting("kleinanzeigen_api_auth", auth if re.fullmatch(r"[^:\s]+:[^\s]+", auth) else "")
-                ka.set_client(None)           # the next request builds a client with the new credentials
-    return back(f"/settings/platforms?msg={quote(t('Changes saved'), safe='')}")
+    set_setting(f"platform_{p.id}_enabled", "1" if form.get("enabled") else "0")
+    set_setting(f"platform_{p.id}_product_search", "1" if form.get("product_search") else "0")
+    gap = str(form.get("gap") or "").strip().replace(",", ".")
+    budget = str(form.get("budget") or "").strip()
+    set_setting(f"platform_{p.id}_min_gap_s", gap if re.fullmatch(r"\d+(\.\d+)?", gap) else "")
+    set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "")
+    p.limiter.min_gap_s, p.limiter.per_hour = platform_min_gap_s(p.id), platform_per_hour(p.id)
+    if p.id == "kleinanzeigen":
+        from app.platforms import kleinanzeigen as ka
+        auth = str(form.get("auth") or "").strip()
+        if auth != get_setting("kleinanzeigen_api_auth"):
+            set_setting("kleinanzeigen_api_auth", auth if re.fullmatch(r"[^:\s]+:[^\s]+", auth) else "")
+            ka.set_client(None)           # the next request builds a client with the new credentials
+    return back(f"/settings/{p.id}?msg={quote(t('Changes saved'), safe='')}")
 
 
 def _timeline_section() -> dict[str, Any]:

@@ -9,7 +9,7 @@ PAGES = ["/", "/agents", "/hits", "/hits?agent_id=1&state=all", "/chats", "/chat
          "/purchases", "/purchases/1", "/purchases?show=all", "/settings", "/stats/willhaben", "/session", "/deals",
          "/myads/cleanup", "/bugreport", "/timeline", "/timeline?kind=llm&errors=1&q=x&ad=9&range=7d", "/timeline?job=1",
          "/timeline?conversation=c1&agent=1", "/stats/requests?platform=kleinanzeigen",
-         "/hits?platform=willhaben&state=all"] + [f"/settings/{s}" for s in SETTINGS_SECTIONS]
+         "/hits?platform=willhaben&state=all"] + [f"/settings/{s}" for s in SETTINGS_SECTIONS] + ["/settings/kleinanzeigen"]
 
 
 @pytest.fixture

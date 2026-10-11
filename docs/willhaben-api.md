@@ -112,7 +112,7 @@ login, but their JavaScript chunks are public static files. Sending chat message
 this document were read from those chunks (find the chunk names in the logged-in page or a capture, download them
 anonymously, search for the action ids). To see real request/response shapes, capture them:
 
-1. Dashboard → Settings → willhaben account → log in (this opens the session page with the remote browser view).
+1. Dashboard → Settings → Platforms → willhaben → log in (this opens the session page with the remote browser view).
 2. On the session page, start a recording with a matching label (`chat`, `chat-senden` (send chat),
    `meine-anzeigen` (my ads), `reaktivieren` (reactivate), `anzeige-aufgeben` (place an ad)).
 3. Perform the action in the remote browser view (or noVNC), e.g. open a conversation and send a test
@@ -397,6 +397,6 @@ offer; as the seller, record "paylivery-accept" and "paylivery-decline" through 
 the request and response bodies of the willhaben calls that the action made, so the endpoints, request bodies and
 notice shapes can be written down here.
 
-To record a notice: Settings → willhaben account → Advanced → API recording with the label `chat`, then in the browser
+To record a notice: Settings → Platforms → willhaben → Advanced → API recording with the label `chat`, then in the browser
 window open a conversation of a sold ad where willhaben shows the PayLivery notice. Stop the recording and add the
 notice's JSON shape (type, text, parameters, link fields) to this section.

@@ -6,7 +6,7 @@
 {% set fill_ch = {'anonymous': 'fill-ch-anonymous', 'account': 'fill-ch-account', 'chat': 'fill-ch-chat'} %}
 {% set bg_ch = {'anonymous': 'bg-ch-anonymous', 'account': 'bg-ch-account', 'chat': 'bg-ch-chat'} %}
 <div class="mb-5 flex flex-wrap items-start justify-between gap-6">
-  <div class="min-w-0">{% if data.platform == 'willhaben' %}<a href="/settings/willhaben" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("willhaben account") }}</a>{% else %}<a href="/settings/platforms" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("Platforms") }}</a>{% endif %}<h1 class="mt-1.5">{{ _("{platform} requests", platform=platform_name(data.platform)) }}</h1></div>
+  <div class="min-w-0"><a href="/settings/{{ data.platform }}" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("{platform} settings", platform=platform_name(data.platform)) }}</a><h1 class="mt-1.5">{{ _("{platform} requests", platform=platform_name(data.platform)) }}</h1></div>
   <div class="flex flex-wrap items-center gap-2">
   {% if platform_choices|length > 1 %}<select aria-label="{{ _('Platform') }}" onchange="location.href='/stats/requests?platform='+this.value+'&range={{ data.range }}'" class="select select-sm w-auto bg-base-100">{% for pc in platform_choices %}<option value="{{ pc.id }}" {% if pc.id == data.platform %}selected{% endif %}>{{ pc.name }}</option>{% endfor %}</select>{% endif %}
   <nav class="inline-flex flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px]" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/requests?platform={{ data.platform }}&range={{ r }}" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1 no-underline {{ 'bg-brand-soft font-semibold text-primary' if r == data.range else 'hover:bg-hover' }}"{% if r == data.range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
@@ -20,7 +20,7 @@
   <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums">{{ data.cached }}</div><div class="mt-1 text-muted">{{ _("from cache (no access)") }}</div></div>
 </div>
 {% if not data.total and not data.cached %}
-{% call ui.empty(_("No willhaben requests logged in this range yet."), _("Counting starts with this version; every request to willhaben is logged per minute from now on.")) %}{% endcall %}
+{% set pname = platform_name(data.platform) %}{% call ui.empty(_("No {platform} requests logged in this range yet.", platform=pname), _("Every request to {platform} is logged per minute from the first one on.", platform=pname)) %}{% endcall %}
 {% else %}
 <section class="mb-4 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" class="block h-auto w-full overflow-visible" aria-label="{{ _('Stacked bar chart of willhaben requests per {m} min', m=(data.bucket_s // 60)) }}">
