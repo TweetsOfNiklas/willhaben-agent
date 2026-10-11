@@ -153,7 +153,6 @@
   "Maximum set to {max}: asking price plus shipping {ship}": "Höchstpreis auf {max} gesetzt: Angebotspreis plus Versand {ship}",
   "Buy now": "Sofort kaufen",
   "How to buy": "Kaufart",
-  "Settings → Buying rules": "Einstellungen → Regeln für Käufe",
   "Prefer buying with PayLivery (preselected in the buy dialog)": "Bevorzugt mit PayLivery kaufen (im Kaufen-Dialog vorausgewählt)",
   "Shipping {amount}": "Versand {amount}",
   "Shipping about {amount}": "Versand ca. {amount}",
@@ -226,5 +225,6 @@
   "Opening offer {amount} is below your wish price {wish}": "Erstes Angebot {amount} liegt unter deinem Wunschpreis {wish}",
   "Internal instructions or AI talk in our own message ({word})": "Interne Anweisungen oder KI-Gerede in unserer Nachricht ({word})",
   "Answer is unusually long ({n} characters) – a chat answer needs a few sentences": "Antwort ist ungewöhnlich lang ({n} Zeichen) – eine Chatantwort braucht ein paar Sätze",
-  "Our own message quotes the agent's instructions": "Unsere Nachricht zitiert die Anweisungen des Agenten"
+  "Our own message quotes the agent's instructions": "Unsere Nachricht zitiert die Anweisungen des Agenten",
+  "Settings → willhaben → Buying rules": "Einstellungen → willhaben → Regeln für Käufe"
 }

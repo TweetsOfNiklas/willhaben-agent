@@ -63,7 +63,7 @@ It runs on your own server, from your home internet connection, and you control 
   three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
   automatic answers with an instruction and a minimum price (switches and text save as you type), edit text and photos
   (Claude can propose a better text), deactivate, delete, mark sold or reserved (other buyers get a notice draft).
-  Ads that expired longer ago than a cutoff (Settings → My ads, 30 days by default) move to Deactivated; the old copy
+  Ads that expired longer ago than a cutoff (Settings → willhaben → My ads, 30 days by default) move to Deactivated; the old copy
   of a renewed ad is never listed again and its chats use the new ad's settings.
 - **Shipping**: when a buyer sends an address, the app compares parcel prices of Post, GLS, Hermes and DPD and shows
   the nearest drop-off points. The label is bought only after the buyer has paid: you mark the payment (a buyer's
@@ -163,7 +163,7 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
    get pushes.
 4. **Settings → Telegram** (optional): create a bot with @BotFather (`/newbot`) and paste its token. Then open the bot
    in Telegram on any device (link or QR code) and press Start; the chat shows up in Settings and you confirm it with
-   one tap; compare the 4-digit code the bot sent you, since anyone can write to a bot. Settings → Automatic answers
+   one tap; compare the 4-digit code the bot sent you, since anyone can write to a bot. Settings → willhaben → Automatic answers
    decides whether pushes go to Home Assistant, Telegram or both.
 5. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
    Optionally switch on "Claude screening" and describe exactly what you want.

@@ -215,7 +215,12 @@ def test_settings_platforms_page_and_save(client):
 
     page = client.get("/settings/willhaben").text
     nav = page[page.index('<nav aria-label="Settings"'):]                 # the settings menu, not the account menu
-    assert nav.index("Platforms") < nav.index('href="/settings/willhaben"') < nav.index('href="/settings/kleinanzeigen"')
+    order = ["Platforms"] + [f'href="/settings/{s}"' for s in ("willhaben", "purchase", "paylivery", "myads", "chats",
+                                                                 "kleinanzeigen", "shipping", "printers", "calendar")]
+    assert [nav.index(x) for x in order] == sorted(nav.index(x) for x in order)   # willhaben's own pages sit under it
+    assert nav.index("Shipping &amp; pickup") < nav.index('href="/settings/shipping"') and "Buying &amp; selling" not in nav
+    assert 'pl-7' in nav[nav.index('href="/settings/paylivery"') - 200:nav.index('href="/settings/paylivery"') + 200]
+    assert "Platforms · willhaben" in client.get("/settings/paylivery").text
     assert 'href="/settings/platforms"' not in page and "<h2>willhaben</h2>" in page
     r = client.get("/settings/platforms", follow_redirects=False)            # the former page of all sites
     assert r.status_code == 303 and r.headers["location"] == "/settings/kleinanzeigen"

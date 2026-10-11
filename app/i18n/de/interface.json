@@ -59,7 +59,6 @@
  "AI": "KI",
  "Account": "Konto",
  "Backup & restore": "Backup & Wiederherstellung",
- "Buying & selling": "Kaufen & Verkaufen",
  "Buying rules": "Kaufregeln",
  "Changes are saved per section.": "Änderungen werden pro Abschnitt gespeichert.",
  "Language & appearance": "Sprache & Darstellung",
@@ -236,5 +235,6 @@
  "Nothing done": "Nichts getan",
  "Not linked yet": "Noch nicht verknüpft",
  "Not connected yet": "Noch nicht verbunden",
- "No ad expires in the next {n} days.": "Keine Anzeige läuft in den nächsten {n} Tagen ab."
+ "No ad expires in the next {n} days.": "Keine Anzeige läuft in den nächsten {n} Tagen ab.",
+ "Shipping & pickup": "Versand & Abholung"
 }

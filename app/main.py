@@ -1548,8 +1548,8 @@ async def capture_download(name: str):
 
 
 # ------------------------------------------------------------------ settings
-SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "shipping", "printers", "calendar", "myads",
-                     "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "timeline", "web", "language")   # settings.html groups
+SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "shipping", "printers", "calendar",
+                     "claude", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language")   # settings.html groups
 
 
 def _site_sections() -> dict[str, Any]:

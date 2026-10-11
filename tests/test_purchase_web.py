@@ -562,7 +562,7 @@ def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # 
     assert 'data-s="max"' in frag and ">Ad<" not in frag             # the ad is on the left, not a summary row again
     assert 'class="btn btn-primary ml-auto bd-start"' in frag and 'type="submit"' in frag and "Start purchase" in frag
     assert "Nothing is paid automatically." in frag
-    assert 'href="/settings/purchase"' in frag and "Settings → Buying rules" in frag
+    assert 'href="/settings/purchase"' in frag and "Settings → willhaben → Buying rules" in frag
     assert 'class="bd-time ' in frag and "Preferred time" in frag and "e.g. Saturday morning" in frag
     assert "Description" in frag and ">Viewer</a>" in frag and "willhaben ↗" in frag
     assert "Buy now" in frag and 'data-ad="2000000001"' in frag
