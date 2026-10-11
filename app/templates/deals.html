@@ -65,23 +65,23 @@
   </aside>
 </div>
 <script>
-// A running search replaces its box every 2 s (htmx): the generated searches and the agent form stay open
-// across those refreshes and a reload, per search (sessionStorage; without it they just start closed).
+// A running search replaces its box every 2 s (htmx): the generated searches and the agent form stay open across
+// those refreshes. The open state goes into the new HTML before the swap, so nothing closes and reopens (no
+// flicker, no jump of the page); per search it is also kept for a reload (sessionStorage, optional).
 (() => {
   const key = () => { const b = document.getElementById('ps-box'); return b ? 'ps-open-' + b.dataset.search : null; };
-  const opened = () => { try { return JSON.parse(sessionStorage.getItem(key()) || '[]'); } catch (e) { return []; } };
-  const save = () => {
-    const k = key(); if (!k) return;
-    const names = [...document.querySelectorAll('#ps-box details[data-keep]')].filter(d => d.open).map(d => d.dataset.keep);
-    try { sessionStorage.setItem(k, JSON.stringify(names)); } catch (e) {}
-  };
-  const restore = () => {
-    if (!key()) return;
-    opened().forEach(n => { const d = document.querySelector('#ps-box details[data-keep="' + n + '"]'); if (d && !d.open) d.open = true; });
-  };
+  const openNow = () => [...document.querySelectorAll('#ps-box details[data-keep]')].filter(d => d.open).map(d => d.dataset.keep);
+  const save = () => { const k = key(); if (k) { try { sessionStorage.setItem(k, JSON.stringify(openNow())); } catch (e) {} } };
   document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('#ps-box details[data-keep]')) save(); }, true);
-  document.body.addEventListener('htmx:afterSettle', restore);
-  restore();
+  document.body.addEventListener('htmx:beforeSwap', e => {
+    if (!e.detail.target || e.detail.target.id !== 'ps-box' || typeof e.detail.serverResponse !== 'string') return;
+    let html = e.detail.serverResponse;
+    openNow().forEach(n => { html = html.replace('data-keep="' + n + '"', 'data-keep="' + n + '" open'); });
+    e.detail.serverResponse = html;
+  });
+  let opened = [];                         // after a reload
+  try { opened = JSON.parse(sessionStorage.getItem(key()) || '[]'); } catch (e) {}
+  opened.forEach(n => { const d = document.querySelector('#ps-box details[data-keep="' + n + '"]'); if (d) d.open = true; });
 })();
 </script>
 {% endblock %}
