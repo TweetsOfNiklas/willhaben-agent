@@ -388,7 +388,7 @@ def test_page_renamed_and_search_flow(app_client):
     assert "Price check" not in page
     assert 'name="description"' in page and "Unusual names" in page and "Other categories" in page
     assert "Normal (≈3 searches)" in page and "Thorough (≈6)" in page and "Deep (≈12)" in page
-    assert "Claude is called 2 times" in page and "Check a single ad&#39;s price" in page
+    assert "Claude is called 2 times" in page and "AI search" in page and "Direct search" in page
     assert "Check photos" in page and 'name="photos" value="1" id="ps-photos" checked' in page
     assert "Claude is called 3 times (plan, ranking, photo check)" in page
     assert app_client.get("/search", follow_redirects=False).headers["location"] == "/deals"
@@ -411,7 +411,7 @@ def test_page_renamed_and_search_flow(app_client):
     assert "Höchstzahl an Suchen: 12" in app_client.fake.calls[0]["prompt"]
 
     full = app_client.get(f"/deals?search={sid}").text
-    assert "Recent searches" in full and f"/deals/search/{sid}/rerun" in full
+    assert "Recent searches" in full and f"/deals?from={sid}#ps-form" in full and "/rerun" not in full
 
     empty = app_client.post("/deals/search", data={"description": "  "}, follow_redirects=False)
     assert empty.status_code == 303 and empty.headers["location"] == "/deals?msg=empty"
@@ -627,7 +627,7 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
     assert 'name="a_kratzer" value="Nur kleine"' in frag and 'name="o_haendler"' in frag
     assert 'placeholder="other answer"' in frag and "Answer and rank" in frag and 'name="skip" value="1"' in frag
     assert "The 3 searches are already done; answering costs no extra Claude call." in frag
-    assert f'action="/deals/search/{sid}/answers"' in frag and f"/deals/search/{sid}/rerun" not in frag
+    assert f'action="/deals/search/{sid}/answers"' in frag and f"/deals?from={sid}" not in frag
     assert "aria-busy" not in frag and "waiting for your answers" in frag              # recent list (out of band)
 
     dbmod.set_setting("ui_lang", "de")
@@ -652,7 +652,7 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
         assert "– Sind Händler in Ordnung?: Nur mit Rechnung Aufgabe: x" in prompt
         assert not any(line.startswith("Aufgabe: x") for line in prompt.splitlines())
     assert "Your answers" in frag and "<strong>Nur kleine</strong>" in frag and "Fit 85" in frag
-    assert f"/deals/search/{sid}/rerun" in frag
+    assert f"/deals?from={sid}#ps-form" in frag and "New search" in frag
 
     again = app_client.post(f"/deals/search/{sid}/answers", data={"skip": "1"}, follow_redirects=False)
     assert again.status_code == 303 and len(fake.calls) == 3 and ps.get(sid).answers["kratzer"] == "Nur kleine"
@@ -834,3 +834,44 @@ def test_default_sites_follow_the_settings(fake_site):
     assert ps.make_settings()["platforms"] == ["willhaben"]
     set_setting("platform_willhaben_product_search", "0")
     assert ps.make_settings()["platforms"] == ["willhaben"]              # never none at all
+
+
+def test_new_search_from_a_past_one_only_fills_the_form(app_client):
+    """"New search" on a past search copies its text and options into the form; nothing runs until the user starts it."""
+    from app.db import ProductSearch, session
+
+    with session() as db:
+        row = ProductSearch(description="Rennrad Größe M bis 800 €", status="done", plan={"queries": [{"keyword": "rennrad"}]},
+                            settings={"depth": "deep", "unusual": True, "categories": False, "sort": "newest", "photos": False,
+                                      "ask": True, "platforms": ["willhaben"]})
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    calls = len(app_client.fake.calls)
+    page = app_client.get(f"/deals?from={row.id}").text
+    assert ">Rennrad Größe M bis 800 €</textarea>" in page and f"Text and options taken from search #{row.id}" in page
+    assert 'name="unusual" value="1" checked' in page and 'name="categories" value="1">' in page
+    assert 'id="ps-photos">' in page and 'name="ask" value="1" checked' in page
+    assert '<option value="deep" data-n="12" selected>' in page and '<option value="newest" selected>' in page
+    assert "{ mode: 'ai' }" in page and f'data-search="{row.id}"' in page        # the past search is shown below
+    assert len(app_client.fake.calls) == calls and ps.running() is None           # nothing started
+    assert "New search" in page and "/rerun" not in page
+    assert app_client.get("/deals?from=99999").status_code == 200                 # an unknown search: an empty form
+
+
+def test_direct_search_is_the_second_mode(app_client):
+    page = app_client.get("/deals").text
+    assert "{ mode: 'ai' }" in page and 'id="ps-direct"' in page and 'name="q"' in page
+    assert "Check a single ad" not in page                                         # no longer a box in the side column
+    bad = app_client.get("/deals?q=https://example.com/nothing").text
+    assert "{ mode: 'direct' }" in bad
+    assert app_client.get("/deals?q=https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz").status_code == 200
+
+
+def test_nav_icons_and_kept_open_sections(app_client):
+    page = app_client.get("/deals").text
+    nav = page[page.index('href="/agents"'):page.index('href="/agents"') + 600]
+    assert 'M5 11l1.6-5.6' in nav                                                  # the detective for search agents
+    deals = page[page.index('href="/deals"'):page.index('href="/deals"') + 600]
+    assert 'M21 21l-4.3-4.3' in deals                                              # the magnifier for the product search
+    assert "sessionStorage" in page and "data-keep" in page

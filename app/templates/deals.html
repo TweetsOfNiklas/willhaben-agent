@@ -3,26 +3,44 @@
 {% block content %}
 {{ ui.head(_("Product search"), _("Describe what you need. Claude plans the searches, the app runs them anonymously, Claude picks the best offers.")) }}
 {% if ps_msg %}{{ ui.msg(ps_msg, 'warn') }}{% endif %}
+{# Two modes like "New ad": the AI search (Claude plans the searches and ranks the offers) and the direct search
+   (one ad's price, or the willhaben ads for a text). `ps_prefill`: a past search's text and options ("New search"). #}
+{% set pf = ps_prefill if ps_prefill is defined and ps_prefill else none %}{% set pst = pf.settings if pf else {} %}
+{% set direct = not pf and (q or res or (pending_ad is defined and pending_ad) or results is not none or error) %}
 <div class="grid grid-cols-1 items-start gap-5 md:grid-cols-[minmax(0,1fr)_340px]">
-  <div class="flex min-w-0 flex-col gap-5">
-    <form method="post" action="/deals/search" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-      <textarea id="ps-desc" name="description" rows="3" maxlength="2000" required placeholder="{{ _('Describe what you need: item, size, budget, condition, where you can pick it up – e.g. a quiet dishwasher, 60 cm wide, up to € 300, pickup around Vienna, no dealers') }}" class="textarea w-full bg-base-200"></textarea>
+  <div x-data="{ mode: '{{ 'direct' if direct else 'ai' }}' }" class="flex min-w-0 flex-col gap-5">
+    <nav id="ps-mode" class="inline-flex flex-wrap gap-0.5 self-start rounded-field border border-base-300 bg-base-100 p-[3px]">
+      <button type="button" data-mode="ai" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1" :class="mode === 'ai' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" @click="mode = 'ai'">{{ _("AI search") }}</button>
+      <button type="button" data-mode="direct" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1" :class="mode === 'direct' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" @click="mode = 'direct'">{{ _("Direct search") }}</button>
+    </nav>
+    <form id="ps-form" x-show="mode === 'ai'"{% if direct %} x-cloak{% endif %} method="post" action="/deals/search" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+      {% if pf %}<p class="text-[12.5px] text-muted">{{ _("Text and options taken from search #{id}. Change what you like, then start the search.", id=pf.id) }}</p>{% endif %}
+      <textarea id="ps-desc" name="description" rows="3" maxlength="2000" required placeholder="{{ _('Describe what you need: item, size, budget, condition, where you can pick it up – e.g. a quiet dishwasher, 60 cm wide, up to € 300, pickup around Vienna, no dealers') }}" class="textarea w-full bg-base-200"{% if pf %} autofocus{% endif %}>{{ pf.description if pf else '' }}</textarea>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <label class="flex cursor-pointer items-center gap-2" title="{{ _('Misspellings, nicknames, abbreviations, German/English and older model names, generic descriptions – where deals hide') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="unusual" value="1">{{ _("Unusual names") }}</label>
-        <label class="flex cursor-pointer items-center gap-2" title="{{ _('Mis-categorised listings, bundles and lots that contain the item, neighbouring categories') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="categories" value="1">{{ _("Other categories") }}</label>
-        <label class="flex cursor-pointer items-center gap-2" title="{{ _('One more Claude call: looks at the photos of the best offers, catches damage, wrong variants and stock photos; the fit score includes it') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="photos" value="1" id="ps-photos" checked>{{ _("Check photos") }}</label>
-        <label class="flex cursor-pointer items-center gap-2" title="{{ _('Claude may ask up to three short questions after planning; answering costs no extra call.') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="ask" value="1" checked>{{ _("Ask short questions") }}</label>
-        <label class="flex items-center gap-2 text-muted">{{ _("Depth") }}<select name="depth" id="ps-depth" class="select select-sm w-auto bg-base-200"><option value="normal" data-n="{{ ps_depths.normal }}">{{ _("Normal (≈{n} searches)", n=ps_depths.normal) }}</option><option value="thorough" data-n="{{ ps_depths.thorough }}">{{ _("Thorough (≈{n})", n=ps_depths.thorough) }}</option><option value="deep" data-n="{{ ps_depths.deep }}">{{ _("Deep (≈{n})", n=ps_depths.deep) }}</option></select></label>
-        {% if ps_sites|length > 1 %}<span class="flex flex-wrap items-center gap-2 text-muted">{{ _("Sites") }}{% for pc in ps_sites %}<label class="flex cursor-pointer items-center gap-1.5 text-base-content"><input type="checkbox" name="sites" value="{{ pc.id }}" checked class="checkbox checkbox-sm">{{ pc.name }}</label>{% endfor %}</span>{% endif %}
-        <label class="flex items-center gap-2 text-muted">{{ _("Order") }}<select name="sort" class="select select-sm w-auto bg-base-200"><option value="relevance">{{ _("Relevance") }}</option><option value="newest">{{ _("Newest first") }}</option></select></label>
+        <label class="flex cursor-pointer items-center gap-2" title="{{ _('Misspellings, nicknames, abbreviations, German/English and older model names, generic descriptions – where deals hide') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="unusual" value="1"{% if pst.unusual %} checked{% endif %}>{{ _("Unusual names") }}</label>
+        <label class="flex cursor-pointer items-center gap-2" title="{{ _('Mis-categorised listings, bundles and lots that contain the item, neighbouring categories') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="categories" value="1"{% if pst.categories %} checked{% endif %}>{{ _("Other categories") }}</label>
+        <label class="flex cursor-pointer items-center gap-2" title="{{ _('One more Claude call: looks at the photos of the best offers, catches damage, wrong variants and stock photos; the fit score includes it') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="photos" value="1" id="ps-photos"{% if not pf or pst.photos %} checked{% endif %}>{{ _("Check photos") }}</label>
+        <label class="flex cursor-pointer items-center gap-2" title="{{ _('Claude may ask up to three short questions after planning; answering costs no extra call.') }}"><input type="checkbox" class="toggle toggle-primary toggle-sm" name="ask" value="1"{% if not pf or pst.ask %} checked{% endif %}>{{ _("Ask short questions") }}</label>
+        <label class="flex items-center gap-2 text-muted">{{ _("Depth") }}<select name="depth" id="ps-depth" class="select select-sm w-auto bg-base-200"><option value="normal" data-n="{{ ps_depths.normal }}"{% if pst.depth == 'normal' %} selected{% endif %}>{{ _("Normal (≈{n} searches)", n=ps_depths.normal) }}</option><option value="thorough" data-n="{{ ps_depths.thorough }}"{% if pst.depth == 'thorough' %} selected{% endif %}>{{ _("Thorough (≈{n})", n=ps_depths.thorough) }}</option><option value="deep" data-n="{{ ps_depths.deep }}"{% if pst.depth == 'deep' %} selected{% endif %}>{{ _("Deep (≈{n})", n=ps_depths.deep) }}</option></select></label>
+        {% if ps_sites|length > 1 %}<span class="flex flex-wrap items-center gap-2 text-muted">{{ _("Sites") }}{% for pc in ps_sites %}<label class="flex cursor-pointer items-center gap-1.5 text-base-content"><input type="checkbox" name="sites" value="{{ pc.id }}"{% if not pf or pc.id in (pst.platforms or []) %} checked{% endif %} class="checkbox checkbox-sm">{{ pc.name }}</label>{% endfor %}</span>{% endif %}
+        <label class="flex items-center gap-2 text-muted">{{ _("Order") }}<select name="sort" class="select select-sm w-auto bg-base-200"><option value="relevance">{{ _("Relevance") }}</option><option value="newest"{% if pst.sort == 'newest' %} selected{% endif %}>{{ _("Newest first") }}</option></select></label>
       </div>
       {% if ps_sites_off %}<p class="text-[12.5px] text-muted">{{ _("{sites} can also be searched once you switch them on in the settings.", sites=ps_sites_off|map(attribute='name')|join(', ')) }} <a class="link link-primary" href="/settings/{{ ps_sites_off[0].id }}">{{ _("Switch on") }} →</a></p>{% endif %}
       <div class="flex flex-wrap items-center gap-3"><button type="submit" id="ps-submit" class="btn btn-primary" {% if ps_running %}disabled title="{{ _('A product search is still running – wait for it to finish.') }}"{% endif %}>{{ _("Search") }}</button>
         <small class="text-muted">{{ _("Costs up to") }} <strong id="ps-n">{{ ps_depths.normal }}</strong> {{ _("requests per site (one per search; {used} of {budget} willhaben requests used in the last hour)", used=wh_limiter().last_hour, budget=wh_budget()) }} · <span id="ps-calls-photos">{{ _("Claude is called {n} times (plan, ranking, photo check).", n=ps_claude_calls + 1) }}</span><span id="ps-calls-text" hidden>{{ _("Claude is called {n} times (plan + ranking).", n=ps_claude_calls) }}</span></small></div>
     </form>
-    <script>(() => { const sel = document.getElementById('ps-depth'), out = document.getElementById('ps-n'); sel.addEventListener('change', () => { out.textContent = sel.selectedOptions[0].dataset.n; });
+    <section id="ps-direct" x-show="mode === 'direct'"{% if not direct %} x-cloak{% endif %} class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+      <form method="get" action="/deals" role="search" class="m-0 flex flex-col gap-1.5">
+        <label for="ps-q" class="font-semibold">{{ _("Ad link, willhaben ad id or search text") }}</label>
+        <div class="flex flex-nowrap items-center gap-2"><input type="search" id="ps-q" name="q" value="{{ q }}" required placeholder="{{ _('e.g. a link to an ad, or: Raspberry Pi 5') }}" class="input min-w-0 flex-1 bg-base-200"><button class="btn btn-primary">{{ _("Check") }}</button></div>
+      </form>
+      <small class="text-muted">{{ _("A link to an ad (from any switched-on site) checks its price against comparable willhaben ads; a text lists the matching willhaben ads with their price position. No Claude call until you ask for it.") }} {{ _("Each check costs up to 4 willhaben/Geizhals requests (results are cached for an hour); Claude is only asked when you click.") }}</small>
+      {% if error %}{{ ui.msg(error, 'error') }}{% endif %}
+    </section>
+    <script>(() => { const sel = document.getElementById('ps-depth'), out = document.getElementById('ps-n'); const upd = () => { out.textContent = sel.selectedOptions[0].dataset.n; }; sel.addEventListener('change', upd); upd();
       const photos = document.getElementById('ps-photos'); const calls = () => { document.getElementById('ps-calls-photos').hidden = !photos.checked; document.getElementById('ps-calls-text').hidden = photos.checked; }; photos.addEventListener('change', calls); calls(); })();</script>
-    <div id="ps-result">{% if ps %}{% include "_product_search.html" %}{% endif %}</div>
+    <div id="ps-result" x-show="mode === 'ai'"{% if direct %} x-cloak{% endif %}>{% if ps %}{% include "_product_search.html" %}{% endif %}</div>
+    <div x-show="mode === 'direct'"{% if not direct %} x-cloak{% endif %} class="flex min-w-0 flex-col gap-5">
     {% if res %}{% include "_deal_result.html" %}
     {% elif pending_ad %}
     <section hx-get="{{ '/deals/ad/' ~ pending_ad if (pending_platform or 'willhaben') == 'willhaben' else '/deals/ad/' ~ pending_platform ~ '/' ~ pending_ad }}/result?q={{ quote(q) }}&amp;cat={{ quote(pending_cat or '') }}{% if pending_hit %}&amp;hit={{ pending_hit }}{% endif %}" hx-trigger="load" hx-swap="outerHTML" class="flex items-center gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
@@ -34,13 +52,9 @@
       <div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">{% for a in results %}<article class="flex flex-col overflow-hidden rounded-box border border-base-300 bg-base-100"><a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}">{{ ui.thumb(a.image_url, 'h-[150px] w-full', 'rounded-none') }}</a><div class="flex flex-1 flex-col gap-1.5 px-3.5 pt-3 pb-2.5"><a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}" class="font-semibold leading-snug text-base-content no-underline hover:underline">{{ a.title }}</a><div class="flex flex-wrap items-center gap-2"><span class="text-base font-semibold tabular-nums">{{ a.price_display or (a.price|eur) }}</span>{% if a.level %}{{ ui.deal_lvl(a.level, deal_level_label(a.level)) }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ a.location or '' }}</div></div><div class="border-t border-base-300 p-2.5"><a class="btn btn-sm w-full" href="/deals/ad/{{ a.ad_id }}?q={{ quote(q) }}">{{ _("Check") }}</a></div></article>{% else %}<p class="col-span-full text-muted">{{ _("No ads found.") }}</p>{% endfor %}</div>
       {% if spread %}<small class="text-muted">{{ _("The badges compare each ad with the other results of this search.") }}</small>{% endif %}</div>
     {% endif %}
+    </div>
   </div>
   <aside class="flex flex-col gap-4">
-    <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-4 py-3.5">
-      <h3>{{ _("Check a single ad's price") }}</h3>
-      <form method="get" action="/deals" role="search" class="m-0 flex flex-nowrap items-center gap-1.5"><input type="search" name="q" value="{{ q }}" required aria-label="{{ _('Ad link, willhaben ad id or search text') }}" placeholder="{{ _('Ad link, willhaben ad id or search text') }}" class="input input-sm min-w-0 flex-1 bg-base-200"><button class="btn btn-sm">{{ _("Check") }}</button></form>
-      <small class="text-muted">{{ _("Each check costs up to 4 willhaben/Geizhals requests (results are cached for an hour); Claude is only asked when you click.") }}</small>
-    </section>
     {% include "_product_search_recent.html" %}
     {% if recent %}
     <section class="overflow-hidden rounded-box border border-base-300 bg-base-100"><header class="border-b border-base-300 px-4 py-3 font-semibold"><h3>{{ _("Recently checked") }}</h3></header>
@@ -50,4 +64,24 @@
     {% endif %}
   </aside>
 </div>
+<script>
+// A running search replaces its box every 2 s (htmx): the generated searches and the agent form stay open
+// across those refreshes and a reload, per search (sessionStorage; without it they just start closed).
+(() => {
+  const key = () => { const b = document.getElementById('ps-box'); return b ? 'ps-open-' + b.dataset.search : null; };
+  const opened = () => { try { return JSON.parse(sessionStorage.getItem(key()) || '[]'); } catch (e) { return []; } };
+  const save = () => {
+    const k = key(); if (!k) return;
+    const names = [...document.querySelectorAll('#ps-box details[data-keep]')].filter(d => d.open).map(d => d.dataset.keep);
+    try { sessionStorage.setItem(k, JSON.stringify(names)); } catch (e) {}
+  };
+  const restore = () => {
+    if (!key()) return;
+    opened().forEach(n => { const d = document.querySelector('#ps-box details[data-keep="' + n + '"]'); if (d && !d.open) d.open = true; });
+  };
+  document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('#ps-box details[data-keep]')) save(); }, true);
+  document.body.addEventListener('htmx:afterSettle', restore);
+  restore();
+})();
+</script>
 {% endblock %}

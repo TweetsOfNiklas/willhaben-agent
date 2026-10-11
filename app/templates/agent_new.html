@@ -11,10 +11,13 @@
   <h1 class="mt-1.5">{{ _("New search agent") }}</h1>
   <p class="mt-1 max-w-[640px] text-muted">{{ _("Paste a search link from the site, or type what you are looking for — the agent then checks it at human-like intervals.") }}</p>
 </div>
-{% if platform_choices|length > 1 %}
+{# the site: every switched-on one to pick; the switched-off ones lead to their settings page #}
 {% set picker = [] %}{% for pc in platform_choices %}{% set _x = picker.append(('/agents/new?platform=' ~ pc.id ~ (('&keyword=' ~ (preview.keyword|urlencode)) if preview.keyword else ''), pc.name, none, pc.id == platform.id)) %}{% endfor %}
-<div class="mb-4">{{ ui.seg(picker) }}</div>
-{% endif %}
+<div id="agent-sites" class="mb-2 flex flex-wrap items-center gap-2">
+  <span class="text-[12.5px] text-muted">{{ _("Site") }}</span>{{ ui.seg(picker) }}
+  {% for pc in platform_off %}<a href="/settings/{{ pc.id }}" class="inline-flex items-center gap-1 rounded-full border border-dashed border-base-300 px-2.5 py-0.5 text-[12.5px] text-muted no-underline hover:border-primary hover:text-primary" title="{{ _('Switched off – its settings page has the switch') }}">{{ pc.name }} <small class="opacity-75">{{ _("off") }}</small></a>{% endfor %}
+</div>
+{% if platform_off %}<p class="mb-4 text-[12.5px] text-muted">{{ _("{sites} can also be watched once you switch them on in the settings.", sites=platform_off|map(attribute='name')|join(', ')) }} <a class="link link-primary" href="/settings/{{ platform_off[0].id }}">{{ _("Switch on") }} →</a></p>{% else %}<div class="mb-4"></div>{% endif %}
 <form method="get" action="/agents/new" class="mb-3 flex flex-nowrap items-center gap-2.5">
   <input type="hidden" name="platform" value="{{ platform.id }}">
   <label class="input h-[42px] flex-1 rounded-[10px] bg-base-100">

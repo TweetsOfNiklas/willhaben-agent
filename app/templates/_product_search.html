@@ -1,9 +1,9 @@
 {# One Claude product search (ps). Polls itself while running — same hx attributes and ids. #}
 {% import "_ui.html" as ui %}
 {% set live = ps_is_running(ps) %}{% set plan = ps.plan or {} %}{% set st = ps.settings or {} %}
-<section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="ps-box"{% if live %} hx-get="/deals/search/{{ ps.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="ps-box" data-search="{{ ps.id }}"{% if live %} hx-get="/deals/search/{{ ps.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <header class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-base-300 px-4 py-3 font-semibold"><span>{{ _("Search #{id}", id=ps.id) }} <span class="text-[12.5px] font-normal text-muted">· {{ (ps.started_at or ps.created_at)|ago }} · {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}{% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}{% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}</span></span>
-    {% if not live and ps.status != 'asking' %}<form method="post" action="/deals/search/{{ ps.id }}/rerun" class="m-0 ml-auto"><button class="btn btn-xs" {% if ps_running %}disabled{% endif %} title="{{ _('Runs the same searches again; only the ranking and the photo check ask Claude.') }}">↻ {{ _("Run again") }}</button></form>{% endif %}</header>
+    {% if not live and ps.status != 'asking' %}<a href="/deals?from={{ ps.id }}#ps-form" class="btn btn-xs ml-auto" title="{{ _('Copies the text and the options into the search form; you check them and start the search.') }}">{{ ui.icon('edit', 13) }}{{ _("New search") }}</a>{% endif %}</header>
   <div class="flex flex-col gap-3 px-4 py-3.5">
     <p class="italic text-muted">„{{ ps.description }}“</p>
     {% if live %}{% set pr = ps.progress or {} %}
@@ -37,12 +37,12 @@
       </article>{% endfor %}</div>
       {% else %}<p class="text-muted">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
     {% endif %}
-    {% if plan.queries %}<details class="text-[13px] text-muted"><summary class="cursor-pointer">{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
+    {% if plan.queries %}<details data-keep="queries" class="text-[13px] text-muted"><summary class="cursor-pointer">{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
       {% set multi_site = (st.platforms or [])|length > 1 %}<table class="table table-sm mt-2"><thead class="text-[11.5px] tracking-wide uppercase"><tr><th>{{ _("Search term") }}</th>{% if multi_site %}<th>{{ _("Site") }}</th>{% endif %}<th>{{ _("Why") }}</th><th>{{ _("Found") }}</th></tr></thead><tbody>
       {% for q in (ps.queries or plan.queries) %}<tr><td><a class="link link-primary" href="{{ q.url or ('https://www.willhaben.at/iad/' ~ (q.category_path or 'kaufen-und-verkaufen/marktplatz') ~ '?keyword=' ~ (q.keyword|urlencode)) }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from or q.price_to %}<br><small class="text-muted">{{ q.price_from|eur if q.price_from else '' }}–{{ q.price_to|eur if q.price_to else '' }}</small>{% endif %}</td>{% if multi_site %}<td>{{ platform_name(q.platform) }}</td>{% endif %}<td>{{ q.why }}{% if q.category_hint %}<br><span class="text-muted">{{ q.category_hint }}</span>{% endif %}</td><td>{% if q.error %}{{ q.error }}{% elif q.skipped %}{{ _("skipped") }}{% elif q.found is defined and q.found is not none %}{{ _("{n} ads, {k} new candidates", n=q.found, k=q.kept) }}{% else %}–{% endif %}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
     {% if not live and ps.status == 'done' and plan.queries %}
       {% for a in ps_agents %}<small><a class="link link-primary" href="/agents">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% if ps_agents|length > 1 or ps_agent_sites %} ({{ platform_name(a.platform) }}){% endif %}</small>{% endfor %}
-      {% if ps_agent_sites %}<details class="text-[13px]"><summary class="cursor-pointer">{{ _("Create a search agent from this search") }}</summary>
+      {% if ps_agent_sites %}<details data-keep="agent" class="text-[13px]"><summary class="cursor-pointer">{{ _("Create a search agent from this search") }}</summary>
         <form method="post" action="/deals/search/{{ ps.id }}/agent" class="mt-2 flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-200 px-4 py-3.5">
           <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-[minmax(0,1fr)_160px]"><label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ ps_agent_name }}" maxlength="120" class="input w-full bg-base-100"></label><label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ ps_agent_interval_min }}" min="1" class="input w-full bg-base-100"></label></div>
           {{ ui.switch_row(_("Let Claude screen new hits"), _("{n} searches per check", n=ps_agent_n), true, 'name="screen_on"') }}

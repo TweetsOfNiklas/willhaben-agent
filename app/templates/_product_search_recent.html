@@ -20,9 +20,7 @@
         </span>
       </a>
       {% if not running and s.status != 'asking' %}
-      <form method="post" action="/deals/search/{{ s.id }}/rerun" class="m-0">
-        <button type="submit" class="btn btn-ghost btn-sm btn-square text-muted hover:text-base-content" title="{{ _('Run again') }}" aria-label="{{ _('Run again') }}" {% if ps_running %}disabled{% endif %}>{{ ui.icon('refresh', 16) }}</button>
-      </form>
+      <a href="/deals?from={{ s.id }}#ps-form" class="btn btn-ghost btn-sm btn-square text-muted hover:text-base-content" title="{{ _('New search with this text') }}" aria-label="{{ _('New search with this text') }}">{{ ui.icon('edit', 16) }}</a>
       {% endif %}
     </div>
     {% endfor %}

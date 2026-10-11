@@ -426,6 +426,8 @@ async def agents_new(request: Request):
                 preview.update(rows_found=page.rows_found, ads=page.ads)
     return render(request, "agent_new.html", f=filters, url=url, preview=preview, platform=p,
                   platform_choices=platforms.all(), error=error, url_param=url_param,
+                  platform_off=[x for x in platforms.all(enabled_only=False) if not platforms.enabled(x.id)
+                                and (x.can("search_url") or x.can("keyword_search"))],
                   settings=get_settings(), thresholds=screening.thresholds())
 
 

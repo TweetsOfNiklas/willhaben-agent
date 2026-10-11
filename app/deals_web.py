@@ -9,7 +9,7 @@ import re
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, FastAPI, Form, HTTPException, Request
+from fastapi import APIRouter, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -260,8 +260,20 @@ async def product_search_status(request: Request, search_id: int):
     return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id, oob=True))
 
 
+def _prefill(search_id: int | None) -> dict[str, Any] | None:
+    """"New search" on a past search: its text and options fill the form; nothing starts until the user clicks."""
+    row = product_search.get(search_id) if search_id else None
+    if row is None:
+        return None
+    st = {"photos": True, "ask": True, **(row.settings or {})}       # older searches do not store these two
+    return {"id": row.id, "description": row.description, "settings": st}
+
+
 @router.get("/deals", response_class=HTMLResponse)
-async def deals_page(request: Request, q: str = "", search: int | None = None, msg: str | None = None):
+async def deals_page(request: Request, q: str = "", search: int | None = None, msg: str | None = None,
+                     from_: int | None = Query(None, alias="from")):
+    """Product search ("AI search": Claude plans and ranks) and the direct search (one ad's price, or the willhaben
+    ads for a text). `from` = a past search whose text and options fill the form."""
     from app.main import render
 
     q = q.strip()
@@ -285,8 +297,9 @@ async def deals_page(request: Request, q: str = "", search: int | None = None, m
             for a in ads:
                 pos = deals.position(a.get("price"), spread, None) if spread and spread["count"] >= deals.MIN_COMPARABLES else None
                 results.append({**a, "level": (pos or {}).get("level")})
+    prefill = _prefill(from_)
     return render(request, "deals.html", q=q, results=results, spread=spread, error=error, recent=deals.recent(),
-                  res=None, quote=quote, **_search_ctx(search, msg))
+                  res=None, quote=quote, ps_prefill=prefill, **_search_ctx(search or (prefill or {}).get("id"), msg))
 
 
 @router.get("/deals/ad/{ad_id}/result", response_class=HTMLResponse)

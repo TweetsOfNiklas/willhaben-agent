@@ -58,9 +58,9 @@
     <span class="hidden rail-x:inline">willhaben Agent</span>
   </a>
   {{ item('/', 'home', _("Home")) }}
-  {{ item('/agents', 'search', _("Search agents")) }}
+  {{ item('/agents', 'detective', _("Search agents")) }}
   {{ item('/hits', 'target', _("Hits"), counts.get('hits', 0)) }}
-  {{ item('/deals', 'box', _("Product search")) }}
+  {{ item('/deals', 'search', _("Product search")) }}
   {{ item('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)) }}
   {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0)) }}
   {{ item('/myads', 'tag', _("My ads")) }}
@@ -153,7 +153,7 @@
 {% endif %}
 
 {# ---- account menu ---- #}
-{% set more_pages = [('/agents', 'search', _("Search agents"), 0), ('/deals', 'box', _("Product search"), 0), ('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)), ('/new-ad', 'plus', _("New ad"), 0)] %}
+{% set more_pages = [('/agents', 'detective', _("Search agents"), 0), ('/deals', 'search', _("Product search"), 0), ('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)), ('/new-ad', 'plus', _("New ad"), 0)] %}
 <div id="account-menu" x-cloak x-show="layer === 'account'" class="fixed inset-0 z-[90]" @click.self="close()">
   <div class="{{ layer_box }} flex w-[248px] flex-col gap-0.5 p-1.5 max-md:max-h-[calc(100dvh-92px)] max-md:overflow-y-auto" role="menu">
     <div class="mb-1 flex items-center gap-2.5 border-b border-base-300 px-2 pt-2 pb-2.5">
@@ -329,7 +329,7 @@
 {{ _("My ads") }}||/myads
 {{ _("New ad") }}|{{ _("action") }}|/new-ad
 {{ _("Browser window") }}|{{ _("action") }}|/session
-{{ _("Timeline") }}|{{ _("Claude, willhaben, actions") }}|/timeline
+{{ _("Timeline") }}|{{ _("Claude, sites, actions") }}|/timeline
 {{ _("willhaben requests") }}|{{ _("statistics") }}|/stats/willhaben
 {{ _("Report a bug") }}||/bugreport
 {% for p in platforms_all(false) if p.id != 'willhaben' %}{{ p.name }}|{{ _("Settings") }}|/settings/{{ p.id }}

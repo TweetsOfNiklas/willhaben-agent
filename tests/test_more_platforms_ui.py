@@ -88,3 +88,15 @@ def test_viewer_for_a_shpock_ad_and_a_deal(client):
     assert "EKE Case 2.0" in deal and "Preisjäger shows no details here" in deal
     page = client.get("/hits?state=all").text
     assert 'data-ad="preisjaeger:369807"' in page
+
+
+def test_new_agent_shows_every_site(client):
+    page = client.get("/agents/new").text
+    sites = page[page.index('id="agent-sites"'):page.index('id="agent-sites"') + 3000]
+    assert 'href="/agents/new?platform=willhaben"' in sites
+    assert all(f'href="/settings/{pid}"' in sites for pid in ("kleinanzeigen", *NEW))       # off: lead to their switch
+    assert "Kleinanzeigen, Shpock, Vinted, Preisjäger can also be watched once you switch them on" in page
+    set_setting("platform_vinted_enabled", "1")
+    sites = client.get("/agents/new?platform=vinted").text
+    sites = sites[sites.index('id="agent-sites"'):sites.index('id="agent-sites"') + 3000]
+    assert 'href="/agents/new?platform=vinted"' in sites and 'href="/settings/vinted"' not in sites

@@ -6,6 +6,7 @@
 <svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="{{ sw }}" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 {{ cls }}" aria-hidden="true">
   {%- if name == 'home' %}<path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/>
   {%- elif name == 'search' %}<path d="M21 21l-4.3-4.3"/><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z"/>
+  {%- elif name == 'detective' %}<path d="M2 11h20"/><path d="M5 11l1.6-5.6A2 2 0 0 1 8.5 4h7a2 2 0 0 1 1.9 1.4L19 11"/><circle cx="7" cy="17" r="3"/><circle cx="17" cy="17" r="3"/><path d="M10 17h4"/>
   {%- elif name == 'target' %}<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
   {%- elif name == 'box' %}<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v9"/>
   {%- elif name == 'cart' %}<path d="M3 3h2l2.4 12.4a2 2 0 0 0 2 1.6h9.2a2 2 0 0 0 2-1.6L22 7H6"/><path d="M9 21h.01"/><path d="M18 21h.01"/>

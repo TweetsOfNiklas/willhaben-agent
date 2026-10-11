@@ -43,7 +43,7 @@
   <p class="text-muted">{{ _("Pick a purchase on the left.") }}</p>
 {% else %}
   {% call ui.empty(_("No purchase orders yet. Start one with Buy in the product search."), '', 'mt-6 bg-base-100') %}
-    <a class="btn btn-primary btn-sm mt-2" href="/deals">{{ ui.icon('box', 16) }}{{ _("Product search") }}</a>
+    <a class="btn btn-primary btn-sm mt-2" href="/deals">{{ ui.icon('search', 16) }}{{ _("Product search") }}</a>
   {% endcall %}
 {% endif %}
 </div>
