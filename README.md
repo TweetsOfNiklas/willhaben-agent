@@ -193,7 +193,9 @@ it as `.txt`/`.json` and share it yourself. Read it before sharing.
 The app fires events on the HA event bus: `willhaben_hit`, `willhaben_price_drop`, `willhaben_message`,
 `willhaben_auto_reply`, `willhaben_auto_reply_pending`, `willhaben_ad_expiring`, `willhaben_ad_expired`,
 `willhaben_ad_renewed`, `willhaben_meetup`, `willhaben_shipping`, `willhaben_health`, `willhaben_test`. The payload has
-`title`, `message`, `url` and `image`, plus `agent`, `ad_id`, `price` or `conversation_id` depending on the event.
+`title`, `message`, `url` (the original link, often willhaben), `app_url` (the matching page in this dashboard, only
+when Settings → Web address is reachable from a phone, else empty) and `image`, plus `agent`, `ad_id`, `price` or
+`conversation_id` depending on the event.
 Hits also carry the screening result (`screen_relevant`, `screen_deal`, `screen_reason`, `screen_issues`) and the scam
 check (`scam_flags`, `scam_level`). Events always fire, even for hits the screening holds back from your phone. If you picked a phone in
 Settings, the app also sends pushes directly. Otherwise you can build your own automation:
@@ -212,8 +214,8 @@ actions:
       message: "{{ trigger.event.data.message }}"
       data:
         image: "{{ trigger.event.data.image }}"
-        clickAction: "{{ trigger.event.data.url }}"
-        url: "{{ trigger.event.data.url }}"
+        clickAction: "{{ trigger.event.data.app_url or trigger.event.data.url }}"
+        url: "{{ trigger.event.data.app_url or trigger.event.data.url }}"
 ```
 
 ## MCP (Claude Desktop / Claude Code)
