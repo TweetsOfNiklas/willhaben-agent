@@ -1,6 +1,7 @@
-"""Counts of willhaben requests per minute (table AccessCount), for the footer and /stats/willhaben.
+"""Counts of requests to willhaben and the other platforms per minute (table AccessCount), for the footer and the
+request statistics.
 
-Only aggregated, non-personal metadata is kept: (UTC minute, channel, kind, outcome) -> count. The path is reduced to a
+Only aggregated, non-personal metadata is kept: (UTC minute, platform, channel, kind, outcome) -> count. The path is reduced to a
 coarse kind on the spot and thrown away, so no URL, query value, ad id, conversation id or message text is ever stored.
 
 Recording is a dict increment in memory (never raises, never touches the disk in the request path); the scheduler job
@@ -36,7 +37,8 @@ RETENTION_DAYS = 8
 FLUSH_INTERVAL_S = 60
 _MAX_BUFFER_KEYS = 5000            # if the DB stays unwritable: drop counts rather than grow without bound
 
-_buffer: dict[tuple[int, str, str, str], int] = {}
+_buffer: dict[tuple[int, str, str, str, str], int] = {}     # (minute, platform, channel, kind, outcome) -> n
+_PLATFORM_RE = re.compile(r"^[a-z][a-z0-9_]{0,30}$")
 _last_prune = [0.0]
 
 # first match wins; paths are lowercased and stripped of host and query before matching
@@ -86,10 +88,11 @@ def now_minute() -> int:
     return int(time.time() // 60)
 
 
-def record(channel: str, kind: str, outcome: str = "ok", n: int = 1) -> None:
-    """Count one willhaben access. Never raises; unknown values collapse to fixed words (nothing free-form is stored)."""
+def record(channel: str, kind: str, outcome: str = "ok", n: int = 1, *, platform: str = "willhaben") -> None:
+    """Count one access. Never raises; unknown values collapse to fixed words (nothing free-form is stored)."""
     try:
-        key = (now_minute(), channel if channel in CHANNELS else "account", kind if kind in KINDS else "other",
+        key = (now_minute(), platform if _PLATFORM_RE.match(platform or "") else "other",
+               channel if channel in CHANNELS else "other", kind if kind in KINDS else "other",
                outcome if outcome in OUTCOMES else "error")
         if key in _buffer or len(_buffer) < _MAX_BUFFER_KEYS:
             _buffer[key] = _buffer.get(key, 0) + n
@@ -100,8 +103,8 @@ def record(channel: str, kind: str, outcome: str = "ok", n: int = 1) -> None:
 class track:
     """`with track(channel, kind) as tr: ...; tr.status = 200` records the outcome, or `error` on an exception."""
 
-    def __init__(self, channel: str, kind: str) -> None:
-        self.channel, self.kind = channel, kind
+    def __init__(self, channel: str, kind: str, platform: str = "willhaben") -> None:
+        self.channel, self.kind, self.platform = channel, kind, platform
         self.status: int | None = None
         self.outcome: str | None = None
 
@@ -109,11 +112,12 @@ class track:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        record(self.channel, self.kind, "error" if exc_type else (self.outcome or outcome_for_status(self.status)))
+        record(self.channel, self.kind, "error" if exc_type else (self.outcome or outcome_for_status(self.status)),
+               platform=self.platform)
         return False
 
 
-def pending() -> dict[tuple[int, str, str, str], int]:
+def pending() -> dict[tuple[int, str, str, str, str], int]:
     """Counts not yet written to the database (readers add them so the numbers are current)."""
     return dict(_buffer)
 
@@ -123,26 +127,27 @@ def reset() -> None:
     _buffer.clear()
 
 
-def _write(items: dict[tuple[int, str, str, str], int]) -> None:
+def _write(items: dict[tuple[int, str, str, str, str], int]) -> None:
     from sqlalchemy.dialects.sqlite import insert
 
     from app.db import AccessCount, get_engine
 
-    rows = [{"minute": m, "channel": c, "kind": k, "outcome": o, "count": n} for (m, c, k, o), n in items.items()]
+    rows = [{"minute": m, "platform": p, "channel": c, "kind": k, "outcome": o, "count": n}
+            for (m, p, c, k, o), n in items.items()]
     stmt = insert(AccessCount.__table__)
-    stmt = stmt.on_conflict_do_update(index_elements=["minute", "channel", "kind", "outcome"],
+    stmt = stmt.on_conflict_do_update(index_elements=["minute", "platform", "channel", "kind", "outcome"],
                                       set_={"count": AccessCount.__table__.c.count + stmt.excluded.count})
     with get_engine().begin() as conn:
         conn.execute(stmt, rows)
 
 
-def _take() -> dict[tuple[int, str, str, str], int]:
+def _take() -> dict[tuple[int, str, str, str, str], int]:
     items = dict(_buffer)
     _buffer.clear()
     return items
 
 
-def _restore(items: dict[tuple[int, str, str, str], int]) -> None:
+def _restore(items: dict[tuple[int, str, str, str, str], int]) -> None:
     for key, n in items.items():
         if key in _buffer or len(_buffer) < _MAX_BUFFER_KEYS:
             _buffer[key] = _buffer.get(key, 0) + n

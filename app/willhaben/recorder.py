@@ -190,6 +190,7 @@ class Pending:
     store_response: bool = True
     upload: tuple[str, str] | None = None
     key_body: Any = None
+    platform: str = "willhaben"
     context: dict[str, Any] = field(default_factory=dict)
 
 
@@ -205,7 +206,7 @@ def record_http(channel: str, kind: str, method: str, url: str, *, req_headers: 
                 resp_body: Any = None, duration_ms: int | None = None, outcome: str | None = None,
                 cached: bool = False, final_url: str | None = None, error: str | None = None,
                 content_type: str | None = None, ws_status: str | None = None, store_response: bool = True,
-                upload: tuple[str, str] | None = None, key_body: Any = None) -> None:
+                upload: tuple[str, str] | None = None, key_body: Any = None, platform: str = "willhaben") -> None:
     """Store one request and its answer (in the background), when recording is switched on. Never raises."""
     try:
         if not enabled():
@@ -218,7 +219,7 @@ def record_http(channel: str, kind: str, method: str, url: str, *, req_headers: 
                     req_headers=redact_headers(req_headers), req_body=req_body,
                     resp_headers=redact_headers(resp_headers), resp_body=resp_body,
                     content_type=content_type or _content_type(resp_headers) or (_sniff(resp_body) if resp_body is not None else None),
-                    store_response=store_response, upload=upload, key_body=key_body)
+                    store_response=store_response, upload=upload, key_body=key_body, platform=platform or "willhaben")
         _enqueue(p)
     except Exception as e:  # noqa: BLE001 - the recording must never break the request
         log.warning("willhaben recording failed for %s %s: %s", method, url, e)
@@ -286,14 +287,18 @@ def _write(p: Pending) -> None:
         key = canonical_key(p.method, p.url, p.key_body if p.key_body is not None else p.req_body, upload=p.upload)
         status = p.status if p.status is not None else p.ws_status
         title = f"{p.method} {_path(p.url)[:160]}" + (f" → {status}" if status is not None else "") + (" (cache)" if p.cached else "")
+        if p.platform != "willhaben":
+            title = f"[{p.platform}] {title}"
         ok = p.outcome in ("ok", "cached")
         with timeline.context(**p.context):
             failure = f"HTTP {p.status}" if p.status is not None else str(p.ws_status or p.outcome)
             event_id = timeline.record("wh", title, name=p.kind, ok=ok, error=p.error or (None if ok else failure),
                                        duration_ms=p.duration_ms,
                                        payload={k: v for k, v in {"channel": p.channel, "status": status, "bytes": resp_size,
-                                                                  "cached": p.cached or None}.items() if v is not None})
-        rec = WhRecording(event_id=event_id, channel=p.channel, kind=p.kind, method=p.method, url=p.url[:2000],
+                                                                  "cached": p.cached or None,
+                                                                  "platform": p.platform if p.platform != "willhaben" else None}.items()
+                                                if v is not None})
+        rec = WhRecording(event_id=event_id, platform=p.platform, channel=p.channel, kind=p.kind, method=p.method, url=p.url[:2000],
                           final_url=(p.final_url[:2000] if p.final_url and p.final_url != p.url else None),
                           canonical_key=key, status=p.status, ws_status=p.ws_status, duration_ms=p.duration_ms,
                           outcome=p.outcome, cached=p.cached, error=p.error,
@@ -339,7 +344,8 @@ def view_for_event(event_id: int | None) -> dict[str, Any] | None:
         return None
     req, req_cut = _text(r.req_body)
     resp, resp_cut = _text(r.resp_body)
-    return {"id": r.id, "channel": r.channel, "kind": r.kind, "method": r.method, "url": r.url, "final_url": r.final_url,
+    return {"id": r.id, "platform": r.platform or "willhaben", "channel": r.channel, "kind": r.kind, "method": r.method,
+            "url": r.url, "final_url": r.final_url,
             "status": r.status, "ws_status": r.ws_status, "outcome": r.outcome, "cached": r.cached, "error": r.error,
             "content_type": r.content_type, "key": r.canonical_key, "pruned": r.pruned,
             "req_headers": json.loads(r.req_headers) if r.req_headers else None,
@@ -388,7 +394,10 @@ def stats() -> dict[str, Any]:
         rows = int(db.exec(select(func.count()).select_from(WhRecording)).one())
         oldest, newest = db.exec(select(func.min(WhRecording.ts), func.max(WhRecording.ts))).one()
         by_channel = {c: int(n) for c, n in db.exec(select(WhRecording.channel, func.count()).group_by(WhRecording.channel))}
-    return {"rows": rows, "bytes": storage_size(), "oldest": oldest, "newest": newest, "by_channel": by_channel}
+        by_platform = {(p or "willhaben"): int(n) for p, n in db.exec(select(WhRecording.platform, func.count())
+                                                                        .group_by(WhRecording.platform))}
+    return {"rows": rows, "bytes": storage_size(), "oldest": oldest, "newest": newest, "by_channel": by_channel,
+            "by_platform": by_platform}
 
 
 def delete_for_events(db, event_ids: list[int]) -> None:

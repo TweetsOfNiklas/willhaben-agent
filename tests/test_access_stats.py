@@ -94,7 +94,31 @@ def test_record_never_raises_and_only_stores_fixed_words(monkeypatch):
     monkeypatch.setattr(access_log, "now_minute", lambda: 1 / 0)
     access_log.record("anonymous", "search")                               # swallowed
     monkeypatch.undo()
-    assert _counts() == {("anonymous", "other", "error"): 1, ("account", "search", "ok"): 1}
+    assert _counts() == {("anonymous", "other", "error"): 1, ("other", "search", "ok"): 1}
+
+
+# ------------------------------------------------------------------ per platform
+def test_counts_are_kept_per_platform():
+    access_log.record("anonymous", "search", platform="kleinanzeigen")
+    access_log.record("anonymous", "search", platform="kleinanzeigen")
+    access_log.record("anonymous", "search")
+    access_log.record("anonymous", "detail", "cached", platform="kleinanzeigen")
+    access_log.record("anonymous", "search", platform="Bad Platform!")      # free text -> "other"
+    assert access_stats.last_hour() == 1                                  # willhaben only: the footer gauge
+    assert access_stats.last_hour(platform="kleinanzeigen") == 2
+    assert access_stats.by_platform() == {"kleinanzeigen": 2, "willhaben": 1, "other": 1}
+    access_log.flush()
+    assert {(r.platform, r.channel, r.kind, r.outcome, r.count) for r in _rows()} == {
+        ("kleinanzeigen", "anonymous", "search", "ok", 2), ("willhaben", "anonymous", "search", "ok", 1),
+        ("kleinanzeigen", "anonymous", "detail", "cached", 1), ("other", "anonymous", "search", "ok", 1)}
+    assert access_stats.last_hour(platform="kleinanzeigen") == 2 and access_stats.last_hour() == 1
+    assert access_stats.by_platform() == {"kleinanzeigen": 2, "willhaben": 1, "other": 1}
+    s = access_stats.series("1h", platform="kleinanzeigen")
+    assert s["platform"] == "kleinanzeigen" and s["total"] == 2 and s["cached"] == 1 and s["last_hour"] == 2
+    assert access_stats.series("1h")["total"] == 1
+    with access_log.track("anonymous", "search", platform="kleinanzeigen") as tr:
+        tr.status = 429
+    assert access_stats.series("1h", platform="kleinanzeigen")["blocked"] == 1
 
 
 # ------------------------------------------------------------------ recording: anonymous client
@@ -401,8 +425,9 @@ async def test_no_personal_data_stored():
         for v in (r.channel, r.kind, r.outcome):
             assert not re.search(r"\d|[?=/&@]|max|muster", v, re.I), v
         assert r.channel in access_log.CHANNELS and r.kind in access_log.KINDS and r.outcome in access_log.OUTCOMES
+        assert r.platform == "willhaben"
     cols = {c.name for c in AccessCount.__table__.columns}
-    assert cols == {"minute", "channel", "kind", "outcome", "count"}
+    assert cols == {"minute", "platform", "channel", "kind", "outcome", "count"}
 
 
 # ------------------------------------------------------------------ page, footer, API

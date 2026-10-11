@@ -67,8 +67,10 @@ def note(rec, kind: str) -> None:
     except ValueError:
         path = rec.url
     status = rec.status if rec.status is not None else rec.ws_status
-    timeline.record("wh", f"{rec.method} {path[:160]} → {status} (replay)", name=kind,
-                    payload={"replayed_from": rec.id, "status": status, "channel": rec.channel, "replay": True})
+    prefix = f"[{rec.platform}] " if rec.platform and rec.platform != "willhaben" else ""
+    timeline.record("wh", f"{prefix}{rec.method} {path[:160]} → {status} (replay)", name=kind,
+                    payload={k: v for k, v in {"replayed_from": rec.id, "status": status, "channel": rec.channel,
+                                               "replay": True, "platform": rec.platform}.items() if v is not None})
 
 
 def body_text(rec) -> str:

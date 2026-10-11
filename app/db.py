@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import JSON, Column, Index, LargeBinary, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, LargeBinary, String, UniqueConstraint
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from app.config import get_settings
@@ -14,11 +14,18 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _platform_column() -> Column:
+    """The site a row belongs to (app/platforms); old rows are willhaben's."""
+    return Column(String, nullable=False, server_default="willhaben", index=True)
+
+
 class SearchAgent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str
-    source_url: str
-    webapi_url: str
+    platform: str = Field(default="willhaben", sa_column=_platform_column())
+    source_url: str                     # the search as a browser link (= spec["url"]; what "on <site>" opens)
+    webapi_url: str                     # willhaben: the JSON search URL (= spec["api"]); other sites: = source_url
+    spec: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # app.platforms.SearchSpec; None = old row
     interval_s: int = 300
     enabled: bool = True
     notify: bool = True
@@ -44,7 +51,8 @@ class Hit(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("agent_id", "ad_id"),)
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int = Field(foreign_key="searchagent.id", index=True)
-    ad_id: str = Field(index=True)
+    platform: str = Field(default="willhaben", sa_column=_platform_column())
+    ad_id: str = Field(index=True)      # the site's own id; in links it travels as a ref (app.platforms.ad_ref)
     heading: str
     body: str | None = None
     price: float | None = None
@@ -230,8 +238,10 @@ class AdBatch(SQLModel, table=True):
 
 
 class DealCheck(SQLModel, table=True):
-    """Price check of one ad (Produktsuche tab / ad viewer): last analysis and Claude's verdict, one row per ad."""
+    """Price check of one ad (Produktsuche tab / ad viewer): last analysis and Claude's verdict, one row per ad.
+    The key is the ad's ref: the bare id for willhaben, "<platform>:<id>" for other sites."""
     ad_id: str = Field(primary_key=True)
+    platform: str | None = None
     title: str | None = None
     price: float | None = None
     price_display: str | None = None
@@ -341,6 +351,7 @@ class LLMCall(SQLModel, table=True):
 class AccessCount(SQLModel, table=True):
     """willhaben requests per minute (app/willhaben/access_log.py): aggregated counters only, no paths, ids or texts."""
     minute: int = Field(primary_key=True)     # UTC epoch minute (unix time // 60)
+    platform: str = Field(default="willhaben", primary_key=True)   # the site (app/platforms)
     channel: str = Field(primary_key=True)    # anonymous | account | chat
     kind: str = Field(primary_key=True)       # access_log.KINDS
     outcome: str = Field(primary_key=True)    # ok | client_error | blocked | error | cached
@@ -404,6 +415,7 @@ class WhRecording(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     ts: datetime = Field(default_factory=utcnow, index=True)
     event_id: int | None = Field(default=None, index=True)    # TimelineEvent.id (no FK: pruning order never matters)
+    platform: str | None = Field(default=None, index=True)    # the site (app/platforms); None = willhaben (old rows)
     channel: str = Field(index=True)          # anonymous | account | chat | navigation | download | browser
     kind: str = Field(index=True)             # access_log.KINDS + chat_push | download
     method: str                               # GET/POST/PUT/DELETE | UPLOAD | WS | WSPUSH
@@ -448,12 +460,14 @@ def set_engine(engine) -> None:
 
 def init_db() -> None:
     engine = get_engine()
+    _rebuild_access_counts(engine)
     SQLModel.metadata.create_all(engine)
     _add_missing_columns(engine)
 
 
 def _add_missing_columns(engine) -> None:
-    """Tiny forward-only migration: new nullable model fields become columns of existing tables."""
+    """Tiny forward-only migration: new model fields become columns of existing tables when they are nullable or
+    carry a server default (e.g. platform = 'willhaben' for rows from before there were other sites)."""
     from sqlalchemy import inspect, text
 
     insp = inspect(engine)
@@ -463,9 +477,35 @@ def _add_missing_columns(engine) -> None:
                 continue
             existing = {c["name"] for c in insp.get_columns(table.name)}
             for col_ in table.columns:
-                if col_.name not in existing and col_.nullable:
-                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col_.name}" '
-                                      f'{col_.type.compile(engine.dialect)}'))
+                if col_.name in existing:
+                    continue
+                ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{col_.name}" {col_.type.compile(engine.dialect)}'
+                if col_.nullable:
+                    conn.execute(text(ddl))
+                elif col_.server_default is not None:
+                    default = str(col_.server_default.arg).replace("'", "''")
+                    conn.execute(text(f"{ddl} NOT NULL DEFAULT '{default}'"))
+        for table in SQLModel.metadata.sorted_tables:
+            if insp.has_table(table.name):
+                for index in table.indexes:
+                    index.create(conn, checkfirst=True)
+
+
+def _rebuild_access_counts(engine) -> None:
+    """accesscount got `platform` as part of its primary key: SQLite cannot add a key column, so the table is
+    rebuilt once with the old counters kept as willhaben's."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if not insp.has_table("accesscount") or any(c["name"] == "platform" for c in insp.get_columns("accesscount")):
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE accesscount RENAME TO accesscount_old"))
+    SQLModel.metadata.tables["accesscount"].create(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO accesscount (minute, platform, channel, kind, outcome, count) "
+                          "SELECT minute, 'willhaben', channel, kind, outcome, count FROM accesscount_old"))
+        conn.execute(text("DROP TABLE accesscount_old"))
 
 
 def session() -> Session:
@@ -534,6 +574,13 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "timeline_prune": "0",
     "timeline_days": "30",
     "timeline_max_mb": "500",
+    # other platforms (app/platforms): switched on in Settings → Platforms; empty pacing values = the .env defaults
+    "platform_kleinanzeigen_enabled": "0",
+    "platform_kleinanzeigen_per_hour": "",
+    "platform_kleinanzeigen_min_gap_s": "",
+    "platform_willhaben_product_search": "1",
+    "platform_kleinanzeigen_product_search": "1",
+    "kleinanzeigen_api_auth": "",
 }
 
 
@@ -553,6 +600,24 @@ def requests_per_hour() -> int:
     """The hourly willhaben request budget: set in Settings → willhaben, else REQUESTS_PER_HOUR from .env (0 = none)."""
     raw = get_setting("requests_per_hour")
     return int(raw) if raw.isdigit() else get_settings().requests_per_hour
+
+
+def platform_per_hour(platform: str) -> int:
+    """The hourly request budget of a platform (Settings → Platforms, else PLATFORM_<ID>_PER_HOUR; willhaben: its own)."""
+    if platform == "willhaben":
+        return requests_per_hour()
+    raw = get_setting(f"platform_{platform}_per_hour")
+    return int(raw) if raw.isdigit() else int(getattr(get_settings(), f"platform_{platform}_per_hour", 0) or 0)
+
+
+def platform_min_gap_s(platform: str) -> float:
+    if platform == "willhaben":
+        return get_settings().request_min_gap_s
+    raw = get_setting(f"platform_{platform}_min_gap_s").strip()
+    try:
+        return float(raw) if raw else float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+    except ValueError:
+        return float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
 
 
 def get_setting(key: str) -> str:

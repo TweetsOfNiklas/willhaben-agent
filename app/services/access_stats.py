@@ -1,4 +1,4 @@
-"""willhaben access statistics: time buckets and totals from the per-minute access log (app/willhaben/access_log.py).
+"""Request statistics per platform: time buckets and totals from the per-minute access log (app/willhaben/access_log.py).
 
 Storage is UTC epoch minutes; labels are local time (Europe/Vienna, like the rest of the dashboard).
 Cache hits (`cached`) are shown separately and never count as a willhaben access.
@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import func, select
 
-from app.db import AccessCount, requests_per_hour, session
+from app.db import AccessCount, platform_per_hour, session
 from app.i18n import t
 from app.willhaben import access_log
 from app.willhaben.access_log import CHANNELS, KINDS, OUTCOMES
@@ -41,17 +41,18 @@ def outcome_label(o: str) -> str:
             "error": t("error (5xx/network)"), "cached": t("from cache (no access)")}.get(o, o)
 
 
-def _rows(first_min: int, last_min: int, bucket_s: int, off: int) -> list[tuple[int, str, str, str, int]]:
-    """(bucket index, channel, kind, outcome, count) for minutes in [first_min, last_min], summed in SQLite, plus the
-    not yet flushed buffer. Bucket index = (UTC seconds + local offset) // bucket_s."""
+def _rows(first_min: int, last_min: int, bucket_s: int, off: int,
+          platform: str = "willhaben") -> list[tuple[int, str, str, str, int]]:
+    """(bucket index, channel, kind, outcome, count) of one platform for minutes in [first_min, last_min], summed in
+    SQLite, plus the not yet flushed buffer. Bucket index = (UTC seconds + local offset) // bucket_s."""
     b = ((AccessCount.minute * 60 + off) // bucket_s).label("b")
     with session() as db:
         stored = [tuple(r) for r in db.exec(
             select(b, AccessCount.channel, AccessCount.kind, AccessCount.outcome, func.sum(AccessCount.count))
-            .where(AccessCount.minute >= first_min, AccessCount.minute <= last_min)
+            .where(AccessCount.minute >= first_min, AccessCount.minute <= last_min, AccessCount.platform == platform)
             .group_by(b, AccessCount.channel, AccessCount.kind, AccessCount.outcome))]
-    pend = [((m * 60 + off) // bucket_s, c, k, o, n) for (m, c, k, o), n in access_log.pending().items()
-            if first_min <= m <= last_min]
+    pend = [((m * 60 + off) // bucket_s, c, k, o, n) for (m, p, c, k, o), n in access_log.pending().items()
+            if first_min <= m <= last_min and p == platform]
     return stored + pend
 
 
@@ -60,19 +61,36 @@ def _rows(first_min: int, last_min: int, bucket_s: int, off: int) -> list[tuple[
 UNPACED = (("chat", "chat", "error"),)
 
 
-def last_hour(now: float | None = None, exclude: tuple[tuple[str, str, str], ...] = ()) -> int:
-    """willhaben accesses (cache hits excluded) in the last 60 minutes incl. the current one, from the persisted log.
-    `exclude`: (channel, kind, outcome) combinations not to count."""
+def last_hour(now: float | None = None, exclude: tuple[tuple[str, str, str], ...] = (),
+              platform: str = "willhaben") -> int:
+    """Accesses of one platform (cache hits excluded) in the last 60 minutes incl. the current one, from the
+    persisted log. `exclude`: (channel, kind, outcome) combinations not to count."""
     now_min = int((now if now is not None else time.time()) // 60)
     first = now_min - 59
-    where = [AccessCount.minute >= first, AccessCount.minute <= now_min, AccessCount.outcome != "cached"]
+    where = [AccessCount.minute >= first, AccessCount.minute <= now_min, AccessCount.outcome != "cached",
+             AccessCount.platform == platform]
     for c, k, o in exclude:
         where.append(~((AccessCount.channel == c) & (AccessCount.kind == k) & (AccessCount.outcome == o)))
     with session() as db:
         stored = db.exec(select(func.coalesce(func.sum(AccessCount.count), 0)).where(*where)).one()
-    pend = sum(n for (m, c, k, o), n in access_log.pending().items()
-               if first <= m <= now_min and o != "cached" and (c, k, o) not in exclude)
+    pend = sum(n for (m, p, c, k, o), n in access_log.pending().items()
+               if first <= m <= now_min and o != "cached" and (c, k, o) not in exclude and p == platform)
     return int(stored or 0) + pend
+
+
+def by_platform(now: float | None = None) -> dict[str, int]:
+    """Accesses in the last hour per platform (cache hits excluded)."""
+    now_min = int((now if now is not None else time.time()) // 60)
+    first = now_min - 59
+    with session() as db:
+        rows = db.exec(select(AccessCount.platform, func.sum(AccessCount.count))
+                       .where(AccessCount.minute >= first, AccessCount.minute <= now_min, AccessCount.outcome != "cached")
+                       .group_by(AccessCount.platform)).all()
+    out = {p: int(n or 0) for p, n in rows}
+    for (m, p, _c, _k, o), n in access_log.pending().items():
+        if first <= m <= now_min and o != "cached":
+            out[p] = out.get(p, 0) + n
+    return out
 
 
 def _local(ts: float, fmt: str) -> str:
@@ -83,8 +101,9 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
 
-def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]:
-    """Buckets (oldest first, the last one is the current, partial bucket) stacked by channel, plus totals."""
+def series(rng: str = DEFAULT_RANGE, now: float | None = None, platform: str = "willhaben") -> dict[str, Any]:
+    """Buckets of one platform (oldest first, the last one is the current, partial bucket) stacked by channel, plus
+    totals."""
     rng = rng if rng in RANGES else DEFAULT_RANGE
     span, bucket_s = RANGES[rng]
     now = time.time() if now is None else now
@@ -100,7 +119,7 @@ def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]
     by_channel = {c: 0 for c in CHANNELS}
     by_kind = {k: 0 for k in KINDS}
     by_outcome = {o: 0 for o in OUTCOMES}
-    for bidx, ch, kind, outcome, cnt in _rows(first_ts // 60, int(now // 60), bucket_s, off):
+    for bidx, ch, kind, outcome, cnt in _rows(first_ts // 60, int(now // 60), bucket_s, off, platform):
         idx = bidx - first_idx
         if not 0 <= idx < n:
             continue
@@ -117,8 +136,9 @@ def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]
             b["blocked"] += cnt
     total = sum(by_channel.values())
     peak = max(buckets, key=lambda b: b["total"])
-    budget = requests_per_hour()
+    budget = platform_per_hour(platform)
     return {
+        "platform": platform,
         "range": rng, "ranges": list(RANGES), "bucket_s": bucket_s, "from": _iso(first_ts), "to": _iso(now),
         "channels": list(CHANNELS), "buckets": buckets, "total": total,
         "cached": by_outcome.get("cached", 0), "blocked": by_outcome.get("blocked", 0),
@@ -127,7 +147,7 @@ def series(rng: str = DEFAULT_RANGE, now: float | None = None) -> dict[str, Any]
         "peak": {"start": peak["start"], "label": peak["label"], "total": peak["total"]} if peak["total"] else None,
         "budget": budget,
         "budget_per_bucket": round(budget * bucket_s / 3600, 2) if budget and rng in BUDGET_LINE_RANGES else None,
-        "last_hour": last_hour(now),
+        "last_hour": last_hour(now, platform=platform),
     }
 
 

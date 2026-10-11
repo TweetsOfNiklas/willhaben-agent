@@ -103,7 +103,7 @@ def export_recordings(out: Path, *, since: timedelta | None = None, kinds: set[s
     for r in sorted(picked, key=lambda r: r.id):
         req_ct = recorder._sniff(recorder.decode_body(r.req_body)) if r.req_body is not None else None
         entries.append((r, {
-            "method": r.method, "url": r.url, "final_url": r.final_url,
+            "method": r.method, "url": r.url, "final_url": r.final_url, "platform": r.platform or "willhaben",
             "kind": r.kind, "channel": r.channel, "status": r.status, "ws_status": r.ws_status,
             "content_type": r.content_type, "recorded_at": r.ts.isoformat(timespec="seconds"),
             "truncated": r.resp_truncated,
