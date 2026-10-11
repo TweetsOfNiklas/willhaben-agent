@@ -799,6 +799,19 @@ def _ceiling_lines(mode: str, shipping_cost: float | None, shipping_source: str 
     return lines
 
 
+def _amount_cap_lines(max_price: float | None, asking: float | None) -> list[str]:
+    """Every euro amount in our own message is checked against the maximum (code refuses the message otherwise),
+    also amounts we only quote: the asking price, a seller's price, comparable ads."""
+    if not max_price:
+        return []
+    lines = [f"- Kein Eurobetrag in deiner Nachricht darf über {_money_de(max_price)} liegen, auch kein zitierter "
+             "(Angebotspreis, Preis des Verkäufers, vergleichbare Anzeigen). Sonst wird die Nachricht nicht gesendet."]
+    if asking and asking > max_price + 0.005:
+        lines.append(f"- Der Angebotspreis der Anzeige ({_money_de(asking)}) liegt über dem Höchstpreis: nenn ihn "
+                     "nicht, auch nicht als „statt …“ oder „du verlangst …“.")
+    return lines
+
+
 def _market_line(market: dict[str, Any] | None, median: float | None) -> list[str]:
     """Figures of comparable ads, to be used as arguments ("vergleichbare Anzeigen gibt es ab X")."""
     m = market or {}
@@ -848,6 +861,7 @@ def purchase_rules(*, asking: float | None, median: float | None, target: float 
     lines = ["Regeln für den Kauf (verbindlich, vor allen anderen Regeln):"]
     lines.append(f"- Angebotspreis der Anzeige: {_money_de(asking) if asking else 'unbekannt'}")
     lines += _ceiling_lines(mode, shipping_cost, shipping_source, max_price, item_ceiling, fee)
+    lines += _amount_cap_lines(max_price, asking)
     if max_price:
         lines.append("- Verlangt der Verkäufer mehr und geht nicht darunter, setze stage = \"needs_user\".")
     if target:
@@ -930,7 +944,9 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
                            mode: str, rules: str, *, seller_name: str | None = None,
                            shipping_cost: float | None = None, shipping_source: str | None = None,
                            item_ceiling: float | None = None, market: dict[str, Any] | None = None,
-                           fee: dict[str, Any] | None = None, questions: list[str] | None = None) -> str:
+                           fee: dict[str, Any] | None = None, questions: list[str] | None = None,
+                           asking: float | None = None, refused: tuple[str, list[str]] | None = None) -> str:
+    """`refused`: the previous attempt and why the code refused it, for the one retry."""
     ctx = ad_context or {}
     first = seller_first_name(seller_name or ctx.get("seller_name"))
     lines = ["Anzeige:",
@@ -941,6 +957,7 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
              "", f"Vorname des Verkäufers: {first}" if first else "Vorname des Verkäufers: unbekannt (keine Anrede mit Namen)",
              f"Modus: {'Abholung' if mode == 'pickup' else 'mit willhaben PayLivery' if mode == 'paylivery' else 'Überweisung'}",
              *_ceiling_lines(mode, shipping_cost, shipping_source, max_price, item_ceiling, fee),
+             *_amount_cap_lines(max_price, asking),
              f"Zielpreis Artikel (darunter beginnen): {_money_de(target) if target else 'kein Zielpreis'}"]
     if mode == "direct" and target and shipping_cost is not None:
         lines.append(f"Zielpreis inkl. Versand: {_money_de(target + shipping_cost)}")
@@ -949,4 +966,8 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
         lines += ["", "Fragen der Person an den Verkäufer (in dieser Nachricht stellen):", *[f"- {q}" for q in questions]]
     lines += ["", "Regeln der Person für Käufe:", (rules or "").strip() or "(keine)",
               "", "Aufgabe: Schreib die erste Nachricht an den Verkäufer."]
+    if refused:
+        text, why = refused
+        lines += ["", f"Dein erster Entwurf wurde nicht gesendet ({'; '.join(why)}):", f"„{text}“",
+                  "Schreib ihn neu und vermeide genau das."]
     return "\n".join(lines)
