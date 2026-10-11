@@ -57,7 +57,7 @@ def app_path(kind: str, url: str | None, ad_id: Any = None, conversation_id: Any
 def app_link(kind: str, url: str | None, data: dict[str, Any] | None = None) -> str | None:
     """Full link to the app page of a notification (public_url + app_path), None if no page fits."""
     data = data or {}
-    path = app_path(kind, url, data.get("ad_id"), data.get("conversation_id"))
+    path = app_path(kind, url, data.get("ref") or data.get("ad_id"), data.get("conversation_id"))
     return get_settings().public_url.rstrip("/") + path if path else None
 
 
@@ -90,7 +90,10 @@ async def notify(kind: str, title: str, message: str, *, url: str | None = None,
     Returns True if HA accepted the event. `channel` overrides the push channel setting (the connection
     watchdog uses "both" when one channel is broken).
     """
-    ids = {k: str(v) for k in ("ad_id", "conversation_id") if (v := (data or {}).get(k))}
+    d = data or {}
+    ids = {k: str(v) for k in ("ad_id", "conversation_id") if (v := d.get(k))}
+    if d.get("ref"):
+        ids["ad_id"] = str(d["ref"])          # other sites: "<platform>:<id>", so the inbox opens the right viewer
     log_event(kind, f"{title}: {message}", url, **ids)
     from app.services import telegram
     from app.services.ha_auth import ha_token, ha_url, notify_service

@@ -265,6 +265,7 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
         alts = (draft.alternatives or []) if draft else []
         rows += _rows([_button(a["label"], "D_ALT", f"{draft_id}|{a['label']}|{a['instruction']}") for a in alts])
     buttons = []
+    ref = data.get("ref") or ad_id                # hits of other sites: "<platform>:<id>"
     if kind == "message" and conv:
         buttons += [_button("✍️ " + t("Draft with Claude"), "C_DRAFT", conv), _button("↩️ " + t("Reply"), "C_REPLY", conv)]
     elif kind == "auto_reply" and conv:
@@ -273,8 +274,8 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
         if ad_id:
             buttons.append(_button("⏸ " + t("Auto answers off for this ad"), "A_OFF", ad_id))
     elif kind in ("hit", "price_drop") and ad_id:
-        buttons += [_button("⭐ " + t("Keep"), "H_SAVE", ad_id), _button("🚫 " + t("Ignore"), "H_IGNORE", ad_id)]
-        if get_setting("purchase_enabled") == "1":
+        buttons += [_button("⭐ " + t("Keep"), "H_SAVE", ref), _button("🚫 " + t("Ignore"), "H_IGNORE", ref)]
+        if get_setting("purchase_enabled") == "1" and ":" not in str(ref):   # purchase orders: willhaben only
             buttons.append(_button("🛒 " + t("Start purchase order"), "P_BUY", ad_id))
     rows += _rows(buttons)
     if url and url.startswith("https://"):
@@ -740,9 +741,16 @@ def _set_auto(ad_id: str, on: bool) -> str:
         return ad.heading or ad_id
 
 
-def _set_hit_state(ad_id: str, state: str) -> int:
+def _set_hit_state(ref: str, state: str) -> int:
+    """Every agent's hit of this ad (the ref names the site; a bare id is a willhaben id from an older push)."""
+    from app.platforms import InvalidRef, split_ref
+
+    try:
+        platform, ad_id = split_ref(ref)
+    except InvalidRef:
+        return 0
     with session() as db:
-        hits = db.exec(select(Hit).where(Hit.ad_id == ad_id)).all()
+        hits = db.exec(select(Hit).where(Hit.ad_id == ad_id, Hit.platform == platform)).all()
         for h in hits:
             h.state = state
             db.add(h)

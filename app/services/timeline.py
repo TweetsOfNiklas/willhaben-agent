@@ -411,6 +411,13 @@ def action_label(name: str, fallback: str = "") -> str:
     return t(label) if label else (fallback or name)
 
 
+def ad_ref_for(platform: Any, ad_id: Any) -> str:
+    """The ad id as it is stored on entries: bare for willhaben, "<platform>:<id>" for other sites."""
+    from app.platforms import ad_ref
+
+    return ad_ref(str(platform) if platform else None, str(ad_id))
+
+
 def resolve_ids(fields: dict[str, Any]) -> dict[str, Any]:
     """Add the ids a known thing leads to: a reply draft or shipment -> its chat, a chat -> its ad, a hit -> its agent
     and ad, a purchase -> its ad and chat. Missing rows are ignored."""

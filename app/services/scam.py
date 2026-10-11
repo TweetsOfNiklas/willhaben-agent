@@ -37,19 +37,20 @@ CHEAP_OK_HEADING = re.compile(r"\b(tausch\w*|suche|gesucht|teile|hülle|case|cov
                               r"nur (die )?(box|verpackung))\b", _I)
 PREPAY_ONLY = re.compile(r"\b(nur|ausschlie(?:ß|ss)lich)\s+(?:(?:gegen|per|mit|bei|über)\s+)?"
                          r"(vor(?:aus)?kasse|vorab[- ]?(?:überweisung|zahlung)|überweisung)\b", _I)
-PICKUP_OK = re.compile(r"\b(abholung|abholen|selbstabhol\w*|barzahlung|bar bei|paylivery|treffen|persönlich)\b", _I)
+PICKUP_OK = re.compile(r"\b(abholung|abholen|selbstabhol\w*|barzahlung|bar bei|paylivery|sicher bezahlen|treffen|persönlich)\b", _I)
 NO_PICKUP = re.compile(r"\bkeine (selbst)?abholung\b|\babholung (ist )?(leider )?nicht möglich\b", _I)
 MONEY_TRANSFER = re.compile(r"\b(western\s?union|money\s?gram|ria money|paysafe\s?(card|karte)?|"
                             r"(amazon|itunes|google[- ]play|steam)[- ]?(gutschein|karte|guthaben))", _I)
 CRYPTO_PAY = re.compile(r"\b(zahlung|bezahlung|bezahlen|zahle|überweis\w*)\b[^.\n]{0,30}\b(bitcoin|btc|krypto\w*|usdt|ethereum)\b", _I)
 COURIER = re.compile(r"\b(kurier\w*|spedition\w*|transport(unternehmen|firma|dienst)|lieferdienst|lieferfirma)\b", _I)
 ABROAD = re.compile(r"\b(im ausland|aus dem ausland|ins ausland|beruflich (im ausland|unterwegs)|auf montage|"
-                    r"nicht (mehr )?in österreich|derzeit in|zurzeit in|momentan in)\b", _I)
+                    r"nicht (mehr )?in (österreich|deutschland|der schweiz)|derzeit in|zurzeit in|momentan in)\b", _I)
 SHIP_ONLY = re.compile(r"\b(nur|ausschlie(?:ß|ss)lich)\s+(per\s+)?(post)?versand\b|" + NO_PICKUP.pattern, _I)
 OFF_PLATFORM = re.compile(r"\b(nur|ausschlie(?:ß|ss)lich)\s+(?:(?:über|per|via|auf|an|mit|unter)\s+)?"
                           r"(whats\s?app|telegram|signal|viber|e-?mail|mail)\b|"
-                          r"\bkeine willhaben[- ]?nachrichten\b|\bantworte nicht (auf|über) willhaben\b|"
-                          r"\b(willhaben[- ]?)?nachrichten (hier )?(werden )?nicht gelesen\b", _I)
+                          r"\bkeine (willhaben|kleinanzeigen|plattform|portal|app)[- ]?nachrichten\b|"
+                          r"\bantworte nicht (auf|über) (willhaben|kleinanzeigen|die plattform|die app)\b|"
+                          r"\b((willhaben|kleinanzeigen|plattform)[- ]?)?nachrichten (hier )?(werden )?nicht gelesen\b", _I)
 MESSENGER = re.compile(r"\b(whats\s?app|telegram|viber)\b", _I)
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]*[a-z]{2,}", _I)
 EMAIL_SPELLED = re.compile(r"\b[\w.+-]+\s*(\(at\)|\[at\])\s*[\w-]+\s*(\.|\(punkt\)|\(dot\))\s*[a-z]{2,}\b", _I)
@@ -75,6 +76,8 @@ DEALER_TEXT = re.compile(r"\b(\d+ (monate|jahre?) gewährleistung|gewährleistun
 PRIVATE_TEXT = re.compile(r"\b(privatverkauf|privat ?verkauf|keine garantie|keine gewährleistung|keine rücknahme)\b", _I)
 # neighbours and common EU countries: a German or Swiss number is normal for a seller near the border
 NEAR_CC = ("43", "49", "41", "423", "420", "421", "36", "386", "39")
+# an IBAN of the site's own country is just "bank details", a neighbour's is worth a look, anything else a warning
+NEAR_IBAN = {"AT": ("DE", "CH"), "DE": ("AT", "CH", "NL"), "CH": ("DE", "AT")}
 
 
 def _label(code: str, **p: Any) -> str:
@@ -89,7 +92,7 @@ def _label(code: str, **p: Any) -> str:
         "courier_abroad": lambda: t("Seller abroad, delivery by courier"),
         "courier_cheap": lambda: t("Courier delivery at a very low price"),
         "ship_only_cheap": lambda: t("Shipping only, at a very low price"),
-        "off_platform": lambda: t("Wants contact outside willhaben"),
+        "off_platform": lambda: t("Wants contact outside the platform"),
         "email": lambda: t("E-mail address in the text"),
         "foreign_iban": lambda: t("Foreign bank account (IBAN {cc})", **p),
         "iban": lambda: t("Bank details in the text"),
@@ -167,9 +170,11 @@ def agent_context(agent_id: int, exclude: set[int] | None = None) -> dict[str, A
     return median_context(list(prices))
 
 
-def flags(item: Any, context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Scam flags for a Hit, AdSummary, AdDetail or dict (heading, body/description, price, is_private)."""
+def flags(item: Any, context: dict[str, Any] | None = None, *, home_country: str = "AT") -> list[dict[str, Any]]:
+    """Scam flags for a Hit, Listing, AdDetail or dict (heading, body/description, price, is_private).
+    `home_country` is the site's country (an IBAN from there is normal)."""
     ctx = context or {}
+    home = (home_country or "AT").upper()
     heading = _get(item, "heading", "title") or ""
     body = _get(item, "body", "description") or ""
     text = f"{heading}\n{body}"
@@ -215,10 +220,10 @@ def flags(item: Any, context: dict[str, Any] | None = None) -> list[dict[str, An
         add("prepay_only", "warn")
     for raw in IBAN.findall(text.upper()):
         if _iban_ok(raw):
-            if raw[:2] == "AT":
+            if raw[:2] == home:
                 add("iban", "info")
             else:
-                add("foreign_iban", "warn" if raw[:2] in ("DE", "CH") else "high", cc=raw[:2])
+                add("foreign_iban", "warn" if raw[:2] in NEAR_IBAN.get(home, ()) else "high", cc=raw[:2])
 
     # --- delivery
     if COURIER.search(text):
@@ -292,4 +297,13 @@ def for_viewer(d: Any, h: Any = None) -> list[dict[str, Any]]:
     ctx = agent_context(h.agent_id, {h.id}) if h is not None and getattr(h, "agent_id", None) else None
     item = {"heading": d.heading, "description": d.description, "price": d.price,
             "is_private": d.is_private if d.is_private is not None else getattr(h, "is_private", None)}
-    return all_flags(flags(item, ctx))
+    return all_flags(flags(item, ctx, home_country=home_country_of(getattr(d, "platform", None))))
+
+
+def home_country_of(platform: str | None) -> str:
+    from app import platforms
+
+    try:
+        return platforms.get(platform or "willhaben").home_country
+    except Exception:  # noqa: BLE001 - an unknown platform: willhaben's rules
+        return "AT"

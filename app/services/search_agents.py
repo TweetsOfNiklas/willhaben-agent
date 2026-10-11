@@ -1,7 +1,8 @@
-"""Own search agents: poll the search JSON, diff against stored hits, notify.
+"""Own search agents: run a search on its platform, diff against stored hits, notify.
 
-An agent is either one willhaben search URL or, created from a product search, several keyword searches
-(`queries`) run one after another per check, with the search plan's cheap code filters (`plan`) applied to new ads.
+An agent watches one site (app/platforms): either one pasted search link (`spec`) or, created from a product search,
+several keyword searches (`queries`) run one after another per check, with the search plan's cheap code filters
+(`plan`) applied to new ads. Nothing here knows a site's URLs or JSON; the adapters do.
 """
 from __future__ import annotations
 
@@ -16,9 +17,9 @@ from app.config import get_settings
 from app.db import Hit, ProductSearch, SearchAgent, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services import product_search, scam, screening
+from app import platforms
+from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ad_ref
 from app.services.notify import notify
-from app.willhaben.parse import AdSummary, describe_search, keyword_search_url, to_webapi_url, web_url
-from app.willhaben.public import Blocked, WillhabenError, get_public
 
 log = logging.getLogger(__name__)
 
@@ -38,12 +39,21 @@ class RunResult:
     error: str | None = None
 
 
-def create_agent(source_url: str, name: str | None = None, interval_s: int | None = None) -> SearchAgent:
+def _interval(platform: platforms.Platform, interval_s: int | None) -> int:
     s = get_settings()
-    webapi = to_webapi_url(source_url, rows=s.search_rows)
-    interval = max(interval_s or s.default_agent_interval_s, s.min_agent_interval_s)
-    agent = SearchAgent(name=name or describe_search(source_url), source_url=source_url.strip(),
-                        webapi_url=webapi, interval_s=interval)
+    return max(interval_s or s.default_agent_interval_s, s.min_agent_interval_s, platform.min_interval_s)
+
+
+def create_agent(source_url: str, name: str | None = None, interval_s: int | None = None) -> SearchAgent:
+    """An agent from a pasted result-list link of any supported site. Raises InvalidSearchUrl."""
+    p = platforms.for_url(source_url)
+    return create_agent_from_spec(p.parse_search_url(source_url), name, interval_s)
+
+
+def create_agent_from_spec(spec: SearchSpec, name: str | None = None, interval_s: int | None = None) -> SearchAgent:
+    p = platforms.get(spec.platform)
+    agent = SearchAgent(name=name or p.describe(spec), platform=p.id, spec=spec.to_json(), source_url=spec.url,
+                        webapi_url=spec.api or spec.url, interval_s=_interval(p, interval_s))
     with session() as db:
         db.add(agent)
         db.commit()
@@ -51,18 +61,32 @@ def create_agent(source_url: str, name: str | None = None, interval_s: int | Non
     return agent
 
 
-def agent_queries(plan: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """The agent's searches for a product-search plan: newest first (agents diff on newness), no price_to in the
-    URL (drop_reason applies it, like the product search does)."""
-    rows = get_settings().search_rows
+def agent_spec(agent: SearchAgent) -> SearchSpec:
+    """The agent's search; rows from before `spec` existed are willhaben searches with their stored URLs."""
+    if agent.spec:
+        return SearchSpec.from_json(agent.spec)
+    return SearchSpec(platform=agent.platform or "willhaben", url=agent.source_url, api=agent.webapi_url)
+
+
+def _query_spec(q: dict[str, Any], platform: str = "willhaben") -> SearchSpec:
+    if q.get("spec"):
+        return SearchSpec.from_json(q["spec"])
+    return SearchSpec(platform=q.get("platform") or platform, url=q.get("source_url") or q.get("webapi_url") or "",
+                      api=q.get("webapi_url"), keyword=q.get("keyword"), price_from=q.get("price_from"))
+
+
+def agent_queries(plan: dict[str, Any] | None, platform_id: str = "willhaben") -> list[dict[str, Any]]:
+    """The agent's searches for a product-search plan on one platform: newest first (agents diff on newness), no
+    price_to in the search (drop_reason applies it, like the product search does)."""
+    p = platforms.get(platform_id)
     out = []
     for q in (plan or {}).get("queries") or []:
         if not isinstance(q, dict) or not q.get("keyword"):
             continue
-        path = q.get("category_path") or product_search.DEFAULT_PATH
-        webapi = keyword_search_url(q["keyword"], rows, q.get("price_from"), None, sort=1, path=path)
-        out.append({"keyword": q["keyword"], "webapi_url": webapi, "source_url": web_url(webapi),
-                    "price_from": q.get("price_from"), "price_to": q.get("price_to"),
+        category = q.get("category_path") if p.id == "willhaben" else None
+        spec = p.keyword_search(q["keyword"], q.get("price_from"), None, category=category, sort="newest")
+        out.append({"keyword": q["keyword"], "platform": p.id, "spec": spec.to_json(), "webapi_url": spec.api,
+                    "source_url": spec.url, "price_from": q.get("price_from"), "price_to": q.get("price_to"),
                     "category_path": q.get("category_path"), "why": q.get("why") or ""})
     return out
 
@@ -104,22 +128,25 @@ def agent_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def create_agent_from_search(search_id: int, name: str | None = None, interval_s: int | None = None,
-                             screen: bool = True) -> SearchAgent:
-    """A search agent that keeps running a finished product search's keyword searches. Raises KeyError for an
-    unknown search, ValueError when it has no planned searches. Does not run the baseline (the caller schedules)."""
+                             screen: bool = True, platform: str = "willhaben") -> SearchAgent:
+    """A search agent that keeps running a finished product search's keyword searches on one platform. Raises
+    KeyError for an unknown search, ValueError when it has no planned searches or the platform cannot search by
+    keyword. Does not run the baseline (the caller schedules)."""
     with session() as db:
         row = db.get(ProductSearch, search_id)
     if row is None:
         raise KeyError(search_id)
-    queries = agent_queries(row.plan)
+    p = platforms.get(platform)
+    if not p.can("keyword_search"):
+        raise ValueError(t("{name} has no keyword search.", name=p.name))
+    queries = agent_queries(row.plan, p.id)
     if not queries:
-        raise ValueError(t("This search has no planned willhaben searches yet."))
-    s = get_settings()
-    interval = max(interval_s or default_interval_s(len(queries)), s.min_agent_interval_s)
+        raise ValueError(t("This search has no planned searches yet."))
+    interval = _interval(p, interval_s or default_interval_s(len(queries)))
     first = queries[0]
-    agent = SearchAgent(name=(name or "").strip() or agent_name(row), source_url=first["source_url"],
-                        webapi_url=first["webapi_url"], interval_s=interval, queries=queries,
-                        plan=agent_plan(row.plan), search_id=row.id)
+    agent = SearchAgent(name=(name or "").strip() or agent_name(row), platform=p.id, spec=first["spec"],
+                        source_url=first["source_url"], webapi_url=first["webapi_url"] or first["source_url"],
+                        interval_s=interval, queries=queries, plan=agent_plan(row.plan), search_id=row.id)
     if screen:
         agent.screen, agent.screen_brief, agent.screen_min = True, screen_brief(row) or None, "match"
     with session() as db:
@@ -129,22 +156,21 @@ def create_agent_from_search(search_id: int, name: str | None = None, interval_s
     return agent
 
 
-async def _search_all(queries: list[dict[str, Any]]) -> tuple[list[tuple[AdSummary, dict[str, Any]]], int,
-                                                             list[str], Exception | None, int]:
-    """Run an agent's searches one after another (uncached). Returns (ads with their query, de-duplicated by ad id,
-    first occurrence wins; summed rows_found; error lines; first exception; number of searches that succeeded).
-    A block stops the remaining searches of this run."""
-    client = get_public()
-    ads: list[tuple[AdSummary, dict[str, Any]]] = []
+async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> tuple[
+        list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, int]:
+    """Run an agent's searches one after another (uncached), each on its platform. Returns (ads with their query,
+    de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; number of
+    searches that succeeded). A block stops the remaining searches of this run."""
+    ads: list[tuple[Listing, dict[str, Any] | None]] = []
     seen: set[str] = set()
     rows, errors, first_exc, ok = 0, [], None, 0
-    n = len(queries)
-    for i, q in enumerate(queries, 1):
+    n = len(specs)
+    for i, (spec, q) in enumerate(specs, 1):
         try:
-            page = await client.search(q["webapi_url"])
-        except WillhabenError as e:
-            log.warning("agent search %s/%s (%s) failed: %s", i, n, q.get("keyword"), e)
-            errors.append(t("search {i}/{n} failed: {error}", i=i, n=n, error=e))
+            page = await platforms.get(spec.platform).search(spec)
+        except PlatformError as e:
+            log.warning("agent search %s/%s (%s) failed: %s", i, n, spec.keyword, e)
+            errors.append(t("search {i}/{n} failed: {error}", i=i, n=n, error=e) if n > 1 else str(e))
             first_exc = first_exc or e
             if isinstance(e, Blocked):
                 if i < n:
@@ -161,7 +187,7 @@ async def _search_all(queries: list[dict[str, Any]]) -> tuple[list[tuple[AdSumma
     return ads, rows, errors, first_exc, ok
 
 
-def _apply(hit: Hit, ad: AdSummary) -> None:
+def _apply(hit: Hit, ad: Listing) -> None:
     hit.heading = ad.heading
     hit.body = ad.body
     hit.price = ad.price
@@ -199,33 +225,28 @@ async def _run_agent(agent_id: int) -> RunResult:
         if agent is None:
             res.error = t("Agent not found")
             return res
-        webapi_url, name = agent.webapi_url, agent.name
-        queries, plan = agent.queries, agent.plan
-    partial_error = None
-    if queries:      # created from a product search: several searches per check
-        found, rows_found, errors, first_exc, ok = await _search_all(queries)
-        if not ok:
-            e = first_exc       # every search failed: the same error path as a single-URL agent
-            with session() as db:
-                agent = db.get(SearchAgent, agent_id)
-                agent.last_run_at, agent.last_error = utcnow(), str(e)
-                db.add(agent)
-                db.commit()
-            res.error = str(e)
-            return res
-        partial_error = "; ".join(errors) or None
-    else:
-        try:
-            page = await get_public().search(webapi_url)
-        except WillhabenError as e:
-            with session() as db:
-                agent = db.get(SearchAgent, agent_id)
-                agent.last_run_at, agent.last_error = utcnow(), str(e)
-                db.add(agent)
-                db.commit()
-            res.error = str(e)
-            return res
-        found, rows_found = [(ad, None) for ad in page.ads], page.rows_found
+        name, queries, plan = agent.name, agent.queries, agent.plan
+        specs = [(_query_spec(q, agent.platform), q) for q in queries] if queries else [(agent_spec(agent), None)]
+
+    def _fail(error: str) -> RunResult:
+        with session() as db:
+            row = db.get(SearchAgent, agent_id)
+            row.last_run_at, row.last_error = utcnow(), error
+            db.add(row)
+            db.commit()
+        res.error = error
+        return res
+
+    try:
+        platform = platforms.get(agent.platform)
+    except platforms.UnknownPlatform:
+        return _fail(t("Unknown platform: {id}", id=agent.platform))
+    if not platforms.enabled(platform.id):
+        return _fail(t("{name} is switched off in Settings → Platforms", name=platform.name))
+    found, rows_found, errors, first_exc, ok = await _search_all(specs)
+    if not ok:
+        return _fail(str(first_exc))         # every search failed (one search: its error)
+    partial_error = "; ".join(errors) or None
 
     res.rows_found = rows_found
     with session() as db:
@@ -240,10 +261,10 @@ async def _run_agent(agent_id: int) -> RunResult:
             if hit is None:
                 if plan and product_search.drop_reason(ad, plan, query):
                     continue        # "Suche" ad, far over budget or an exclusion word: never stored or notified
-                hit = Hit(agent_id=agent_id, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
+                hit = Hit(agent_id=agent_id, platform=platform.id, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
                           state="seen" if res.baseline else "new")
                 _apply(hit, ad)
-                hit.scam_flags = scam.flags(hit, scam_ctx) or None   # before screening, which sees them too
+                hit.scam_flags = scam.flags(hit, scam_ctx, home_country=platform.home_country) or None   # before screening
                 _mark_scam_issue(hit)
                 db.add(hit)
                 existing[ad.ad_id] = hit
@@ -255,11 +276,11 @@ async def _run_agent(agent_id: int) -> RunResult:
             if prev_price is not None and ad.price is not None and ad.price < prev_price:
                 hit.price_dropped_at = utcnow()
                 hit.old_price = prev_price
-                hit.scam_flags = scam.flags(hit, scam_ctx) or None   # a new price can be a new red flag
+                hit.scam_flags = scam.flags(hit, scam_ctx, home_country=platform.home_country) or None   # a new red flag?
                 _mark_scam_issue(hit)
                 if hit.state != "ignored":
                     res.price_drops.append(hit)
-            if ad.is_bumped and prev_published and ad.published_at and ad.published_at > prev_published:
+            if ad.is_bumped is True and prev_published and ad.published_at and ad.published_at > prev_published:
                 hit.bumped_count += 1
                 res.bumped += 1
             db.add(hit)
@@ -279,26 +300,29 @@ async def _run_agent(agent_id: int) -> RunResult:
         await screening.screen(agent_id, to_notify)
         _file_screened(agent, res.new, res.price_drops)
 
+    # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
+    label = f"{platform.name} · {name}" if platforms.multi() else name
+    site = {"agent": name, "platform": platform.id}
     if notify_new and res.new:
         good = [h.id for h in res.new if screening.passes(agent, h)]
         pushed = set(good[:MAX_PUSH_PER_RUN])
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
-                await notify("hit", _scam_prefix(h) + f"{name}: {h.price_display or ''}".strip(" :"), _hit_text(h),
+                await notify("hit", _scam_prefix(h) + f"{label}: {h.price_display or ''}".strip(" :"), _hit_text(h),
                              url=h.url, image=h.image_url, push=h.id in pushed,
-                             data={"agent": name, "ad_id": h.ad_id, "price": h.price, "location": h.location,
-                                   **_screen_data(h), **_scam_data(h)})
+                             data={**site, "ad_id": h.ad_id, "ref": ad_ref(platform.id, h.ad_id), "price": h.price,
+                                   "location": h.location, **_screen_data(h), **_scam_data(h)})
         if len(good) > MAX_PUSH_PER_RUN:
-            await notify("hit", name, t("+{n} more new hits", n=len(good) - MAX_PUSH_PER_RUN),
-                         data={"agent": name, "count": len(good)})
+            await notify("hit", label, t("+{n} more new hits", n=len(good) - MAX_PUSH_PER_RUN),
+                         data={**site, "count": len(good)})
     if notify_drops:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
-            await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=name),
-                         f"{h.heading}: {h.old_price:g} → {h.price:g} €" + _scam_line(h) + _screen_line(h),
+            await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label),
+                         f"{h.heading}: {h.old_price:g} → {h.price:g} {platform.currency}" + _scam_line(h) + _screen_line(h),
                          url=h.url, image=h.image_url,
                          push=screening.passes(agent, h),
-                         data={"agent": name, "ad_id": h.ad_id, "price": h.price, "old_price": h.old_price,
-                               **_screen_data(h), **_scam_data(h)})
+                         data={**site, "ad_id": h.ad_id, "ref": ad_ref(platform.id, h.ad_id), "price": h.price,
+                               "old_price": h.old_price, **_screen_data(h), **_scam_data(h)})
     return res
 
 

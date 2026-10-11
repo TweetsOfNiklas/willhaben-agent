@@ -298,7 +298,7 @@ def test_hit_card_and_viewer_render_badges():
         db.commit()
     with TestClient(app) as c:
         html = c.get("/hits", headers={"accept-language": "de"}).text
-    assert "Preis nur 28 % vom Üblichen (900 €)" in html and "Will Kontakt außerhalb von willhaben" in html
+    assert "Preis nur 28 % vom Üblichen (900 €)" in html and "Will Kontakt außerhalb der Plattform" in html
     assert "Telefonnummer im Text" not in html          # info flags stay out of the hit cards
 
 

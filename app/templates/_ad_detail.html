@@ -1,6 +1,10 @@
 {% import "_ui.html" as ui %}
-{# Fragment for the ad viewer. d = AdDetail or None, h = Hit or None #}
-{% if error %}<div class="p-4">{{ ui.msg(_("willhaben error: {error}", error=error), 'error') }}</div>
+{# Fragment for the ad viewer. d = AdDetail or None, h = Hit or None, platform = the site's adapter, reduced = the site
+   has no ad-detail call (d is built from the hit), ref = the ad's ref for links. #}
+{% set platform = platform if platform is defined else platform_get('willhaben') %}
+{% set ref = ref if ref is defined else (d.ad_id if d else ad_id) %}
+{% set wh = platform.id == 'willhaben' %}
+{% if error %}<div class="p-4">{{ ui.msg(_("{platform} error: {error}", platform=platform.name, error=error), 'error') }}</div>
 {% elif not d %}<p class="px-6 py-6 text-muted">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
 {% else %}
 <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(320px,1fr)]">
@@ -14,17 +18,18 @@
   <div class="flex min-w-0 flex-col gap-3.5 px-5 py-[18px] pb-5 md:border-l md:border-base-300">
     <div>
       <div class="mb-1.5 flex items-start justify-between gap-3"><h2 class="min-w-0 text-[18px] leading-snug break-words">{{ d.heading }}</h2>
-        <a href="{{ d.url }}" target="_blank" rel="noopener" class="mt-0.5 shrink-0 text-[13px] font-medium whitespace-nowrap text-primary no-underline hover:underline">willhaben ↗</a></div>
+        <a href="{{ d.url }}" target="_blank" rel="noopener" class="mt-0.5 shrink-0 text-[13px] font-medium whitespace-nowrap text-primary no-underline hover:underline">{{ platform.name }} ↗</a></div>
       <div class="flex flex-wrap items-baseline gap-2.5 text-2xl font-bold tracking-tight">{{ d.price_display or (d.price|eur) }}{% if h and h.old_price and h.price and h.old_price > h.price %}<span class="text-sm font-normal text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}</div>
       <div class="mt-1.5 text-[13px] leading-normal text-muted">{% if d.location %}{{ d.location }}{% endif %}{% if d.published_at %} · {{ _("published {ago}", ago=d.published_at|ago) }}{% endif %}{% if d.first_published_at and d.published_at and d.first_published_at < d.published_at %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}{% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}{% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}</div>
       {% set scam_f = scam_for_viewer(d, h) %}{% if scam_f %}<div class="mt-2 flex flex-wrap gap-1.5" title="{{ _('Scam check (rules, no AI)') }}">{% for f in scam_f %}{{ ui.pill(f.label, 'bad' if f.severity == 'warn' else ('' if f.severity == 'info' else 'warn'), false) }}{% endfor %}</div>{% endif %}
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      {% if purchase_enabled() %}<a class="btn btn-primary" data-buy="{{ d.ad_id }}" href="/purchases/new/{{ d.ad_id }}">{{ _("Buy") }}…</a>{% else %}<button type="button" class="btn" disabled title="{{ _('Turn on purchases in Settings') }}">{{ _("Buy") }}</button>{% endif %}
+      {% if wh %}{% if purchase_enabled() %}<a class="btn btn-primary" data-buy="{{ d.ad_id }}" href="/purchases/new/{{ d.ad_id }}">{{ _("Buy") }}…</a>{% else %}<button type="button" class="btn" disabled title="{{ _('Turn on purchases in Settings') }}">{{ _("Buy") }}</button>{% endif %}{% endif %}
       {% if h %}{% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}<button type="button" class="btn disabled:opacity-60 {{ 'border-primary bg-brand-soft text-primary' if h.state == s else '' }}" data-state="{{ 'new' if h.state == s else s }}" data-hit="{{ h.id }}">{{ '✓ ' if h.state == s }}{{ label }}</button>{% endfor %}{% endif %}
-      <a href="/deals/ad/{{ d.ad_id }}" class="btn">{{ _("Check price closely") }}</a>
+      <a href="{{ '/deals/ad/' ~ d.ad_id if wh else '/deals/ad/' ~ platform.id ~ '/' ~ d.ad_id ~ ('?hit=' ~ h.id if h else '') }}" class="btn">{{ _("Check price closely") }}</a>
     </div>
-    <div hx-get="/hits/ad/{{ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML"><small class="text-muted"><span class="loading loading-spinner loading-xs align-middle"></span> {{ _("Checking the price …") }}</small></div>
+    <div hx-get="{{ '/hits/ad/' ~ d.ad_id if wh else '/hits/ad/' ~ platform.id ~ '/' ~ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML"><small class="text-muted"><span class="loading loading-spinner loading-xs align-middle"></span> {{ _("Checking the price …") }}</small></div>
+    {% if reduced %}<small class="text-[12.5px] text-muted">{{ _("{platform} shows no details here: the description is the listing's teaser, the price check compares with willhaben ads.", platform=platform.name) }}</small>{% endif %}
     {% if h and h.screen_relevant is not none %}
     <div class="flex flex-col gap-1.5 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-2.5">
       <div class="flex flex-wrap items-center gap-2"><strong class="text-primary">{{ _("Claude's assessment") }}</strong>{% for lbl in screen_labels(h) %}{{ ui.pill(lbl, 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else ('brand' if h.screen_relevant else '')), false) }}{% endfor %}{% if h.screen_at %}<small class="text-muted">· {{ h.screen_at|ago }}</small>{% endif %}</div>

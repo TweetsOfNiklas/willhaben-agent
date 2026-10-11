@@ -424,7 +424,8 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
 
 
 def _ad_summary(ad: AdDetail) -> dict[str, Any]:
-    return {"ad_id": ad.ad_id, "title": ad.heading, "price": ad.price, "price_display": ad.price_display,
+    return {"ad_id": ad.ad_id, "ref": ad.ref, "platform": ad.platform, "title": ad.heading, "price": ad.price,
+            "price_display": ad.price_display,
             "location": ad.location, "url": ad.url, "image": ad.images[0] if ad.images else None,
             "is_private": ad.is_private, "category": " › ".join(ad.category_path)}
 
@@ -483,7 +484,7 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
                   fallback_query: str | None = None, category_url: str | None = None) -> dict[str, Any]:
     """Price position of one ad. `query` overrides the comparable search; `fallback_query` (a search agent's
     keyword) is used only when the title gives none. Claude runs only with use_claude (explicit click)."""
-    res = cached(ad.ad_id, query, category_url)
+    res = cached(ad.ref, query, category_url)
     if res is not None and (res.get("ad") or {}).get("price") != ad.price:
         res = None                                    # price changed since: re-position (searches are cached)
     if res is None:
@@ -495,17 +496,17 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
                "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,
                "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None),
-               "claude": stored_claude(ad.ad_id, ad.price), "checked_at": utcnow().isoformat()}
+               "claude": stored_claude(ad.ref, ad.price), "checked_at": utcnow().isoformat()}
         if not comp.get("error"):
-            _put(_results, _key(ad.ad_id, query, category_url), res, RESULT_TTL_S)
+            _put(_results, _key(ad.ref, query, category_url), res, RESULT_TTL_S)
     if use_claude and not _claude_for(res.get("claude"), ad.price):
         verdict = await ask_claude(ad, res)
         res = {**res, "claude": verdict}
         if "deal" in verdict:
             at = _ran_at(res)
             age = (utcnow() - at).total_seconds() if at else 0
-            _put(_results, _key(ad.ad_id, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - max(0.0, age))
-            save_claude(ad.ad_id, verdict)
+            _put(_results, _key(ad.ref, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - max(0.0, age))
+            save_claude(ad.ref, verdict)
     return res
 
 
@@ -514,8 +515,10 @@ def remember(res: dict[str, Any]) -> None:
     ad = res.get("ad") or {}
     if not ad.get("ad_id"):
         return
+    key = str(ad.get("ref") or ad["ad_id"])
     with session() as db:
-        row = db.get(DealCheck, str(ad["ad_id"])) or DealCheck(ad_id=str(ad["ad_id"]))
+        row = db.get(DealCheck, key) or DealCheck(ad_id=key)
+        row.platform = ad.get("platform") or "willhaben"
         row.title, row.price, row.price_display = ad.get("title"), ad.get("price"), ad.get("price_display")
         row.image_url, row.url, row.query = ad.get("image"), ad.get("url"), res.get("query")
         row.result = {k: v for k, v in res.items() if k != "claude"}
@@ -619,13 +622,33 @@ async def ask_claude(ad: AdDetail, res: dict[str, Any]) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ input parsing
-def parse_ad_ref(text: str | None) -> str | None:
-    """Ad id from a bare id or any willhaben ad link; None for free text (→ keyword search)."""
+def parse_ad_ref(text: str | None) -> tuple[str, str] | None:
+    """(platform, ad id) from a bare willhaben id, a ref ("kleinanzeigen:123") or an ad link of any supported site;
+    None for free text (→ keyword search)."""
+    from app import platforms
+    from app.platforms import InvalidRef, InvalidSearchUrl, split_ref
+
     s = (text or "").strip()
     if re.fullmatch(r"\d{6,}", s):
-        return s
-    if not re.search(r"(^https?://|^www\.|willhaben\.at)", s, re.I):
+        return "willhaben", s
+    if re.fullmatch(r"[a-z][a-z0-9_]*:\d+", s):
+        try:
+            return split_ref(s)
+        except InvalidRef:
+            return None
+    if not re.search(r"(^https?://|^www\.)", s, re.I) and not is_site_link(s):
         return None
-    m = re.search(r"[?&]adId=(\d+)", s, re.I) or re.search(r"/d/[^?#]*?-(\d{6,})/?(?:[?#]|$)", s) \
-        or re.search(r"-(\d{6,})/?(?:[?#]|$)", s) or re.search(r"/(\d{6,})/?(?:[?#]|$)", s)
-    return m.group(1) if m else None
+    try:
+        p = platforms.for_url(s if re.match(r"^https?://", s, re.I) else f"https://{s}")
+    except InvalidSearchUrl:
+        return None
+    ad_id = p.parse_ad_url(s if re.match(r"^https?://", s, re.I) else f"https://{s}")
+    return (p.id, ad_id) if ad_id else None
+
+
+def is_site_link(text: str) -> bool:
+    """The text names one of the platforms' hosts (a link to it, with or without the scheme)."""
+    from app import platforms
+
+    s = (text or "").strip()
+    return any(h in s.lower() for p in platforms.all(enabled_only=False) for h in p.hosts)

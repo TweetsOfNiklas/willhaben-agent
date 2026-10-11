@@ -148,7 +148,7 @@ def path_ids(path: str, params: dict[str, Any]) -> dict[str, Any]:
         if k in ("conversation_id", "agent_id", "shipment_id", "search_id", "batch_id"):
             out[k] = v
         elif k == "ad_id":
-            out["ad_id"] = v
+            out["ad_id"] = timeline.ad_ref_for(params.get("platform"), v)
             if path.startswith(_MINE):
                 out["mine"] = True
         elif k == "draft_id":

@@ -217,7 +217,8 @@ def test_position_not_enough_data():
     ("", None),
 ])
 def test_parse_ad_ref(text, ad_id):
-    assert deals.parse_ad_ref(text) == ad_id
+    assert deals.parse_ad_ref(text) == (("willhaben", ad_id) if ad_id else None)
+    assert deals.parse_ad_ref("kleinanzeigen:2712345678") == ("kleinanzeigen", "2712345678")
 
 
 # ------------------------------------------------------------------ analysis with fakes
@@ -491,7 +492,7 @@ async def test_results_before_the_size_filter_are_recomputed(wh, monkeypatch):
 
 def test_deals_page_rejects_non_ad_links(app_client):
     page = app_client.get("/deals", params={"q": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrraeder-4552"}).text
-    assert "This link is not a willhaben ad." in page and app_client.calls["search"] == 0
+    assert "This link is not an ad on a supported site." in page and app_client.calls["search"] == 0
 
 
 

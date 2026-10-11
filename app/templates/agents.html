@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block content %}
-{% call ui.head(_("Search agents"), _("Built from willhaben's own filters. Checks run at irregular, human-like intervals and slow down at night.")) %}
+{% call ui.head(_("Search agents"), _("Watch searches on {sites} and report new ads and price drops. Checks run at irregular, human-like intervals and slow down at night.", sites=platforms_all()|map(attribute='name')|join(', '))) %}
   <a href="/agents/new" class="btn btn-primary">+ {{ _("New search agent") }}</a>
 {% endcall %}
 {% if quiet and quiet.active and agents %}
@@ -29,13 +29,14 @@
       <div class="flex flex-1 flex-col gap-1.5 px-4 pt-3.5 pb-3">
         <div class="flex items-center justify-between gap-2.5">
           <a href="/hits?agent_id={{ a.id }}&state=all" class="min-w-0 truncate text-[15px] font-semibold text-base-content no-underline hover:underline">{{ a.name }}</a>
+          {% if platforms_multi() %}{{ ui.pill(platform_name(a.platform), '', false, 'shrink-0') }}{% endif %}
           {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}" class="badge badge-sm h-5 shrink-0 border-0 bg-primary font-semibold whitespace-nowrap text-primary-content no-underline">{{ _("{n} new", n=counts.get(a.id)) }}</a>
           {% elif not a.enabled %}{{ ui.pill(_("paused"), '', false, 'shrink-0') }}{% endif %}
         </div>
         <div class="text-[13px] leading-relaxed text-muted">
           {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
           {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
-          {% if a.last_rows_found is not none %}{{ _("{n} matching ads on willhaben", n='{:,}'.format(a.last_rows_found).replace(',', '.')) }}{% endif %}
+          {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=platform_name(a.platform)) }}{% endif %}
           {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
         </div>
         {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
@@ -51,7 +52,7 @@
           <button class="btn btn-sm w-full whitespace-nowrap">{{ _("Pause") if a.enabled else _("Resume") }}</button>
         </form>
         <button type="button" class="btn btn-ghost btn-sm w-full whitespace-nowrap" @click="$refs.dlg.showModal()">{{ _("Settings") }}</button>
-        <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm w-full whitespace-nowrap text-muted">{{ _("on willhaben") }} ↗</a>
+        <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm w-full whitespace-nowrap text-muted">{{ _("on {platform}", platform=platform_name(a.platform)) }} ↗</a>
       </footer>
     </article>
 
@@ -63,7 +64,7 @@
             {{ ui.eyebrow(_("Search agent")) }}
             <h2 class="truncate text-[17px]">{{ a.name }}</h2>
           </div>
-          <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] whitespace-nowrap no-underline">{{ _("Filters on willhaben") }} ↗</a>
+          <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] whitespace-nowrap no-underline">{{ _("Search on {platform}", platform=platform_name(a.platform)) }} ↗</a>
           <button class="btn btn-ghost btn-sm btn-square" type="button" @click="$refs.dlg.close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
         </header>
         <form method="post" action="/agents/{{ a.id }}/edit" class="flex flex-1 flex-col gap-3.5 px-5 py-[18px]">
@@ -97,7 +98,7 @@
   {% endfor %}
 </div>
 {% else %}
-{% call ui.empty(_("No search agents yet"), _("Type what you are looking for and click your filters together – the agent reports new ads and price drops faster than the willhaben emails.")) %}
+{% call ui.empty(_("No search agents yet"), _("Type what you are looking for or paste a search link – the agent reports new ads and price drops faster than the sites' own e-mail alerts.")) %}
   <a href="/agents/new" class="btn btn-primary mt-1.5">{{ _("Create your first search agent") }}</a>
 {% endcall %}
 {% endif %}

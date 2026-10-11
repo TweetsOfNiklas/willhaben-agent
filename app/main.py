@@ -36,11 +36,12 @@ from app.services import health, human_pace, jobs
 from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
-from app import backup_routes, label_buy_routes, paylivery_routes, printing_routes, purchase_routes
+from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app.services.search_agents import create_agent, refile_screened, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
+from app.platforms import PlatformError, ad_ref
 from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with_params
 from app.willhaben.public import WillhabenError, get_public, willhaben_limiter
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
@@ -205,6 +206,18 @@ def _asset_version() -> str:
 
 
 templates.env.globals.update(asset_version=_asset_version)
+
+
+def _platform_name(pid: str | None) -> str:
+    try:
+        return platforms.get(pid or "willhaben").name
+    except Exception:  # noqa: BLE001 - a row of a platform that no longer exists
+        return pid or "willhaben"
+
+
+# platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
+templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
+                             platforms_all=platforms.all, platform_get=platforms.get)
 
 
 def _inbox_seen_at() -> datetime:
@@ -453,27 +466,33 @@ async def agents_delete(agent_id: int):
 
 
 @app.get("/hits", response_class=HTMLResponse)
-async def hits_page(request: Request, agent_id: str = "", state: str = "new"):
+async def hits_page(request: Request, agent_id: str = "", state: str = "new", platform: str = ""):
     aid = int(agent_id) if agent_id.strip().isdigit() else None   # "All search agents" sends an empty value
+    platform = platform.strip().lower()
     with session() as db:
         q = select(Hit)
         if aid:
             q = q.where(Hit.agent_id == aid)
+        if platform:
+            q = q.where(Hit.platform == platform)
         if state != "all":
             q = q.where(Hit.state == state)
         hits = list(db.exec(q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc()).limit(200)))
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
         counts_q = select(Hit.state, func.count()).group_by(Hit.state)
-        state_counts = dict(db.exec(counts_q.where(Hit.agent_id == aid) if aid else counts_q).all())
+        if aid:
+            counts_q = counts_q.where(Hit.agent_id == aid)
+        if platform:
+            counts_q = counts_q.where(Hit.platform == platform)
+        state_counts = dict(db.exec(counts_q).all())
+        used = sorted({a.platform for a in agents.values()})
     state_counts["all"] = sum(state_counts.values())
-    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts)
+    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
+                  platform=platform, platform_ids=used if len(used) > 1 else [])
 
 
-@app.get("/hits/ad/{ad_id}", response_class=HTMLResponse)
-async def hit_ad_detail(request: Request, ad_id: str, hit: int | None = None):
-    """Ad detail as a fragment for the in-dashboard viewer (no redirect to willhaben)."""
-    if not ad_id.isdigit():
-        raise HTTPException(400)
+async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str, hit: int | None) -> HTMLResponse:
+    """The ad viewer's content: the ad from its site (or, for sites without ad details, what the hit knows)."""
     h = None
     if hit:
         with session() as db:
@@ -484,12 +503,26 @@ async def hit_ad_detail(request: Request, ad_id: str, hit: int | None = None):
                 db.commit()
                 db.refresh(h)
     error = d = None
-    try:
-        d = await get_public().get_detail(ad_id)
-    except WillhabenError as e:
-        error = str(e)
+    reduced = not platform.can("detail")
+    if reduced:
+        d = platforms.AdDetail.from_hit(h) if h is not None else None
+    else:
+        try:
+            d = await platform.detail(ad_id, url=h.url if h else None)
+        except PlatformError as e:
+            error = str(e)
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
-    return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error})
+    return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
+                                                                   "platform": platform, "reduced": reduced,
+                                                                   "ref": platform.ref(ad_id)})
+
+
+@app.get("/hits/ad/{ad_id}", response_class=HTMLResponse)
+async def hit_ad_detail(request: Request, ad_id: str, hit: int | None = None):
+    """A willhaben ad as a fragment for the in-dashboard viewer (other sites: /hits/ad/<platform>/<id>)."""
+    if not ad_id.isdigit():
+        raise HTTPException(400)
+    return await ad_fragment(request, platforms.get("willhaben"), ad_id, hit)
 
 
 @app.post("/hits/{hit_id}/state", response_class=HTMLResponse)
@@ -2155,7 +2188,8 @@ async def settings_test_notify():
 
 # ------------------------------------------------------------------ JSON API (for MCP)
 def _hit_dict(h: Hit) -> dict[str, Any]:
-    return {"id": h.id, "agent_id": h.agent_id, "ad_id": h.ad_id, "title": h.heading, "price": h.price,
+    return {"id": h.id, "agent_id": h.agent_id, "platform": h.platform, "ad_id": h.ad_id,
+            "ref": ad_ref(h.platform, h.ad_id), "title": h.heading, "price": h.price,
             "price_display": h.price_display, "old_price": h.old_price, "location": h.location,
             "published_at": h.published_at.isoformat() if h.published_at else None, "url": h.url,
             "state": h.state, "image_url": h.image_url}

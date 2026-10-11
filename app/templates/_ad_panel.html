@@ -25,6 +25,9 @@
     return p;
   };
   let list = [], idx = -1;
+  // a ref is the ad id, or "<platform>:<id>" for sites other than willhaben (app/platforms)
+  const path = ref => { const i = ref.indexOf(':'); return i < 0 ? '/hits/ad/' + encodeURIComponent(ref)
+    : '/hits/ad/' + encodeURIComponent(ref.slice(0, i)) + '/' + encodeURIComponent(ref.slice(i + 1)); };
 
   // One entry per ad, in page order (a card can have several links to the same ad).
   const collect = () => {
@@ -43,7 +46,7 @@
     body.replaceChildren(loading(T.loading));
     if (!dlg.open) dlg.showModal();
     try {
-      const r = await fetch(`/hits/ad/${encodeURIComponent(ad)}${hit ? '?hit=' + encodeURIComponent(hit) : ''}`);
+      const r = await fetch(`${path(ad)}${hit ? '?hit=' + encodeURIComponent(hit) : ''}`);
       if (idx !== i) return;                         // user moved on meanwhile
       if (r.ok) { body.innerHTML = await r.text(); if (window.htmx) htmx.process(body); }
       else body.replaceChildren(msg('px-6 py-6 text-error', T.error.replace('{status}', r.status)));
@@ -93,9 +96,9 @@
     if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
   });
 
-  // deep link from a phone push: ?view=<ad id> opens the viewer (with the page's ads to step through if it is listed)
+  // deep link from a phone push: ?view=<ref> opens the viewer (with the page's ads to step through if it is listed)
   const url = new URL(location.href), view = url.searchParams.get('view');
-  if (view && /^\d+$/.test(view)) {
+  if (view && /^(?:[a-z][a-z0-9_]*:)?[\w-]+$/.test(view)) {
     list = collect();
     const i = list.findIndex(x => x.ad === view);
     if (i < 0) list = [{ad: view, hit: ''}];

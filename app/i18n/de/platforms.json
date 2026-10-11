@@ -2,5 +2,22 @@
  "{name} pause after a block, {s} s left": "{name}: Pause nach einer Sperre, noch {s} s",
  "{name}: request limit ({n}/h) reached, free again in {m} min": "{name}: Anfragelimit ({n}/h) erreicht, in {m} min wieder frei",
  "{name} is switched off in Settings → Platforms": "{name} ist in Einstellungen → Plattformen ausgeschaltet",
- "Not a search link of a supported site ({sites})": "Kein Suchlink einer unterstützten Seite ({sites})"
+ "Not a search link of a supported site ({sites})": "Kein Suchlink einer unterstützten Seite ({sites})",
+ "{name} has no keyword search.": "{name} hat keine Stichwortsuche.",
+ "This search has no planned searches yet.": "Diese Suche hat noch keine geplanten Suchen.",
+ "Unknown platform: {id}": "Unbekannte Plattform: {id}",
+ "Wants contact outside the platform": "Will Kontakt außerhalb der Plattform",
+ "No details for this ad; open it on {platform}.": "Keine Details zu dieser Anzeige; öffne sie auf {platform}.",
+ "This link is not an ad on a supported site.": "Dieser Link ist keine Anzeige einer unterstützten Seite.",
+ "{platform} error: {error}": "{platform}-Fehler: {error}",
+ "{platform} shows no details here: the description is the listing's teaser, the price check compares with willhaben ads.": "{platform} zeigt hier keine Details: die Beschreibung ist der Anriss aus der Liste, der Preischeck vergleicht mit willhaben-Anzeigen.",
+ "Ctrl-click opens the ad on its site": "Strg-Klick öffnet die Anzeige auf ihrer Seite",
+ "Watch searches on {sites} and report new ads and price drops. Checks run at irregular, human-like intervals and slow down at night.": "Beobachten Suchen auf {sites} und melden neue Anzeigen und Preissenkungen. Die Prüfungen laufen in unregelmäßigen, menschlichen Abständen und werden nachts seltener.",
+ "{n} matching ads on {platform}": "{n} passende Anzeigen auf {platform}",
+ "on {platform}": "auf {platform}",
+ "Search on {platform}": "Suche auf {platform}",
+ "Type what you are looking for or paste a search link – the agent reports new ads and price drops faster than the sites' own e-mail alerts.": "Tipp ein, was du suchst, oder füge einen Suchlink ein – der Agent meldet neue Anzeigen und Preissenkungen schneller als die E-Mail-Benachrichtigungen der Seiten.",
+ "Open on {platform}": "Auf {platform} öffnen",
+ "Ad link, willhaben ad id or search text": "Anzeigenlink, willhaben-Anzeigen-ID oder Suchtext",
+ "Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.": "Ein Klick auf einen Treffer öffnet die Anzeige hier; ← / → blättert, Strg-Klick öffnet die Anzeige auf ihrer Seite."
 }

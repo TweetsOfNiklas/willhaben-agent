@@ -93,5 +93,5 @@ def test_view_deep_link_opens_the_ad_viewer(client):  # noqa: F811
     assert page.status_code == 200
     script = page.text[page.text.index('id="ad-viewer"'):]
     script = script[script.index("<script>"):script.index("</script>")]
-    assert "searchParams.get('view')" in script and "/^\\d+$/.test(view)" in script
+    assert "searchParams.get('view')" in script and "/^(?:[a-z][a-z0-9_]*:)?[\\w-]+$/.test(view)" in script
     assert "history.replaceState" in script and "searchParams.delete('view')" in script

@@ -252,7 +252,7 @@ def test_agent_builder(client):
 
 def test_agent_builder_rejects_foreign_url(client):
     r = client.get("/agents/new", params={"url": "https://evil.example/iad/x"})
-    assert r.status_code == 200 and "Not a willhaben.at URL" in r.text
+    assert r.status_code == 200 and "Not a willhaben.at URL" in r.text   # willhaben's own parser explains the link
 
 
 def test_model_selector(client):

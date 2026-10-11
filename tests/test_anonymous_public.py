@@ -43,6 +43,14 @@ def test_listed_anonymous_modules_exist():
     assert not missing, missing
 
 
+def test_agent_pipeline_is_platform_neutral():
+    for rel in PLATFORM_NEUTRAL:
+        tree = ast.parse((APP / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module in SITE_MODULES:
+                raise AssertionError(f"{rel} imports {node.module}: go through app.platforms instead")
+
+
 async def test_public_client_has_own_jar_and_starts_fresh(monkeypatch):
     seen, status = [], {"next": 200}
 

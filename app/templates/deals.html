@@ -23,7 +23,7 @@
     <div id="ps-result">{% if ps %}{% include "_product_search.html" %}{% endif %}</div>
     {% if res %}{% include "_deal_result.html" %}
     {% elif pending_ad %}
-    <section hx-get="/deals/ad/{{ pending_ad }}/result?q={{ quote(q) }}&amp;cat={{ quote(pending_cat or '') }}" hx-trigger="load" hx-swap="outerHTML" class="flex items-center gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <section hx-get="{{ '/deals/ad/' ~ pending_ad if (pending_platform or 'willhaben') == 'willhaben' else '/deals/ad/' ~ pending_platform ~ '/' ~ pending_ad }}/result?q={{ quote(q) }}&amp;cat={{ quote(pending_cat or '') }}{% if pending_hit %}&amp;hit={{ pending_hit }}{% endif %}" hx-trigger="load" hx-swap="outerHTML" class="flex items-center gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
       <span class="loading loading-spinner loading-sm shrink-0 text-primary"></span>
       <div><div class="font-semibold">{{ _("Checking the price …") }}</div><div class="text-[12.5px] text-muted">{{ _("Comparable ads are loaded from willhaben; this takes a few seconds the first time, then it is cached for an hour.") }}</div></div>
     </section>
@@ -36,7 +36,7 @@
   <aside class="flex flex-col gap-4">
     <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-4 py-3.5">
       <h3>{{ _("Check a single ad's price") }}</h3>
-      <form method="get" action="/deals" role="search" class="m-0 flex flex-nowrap items-center gap-1.5"><input type="search" name="q" value="{{ q }}" required aria-label="{{ _('willhaben link, ad id or search text') }}" placeholder="{{ _('willhaben link, ad id or search text') }}" class="input input-sm min-w-0 flex-1 bg-base-200"><button class="btn btn-sm">{{ _("Check") }}</button></form>
+      <form method="get" action="/deals" role="search" class="m-0 flex flex-nowrap items-center gap-1.5"><input type="search" name="q" value="{{ q }}" required aria-label="{{ _('Ad link, willhaben ad id or search text') }}" placeholder="{{ _('Ad link, willhaben ad id or search text') }}" class="input input-sm min-w-0 flex-1 bg-base-200"><button class="btn btn-sm">{{ _("Check") }}</button></form>
       <small class="text-muted">{{ _("Each check costs up to 4 willhaben/Geizhals requests (results are cached for an hour); Claude is only asked when you click.") }}</small>
     </section>
     {% include "_product_search_recent.html" %}

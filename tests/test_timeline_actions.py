@@ -94,6 +94,7 @@ def test_path_ids():
 
     assert path_ids("/myads/{ad_id}/delete", {"ad_id": "5"}) == {"ad_id": "5", "mine": True}
     assert path_ids("/hits/ad/{ad_id}", {"ad_id": "5"}) == {"ad_id": "5"}
+    assert path_ids("/hits/ad/{platform}/{ad_id}", {"platform": "kleinanzeigen", "ad_id": "5"}) == {"ad_id": "kleinanzeigen:5"}
     assert path_ids("/new-ad/{draft_id}", {"draft_id": 3}) == {"draft_id": 3}
     assert path_ids("/purchases/{pid}/{action}", {"pid": 4, "action": "pause"}) == {"purchase_id": 4, "action": "pause"}
 
