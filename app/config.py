@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # WH_REPLAY=1: answer willhaben requests from the stored recordings (app/willhaben/replay.py); a request never
     # seen before still goes to willhaben (and is recorded). With BROWSER_ENABLED=0 the account works offline too.
     wh_replay: bool = False
+    # --- platforms (app/platforms): which search-agent adapters exist besides willhaben; switching them on for
+    # the user happens in Settings → Platforms
+    platforms_enabled: str = "willhaben"
 
     # --- logged-in browser session (Playwright persistent profile) ---
     browser_enabled: bool = True

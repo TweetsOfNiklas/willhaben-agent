@@ -11,7 +11,12 @@ APP = Path(__file__).resolve().parent.parent / "app"
 ANONYMOUS_MODULES = ["services/search_agents.py", "services/screening.py", "services/deals.py", "services/scam.py",
                      "services/geizhals.py", "services/product_search.py", "services/ad_images.py",
                      "willhaben/public.py", "willhaben/recorder.py", "willhaben/replay.py", "willhaben/redact.py",
-                     "willhaben/export.py"]
+                     "willhaben/export.py", "platforms/__init__.py", "platforms/base.py", "platforms/types.py",
+                     "platforms/text.py", "platforms/ratelimit.py", "platforms/registry.py", "platforms/willhaben.py",
+                     "platforms/httpclient.py", "platforms/kleinanzeigen.py"]
+# the agent pipeline talks to platforms only through app.platforms (a new site needs no change there)
+PLATFORM_NEUTRAL = ["services/search_agents.py"]
+SITE_MODULES = {"app.willhaben.parse", "app.willhaben.public"}
 ACCOUNT = {"app.willhaben.session", "app.willhaben.account", "app.willhaben.insert", "app.willhaben.sales"}
 
 
@@ -30,6 +35,12 @@ def test_anonymous_modules_never_import_the_account_session():
             assert not (set(names) & ACCOUNT), f"{rel} imports the logged-in session ({names})"
             if isinstance(node, ast.Name):
                 assert node.id not in ("get_session", "AccountClient"), f"{rel} uses {node.id}"
+
+
+def test_listed_anonymous_modules_exist():
+    missing = [rel for rel in ANONYMOUS_MODULES if not (APP / rel).exists() and not rel.startswith("platforms/kleinanzeigen")
+               and not rel.startswith("platforms/httpclient")]
+    assert not missing, missing
 
 
 async def test_public_client_has_own_jar_and_starts_fresh(monkeypatch):

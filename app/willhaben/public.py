@@ -4,17 +4,16 @@ Every request goes through one shared RateLimiter so all jobs together stay poli
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-import random
 import time
-from collections import deque
-from typing import Any
 
 import httpx
 
 from app.config import get_settings
 from app.i18n import t
+from app.platforms.base import Blocked as PlatformBlocked
+from app.platforms.base import PlatformError
+from app.platforms.ratelimit import RateLimiter  # noqa: F401 - re-exported, tests and geizhals import it from here
 from app.willhaben import access_log, recorder, replay
 from app.willhaben.parse import (
     AdDetail,
@@ -33,81 +32,10 @@ log = logging.getLogger(__name__)
 WEB_CLIENT = "api@willhaben.at;responsive_web;server;1.0.0;desktop"
 
 
-class WillhabenError(RuntimeError):
-    pass
-
-
-class Blocked(WillhabenError):
-    """403/429: willhaben is throttling or blocking this IP. `sent` is True when willhaben answered
-    (the request went out), False when the shared limiter refused it before sending."""
-
-    sent = False
-
-
-class RateLimiter:
-    """Serialises requests with a minimum gap (plus jitter), an hourly budget and a global cool-down.
-
-    Waits that would block a caller for longer than `max_wait_s` (cool-down after 403/429 or an
-    exhausted budget) raise Blocked instead, so dashboard requests fail fast and scheduled jobs
-    simply retry on their next run.
-    """
-
-    def __init__(self, min_gap_s: float, per_hour: int = 0, max_wait_s: float = 45.0) -> None:
-        self.min_gap_s = min_gap_s
-        self.per_hour = per_hour
-        self.max_wait_s = max_wait_s
-        self._lock = asyncio.Lock()
-        self._last = 0.0
-        self._cooldown_until = 0.0
-        self._strikes = 0
-        self._recent: deque[float] = deque()   # monotonic start times of the last hour
-
-    def _budget_wait(self, now: float) -> float:
-        while self._recent and now - self._recent[0] >= 3600:
-            self._recent.popleft()
-        if not self.per_hour or len(self._recent) < self.per_hour:
-            return 0.0
-        return self._recent[0] + 3600 - now
-
-    async def __aenter__(self) -> None:
-        await self._lock.acquire()
-        try:
-            now = time.monotonic()
-            if self._cooldown_until - now > self.max_wait_s:
-                raise Blocked(t("willhaben pause after a block, {s} s left", s=f"{self._cooldown_until - now:.0f}"))
-            budget = self._budget_wait(now)
-            if budget > self.max_wait_s:
-                raise Blocked(t("Request limit ({n}/h) reached, free again in {m} min", n=self.per_hour, m=f"{budget / 60:.0f}"))
-            wait = max(self._cooldown_until - now, self._last + self.min_gap_s - now, budget, 0.0)
-            if wait > 0:
-                await asyncio.sleep(wait + random.uniform(0, self.min_gap_s / 2))
-            self._recent.append(time.monotonic())
-        except BaseException:
-            self._lock.release()
-            raise
-
-    async def __aexit__(self, *exc: Any) -> None:
-        self._last = time.monotonic()
-        self._lock.release()
-
-    def penalize(self) -> float:
-        """Exponential back-off after 403/429; returns the cool-down in seconds."""
-        self._strikes += 1
-        delay = min(60 * 2 ** (self._strikes - 1), 3600)
-        self._cooldown_until = time.monotonic() + delay
-        return delay
-
-    def reward(self) -> None:
-        self._strikes = 0
-
-    @property
-    def cooling_down_s(self) -> float:
-        return max(0.0, self._cooldown_until - time.monotonic())
-
-    @property
-    def last_hour(self) -> int:
-        self._budget_wait(time.monotonic())
-        return len(self._recent)
+# The errors are the neutral platform errors (app/platforms/base.py): every `except WillhabenError` also catches
+# what the shared limiter and the other adapters raise.
+WillhabenError = PlatformError
+Blocked = PlatformBlocked
 
 
 _limiter: RateLimiter | None = None
@@ -120,7 +48,7 @@ def willhaben_limiter() -> RateLimiter:
         s = get_settings()
         from app.db import requests_per_hour   # the budget may be changed in Settings
 
-        _limiter = RateLimiter(s.request_min_gap_s, requests_per_hour())
+        _limiter = RateLimiter(s.request_min_gap_s, requests_per_hour(), name="willhaben")
     return _limiter
 
 

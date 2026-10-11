@@ -4,25 +4,32 @@ All shapes verified against live responses on 2026-10-09 (see tests/fixtures).
 """
 from __future__ import annotations
 
-import html
 import json
 import math
 import re
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.i18n import t
+from app.platforms.base import InvalidSearchUrl  # noqa: F401 - re-exported: the app's search-URL error lives here too
+from app.platforms.text import clean_text, parse_iso  # noqa: F401 - clean_text is imported from here by other modules
+from app.platforms.types import (  # noqa: F401 - the neutral shapes; AdSummary is the old name of Listing
+    AdDetail,
+    FilterValue,
+    Listing,
+    SearchFilter,
+    SearchFilters,
+    SearchPage,
+)
+
+AdSummary = Listing
+_iso = parse_iso
 
 BASE = "https://www.willhaben.at"
 SEARCH_PREFIX = "/webapi/ad-search/search/atz/seo/"
 # Query params the web app adds for its own bookkeeping; dropped so the agent URL is stable.
 _VOLATILE_PARAMS = {"page", "sfId", "isNavigation", "publishedDateTo", "rows", "sort", "isLog"}
-
-
-class InvalidSearchUrl(ValueError):
-    pass
 
 
 def attrs(obj: dict[str, Any]) -> dict[str, list[str]]:
@@ -55,81 +62,10 @@ def _ms(v: str | None) -> datetime | None:
     return datetime.fromtimestamp(f / 1000, tz=timezone.utc)
 
 
-def _iso(v: str | None) -> datetime | None:
-    """ISO strings like 2026-11-23T10:26:53+0100 -> aware UTC datetime (naive input is taken as UTC)."""
-    if not v:
-        return None
-    try:
-        dt = datetime.strptime(v, "%Y-%m-%dT%H:%M:%S%z")
-    except ValueError:
-        try:
-            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def clean_text(s: str | None) -> str | None:
-    if s is None:
-        return None
-    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
-    s = re.sub(r"<li[^>]*>", "\n• ", s, flags=re.I)                      # dealers format with lists ...
-    s = re.sub(r"</(p|div|ul|ol|h[1-6]|tr)>", "\n", s, flags=re.I)       # ... and paragraphs
-    s = re.sub(r"<[^>]+>", "", s)
-    s = re.sub(r"[ \t]+\n", "\n", html.unescape(s))
-    return re.sub(r"\n{3,}", "\n\n", s).strip()
-
-
 def ad_url(seo_url: str | None, ad_id: str) -> str:
     if seo_url:
         return f"{BASE}/iad/{seo_url.lstrip('/')}"
     return f"{BASE}/iad/object?adId={ad_id}"
-
-
-@dataclass
-class AdSummary:
-    ad_id: str
-    heading: str
-    body: str | None
-    price: float | None
-    price_display: str | None
-    old_price: float | None
-    location: str | None
-    postcode: str | None
-    state: str | None
-    published_at: datetime | None
-    changed_at: datetime | None
-    end_date: datetime | None
-    url: str
-    image_url: str | None
-    is_private: bool | None
-    is_bumped: bool
-    status: str
-    category_ids: list[str] = field(default_factory=list)   # category tree root -> leaf ("categorytreeids")
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "ad_id": self.ad_id,
-            "title": self.heading,
-            "category_ids": self.category_ids,
-            "price": self.price,
-            "price_display": self.price_display,
-            "old_price": self.old_price,
-            "location": self.location,
-            "published_at": self.published_at.isoformat() if self.published_at else None,
-            "url": self.url,
-            "image_url": self.image_url,
-            "is_private": self.is_private,
-        }
-
-
-@dataclass
-class SearchPage:
-    rows_found: int
-    ads: list[AdSummary]
-    title: str | None = None
 
 
 def parse_summary(ad: dict[str, Any]) -> AdSummary:
@@ -160,6 +96,7 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         is_bumped=_first(a, "IS_BUMPED") == "1",
         status=((ad.get("advertStatus") or {}).get("id")) or "unknown",
         category_ids=[c for c in (_first(a, "categorytreeids") or "").split(";") if c],
+        platform="willhaben",
     )
 
 
@@ -170,59 +107,6 @@ def parse_search(data: dict[str, Any]) -> SearchPage:
         ads=[parse_summary(x) for x in items],
         title=data.get("searchTitle") or data.get("heading"),
     )
-
-
-@dataclass
-class AdDetail:
-    ad_id: str
-    heading: str
-    description: str | None
-    price: float | None
-    price_display: str | None
-    status: str
-    published_at: datetime | None
-    first_published_at: datetime | None
-    end_date: datetime | None
-    url: str
-    images: list[str] = field(default_factory=list)
-    location: str | None = None
-    seller_name: str | None = None
-    seller_login_id: str | None = None
-    seller_uuid: str | None = None
-    is_private: bool | None = None
-    chat_enabled: bool | None = None
-    category_path: list[str] = field(default_factory=list)
-    edit_actions: Any = None
-    category_id: str | None = None     # leaf category (same id space as AdSummary.category_ids)
-    paylivery_enabled: bool = False    # the ad offers willhaben PayLivery (attribute payliveryEnabled)
-    buy_now: bool = False              # "Sofort kaufen" (p2ppOptions.buyNowInformationDto.isBuyNowAd)
-    shipping_price: float | None = None  # cheapest PayLivery delivery price for the buyer (p2ppOptions.deliveryOptions[].price)
-    place: str | None = None           # pickup place for a map search: "postcode municipality, country" (advertAddressDetails)
-
-    @property
-    def maps_url(self) -> str | None:
-        """Google Maps search for the place of the ad (postcode level, private sellers show no street)."""
-        return f"https://www.google.com/maps/search/?api=1&query={quote_plus(self.place)}" if self.place else None
-
-    def as_context(self) -> dict[str, Any]:
-        return {
-            "ad_id": self.ad_id,
-            "title": self.heading,
-            "price": self.price_display or (f"€ {self.price:g}" if self.price is not None else None),
-            "description": self.description,
-            "location": self.location,
-            "category": " > ".join(self.category_path),
-            "status": self.status,
-            "end_date": self.end_date.isoformat() if self.end_date else None,
-            "seller_name": self.seller_name,
-            "seller_login_id": self.seller_login_id,
-            "seller_uuid": self.seller_uuid,
-            "url": self.url,
-            "images": self.images[:5],
-            "paylivery": self.paylivery_enabled,
-            "buy_now": self.buy_now,
-            "shipping_price": self.shipping_price,
-        }
 
 
 def _flag(*values: Any) -> bool:
@@ -394,47 +278,6 @@ def with_params(url: str, changes: dict[str, str | None]) -> str:
 
 def url_param(url: str, name: str) -> str | None:
     return dict(parse_qsl(urlsplit(url).query)).get(name)
-
-
-@dataclass
-class FilterValue:
-    label: str
-    url: str                 # browser URL with this value applied (selected values: with it removed)
-    hits: int | None = None
-
-
-@dataclass
-class SearchFilter:
-    id: str
-    label: str
-    kind: str                # HIERARCHICAL | RANGE | STANDARD
-    multi: bool
-    values: list[FilterValue]
-    selected: list[FilterValue]
-    range_params: list[str] = field(default_factory=list)   # e.g. [PRICE_FROM, PRICE_TO]
-
-
-@dataclass
-class SearchFilters:
-    """One step of the search-agent builder: the current search plus everything that can be added to it."""
-    url: str
-    rows_found: int
-    groups: list[tuple[str, list[SearchFilter]]]
-    ads: list[AdSummary]
-    keyword: str | None = None
-
-    @property
-    def selected(self) -> list[tuple[SearchFilter, FilterValue]]:
-        return [(f, v) for _, fs in self.groups for f in fs for v in f.selected]
-
-    def suggested_name(self) -> str:
-        parts = [self.keyword] if self.keyword else []
-        for f, v in self.selected:
-            # Category shows its whole path; the deepest level is enough for a name.
-            if f.kind == "HIERARCHICAL" and v is not f.selected[-1]:
-                continue
-            parts.append(v.label)
-        return " · ".join(parts)[:80] or t("All ads")
 
 
 def _link(d: Any) -> str | None:

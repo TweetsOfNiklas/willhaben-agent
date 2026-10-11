@@ -1,0 +1,6 @@
+{
+ "{name} pause after a block, {s} s left": "{name}: Pause nach einer Sperre, noch {s} s",
+ "{name}: request limit ({n}/h) reached, free again in {m} min": "{name}: Anfragelimit ({n}/h) erreicht, in {m} min wieder frei",
+ "{name} is switched off in Settings → Platforms": "{name} ist in Einstellungen → Plattformen ausgeschaltet",
+ "Not a search link of a supported site ({sites})": "Kein Suchlink einer unterstützten Seite ({sites})"
+}
