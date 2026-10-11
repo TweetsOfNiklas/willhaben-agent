@@ -16,6 +16,9 @@ DEFAULT = DEFAULT_PLATFORM
 _FACTORIES: dict[str, str] = {        # id -> "module:Class"; order = display order
     "willhaben": "app.platforms.willhaben:WillhabenPlatform",
     "kleinanzeigen": "app.platforms.kleinanzeigen:KleinanzeigenPlatform",
+    "shpock": "app.platforms.shpock:ShpockPlatform",
+    "vinted": "app.platforms.vinted:VintedPlatform",
+    "preisjaeger": "app.platforms.preisjaeger:PreisjaegerPlatform",
 }
 _instances: dict[str, Platform] = {}
 _overrides: dict[str, Platform | None] = {}

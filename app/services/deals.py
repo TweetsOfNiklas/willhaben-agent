@@ -631,7 +631,7 @@ def parse_ad_ref(text: str | None) -> tuple[str, str] | None:
     s = (text or "").strip()
     if re.fullmatch(r"\d{6,}", s):
         return "willhaben", s
-    if re.fullmatch(r"[a-z][a-z0-9_]*:\d+", s):
+    if re.fullmatch(r"[a-z][a-z0-9_]*:[\w-]+", s):        # shpock ids are not numbers
         try:
             return split_ref(s)
         except InvalidRef:

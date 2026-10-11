@@ -1,0 +1,134 @@
+{
+ "data": {
+  "itemSearch": {
+   "__typename": "FetchItemsResponse",
+   "od": "aP2AdPa8oGEkcHn8efsxTsBzrJZbQ8wQoeTLCC46GLC/1IVZWPdJgsxlmbrrLoIAEgB287FfpQ+xqiHsLaLNEYKpfiNsqTJ3FiCr5rp8ZFs=|kK0qq2GGPkZuRM44IudKWw==",
+   "offset": 0,
+   "limit": 10,
+   "count": 10,
+   "total": null,
+   "itemResults": [
+    {
+     "distanceGroup": "ungrouped",
+     "items": [
+      {
+       "__typename": "ItemSummary",
+       "id": "asu6-t2hxq7bDRFz",
+       "title": "Apple IPhone 15 Pro 128 GB Titan Schwarz",
+       "description": "Ich verkaufe mein iPhone 15 Pro mit 128 GB Speicher in Titan Schwarz, da ich es nicht mehr benötige.\n\nDas Handy befindet sich in einem sehr gepflegten Zustand. Das Display und die Rückseite sind kratzerfrei. Die Kamera funktioniert einwandfrei und der Batteriezustand liegt bei 86 %.\n\nEin Ladekabel ist im Lieferumfang enthalten. Die Originalverpackung ist leider nicht mehr vorhanden.\n\nWichtig: Nur persönliche Abholung in Vorarlberg, kein Versand. Bezahlung bei Übergabe in bar.",
+       "path": "/de-at/i/asu6-t2hxq7bDRFz/apple-iphone-15-pro-128-gb-titan-schwarz",
+       "locality": "6971 Hard",
+       "price": 450,
+       "originalPrice": null,
+       "currency": "eur",
+       "isNew": false,
+       "isSold": false,
+       "isFree": false,
+       "isBoosted": false,
+       "isShippable": false,
+       "canonicalURL": "https://www.shpock.com/de-at/i/asu6-t2hxq7bDRFz/apple-iphone-15-pro-128-gb-titan-schwarz",
+       "media": [
+        {
+         "id": "6acbbafadda1c6aedb52e82b"
+        }
+       ]
+      },
+      {
+       "__typename": "ItemSummary",
+       "id": "asuokiMmuRvIB_Ms",
+       "title": "Apple iPhone 15 Pro 128 GB",
+       "description": "Ich verkaufe mein Apple iPhone 15 Pro mit 128 GB Speicher. Den optischen Zustand könnt ihr den aktuellen Fotos entnehmen.\n\nDetails:\n\n* 128 GB Speicher\n* Maximale Akkukapazität: 87 %\n* Batteriezustand laut Einstellungen: Normal\n* 898 Ladezyklen\n* Ersteinsatz der Batterie: April 2024\n• Inklusive Schutzhülle und Blickschutzfolie aus Panzerglas\n\nAbholung bevorzugt, Versand nach Absprache ebenfalls möglich.\n\nBei Interesse oder Fragen gerne melden!\n\n\nDies ist ein Privatverkauf unter Ausschluss der Sachmängelhaftung. Ich übernehme keine Garantie und biete keine freiwillige Rücknahme an.\n\nDer Haftungsausschluss gilt nicht bei arglistig verschwiegenen Mängeln, bei Schäden aus der Verletzung von Leben, Körper oder Gesundheit sowie bei vorsätzlicher oder grob fahrlässiger Pflichtverletzung.",
+       "path": "/de-at/i/asuokiMmuRvIB_Ms/apple-iphone-15-pro-128-gb",
+       "locality": "68309 Mannheim",
+       "price": 499,
+       "originalPrice": 549,
+       "currency": "eur",
+       "isNew": false,
+       "isSold": false,
+       "isFree": false,
+       "isBoosted": false,
+       "isShippable": false,
+       "canonicalURL": "https://www.shpock.com/de-at/i/asuokiMmuRvIB_Ms/apple-iphone-15-pro-128-gb",
+       "media": [
+        {
+         "id": "6acba8922326b91bc81af4f5"
+        }
+       ]
+      },
+      {
+       "__typename": "ItemSummary",
+       "id": "asujonHZ09fRAmEi",
+       "title": "Apple iPhone 15 Pro, 128GB, 91% Akku mit oVP",
+       "description": "Es befindet sich in einem sehr guten Zustand, ist voll funktionsfähig und frei für alle Karten und Netze.\n\n\nEs wird mit dem Ladekabel und der Verpackung angeboten.\n\n\nAuf Anfrage und gegen Vorkasse versende ich auch.\n\n\nDa Privatverkauf: Keine Gewährleistung, keine Rücknahme, keine Garantie und kein Umtauschrecht.",
+       "path": "/de-at/i/asujonHZ09fRAmEi/apple-iphone-15-pro-128gb-91-akku-mit-ovp",
+       "locality": "1180 Wien",
+       "price": 450,
+       "originalPrice": null,
+       "currency": "eur",
+       "isNew": false,
+       "isSold": false,
+       "isFree": true,
+       "isBoosted": false,
+       "isShippable": false,
+       "canonicalURL": "https://www.shpock.com/de-at/i/asujonHZ09fRAmEi/apple-iphone-15-pro-128gb-91-akku-mit-ovp",
+       "media": [
+        {
+         "id": "6acba3a271d9d3d7d14d4c42"
+        }
+       ]
+      },
+      {
+       "__typename": "ItemSummary",
+       "id": "asuXd_pn-ixnBBF2",
+       "title": "Iphone 15 Pro Max Neu",
+       "description": "Verkaufe Iphone 15 Pro Max. Neu ohne Originalverpackung.",
+       "path": "/de-at/i/asuXd_pn-ixnBBF2/iphone-15-pro-max-neu",
+       "locality": "6922 Wolfurt",
+       "price": 450,
+       "originalPrice": null,
+       "currency": "eur",
+       "isNew": false,
+       "isSold": false,
+       "isFree": false,
+       "isBoosted": false,
+       "isShippable": false,
+       "canonicalURL": "https://www.shpock.com/de-at/i/asuXd_pn-ixnBBF2/iphone-15-pro-max-neu",
+       "media": [
+        {
+         "id": "6acb9777fa67fa2c6700e337"
+        }
+       ]
+      },
+      {
+       "__typename": "ItemSummary",
+       "id": "asSOLD0000000000",
+       "title": "Iphone 15 Pro Max Neu",
+       "description": "Verkaufe Iphone 15 Pro Max. Neu ohne Originalverpackung.",
+       "path": "/de-at/i/asuXd_pn-ixnBBF2/iphone-15-pro-max-neu",
+       "locality": "6922 Wolfurt",
+       "price": 450,
+       "originalPrice": null,
+       "currency": "eur",
+       "isNew": false,
+       "isSold": true,
+       "isFree": false,
+       "isBoosted": false,
+       "isShippable": false,
+       "canonicalURL": "https://www.shpock.com/de-at/i/asuXd_pn-ixnBBF2/iphone-15-pro-max-neu",
+       "media": [
+        {
+         "id": "6acb9777fa67fa2c6700e337"
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   "filters": []
+  }
+ },
+ "extensions": {
+  "requestId": "6e9f3883-75a1-4a46-8d39-ad74e1c08146",
+  "trackingId": ""
+ }
+}

@@ -65,7 +65,87 @@ def _uninstall_ka():
     ka.set_client(None)
 
 
+class FileTransport:
+    """Serves fixture files by URL substring (first match wins); everything else is a 404. Records (url, headers)."""
+
+    def __init__(self, routes):
+        self.routes, self.calls = routes, []
+
+    async def send(self, method, url, *, params=None, headers=None):
+        from app.platforms.httpclient import FetchResponse
+        self.calls.append((url, headers))
+        for part, name, ctype in self.routes:
+            if part in url:
+                return FetchResponse(200, {"content-type": ctype}, (FIXTURES / name).read_bytes(), url)
+        return FetchResponse(404, {}, b"", url)
+
+    def clear_cookies(self):
+        pass
+
+    async def aclose(self):
+        pass
+
+
+SHPOCK_ROUTES = [("/graphql", "shpock_search.json", "application/json"),
+                 ("/i/asu6-t2hxq7bDRFz", "shpock_item.html", "text/html")]
+VINTED_ROUTES = [("/catalog", "vinted_catalog.rsc", "text/x-component"),
+                 ("/items/10341874098", "vinted_item.rsc", "text/x-component")]
+PREISJAEGER_ROUTES = [("/search", "preisjaeger_search.html", "text/html")]
+
+
+def _installer(module, client_cls, routes):
+    def install():
+        mod = __import__(f"app.platforms.{module}", fromlist=["x"])
+        client = getattr(mod, client_cls)(transport=FileTransport(routes))
+        client.limiter = RateLimiter(0, name=module)
+        mod.set_client(client)
+        return client
+
+    def uninstall():
+        __import__(f"app.platforms.{module}", fromlist=["x"]).set_client(None)
+    return install, uninstall
+
+
 CASES = {
+    "shpock": {
+        "url": "https://www.shpock.com/de-at/results?q=iphone+15+pro&priceFrom=100&priceTo=500",
+        "volatile": "https://www.shpock.com/de-at/results?q=iphone+15+pro&priceFrom=100&priceTo=500&sort=x&page=2",
+        "invalid": ["https://www.shpock.com/de-at/i/asu6-t2hxq7bDRFz/apple-iphone", "https://example.com/de-at/results?q=x",
+                    "https://www.shpock.com/de-at/results", "https://www.shpock.com/de-at/c/handys"],
+        "ad_url": "https://www.shpock.com/de-at/i/asu6-t2hxq7bDRFz/apple-iphone-15-pro-128-gb-titan-schwarz",
+        "ad_id": "asu6-t2hxq7bDRFz",
+        "keyword": "rennrad",
+        "install": _installer("shpock", "ShpockClient", SHPOCK_ROUTES)[0],
+        "uninstall": _installer("shpock", "ShpockClient", SHPOCK_ROUTES)[1],
+        "expect_ads": 4,
+        "detail_id": "asu6-t2hxq7bDRFz",
+    },
+    "vinted": {
+        "url": "https://www.vinted.at/catalog?search_text=iphone+15+pro&brand_ids[]=54&price_from=5&price_to=50&currency=EUR&order=newest_first",
+        "volatile": "https://www.vinted.at/catalog?search_text=iphone+15+pro&brand_ids[]=54&price_from=5&price_to=50&page=3&time=1791756814&search_id=9&order=relevance",
+        "invalid": ["https://www.vinted.at/items/10341874098-handyhullen", "https://example.com/catalog?search_text=x",
+                    "https://www.vinted.at/", "https://www.vinted.at/catalog"],
+        "ad_url": "https://www.vinted.at/items/10341874098-handyhullen-iphone-16-max-pro-max?referrer=catalog",
+        "ad_id": "10341874098",
+        "keyword": "rennrad",
+        "install": _installer("vinted", "VintedClient", VINTED_ROUTES)[0],
+        "uninstall": _installer("vinted", "VintedClient", VINTED_ROUTES)[1],
+        "expect_ads": 4,
+        "detail_id": "10341874098",
+    },
+    "preisjaeger": {
+        "url": "https://www.preisjaeger.at/search?q=iphone",
+        "volatile": "https://www.preisjaeger.at/search?q=iphone&sortBy=hot&page=2&hide_expired=true",
+        "invalid": ["https://www.preisjaeger.at/deals/eke-case-20-der-ecken-schutz-369807", "https://example.com/search?q=x",
+                    "https://www.preisjaeger.at/search", "https://www.preisjaeger.at/gruppe/iphone"],
+        "ad_url": "https://www.preisjaeger.at/deals/eke-case-20-der-ecken-schutz-furs-apple-iphone-18-369807",
+        "ad_id": "369807",
+        "keyword": "rennrad",
+        "install": _installer("preisjaeger", "PreisjaegerClient", PREISJAEGER_ROUTES)[0],
+        "uninstall": _installer("preisjaeger", "PreisjaegerClient", PREISJAEGER_ROUTES)[1],
+        "expect_ads": 4,
+        "detail_id": None,
+    },
     "kleinanzeigen": {
         "url": "https://www.kleinanzeigen.de/s-preis:100:2000/rennrad/k0",
         "volatile": "https://www.kleinanzeigen.de/s-sortierung:preis/s-preis:100:2000/s-seite:2/rennrad/k0",

@@ -130,6 +130,10 @@ class Platform(ABC):
         """Coarse kind of a request to this site for the access log (search | detail | filters | other)."""
         return "other"
 
+    def about(self) -> str:
+        """A sentence or two for the site's settings page: how it is reached and what its listings lack."""
+        return ""
+
     def status(self) -> dict[str, Any]:
         lim = self.limiter
         return {"id": self.id, "name": self.name, "access": self.access, "last_hour": lim.last_hour,

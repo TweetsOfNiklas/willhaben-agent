@@ -12,7 +12,7 @@ It runs on your own server, from your home internet connection, and you control 
 (English or German).
 
 - **Search agents**: build a search with willhaben's own filters, or paste a search link or type a search term for
-  another supported site (kleinanzeigen.de; see "Supported platforms"), and get notified about new listings and
+  another supported site (kleinanzeigen.de, Shpock, Vinted, Preisjäger; see "Supported platforms"), and get notified about new listings and
   price drops, usually much faster than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
   predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
@@ -30,7 +30,7 @@ It runs on your own server, from your home internet connection, and you control 
   category comes from willhaben's suggestion or your own pick).
 - **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
   Claude plans a few searches, the app runs them anonymously on willhaben and on every other site switched on for it
-  (Settings → Platforms; the search form lets you pick), and Claude picks the best offers, each with a
+  (Settings → Platforms; the search form lets you pick and names the sites still switched off), and Claude picks the best offers, each with a
   fit score, a short reason, red flags, the price bar and the scam check. An optional photo check (on by default)
   shows Claude the photos of the best offers (at most 10) and weighs damage, wear, wrong variants, stock photos or a
   different item against what you care about (a scratch barely counts if you prefer the lower price). When the
@@ -130,9 +130,15 @@ pacing and budget.
 |---|---|---|---|---|---|---|---|
 | willhaben.at | AT | direct requests + the logged-in browser | own filters, link, keyword | yes | yes | yes | done |
 | kleinanzeigen.de | DE | the Kleinanzeigen app's JSON API (direct requests) | link, keyword with a price range, product search | yes | against willhaben listings | no | built; search, ad details and places checked once against the live API (2026-10-11), no agent has run for days yet |
+| shpock.com | AT, DE | the GraphQL API of the Shpock website (direct requests, no login) | link, keyword with a price range, product search | yes (the ad's page: posting time, condition, seller) | against willhaben listings | no | built; search and ad pages checked once against the live site (2026-10-12), no agent has run for days yet |
+| vinted.at, vinted.de | AT, DE | the catalog data the website renders for a browser (direct requests, no login, about 3 MB per search, agents every 5 min at most) | link with the site's own filters, keyword with a price range, product search | yes (the ad's page) | against willhaben listings | no | built; search and ad pages checked once against the live site (2026-10-12), no agent has run for days yet |
+| preisjaeger.at | AT | the deal cards of the search page (direct requests, no login); deals from shops, not private listings | link, keyword (the app applies the price range), product search | the listing only | against willhaben listings | no | built; search checked once against the live site (2026-10-12), no agent has run for days yet |
+
+Facebook Marketplace needs a login and is not supported. Shpock and Vinted listings come without a date (opening one
+loads it), Vinted's also without a place; on Preisjäger the shop is shown where the other sites show the place.
 
 Links from any of these sites can be pasted on "New search agent"; hits of other sites are listed with the site's
-name, and their links in pushes and the dashboard carry the site (`kleinanzeigen:<id>`).
+name, and their links in pushes and the dashboard carry the site (`kleinanzeigen:<id>`, `shpock:<id>`, …).
 
 ## Quick start
 
@@ -202,7 +208,8 @@ Every variable is optional. Values set in the dashboard win over the environment
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude token from `claude setup-token`, instead of signing in through the dashboard |
 | `HA_URL`, `HA_TOKEN`, `HA_NOTIFY_SERVICE` | Home Assistant without the connect flow |
 | `REQUEST_MIN_GAP_S`, `REQUESTS_PER_HOUR` | Rate limit for all willhaben requests (defaults 3 s, 240/h) |
-| `PLATFORMS_ENABLED`, `PLATFORM_KLEINANZEIGEN_MIN_GAP_S`, `PLATFORM_KLEINANZEIGEN_PER_HOUR`, `KLEINANZEIGEN_API_AUTH` | Which other sites exist (default `willhaben,kleinanzeigen`), kleinanzeigen's pacing (3 s, 120/h) and, in case the bundled ones stop working, the Kleinanzeigen app's API credentials (`user:password`); all also in Settings → Platforms |
+| `PLATFORMS_ENABLED`, `PLATFORM_KLEINANZEIGEN_MIN_GAP_S`, `PLATFORM_KLEINANZEIGEN_PER_HOUR`, `KLEINANZEIGEN_API_AUTH` | Which other sites exist (default `willhaben,kleinanzeigen,shpock,vinted,preisjaeger`), kleinanzeigen's pacing (3 s, 120/h) and, in case the bundled ones stop working, the Kleinanzeigen app's API credentials (`user:password`); all also in Settings → Platforms |
+| `PLATFORM_SHPOCK_MIN_GAP_S`, `PLATFORM_SHPOCK_PER_HOUR`, `PLATFORM_VINTED_MIN_GAP_S`, `PLATFORM_VINTED_PER_HOUR`, `PLATFORM_PREISJAEGER_MIN_GAP_S`, `PLATFORM_PREISJAEGER_PER_HOUR` | Pacing of the other sites (Shpock 4 s, 90/h; Vinted 8 s, 40/h; Preisjäger 4 s, 60/h); also in Settings → Platforms |
 | `DEFAULT_AGENT_INTERVAL_S`, `MIN_AGENT_INTERVAL_S`, `CHAT_POLL_INTERVAL_S` | Polling intervals |
 | `VNC_PASSWORD`, `NOVNC_URL` | Optional noVNC view of the login browser (port 6080, LAN only) |
 | `PROXY_VIA`, `PROXY_HOSTS` | Map hostnames (e.g. your HA domain) to a reverse-proxy container on a shared network |
@@ -286,6 +293,7 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 |---|---|
 | Search agents, hits, price drops, quiet hours, human pace | done |
 | Search agents on kleinanzeigen.de (platform adapter framework) | built; the API answers were checked once live, **no agent has run against it for days yet** |
+| Search agents on Shpock, Vinted and Preisjäger | built; searches and ad pages were checked once live (2026-10-12), **no agent has run against them for days yet** |
 | Claude screening of hits (with reasons), scam check | done (thresholds still being tuned on real hits) |
 | willhaben login in the dashboard, session check, silent re-login | done |
 | Chat sync (live), history, Claude reply drafts, sending, read receipts | done |

@@ -41,3 +41,29 @@ def to_float(v: str | float | int | None) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def one_line(s: str | None) -> str | None:
+    """Tabs, line breaks and space runs as one space; None when nothing is left."""
+    if s is None:
+        return None
+    s = re.sub(r"\s+", " ", str(s)).strip()
+    return s or None
+
+
+def euro(amount: float) -> str:
+    """German price text as the sites show it: 1.250 €, 12,50 €."""
+    if amount == int(amount):
+        return f"{amount:,.0f}".replace(",", ".") + " €"
+    return f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+
+def from_epoch(v: float | int | str | None, *, ms: bool = False) -> datetime | None:
+    """Unix time (seconds, or milliseconds with ms=True) -> aware UTC datetime; None for 0 or junk."""
+    f = to_float(v)
+    if not f:
+        return None
+    try:
+        return datetime.fromtimestamp(f / 1000 if ms else f, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None

@@ -11,6 +11,7 @@ from app.platforms import Blocked, InvalidSearchUrl, PlatformError, SearchSpec
 from app.platforms import kleinanzeigen as ka
 from app.platforms.httpclient import FetchResponse
 from app.platforms.ratelimit import RateLimiter
+from app.platforms.text import euro
 from app.services.search_agents import create_agent, run_agent
 from tests.conftest import load
 from tests.test_platforms_contract import KaTransport
@@ -71,7 +72,7 @@ def test_ad_answer_becomes_detail():
     assert d.ad_id == "2712345678" and d.heading == "Rennrad Canyon Endurace" and d.seller_name == "Erika"
     assert d.description.startswith("Canyon Endurace CF 8") and "\n" in d.description and len(d.images) == 3
     assert d.is_vb is True and d.price_display == "1.250 € VB" and d.category_path == ["Fahrräder & Zubehör"]
-    assert ka._euro(12.5) == "12,50 €" and ka._euro(1234567) == "1.234.567 €"
+    assert euro(12.5) == "12,50 €" and euro(1234567) == "1.234.567 €"
     assert d.platform == "kleinanzeigen" and d.ref == "kleinanzeigen:2712345678" and d.is_private is True
     assert ka.parse_ad({}) is None
     assert ka.parse_locations(load("kleinanzeigen_locations.json")) == [(3331, "Berlin"), (3360, "Berlin Mitte")]
@@ -178,4 +179,10 @@ def test_registry_knows_kleinanzeigen():
     assert [p.id for p in platforms.all()] == ["willhaben", "kleinanzeigen"]
     assert platforms.for_host("img.kleinanzeigen.de").id == "kleinanzeigen"
     assert platforms.names() == "willhaben, Kleinanzeigen"
-    assert get_settings().platforms_enabled == "willhaben,kleinanzeigen"
+    assert get_settings().platforms_enabled == "willhaben,kleinanzeigen,shpock,vinted,preisjaeger"
+
+
+def test_city_with_district_is_one_line():
+    ad = load("kleinanzeigen_ads.json")[ka.ADS_NS]["value"]["ad"][0]
+    ad["ad-address"]["state"] = {"value": "Hamburg\tWaltershof"}
+    assert ka.parse_listing(ad).location == "10115 Hamburg, Waltershof"

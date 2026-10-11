@@ -143,12 +143,17 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
             **_agent_ctx(shown)}
 
 
+def _sites_off() -> list[platforms.Platform]:
+    """Sites the product search could use that are switched off: the form names them, with a link to switch on."""
+    return [p for p in platforms.all(enabled_only=False) if p.can("keyword_search") and not platforms.enabled(p.id)]
+
+
 def _agent_ctx(shown: Any) -> dict[str, Any]:
     """"Search agent from this search": the existing agents (one per site), or the form's defaults."""
     sites = [p for p in product_search.search_platforms()]
     if shown is None or shown.id is None:
         return {"ps_agent": None, "ps_agents": [], "ps_agent_n": 0, "ps_agent_interval_min": 0, "ps_agent_name": "",
-                "ps_sites": sites, "ps_agent_sites": []}
+                "ps_sites": sites, "ps_agent_sites": [], "ps_sites_off": _sites_off()}
     with session() as db:
         agents = list(db.exec(select(SearchAgent).where(SearchAgent.search_id == shown.id).order_by(SearchAgent.id)))
     n = len((shown.plan or {}).get("queries") or [])
@@ -157,7 +162,8 @@ def _agent_ctx(shown: Any) -> dict[str, Any]:
     agent_sites = [p for p in platforms.all() if p.can("keyword_search") and p.id in used and p.id not in taken]
     return {"ps_agent": agents[0] if agents else None, "ps_agents": agents, "ps_agent_n": n,
             "ps_agent_interval_min": search_agents.default_interval_s(n) // 60,
-            "ps_agent_name": search_agents.agent_name(shown), "ps_sites": sites, "ps_agent_sites": agent_sites}
+            "ps_agent_name": search_agents.agent_name(shown), "ps_sites": sites, "ps_agent_sites": agent_sites,
+            "ps_sites_off": _sites_off()}
 
 
 @router.get("/search")

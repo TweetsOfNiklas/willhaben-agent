@@ -27,7 +27,7 @@ from app.i18n import t
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import FetchResponse, HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
-from app.platforms.text import clean_text, parse_iso, to_float
+from app.platforms.text import clean_text, euro, one_line, parse_iso, to_float
 from app.platforms.types import AdDetail, Listing, SearchPage, SearchSpec
 
 log = logging.getLogger(__name__)
@@ -86,13 +86,6 @@ def _pictures(ad: dict[str, Any]) -> list[str]:
     return out
 
 
-def _euro(amount: float) -> str:
-    """German price text as the site shows it: 1.250 €, 12,50 €."""
-    if amount == int(amount):
-        return f"{amount:,.0f}".replace(",", ".") + " €"
-    return f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
-
-
 def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
     """(price, display, negotiable): FREE -> 0 "Zu verschenken"; no amount -> None "VB"; "120 € VB" when negotiable.
     Seen live (2026-10): SPECIFIED_AMOUNT and PLEASE_CONTACT with an amount (shown as the plain price)."""
@@ -104,13 +97,13 @@ def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
     vb = kind == "NEGOTIABLE"
     if amount is None:
         return None, "VB" if vb or kind in ("SEE_DESCRIPTION", "PLEASE_CONTACT") else None, vb or None
-    return amount, _euro(amount) + (" VB" if vb else ""), vb
+    return amount, euro(amount) + (" VB" if vb else ""), vb
 
 
 def _common(ad: dict[str, Any]) -> dict[str, Any]:
     addr = ad.get("ad-address") or {}
     postcode = _text(addr.get("zip-code"))
-    city = _text(addr.get("state"))
+    city = one_line((_text(addr.get("state")) or "").replace("\t", ", "))   # "Hamburg\tWaltershof": city, district
     price, display, vb = _price(ad)
     poster = (str(_val(ad.get("poster-type")) or "")).upper()
     url = next((ln.get("href") for ln in _links(ad.get("link")) if ln.get("rel") == "self-public-website"), None)
