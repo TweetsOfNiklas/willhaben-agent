@@ -10,7 +10,8 @@ from app.willhaben.parse import _price_from_display
 APP = Path(__file__).resolve().parent.parent / "app"
 ANONYMOUS_MODULES = ["services/search_agents.py", "services/screening.py", "services/deals.py", "services/scam.py",
                      "services/geizhals.py", "services/product_search.py", "services/ad_images.py",
-                     "willhaben/public.py"]
+                     "willhaben/public.py", "willhaben/recorder.py", "willhaben/replay.py", "willhaben/redact.py",
+                     "willhaben/export.py"]
 ACCOUNT = {"app.willhaben.session", "app.willhaben.account", "app.willhaben.insert", "app.willhaben.sales"}
 
 

@@ -29,6 +29,7 @@ from app.llm.base import LLMError, get_backend
 from app.services import geizhals
 from app.willhaben.parse import AdDetail, InvalidSearchUrl, to_webapi_url
 from app.willhaben.public import WillhabenError, get_public
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -597,6 +598,7 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
     return "\n".join(lines)
 
 
+@timeline.scoped(ad_id=lambda a: a["ad"].ad_id)
 async def ask_claude(ad: AdDetail, res: dict[str, Any]) -> dict[str, Any]:
     """{deal, reason, model, at} or {error}."""
     from app.services.screening import _download

@@ -121,6 +121,46 @@ anonymously, search for the action ids). To see real request/response shapes, ca
    cookies/CSRF, request body and response.
 5. Add the endpoint to `app/willhaben/account.py` and update this table.
 
+With "Record willhaben requests" switched on (see below), the captured requests of such a manual recording are also
+stored as recordings (channel `browser`), so they can be replayed and exported like the app's own requests.
+
+## Recording, replay and fixtures
+
+**Recording** (opt-in: Settings → Timeline → "Record willhaben requests", setting `wh_recording`, off by default).
+`app/willhaben/recorder.py` stores every request the app sends to willhaben in the table `whrecording` of `app.db`:
+
+| Channel | Where | Body |
+|---|---|---|
+| `anonymous` | `PublicClient._get` (search, detail, filters) | full answer; cache hits as a metadata row |
+| `account` | `BrowserSession.api` / `upload` | request JSON and answer; uploads: field, file name, type and size only |
+| `chat` | `ws_request` / `ws_send`, live socket pushes (`WSPUSH`, kind `chat_push`) | frames and the result |
+| `navigation` | page loads (`_goto`, remote back/reload) | none |
+| `download` | ad images (size + sha256 only), PayLivery label PDFs | PDF up to 1 MiB |
+| `browser` | the manual API recording above | as captured |
+
+Headers are kept without `cookie`, `set-cookie`, `authorization` and the CSRF token. Bodies are zlib-compressed and capped
+(requests 256 KiB, JSON/text 2 MiB, HTML 3 MiB, PDF 1 MiB, other 256 KiB); a longer body keeps its head and is
+flagged `truncated`. Each request has a `canonical_key`: method, host + path, the query sorted and without volatile
+parameters (`_`, `t`, `ts`, `timestamp`, `cb`, `nocache`, `rnd`, `sfId`, …; `page`, `rows`, `sort`, `offset`, `limit`
+stay), and the body without request ids and client timestamps. When the timeline is switched on too, every request is
+also a timeline entry (`/timeline`, tab willhaben) with the ad / chat / search it belonged to.
+
+**Replay** (`WH_REPLAY=1`, `app/willhaben/replay.py`): a request whose canonical key was recorded is answered from the
+newest complete recording (not cut off, not pruned, no cache entry, no 403/429, no network error): nothing is sent,
+the rate limiter does not wait and nothing is counted as an access. Writes replay only the exact same request (a
+different chat text or ad edit is never answered with an old result). Unknown requests go to willhaben as usual and
+are recorded while recording is on. With `BROWSER_ENABLED=0` as well, the account side has no browser at all
+(`ReplaySession`): the login comes from a recorded `/userprofile/me`, recorded account calls work, everything else
+fails with "never recorded". Pushed live-chat frames are recorded but not played back.
+
+**Fixtures**: `uv run python -m app.willhaben.export --out tests/fixtures/rec --since 7d --kinds search,detail,chat`
+writes one JSON file per request (newest version; `--all` for every one) to `<out>/<kind>/`, with personal data
+replaced by `app/willhaben/redact.py`: names, e-mail addresses, phone numbers, addresses, IBANs, user / conversation /
+message ids, UUIDs and chat texts (`--keep-texts` keeps those); `--raw` skips redaction (never commit that).
+Settings → Timeline offers the same as a ZIP download. `tests/fake_willhaben.py` serves such a folder to the real
+clients: `transport_from_cassette()` for `PublicClient`, `FakeSession` for `AccountClient`; requests are matched by the
+same canonical key and misses are listed in `cassette.misses`.
+
 ## Sending chat messages (from the web app bundle, 2026-10-09)
 
 No REST call: the web app sends via the chat WebSocket `wss://chat-realtime-web.willhaben.at/webapi/chat-ws/v1/ws/`

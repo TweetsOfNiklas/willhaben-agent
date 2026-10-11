@@ -47,6 +47,9 @@ class Job:
 
     def progress(self, done: int, step: str = "", current: str | None = None) -> None:
         self.done, self.step, self.current = done, step, current
+        if current:     # what the job records from here on belongs to this item (timeline)
+            from app.services import timeline
+            timeline.update_context(**timeline.marker_ids(current))
 
     def view(self) -> dict[str, Any]:
         return {"id": self.id, "label": self.label, "lane": self.lane, "status": self.status, "step": self.step, "current": self.current,
@@ -88,18 +91,25 @@ JOB_TIMEOUT_S = 15 * 60     # longest a job may run (a big clean-up or update fi
 
 
 async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
+    from app.services import timeline
+
     try:
         async with _locks.setdefault(job.lane, asyncio.Lock()):
             job.status = "running"
-            try:
-                job.result = await asyncio.wait_for(run(job), JOB_TIMEOUT_S) or ""
-                job.status = "done"
-            except TimeoutError:          # a stuck request (e.g. a willhaben page that never answers) frees the lane
-                log.warning("job %r timed out after %d s", job.label, JOB_TIMEOUT_S)
-                job.status, job.result = "failed", t("Took longer than {n} min – stopped", n=JOB_TIMEOUT_S // 60)
-            except Exception as e:  # noqa: BLE001 - nobody awaits the task: the error goes to the header
-                log.warning("job %r failed: %s", job.label, e)
-                job.status, job.result = "failed", str(e)
+            # one timeline entry per job; Claude calls and willhaben requests inside it are its steps
+            async with timeline.run("job", job.label, name=job.kind, **timeline.marker_ids(job.current)) as tl:
+                try:
+                    job.result = await asyncio.wait_for(run(job), JOB_TIMEOUT_S) or ""
+                    job.status = "done"
+                except TimeoutError:          # a stuck request (e.g. a willhaben page that never answers) frees the lane
+                    log.warning("job %r timed out after %d s", job.label, JOB_TIMEOUT_S)
+                    job.status, job.result = "failed", t("Took longer than {n} min – stopped", n=JOB_TIMEOUT_S // 60)
+                except Exception as e:  # noqa: BLE001 - nobody awaits the task: the error goes to the header
+                    log.warning("job %r failed: %s", job.label, e)
+                    job.status, job.result = "failed", str(e)
+                tl.finish(job.status == "done", job.result if job.status == "failed" else None,
+                          payload={k: v for k, v in {"result": job.result, "problems": job.problems, "done": job.done,
+                                                     "total": job.total, "lane": job.lane}.items() if v})
     finally:
         job.finished_at, job.step, job.current = utcnow(), "", None
         if job in _active:

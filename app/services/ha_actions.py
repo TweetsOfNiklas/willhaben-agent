@@ -131,7 +131,26 @@ def parse_action(action: str) -> tuple[str, int] | None:
 
 
 async def handle(event_data: dict[str, Any]) -> str | None:
-    """Act on one tapped button; returns a short result text for the log."""
+    """Act on one tapped button (Home Assistant push or Telegram); returns a short result text for the log.
+    Each handled tap is a timeline action."""
+    from app.services import timeline
+
+    parsed = parse_action(str(event_data.get("action") or ""))
+    actor = timeline.current().get("actor") if timeline.current().get("actor") == "telegram" else "ha"
+    ids: dict[str, Any] = {}
+    if parsed:
+        ids = {"shipment_id": parsed[1]} if parsed[0] == "SHIP" or parsed[0] in SHIPMENT_VERBS else {"reply_draft": parsed[1]}
+        ids = timeline.resolve_ids(ids)
+    with timeline.context(actor=actor, **ids):
+        res = await _handle(event_data)
+        if parsed and res is not None:
+            failed = res.startswith("error")
+            timeline.action(f"button.{parsed[0].lower()}", t("Push button: {verb}", verb=parsed[0]), ok=not failed,
+                            error=res[7:] if failed else None, payload={"result": res})
+    return res
+
+
+async def _handle(event_data: dict[str, Any]) -> str | None:
     from app.db import Draft, session
     from app.services import chats
     from app.services.notify import clear_push, notify

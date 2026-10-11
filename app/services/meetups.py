@@ -14,6 +14,7 @@ from typing import Any
 from app.db import Conversation, Draft, session
 from app.i18n import t
 from app.services import gcal
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ def forget(conversation_id: str) -> None:
             db.commit()
 
 
+@timeline.scoped(conversation_id="conversation_id")
 async def extract(conversation_id: str) -> dict[str, Any] | None:
     """Ask Claude for the agreed appointment in a chat that was answered outside the app."""
     from app.llm.base import get_backend

@@ -26,7 +26,7 @@ from typing import Any
 from app.config import get_settings
 from app.db import utcnow
 from app.i18n import t
-from app.willhaben import access_log
+from app.willhaben import access_log, recorder, replay
 from app.willhaben.public import WEB_CLIENT, Blocked, willhaben_limiter
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,6 @@ LOGIN_URL = f"{ORIGIN}/iad/myprofile/login?r=/iad/myprofile/myadverts"
 UI_IDLE_S = 15 * 60       # the visible page goes to about:blank after this long without use
 VNC_PORT = 5900           # x11vnc; websockify (noVNC) holds a connection to it while a viewer is open
 ME_PATH = "/webapi/userprofile-service/userprofile/me"
-_REDACT_HEADERS = {"cookie", "set-cookie", "authorization", "x-bbx-csrf-token"}
 # Special keys the remote view may press (printable characters go through keyboard.type).
 _REMOTE_KEYS = {"Enter", "Tab", "Shift+Tab", "Backspace", "Delete", "Escape", "ArrowLeft", "ArrowRight", "ArrowUp",
                 "ArrowDown", "Home", "End", "PageUp", "PageDown", "Control+a", "Control+z", "Space"}
@@ -137,10 +136,18 @@ class BrowserSession:
     # ---------------------------------------------------------------- API calls
     @staticmethod
     async def _goto(page, url: str, kind: str = "navigation", **kw: Any) -> Any:
-        """page.goto() of a willhaben page, counted in the access log (channel account)."""
+        """page.goto() of a willhaben page, counted in the access log (channel account) and recorded (no body)."""
+        started = time.monotonic()
         with access_log.track("account", kind) as tr:
-            res = await page.goto(url, **kw)
+            try:
+                res = await page.goto(url, **kw)
+            except Exception as e:
+                recorder.record_http("navigation", kind, "GET", url, outcome="error", error=str(e),
+                                     duration_ms=int((time.monotonic() - started) * 1000))
+                raise
             tr.status = getattr(res, "status", None)
+        recorder.record_http("navigation", kind, "GET", url, status=tr.status, final_url=getattr(res, "url", None),
+                             duration_ms=int((time.monotonic() - started) * 1000), store_response=False)
         return res
 
     async def _csrf(self) -> str | None:
@@ -155,27 +162,40 @@ class BrowserSession:
 
     async def api(self, method: str, path: str, body: Any = None, accept: str = "application/json") -> ApiResponse:
         """Run fetch() for an `/webapi/...` path (or a page, with accept=text/html) inside the logged-in browser."""
-        self._require()
         url = path if path.startswith("http") else ORIGIN + path
+        payload = json.dumps(body) if body is not None else None
+        if replay.enabled() and (rec := replay.find(method, url, payload)):    # WH_REPLAY=1
+            replay.note(rec, access_log.classify(url))
+            return ApiResponse(*replay.as_api_response(rec))
+        self._require()
         headers = {"accept": accept, "x-wh-client": WEB_CLIENT}
         csrf = await self._csrf()
         if csrf:
             headers["x-bbx-csrf-token"] = csrf
-        payload = None
         if body is not None:
             headers["content-type"] = "application/json"
-            payload = json.dumps(body)
+        kind = access_log.classify(url)
         async with self.limiter:
             await self._ensure_parked()
-            with access_log.track("account", access_log.classify(url)) as tr:
-                res = await self.api_page.evaluate(
-                    """async ({method, url, headers, payload}) => {
-                        const r = await fetch(url, {method, headers, body: payload, credentials: 'include'});
-                        return {status: r.status, text: await r.text(), url: r.url};
-                    }""",
-                    {"method": method, "url": url, "headers": headers, "payload": payload},
-                )
+            with access_log.track("account", kind) as tr:
+                started = time.monotonic()
+                try:
+                    res = await self.api_page.evaluate(
+                        """async ({method, url, headers, payload}) => {
+                            const r = await fetch(url, {method, headers, body: payload, credentials: 'include'});
+                            return {status: r.status, text: await r.text(), url: r.url,
+                                    headers: Object.fromEntries(r.headers.entries())};
+                        }""",
+                        {"method": method, "url": url, "headers": headers, "payload": payload},
+                    )
+                except Exception as e:
+                    recorder.record_http("account", kind, method, url, req_headers=headers, req_body=payload, outcome="error",
+                                         error=str(e), duration_ms=int((time.monotonic() - started) * 1000))
+                    raise
                 tr.status = res["status"]
+        recorder.record_http("account", kind, method, url, req_headers=headers, req_body=payload, status=res["status"],
+                             resp_headers=res.get("headers"), resp_body=res.get("text"), final_url=res.get("url"),
+                             duration_ms=int((time.monotonic() - started) * 1000))
         if res["status"] == 429:
             raise Blocked(t("willhaben responded {status}; pausing {s}s", status=429, s=f"{self.limiter.penalize():.0f}"))
         return ApiResponse(status=res["status"], text=res["text"], url=res["url"])
@@ -184,8 +204,11 @@ class BrowserSession:
         """multipart/form-data POST of one file from the logged-in page (e.g. ad photos)."""
         import base64
 
-        self._require()
         url = path if path.startswith("http") else ORIGIN + path
+        if replay.enabled() and (rec := replay.find("UPLOAD", url, upload=(field, mime))):
+            replay.note(rec, "upload")
+            return ApiResponse(*replay.as_api_response(rec))
+        self._require()
         headers = {"accept": "application/json", "x-wh-client": WEB_CLIENT}
         csrf = await self._csrf()
         if csrf:
@@ -193,19 +216,33 @@ class BrowserSession:
         async with self.limiter:
             await self._ensure_parked()
             with access_log.track("account", "upload") as tr:
-                res = await self.api_page.evaluate(
-                    """async ({url, headers, field, filename, b64, mime}) => {
-                        const bin = atob(b64), bytes = new Uint8Array(bin.length);
-                        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                        const fd = new FormData();
-                        fd.append(field, new Blob([bytes], {type: mime}), filename);
-                        const r = await fetch(url, {method: 'POST', headers, body: fd, credentials: 'include'});
-                        return {status: r.status, text: await r.text(), url: r.url};
-                    }""",
-                    {"url": url, "headers": headers, "field": field, "filename": filename,
-                     "b64": base64.b64encode(data).decode(), "mime": mime},
-                )
+                started = time.monotonic()
+                try:
+                    res = await self.api_page.evaluate(
+                        """async ({url, headers, field, filename, b64, mime}) => {
+                            const bin = atob(b64), bytes = new Uint8Array(bin.length);
+                            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                            const fd = new FormData();
+                            fd.append(field, new Blob([bytes], {type: mime}), filename);
+                            const r = await fetch(url, {method: 'POST', headers, body: fd, credentials: 'include'});
+                            return {status: r.status, text: await r.text(), url: r.url,
+                                    headers: Object.fromEntries(r.headers.entries())};
+                        }""",
+                        {"url": url, "headers": headers, "field": field, "filename": filename,
+                         "b64": base64.b64encode(data).decode(), "mime": mime},
+                    )
+                except Exception as e:
+                    recorder.record_http("account", "upload", "UPLOAD", url, req_headers=headers, outcome="error",
+                                         error=str(e), upload=(field, mime),
+                                         duration_ms=int((time.monotonic() - started) * 1000))
+                    raise
                 tr.status = res["status"]
+        # the file itself is not stored (photos: size + hash only), it is matched by field and type
+        recorder.record_http("account", "upload", "UPLOAD", url, req_headers=headers,
+                             req_body={"field": field, "filename": filename, "mime": mime, "bytes": len(data)},
+                             status=res["status"], resp_headers=res.get("headers"), resp_body=res.get("text"),
+                             final_url=res.get("url"), upload=(field, mime),
+                             duration_ms=int((time.monotonic() - started) * 1000))
         return ApiResponse(status=res["status"], text=res["text"], url=res["url"])
 
     async def ws_send(self, url: str, frames: list[dict[str, Any]], settle_ms: int = 1500) -> dict[str, Any]:
@@ -213,10 +250,14 @@ class BrowserSession:
 
         Frames go out with small random gaps, roughly like messages scrolling into view one after another.
         """
+        if replay.enabled() and (rec := replay.find("WS", url, frames)):
+            replay.note(rec, "chat")
+            return replay.as_ws_result(rec)
         self._require()
         async with self.limiter:
             await self._ensure_parked()
             with access_log.track("chat", "chat") as tr:
+                started = time.monotonic()
                 res = await self.api_page.evaluate(
                     """({url, frames, settle}) => new Promise((resolve) => {
                         let sent = 0, done = false;
@@ -237,6 +278,7 @@ class BrowserSession:
                     {"url": url, "frames": frames, "settle": settle_ms},
                 )
                 tr.outcome = access_log.ws_outcome(res.get("status") if isinstance(res, dict) else None)
+        recorder.record_ws("chat", url, frames, res, outcome=tr.outcome, duration_ms=int((time.monotonic() - started) * 1000))
         return res
 
     async def ws_request(self, url: str, frame: dict[str, Any], request_id: str | None, *, req_type: str,
@@ -247,10 +289,14 @@ class BrowserSession:
         Resolves with the first frame carrying our request_id and a final status (success/error),
         or {"status": "timeout"|"ws_error"|"closed"} otherwise.
         """
+        if replay.enabled() and (rec := replay.find("WS", url, frame)):
+            replay.note(rec, "send" if req_type == "send_message" else "chat")
+            return replay.as_ws_result(rec)
         self._require()
         async with self.limiter:
             await self._ensure_parked()
             with access_log.track("chat", "send" if req_type == "send_message" else "chat") as tr:
+                started = time.monotonic()
                 res = await self.api_page.evaluate(
                     """({url, frame, rid, reqType, timeout}) => new Promise((resolve) => {
                         let done = false, acked = false;
@@ -274,6 +320,8 @@ class BrowserSession:
                 # acked but no final frame: the caller treats it as a likely success (checks the history)
                 tr.outcome = "ok" if isinstance(res, dict) and res.get("acked") and status in ("timeout", "closed") \
                     else access_log.ws_outcome(status)
+        recorder.record_ws("send" if req_type == "send_message" else "chat", url, frame, res, outcome=tr.outcome,
+                           duration_ms=int((time.monotonic() - started) * 1000))
         return res
 
     async def api_json(self, method: str, path: str, body: Any = None) -> Any:
@@ -407,9 +455,14 @@ class BrowserSession:
                 await page.mouse.move(float(ev.get("x", 640)), float(ev.get("y", 430)))
                 await page.mouse.wheel(0, max(-3000.0, min(3000.0, float(ev["dy"]))))
             elif kind in ("back", "reload"):
+                started = time.monotonic()
                 with access_log.track("account", "navigation") as tr:
                     res = await (page.go_back if kind == "back" else page.reload)(wait_until="domcontentloaded")
                     tr.status = getattr(res, "status", None)
+                if res is not None:
+                    recorder.record_http("navigation", "navigation", "GET", getattr(res, "url", "") or page.url,
+                                         status=tr.status, store_response=False,
+                                         duration_ms=int((time.monotonic() - started) * 1000))
             else:
                 raise ValueError(t("unknown input: {kind}", kind=kind))
 
@@ -486,6 +539,8 @@ class BrowserSession:
             return
         if msg.get("req_type") == "ping":
             return
+        from app.willhaben.account import CHAT_WS
+        recorder.record_push(CHAT_WS, msg)     # kept for the timeline and replay; pings and socket states are not
         payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
         cid = msg.get("conversation_id") or payload.get("conversation_id")
         if cid and self._chat_cb:
@@ -546,14 +601,21 @@ class BrowserSession:
             return
         try:
             resp = await request.response()
-            body = None
+            body = raw = None
             if resp is not None:
                 try:
+                    raw = await resp.body()
                     # Pages carry their data in __NEXT_DATA__ at the very end, so keep them whole.
                     limit = 3_000_000 if request.resource_type == "document" else 200_000
-                    body = (await resp.body())[:limit].decode("utf-8", "replace")
+                    body = raw[:limit].decode("utf-8", "replace")
                 except Exception:  # noqa: BLE001 - redirects have no body
-                    body = None
+                    body = raw = None
+            # what willhaben's own web app sent (PayLivery steps): also a replayable recording
+            recorder.record_http("browser", access_log.classify(url), request.method, url,
+                                 req_headers=await request.all_headers(), req_body=request.post_data,
+                                 status=resp.status if resp else None,
+                                 resp_headers=await resp.all_headers() if resp else None, resp_body=raw,
+                                 outcome=None if resp else "error")
             cap["entries"].append({
                 "ts": utcnow().isoformat(),
                 "method": request.method,
@@ -631,10 +693,40 @@ def parse_me(data: Any) -> dict[str, Any] | None:
     return user
 
 
-def _redact(headers: dict[str, str] | None) -> dict[str, str] | None:
-    if headers is None:
-        return None
-    return {k: ("<redacted>" if k.lower() in _REDACT_HEADERS else v) for k, v in headers.items()}
+_redact = recorder.redact_headers      # cookies, CSRF token and authorization never leave the browser
+
+
+class ReplaySession(BrowserSession):
+    """WH_REPLAY=1 with BROWSER_ENABLED=0: the account without a browser, answered from the recordings only
+    (app/willhaben/replay.py). A request that was never recorded fails with SessionUnavailable."""
+
+    @property
+    def started(self) -> bool:
+        return True
+
+    async def start(self) -> None:
+        self.error = None
+
+    async def stop(self) -> None:
+        pass
+
+    def _require(self) -> None:
+        raise SessionUnavailable(t("Offline replay: this willhaben request was never recorded (no browser)"))
+
+    async def refresh_sso(self) -> bool:
+        return False
+
+    async def start_chat_listener(self, on_event) -> None:
+        self.chat_live.update(state="replay", since=utcnow())
+
+    async def chat_watchdog(self) -> None:
+        return
+
+    async def park_idle_ui(self, idle_s: float = UI_IDLE_S) -> bool:
+        return False
+
+    def status(self) -> dict[str, Any]:
+        return {**super().status(), "replay": True}
 
 
 _session: BrowserSession | None = None
@@ -643,5 +735,6 @@ _session: BrowserSession | None = None
 def get_session() -> BrowserSession:
     global _session
     if _session is None:
-        _session = BrowserSession()
+        s = get_settings()
+        _session = ReplaySession() if s.wh_replay and not s.browser_enabled else BrowserSession()
     return _session

@@ -386,6 +386,9 @@ async def _ask(prompt: str, verb: str, ref: str, placeholder: str) -> None:
 
 # ------------------------------------------------------------------ incoming
 async def handle_update(u: dict[str, Any]) -> None:
+    from app.services import timeline
+
+    timeline.set_actor("telegram")      # what the buttons and replies cause shows up as done via Telegram
     if cq := u.get("callback_query"):
         await _on_callback(cq)
     elif msg := u.get("message"):
@@ -469,6 +472,9 @@ async def _on_callback(cq: dict[str, Any]) -> None:
         await _answer(cq_id, t("This button has expired."))
         return
     verb, ref = row.verb, row.ref
+    if not verb.startswith("D_"):         # the D_ buttons are recorded by ha_actions.handle
+        from app.services import timeline
+        timeline.action(f"telegram.{verb.lower()}", t("Telegram button: {verb}", verb=verb), ref=ref)
 
     if verb in ("D_SEND", "D_DISCARD", "D_CAL", "D_SHIP", "D_PAID", "D_BUY", "D_DECL", "D_CANCEL"):
         await _answer(cq_id, "…")

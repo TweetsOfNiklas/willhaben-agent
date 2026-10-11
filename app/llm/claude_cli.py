@@ -60,36 +60,50 @@ class ClaudeCLI:
             "--strict-mcp-config",
         ]
 
+    @staticmethod
+    def photo_names(images: list[Path] | None) -> list[str]:
+        """The names the photos get in the CLI's working directory: foto1.jpg, foto2.png, …"""
+        return [f"foto{i}{src.suffix.lower() or '.jpg'}" for i, src in enumerate(images or [], 1)]
+
+    @staticmethod
+    def photo_note(names: list[str]) -> str:
+        """The line appended to the prompt that tells Claude to look at the photos ("" without photos)."""
+        if not names:
+            return ""
+        return ("\n\nFotos des Artikels liegen im Arbeitsverzeichnis. Sieh dir jedes mit dem "
+                "Read-Tool an, bevor du antwortest: " + ", ".join(f"./{n}" for n in names))
+
     async def complete(self, *, system: str, prompt: str, schema: dict[str, Any],
                        images: list[Path] | None = None) -> LLMResult:
         from app.llm import usage
+        from app.services import timeline
 
         started = time.monotonic()
+        sent = prompt + self.photo_note(self.photo_names(images))     # the prompt exactly as Claude gets it
         try:
             res = await self._complete(system=system, prompt=prompt, schema=schema, images=images)
         except LLMError as e:
-            usage.record(self.purpose, self.model, None, ok=False, error=str(e),
-                         duration_ms=int((time.monotonic() - started) * 1000))
+            elapsed = int((time.monotonic() - started) * 1000)
+            usage.record(self.purpose, self.model, None, ok=False, error=str(e), duration_ms=elapsed)
             record_call(False, str(e))      # connection watchdog
+            timeline.llm_call(purpose=self.purpose, model=self.model, system=system, prompt=sent, images=images,
+                              schema=schema, error=str(e), duration_ms=elapsed)
             raise
         usage.record(self.purpose, res.model, res.raw, ok=True, duration_ms=res.duration_ms)
         record_call(True)
+        timeline.llm_call(purpose=self.purpose, model=res.model, system=system, prompt=sent, images=images, schema=schema,
+                          data=res.data, duration_ms=res.duration_ms or int((time.monotonic() - started) * 1000),
+                          cost_usd=res.cost_usd, raw=res.raw)
         return res
 
     async def _complete(self, *, system: str, prompt: str, schema: dict[str, Any],
                         images: list[Path] | None = None) -> LLMResult:
         images = images or []
         with tempfile.TemporaryDirectory(prefix="wh-llm-") as tmp:
-            names = []
-            for i, src in enumerate(images, 1):
-                dst = Path(tmp) / f"foto{i}{src.suffix.lower() or '.jpg'}"
-                shutil.copyfile(src, dst)
-                names.append(dst.name)
-            if names:
-                prompt += (
-                    "\n\nFotos des Artikels liegen im Arbeitsverzeichnis. Sieh dir jedes mit dem "
-                    "Read-Tool an, bevor du antwortest: " + ", ".join(f"./{n}" for n in names)
-                )
+            names = self.photo_names(images)
+            for src, name in zip(images, names, strict=True):
+                shutil.copyfile(src, Path(tmp) / name)
+            prompt += self.photo_note(names)
             args = self.build_args(system=system, schema=schema, with_images=bool(names))
             try:
                 proc = await asyncio.create_subprocess_exec(

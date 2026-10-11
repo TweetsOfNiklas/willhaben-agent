@@ -55,6 +55,8 @@ BASE_DIR = Path(__file__).parent
 async def lifespan(app: FastAPI):
     s = get_settings()
     init_db()
+    from app.services import timeline as _timeline
+    _timeline.mark_interrupted()                   # runs cut off by the last restart
     apply_public_url()                             # Settings → Web address wins over PUBLIC_URL in .env
     refile_screened()                              # once: screened-out hits leave "new" for "filtered"
     ad_batch.recover()
@@ -63,7 +65,7 @@ async def lifespan(app: FastAPI):
     chats.recover_sending()
     deals_web.product_search.recover()
     purchase_svc.recover()
-    if s.browser_enabled:
+    if s.browser_enabled or s.wh_replay:            # WH_REPLAY without a browser: the login comes from recordings
         sess = get_session()
         await sess.start()
         if sess.started:
@@ -94,6 +96,8 @@ async def lifespan(app: FastAPI):
         await get_session().stop()
         await get_public().aclose()
     finally:
+        from app.willhaben import recorder
+        await recorder.drain()                    # willhaben recordings still being written
         access_log.flush()                        # last unwritten willhaben access counts
 
 
@@ -1413,7 +1417,7 @@ async def capture_download(name: str):
 
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "shipping", "calendar", "purchase", "paylivery", "printers", "myads",
-                     "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "web", "language")   # settings.html groups
+                     "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "timeline", "web", "language")   # settings.html groups
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1553,6 +1557,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **(_claude_section() if section == "claude" else {}),
+                  **(_timeline_section() if section == "timeline" else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(),
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
@@ -1565,6 +1570,12 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings/willhaben", backup=backup_routes.panel(),
                   web=_web_address(), **label_buy_routes.panel(), **printing_routes.panel())
+
+
+def _timeline_section() -> dict[str, Any]:
+    from app.services import timeline as tl
+
+    return {"tl_cfg": tl.config(), "tl_size": tl.size(), "tl_rec": tl.recording_stats()}
 
 
 def _web_address() -> dict[str, Any]:
@@ -2344,3 +2355,5 @@ from app import bugreport_routes  # noqa: E402  footer "Report a bug" (/bugrepor
 bugreport_routes.install(app)
 from app import stats_web  # noqa: E402  willhaben access statistics (/stats/willhaben, footer counter)
 stats_web.install(app, templates)
+from app import timeline_web  # noqa: E402  timeline (/timeline), Settings → Timeline
+timeline_web.install(app, templates)

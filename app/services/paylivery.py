@@ -23,6 +23,7 @@ import inspect
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
@@ -33,8 +34,10 @@ from app.config import get_settings
 from app.db import Conversation, Message, Shipment, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services import shipping
+from app.willhaben import recorder
 from app.willhaben import session as willhaben_session
 from app.willhaben.account import ChatMessage
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -629,17 +632,33 @@ async def _record_label(conversation_id: str, urls: list[str]) -> tuple[Shipment
 
 async def _download(shipment_id: int, urls: list[str]) -> str | None:
     """Fetch the first link that answers with a PDF, through the logged-in browser session. Returns the file name."""
+    from app.willhaben import replay
+
     sess = willhaben_session.get_session()
     if not sess.started:
         log.info("PayLivery label for shipment %s not downloaded: browser session not running", shipment_id)
         return None
     for url in urls[:3]:
+        started = time.monotonic()
+        if replay.enabled() and (rec := replay.find("GET", url)):       # WH_REPLAY=1: the recorded PDF
+            replay.note(rec, "download")
+            body = recorder.decode_body(rec.resp_body) or b""
+            if body[:5] == b"%PDF-":
+                d = get_settings().data_dir / "labels"
+                d.mkdir(parents=True, exist_ok=True)
+                path = d / f"shipment-{shipment_id}-paylivery.pdf"
+                path.write_bytes(body)
+                return path.name
         try:
             res = await sess.context.request.get(url, timeout=30000)
             body = await res.body()
         except Exception as e:  # noqa: BLE001 - the notice stays, the label can be fetched later by hand
             log.warning("PayLivery label download for shipment %s failed: %s", shipment_id, e)
+            recorder.record_http("download", "download", "GET", url, outcome="error", error=str(e))
             continue
+        recorder.record_http("download", "download", "GET", url, status=getattr(res, "status", None),
+                             resp_headers=getattr(res, "headers", None), resp_body=body,
+                             duration_ms=int((time.monotonic() - started) * 1000))
         if res.ok and body[:5] == b"%PDF-" and len(body) <= MAX_LABEL_BYTES:
             d = get_settings().data_dir / "labels"
             d.mkdir(parents=True, exist_ok=True)
@@ -1170,10 +1189,12 @@ def _session_ready():
     return sess
 
 
+@timeline.scoped(conversation_id="conversation_id", step="action")
 async def run_action(conversation_id: str, action: str, amount: float | None = None) -> str:
     """Drive one willhaben action in the app's browser with the API recording on. Returns the message for the user;
     the outcome also goes into the chat's history."""
     conv = _conv(conversation_id)
+    timeline.update_context(ad_id=conv.ad_id if conv else None)
     if conv is None or action not in BROWSER_ACTIONS:
         raise PayLiveryError(t("Unknown action"))
     check_action(conv, action, amount)

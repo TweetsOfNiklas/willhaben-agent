@@ -8,7 +8,7 @@
   (_("Buying & selling"), [("purchase", _("Buying rules"), ''), ("paylivery", "PayLivery", ''), ("printers", _("Printers"), ''), ("myads", _("My ads"), '')]),
   (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else '')), ("rules", _("My rules"), ''), ("chats", _("Automatic answers"), '')]),
   (_("Notifications"), [("ha", "Home Assistant", ''), ("telegram", "Telegram", ''), ("quiet", _("Quiet hours"), '')]),
-  (_("System"), [("backup", _("Backup & restore"), ''), ("web", _("Web address"), ('' if web is not defined or web.reachable else 'warn')), ("language", _("Language & appearance"), '')]),
+  (_("System"), [("backup", _("Backup & restore"), ''), ("timeline", _("Timeline"), ''), ("web", _("Web address"), ('' if web is not defined or web.reachable else 'warn')), ("language", _("Language & appearance"), '')]),
 ] %}
 {% set dot = {'bad': 'bg-error', 'warn': 'bg-warning'} %}
 {% set section = section if section is defined and section else 'willhaben' %}

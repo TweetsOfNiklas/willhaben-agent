@@ -57,6 +57,10 @@ def fresh_db():
     dbmod.set_engine(engine)
     dbmod.init_db()
     from app.services import jobs
+    from app.willhaben import recorder
     jobs.reset()                # background jobs are per event loop
+    recorder.sync_writes = True  # one in-memory connection: willhaben recordings are written right away
     yield
+    recorder.reset()
+    recorder.sync_writes = False
     dbmod.set_engine(None)

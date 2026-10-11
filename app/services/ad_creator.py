@@ -19,6 +19,7 @@ from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_prompt, ad_refine_prompt
 from app.services import geizhals
 from app.willhaben.public import WillhabenError, get_public
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -56,12 +57,14 @@ def save_images(draft_id: int, files: list[tuple[str, bytes]]) -> list[str]:
     return paths
 
 
+@timeline.scoped(batch_id="batch_id")
 async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int | None = None) -> AdDraft:
     with session() as db:
         draft = AdDraft(input_text=notes, batch_id=batch_id)
         db.add(draft)
         db.commit()
         db.refresh(draft)
+    timeline.update_context(draft_id=draft.id)
     paths = save_images(draft.id, files)
     try:
         result = await get_backend("ads").complete(
@@ -220,6 +223,7 @@ async def reconcile_with_geizhals(draft_id: int) -> AdDraft:
     return await refine_draft(draft_id, RECONCILE_INSTRUCTION, label=t("Checked against the Geizhals spec sheet"))
 
 
+@timeline.scoped(draft_id="draft_id")
 async def refine_draft(draft_id: int, instruction: str, label: str | None = None) -> AdDraft:
     """Let Claude revise the draft; the previous version goes to `revisions` for undo."""
     with session() as db:

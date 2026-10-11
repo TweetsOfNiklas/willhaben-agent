@@ -15,6 +15,7 @@ from app.willhaben.account import ACTION_DELETE, AccountClient, AdvertList, Endp
 from app.willhaben.parse import extract_ad_id
 from app.willhaben.public import Blocked, WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -492,6 +493,7 @@ async def set_photos(ad_id: str, order: list[str], new_photos: list[tuple[str, b
         return db.get(MyAd, ad_id)
 
 
+@timeline.scoped(ad_id="ad_id", mine=lambda a: True)
 async def ai_revise(ad_id: str, heading: str, description: str, price: float | None,
                     instruction: str) -> dict[str, Any]:
     """Claude revises title and description of a live ad by one instruction (nothing is saved).
@@ -502,10 +504,9 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
     import tempfile
     from pathlib import Path
 
-    import httpx
-
     from app.llm.base import get_backend
     from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_refine_prompt
+    from app.services import ad_images
 
     instruction = instruction.strip() or "Überarbeite das Inserat: klarer, verkaufsstärker, ehrlich."
     detail = None
@@ -518,16 +519,10 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
                "condition": "", "attributes": []}
     with tempfile.TemporaryDirectory(prefix="wh-edit-") as tmp:
         photos: list[Path] = []
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
-            for i, url in enumerate((getattr(detail, "images", None) or [])[:4], 1):
-                try:
-                    r = await c.get(url)
-                except httpx.HTTPError:
-                    continue
-                if r.status_code == 200 and r.content and len(r.content) < 3 * 1024 * 1024:
-                    p = Path(tmp) / f"foto{i}.jpg"
-                    p.write_bytes(r.content)
-                    photos.append(p)
+        for i, url in enumerate((getattr(detail, "images", None) or [])[:4], 1):
+            # through the shared downloader: counted in the access log and recorded like every willhaben request
+            if p := await ad_images.download(url, Path(tmp), f"foto{i}"):
+                photos.append(p)
         prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "", rules=get_setting("reply_rules"),
                                   n_images=len(photos), current=current, specs=None, product_name=None,
                                   instruction=instruction)

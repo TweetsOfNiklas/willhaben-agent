@@ -55,6 +55,7 @@ from app.llm.prompts import (
 from app.services import ad_images, deals, scam
 from app.willhaben.parse import AdSummary, keyword_search_url
 from app.willhaben.public import Blocked, WillhabenError, get_public
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -561,6 +562,7 @@ def recover() -> None:
         db.commit()
 
 
+@timeline.scoped(search_id="search_id")
 async def run(search_id: int, replan: bool = True) -> None:
     """The whole search for one stored row; every step is written back so the page can show progress."""
     _active.add(search_id)
@@ -620,6 +622,7 @@ async def _continue(search_id: int) -> None:
         _active.discard(search_id)
 
 
+@timeline.scoped(search_id="search_id")
 async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any], settings: dict[str, Any],
                            cards: list[dict[str, Any]], answers: dict[str, Any] | None, warning: str | None) -> None:
     """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped (rows stay small)."""

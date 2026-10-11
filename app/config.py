@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     default_agent_interval_s: int = 300
     min_agent_interval_s: int = 120
     search_rows: int = 30
+    # WH_REPLAY=1: answer willhaben requests from the stored recordings (app/willhaben/replay.py); a request never
+    # seen before still goes to willhaben (and is recorded). With BROWSER_ENABLED=0 the account works offline too.
+    wh_replay: bool = False
 
     # --- logged-in browser session (Playwright persistent profile) ---
     browser_enabled: bool = True

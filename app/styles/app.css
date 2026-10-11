@@ -117,6 +117,8 @@
 @custom-variant busy (&:is(.htmx-request, .htmx-request *));
 /* rail-x: the sidebar is expanded (html[data-rail=expanded]) */
 @custom-variant rail-x (&:where([data-rail="expanded"] *));
+/* row-open: inside the <summary> of an open <details> – not of an open outer one (timeline rows nest) */
+@custom-variant row-open (&:where(details[open] > summary *));
 
 @layer base {
   body { font-size: 14px; line-height: 1.45; }

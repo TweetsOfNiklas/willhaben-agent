@@ -10,8 +10,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlmodel import select
 
 from app.config import get_settings
+from app.i18n import t
 from app.db import SearchAgent, session, utcnow
-from app.services import chats, health, human_pace, my_ads, quiet_hours
+from app.services import chats, health, human_pace, my_ads, quiet_hours, timeline
 from app.services.search_agents import run_agent
 from app.willhaben import access_log
 from app.willhaben.session import get_session
@@ -37,7 +38,8 @@ async def _run_agent_job(agent_id: int) -> None:
     if human_pace.take_break():
         log.info("agent %s: skipping this check (human-like break)", agent_id)
         return
-    await run_agent(agent_id)
+    with timeline.fresh(actor="scheduler"):
+        await run_agent(agent_id)
 
 
 def schedule_agent(agent: SearchAgent, run_soon: bool = True) -> None:
@@ -72,7 +74,8 @@ async def _session_check() -> None:
     sess = get_session()
     if sess.started:
         try:
-            await sess.check_login()
+            with timeline.fresh(actor="scheduler"):
+                await sess.check_login()
         except Exception as e:  # noqa: BLE001
             log.warning("session check failed: %s", e)
 
@@ -95,9 +98,16 @@ async def _chat_sync() -> None:
     if get_session().chat_live_ok() and last and utcnow() - last < LIVE_FALLBACK:
         return
     try:
-        await chats.sync()
+        with timeline.fresh(actor="scheduler"):
+            async with timeline.run("sched", t("Chat sync"), name="chat-sync"):
+                await chats.sync()
     except Exception as e:  # noqa: BLE001 - keep the job alive
         log.warning("chat sync failed: %s", e)
+
+
+async def _myads_check() -> None:
+    with timeline.fresh(actor="scheduler"):
+        await my_ads.scheduled_update()
 
 
 def start() -> None:
@@ -118,8 +128,11 @@ def start() -> None:
                       replace_existing=True, max_instances=1, coalesce=True)   # idle CPU: see session.park_idle_ui
     scheduler.add_job(access_log.flush_job, IntervalTrigger(seconds=access_log.FLUSH_INTERVAL_S), id="access-log",
                       replace_existing=True, max_instances=1, coalesce=True)   # write + prune willhaben access counts
-    scheduler.add_job(my_ads.scheduled_update, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",
+    scheduler.add_job(_myads_check, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",
                       replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(timeline.prune_job, IntervalTrigger(hours=1, jitter=120), id="timeline-prune",
+                      replace_existing=True, max_instances=1, coalesce=True,   # only when switched on in Settings
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=10))
     scheduler.start()
     # Stagger the first agent runs so a restart does not burst requests.
     for i, a in enumerate(x for x in agents if x.enabled):

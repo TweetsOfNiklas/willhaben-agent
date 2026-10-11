@@ -34,7 +34,8 @@ READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 
 
 async def _call(method: str, path: str, **kw: Any) -> Any:
-    async with httpx.AsyncClient(base_url=BASE, auth=AUTH, timeout=300) as c:
+    async with httpx.AsyncClient(base_url=BASE, auth=AUTH, timeout=300,
+                                 headers={"x-wh-client-kind": "mcp"}) as c:   # timeline: actor "mcp"
         r = await c.request(method, path, **kw)
     try:
         body = r.json()

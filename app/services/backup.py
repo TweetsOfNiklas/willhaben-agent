@@ -8,7 +8,8 @@ A backup is a ZIP with the same relative paths as DATA_DIR plus a `manifest.json
     labels/...                downloaded parcel labels
     browser-profile/...       optional: the willhaben login (Chromium profile without caches and Singleton* locks)
 
-Not included: captures/ (raw request recordings with chat content) and backups/ itself.
+Not included: captures/ (manual raw request recordings with chat content) and backups/ itself. The timeline and the
+willhaben request recordings (Settings → Timeline, opt-in) are tables in app.db and therefore included.
 
 Optionally the whole ZIP is encrypted with a passphrase (scrypt → AES-256-GCM in 1 MiB chunks, STREAM
 construction: nonce = prefix | counter | last-flag, so chunks cannot be reordered, dropped or cut off).

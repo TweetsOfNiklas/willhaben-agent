@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.i18n import t
 from app.services import shipping
 from app.services.shipping_tariffs import CARRIERS
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -348,6 +349,11 @@ async def start(shipment_id: int) -> str:
 
 async def fill_current() -> str:
     """Fill the form step that is visible now (button on the session page)."""
+    with timeline.context(shipment_id=_active.get("shipment")):
+        return await _fill_current()
+
+
+async def _fill_current() -> str:
     from app.llm.base import LLMError, get_backend
 
     page, sid = _active.get("page"), _active.get("shipment")

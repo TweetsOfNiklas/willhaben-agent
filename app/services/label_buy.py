@@ -30,6 +30,7 @@ from app.db import Shipment, get_setting, utcnow
 from app.i18n import t
 from app.services import label_fill, shipping
 from app.services.shipping_tariffs import CARRIERS
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -602,6 +603,7 @@ def _label_arrived(sid: int) -> bool:
     return bool(s and s.label_path and s.label_path != _active.get("label_before"))
 
 
+@timeline.scoped(shipment_id="sid")
 async def _one_step(sid: int, page) -> str:
     """One step: replayed from the playbook while the page still matches it, else asked of Claude.
 

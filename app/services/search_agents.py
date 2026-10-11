@@ -178,6 +178,21 @@ def _apply(hit: Hit, ad: AdSummary) -> None:
 
 
 async def run_agent(agent_id: int) -> RunResult:
+    """One check of a search agent, as one timeline run (its searches, screening and pushes are the steps)."""
+    from app.services import timeline
+
+    with session() as db:
+        agent = db.get(SearchAgent, agent_id)
+        title = agent.name if agent else t("Agent {id}", id=agent_id)
+    async with timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
+        res = await _run_agent(agent_id)
+        tl.finish(not res.error, res.error, payload={k: v for k, v in {
+            "rows_found": res.rows_found, "new": len(res.new), "price_drops": len(res.price_drops), "bumped": res.bumped,
+            "baseline": res.baseline or None}.items() if v is not None})
+    return res
+
+
+async def _run_agent(agent_id: int) -> RunResult:
     res = RunResult(agent_id=agent_id)
     with session() as db:
         agent = db.get(SearchAgent, agent_id)

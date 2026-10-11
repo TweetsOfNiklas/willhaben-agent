@@ -1,0 +1,14 @@
+{# Settings → Timeline → willhaben requests: download redacted fixture files (app/willhaben/export.py) as a ZIP. #}
+<details class="text-[13px]">
+  <summary class="cursor-pointer font-medium">{{ _("Export as test fixtures") }}</summary>
+  <form method="post" action="/settings/timeline/recordings/export" class="mt-2 flex flex-col gap-2.5">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Recorded in the last") }}</span>
+        <select name="since" class="select w-full min-w-0 bg-base-200"><option value="1d">{{ _("24 hours") }}</option><option value="7d" selected>{{ _("7 days") }}</option><option value="30d">{{ _("30 days") }}</option><option value="">{{ _("any time") }}</option></select></label>
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Kinds (comma-separated, empty = all)") }}</span><input name="kinds" placeholder="search,detail,chat" class="input w-full min-w-0 bg-base-200"></label>
+    </div>
+    <label class="flex cursor-pointer items-center gap-2"><input type="checkbox" name="keep_texts" class="checkbox checkbox-sm">{{ _("Keep chat texts (names, e-mails, ids and addresses are still replaced)") }}</label>
+    <small class="text-[12.5px] text-muted">{{ _("One file per request, newest version only, personal data replaced by placeholders. Images are not included. Check the files before you share or commit them.") }}</small>
+    <div><button class="btn btn-sm">{{ _("Download ZIP") }}</button></div>
+  </form>
+</details>

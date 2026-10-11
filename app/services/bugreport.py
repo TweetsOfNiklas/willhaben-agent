@@ -32,7 +32,7 @@ from app import __version__
 from app.config import get_settings
 from app.db import (
     DEFAULT_SETTINGS, AdBatch, AdDraft, Conversation, DealCheck, Draft, EventLog, Hit, LLMCall, Message, MyAd,
-    SearchAgent, Setting, Shipment, session, utcnow,
+    SearchAgent, Setting, Shipment, TimelineEvent, session, utcnow,
 )
 from app.services import logbuffer
 
@@ -584,6 +584,10 @@ def activity_section(anon: Anonymizer, events: int = 30) -> dict[str, Any]:
             "drafts": _by(db, Draft.status), "my_ads": _by(db, MyAd.status), "ad_drafts": _by(db, AdDraft.status),
             "ad_batches": _by(db, AdBatch.status), "shipments": _by(db, Shipment.status),
             "price_checks": _count(db, DealCheck),
+            # the timeline only as counts: its titles, prompts and willhaben answers hold chat texts and addresses
+            "timeline_entries": _by(db, TimelineEvent.kind),
+            "timeline_failures": {str(k): int(n) for k, n in db.exec(
+                select(TimelineEvent.kind, func.count()).where(col(TimelineEvent.ok).is_(False)).group_by(TimelineEvent.kind))},
         }
         recent = list(db.exec(select(EventLog.ts, EventLog.kind).order_by(col(EventLog.id).desc()).limit(events)))
     llm = [{"purpose": g["purpose"], "model": g["model"], "calls": g["calls"], "failures": g["errors"],
@@ -629,7 +633,8 @@ SAFE_SETTINGS = {
     "gcal_in_drafts", "gcal_window_end", "gcal_window_start", "geizhals_auto_specs", "health_disk_min_mb", "llm_model",
     "notify_messages", "push_channel", "quiet_enabled", "quiet_end", "quiet_interval_min", "quiet_mode", "quiet_start",
     "reply_delay_max_s", "reply_delay_min_s", "reply_fast_max_s", "reply_fast_min_s", "reply_humanize", "send_verified",
-    "ship_carriers", "ship_detect", "ship_sort", "telegram_enabled", "telegram_kinds", "ui_lang", "ui_lang_seen",
+    "ship_carriers", "ship_detect", "ship_sort", "telegram_enabled", "telegram_kinds", "timeline_days", "timeline_enabled", "timeline_max_mb", "timeline_prune", "ui_lang",
+    "ui_lang_seen", "wh_recording",
 }
 SAFE_ENV = {
     "llm_backend", "llm_model", "llm_timeout_s", "request_min_gap_s", "requests_per_hour", "default_agent_interval_s",

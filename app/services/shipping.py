@@ -29,6 +29,7 @@ from sqlmodel import select
 from app.db import Conversation, Shipment, current_ad, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services.shipping_tariffs import CARRIERS, Option, options_for
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -266,6 +267,7 @@ def _extract_prompt(conv: Conversation, messages: list[tuple[str, Any, str]]) ->
     return "\n".join(lines)
 
 
+@timeline.scoped(conversation_id="conversation_id")
 async def detect(conversation_id: str, force: bool = False) -> Shipment | None:
     """Ask Claude for address + parcel; creates or updates the chat's draft shipment."""
     from app.llm.base import get_backend

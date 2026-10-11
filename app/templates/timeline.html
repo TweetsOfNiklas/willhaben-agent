@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{% block title %}{{ _("Timeline") }} · willhaben Agent{% endblock %}
+{# Everything the app did, newest first (app/timeline_web.py). "All" folds the steps of a job or agent run into the
+   run's entry; any filter lists every matching entry. Rows open their details (prompts, answers, requests) on click. #}
+{% block content %}
+{% call ui.head(_("Timeline"), _("What happened, for which ad, chat or search: Claude's prompts and answers, willhaben requests, your actions, jobs and agent runs.")) %}
+  <a href="/settings/timeline" class="btn btn-ghost btn-sm">{{ ui.icon('settings', 16) }}{{ _("Retention") }}</a>
+{% endcall %}
+{% if not cfg.record %}
+<div class="mb-3 rounded-box border border-base-300 bg-base-100 px-4 py-3">{{ _("The timeline is switched off, so nothing new is recorded.") }} <a class="link link-primary" href="/settings/timeline">{{ _("Switch it on in Settings → Timeline") }}</a></div>
+{% endif %}
+<form method="get" action="/timeline" class="mb-3 flex flex-wrap items-center gap-2.5" id="tl-filters">
+  {{ ui.seg(tabs) }}
+  {% if filters.kind %}<input type="hidden" name="kind" value="{{ filters.kind }}">{% endif %}
+  {% for p, v in filters.ids.items() %}<input type="hidden" name="{{ p }}" value="{{ v }}">{% endfor %}
+  {% if filters.job %}<input type="hidden" name="job" value="{{ filters.job }}">{% endif %}
+  <select name="range" aria-label="{{ _('Time range') }}" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100">
+    {% for k, label in ranges %}<option value="{{ k }}" {% if k == filters.range %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <label class="flex cursor-pointer items-center gap-1.5 text-[13px]"><input type="checkbox" name="errors" value="1" class="checkbox checkbox-sm" onchange="this.form.submit()" {% if filters.errors %}checked{% endif %}>{{ _("Errors only") }}</label>
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="{{ _('Search titles and errors') }}" aria-label="{{ _('Search') }}" class="input input-sm w-56 max-w-full bg-base-100">
+</form>
+{% if chips %}
+<div class="mb-3 flex flex-wrap items-center gap-2">
+  <span class="text-[12.5px] text-muted">{{ _("Only:") }}</span>
+  {% for label, href in chips %}<a href="{{ href }}" class="inline-flex items-center gap-1.5 rounded-full border border-primary bg-brand-soft px-3 py-1 text-[13px] text-primary no-underline" title="{{ _('Remove filter') }}">{{ label }}{{ ui.icon('x', 12) }}</a>{% endfor %}
+  <a href="/timeline" class="text-[12.5px] link link-primary no-underline">{{ _("Clear all") }}</a>
+</div>
+{% endif %}
+{% if rows %}
+<ul class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="tl-rows">
+  {% include "_timeline_rows.html" %}
+</ul>
+{% else %}
+{% call ui.empty(_("Nothing recorded yet.") if not (filters.kind or filters.errors or filters.q or filters.ids or filters.job) else _("No entries match these filters."), _("Claude calls, willhaben requests, your actions and background jobs show up here as they happen.")) %}{% endcall %}
+{% endif %}
+<p class="mt-4 text-[12.5px] text-muted">{{ _("{n} entries, about {mb} MB.", n=size.events, mb=size.mb) }}
+  {% if cfg.enabled %}{{ _("Older entries are deleted automatically (Settings → Timeline).") }}{% else %}{{ _("Entries are kept until you switch on pruning in Settings → Timeline.") }}{% endif %}
+  {{ _("Prompts and willhaben answers contain chat texts and addresses; they stay on this server and are never part of a bug report.") }}
+  <a class="link link-primary" href="/api/timeline{{ request.url.query and '?' ~ request.url.query or '' }}">JSON</a></p>
+<script>
+function tlCopy(btn) {
+  const text = btn.closest('[data-text]').querySelector('pre').textContent;
+  const done = () => { const old = btn.textContent; btn.textContent = btn.dataset.done; setTimeout(() => btn.textContent = old, 1500); };
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done); return; }
+  const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {} ta.remove();
+}
+</script>
+{% endblock %}

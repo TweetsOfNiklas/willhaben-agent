@@ -27,6 +27,7 @@ from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
 from app.willhaben.public import WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -294,6 +295,7 @@ def _style_examples(limit: int = 3) -> list[str]:
         return [r.text for r in rows]
 
 
+@timeline.scoped(conversation_id="conversation_id")
 async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool = False) -> Draft:
     conv = await ensure_ad_context(conversation_id)
     if conv is None:
@@ -305,6 +307,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         msgs_t = [(m.direction, m.created_at, m.text) for m in msgs]
     cal = gcal.config()
     buy = purchase.for_conversation(conversation_id) if conv.role == "buyer" else None
+    timeline.update_context(ad_id=conv.ad_id, purchase_id=buy.id if buy else None, mine=conv.role == "seller" or None)
     if auto and conv.role == "buyer" and buy is None:
         raise LLMError(t("No open purchase for this chat"))
     if buy is not None:                           # buyer: the purchase's rules replace the seller's rules

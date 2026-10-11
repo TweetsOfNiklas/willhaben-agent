@@ -22,6 +22,7 @@ from app.i18n import LANGS, background_lang, t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import SCREEN_SCHEMA, SCREEN_SYSTEM, screen_prompt
 from app.services.ad_creator import price_stats
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -117,6 +118,7 @@ async def _download(url: str | None, folder: Path, name: str) -> Path | None:
     return await ad_images.download(url, folder, name, transport=_transport)   # _transport read per call (tests)
 
 
+@timeline.scoped(agent_id="agent_id")
 async def screen(agent_id: int, hits: list[Hit]) -> int:
     """Ask Claude about up to MAX_PER_CALL hits and store the verdicts on them. Returns how many were judged."""
     with session() as db:
@@ -124,6 +126,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
     if agent is None or not agent.screen or not hits:
         return 0
     hits = hits[:MAX_PER_CALL]
+    timeline.update_context(hit_ids=[h.id for h in hits])
     stats = _stats(agent_id, {h.id for h in hits})
     lang = LANGS.get(background_lang(), "Deutsch")
     with tempfile.TemporaryDirectory(prefix="wh-screen-") as tmp:

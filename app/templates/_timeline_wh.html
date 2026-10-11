@@ -1,0 +1,25 @@
+{# The stored willhaben request of a timeline entry (_timeline_detail.html). rec = recorder.view_for_event(). #}
+<div class="flex flex-col gap-2.5">
+  <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1">
+    <dt class="text-muted">{{ _("Request") }}</dt><dd class="break-all"><code class="text-[12px]">{{ rec.method }} {{ rec.url }}</code></dd>
+    {% if rec.final_url %}<dt class="text-muted">{{ _("Ended at") }}</dt><dd class="break-all"><code class="text-[12px]">{{ rec.final_url }}</code></dd>{% endif %}
+    <dt class="text-muted">{{ _("Answer") }}</dt><dd>{% if rec.status is not none %}HTTP {{ rec.status }}{% elif rec.ws_status %}{{ rec.ws_status }}{% else %}–{% endif %} · {{ rec.outcome }}{% if rec.cached %} · {{ _("from the app's cache, no request to willhaben") }}{% endif %}{% if rec.content_type %} · {{ rec.content_type }}{% endif %}</dd>
+    <dt class="text-muted">{{ _("Channel") }}</dt><dd>{{ rec.channel }} · {{ rec.kind }}</dd>
+    <dt class="text-muted">{{ _("Replay key") }}</dt><dd><code class="text-[12px]">{{ rec.key }}</code></dd>
+  </dl>
+  {% if rec.pruned %}<p class="text-muted">{{ _("The bodies of this request were deleted to save space (Settings → Timeline).") }}</p>{% endif %}
+  {% for side, label, body, cut, size, truncated, headers in [('request', _("Request body"), rec.request, rec.request_cut, rec.req_size, rec.req_truncated, rec.req_headers), ('response', _("Response body"), rec.response, rec.response_cut, rec.resp_size, rec.resp_truncated, rec.resp_headers)] %}
+  {% if body is not none or headers or (side == 'response' and rec.image) %}
+  <section data-text class="overflow-hidden rounded-field border border-base-300 bg-base-100">
+    <header class="flex items-center justify-between gap-2 border-b border-base-300 px-3 py-1.5">
+      <span class="font-semibold">{{ label }} <small class="font-normal text-muted">{{ _("{n} bytes", n=size) }}{% if truncated %} · {{ _("only the beginning is stored") }}{% endif %}{% if cut %} · {{ _("shortened here") }}{% endif %}</small></span>
+      {% if body is not none %}<span class="flex items-center gap-1"><a class="btn btn-ghost btn-xs" href="/timeline/wh/{{ rec.id }}/{{ side }}" target="_blank" rel="noopener">{{ _("Open") }}</a><button type="button" class="btn btn-ghost btn-xs" data-done="{{ _('Copied') }}" onclick="tlCopy(this)">{{ _("Copy") }}</button></span>{% endif %}
+    </header>
+    {% if headers %}<details class="border-b border-base-300 px-3 py-1.5 text-[12px] text-muted"><summary class="cursor-pointer">{{ _("Headers ({n})", n=headers|length) }}</summary><pre class="mt-1 font-mono whitespace-pre-wrap">{% for k, v in headers.items() %}{{ k }}: {{ v }}
+{% endfor %}</pre></details>{% endif %}
+    {% if side == 'response' and rec.image %}<p class="px-3 py-2 text-muted">{{ _("An image: only its size and checksum are stored.") }} <code class="text-[11px]">{{ rec.body_hash[:16] }}…</code></p>
+    {% elif body is not none %}<pre class="max-h-[420px] overflow-auto px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap">{{ body }}</pre>{% endif %}
+  </section>
+  {% endif %}
+  {% endfor %}
+</div>

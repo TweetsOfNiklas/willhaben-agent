@@ -1,0 +1,38 @@
+{# One timeline entry opened (htmx from _timeline_rows.html): facts, links, long texts, a willhaben request/response,
+   the steps of a run. Context: e, facts, texts [(name, label, text)], steps, narrow [(label, href)], rec. #}
+{% import "_ui.html" as ui %}
+<div class="flex flex-col gap-3 text-[13px]">
+  {% if e.error %}<div class="rounded-field bg-bad-soft px-3 py-2 whitespace-pre-wrap text-error">{{ e.error }}</div>{% endif %}
+  <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1">
+    <dt class="text-muted">{{ _("Time") }}</dt><dd class="tabular-nums">{{ e.ts|local('%d.%m.%Y %H:%M:%S') }}</dd>
+    <dt class="text-muted">{{ _("Kind") }}</dt><dd>{{ tl_kind_label(e.kind) }}{% if e.name %} · <code class="text-[12px]">{{ e.name }}</code>{% endif %}</dd>
+    {% if e.actor %}<dt class="text-muted">{{ _("By") }}</dt><dd>{{ tl_actor_label(e.actor) }}</dd>{% endif %}
+    {% if e.duration_ms is not none %}<dt class="text-muted">{{ _("Duration") }}</dt><dd class="tabular-nums">{{ tl_duration(e.duration_ms) }}</dd>{% endif %}
+    {% if e.run_id %}<dt class="text-muted">{{ _("Part of") }}</dt><dd><a class="link link-primary" href="/timeline?job={{ e.run_id }}">{{ _("Run {id}", id=e.run_id) }}</a></dd>{% endif %}
+    {% for k, v in facts %}<dt class="text-muted">{{ k }}</dt><dd class="break-words">{{ v }}</dd>{% endfor %}
+  </dl>
+  {% set links = tl_links(e) %}
+  {% if links or narrow or steps %}
+  <div class="flex flex-wrap items-center gap-2">
+    {% for l in links %}<a href="{{ l.href }}"{% if l.ad %} data-ad="{{ l.ad }}"{% endif %} class="btn btn-xs">{{ l.label }}{{ ui.icon('external', 12) }}</a>{% endfor %}
+    {% for label, href in narrow %}<a href="{{ href }}" class="btn btn-ghost btn-xs">{{ label }}</a>{% endfor %}
+    {% if e.kind in ('job', 'agent_run', 'sched') %}<a href="/timeline?job={{ e.id }}" class="btn btn-ghost btn-xs">{{ _("All steps as a list") }}</a>{% endif %}
+  </div>
+  {% endif %}
+  {% for name, label, text in texts %}
+  <section data-text class="overflow-hidden rounded-field border border-base-300 bg-base-100">
+    <header class="flex items-center justify-between gap-2 border-b border-base-300 px-3 py-1.5">
+      <span class="font-semibold">{{ label }} <small class="font-normal text-muted">{{ _("{n} characters", n=text|length) }}</small></span>
+      <span class="flex items-center gap-1"><a class="btn btn-ghost btn-xs" href="/timeline/{{ e.id }}/text/{{ name }}" target="_blank" rel="noopener">{{ _("Open") }}</a><button type="button" class="btn btn-ghost btn-xs" data-done="{{ _('Copied') }}" onclick="tlCopy(this)">{{ _("Copy") }}</button></span>
+    </header>
+    <pre class="max-h-[420px] overflow-auto px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap">{{ text }}</pre>
+  </section>
+  {% endfor %}
+  {% if rec %}{% include "_timeline_wh.html" %}{% elif e.kind == 'wh' %}<p class="text-muted">{{ _("The request and answer are no longer stored (pruned).") }}</p>{% endif %}
+  {% if steps %}
+  <div>
+    <div class="mb-1.5 font-semibold">{{ _("Steps ({n})", n=steps|length) }}</div>
+    <ul class="overflow-hidden rounded-field border border-base-300 bg-base-100">{% with rows=steps, step_counts={}, has_more=false %}{% include "_timeline_rows.html" %}{% endwith %}</ul>
+  </div>
+  {% elif e.kind in ('job', 'agent_run', 'sched') %}<p class="text-muted">{{ _("No steps recorded inside this run.") }}</p>{% endif %}
+</div>

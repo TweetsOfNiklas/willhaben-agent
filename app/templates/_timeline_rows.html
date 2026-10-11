@@ -1,0 +1,33 @@
+{# Timeline entries as <li> rows (timeline.html, "Load more", the steps of a run in _timeline_detail.html).
+   Context: rows, step_counts ({run_id: {kind: n}}), optional has_more + next_url. #}
+{% import "_ui.html" as ui %}
+{% for e in rows %}
+{% set steps_n = step_counts.get(e.id, {}) %}
+<li class="border-b border-base-300 last:border-b-0" id="tl-{{ e.id }}">
+  <details hx-get="/timeline/{{ e.id }}" hx-trigger="toggle once" hx-target="find [data-detail]" hx-swap="innerHTML">
+    <summary class="grid cursor-pointer list-none grid-cols-[72px_minmax(0,1fr)_auto] items-start gap-3 px-4 py-2.5 hover:bg-hover [&::-webkit-details-marker]:hidden">
+      <span class="pt-0.5 text-[12.5px] text-muted tabular-nums" title="{{ e.ts|local('%d.%m.%Y %H:%M:%S') }}">{{ e.ts|local('%d.%m. %H:%M') }}</span>
+      <span class="min-w-0">
+        <span class="flex min-w-0 items-center gap-2">{{ ui.pill(tl_kind_label(e.kind), tl_kind_tones.get(e.kind, ''), dot=false) }}<span class="truncate font-medium">{{ tl_title(e) }}</span></span>
+        <span class="mt-0.5 block truncate text-[12.5px] text-muted">
+          {%- set meta = [] %}
+          {%- if e.actor and e.actor != 'system' %}{% set _x = meta.append(tl_actor_label(e.actor)) %}{% endif %}
+          {%- if e.kind == 'llm' and e.payload and e.payload.tokens %}{% set _x = meta.append(_("{n} tokens", n=(e.payload.tokens.input or 0) + (e.payload.tokens.output or 0))) %}{% endif %}
+          {%- if e.duration_ms is not none %}{% set _x = meta.append(tl_duration(e.duration_ms)) %}{% endif %}
+          {%- if e.kind != 'notify' %}{% for l in tl_links(e) %}{% set _x = meta.append(l.label) %}{% endfor %}{% endif %}
+          {%- if steps_n %}{% set _x = meta.append(_("{n} steps", n=steps_n.values()|sum)) %}{% endif %}
+          {{- meta|join(' · ') }}{% if e.error %}{{ ' · ' if meta else '' }}<span class="text-error">{{ e.error|truncate(140) }}</span>{% endif %}</span>
+      </span>
+      <span class="flex items-center gap-1.5 pt-0.5">
+        {% if e.ok is none %}<span class="loading loading-spinner loading-xs text-primary" title="{{ _('running') }}"></span>
+        {% elif e.ok == false %}{{ ui.pill(_("failed"), 'bad') }}{% endif %}
+        <span class="text-muted transition-transform row-open:rotate-90">{{ ui.icon('chevron-right', 14) }}</span>
+      </span>
+    </summary>
+    <div data-detail class="border-t border-dashed border-base-300 bg-base-200/40 px-4 py-3"><span class="loading loading-dots loading-sm text-muted"></span></div>
+  </details>
+</li>
+{% endfor %}
+{% if has_more %}
+<li id="tl-more" class="px-4 py-3 text-center"><button type="button" class="btn btn-ghost btn-sm" hx-get="{{ next_url }}" hx-target="#tl-more" hx-swap="outerHTML">{{ _("Load more") }}</button></li>
+{% endif %}

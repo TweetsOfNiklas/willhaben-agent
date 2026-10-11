@@ -171,6 +171,7 @@
       <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}{{ _("willhaben account") }}</a></li>
       <li><a href="/session" data-remote role="menuitem">{{ ui.icon('monitor', 16) }}<span class="flex-1">{{ _("Browser window") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
       <li><a href="/settings/claude" role="menuitem">{{ ui.icon('bot', 16) }}{{ _("Claude & usage") }}</a></li>
+      <li><a href="/timeline" role="menuitem">{{ ui.icon('clock', 16) }}{{ _("Timeline") }}</a></li>
       <li><a href="/settings" role="menuitem">{{ ui.icon('settings', 16) }}{{ _("Settings") }}</a></li>
       <li><form method="post" action="/lang" class="flex cursor-default items-center gap-2 hover:bg-transparent">
         {{ ui.icon('globe', 16) }}<span class="flex-1">{{ _("Language") }}</span>
@@ -328,9 +329,10 @@
 {{ _("My ads") }}||/myads
 {{ _("New ad") }}|{{ _("action") }}|/new-ad
 {{ _("Browser window") }}|{{ _("action") }}|/session
+{{ _("Timeline") }}|{{ _("Claude, willhaben, actions") }}|/timeline
 {{ _("willhaben requests") }}|{{ _("statistics") }}|/stats/willhaben
 {{ _("Report a bug") }}||/bugreport
-{% for id, label in [('willhaben', _("willhaben account")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
+{% for id, label in [('willhaben', _("willhaben account")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('timeline', _("Timeline")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
 {% endfor %}</template>
 
 {# ---- phone: the jobs button floats above the tab bar while something runs or just finished ---- #}

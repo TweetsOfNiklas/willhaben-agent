@@ -37,6 +37,7 @@ from app.services.notify import notify
 from app.willhaben.account import OpenerUnconfirmed, SendFailed
 from app.willhaben.public import WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -597,10 +598,12 @@ async def _begin(pid: int) -> None:
         await _fail(pid, t("Could not start the purchase: {error}", error=e))
 
 
+@timeline.scoped(purchase_id="pid")
 async def _begin_inner(pid: int) -> None:
     row = get(pid)
     if row is None:
         return
+    timeline.update_context(ad_id=row.ad_id, search_id=row.search_id)
     try:
         detail = await get_public().get_detail(row.ad_id)
     except WillhabenError as e:

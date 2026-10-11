@@ -62,7 +62,6 @@
  "Backup": "Backup",
  "Save everything in one file and bring it back later, e.g. on a new server.": "Alles in eine Datei sichern und später zurückholen, z. B. auf einem neuen Server.",
  "The file contains your logins and tokens (Claude, Home Assistant, Telegram, Google) and all chats. Keep it private.": "Die Datei enthält deine Logins und Tokens (Claude, Home Assistant, Telegram, Google) und alle Chats. Gib sie nicht weiter.",
- "Contains: database, tokens, ad photos and parcel labels. Not included: API recordings.": "Enthält: Datenbank, Tokens, Anzeigen-Fotos und Paketlabels. Nicht enthalten: API-Aufzeichnungen.",
  "Include willhaben login (browser profile)": "willhaben-Login (Browserprofil) einschließen",
  "can be large; without it you log in to willhaben again after a restore": "kann groß sein; ohne musst du dich nach dem Wiederherstellen neu bei willhaben anmelden",
  "Passphrase (optional)": "Passphrase (optional)",
@@ -77,5 +76,6 @@
  "Download": "Herunterladen",
  "Set DASHBOARD_PASSWORD to enable backup downloads.": "Setze DASHBOARD_PASSWORD, um Backups herunterzuladen.",
  "The upload has no size.": "Der Upload hat keine Größenangabe.",
- "Choose a backup file first.": "Wähle zuerst eine Backup-Datei."
+ "Choose a backup file first.": "Wähle zuerst eine Backup-Datei.",
+ "Contains: database (with the timeline and willhaben recordings, when switched on), tokens, ad photos and parcel labels. Not included: manual API recordings.": "Enthält: Datenbank (mit Logbuch und willhaben-Aufzeichnungen, wenn eingeschaltet), Tokens, Anzeigen-Fotos und Paketlabels. Nicht enthalten: manuelle API-Aufzeichnungen."
 }

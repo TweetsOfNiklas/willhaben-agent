@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, LargeBinary, UniqueConstraint
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from app.config import get_settings
@@ -354,6 +354,78 @@ class EventLog(SQLModel, table=True):
     conversation_id: str | None = None
 
 
+class TimelineEvent(SQLModel, table=True):
+    """One entry of the timeline (/timeline, app/services/timeline.py): a Claude call, a willhaben request, a user
+    action, a background job or agent run, or a notification. Entity ids come from the timeline context, so one
+    entry can belong to several things at once (a reply draft: chat + ad + purchase)."""
+    __table_args__ = (Index("ix_timelineevent_kind_ts", "kind", "ts"),)
+    id: int | None = Field(default=None, primary_key=True)
+    ts: datetime = Field(default_factory=utcnow, index=True)
+    kind: str = Field(index=True)             # llm | wh | action | job | agent_run | sched | notify
+    name: str | None = Field(default=None, index=True)   # llm: purpose; action: "chat.send"; job: Job.kind; wh: access kind
+    actor: str | None = None                  # user | api | mcp | telegram | ha | scheduler | system
+    title: str = ""
+    ok: bool | None = Field(default=None, index=True)    # None: a run that is still going (record() sets it)
+    error: str | None = None
+    duration_ms: int | None = None
+    run_id: int | None = Field(default=None, index=True)   # the job / agent run / scheduler entry this belongs to
+    url: str | None = None
+    ad_id: str | None = Field(default=None, index=True)
+    conversation_id: str | None = Field(default=None, index=True)
+    agent_id: int | None = Field(default=None, index=True)
+    purchase_id: int | None = Field(default=None, index=True)
+    search_id: int | None = Field(default=None, index=True)    # ProductSearch
+    batch_id: int | None = Field(default=None, index=True)     # AdBatch
+    draft_id: int | None = Field(default=None, index=True)     # AdDraft (chat reply drafts go to extra["reply_draft"])
+    shipment_id: int | None = Field(default=None, index=True)
+    payload: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # small facts: model, tokens, counts
+    extra: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))     # rarer refs: hit_ids, reply_draft, mine
+    has_blobs: bool = False
+
+
+class TimelineBlob(SQLModel, table=True):
+    """A long text of a timeline entry (system prompt, prompt, response), zlib-compressed when it is big."""
+    id: int | None = Field(default=None, primary_key=True)
+    event_id: int = Field(index=True)
+    name: str                                 # system | prompt | schema | response
+    encoding: str = "raw"                     # raw | zlib
+    size: int = 0                             # uncompressed bytes
+    data: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
+
+
+
+class WhRecording(SQLModel, table=True):
+    """One willhaben request with its answer (app/willhaben/recorder.py), for the timeline, offline replay
+    (WH_REPLAY=1, app/willhaben/replay.py) and test fixtures (app/willhaben/export.py). Bodies are zlib-compressed;
+    images are kept as size + hash only. Cookies and tokens in headers are redacted."""
+    id: int | None = Field(default=None, primary_key=True)
+    ts: datetime = Field(default_factory=utcnow, index=True)
+    event_id: int | None = Field(default=None, index=True)    # TimelineEvent.id (no FK: pruning order never matters)
+    channel: str = Field(index=True)          # anonymous | account | chat | navigation | download | browser
+    kind: str = Field(index=True)             # access_log.KINDS + chat_push | download
+    method: str                               # GET/POST/PUT/DELETE | UPLOAD | WS | WSPUSH
+    url: str
+    final_url: str | None = None              # after redirects
+    canonical_key: str = Field(index=True)    # recorder.canonical_key(): what replay matches on
+    status: int | None = None                 # None: network error or WebSocket
+    ws_status: str | None = None              # WebSocket: ok | success | error | timeout | ws_error | closed
+    duration_ms: int | None = None
+    outcome: str = "ok"                       # ok | client_error | blocked | error | cached
+    cached: bool = False                      # answered from PublicClient's cache (no willhaben access)
+    error: str | None = None
+    req_headers: str | None = None            # JSON
+    req_body: bytes | None = Field(default=None, sa_column=Column(LargeBinary))
+    req_size: int = 0
+    req_truncated: bool = False
+    resp_headers: str | None = None           # JSON
+    resp_body: bytes | None = Field(default=None, sa_column=Column(LargeBinary))
+    resp_size: int = 0
+    resp_truncated: bool = False
+    content_type: str | None = None
+    body_hash: str | None = None              # sha256 of the whole answer
+    pruned: bool = False                      # bodies dropped to save space, the rest kept
+
+
 _engine = None
 
 
@@ -413,6 +485,9 @@ def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | N
     with session() as db:
         db.add(EventLog(kind=kind, message=message, url=url, ad_id=ad_id, conversation_id=conversation_id))
         db.commit()
+    from app.services import timeline    # the notification also shows up in the timeline
+
+    timeline.record("notify", message, name=kind, url=url, ad_id=ad_id, conversation_id=conversation_id)
 
 
 DEFAULT_SETTINGS: dict[str, str] = {
@@ -449,6 +524,13 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "quiet_end": "07:00",
     "quiet_mode": "slow",
     "quiet_interval_min": "60",
+    # timeline (/timeline) and willhaben request recording: both opt-in (Settings → Timeline); entries are kept
+    # forever unless pruning is switched on there
+    "timeline_enabled": "0",
+    "wh_recording": "0",
+    "timeline_prune": "0",
+    "timeline_days": "30",
+    "timeline_max_mb": "500",
 }
 
 

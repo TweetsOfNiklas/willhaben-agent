@@ -16,6 +16,7 @@ from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import SORT_SCHEMA, SORT_SYSTEM, sort_prompt
 from app.services import ad_creator
+from app.services import timeline
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ def groups_from_result(data: dict[str, Any], pool: list[int], keep: list[dict[st
     return groups
 
 
+@timeline.scoped(batch_id="batch_id")
 async def sort(batch_id: int, hint: str | None = None) -> AdBatch:
     """Let Claude (re-)group the photos. Groups that are drafts already stay as they are."""
     b = get(batch_id)

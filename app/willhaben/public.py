@@ -15,7 +15,7 @@ import httpx
 
 from app.config import get_settings
 from app.i18n import t
-from app.willhaben import access_log
+from app.willhaben import access_log, recorder, replay
 from app.willhaben.parse import (
     AdDetail,
     SearchFilters,
@@ -164,17 +164,29 @@ class PublicClient:
         # a 404 can turn into a live ad within minutes (freshly published or reactivated): keep it only briefly
         if cache_s and hit and time.monotonic() - hit[0] < (min(cache_s, NOT_FOUND_CACHE_S) if hit[1].status_code == 404 else cache_s):
             access_log.record("anonymous", kind, "cached")
+            recorder.record_http("anonymous", kind, "GET", url, status=hit[1].status_code, resp_headers=dict(hit[1].headers),
+                                 resp_body=hit[1].content, duration_ms=0, outcome="cached", cached=True,
+                                 final_url=str(hit[1].url), store_response=False)   # the body is stored once already
             return hit[1]
+        if replay.enabled() and (rec := replay.find("GET", url)):     # WH_REPLAY=1: no request, no waiting
+            replay.note(rec, kind)
+            return replay.as_httpx_response(rec, url)
         headers = {"accept": "application/json", "x-wh-client": WEB_CLIENT} if json_api else {"accept": "text/html"}
         if time.monotonic() - self._jar_since > ANON_SESSION_S:
             self.new_anonymous_session()
         async with self.limiter:
             with access_log.track("anonymous", kind) as tr:
+                started = time.monotonic()
                 try:
                     r = await self._client.get(url, headers=headers)
                 except httpx.HTTPError as e:
+                    recorder.record_http("anonymous", kind, "GET", url, req_headers=headers, outcome="error", error=str(e),
+                                         duration_ms=int((time.monotonic() - started) * 1000))
                     raise WillhabenError(t("Network error: {error}", error=e)) from e
                 tr.status = r.status_code
+        recorder.record_http("anonymous", kind, "GET", url, req_headers=headers, status=r.status_code,
+                             resp_headers=dict(r.headers), resp_body=r.content, final_url=str(r.url),
+                             duration_ms=int((time.monotonic() - started) * 1000))
         if r.status_code in (403, 429):
             self.new_anonymous_session()        # don't keep presenting the visitor that just got blocked
             delay = self.limiter.penalize()

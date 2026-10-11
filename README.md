@@ -84,6 +84,12 @@ It runs on your own server, from your home internet connection, and you control 
   Telegram, live chat or disk space fails.
 - **Polite by design**: every willhaben request goes through one shared rate limiter (minimum gap plus an
   hourly budget). Quiet hours slow the agents down at night. Nothing is ever written to willhaben without your approval.
+- **Timeline** (opt-in, Settings → Timeline): what happened, for which ad, chat, search agent, product search or
+  purchase. Every Claude call with its full prompt and answer, your actions (also via Telegram, Home Assistant, the API
+  and MCP), background jobs, agent runs and notifications, each with its errors and duration; jobs and agent runs open
+  up into their steps. A second switch records every willhaben request with its answer (cookies and tokens left out),
+  for the timeline, an offline replay mode (`WH_REPLAY=1`) and redacted test fixtures. Both are off by default and kept
+  until you switch on automatic deletion (days and/or a size). Neither ever goes into a bug report.
 - **MCP server**, so Claude Desktop or Claude Code can use the agent as a tool.
 - **Interface**: a collapsible sidebar with badges (new hits, unread chats, payments due), a notification inbox, live
   meters for Claude tokens this month and willhaben requests in the last hour (each with a popup: per task / per
@@ -152,7 +158,8 @@ avatar at the bottom of the sidebar) or under Settings → Language & appearance
 
 **Settings → Backup & restore** downloads everything (database, tokens, ad photos, optionally the willhaben login) as one
 ZIP, optionally encrypted with a passphrase, and restores such a file after a preview and a confirm click. The file
-contains your logins: keep it private.
+contains your logins: keep it private. With the timeline or the willhaben recording switched on, the database also
+holds Claude prompts and willhaben answers (chat texts, addresses).
 
 **willhaben requests:** the meter in the sidebar opens a summary (last hour per channel, the last 6 hours, the hourly
 budget, which you can change right there) and links to `/stats/willhaben`, a chart of every request the app
@@ -178,6 +185,7 @@ Every variable is optional. Values set in the dashboard win over the environment
 | `DEFAULT_AGENT_INTERVAL_S`, `MIN_AGENT_INTERVAL_S`, `CHAT_POLL_INTERVAL_S` | Polling intervals |
 | `VNC_PASSWORD`, `NOVNC_URL` | Optional noVNC view of the login browser (port 6080, LAN only) |
 | `PROXY_VIA`, `PROXY_HOSTS` | Map hostnames (e.g. your HA domain) to a reverse-proxy container on a shared network |
+| `WH_REPLAY` | `1`: answer willhaben requests from the recorded ones (Settings → Timeline); unknown requests still go to willhaben. With `BROWSER_ENABLED=0` the app runs without any willhaben access for what was recorded |
 
 See `.env.example` for all of them. Host-specific compose additions (extra networks, proxy settings) belong in
 a `compose.override.yaml`. Compose merges it automatically, and it is git-ignored.
@@ -269,6 +277,7 @@ Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_sea
 | Purchase orders (buyer side): contact, negotiation, PayLivery offer, pay-now push, pickup appointments | built and tested with fakes; **not yet live-tested** |
 | PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → willhaben account → Advanced → API recording) |
 | Connection watchdog, backup, bug report, request statistics | done |
+| Timeline (Claude prompts and answers, actions, jobs), willhaben request recording, offline replay, fixture export | built and tested with fakes; **not yet used against live willhaben** |
 | MCP server | done |
 
 willhaben's interfaces used by the app are documented in `docs/willhaben-api.md`. To check a response shape, the
@@ -291,6 +300,10 @@ Locally a real Chromium window opens for the login. Use `BROWSER_HEADLESS=1` for
   German on purpose, since Claude writes Austrian German ads and replies.
 - **Fixtures** are real willhaben responses. Redact new recordings before committing them:
   `python tests/redact_fixture.py tests/fixtures/<file>.json`. Never commit `data/`, `.env` or `compose.override.yaml`.
+  With "Record willhaben requests" on, `uv run python -m app.willhaben.export --out tests/fixtures/rec --since 7d`
+  writes redacted fixtures from what the app recorded, and `tests/fake_willhaben.py` serves them to the clients.
+- **Offline**: after recording for a while, `WH_REPLAY=1 BROWSER_ENABLED=0 uv run python -m app` answers the recorded
+  willhaben requests from the database (see `docs/willhaben-api.md`, "Recording, replay and fixtures").
 - **CI**: `.github/workflows/docker.yml` runs lint and tests, then builds the image and pushes it to GitHub
   Container Registry. The default branch gets `latest`, tags `v1.2.3` get `1.2.3` and `1.2`, and every build gets
   `sha-<commit>`. Pull requests build without pushing. To release, bump `app/__init__.py` and `pyproject.toml` and
