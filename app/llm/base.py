@@ -34,13 +34,31 @@ def _(text: str) -> str:
     return text
 
 
-# Selectable in Settings. Full ids on purpose: in CLI 2.1.286 the alias "haiku" still means Haiku 4.5.
+# Selectable in Settings (id, name) - the current models of the API. Full ids on purpose: in CLI 2.1.286 the alias
+# "haiku" still means Haiku 4.5.
 MODELS = [
-    ("claude-opus-5-5", "Opus 5.5", _("best quality for replies and listings")),
-    ("claude-fable-5-1", "Fable 5.1", _("newest model")),
-    ("claude-sonnet-5-5", "Sonnet 5.5", _("faster, a little less thorough")),
-    ("claude-haiku-5-5", "Haiku 5.5", _("fastest, for simple replies")),
+    ("claude-opus-5-5", "Opus 5.5"),
+    ("claude-fable-5-1", "Fable 5.1"),
+    ("claude-sonnet-5-5", "Sonnet 5.5"),
+    ("claude-haiku-5-5", "Haiku 5.5"),
 ]
+
+# API list prices, USD per million tokens (input, output). Source: Anthropic Claude API pricing, as of 2026-10-06.
+# Haiku 5.5: prompts up to 100K tokens ($0.50 / $2.50 beyond). Only shown as relative cost in Settings → Claude;
+# the "API price" column there comes from the CLI's own costUSD (app/llm/usage.py), not from this table.
+PRICES = {
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-fable-5-1": (10.0, 50.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),
+}
+
+
+def cost_factors() -> dict[str, int]:
+    """Token price of each model in MODELS relative to the cheapest one (input + output list price), cheapest first,
+    e.g. {"claude-haiku-5-5": 1, "claude-sonnet-5-5": 20, …}. Models without a price are left out."""
+    priced = sorted((sum(PRICES[m]), m) for m, _n in MODELS if m in PRICES)
+    return {m: round(p / priced[0][0]) for p, m in priced} if priced else {}
 
 
 # What a model is used for -> settings key. Unset keys fall back to PURPOSE_DEFAULTS, then llm_model / LLM_MODEL.

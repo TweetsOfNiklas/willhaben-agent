@@ -9,11 +9,15 @@
     <small class="text-muted">{% if c.median and ad.price %}{% set diff = ((ad.price - c.median) * 100 / c.median)|round|int %}{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% endif %}{% if c.count %} · {{ _("{n} comparable ads", n=c.count) }}{% endif %}</small>
   </div>
   {% if p.pos is not none %}{% set pct = (p.pos * 100)|round(1) %}
-  <div class="relative px-1 pt-[18px] pb-[18px]">
-    <span class="absolute top-0 whitespace-nowrap text-[12.5px] font-bold" style="left:{{ pct }}%;transform:translateX(-{{ pct }}%)">{{ ad.price|eur }}</span>
-    <span class="absolute top-4 h-4 w-[3px] -translate-x-1/2 rounded-sm bg-base-content shadow-[0_0_0_2px_var(--color-base-200)]" style="left:{{ pct }}%"></span>
-    <div class="deal-track"></div>
-    <div class="relative mt-1 h-4 text-[11.5px] text-muted">{% for pos, v in p.ticks %}<span class="absolute -translate-x-1/2 whitespace-nowrap" style="left:{{ (pos * 100)|round(1) }}%">{{ v|eur }}</span>{% endfor %}</div>
+  {# the bar: the price as a ring on the track (like the buy dialog), its label above; scale marks with values below #}
+  <div class="relative mx-2 pt-6 pb-1">
+    {# centred over the ring; only at the very ends aligned to the edge so it stays inside the card #}
+    <span class="absolute top-0 whitespace-nowrap text-[12.5px] font-bold tabular-nums" style="left:{{ pct }}%;transform:translateX(-{{ 50 if 8 <= pct <= 92 else (0 if pct < 8 else 100) }}%)">{{ ad.price|eur }}</span>
+    <div class="deal-track relative">
+      {% for pos, v in p.ticks %}<span class="absolute top-full mt-0.5 h-1.5 w-px -translate-x-1/2 bg-base-content/40" style="left:{{ (pos * 100)|round(1) }}%"></span>{% endfor %}
+      <span class="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-base-content bg-base-200 shadow-sm" style="left:{{ pct }}%" role="img" aria-label="{{ ad.price|eur }}"></span>
+    </div>
+    <div class="relative mt-2.5 h-4 text-[11.5px] text-muted tabular-nums">{% for pos, v in p.ticks %}<span class="absolute -translate-x-1/2 whitespace-nowrap" style="left:{{ (pos * 100)|round(1) }}%">{{ v|eur }}</span>{% endfor %}</div>
   </div>
   {% if p.suspicious %}<div class="self-start rounded-md bg-bad-soft px-2 py-1 text-[12.5px] font-semibold text-error">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</div>{% endif %}
   {% else %}<p class="text-[12.5px] text-muted">{{ deal_explain(res) }}</p>{% endif %}

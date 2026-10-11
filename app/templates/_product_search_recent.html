@@ -1,21 +1,31 @@
+{% import "_ui.html" as ui %}
 {# "Recent searches" list; the finished search's polled fragment re-sends it out of band (ps_oob) so status and buttons refresh. #}
 <div id="ps-recent-box"{% if ps_oob %} hx-swap-oob="true"{% endif %}>
 {% if ps_recent %}
-  <details class="overflow-hidden rounded-box border border-base-300 bg-base-100" {% if not ps %}open{% endif %}>
-    <summary class="cursor-pointer px-4 py-3 font-semibold">{{ _("Recent searches") }}</summary>
-    <table class="table table-sm">
-      <tbody>
-      {% for s in ps_recent %}
-        <tr>
-          <td class="whitespace-normal"><a class="link link-primary" href="/deals?search={{ s.id }}#ps-result">{{ s.description|truncate(90) }}</a></td>
-          <td><small>{% if ps_is_running(s) %}{{ _("running") }}{% elif s.status == 'asking' %}{{ _("waiting for your answers") }}{% elif s.status == 'done' %}{{ _("{n} offers", n=(s.results or [])|length) }}{% else %}{{ _("failed") }}{% endif %}</small></td>
-          <td><small class="whitespace-nowrap text-muted">{{ (s.started_at or s.created_at)|ago }}</small></td>
-          <td>{% if not ps_is_running(s) and s.status != 'asking' %}<form method="post" action="/deals/search/{{ s.id }}/rerun" class="m-0">
-                <button type="submit" class="btn btn-xs whitespace-nowrap" {% if ps_running %}disabled{% endif %}>↻ {{ _("Run again") }}</button></form>{% endif %}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  <details class="group overflow-hidden rounded-box border border-base-300 bg-base-100" {% if not ps %}open{% endif %}>
+    <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold [&::-webkit-details-marker]:hidden">
+      <h3 class="flex-1">{{ _("Recent searches") }}</h3><span class="text-muted transition-transform group-open:rotate-180">{{ ui.icon('chevron-down', 16) }}</span>
+    </summary>
+    {% for s in ps_recent %}
+    {% set running = ps_is_running(s) %}
+    <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-base-300 py-2.5 pr-2 pl-4 hover:bg-hover">
+      <a href="/deals?search={{ s.id }}#ps-result" class="min-w-0 text-base-content no-underline" title="{{ s.description }}">
+        <span class="line-clamp-2 font-medium break-words">{{ s.description }}</span>
+        <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted">
+          {%- if running %}{{ ui.pill(_("running"), 'brand') }}
+          {%- elif s.status == 'asking' %}{{ ui.pill(_("waiting for your answers"), 'warn') }}
+          {%- elif s.status == 'done' %}{% set n = (s.results or [])|length %}{{ ui.pill(_("{n} offers", n=n), 'ok' if n else '', dot=false) }}
+          {%- else %}{{ ui.pill(_("failed"), 'bad') }}{% endif %}
+          <span class="whitespace-nowrap">{{ (s.started_at or s.created_at)|ago }}</span>
+        </span>
+      </a>
+      {% if not running and s.status != 'asking' %}
+      <form method="post" action="/deals/search/{{ s.id }}/rerun" class="m-0">
+        <button type="submit" class="btn btn-ghost btn-sm btn-square text-muted hover:text-base-content" title="{{ _('Run again') }}" aria-label="{{ _('Run again') }}" {% if ps_running %}disabled{% endif %}>{{ ui.icon('refresh', 16) }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
   </details>
 {% endif %}
 </div>

@@ -39,6 +39,7 @@ RESULT_TTL_S = 3600
 GEIZHALS_FAIL_TTL_S = 900    # Geizhals blocking/down: don't retry on every open
 MIN_COMPARABLES = 5          # fewer -> Geizhals new price as anchor, or no position at all
 QUERY_WORDS = 3              # willhaben keyword search is AND: short queries find enough comparables
+FILTERS = 2                  # version of the comparable filters (2: RAM/storage sizes); older results are recomputed
 CLOSEST = 10
 RECENT = 10
 USED_LOW, USED_HIGH = 0.40, 0.70   # used items typically sell for 40–70 % of the new price
@@ -108,7 +109,10 @@ def tokens(title: str | None) -> list[str]:
 
 
 def query_from_title(title: str | None, words: int = QUERY_WORDS) -> str:
-    return " ".join(tokens(title)[:words])
+    """The first words of the title, "4 GB" as one word "4GB" (so "Pi 4 4 GB" keeps both). willhaben matches either
+    spelling (checked 10/2026: "iPhone 13 128GB" also finds the "128 GB" ads, 1326 vs 1327 hits). No size is pulled in
+    from further on (a longer AND query finds fewer); _same_size() separates the variants."""
+    return " ".join(tokens(geizhals.glue_units(title or ""))[:words])
 
 
 def _model_token(toks: list[str], i: int) -> bool:
@@ -265,6 +269,33 @@ def _same_kind(other_title: str | None, ad_title: str | None) -> bool:
     return not any(v in ow and v not in aw for v in VARIANT_WORDS)
 
 
+_PAIR_RE = re.compile(r"(?<![\w.,])(\d+)\s*/\s*(\d+(?:\.\d+)?)(gb|tb)\b", re.I)   # "8/256GB": RAM/storage
+_SIZE_RE = re.compile(r"(\d+(?:[.,]\d+)?)(\D+)")
+
+
+def _pair(m: re.Match[str]) -> str:
+    """"8/256GB" -> "8GB 256GB"; not "Pi 4 / 8GB" (model and size: storage is at least 4 x RAM)."""
+    ram, size, unit = m.groups()
+    return f"{ram}{unit} {size}{unit}" if float(size) >= 4 * int(ram) else m.group(0)
+
+
+def _capacities(title: str | None) -> set[str]:
+    """RAM/storage/battery sizes in a title as numbers: "4 GB" = "4gb", "1,5 TB" = "1.5tb", "20.000 mAh" = "20000mah"
+    (thousands separator), "2.0TB" = "2tb"; "8/256GB" names both sizes."""
+    out = set()
+    for c in geizhals.CAPACITY_RE.findall(_PAIR_RE.sub(_pair, geizhals.glue_units(title or ""))):
+        num, unit = _SIZE_RE.fullmatch(c).groups()
+        out.add(f"{float(re.sub(r'[.,](?=\d{3}$)', '', num).replace(',', '.')):g}{unit.lower()}")
+    return out
+
+
+def _same_size(other_title: str | None, ad_title: str | None) -> bool:
+    """False for another RAM/storage variant: a "Pi 4 8GB" is no comparable for a "Pi 4 4GB". A title without a
+    size, or one that names all of the ad's sizes ("4 GB + 32GB SD-Karte"), still counts."""
+    o, a = _capacities(other_title), _capacities(ad_title)
+    return o <= a or a <= o
+
+
 def _category_scope(ads: list[dict[str, Any]], category_id: str | None) -> tuple[list[dict[str, Any]], str | None]:
     """Same leaf category as the ad; too few -> same parent category; none known -> unchanged."""
     if not category_id:
@@ -316,9 +347,10 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
                       category_id: str | None = None, title: str | None = None,
                       category_url: str | None = None) -> dict[str, Any]:
     """Comparable ads: the keyword search narrowed to the ad's own category (or a category the user picked),
-    without accessories/other variants and extreme prices. `filtered` says how many each step dropped."""
+    without accessories/other variants (RAM/storage sizes too) and extreme prices. `filtered` says how many each
+    step dropped."""
     out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
-                           "scope": None, "filtered": {}}
+                           "scope": None, "filtered": {}, "filters": FILTERS}
     if not query and not category_url:
         return out
     try:
@@ -336,8 +368,9 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
         ads, scope = _category_scope(ads, category_id)
     n1 = len(ads)
     if title:
-        kind = [a for a in ads if _same_kind(a.get("title"), title)]
-        ads = kind if len(kind) >= MIN_COMPARABLES else ads
+        for same in (_same_kind, _same_size):     # sizes leaving too few do not undo the accessory filter
+            kept = [a for a in ads if same(a.get("title"), title)]
+            ads = kept if len(kept) >= MIN_COMPARABLES else ads
     n2 = len(ads)
     ads = _trim(ads)
     out["scope"], out["filtered"] = scope, {"category": n0 - n1, "kind": n1 - n2, "outliers": n2 - len(ads)}
@@ -415,8 +448,8 @@ def _ran_at(res: dict[str, Any]) -> datetime | None:
 
 
 def _current(res: dict[str, Any] | None) -> bool:
-    """Results from before the category/variant filter (no "filtered" counts) are recomputed."""
-    return bool(res) and "filtered" in (res.get("comparables") or {})
+    """Results from before the current comparable filters (category, variant, sizes: FILTERS) are recomputed."""
+    return bool(res) and (res.get("comparables") or {}).get("filters") == FILTERS
 
 
 def cached(ad_id: str, query: str | None = None, category_url: str | None = None) -> dict[str, Any] | None:

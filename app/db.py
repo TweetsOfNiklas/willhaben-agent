@@ -397,6 +397,17 @@ def session() -> Session:
     return Session(get_engine(), expire_on_commit=False)
 
 
+SETTING_PUBLIC_URL = "public_url"   # Settings → Web address; wins over PUBLIC_URL in .env
+
+
+def apply_public_url() -> str:
+    """Put the stored web address into the cached settings, so every get_settings().public_url sees it (at startup
+    and after saving); without one, PUBLIC_URL from .env (or the default) applies again."""
+    s = get_settings()
+    s.public_url = get_setting(SETTING_PUBLIC_URL).strip() or type(s)().public_url
+    return s.public_url
+
+
 def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | None = None,
               conversation_id: str | None = None) -> None:
     with session() as db:

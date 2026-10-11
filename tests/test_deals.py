@@ -137,6 +137,13 @@ def test_query_from_title_drops_filler():
     assert deals.query_from_title("neu und OVP") == ""
 
 
+def test_query_from_title_glues_sizes():
+    assert deals.query_from_title("Raspberry Pi 4 4 GB") == "Raspberry Pi 4"        # the second "4" is no duplicate
+    assert deals.query_from_title("Raspberry Pi 4 4 GB", words=4) == "Raspberry Pi 4 4GB"
+    assert deals.query_from_title("iPhone 13 128 GB blau") == "iPhone 13 128GB"     # in the 3 words: one word
+    assert deals.query_from_title("MacBook Air M1 8GB 256GB") == "MacBook Air M1"   # no size pulled in from further on
+
+
 def test_geizhals_query_only_for_products():
     assert deals.geizhals_query("iPhone 13 128GB Display kaputt") == "iPhone 13 128GB"
     assert deals.geizhals_query("Bosch GSR 18V-55 Akkuschrauber") == "Bosch GSR 18V-55"
@@ -467,6 +474,21 @@ async def test_claude_verdict_tied_to_price(wh, monkeypatch):
     assert len(fake.calls) == 2
 
 
+async def test_results_before_the_size_filter_are_recomputed(wh, monkeypatch):
+    async def no_gh(q):
+        return None
+    monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
+    res = await deals.analyze(_ad(100))
+    assert res["comparables"]["filters"] == deals.FILTERS
+    old = {**res, "comparables": {k: v for k, v in res["comparables"].items() if k != "filters"}}
+    deals.remember(old)                                          # stored by a version without the size filter
+    deals.clear_cache()
+    assert deals.cached(AD_ID) is None
+    deals.remember(res)
+    deals.clear_cache()
+    assert deals.cached(AD_ID) is not None
+
+
 def test_deals_page_rejects_non_ad_links(app_client):
     page = app_client.get("/deals", params={"q": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/fahrraeder-4552"}).text
     assert "This link is not a willhaben ad." in page and app_client.calls["search"] == 0
@@ -516,6 +538,64 @@ def test_same_kind_rules():
     assert not deals._same_kind("Hülle für iPhone 15 Pro", "iPhone 15 pro")
     assert deals._same_kind("iPhone 15 Pro Display defekt", "iPhone 15 Pro defekt")    # the ad itself is defective
     assert not deals._same_kind("Nur OVP iPhone 15 Pro", "iPhone 15 pro")
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    ("Raspberry Pi 4 8GB", "Raspberry Pi 4 4GB", False),
+    ("Raspberry Pi 4 Model B", "Raspberry Pi 4 4GB", True),                   # no size: may be any, kept
+    ("Raspberry Pi 4 4 GB + 32GB SD-Karte", "Raspberry Pi 4 4GB", True),      # names the ad's size too
+    ("Raspberry Pi 4 4GB", "Raspberry Pi 4 4 GB", True),                      # "4 GB" = "4GB"
+    ("MacBook Air M1 16GB 256GB", "MacBook Air M1 8GB 256GB", False),
+    ("MacBook Air M1 8GB 512GB", "MacBook Air M1 8GB 256GB", False),
+    ("MacBook Air M1 256GB", "MacBook Air M1 8GB 256GB", True),
+    ("MacBook Air M1 8 GB / 256 GB", "MacBook Air M1 8GB 256GB", True),
+    ("Samsung T7 1,5 TB", "Samsung T7 1.5TB", True),
+    ("Raspberry Pi 4 8GB", "Raspberry Pi 4", True),                           # ad without a size: no change
+    ("Anker Powerbank 20000mAh", "Anker Powerbank 20.000 mAh", True),         # thousands separator
+    ("Anker Powerbank 10.000 mAh", "Anker Powerbank 20000mAh", False),
+    ("Samsung T7 2TB", "Samsung T7 2.0TB", True),
+    ("MacBook Air M1 16/256GB", "MacBook Air M1 8GB 256GB", False),           # RAM/storage
+    ("MacBook Air M1 8/256 GB", "MacBook Air M1 8GB 256GB", True),
+    ("Raspberry Pi 4 / 8GB", "Raspberry Pi 4 4GB", False),                    # model / size, not RAM/storage
+])
+def test_same_size(other, ad, ok):
+    assert deals._same_size(other, ad) is ok
+
+
+def _fake_search(monkeypatch, ads):
+    async def search_ads(q):
+        return {"rows_found": len(ads), "ads": ads}
+    monkeypatch.setattr(deals, "search_ads", search_ads)
+
+
+async def test_comparables_leave_out_other_sizes(monkeypatch):
+    pi = "2691;5013000"
+    ads = [_summ(n, "Raspberry Pi 4 4 GB", p, pi) for n, p in enumerate([45, 50, 55, 60])]
+    ads += [_summ(10, "Raspberry Pi 4 Model B", 52, pi), _summ(11, "Raspberry Pi 4 4 GB + 32GB SD-Karte", 58, pi)]
+    ads += [_summ(20 + n, "Raspberry Pi 4 8GB", p, pi) for n, p in enumerate([80, 85, 90])]
+    ads += [_summ(30, "Raspberry Pi 4 Gehäuse", 10, pi)]
+    _fake_search(monkeypatch, ads)
+    out = await deals.comparables("Raspberry Pi 4", AD_ID, 50, category_id="5013000", title="Raspberry Pi 4 4GB")
+    assert out["count"] == 6 and out["stats"]["max"] == 60
+    assert out["filtered"] == {"category": 0, "kind": 4, "outliers": 0}      # 3 x 8GB + the case
+
+    mac = [_summ(n, "MacBook Air M1 8GB 256GB", p, pi) for n, p in enumerate([600, 650, 700, 720])]
+    mac += [_summ(10, "MacBook Air M1 8 GB / 256 GB", 680, pi), _summ(11, "MacBook Air M1 256GB", 640, pi)]
+    mac += [_summ(20, "MacBook Air M1 16GB 256GB", 900, pi), _summ(21, "MacBook Air M1 8GB 512GB", 820, pi)]
+    _fake_search(monkeypatch, mac)
+    out = await deals.comparables("MacBook Air M1", AD_ID, 650, category_id="5013000", title="MacBook Air M1 8GB 256GB")
+    assert out["count"] == 6 and out["stats"]["max"] == 720 and out["filtered"]["kind"] == 2
+
+
+async def test_comparables_too_few_of_the_size_keep_the_accessory_filter(monkeypatch):
+    pi = "2691;5013000"
+    ads = [_summ(n, "Raspberry Pi 4 4GB", p, pi) for n, p in enumerate([50, 55])] + [_summ(5, "Raspberry Pi 4", 52, pi)]
+    ads += [_summ(20 + n, "Raspberry Pi 4 8GB", p, pi) for n, p in enumerate([80, 85, 90, 95, 100, 70])]
+    ads += [_summ(30, "Raspberry Pi 4 Gehäuse", 10, pi)]
+    _fake_search(monkeypatch, ads)
+    out = await deals.comparables("Raspberry Pi 4", AD_ID, 50, category_id="5013000", title="Raspberry Pi 4 4GB")
+    assert out["count"] == 9 and out["filtered"]["kind"] == 1               # all sizes, but not the case
+    assert out["stats"]["min"] == 50
 
 
 async def test_category_choices_and_chosen_category(monkeypatch):

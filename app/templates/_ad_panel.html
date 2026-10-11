@@ -92,5 +92,16 @@
     if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
     if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
   });
+
+  // deep link from a phone push: ?view=<ad id> opens the viewer (with the page's ads to step through if it is listed)
+  const url = new URL(location.href), view = url.searchParams.get('view');
+  if (view && /^\d+$/.test(view)) {
+    list = collect();
+    const i = list.findIndex(x => x.ad === view);
+    if (i < 0) list = [{ad: view, hit: ''}];
+    show(Math.max(i, 0));
+    url.searchParams.delete('view');
+    history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+  }
 })();
 </script>

@@ -77,6 +77,17 @@ class Settings(BaseSettings):
         return self.data_dir / "ad-drafts"
 
 
+def address_check(url: str | None) -> dict[str, bool]:
+    """Can a phone open links to this dashboard address? `reachable`: not a loopback/placeholder host;
+    `https`: Telegram buttons need it."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit((url or "").strip())
+    host = (parts.hostname or "").lower()
+    reachable = parts.scheme in ("http", "https") and host not in ("", "localhost", "127.0.0.1", "0.0.0.0", "::1")
+    return {"reachable": reachable, "https": reachable and parts.scheme == "https"}
+
+
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()

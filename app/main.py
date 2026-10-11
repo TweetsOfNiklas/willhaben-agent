@@ -5,7 +5,7 @@ import asyncio
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlsplit
 from typing import Any
@@ -21,10 +21,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
-from app.config import get_settings
+from app.config import address_check, get_settings
 from app.db import (
-    AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, MyAd, Purchase, SearchAgent, get_setting, init_db, recent_events,
-    requests_per_hour, session, set_setting, utcnow,
+    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, MyAd, Purchase, SearchAgent, apply_public_url,
+    get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage
 from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
@@ -55,6 +55,7 @@ BASE_DIR = Path(__file__).parent
 async def lifespan(app: FastAPI):
     s = get_settings()
     init_db()
+    apply_public_url()                             # Settings → Web address wins over PUBLIC_URL in .env
     ad_batch.recover()
     my_ads.recover()                               # queued jobs died with the last process: unmark what they held
     ad_creator.recover_publishing()
@@ -284,6 +285,10 @@ async def healthz():
     return {"ok": True, "browser": get_session().started, "logged_in": get_session().logged_in}
 
 
+HOME_EVENTS = 8              # activity entries on Home (the inbox in the sidebar has more)
+HOME_EXPIRING_DAYS = 5       # "Expiring soon" on Home: own ads that end within these days
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     with session() as db:
@@ -296,10 +301,11 @@ async def index(request: Request):
             "expired": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "expired",
                                                                              col(MyAd.replaced_by).is_(None))).one(),
         }
-        soon = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.end_date).is_not(None))
+        soon = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.end_date).is_not(None),
+                                               col(MyAd.end_date) <= utcnow() + timedelta(days=HOME_EXPIRING_DAYS))
                             .order_by(MyAd.end_date).limit(5)))
         latest = list(db.exec(select(Hit).where(Hit.state == "new").order_by(col(Hit.first_seen_at).desc()).limit(8)))
-    return render(request, "index.html", stats=stats, soon=soon, latest=latest, events=recent_events(20),
+    return render(request, "index.html", stats=stats, soon=soon, latest=latest, events=recent_events(HOME_EVENTS),
                   llm_ok=bool(claude_token()), health=health.collect())
 
 
@@ -436,19 +442,20 @@ async def agents_delete(agent_id: int):
 
 
 @app.get("/hits", response_class=HTMLResponse)
-async def hits_page(request: Request, agent_id: int | None = None, state: str = "new"):
+async def hits_page(request: Request, agent_id: str = "", state: str = "new"):
+    aid = int(agent_id) if agent_id.strip().isdigit() else None   # "All search agents" sends an empty value
     with session() as db:
         q = select(Hit)
-        if agent_id:
-            q = q.where(Hit.agent_id == agent_id)
+        if aid:
+            q = q.where(Hit.agent_id == aid)
         if state != "all":
             q = q.where(Hit.state == state)
         hits = list(db.exec(q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc()).limit(200)))
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
         counts_q = select(Hit.state, func.count()).group_by(Hit.state)
-        state_counts = dict(db.exec(counts_q.where(Hit.agent_id == agent_id) if agent_id else counts_q).all())
+        state_counts = dict(db.exec(counts_q.where(Hit.agent_id == aid) if aid else counts_q).all())
     state_counts["all"] = sum(state_counts.values())
-    return render(request, "hits.html", hits=hits, agents=agents, agent_id=agent_id, state=state, state_counts=state_counts)
+    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts)
 
 
 @app.get("/hits/ad/{ad_id}", response_class=HTMLResponse)
@@ -1405,7 +1412,7 @@ async def capture_download(name: str):
 
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "shipping", "calendar", "purchase", "paylivery", "printers", "myads",
-                     "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "language")   # settings.html groups
+                     "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "web", "language")   # settings.html groups
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1418,24 +1425,16 @@ INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "message": "New mes
                "ad_renewed": "Ad renewed", "paylivery": "Pay now!", "purchase": "Purchase order", "health": "Connections", "test": "Test"}
 
 
-_WH_AD_ID = re.compile(r"willhaben\.at/.*?(?:adId=|-)(\d{6,})(?:/?$|[/?&#])")
-
-
 def event_link(e: EventLog) -> dict[str, Any] | None:
     """Where an activity entry leads in this app: {href, ad, external}. `ad` opens the ad viewer (_ad_panel.html);
-    willhaben only when no page here fits. Older rows without ids get the ad id from their willhaben link."""
-    url = e.url or ""
-    base = get_settings().public_url.rstrip("/")
-    if base and url.startswith(base):
-        return {"href": url[len(base):] or "/", "ad": None, "external": False}
-    if e.conversation_id:
-        return {"href": f"/chats/{e.conversation_id}", "ad": None, "external": False}
-    ad_id = e.ad_id or (m.group(1) if (m := _WH_AD_ID.search(url)) else None)
-    if ad_id and e.kind in ("hit", "price_drop"):
-        return {"href": url or "/hits", "ad": ad_id, "external": False}
-    if ad_id and e.kind.startswith("ad_"):
-        return {"href": f"/myads?ad={ad_id}", "ad": None, "external": False}
-    return {"href": url, "ad": None, "external": True} if url else None
+    willhaben only when no page here fits. Same mapping as the phone pushes (notify.app_path)."""
+    from app.services.notify import app_path
+
+    path = app_path(e.kind, e.url, e.ad_id, e.conversation_id)
+    if path is None:
+        return {"href": e.url, "ad": None, "external": True} if e.url else None
+    ad = path.split("=", 1)[1] if path.startswith("/hits?view=") else None
+    return {"href": path, "ad": ad, "external": False}
 
 
 templates.env.globals.update(event_link=event_link)
@@ -1494,16 +1493,18 @@ async def inbox_read_all(request: Request):
 
 def _claude_section() -> dict[str, Any]:
     """Context of settings/claude.html (handoff design): models per task, the monthly limit, usage per task and model."""
-    from app.llm.base import last_call
+    from app.llm.base import cost_factors, last_call
 
     lim = llm_usage.limit()
     rows = []
     fmt = lambda n: "{:,}".format(n or 0).replace(",", ".")   # noqa: E731
+    fac, names = cost_factors(), {m: name.split()[0] for m, name in MODELS}   # "Haiku 5.5" -> "Haiku"
     for g in (llm_usage.summary().get("groups") or []):
         rows.append({"label": t(PURPOSES[g["purpose"]][1]) if g["purpose"] in PURPOSES else t("Other (tests, misc.)"),
                      "model": g["model"], "calls": g["calls"], "tokens_in": fmt(g["input"]), "tokens_out": fmt(g["output"]),
                      "cost": g["cost_usd"]})
     return {"models": {p: _alias(model_for(p)) for p in PURPOSES}, "model_choices": MODELS,   # full model ids
+            "model_costs": [(names[m], f) for m, f in fac.items()],   # relative token price, cheapest first
             "claude_usage": {"used": lim["used"], "limit": lim["limit"]},
             "claude_limit_mode": lim["mode"], "token_usage": rows,
             **({"claude_last_call": last_call["at"]} if last_call.get("at") else {})}
@@ -1562,7 +1563,25 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings/willhaben", backup=backup_routes.panel(),
-                  **label_buy_routes.panel(), **printing_routes.panel())
+                  web=_web_address(), **label_buy_routes.panel(), **printing_routes.panel())
+
+
+def _web_address() -> dict[str, Any]:
+    """Settings → Web address: the address links open, what is stored here and what .env says."""
+    url = get_settings().public_url
+    return {"url": url, "stored": get_setting(SETTING_PUBLIC_URL).strip(), "env": type(get_settings())().public_url,
+            **address_check(url)}
+
+
+@app.post("/settings/web")
+async def settings_web(public_url: str = Form("")):
+    url = public_url.strip().rstrip("/")
+    if url and not re.fullmatch(r"https?://[^\s/?#]+(/[^\s?#]*)?", url):
+        return back(f"/settings/web?msg={quote(t('Enter the address with http:// or https://, e.g. https://willhaben.example.com'), safe='')}")
+    set_setting(SETTING_PUBLIC_URL, url)
+    apply_public_url()
+    msg = t("Web address saved") if url else t("Web address reset to PUBLIC_URL from .env")
+    return back(f"/settings/web?msg={quote(msg, safe='')}")
 
 
 async def _gcal_ctx() -> dict[str, Any]:
@@ -1648,10 +1667,10 @@ def _alias(model: str) -> str:
 
 @app.post("/settings/model")
 async def settings_model(purpose: str = Form(...), model: str = Form(...)):
-    if purpose not in PURPOSES or model not in {m for m, _, _ in MODELS}:
+    if purpose not in PURPOSES or model not in {m for m, _ in MODELS}:
         raise HTTPException(400, t("unknown model"))
     set_setting(PURPOSES[purpose][0], model)
-    label = next(lbl for m, lbl, _ in MODELS if m == model)
+    label = next(lbl for m, lbl in MODELS if m == model)
     return back(f"/settings/claude?msg={quote(f'{t(PURPOSES[purpose][1])}: {label}', safe='')}")
 
 

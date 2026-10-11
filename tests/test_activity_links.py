@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.db import EventLog, log_event
 from app.main import event_link
 from app.services import notify as notify_mod
+from app.services.my_ads import MYADVERTS_URL
 from tests.test_dashboard import client  # noqa: F401  (client fixture)
 
 WH_AD = "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/raspberry-pi-4-4gb-1662146981/"
@@ -13,7 +14,7 @@ WH_AD = "https://www.willhaben.at/iad/kaufen-und-verkaufen/d/raspberry-pi-4-4gb-
 
 def test_event_link_prefers_own_pages():
     assert event_link(EventLog(kind="hit", message="x", url=WH_AD, ad_id="1662146981")) == \
-        {"href": WH_AD, "ad": "1662146981", "external": False}                       # opens the ad viewer
+        {"href": "/hits?view=1662146981", "ad": "1662146981", "external": False}   # opens the ad viewer
     assert event_link(EventLog(kind="message", message="x", url="https://www.willhaben.at/iad/myprofile/chat",
                                conversation_id="c1"))["href"] == "/chats/c1"
     assert event_link(EventLog(kind="ad_expiring", message="x", url=WH_AD, ad_id="1662146981"))["href"] == \
@@ -24,6 +25,17 @@ def test_event_link_prefers_own_pages():
     # older rows without ids: the ad id comes from the willhaben link
     assert event_link(EventLog(kind="price_drop", message="x", url=WH_AD))["ad"] == "1662146981"
     assert event_link(EventLog(kind="ad_renewed", message="x", url=WH_AD))["href"] == "/myads?ad=1662146981"
+    # older rows without ids pointing to willhaben's generic chat / my-adverts pages
+    assert event_link(EventLog(kind="message", message="x", url="https://www.willhaben.at/iad/myprofile/chat")) == \
+        {"href": "/chats", "ad": None, "external": False}
+    assert event_link(EventLog(kind="auto_reply", message="x", url="https://www.willhaben.at/iad/myprofile/chat/"))["href"] == "/chats"
+    assert event_link(EventLog(kind="purchase", message="x", url="https://www.willhaben.at/iad/myprofile/chat/c7"))["href"] == \
+        "/chats/c7"
+    assert event_link(EventLog(kind="ad_expired", message="x", url=MYADVERTS_URL))["href"] == "/myads"
+    # a bare app path (Claude token limit) stays in the app; "+N more new hits" (no link, no id) opens the hits page
+    assert event_link(EventLog(kind="health", message="x", url="/settings/claude")) == \
+        {"href": "/settings/claude", "ad": None, "external": False}
+    assert event_link(EventLog(kind="hit", message="x")) == {"href": "/hits", "ad": None, "external": False}
     # nothing of ours fits: the external link stays, in a new tab
     assert event_link(EventLog(kind="meetup", message="x", url="https://calendar.google.com/e/1"))["external"] is True
     assert event_link(EventLog(kind="test", message="x")) is None
@@ -73,3 +85,13 @@ def test_expiring_soon_links_to_my_ads(client):  # noqa: F811
     page = client.get("/").text
     box = page[page.index("/myads?ad=1662146981") - 300:page.index("/myads?ad=1662146981") + 200]
     assert 'href="/myads?ad=1662146981"' in box and WH_AD not in box and 'target="_blank"' not in box
+
+
+def test_view_deep_link_opens_the_ad_viewer(client):  # noqa: F811
+    """Push link of a hit: /hits?view=<ad id>; the hits page takes it and the viewer script opens that ad."""
+    page = client.get("/hits?view=1662146981")
+    assert page.status_code == 200
+    script = page.text[page.text.index('id="ad-viewer"'):]
+    script = script[script.index("<script>"):script.index("</script>")]
+    assert "searchParams.get('view')" in script and "/^\\d+$/.test(view)" in script
+    assert "history.replaceState" in script and "searchParams.delete('view')" in script

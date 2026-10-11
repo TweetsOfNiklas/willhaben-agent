@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
 
+from app.config import address_check, get_settings
 from app.db import log_event
 
 log = logging.getLogger(__name__)
@@ -14,6 +16,57 @@ _transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock transp
 
 
 PUSH_CHANNELS = ("auto", "ha", "telegram", "both")
+
+_WH_AD_ID = re.compile(r"willhaben\.at/.*?(?:adId=|-)(\d{6,})(?:/?$|[/?&#])")
+# willhaben's own chat list / chat / my-adverts pages (older rows and pushes without ids)
+_WH_PAGE = re.compile(r"^https://www\.willhaben\.at/iad/myprofile/(chat|myadverts)(?:/([\w-]+))?/?(?:[?#].*)?$")
+
+
+def _relative(url: str | None) -> bool:
+    return bool(url) and url.startswith("/") and not url.startswith("//")
+
+
+def _reachable() -> bool:
+    """public_url can be opened from a phone (not localhost; Settings → Web address shows the same check)."""
+    return address_check(get_settings().public_url)["reachable"]
+
+
+def app_path(kind: str, url: str | None, ad_id: Any = None, conversation_id: Any = None) -> str | None:
+    """The page in this app for a notification/activity entry (relative path), None when only `url` fits
+    (e.g. a calendar link). Hits/price drops: /hits?view=<id> opens the ad viewer (_ad_panel.html)."""
+    url = url or ""
+    base = get_settings().public_url.rstrip("/")
+    if base and url.startswith(base):
+        return url[len(base):] or "/"
+    if _relative(url):                    # already a page here (e.g. "/settings/claude")
+        return url
+    if conversation_id:
+        return f"/chats/{conversation_id}"
+    ad_id = str(ad_id) if ad_id else (m.group(1) if (m := _WH_AD_ID.search(url)) else None)
+    if ad_id and kind in ("hit", "price_drop"):
+        return f"/hits?view={ad_id}"
+    if ad_id and kind.startswith("ad_"):
+        return f"/myads?ad={ad_id}"
+    if kind in ("hit", "price_drop") and not url:
+        return "/hits"                    # "+N more new hits"
+    if m := _WH_PAGE.match(url):
+        return "/myads" if m.group(1) == "myadverts" else "/chats" + (f"/{m.group(2)}" if m.group(2) else "")
+    return None
+
+
+def app_link(kind: str, url: str | None, data: dict[str, Any] | None = None) -> str | None:
+    """Full link to the app page of a notification (public_url + app_path), None if no page fits."""
+    data = data or {}
+    path = app_path(kind, url, data.get("ad_id"), data.get("conversation_id"))
+    return get_settings().public_url.rstrip("/") + path if path else None
+
+
+def push_url(kind: str, url: str | None, data: dict[str, Any] | None = None) -> str | None:
+    """What a phone push opens: the app page when public_url is reachable from the phone (not localhost),
+    otherwise the original link (willhaben); a bare app path is nothing a phone can open then."""
+    if not _reachable():
+        return None if _relative(url) else url
+    return app_link(kind, url, data) or url
 
 
 def push_channel() -> str:
@@ -43,16 +96,20 @@ async def notify(kind: str, title: str, message: str, *, url: str | None = None,
     from app.services.ha_auth import ha_token, ha_url, notify_service
 
     channel = channel if channel in ("ha", "telegram", "both") else push_channel()
+    link = push_url(kind, url, data)      # the app page when the phone can reach it, else the willhaben link
     # push=False: log + HA event only (e.g. a hit the Claude screening rejected)
-    if push and channel in ("telegram", "both"):
-        await telegram.send(kind, title, message, url=url, image=image, data=data, actions=actions, tag=tag)
+    if push and channel in ("telegram", "both"):      # Telegram buttons take https links only
+        await telegram.send(kind, title, message, url=link if link and link.startswith("https://") else url,
+                            image=image, data=data, actions=actions, tag=tag)
 
     base, token, service = ha_url(), ha_token(), notify_service()
     if channel not in ("ha", "both"):
         service = None          # HA still gets the event (automations), just no phone push
     if not (base and token):
         return False
-    payload = {"title": title, "message": message, "url": url, "image": image, **(data or {})}
+    # "url" stays the original link (user automations), "app_url" is the page in this app (None if a phone can't open it)
+    payload = {"title": title, "message": message, "url": url, "image": image,
+               "app_url": app_link(kind, url, data) if _reachable() else None, **(data or {})}
     headers = {"Authorization": f"Bearer {token}"}
     try:
         async with httpx.AsyncClient(timeout=15, transport=_transport) as c:
@@ -62,8 +119,8 @@ async def notify(kind: str, title: str, message: str, *, url: str | None = None,
                 log.warning("HA event %s failed: %s %s", kind, r.status_code, r.text[:200])
             if service and push:
                 push_data: dict[str, Any] = {}
-                if url:
-                    push_data.update({"url": url, "clickAction": url})
+                if link:
+                    push_data.update({"url": link, "clickAction": link})
                 if image:
                     push_data["image"] = image
                 if actions:          # buttons in the HA companion app push

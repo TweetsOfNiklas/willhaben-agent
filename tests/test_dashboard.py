@@ -277,6 +277,9 @@ def test_hit_detail_viewer(client):
         db.commit()
     page = client.get("/hits", params={"agent_id": 7}).text
     assert 'data-ad="1662146981" data-hit="5"' in page and 'id="ad-viewer"' in page
+    r = client.get("/hits?state=new&agent_id=")                 # "All search agents" sends an empty value
+    assert r.status_code == 200 and 'data-hit="5"' in r.text
+    assert client.get("/hits?agent_id=abc").status_code == 200   # junk is "all", not a 422 page
     frag = client.get("/hits/ad/1662146981", params={"hit": 5}).text
     assert "Fahrradhose Gr xs" in frag and "willhaben ↗" in frag and 'data-state="saved"' in frag
     assert "<html" not in frag                                   # fragment, not a full page
@@ -316,3 +319,20 @@ def test_agent_create_form_is_not_a_squeezing_grid(client):
     page = client.get("/agents/new", params={"keyword": "fahrrad"}).text
     form = page.split('action="/agents"')[1].split("</form>")[0]
     assert 'name="name"' in form and 'name="screen_on"' in form and 'name="interval_min"' in form
+
+
+def test_home_lists_only_ads_expiring_within_5_days_and_8_activities(client):  # noqa: F811
+    from datetime import timedelta
+
+    from app.db import EventLog, MyAd, session, utcnow
+    with session() as db:
+        db.add(MyAd(ad_id="31", heading="Bald weg", status="active", end_date=utcnow() + timedelta(days=3)))
+        db.add(MyAd(ad_id="32", heading="Noch lange", status="active", end_date=utcnow() + timedelta(days=20)))
+        for i in range(12):
+            db.add(EventLog(kind="hit", message=f"Ereignis {i:02d}"))
+        db.commit()
+    page = client.get("/").text
+    soon = page.split("Expiring soon")[1]
+    assert "Bald weg" in soon and "Noch lange" not in soon
+    activity = page.split('id="activity"')[1].split("</section>")[0]          # the inbox popover has its own list
+    assert sum(f"Ereignis {i:02d}" in activity for i in range(12)) == 8

@@ -235,5 +235,6 @@
  "Took longer than {n} min – stopped": "Hat länger als {n} Min. gedauert – abgebrochen",
  "Nothing done": "Nichts getan",
  "Not linked yet": "Noch nicht verknüpft",
- "Not connected yet": "Noch nicht verbunden"
+ "Not connected yet": "Noch nicht verbunden",
+ "No ad expires in the next {n} days.": "Keine Anzeige läuft in den nächsten {n} Tagen ab."
 }

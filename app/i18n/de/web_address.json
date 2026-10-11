@@ -1,0 +1,13 @@
+{
+ "Web address": "Web-Adresse",
+ "Address of this dashboard": "Adresse dieses Dashboards",
+ "Links in Telegram and Home Assistant notifications open this address, e.g. https://willhaben.example.com. Empty: PUBLIC_URL from .env ({url}).": "Links in Telegram- und Home-Assistant-Benachrichtigungen öffnen diese Adresse, z. B. https://willhaben.example.com. Leer: PUBLIC_URL aus .env ({url}).",
+ "{url} only works on this computer – a phone cannot open it, so notifications link to willhaben.": "{url} funktioniert nur auf diesem Rechner – ein Handy kann die Adresse nicht öffnen, deshalb verlinken Benachrichtigungen auf willhaben.",
+ "Links open {url}. Telegram buttons need an https:// address; until then they open willhaben.": "Links öffnen {url}. Telegram-Buttons brauchen eine https://-Adresse; bis dahin öffnen sie willhaben.",
+ "Links in notifications open {url}.": "Links in Benachrichtigungen öffnen {url}.",
+ "Telegram buttons open this dashboard only with an https:// web address that your phone can reach – until then they open willhaben.": "Telegram-Buttons öffnen dieses Dashboard nur mit einer https://-Web-Adresse, die dein Handy erreicht – bis dahin öffnen sie willhaben.",
+ "Notification links open this dashboard only with a web address that your phone can reach – until then they open willhaben.": "Links in Benachrichtigungen öffnen dieses Dashboard nur mit einer Web-Adresse, die dein Handy erreicht – bis dahin öffnen sie willhaben.",
+ "Enter the address with http:// or https://, e.g. https://willhaben.example.com": "Gib die Adresse mit http:// oder https:// ein, z. B. https://willhaben.example.com",
+ "Web address saved": "Web-Adresse gespeichert",
+ "Web address reset to PUBLIC_URL from .env": "Web-Adresse auf PUBLIC_URL aus .env zurückgesetzt"
+}
