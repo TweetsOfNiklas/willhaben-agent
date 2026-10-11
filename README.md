@@ -11,8 +11,9 @@ A self-hosted assistant for [willhaben.at](https://www.willhaben.at), Austria's 
 It runs on your own server, from your home internet connection, and you control it through a web dashboard
 (English or German).
 
-- **Search agents**: build a search with willhaben's own filters and get notified about new listings and
-  price drops, usually much faster than willhaben's e-mail alerts. Hits open in a detail view inside the dashboard.
+- **Search agents**: build a search with willhaben's own filters, or paste a search link or type a search term for
+  another supported site (kleinanzeigen.de; see "Supported platforms"), and get notified about new listings and
+  price drops, usually much faster than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
   predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
   only hits that pass reach your phone, the others go to their own "Filtered out" list instead of New. Agents check
@@ -117,6 +118,21 @@ Claude runs through the Claude Code CLI with your Claude subscription. You don't
 ![My ads with auto-renew switches, automatic answers and a minimum price](docs/images/my-ads.png)
 **My ads**: auto-renew, automatic answers with a minimum price, deactivate / delete / mark sold.
 
+## Supported platforms
+
+Search agents, the ad viewer, the Claude screening, the scam check and the price check work for every site with an
+adapter (`app/platforms/`, see `docs/platforms.md` for adding one). Buying, chats and your own ads are willhaben's.
+Sites other than willhaben are off until you switch them on in Settings → Platforms, where each has its own request
+pacing and budget.
+
+| Site | Country | Access | Search agents | Ad viewer | Price check | Buying, chats, own ads | Status |
+|---|---|---|---|---|---|---|---|
+| willhaben.at | AT | direct requests + the logged-in browser | own filters, link, keyword | yes | yes | yes | done |
+| kleinanzeigen.de | DE | the Kleinanzeigen app's JSON API (direct requests) | link, keyword with a price range | yes | against willhaben listings | no | built and tested with fixtures; **not yet live-tested** |
+
+Links from any of these sites can be pasted on "New search agent"; hits of other sites are listed with the site's
+name, and their links in pushes and the dashboard carry the site (`kleinanzeigen:<id>`).
+
 ## Quick start
 
 Requirements: Docker with Compose, on a machine with a **home internet connection**. willhaben blocks
@@ -185,6 +201,7 @@ Every variable is optional. Values set in the dashboard win over the environment
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude token from `claude setup-token`, instead of signing in through the dashboard |
 | `HA_URL`, `HA_TOKEN`, `HA_NOTIFY_SERVICE` | Home Assistant without the connect flow |
 | `REQUEST_MIN_GAP_S`, `REQUESTS_PER_HOUR` | Rate limit for all willhaben requests (defaults 3 s, 240/h) |
+| `PLATFORMS_ENABLED`, `PLATFORM_KLEINANZEIGEN_MIN_GAP_S`, `PLATFORM_KLEINANZEIGEN_PER_HOUR`, `KLEINANZEIGEN_API_AUTH` | Which other sites exist (default `willhaben,kleinanzeigen`), kleinanzeigen's pacing (3 s, 120/h) and, in case the bundled ones stop working, the Kleinanzeigen app's API credentials (`user:password`); all also in Settings → Platforms |
 | `DEFAULT_AGENT_INTERVAL_S`, `MIN_AGENT_INTERVAL_S`, `CHAT_POLL_INTERVAL_S` | Polling intervals |
 | `VNC_PASSWORD`, `NOVNC_URL` | Optional noVNC view of the login browser (port 6080, LAN only) |
 | `PROXY_VIA`, `PROXY_HOSTS` | Map hostnames (e.g. your HA domain) to a reverse-proxy container on a shared network |
@@ -209,7 +226,9 @@ The app fires events on the HA event bus: `willhaben_hit`, `willhaben_price_drop
 `willhaben_ad_renewed`, `willhaben_meetup`, `willhaben_shipping`, `willhaben_health`, `willhaben_test`. The payload has
 `title`, `message`, `url` (the original link, often willhaben), `app_url` (the matching page in this dashboard, only
 when Settings → Web address is reachable from a phone, else empty) and `image`, plus `agent`, `ad_id`, `price` or
-`conversation_id` depending on the event.
+`conversation_id` depending on the event. Hits also carry `platform` (`willhaben`, `kleinanzeigen`, …) and `ref`
+(the ad as it appears in links: the bare id for willhaben, `kleinanzeigen:<id>` otherwise); the event names stay
+`willhaben_hit` and `willhaben_price_drop` for every site.
 Hits also carry the screening result (`screen_relevant`, `screen_deal`, `screen_reason`, `screen_issues`) and the scam
 check (`scam_flags`, `scam_level`). Events always fire, even for hits the screening holds back from your phone. If you picked a phone in
 Settings, the app also sends pushes directly. Otherwise you can build your own automation:
@@ -255,7 +274,8 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_search_agent`, `list_hits`,
+Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any platform), `get_ad`, `list_search_agents`,
+`create_search_agent` (a link of any supported site, or a keyword on one platform), `list_hits`,
 `list_conversations`, `get_conversation`, `draft_reply`, `save_reply_draft`, `send_reply`, `list_my_ads`,
 `track_my_ad`.
 
@@ -264,6 +284,7 @@ Tools: `status`, `search_willhaben`, `get_ad`, `list_search_agents`, `create_sea
 | Feature | Status |
 |---|---|
 | Search agents, hits, price drops, quiet hours, human pace | done |
+| Search agents on kleinanzeigen.de (platform adapter framework) | built and tested with fixtures; **not yet live-tested** |
 | Claude screening of hits (with reasons), scam check | done (thresholds still being tuned on real hits) |
 | willhaben login in the dashboard, session check, silent re-login | done |
 | Chat sync (live), history, Claude reply drafts, sending, read receipts | done |

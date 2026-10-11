@@ -332,7 +332,7 @@
 {{ _("Timeline") }}|{{ _("Claude, willhaben, actions") }}|/timeline
 {{ _("willhaben requests") }}|{{ _("statistics") }}|/stats/willhaben
 {{ _("Report a bug") }}||/bugreport
-{% for id, label in [('willhaben', _("willhaben account")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('timeline', _("Timeline")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
+{% for id, label in [('willhaben', _("willhaben account")), ('platforms', _("Platforms")), ('shipping', _("Shipping address")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('printers', _("Printers")), ('claude', _("Claude & usage")), ('chats', _("Automatic answers")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('timeline', _("Timeline")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
 {% endfor %}</template>
 
 {# ---- phone: the jobs button floats above the tab bar while something runs or just finished ---- #}

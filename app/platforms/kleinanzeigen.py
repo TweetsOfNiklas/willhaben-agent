@@ -87,6 +87,13 @@ def _pictures(ad: dict[str, Any]) -> list[str]:
     return out
 
 
+def _euro(amount: float) -> str:
+    """German price text as the site shows it: 1.250 €, 12,50 €."""
+    if amount == int(amount):
+        return f"{amount:,.0f}".replace(",", ".") + " €"
+    return f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+
 def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
     """(price, display, negotiable): FREE -> 0 "Zu verschenken"; no amount -> None "VB"; "120 € VB" when negotiable."""
     price = ad.get("price") or {}
@@ -97,7 +104,7 @@ def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
     vb = kind == "NEGOTIABLE"
     if amount is None:
         return None, "VB" if vb or kind == "SEE_DESCRIPTION" else None, vb or None
-    return amount, f"{amount:g} €" + (" VB" if vb else ""), vb
+    return amount, _euro(amount) + (" VB" if vb else ""), vb
 
 
 def _common(ad: dict[str, Any]) -> dict[str, Any]:

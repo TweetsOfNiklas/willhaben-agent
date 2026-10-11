@@ -24,9 +24,9 @@ AUTH = (os.environ.get("WH_AGENT_USER") or os.environ.get("WH_HELPER_USER") or "
 mcp = MCPServer(
     "willhaben-agent",
     instructions=(
-        "Access to your willhaben Agent: search on willhaben.at, your search agents and their hits, "
-        "willhaben chats with reply drafts, your own ads. Messages are only sent with send_reply; "
-        "always ask for confirmation of the exact text first."
+        "Access to your willhaben Agent: search on willhaben.at and the other second-hand sites it knows "
+        "(list_platforms), your search agents and their hits, willhaben chats with reply drafts, your own ads. "
+        "Messages are only sent with send_reply; always ask for confirmation of the exact text first."
     ),
 )
 
@@ -65,9 +65,28 @@ async def search_willhaben(keyword: str, price_from: float | None = None, price_
 
 
 @mcp.tool(annotations=READ)
-async def get_ad(ad_id: str) -> dict:
-    """Details of a willhaben ad (title, price, description, location, seller, expiry date)."""
-    return await _call("GET", f"/api/ads/{ad_id}")
+async def list_platforms() -> list:
+    """The second-hand sites the agent knows (willhaben, kleinanzeigen, …), whether each is switched on and what it can do."""
+    return await _call("GET", "/api/platforms")
+
+
+@mcp.tool(annotations=READ)
+async def search_listings(platform: str, keyword: str, price_from: float | None = None, price_to: float | None = None,
+                          rows: int = 20, sort: int = 1) -> dict:
+    """Live keyword search on one site (platform id from list_platforms). sort: 1 newest, 3 price ascending,
+    4 price descending, 7 relevance."""
+    params = {"platform": platform, "keyword": keyword, "rows": rows, "sort": sort}
+    if price_from is not None:
+        params["price_from"] = price_from
+    if price_to is not None:
+        params["price_to"] = price_to
+    return await _call("GET", "/api/search", params=params)
+
+
+@mcp.tool(annotations=READ)
+async def get_ad(ad_id: str, platform: str = "willhaben") -> dict:
+    """Details of an ad (title, price, description, location, seller); `platform` for sites other than willhaben."""
+    return await _call("GET", f"/api/ads/{platform}/{ad_id}")
 
 
 @mcp.tool(annotations=READ)
@@ -77,10 +96,15 @@ async def list_search_agents() -> list:
 
 
 @mcp.tool()
-async def create_search_agent(willhaben_url: str, name: str | None = None, interval_minutes: int = 5) -> dict:
-    """Create a new search agent from a willhaben result-list URL (set the filters in the browser first)."""
+async def create_search_agent(url: str | None = None, name: str | None = None, interval_minutes: int = 5,
+                              platform: str | None = None, keyword: str | None = None, price_from: float | None = None,
+                              price_to: float | None = None, willhaben_url: str | None = None) -> dict:
+    """Create a search agent from a result-list URL of any supported site (set the filters in the browser first),
+    or from a keyword with an optional price range on one platform (list_platforms)."""
     return await _call("POST", "/api/agents",
-                       json={"url": willhaben_url, "name": name, "interval_s": interval_minutes * 60})
+                       json={"url": url or willhaben_url, "platform": platform or "willhaben", "keyword": keyword,
+                             "price_from": price_from, "price_to": price_to, "name": name,
+                             "interval_s": interval_minutes * 60})
 
 
 @mcp.tool(annotations=READ)

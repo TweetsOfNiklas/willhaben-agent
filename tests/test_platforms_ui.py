@@ -151,3 +151,95 @@ def test_telegram_keep_is_scoped_to_the_site(fake):
 def test_api_hits_carry_platform_and_ref(client):
     rows = client.get("/api/hits?state=all").json()
     assert {(r["platform"], r["ref"]) for r in rows} == {("willhaben", "77"), ("fake", "fake:77")}
+
+
+def test_new_agent_page_for_another_site(client, fake):
+    fake.pages = [[listing("1", "Rennrad Canyon", 900.0), listing("2", "Rennrad Rahmen", 200.0)]]
+    page = client.get("/agents/new?platform=fake&keyword=rennrad&price_to=1000").text
+    assert "Rennrad Canyon" in page and 'name="platform" value="fake"' in page and "View this search on Fake" in page
+    assert 'name="price_to"' in page and "fahrraeder" not in page            # no willhaben filter aside
+    assert fake.searched[-1].keyword == "rennrad" and fake.searched[-1].price_to == 1000
+    page = client.get("/agents/new?url=https://fake.example/s/kinderrad").text
+    assert 'value="https://fake.example/s/kinderrad"' in page and "kinderrad" in page
+    from app.willhaben import public as public_mod
+    from tests.test_platforms_contract import _willhaben_client
+
+    public_mod.set_public(_willhaben_client())                         # a rejected link shows the willhaben builder
+    try:
+        page = client.get("/agents/new?url=https://evil.example/s/x").text
+    finally:
+        public_mod.set_public(None)
+    assert "Not a search link of a supported site" in page
+    assert client.get("/agents/new?platform=nope").status_code == 404
+    page = client.get("/agents/new?platform=fake").text
+    assert "Type a search term or paste a link" in page
+
+
+def test_create_agent_by_link_keyword_and_api(client, fake):
+    r = client.post("/agents", data={"url": "https://fake.example/s/kinderrad", "interval_min": "10"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/agents"
+    r = client.post("/agents", data={"platform": "fake", "keyword": "lastenrad", "price_from": "100", "price_to": "1.500,50",
+                                     "name": "Lasten", "interval_min": "10"}, follow_redirects=False)
+    assert r.headers["location"] == "/agents"
+    r = client.post("/agents", data={"platform": "fake", "keyword": ""}, follow_redirects=False)
+    assert "search+link+or+a+search+term" in r.headers["location"] or "search%20link" in r.headers["location"]
+    r = client.post("/agents", data={"url": "https://evil.example/x"}, follow_redirects=False)
+    assert "supported" in r.headers["location"]
+    agents = client.get("/api/agents").json()
+    created = {a["name"]: a for a in agents}
+    assert created["kinderrad"]["platform"] == "fake" and created["Lasten"]["spec"]["price_to"] == 1500.5
+    r = client.post("/api/agents", json={"platform": "fake", "keyword": "hollandrad", "price_to": 300})
+    assert r.status_code == 200 and r.json()["platform"] == "fake" and r.json()["spec"]["price_to"] == 300
+    assert client.post("/api/agents", json={"url": "https://example.com"}).status_code == 400
+    assert client.post("/api/agents", json={"platform": "nope", "keyword": "x"}).status_code == 400
+    assert client.post("/api/agents", json={}).status_code == 400
+
+
+def test_platform_api_search_and_detail(client, fake):
+    fake.pages = [[listing("5", "Rad", 10.0)]]
+    r = client.get("/api/search?platform=fake&keyword=rad&sort=3").json()
+    assert r["platform"] == "fake" and r["ads"][0]["ref"] == "fake:5" and fake.searched[-1].sort == "price_asc"
+    assert client.get("/api/search?platform=nope&keyword=rad").status_code == 404
+    d = client.get("/api/ads/fake/77").json()
+    assert d["ref"] == "fake:77" and d["platform"] == "fake"
+    assert client.get("/api/ads/fake/1").status_code == 502
+    fake.capabilities = frozenset({"search_url"})
+    assert client.get("/api/ads/fake/77").status_code == 404 and client.get("/api/search?platform=fake&keyword=x").status_code == 400
+    ids = [p["id"] for p in client.get("/api/platforms").json()]
+    assert ids[:2] == ["willhaben", "kleinanzeigen"] and "fake" in ids
+
+
+def test_settings_platforms_page_and_save(client):
+    from app.db import get_setting
+    from app.platforms import kleinanzeigen as ka
+
+    page = client.get("/settings/platforms").text
+    assert "Kleinanzeigen" in page and 'name="kleinanzeigen_enabled"' in page and "always on" in page
+    r = client.post("/settings/platforms", data={"kleinanzeigen_enabled": "on", "kleinanzeigen_gap": "4,5",
+                                                 "kleinanzeigen_budget": "90", "kleinanzeigen_auth": "u:p",
+                                                 "willhaben_product_search": "on"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert get_setting("platform_kleinanzeigen_enabled") == "1" and get_setting("platform_kleinanzeigen_per_hour") == "90"
+    assert get_setting("platform_kleinanzeigen_min_gap_s") == "4.5" and get_setting("kleinanzeigen_api_auth") == "u:p"
+    assert ka.kleinanzeigen_limiter().per_hour == 90 and ka.kleinanzeigen_limiter().min_gap_s == 4.5
+    assert get_setting("platform_kleinanzeigen_product_search") == "0"
+    client.post("/settings/platforms", data={"kleinanzeigen_auth": "not valid"}, follow_redirects=False)
+    assert get_setting("kleinanzeigen_api_auth") == "" and get_setting("platform_kleinanzeigen_enabled") == "0"
+    ka.kleinanzeigen_limiter().min_gap_s = 0
+
+
+def test_stats_page_per_platform(client):
+    r = client.get("/stats/willhaben", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/stats/requests?platform=willhaben&range=24h"
+    page = client.get("/stats/requests?platform=kleinanzeigen&range=1h").text
+    assert "Kleinanzeigen requests" in page and 'value="kleinanzeigen" selected' in page
+    assert client.get("/stats/requests?platform=nope").status_code == 404
+    assert client.get("/api/stats/requests?platform=kleinanzeigen").json()["platform"] == "kleinanzeigen"
+    assert client.get("/api/stats/willhaben").json()["platform"] == "willhaben"
+
+
+def test_screening_prompt_names_the_site():
+    from app.llm.prompts import SCREEN_SYSTEM, screen_system
+
+    assert "willhaben.at (österreichisches" in SCREEN_SYSTEM
+    assert "kleinanzeigen.de (deutsches" in screen_system("kleinanzeigen.de", "DE")

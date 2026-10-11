@@ -54,7 +54,7 @@ def test_search_answer_becomes_listings():
     page = ka.parse_ads(load("kleinanzeigen_ads.json"))
     assert page.rows_found == 1234 and [a.ad_id for a in page.ads] == ["2712345678", "2712345679", "2712345680", "2712345681"]
     vb, dealer, free, novalue = page.ads
-    assert vb.price == 1250 and vb.price_display == "1250 € VB" and vb.is_private is True and vb.platform == "kleinanzeigen"
+    assert vb.price == 1250 and vb.price_display == "1.250 € VB" and vb.is_private is True and vb.platform == "kleinanzeigen"
     assert vb.location == "10115 Berlin" and vb.postcode == "10115" and vb.published_at.isoformat() == "2026-10-10T07:15:30+00:00"
     assert vb.url == "https://www.kleinanzeigen.de/s-anzeige/rennrad-canyon-endurace/2712345678-217-3331"
     assert vb.image_url.endswith("$_59.JPG") and vb.category_ids == ["217"] and vb.is_bumped is None and vb.ref == "kleinanzeigen:2712345678"
@@ -70,7 +70,8 @@ def test_ad_answer_becomes_detail():
     d = ka.parse_ad(load("kleinanzeigen_ad.json"))
     assert d.ad_id == "2712345678" and d.heading == "Rennrad Canyon Endurace" and d.seller_name == "Erika"
     assert d.description.startswith("Canyon Endurace CF 8") and "\n" in d.description and len(d.images) == 3
-    assert d.is_vb is True and d.price_display == "1250 € VB" and d.category_path == ["Fahrräder & Zubehör"]
+    assert d.is_vb is True and d.price_display == "1.250 € VB" and d.category_path == ["Fahrräder & Zubehör"]
+    assert ka._euro(12.5) == "12,50 €" and ka._euro(1234567) == "1.234.567 €"
     assert d.platform == "kleinanzeigen" and d.ref == "kleinanzeigen:2712345678" and d.is_private is True
     assert ka.parse_ad({}) is None
     assert ka.parse_locations(load("kleinanzeigen_locations.json")) == [(3331, "Berlin"), (3360, "Berlin Mitte")]

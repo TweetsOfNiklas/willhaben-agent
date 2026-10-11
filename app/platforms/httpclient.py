@@ -69,11 +69,17 @@ class HttpxTransport:
     """httpx with its own cookie jar; `transport` lets tests serve canned answers (httpx.MockTransport)."""
 
     def __init__(self, headers: dict[str, str], transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self.client = httpx.AsyncClient(headers=headers, timeout=TIMEOUT_S, follow_redirects=True, transport=transport,
-                                        cookies=httpx.Cookies())
+        self._headers, self._transport = headers, transport
+        self.client = self._new()
+
+    def _new(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(headers=self._headers, timeout=TIMEOUT_S, follow_redirects=True, transport=self._transport,
+                                 cookies=httpx.Cookies())
 
     async def send(self, method: str, url: str, *, params: dict[str, Any] | None = None,
                    headers: dict[str, str] | None = None) -> FetchResponse:
+        if self.client.is_closed:            # closed at shutdown (releases connections); a later request reopens
+            self.client = self._new()
         try:
             r = await self.client.request(method, url, params=params or None, headers=headers)
         except httpx.HTTPError as e:

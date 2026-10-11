@@ -347,42 +347,124 @@ async def agents_page(request: Request, error: str | None = None):
 BUILDER_START = "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz"
 
 
+def _num_or_none(v: str | None) -> float | None:
+    """A price as typed: "1500", "1.500,50" (German), "1500.50" or "1,500.50"."""
+    v = re.sub(r"[€\s]", "", v or "")
+    if "," in v and "." in v:
+        v = v.replace(".", "").replace(",", ".") if v.rfind(",") > v.rfind(".") else v.replace(",", "")
+    elif "," in v:
+        v = v.replace(",", ".")
+    try:
+        return float(v) if v else None
+    except ValueError:
+        return None
+
+
 @app.get("/agents/new", response_class=HTMLResponse)
 async def agents_new(request: Request):
-    """Search-agent builder: keyword + willhaben's own filters, no copied link needed.
+    """Search-agent builder for every platform: a pasted search link (the site is recognised), a search term with a
+    price range, and for willhaben its own filters, no copied link needed.
 
-    State is the browser search URL in `url`; `keyword` and `r_<PARAM>` (range inputs such as
+    willhaben's state is the browser search URL in `url`; `keyword` and `r_<PARAM>` (range inputs such as
     r_PRICE_TO) are merged into it. Every filter value links to the URL with that value applied.
     """
     qp = request.query_params
-    url = qp.get("url") or BUILDER_START
-    changes: dict[str, str | None] = {k[2:]: re.sub(r"[^0-9]", "", v) or None
-                                      for k, v in qp.items() if k.startswith("r_") and k[2:].isidentifier()}
-    if "keyword" in qp:
-        changes["keyword"] = qp["keyword"].strip() or None
-    if changes:
-        url = with_params(url, changes)
-    error = filters = None
-    try:
-        filters = await get_public().search_filters(url)
-    except (WillhabenError, InvalidSearchUrl) as e:
-        error = str(e)
-    return render(request, "agent_new.html", f=filters, url=url, error=error, url_param=url_param,
+    url = (qp.get("url") or "").strip()
+    keyword = (qp.get("keyword") or "").strip()
+    error = None
+    p = None
+    if url:
+        try:
+            p = platforms.for_url(url)
+        except InvalidSearchUrl as e:
+            error, url = str(e), ""
+    if p is None:
+        pid = (qp.get("platform") or "").strip().lower()
+        try:
+            p = platforms.get(pid or "willhaben")
+        except platforms.UnknownPlatform as e:
+            raise HTTPException(404) from e
+        if not platforms.enabled(p.id):
+            error = error or t("{name} is switched off in Settings → Platforms", name=p.name)
+            p = platforms.get("willhaben")
+    preview: dict[str, Any] = {"url": None, "rows_found": 0, "ads": [], "name": "", "keyword": keyword,
+                               "price_from": _num_or_none(qp.get("price_from")), "price_to": _num_or_none(qp.get("price_to"))}
+    filters = None
+    if p.can("filters"):
+        base = url or BUILDER_START
+        changes: dict[str, str | None] = {k[2:]: re.sub(r"[^0-9]", "", v) or None
+                                          for k, v in qp.items() if k.startswith("r_") and k[2:].isidentifier()}
+        if "keyword" in qp:
+            changes["keyword"] = keyword or None
+        if changes:
+            base = with_params(base, changes)
+        url = base
+        try:
+            filters = await p.filters(base)
+        except (PlatformError, InvalidSearchUrl) as e:
+            error = error or str(e)
+        if filters:
+            preview.update(url=filters.url, rows_found=filters.rows_found, ads=filters.ads,
+                           name=filters.suggested_name(), keyword=filters.keyword)
+    else:
+        spec = None
+        try:
+            if url:
+                spec = p.parse_search_url(url)
+            elif keyword:
+                spec = p.keyword_search(keyword, preview["price_from"], preview["price_to"])
+        except InvalidSearchUrl as e:
+            error = error or str(e)
+        if spec is not None:
+            preview.update(url=spec.url, name=p.describe(spec), keyword=spec.keyword, price_from=spec.price_from,
+                           price_to=spec.price_to)
+            try:
+                page = await p.search(spec, rows=12, cache_s=120)
+            except PlatformError as e:
+                error = error or str(e)
+            else:
+                preview.update(rows_found=page.rows_found, ads=page.ads)
+    return render(request, "agent_new.html", f=filters, url=url, preview=preview, platform=p,
+                  platform_choices=platforms.all(), error=error, url_param=url_param,
                   settings=get_settings(), thresholds=screening.thresholds())
 
 
 @app.post("/agents")
-async def agents_create(url: str = Form(...), name: str = Form(""), interval_min: int = Form(5),
-                        screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
-                        screen_hide: list[str] = Form([])):
+async def agents_create(url: str = Form(""), platform: str = Form("willhaben"), keyword: str = Form(""),
+                        price_from: str = Form(""), price_to: str = Form(""), name: str = Form(""),
+                        interval_min: int = Form(5), screen_on: str | None = Form(None), screen_brief: str = Form(""),
+                        screen_min: str = Form("match"), screen_hide: list[str] = Form([])):
     try:
-        agent = create_agent(url, name or None, interval_min * 60)
+        agent = _create_agent(url, platform, keyword, price_from, price_to, name or None, interval_min * 60)
     except InvalidSearchUrl as e:
-        return back(f"/agents?error={e}")
+        return back(f"/agents?error={quote(str(e), safe='')}")
     if screen_on:
         agent = _set_screening(agent.id, True, screen_brief, screen_min, screen_hide)
     scheduler.schedule_agent(agent)
     return back("/agents")
+
+
+def _create_agent(url: str, platform: str, keyword: str, price_from: Any, price_to: Any, name: str | None,
+                  interval_s: int | None) -> SearchAgent:
+    """An agent from a pasted link of any site, or from a search term on the chosen site. Raises InvalidSearchUrl."""
+    from app.services.search_agents import create_agent_from_spec
+
+    url, keyword = (url or "").strip(), (keyword or "").strip()
+    if url:
+        return create_agent(url, name, interval_s)
+    if not keyword:
+        raise InvalidSearchUrl(t("Give a search link or a search term."))
+    try:
+        p = platforms.get((platform or "willhaben").strip().lower())
+    except platforms.UnknownPlatform as e:
+        raise InvalidSearchUrl(t("Unknown platform: {id}", id=platform)) from e
+    if not platforms.enabled(p.id):
+        raise InvalidSearchUrl(t("{name} is switched off in Settings → Platforms", name=p.name))
+    if not p.can("keyword_search"):
+        raise InvalidSearchUrl(t("{name} has no keyword search.", name=p.name))
+    pf = price_from if isinstance(price_from, (int, float)) else _num_or_none(price_from)
+    pt = price_to if isinstance(price_to, (int, float)) else _num_or_none(price_to)
+    return create_agent_from_spec(p.keyword_search(keyword, pf, pt), name, interval_s)
 
 
 @app.post("/agents/{agent_id}/run")
@@ -1466,7 +1548,7 @@ async def capture_download(name: str):
 
 
 # ------------------------------------------------------------------ settings
-SETTINGS_SECTIONS = ("willhaben", "shipping", "calendar", "purchase", "paylivery", "printers", "myads",
+SETTINGS_SECTIONS = ("willhaben", "platforms", "shipping", "calendar", "purchase", "paylivery", "printers", "myads",
                      "claude", "rules", "chats", "ha", "telegram", "quiet", "backup", "timeline", "web", "language")   # settings.html groups
 
 
@@ -1608,6 +1690,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
+                  **({"platform_rows": _platforms_section()} if section == "platforms" else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(),
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
@@ -1620,6 +1703,49 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings/willhaben", backup=backup_routes.panel(),
                   web=_web_address(), **label_buy_routes.panel(), **printing_routes.panel())
+
+
+def _platforms_section() -> list[dict[str, Any]]:
+    """Settings → Platforms: every registered site with its switch, pacing, status and (kleinanzeigen) credentials."""
+    from app.db import platform_min_gap_s, platform_per_hour
+
+    rows = []
+    for p in platforms.all(enabled_only=False):
+        st = p.status()
+        rows.append({"p": p, "enabled": platforms.enabled(p.id), "status": st,
+                     "per_hour": platform_per_hour(p.id), "min_gap_s": platform_min_gap_s(p.id),
+                     "product_search": get_setting(f"platform_{p.id}_product_search") != "0",
+                     "last_hour": access_stats.last_hour(platform=p.id),
+                     "auth": get_setting(f"{p.id}_api_auth") if p.id == "kleinanzeigen" else None,
+                     "auth_default": st.get("auth_default")})
+    return rows
+
+
+@app.post("/settings/platforms")
+async def settings_platforms(request: Request):
+    """Switches, pacing, product-search use and credentials of the other platforms (willhaben's budget lives in its
+    own section)."""
+    from app.db import platform_min_gap_s, platform_per_hour
+
+    form = await request.form()
+    for p in platforms.all(enabled_only=False):
+        if p.id == "willhaben":
+            set_setting("platform_willhaben_product_search", "1" if form.get("willhaben_product_search") else "0")
+            continue
+        set_setting(f"platform_{p.id}_enabled", "1" if form.get(f"{p.id}_enabled") else "0")
+        set_setting(f"platform_{p.id}_product_search", "1" if form.get(f"{p.id}_product_search") else "0")
+        gap = str(form.get(f"{p.id}_gap") or "").strip().replace(",", ".")
+        budget = str(form.get(f"{p.id}_budget") or "").strip()
+        set_setting(f"platform_{p.id}_min_gap_s", gap if re.fullmatch(r"\d+(\.\d+)?", gap) else "")
+        set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "")
+        p.limiter.min_gap_s, p.limiter.per_hour = platform_min_gap_s(p.id), platform_per_hour(p.id)
+        if p.id == "kleinanzeigen":
+            from app.platforms import kleinanzeigen as ka
+            auth = str(form.get("kleinanzeigen_auth") or "").strip()
+            if auth != get_setting("kleinanzeigen_api_auth"):
+                set_setting("kleinanzeigen_api_auth", auth if re.fullmatch(r"[^:\s]+:[^\s]+", auth) else "")
+                ka.set_client(None)           # the next request builds a client with the new credentials
+    return back(f"/settings/platforms?msg={quote(t('Changes saved'), safe='')}")
 
 
 def _timeline_section() -> dict[str, Any]:
@@ -2213,12 +2339,23 @@ async def api_agents():
 
 @app.post("/api/agents")
 async def api_agents_create(payload: dict[str, Any]):
+    """{url} of any supported site, or {platform, keyword, price_from?, price_to?}."""
     try:
-        a = create_agent(payload["url"], payload.get("name"), payload.get("interval_s"))
+        a = _create_agent(str(payload.get("url") or ""), str(payload.get("platform") or "willhaben"),
+                          str(payload.get("keyword") or ""), payload.get("price_from"), payload.get("price_to"),
+                          payload.get("name"), payload.get("interval_s"))
     except (KeyError, InvalidSearchUrl) as e:
         raise HTTPException(400, str(e)) from e
     scheduler.schedule_agent(a)
     return a.model_dump(mode="json")
+
+
+@app.get("/api/platforms")
+async def api_platforms():
+    """The sites the app knows, which are switched on and what each can do."""
+    return [{"id": p.id, "name": p.name, "host": p.host, "home_country": p.home_country, "enabled": platforms.enabled(p.id),
+             "can_filters": p.can("filters"), "can_keyword": p.can("keyword_search"), "can_detail": p.can("detail"),
+             "access": p.access} for p in platforms.all(enabled_only=False)]
 
 
 @app.get("/api/hits")
@@ -2232,25 +2369,53 @@ async def api_hits(agent_id: int | None = None, state: str = "new", limit: int =
         return [_hit_dict(h) for h in db.exec(q.order_by(col(Hit.first_seen_at).desc()).limit(min(limit, 200)))]
 
 
+_SORT_NAMES = {1: "newest", 3: "price_asc", 4: "price_desc", 7: "relevance"}
+
+
 @app.get("/api/search")
 async def api_search(keyword: str, price_from: float | None = None, price_to: float | None = None,
-                     rows: int = 20, sort: int = 1):
+                     rows: int = 20, sort: int = 1, platform: str = "willhaben"):
+    """Live keyword search on one platform (sort: 1 newest, 3 price ascending, 4 price descending, 7 relevance)."""
     try:
-        page = await get_public().search_keyword(keyword, min(rows, 50), price_from, price_to, sort)
-    except WillhabenError as e:
-        raise HTTPException(502, str(e)) from e
-    return {"rows_found": page.rows_found, "ads": [a.as_dict() for a in page.ads]}
+        p = platforms.get(platform)
+    except platforms.UnknownPlatform as e:
+        raise HTTPException(404, f"unknown platform {platform!r}") from e
+    if not p.can("keyword_search"):
+        raise HTTPException(400, f"{p.name} has no keyword search")
+    if p.id == "willhaben":
+        try:
+            page = await get_public().search_keyword(keyword, min(rows, 50), price_from, price_to, sort)
+        except WillhabenError as e:
+            raise HTTPException(502, str(e)) from e
+    else:
+        try:
+            page = await p.search(p.keyword_search(keyword, price_from, price_to, sort=_SORT_NAMES.get(sort, "newest")),
+                                  rows=min(rows, 50), cache_s=300)
+        except PlatformError as e:
+            raise HTTPException(502, str(e)) from e
+    return {"platform": p.id, "rows_found": page.rows_found, "ads": [a.as_dict() for a in page.ads]}
 
 
-@app.get("/api/ads/{ad_id}")
-async def api_ad(ad_id: str):
+@app.get("/api/ads/{platform}/{ad_id}")
+async def api_ad_platform(platform: str, ad_id: str):
     try:
-        d = await get_public().get_detail(ad_id)
-    except WillhabenError as e:
+        p = platforms.get(platform)
+    except platforms.UnknownPlatform as e:
+        raise HTTPException(404, f"unknown platform {platform!r}") from e
+    if not p.can("detail"):
+        raise HTTPException(404, f"{p.name} has no ad details")
+    try:
+        d = await p.detail(ad_id)
+    except PlatformError as e:
         raise HTTPException(502, str(e)) from e
     if d is None:
         raise HTTPException(404, "ad is not online (anymore)")
     return d.as_context()
+
+
+@app.get("/api/ads/{ad_id}")
+async def api_ad(ad_id: str):
+    return await api_ad_platform("willhaben", ad_id)
 
 
 @app.get("/api/chats")

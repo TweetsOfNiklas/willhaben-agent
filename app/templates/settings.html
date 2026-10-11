@@ -4,7 +4,7 @@
    `section` = active id (route: /settings/<id>; /settings = willhaben). A #hash in the URL is mapped to the path below.
    Flags on the nav: bad / warn = a dot next to the label (not connected, missing data). #}
 {% set groups = [
-  (_("Account"), [("willhaben", _("willhaben account"), ('bad' if session_status.started and not session_status.logged_in else '')), ("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("calendar", "Google Calendar", '')]),
+  (_("Account"), [("willhaben", _("willhaben account"), ('bad' if session_status.started and not session_status.logged_in else '')), ("platforms", _("Platforms"), ''), ("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("calendar", "Google Calendar", '')]),
   (_("Buying & selling"), [("purchase", _("Buying rules"), ''), ("paylivery", "PayLivery", ''), ("printers", _("Printers"), ''), ("myads", _("My ads"), '')]),
   (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else '')), ("rules", _("My rules"), ''), ("chats", _("Automatic answers"), '')]),
   (_("Notifications"), [("ha", "Home Assistant", ''), ("telegram", "Telegram", ''), ("quiet", _("Quiet hours"), '')]),

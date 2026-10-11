@@ -1,13 +1,16 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
-{% block title %}{{ _("willhaben requests") }} · willhaben Agent{% endblock %}
+{% block title %}{{ _("{platform} requests", platform=platform_name(data.platform)) }} · willhaben Agent{% endblock %}
 {% block content %}
 {# channel colours: chart fills and legend swatches (the theme colours bg-ch-* / fill-ch-*) #}
 {% set fill_ch = {'anonymous': 'fill-ch-anonymous', 'account': 'fill-ch-account', 'chat': 'fill-ch-chat'} %}
 {% set bg_ch = {'anonymous': 'bg-ch-anonymous', 'account': 'bg-ch-account', 'chat': 'bg-ch-chat'} %}
 <div class="mb-5 flex flex-wrap items-start justify-between gap-6">
-  <div class="min-w-0"><a href="/settings/willhaben" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("willhaben account") }}</a><h1 class="mt-1.5">{{ _("willhaben requests") }}</h1></div>
-  <nav class="inline-flex flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px]" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/willhaben?range={{ r }}" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1 no-underline {{ 'bg-brand-soft font-semibold text-primary' if r == data.range else 'hover:bg-hover' }}"{% if r == data.range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
+  <div class="min-w-0">{% if data.platform == 'willhaben' %}<a href="/settings/willhaben" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("willhaben account") }}</a>{% else %}<a href="/settings/platforms" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("Platforms") }}</a>{% endif %}<h1 class="mt-1.5">{{ _("{platform} requests", platform=platform_name(data.platform)) }}</h1></div>
+  <div class="flex flex-wrap items-center gap-2">
+  {% if platform_choices|length > 1 %}<select aria-label="{{ _('Platform') }}" onchange="location.href='/stats/requests?platform='+this.value+'&range={{ data.range }}'" class="select select-sm w-auto bg-base-100">{% for pc in platform_choices %}<option value="{{ pc.id }}" {% if pc.id == data.platform %}selected{% endif %}>{{ pc.name }}</option>{% endfor %}</select>{% endif %}
+  <nav class="inline-flex flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px]" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/requests?platform={{ data.platform }}&range={{ r }}" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1 no-underline {{ 'bg-brand-soft font-semibold text-primary' if r == data.range else 'hover:bg-hover' }}"{% if r == data.range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
+  </div>
 </div>
 <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
   <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums">{{ data.total }}</div><div class="mt-1 text-muted">{{ _("requests in this range") }}</div></div>
@@ -51,5 +54,5 @@
   <div class="mt-2 overflow-x-auto"><table class="table table-sm tabular-nums"><thead><tr><th>{{ _("Time") }}</th>{% for ch in data.channels %}<th>{{ channel_label(ch) }}</th>{% endfor %}<th>{{ _("Total") }}</th><th>{{ _("blocked (403/429)") }}</th><th>{{ _("from cache (no access)") }}</th></tr></thead>
   <tbody>{% for b in data.buckets|reverse if b.total or b.cached %}<tr><td>{{ b.label }}–{{ b.end_label }}</td>{% for ch in data.channels %}<td>{{ b[ch] }}</td>{% endfor %}<td>{{ b.total }}</td><td>{{ b.blocked }}</td><td>{{ b.cached }}</td></tr>{% endfor %}</tbody></table></div></details>
 {% endif %}
-<p class="mt-4 text-[12.5px] text-muted">{{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }} {{ _("Answers served from the app's short cache are listed separately and are not willhaben requests. Counts are kept for 8 days; times are local.") }} <a class="link link-primary" href="/api/stats/willhaben?range={{ data.range }}">JSON</a></p>
+<p class="mt-4 text-[12.5px] text-muted">{% if data.platform == 'willhaben' %}{{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }} {% else %}{{ _("Every request the search agents, the ad viewer and the product search send to this site, anonymously.") }} {% endif %}{{ _("Answers served from the app's short cache are listed separately and are not requests to the site. Counts are kept for 8 days; times are local.") }} <a class="link link-primary" href="/api/stats/requests?platform={{ data.platform }}&range={{ data.range }}">JSON</a></p>
 {% endblock %}

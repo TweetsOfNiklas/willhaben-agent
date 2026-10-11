@@ -20,7 +20,7 @@ from app.services import ad_images, scam
 from app.services.ad_images import MAX_IMAGE_BYTES  # noqa: F401  (re-exported)
 from app.i18n import LANGS, background_lang, t
 from app.llm.base import LLMError, get_backend
-from app.llm.prompts import SCREEN_SCHEMA, SCREEN_SYSTEM, screen_prompt
+from app.llm.prompts import SCREEN_SCHEMA, screen_prompt, screen_system
 from app.services.ad_creator import price_stats
 from app.services import timeline
 
@@ -144,7 +144,13 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         prompt = screen_prompt(agent_name=agent.name, brief=agent.screen_brief or "", hits=items, stats=stats,
                                language=lang)
         try:
-            result = await get_backend("screen").complete(system=SCREEN_SYSTEM, prompt=prompt, schema=SCREEN_SCHEMA,
+            from app import platforms
+            try:
+                site = platforms.get(agent.platform)
+                system = screen_system(site.host, site.home_country)
+            except Exception:  # noqa: BLE001 - an unknown platform: willhaben's wording
+                system = screen_system()
+            result = await get_backend("screen").complete(system=system, prompt=prompt, schema=SCREEN_SCHEMA,
                                                           images=images)
         except LLMError as e:
             log.warning("screening failed for agent %s: %s", agent_id, e)

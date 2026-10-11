@@ -12,7 +12,7 @@
       <span class="text-[12.5px] text-muted">{{ _("Don't notify when the hit is …") }}</span>
       {% set names = screen_issue_labels() %}{% set chosen = hide if hide is not none else screen_default_hide %}
       <div class="flex flex-wrap gap-1.5">{% for key in screen_hideable %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary"><input type="checkbox" name="screen_hide" value="{{ key }}" {% if key in chosen %}checked{% endif %} class="checkbox checkbox-primary checkbox-xs">{{ names[key] }}</label>{% endfor %}</div>
-      <small class="text-muted">{{ _("“Too expensive” and “price unclear” are covered by “Notify for”. “Too far away” needs an area in the description above; “dealer” comes from willhaben itself.") }}</small>
+      <small class="text-muted">{{ _("“Too expensive” and “price unclear” are covered by “Notify for”. “Too far away” needs an area in the description above; “dealer” comes from the site itself (the seller is marked as commercial).") }}</small>
     </div>
   </div>
 </div>

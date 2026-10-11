@@ -8,7 +8,8 @@ from app.main import SETTINGS_SECTIONS, app
 PAGES = ["/", "/agents", "/hits", "/hits?agent_id=1&state=all", "/chats", "/chats/c1", "/myads", "/myads?ad=9", "/new-ad",
          "/purchases", "/purchases/1", "/purchases?show=all", "/settings", "/stats/willhaben", "/session", "/deals",
          "/myads/cleanup", "/bugreport", "/timeline", "/timeline?kind=llm&errors=1&q=x&ad=9&range=7d", "/timeline?job=1",
-         "/timeline?conversation=c1&agent=1"] + [f"/settings/{s}" for s in SETTINGS_SECTIONS]
+         "/timeline?conversation=c1&agent=1", "/stats/requests?platform=kleinanzeigen",
+         "/hits?platform=willhaben&state=all"] + [f"/settings/{s}" for s in SETTINGS_SECTIONS]
 
 
 @pytest.fixture

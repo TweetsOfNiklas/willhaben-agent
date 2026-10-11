@@ -5,22 +5,37 @@
 {% macro fchip(href, label, count=none, on=false, title='') -%}
 <a href="{{ href }}" class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12.5px] no-underline {{ 'border-primary bg-brand-soft text-primary' if on else 'border-base-300 bg-base-100 hover:border-primary' }}"{% if title %} title="{{ title }}"{% endif %}>{{ label }}{% if count is not none %} <small class="text-[11px] opacity-65">{{ count }}</small>{% endif %}</a>
 {%- endmacro %}
+{% set wh = platform.can('filters') %}
 <div class="mb-5">
   <a href="/agents" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("Search agents") }}</a>
   <h1 class="mt-1.5">{{ _("New search agent") }}</h1>
-  <p class="mt-1 max-w-[640px] text-muted">{{ _("Build the search with willhaben's own filters — the agent then checks it at human-like intervals.") }}</p>
+  <p class="mt-1 max-w-[640px] text-muted">{{ _("Paste a search link from the site, or type what you are looking for — the agent then checks it at human-like intervals.") }}</p>
 </div>
-<form method="get" action="/agents/new" class="mb-4 flex flex-nowrap items-center gap-2.5">
-  <input type="hidden" name="url" value="{{ url }}">
+{% if platform_choices|length > 1 %}
+{% set picker = [] %}{% for pc in platform_choices %}{% set _x = picker.append(('/agents/new?platform=' ~ pc.id ~ (('&keyword=' ~ (preview.keyword|urlencode)) if preview.keyword else ''), pc.name, none, pc.id == platform.id)) %}{% endfor %}
+<div class="mb-4">{{ ui.seg(picker) }}</div>
+{% endif %}
+<form method="get" action="/agents/new" class="mb-3 flex flex-nowrap items-center gap-2.5">
+  <input type="hidden" name="platform" value="{{ platform.id }}">
   <label class="input h-[42px] flex-1 rounded-[10px] bg-base-100">
-    {{ ui.icon('search', 16, 2, 'text-muted') }}
-    <input type="search" name="keyword" value="{{ (f.keyword if f else url_param(url, 'keyword')) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus class="grow text-[15px]">
+    {{ ui.icon('external', 16, 2, 'text-muted') }}
+    <input type="url" name="url" placeholder="{{ _('Paste a search link from {sites}', sites=platform_choices|map(attribute='name')|join(', ')) }}" class="grow text-[15px]">
   </label>
+  <button class="btn h-[42px] rounded-[10px]">{{ _("Use link") }}</button>
+</form>
+<form method="get" action="/agents/new" class="mb-4 flex flex-wrap items-center gap-2.5">
+  {% if wh %}<input type="hidden" name="url" value="{{ url }}">{% else %}<input type="hidden" name="platform" value="{{ platform.id }}">{% endif %}
+  <label class="input h-[42px] min-w-[240px] flex-1 rounded-[10px] bg-base-100">
+    {{ ui.icon('search', 16, 2, 'text-muted') }}
+    <input type="search" name="keyword" value="{{ (f.keyword if f else (preview.keyword or url_param(url, 'keyword'))) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus class="grow text-[15px]">
+  </label>
+  {% if not wh %}<input name="price_from" inputmode="numeric" value="{{ preview.price_from|int if preview.price_from is not none else '' }}" placeholder="{{ _('from') }} €" class="input h-[42px] w-24 rounded-[10px] bg-base-100">
+  <input name="price_to" inputmode="numeric" value="{{ preview.price_to|int if preview.price_to is not none else '' }}" placeholder="{{ _('to') }} €" class="input h-[42px] w-24 rounded-[10px] bg-base-100">{% endif %}
   <button class="btn btn-primary h-[42px] rounded-[10px]">{{ _("Search") }}</button>
 </form>
-{% if f %}
-<div class="grid grid-cols-1 items-start gap-5 md:grid-cols-[260px_minmax(0,1fr)]">
-  <aside class="flex flex-col">
+{% if f or preview.url %}
+<div class="grid grid-cols-1 items-start gap-5 {{ 'md:grid-cols-[260px_minmax(0,1fr)]' if f else '' }}">
+  {% if f %}<aside class="flex flex-col">
     {% for label, filters in f.groups %}{% for flt in filters %}
     <details {% if flt.selected or flt.kind in ('HIERARCHICAL', 'RANGE') or flt.id == 'state' %}open{% endif %} class="group border-b border-base-300 py-2">
       <summary class="flex cursor-pointer list-none items-center gap-2 text-[13.5px] font-semibold [&::-webkit-details-marker]:hidden">{{ flt.label }}{% if flt.selected %}<span class="badge badge-sm border-0 bg-success text-success-content">{{ flt.selected|length }}</span>{% endif %}<span class="ml-auto text-muted transition-transform group-open:rotate-180">{{ ui.icon('chevron-down', 14) }}</span></summary>
@@ -36,28 +51,29 @@
       {% endif %}
     </details>
     {% endfor %}{% endfor %}
-  </aside>
+  </aside>{% endif %}
   <div class="flex min-w-0 flex-col gap-4">
     <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
       <div class="flex flex-wrap items-center gap-2">
-        <span class="text-base font-semibold">{{ '{:,}'.format(f.rows_found).replace(',', '.') }} {{ _("ads") }}</span><span class="text-muted">{{ _("currently match") }}{% if f.selected %} ·{% endif %}</span>
-        {% for flt, v in f.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}
-        <a href="{{ f.url }}" target="_blank" rel="noopener" class="link link-primary ml-auto text-[12.5px] whitespace-nowrap no-underline">{{ _("View this search on willhaben") }} ↗</a>
+        <span class="text-base font-semibold">{{ '{:,}'.format(preview.rows_found).replace(',', '.') }} {{ _("ads") }}</span><span class="text-muted">{{ _("currently match") }}{% if f and f.selected %} ·{% endif %}</span>
+        {% if f %}{% for flt, v in f.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}{% endif %}
+        <a href="{{ preview.url }}" target="_blank" rel="noopener" class="link link-primary ml-auto text-[12.5px] whitespace-nowrap no-underline">{{ _("View this search on {platform}", platform=platform.name) }} ↗</a>
       </div>
       <form method="post" action="/agents" class="flex flex-col gap-3.5">
-        <input type="hidden" name="url" value="{{ f.url }}">
+        <input type="hidden" name="url" value="{{ preview.url }}">
+        <input type="hidden" name="platform" value="{{ platform.id }}">
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
-          <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ f.suggested_name() }}" class="input w-full bg-base-200"></label>
+          <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ preview.name }}" class="input w-full bg-base-200"></label>
           <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}" class="input w-full bg-base-200"></label>
         </div>
         <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=False, brief='', minimum='match', hide=None %}{% include "_screen_fields.html" %}{% endwith %}</div>
-        <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary" {% if not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>+ {{ _("Create search agent") }}</button><small class="text-muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}</small></div>
+        <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary" {% if f and not f.keyword and not f.selected %}disabled title="{{ _('Pick a search term or filter first') }}"{% endif %}>+ {{ _("Create search agent") }}</button><small class="text-muted">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}</small></div>
       </form>
     </section>
     <div>
       {{ ui.eyebrow(_("Latest hits"), 'mb-2') }}
       <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-        {% for a in f.ads %}
+        {% for a in preview.ads %}
         <a class="flex flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 text-base-content no-underline hover:border-primary" href="{{ a.url }}" target="_blank" rel="noopener">
           {{ ui.thumb(a.image_url, 'h-[110px] w-full', 'rounded-none') }}
           <span class="flex min-w-0 flex-col gap-0.5 px-3 py-2.5">
@@ -71,5 +87,7 @@
     </div>
   </div>
 </div>
+{% elif not error %}
+<p class="text-muted">{{ _("Type a search term or paste a link to see what the agent would find.") }}</p>
 {% endif %}
 {% endblock %}
