@@ -1,8 +1,10 @@
-"""Own search agents: run a search on its platform, diff against stored hits, notify.
+"""Own search agents: run their searches on the sites, diff against stored hits, notify.
 
-An agent watches one site (app/platforms): either one pasted search link (`spec`) or, created from a product search,
-several keyword searches (`queries`) run one after another per check, with the search plan's cheap code filters
-(`plan`) applied to new ads. Nothing here knows a site's URLs or JSON; the adapters do.
+An agent watches one or several sites (app/platforms): either one pasted search link (`spec`), or several searches
+(`queries`, each with its platform and spec) run one after another per check: the same search term on several
+sites, a pasted link plus its term on other sites, or a product search's keyword searches, with the search plan's
+cheap code filters (`plan`) applied to new ads. Every hit keeps the site it came from. Nothing here knows a site's
+URLs or JSON; the adapters do.
 """
 from __future__ import annotations
 
@@ -59,6 +61,37 @@ def create_agent_from_spec(spec: SearchSpec, name: str | None = None, interval_s
         db.commit()
         db.refresh(agent)
     return agent
+
+
+def _query_of(spec: SearchSpec) -> dict[str, Any]:
+    """One entry of SearchAgent.queries for a search on any site."""
+    return {"keyword": spec.keyword or "", "platform": spec.platform, "spec": spec.to_json(), "webapi_url": spec.api,
+            "source_url": spec.url, "price_from": spec.price_from, "price_to": spec.price_to}
+
+
+def create_agent_on_sites(specs: list[SearchSpec], name: str | None = None, interval_s: int | None = None) -> SearchAgent:
+    """One agent for several sites: one search per site, checked together (each site paced by its own limiter).
+    The first search is the main one (name, "on <site>" link). One spec makes a plain agent."""
+    if not specs:
+        raise ValueError("no search")
+    if len(specs) == 1:
+        return create_agent_from_spec(specs[0], name, interval_s)
+    first = specs[0]
+    sites = [platforms.get(x.platform) for x in specs]
+    agent = SearchAgent(name=name or sites[0].describe(first), platform=first.platform, spec=first.to_json(),
+                        source_url=first.url, webapi_url=first.api or first.url,
+                        interval_s=max(_interval(x, interval_s) for x in sites), queries=[_query_of(x) for x in specs])
+    with session() as db:
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
+    return agent
+
+
+def agent_platforms(agent: SearchAgent) -> list[str]:
+    """The sites an agent watches, in the order of its searches (one for a plain agent)."""
+    ids = [str(q.get("platform") or agent.platform or "willhaben") for q in agent.queries or [] if isinstance(q, dict)]
+    return list(dict.fromkeys(ids)) or [agent.platform or "willhaben"]
 
 
 def agent_spec(agent: SearchAgent) -> SearchSpec:
@@ -128,21 +161,26 @@ def agent_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def create_agent_from_search(search_id: int, name: str | None = None, interval_s: int | None = None,
-                             screen: bool = True, platform: str = "willhaben") -> SearchAgent:
-    """A search agent that keeps running a finished product search's keyword searches on one platform. Raises
-    KeyError for an unknown search, ValueError when it has no planned searches or the platform cannot search by
-    keyword. Does not run the baseline (the caller schedules)."""
+                             screen: bool = True, platform: str = "willhaben", sites: list[str] | None = None) -> SearchAgent:
+    """A search agent that keeps running a finished product search's keyword searches, on one platform or on
+    several (`sites`: one agent, every planned search on each site). Raises KeyError for an unknown search,
+    ValueError when it has no planned searches or no chosen site can search by keyword. Does not run the baseline
+    (the caller schedules)."""
     with session() as db:
         row = db.get(ProductSearch, search_id)
     if row is None:
         raise KeyError(search_id)
-    p = platforms.get(platform)
-    if not p.can("keyword_search"):
-        raise ValueError(t("{name} has no keyword search.", name=p.name))
-    queries = agent_queries(row.plan, p.id)
+    chosen = [platforms.get(pid) for pid in dict.fromkeys(sites or [platform])]
+    usable = [x for x in chosen if x.can("keyword_search")]
+    if not usable:
+        raise ValueError(t("{name} has no keyword search.", name=chosen[0].name))
+    per_site = [agent_queries(row.plan, x.id) for x in usable]
+    queries = [q for qs in per_site for q in qs]
     if not queries:
         raise ValueError(t("This search has no planned searches yet."))
-    interval = _interval(p, interval_s or default_interval_s(len(queries)))
+    # each site has its own limiter: the interval follows the searches per site, not their sum
+    interval = max(_interval(x, interval_s or default_interval_s(max(len(qs) for qs in per_site))) for x in usable)
+    p = usable[0]
     first = queries[0]
     agent = SearchAgent(name=(name or "").strip() or agent_name(row), platform=p.id, spec=first["spec"],
                         source_url=first["source_url"], webapi_url=first["webapi_url"] or first["source_url"],
@@ -162,7 +200,7 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
     de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; number of
     searches that succeeded). A block stops the remaining searches of this run."""
     ads: list[tuple[Listing, dict[str, Any] | None]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     rows, errors, first_exc, ok = 0, [], None, 0
     n = len(specs)
     for i, (spec, q) in enumerate(specs, 1):
@@ -180,9 +218,10 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
         ok += 1
         rows += page.rows_found or 0
         for ad in page.ads:
-            if not ad.ad_id or ad.ad_id in seen:
+            ad.platform = spec.platform               # the hit belongs to the site that was searched
+            if not ad.ad_id or (spec.platform, ad.ad_id) in seen:
                 continue
-            seen.add(ad.ad_id)
+            seen.add((spec.platform, ad.ad_id))
             ads.append((ad, q))
     return ads, rows, errors, first_exc, ok
 
@@ -237,37 +276,51 @@ async def _run_agent(agent_id: int) -> RunResult:
         res.error = error
         return res
 
-    try:
-        platform = platforms.get(agent.platform)
-    except platforms.UnknownPlatform:
-        return _fail(t("Unknown platform: {id}", id=agent.platform))
-    if not platforms.enabled(platform.id):
-        return _fail(t("{name} is switched off in Settings → Platforms", name=platform.name))
-    found, rows_found, errors, first_exc, ok = await _search_all(specs)
+    usable, skipped = [], []                 # searches on unknown or switched-off sites are skipped (and said so)
+    for spec, q in specs:
+        try:
+            site = platforms.get(spec.platform)
+        except platforms.UnknownPlatform:
+            skipped.append(t("Unknown platform: {id}", id=spec.platform))
+            continue
+        if not platforms.enabled(site.id):
+            skipped.append(t("{name} is switched off in Settings → Platforms", name=site.name))
+            continue
+        usable.append((spec, q))
+    skipped = list(dict.fromkeys(skipped))
+    if not usable:
+        return _fail("; ".join(skipped))
+    found, rows_found, errors, first_exc, ok = await _search_all(usable)
     if not ok:
         return _fail(str(first_exc))         # every search failed (one search: its error)
-    partial_error = "; ".join(errors) or None
+    partial_error = "; ".join(skipped + errors) or None
 
     res.rows_found = rows_found
     with session() as db:
         agent = db.get(SearchAgent, agent_id)
         res.baseline = not agent.baseline_done
-        existing = {h.ad_id: h for h in db.exec(select(Hit).where(Hit.agent_id == agent_id))}
+        existing = {((h.platform or "willhaben"), h.ad_id): h for h in db.exec(select(Hit).where(Hit.agent_id == agent_id))}
+        id_site = {ad_id: pid for pid, ad_id in existing}     # Hit is unique per (agent, ad id), whatever the site
         scam_ctx = _scam_context(existing.values(), [ad for ad, _ in found])
         for ad, query in found:
             if not ad.ad_id:
                 continue
-            hit = existing.get(ad.ad_id)
+            hit = existing.get((ad.platform, ad.ad_id))
+            if hit is None and id_site.get(ad.ad_id, ad.platform) != ad.platform:
+                log.warning("agent %s: %s ad %s has the id of a %s hit, skipped", agent_id, ad.platform, ad.ad_id,
+                            id_site[ad.ad_id])
+                continue
             if hit is None:
                 if plan and product_search.drop_reason(ad, plan, query):
                     continue        # "Suche" ad, far over budget or an exclusion word: never stored or notified
-                hit = Hit(agent_id=agent_id, platform=platform.id, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
+                hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
                           state="seen" if res.baseline else "new")
                 _apply(hit, ad)
-                hit.scam_flags = scam.flags(hit, scam_ctx, home_country=platform.home_country) or None   # before screening
+                hit.scam_flags = scam.flags(hit, scam_ctx, home_country=_site(ad.platform).home_country) or None   # before screening
                 _mark_scam_issue(hit)
                 db.add(hit)
-                existing[ad.ad_id] = hit
+                existing[(ad.platform, ad.ad_id)] = hit
+                id_site[ad.ad_id] = ad.platform
                 if not res.baseline:
                     res.new.append(hit)
                 continue
@@ -276,7 +329,7 @@ async def _run_agent(agent_id: int) -> RunResult:
             if prev_price is not None and ad.price is not None and ad.price < prev_price:
                 hit.price_dropped_at = utcnow()
                 hit.old_price = prev_price
-                hit.scam_flags = scam.flags(hit, scam_ctx, home_country=platform.home_country) or None   # a new red flag?
+                hit.scam_flags = scam.flags(hit, scam_ctx, home_country=_site(hit.platform).home_country) or None   # a new red flag?
                 _mark_scam_issue(hit)
                 if hit.state != "ignored":
                     res.price_drops.append(hit)
@@ -301,29 +354,41 @@ async def _run_agent(agent_id: int) -> RunResult:
         _file_screened(agent, res.new, res.price_drops)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
-    label = f"{platform.name} · {name}" if platforms.multi() else name
-    site = {"agent": name, "platform": platform.id}
+    multi = platforms.multi()
+
+    def label(pid: str) -> str:
+        return f"{_site(pid).name} · {name}" if multi else name
+
     if notify_new and res.new:
         good = [h.id for h in res.new if screening.passes(agent, h)]
         pushed = set(good[:MAX_PUSH_PER_RUN])
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
-                await notify("hit", _scam_prefix(h) + f"{label}: {h.price_display or ''}".strip(" :"), _hit_text(h),
-                             url=h.url, image=h.image_url, push=h.id in pushed,
-                             data={**site, "ad_id": h.ad_id, "ref": ad_ref(platform.id, h.ad_id), "price": h.price,
-                                   "location": h.location, **_screen_data(h), **_scam_data(h)})
+                await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}".strip(" :"),
+                             _hit_text(h), url=h.url, image=h.image_url, push=h.id in pushed,
+                             data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
+                                   "price": h.price, "location": h.location, **_screen_data(h), **_scam_data(h)})
         if len(good) > MAX_PUSH_PER_RUN:
-            await notify("hit", label, t("+{n} more new hits", n=len(good) - MAX_PUSH_PER_RUN),
-                         data={**site, "count": len(good)})
+            sites = list(dict.fromkeys(h.platform for h in res.new))
+            await notify("hit", label(sites[0]) if len(sites) == 1 else name,
+                         t("+{n} more new hits", n=len(good) - MAX_PUSH_PER_RUN),
+                         data={"agent": name, "platform": sites[0] if len(sites) == 1 else None, "count": len(good)})
     if notify_drops:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
-            await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label),
-                         f"{h.heading}: {h.old_price:g} → {h.price:g} {platform.currency}" + _scam_line(h) + _screen_line(h),
-                         url=h.url, image=h.image_url,
-                         push=screening.passes(agent, h),
-                         data={**site, "ad_id": h.ad_id, "ref": ad_ref(platform.id, h.ad_id), "price": h.price,
-                               "old_price": h.old_price, **_screen_data(h), **_scam_data(h)})
+            await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
+                         f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}" + _scam_line(h)
+                         + _screen_line(h), url=h.url, image=h.image_url, push=screening.passes(agent, h),
+                         data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
+                               "price": h.price, "old_price": h.old_price, **_screen_data(h), **_scam_data(h)})
     return res
+
+
+def _site(pid: str | None) -> platforms.Platform:
+    """The adapter of a hit's site; willhaben's when that site is gone (wording only: name, currency, country)."""
+    try:
+        return platforms.get(pid or "willhaben")
+    except platforms.UnknownPlatform:
+        return platforms.get("willhaben")
 
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit]) -> None:

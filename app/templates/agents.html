@@ -29,14 +29,15 @@
       <div class="flex flex-1 flex-col gap-1.5 px-4 pt-3.5 pb-3">
         <div class="flex items-center justify-between gap-2.5">
           <a href="/hits?agent_id={{ a.id }}&state=all" class="min-w-0 truncate text-[15px] font-semibold text-base-content no-underline hover:underline">{{ a.name }}</a>
-          {% if platforms_multi() %}{{ ui.pill(platform_name(a.platform), '', false, 'shrink-0') }}{% endif %}
+          {% set site_names = [] %}{% for pid in agent_sites(a) %}{% set _x = site_names.append(platform_name(pid)) %}{% endfor %}
+          {% if platforms_multi() %}{{ ui.pill(site_names|join(' · '), '', false, 'shrink-0') }}{% endif %}
           {% if counts.get(a.id) %}<a href="/hits?agent_id={{ a.id }}" class="badge badge-sm h-5 shrink-0 border-0 bg-primary font-semibold whitespace-nowrap text-primary-content no-underline">{{ _("{n} new", n=counts.get(a.id)) }}</a>
           {% elif not a.enabled %}{{ ui.pill(_("paused"), '', false, 'shrink-0') }}{% endif %}
         </div>
         <div class="text-[13px] leading-relaxed text-muted">
           {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
-          {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
-          {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=platform_name(a.platform)) }}{% endif %}
+          {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|unique|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
+          {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=site_names|join(', ')) }}{% endif %}
           {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
         </div>
         {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
@@ -78,7 +79,7 @@
             {# a ticked box removes that search on Save; the last one stays (delete the agent instead) #}
             {% for q in a.queries %}
             <div x-data="{ drop: false }" class="flex items-center justify-between gap-3 py-0.5 text-[13px]">
-              <span class="min-w-0" :class="drop && 'line-through opacity-50'"><a class="link link-primary no-underline" href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="text-muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</span>
+              <span class="min-w-0" :class="drop && 'line-through opacity-50'"><a class="link link-primary no-underline" href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword or _("search") }}</a>{% if site_names|length > 1 %} <small class="text-muted">· {{ platform_name(q.platform) }}</small>{% endif %}{% if q.price_from %} <small class="text-muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</span>
               {% if a.queries|length > 1 %}<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12.5px] text-muted"><input type="checkbox" name="drop_query" value="{{ loop.index0 }}" x-model="drop" class="checkbox checkbox-primary checkbox-sm">{{ _("remove") }}</label>{% endif %}
             </div>
             {% endfor %}

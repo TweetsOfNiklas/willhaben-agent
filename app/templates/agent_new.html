@@ -11,15 +11,27 @@
   <h1 class="mt-1.5">{{ _("New search agent") }}</h1>
   <p class="mt-1 max-w-[640px] text-muted">{{ _("Paste a search link from the site, or type what you are looking for — the agent then checks it at human-like intervals.") }}</p>
 </div>
-{# the site: every switched-on one to pick; the switched-off ones lead to their settings page #}
-{% set picker = [] %}{% for pc in platform_choices %}{% set _x = picker.append(('/agents/new?platform=' ~ pc.id ~ (('&keyword=' ~ (preview.keyword|urlencode)) if preview.keyword else ''), pc.name, none, pc.id == platform.id)) %}{% endfor %}
-<div id="agent-sites" class="mb-2 flex flex-wrap items-center gap-2">
-  <span class="text-[12.5px] text-muted">{{ _("Site") }}</span>{{ ui.seg(picker) }}
+{# the sites: one agent can watch several. The first ticked one (or the site of a pasted link) is the main search,
+   with willhaben's own filters when it is willhaben; the others search the same term and price range. Switched-off
+   sites lead to their settings page. `chosen` = [main, others…] from the route. #}
+{% set sites_qs %}{% for sid in chosen %}&sites={{ sid }}{% endfor %}{% endset %}
+<form method="get" action="/agents/new" id="agent-sites" class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+  <span class="text-[12.5px] text-muted">{{ _("Sites") }}</span>
+  {% for pc in platform_choices %}<label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" name="sites" value="{{ pc.id }}" class="checkbox checkbox-sm"{% if pc.id in chosen %} checked{% endif %}{% if not pc.can('keyword_search') and pc.id != platform.id %} disabled{% endif %} onchange="this.form.requestSubmit()">{{ pc.name }}{% if pc.id == platform.id and chosen|length > 1 %} <small class="text-muted">{{ _("main search") }}</small>{% endif %}</label>{% endfor %}
+  {% if preview.keyword %}<input type="hidden" name="keyword" value="{{ preview.keyword }}">{% endif %}
+  {% if preview.price_from is not none %}<input type="hidden" name="price_from" value="{{ preview.price_from|int }}">{% endif %}
+  {% if preview.price_to is not none %}<input type="hidden" name="price_to" value="{{ preview.price_to|int }}">{% endif %}
+  {% if url %}<input type="hidden" name="url" value="{{ url }}" data-site="{{ platform.id }}">{% endif %}
   {% for pc in platform_off %}<a href="/settings/{{ pc.id }}" class="inline-flex items-center gap-1 rounded-full border border-dashed border-base-300 px-2.5 py-0.5 text-[12.5px] text-muted no-underline hover:border-primary hover:text-primary" title="{{ _('Switched off – its settings page has the switch') }}">{{ pc.name }} <small class="opacity-75">{{ _("off") }}</small></a>{% endfor %}
-</div>
+</form>
+<script>(() => { const f = document.getElementById('agent-sites'); f.addEventListener('submit', () => {
+  // the link or filter state belongs to the main site: unticking that site drops it
+  const u = f.querySelector('input[name=url]'); if (!u) return;
+  const box = f.querySelector('input[name=sites][value="' + u.dataset.site + '"]'); if (box && !box.checked) u.remove();
+}); })();</script>
 {% if platform_off %}<p class="mb-4 text-[12.5px] text-muted">{{ _("{sites} can also be watched once you switch them on in the settings.", sites=platform_off|map(attribute='name')|join(', ')) }} <a class="link link-primary" href="/settings/{{ platform_off[0].id }}">{{ _("Switch on") }} →</a></p>{% else %}<div class="mb-4"></div>{% endif %}
 <form method="get" action="/agents/new" class="mb-3 flex flex-nowrap items-center gap-2.5">
-  <input type="hidden" name="platform" value="{{ platform.id }}">
+  {% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
   <label class="input h-[42px] flex-1 rounded-[10px] bg-base-100">
     {{ ui.icon('external', 16, 2, 'text-muted') }}
     <input type="url" name="url" placeholder="{{ _('Paste a search link from {sites}', sites=platform_choices|map(attribute='name')|join(', ')) }}" class="grow text-[15px]">
@@ -28,6 +40,7 @@
 </form>
 <form method="get" action="/agents/new" class="mb-4 flex flex-wrap items-center gap-2.5">
   {% if wh %}<input type="hidden" name="url" value="{{ url }}">{% else %}<input type="hidden" name="platform" value="{{ platform.id }}">{% endif %}
+  {% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
   <label class="input h-[42px] min-w-[240px] flex-1 rounded-[10px] bg-base-100">
     {{ ui.icon('search', 16, 2, 'text-muted') }}
     <input type="search" name="keyword" value="{{ (f.keyword if f else (preview.keyword or url_param(url, 'keyword'))) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus class="grow text-[15px]">
@@ -43,13 +56,13 @@
     <details {% if flt.selected or flt.kind in ('HIERARCHICAL', 'RANGE') or flt.id == 'state' %}open{% endif %} class="group border-b border-base-300 py-2">
       <summary class="flex cursor-pointer list-none items-center gap-2 text-[13.5px] font-semibold [&::-webkit-details-marker]:hidden">{{ flt.label }}{% if flt.selected %}<span class="badge badge-sm border-0 bg-success text-success-content">{{ flt.selected|length }}</span>{% endif %}<span class="ml-auto text-muted transition-transform group-open:rotate-180">{{ ui.icon('chevron-down', 14) }}</span></summary>
       {% if flt.kind == 'RANGE' %}
-        <form method="get" action="/agents/new" class="flex flex-nowrap items-center gap-1.5 pt-2"><input type="hidden" name="url" value="{{ url }}">
+        <form method="get" action="/agents/new" class="flex flex-nowrap items-center gap-1.5 pt-2"><input type="hidden" name="url" value="{{ url }}">{% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
           {% for p in flt.range_params %}<input name="r_{{ p }}" inputmode="numeric" value="{{ url_param(f.url, p) or '' }}" placeholder="{{ _('from') if p.endswith('FROM') else _('to') }}" class="input input-sm min-w-0 flex-1 bg-base-200">{% endfor %}
           <button class="btn btn-xs">{{ _("OK") }}</button></form>
       {% else %}
         <div class="flex flex-wrap gap-1 pt-2">
-          {% for v in flt.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}
-          {% if not flt.selected or flt.multi or flt.kind == 'HIERARCHICAL' %}{% for v in flt.values %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label, ('{:,}'.format(v.hits).replace(',', '.') if v.hits is not none else none)) }}{% endfor %}{% endif %}
+          {% for v in flt.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode) ~ sites_qs, v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}
+          {% if not flt.selected or flt.multi or flt.kind == 'HIERARCHICAL' %}{% for v in flt.values %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode) ~ sites_qs, v.label, ('{:,}'.format(v.hits).replace(',', '.') if v.hits is not none else none)) }}{% endfor %}{% endif %}
         </div>
       {% endif %}
     </details>
@@ -59,12 +72,21 @@
     <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-base font-semibold">{{ '{:,}'.format(preview.rows_found).replace(',', '.') }} {{ _("ads") }}</span><span class="text-muted">{{ _("currently match") }}{% if f and f.selected %} ·{% endif %}</span>
-        {% if f %}{% for flt, v in f.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode), v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}{% endif %}
+        {% if f %}{% for flt, v in f.selected %}{{ fchip('/agents/new?url=' ~ (v.url|urlencode) ~ sites_qs, v.label ~ ' ✕', none, true, _('remove')) }}{% endfor %}{% endif %}
         <a href="{{ preview.url }}" target="_blank" rel="noopener" class="link link-primary ml-auto text-[12.5px] whitespace-nowrap no-underline">{{ _("View this search on {platform}", platform=platform.name) }} ↗</a>
       </div>
+      {% if preview.sites|length > 1 %}
+      <ul class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-200 px-3.5 py-2.5 text-[13px]">
+        {% for row in preview.sites %}<li class="flex flex-wrap items-baseline gap-x-2"><span class="font-medium">{{ row.p.name }}</span>{% if row.error %}<span class="text-error">{{ row.error }}</span>{% else %}<span class="text-muted">{{ _("{n} ads", n='{:,}'.format(row.rows_found).replace(',', '.')) }}</span>{% endif %}{% if row.url %}<a href="{{ row.url }}" target="_blank" rel="noopener" class="link link-primary ml-auto no-underline">{{ _("on {platform}", platform=row.p.name) }} ↗</a>{% endif %}</li>{% endfor %}
+      </ul>
+      {% elif chosen|length > 1 %}<p class="text-[12.5px] text-warning">{{ _("The other sites need a search term: type one above.") }}</p>{% endif %}
       <form method="post" action="/agents" class="flex flex-col gap-3.5">
         <input type="hidden" name="url" value="{{ preview.url }}">
         <input type="hidden" name="platform" value="{{ platform.id }}">
+        {% if preview.sites|length > 1 %}{% for row in preview.sites %}<input type="hidden" name="sites" value="{{ row.p.id }}">{% endfor %}
+        <input type="hidden" name="keyword" value="{{ preview.keyword }}">
+        {% if preview.price_from is not none %}<input type="hidden" name="price_from" value="{{ preview.price_from|int }}">{% endif %}
+        {% if preview.price_to is not none %}<input type="hidden" name="price_to" value="{{ preview.price_to|int }}">{% endif %}{% endif %}
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
           <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ preview.name }}" class="input w-full bg-base-200"></label>
           <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}" class="input w-full bg-base-200"></label>
@@ -81,6 +103,7 @@
           {{ ui.thumb(a.image_url, 'h-[110px] w-full', 'rounded-none') }}
           <span class="flex min-w-0 flex-col gap-0.5 px-3 py-2.5">
             <span class="leading-snug font-semibold">{{ a.heading }}</span>
+            {% if preview.sites|length > 1 %}<span>{{ ui.pill(platform_name(a.platform), '', false) }}</span>{% endif %}
             <span class="font-semibold">{{ a.price_display or '–' }}{% if a.old_price %} <span class="text-[13px] font-normal text-muted line-through">{{ a.old_price|eur }}</span>{% endif %}</span>
             <span class="text-[12.5px] text-muted">{{ a.location or '' }} · {{ a.published_at|ago }}</span>
           </span>

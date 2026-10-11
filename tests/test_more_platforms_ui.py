@@ -54,7 +54,8 @@ def test_product_search_names_the_switched_off_sites(client):
         set_setting(f"platform_{pid}_enabled", "1")
     page = client.get("/deals").text
     assert "Vinted, Preisjäger can also be searched" in page and 'href="/settings/vinted">Switch on' in page
-    assert page.count('name="sites"') == 3                               # willhaben, Kleinanzeigen, Shpock to tick
+    ai_form = page[page.index('id="ps-form"'):page.index("</form>", page.index('id="ps-form"'))]
+    assert ai_form.count('name="sites"') == 3                            # willhaben, Kleinanzeigen, Shpock to tick
     for pid in ("vinted", "preisjaeger"):
         set_setting(f"platform_{pid}_enabled", "1")
     assert "can also be searched once you switch them on" not in client.get("/deals").text
@@ -92,11 +93,27 @@ def test_viewer_for_a_shpock_ad_and_a_deal(client):
 
 def test_new_agent_shows_every_site(client):
     page = client.get("/agents/new").text
-    sites = page[page.index('id="agent-sites"'):page.index('id="agent-sites"') + 3000]
-    assert 'href="/agents/new?platform=willhaben"' in sites
+    sites = page[page.index('id="agent-sites"'):page.index('id="agent-sites"') + 4000]
+    assert '<input type="checkbox" name="sites" value="willhaben" class="checkbox checkbox-sm" checked' in sites
     assert all(f'href="/settings/{pid}"' in sites for pid in ("kleinanzeigen", *NEW))       # off: lead to their switch
     assert "Kleinanzeigen, Shpock, Vinted, Preisjäger can also be watched once you switch them on" in page
     set_setting("platform_vinted_enabled", "1")
-    sites = client.get("/agents/new?platform=vinted").text
-    sites = sites[sites.index('id="agent-sites"'):sites.index('id="agent-sites"') + 3000]
-    assert 'href="/agents/new?platform=vinted"' in sites and 'href="/settings/vinted"' not in sites
+    sites = client.get("/agents/new?sites=vinted").text
+    sites = sites[sites.index('id="agent-sites"'):sites.index('id="agent-sites"') + 4000]
+    assert 'name="sites" value="vinted" class="checkbox checkbox-sm" checked' in sites and 'href="/settings/vinted"' not in sites
+
+
+def test_direct_search_on_the_ticked_sites(client):
+    for pid in ("shpock", "preisjaeger"):
+        set_setting(f"platform_{pid}_enabled", "1")
+    page = client.get("/deals?q=iphone&sites=shpock&sites=preisjaeger").text
+    assert "{ mode: 'direct' }" in page and "8 ads found for „iphone“" in page
+    assert "Shpock 4 · Preisjäger 4" in page and 'data-ad="shpock:asu6-t2hxq7bDRFz"' in page
+    assert 'href="/deals/ad/preisjaeger/369807?q=iphone"' in page and 'href="/deals/ad/shpock/asu6-t2hxq7bDRFz?q=iphone"' in page
+    form = page[page.index('id="ps-direct"'):]
+    assert 'name="sites" value="shpock" class="checkbox checkbox-sm" checked' in form
+    assert 'name="sites" value="willhaben" class="checkbox checkbox-sm">' in form                 # not ticked: not searched
+    preisjaeger.set_client(preisjaeger.PreisjaegerClient(transport=FileTransport([])))
+    preisjaeger.get_client().limiter = RateLimiter(0)
+    page = client.get("/deals?q=iphone&sites=shpock&sites=preisjaeger").text
+    assert "4 ads found" in page and "Preisjäger: Preisjäger search returned HTTP 404" in page   # one site down: the others

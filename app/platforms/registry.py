@@ -108,17 +108,24 @@ def for_host(host: str | None) -> Platform | None:
 
 
 def multi() -> bool:
-    """Agents exist on more than one platform (the UI then shows platform labels on hits and pushes)."""
-    from sqlmodel import func, select
+    """Agents watch more than one platform, one agent several sites or several agents different ones (the UI then
+    shows platform labels on hits and pushes)."""
+    from sqlmodel import select
 
     from app.db import SearchAgent, session
 
     try:
         with session() as db:
-            return int(db.exec(select(func.count(func.distinct(SearchAgent.platform))).where(
-                SearchAgent.platform != None)).one() or 0) > 1  # noqa: E711 - SQL comparison
+            rows = db.exec(select(SearchAgent.platform, SearchAgent.queries)).all()
     except Exception:  # noqa: BLE001 - no database yet
         return False
+    ids: set[str] = set()
+    for pid, queries in rows:
+        ids.add(pid or DEFAULT)
+        ids.update(str(q["platform"]) for q in queries or [] if isinstance(q, dict) and q.get("platform"))
+        if len(ids) > 1:
+            return True
+    return False
 
 
 def set_platform(pid: str, platform: Platform | None) -> None:

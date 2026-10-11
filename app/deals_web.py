@@ -5,6 +5,8 @@ Kept out of main.py (one include there); `render`/`templates` are imported from 
 """
 from __future__ import annotations
 
+import itertools
+import logging
 import re
 from typing import Any
 from urllib.parse import quote
@@ -18,12 +20,13 @@ from sqlmodel import select
 from app import platforms, scheduler
 from app.db import Hit, SearchAgent, session
 from app.i18n import t
-from app.platforms import AdDetail, PlatformError, UnknownPlatform
+from app.platforms import AdDetail, InvalidSearchUrl, PlatformError, UnknownPlatform
 from app.services import deals, product_search, search_agents
 from app.willhaben.parse import url_param
 from app.willhaben.public import WillhabenError
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 def install(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -158,7 +161,7 @@ def _agent_ctx(shown: Any) -> dict[str, Any]:
         agents = list(db.exec(select(SearchAgent).where(SearchAgent.search_id == shown.id).order_by(SearchAgent.id)))
     n = len((shown.plan or {}).get("queries") or [])
     used = [s for s in ((shown.settings or {}).get("platforms") or ["willhaben"])]
-    taken = {a.platform for a in agents}
+    taken = {pid for a in agents for pid in search_agents.agent_platforms(a)}
     agent_sites = [p for p in platforms.all() if p.can("keyword_search") and p.id in used and p.id not in taken]
     return {"ps_agent": agents[0] if agents else None, "ps_agents": agents, "ps_agent_n": n,
             "ps_agent_interval_min": search_agents.default_interval_s(n) // 60,
@@ -229,26 +232,20 @@ async def product_search_answers(request: Request, search_id: int):
 @router.post("/deals/search/{search_id}/agent")
 async def product_search_agent(search_id: int, name: str = Form(""), interval_min: str = Form(""),
                                screen_on: str | None = Form(None), sites: list[str] = Form([])):
-    """Search agents that keep running this search's keyword searches, one per chosen site (no further Claude
+    """One search agent that keeps running this search's keyword searches on every chosen site (no further Claude
     planning call)."""
     minutes = int(interval_min) if interval_min.strip().isdigit() else None
     row = product_search.get(search_id)
     chosen = [s for s in dict.fromkeys(sites) if s] or ((row.settings or {}).get("platforms") if row else None) or ["willhaben"]
-    created = []
-    for pid in chosen:
-        label = name.strip() or None
-        if label and len(chosen) > 1 and pid != "willhaben":
-            label = f"{label} ({_platform(pid).name})"
-        try:
-            created.append(search_agents.create_agent_from_search(search_id, label, minutes * 60 if minutes else None,
-                                                                  screen=bool(screen_on), platform=pid))
-        except KeyError as e:
-            raise HTTPException(404) from e
-        except (ValueError, UnknownPlatform):
-            if not created and pid == chosen[-1]:
-                return RedirectResponse(f"/deals?search={search_id}&msg=noplan#ps-result", status_code=303)
-    for agent in created:
-        scheduler.schedule_agent(agent)
+    chosen = [s for s in chosen if platforms.enabled(s)] or ["willhaben"]
+    try:
+        agent = search_agents.create_agent_from_search(search_id, name.strip() or None, minutes * 60 if minutes else None,
+                                                       screen=bool(screen_on), sites=chosen)
+    except KeyError as e:
+        raise HTTPException(404) from e
+    except (ValueError, UnknownPlatform):
+        return RedirectResponse(f"/deals?search={search_id}&msg=noplan#ps-result", status_code=303)
+    scheduler.schedule_agent(agent)
     return RedirectResponse("/agents", status_code=303)
 
 
@@ -258,6 +255,40 @@ async def product_search_status(request: Request, search_id: int):
     if product_search.get(search_id) is None:
         raise HTTPException(404)
     return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id, oob=True))
+
+
+def _direct_ctx(sites: list[str] | None = None) -> dict[str, Any]:
+    """The direct search's site choice: every switched-on site with a keyword search; `sites` = the ticked ones
+    (none ticked or none given: all of them)."""
+    choices = [p for p in platforms.all() if p.can("keyword_search")]
+    ticked = [p for p in choices if p.id in set(sites or [])] or choices
+    return {"direct_sites": choices, "direct_chosen": [p.id for p in ticked]}
+
+
+async def _direct_search(q: str, sites: list[platforms.Platform]) -> tuple[list[dict[str, Any]], list[str], dict[str, int]]:
+    """A search text on every ticked site at once (willhaben through the price check's cached search, the others
+    sorted by relevance): the ads interleaved site by site, error lines per site, the number found per site."""
+    import asyncio
+
+    async def one(p: platforms.Platform) -> tuple[list[dict[str, Any]], int]:
+        if p.id == "willhaben":
+            data = await deals.search_ads(q)
+            return data["ads"], int(data.get("rows_found") or 0)
+        page = await p.search(p.keyword_search(q, sort="relevance"), rows=deals.SEARCH_ROWS, cache_s=600)
+        return [a.as_dict() for a in page.ads], int(page.rows_found or 0)
+
+    answers = await asyncio.gather(*(one(p) for p in sites), return_exceptions=True)
+    per_site, errors, counts = [], [], {}
+    for p, ans in zip(sites, answers, strict=True):
+        if isinstance(ans, BaseException):
+            if not isinstance(ans, (WillhabenError, InvalidSearchUrl)):
+                log.warning("direct search on %s failed: %r", p.id, ans)
+            errors.append(f"{p.name}: {ans}")
+            continue
+        ads, counts[p.id] = ans
+        per_site.append([a for a in ads if not deals._wanted(a.get("title"))])
+    merged = [a for row in itertools.zip_longest(*per_site) for a in row if a is not None]
+    return merged, errors, counts
 
 
 def _prefill(search_id: int | None) -> dict[str, Any] | None:
@@ -271,9 +302,9 @@ def _prefill(search_id: int | None) -> dict[str, Any] | None:
 
 @router.get("/deals", response_class=HTMLResponse)
 async def deals_page(request: Request, q: str = "", search: int | None = None, msg: str | None = None,
-                     from_: int | None = Query(None, alias="from")):
-    """Product search ("AI search": Claude plans and ranks) and the direct search (one ad's price, or the willhaben
-    ads for a text). `from` = a past search whose text and options fill the form."""
+                     from_: int | None = Query(None, alias="from"), sites: list[str] = Query([])):
+    """Product search ("AI search": Claude plans and ranks) and the direct search (one ad's price, or the ads of the
+    ticked sites for a text). `from` = a past search whose text and options fill the form."""
     from app.main import render
 
     q = q.strip()
@@ -283,15 +314,17 @@ async def deals_page(request: Request, q: str = "", search: int | None = None, m
         return RedirectResponse(f"/deals/ad/{ad_id}" if platform == "willhaben" else f"/deals/ad/{platform}/{ad_id}",
                                 status_code=303)
     results, error, spread = None, None, None
+    direct = _direct_ctx(sites)
+    site_errors: list[str] = []
+    site_counts: dict[str, int] = {}
     if q and (re.search(r"(^https?://|^www\.)", q, re.I) or deals.is_site_link(q)):    # a link, but not to an ad
         error = t("This link is not an ad on a supported site.")
     elif q:
-        try:
-            data = await deals.search_ads(q)
-        except WillhabenError as e:
-            error = str(e)
+        ticked = [p for p in direct["direct_sites"] if p.id in direct["direct_chosen"]]
+        ads, site_errors, site_counts = await _direct_search(q, ticked)
+        if site_errors and not site_counts:
+            error = "; ".join(site_errors)
         else:
-            ads = [a for a in data["ads"] if not deals._wanted(a.get("title"))]
             spread = deals.stats([a["price"] for a in ads if a.get("price")])
             results = []
             for a in ads:
@@ -299,7 +332,8 @@ async def deals_page(request: Request, q: str = "", search: int | None = None, m
                 results.append({**a, "level": (pos or {}).get("level")})
     prefill = _prefill(from_)
     return render(request, "deals.html", q=q, results=results, spread=spread, error=error, recent=deals.recent(),
-                  res=None, quote=quote, ps_prefill=prefill, **_search_ctx(search or (prefill or {}).get("id"), msg))
+                  res=None, quote=quote, ps_prefill=prefill, site_errors=site_errors if results is not None else [],
+                  site_counts=site_counts, **direct, **_search_ctx(search or (prefill or {}).get("id"), msg))
 
 
 @router.get("/deals/ad/{ad_id}/result", response_class=HTMLResponse)
@@ -342,4 +376,4 @@ async def deals_ad_platform(request: Request, platform: str, ad_id: str, q: str 
     # the page answers at once; the analysis (willhaben requests) loads into it: /deals/ad/<id>/result
     return render(request, "deals.html", q=q.strip(), results=None, spread=None, error=None, recent=deals.recent(),
                   res=None, pending_ad=ad_id, pending_platform=p.id, pending_hit=hit, pending_cat=cat, quote=quote,
-                  **_search_ctx())
+                  **_direct_ctx(), **_search_ctx())

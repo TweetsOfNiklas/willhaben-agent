@@ -65,7 +65,6 @@
  "{n} searches per check": "{n} Suchen pro Prüfung",
  "Site": "Seite",
  "Sites": "Seiten",
- "One agent per site:": "Ein Agent pro Seite:",
  "requests per site (one per search; {used} of {budget} willhaben requests used in the last hour)": "Anfragen pro Seite (eine pro Suche; {used} von {budget} willhaben-Anfragen in der letzten Stunde verbraucht)",
  "{platform} settings": "Einstellungen für {platform}",
  "Voucher code {code}": "Gutscheincode {code}",
@@ -97,5 +96,9 @@
  "Reads the catalog the Vinted website renders for a browser (no API, no login). Every search loads about 3 MB, so agents on Vinted run at most every 5 minutes. Listings come without date and place; opening an ad loads its details.": "Liest den Katalog, den die Vinted-Website für einen Browser aufbereitet (keine Schnittstelle, keine Anmeldung). Jede Suche lädt rund 3 MB, deshalb laufen Agenten auf Vinted höchstens alle 5 Minuten. Anzeigen in der Liste haben weder Datum noch Ort; beim Öffnen lädt die App die Details.",
  "Deals from shops that the Preisjäger community posts: new goods with price, comparison price, shop and temperature. No private sellers and no details page; the shop is shown where other sites show the place.": "Deals aus Shops, die die Preisjäger-Community postet: Neuware mit Preis, Vergleichspreis, Shop und Temperatur. Keine privaten Verkäufer und keine Detailseite; der Shop steht dort, wo andere Seiten den Ort zeigen.",
  "Switched off – its settings page has the switch": "Ausgeschaltet – der Schalter ist auf ihrer Einstellungsseite",
- "{sites} can also be watched once you switch them on in the settings.": "{sites} lassen sich ebenfalls beobachten, sobald du sie in den Einstellungen einschaltest."
+ "{sites} can also be watched once you switch them on in the settings.": "{sites} lassen sich ebenfalls beobachten, sobald du sie in den Einstellungen einschaltest.",
+ "main search": "Hauptsuche",
+ "The other sites need a search term: type one above.": "Die anderen Seiten brauchen einen Suchbegriff: gib oben einen ein.",
+ "Give a search term for {name} (the link has none).": "Gib einen Suchbegriff für {name} an (der Link hat keinen).",
+ "Sites:": "Seiten:"
 }

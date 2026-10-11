@@ -98,13 +98,15 @@ async def list_search_agents() -> list:
 @mcp.tool()
 async def create_search_agent(url: str | None = None, name: str | None = None, interval_minutes: int = 5,
                               platform: str | None = None, keyword: str | None = None, price_from: float | None = None,
-                              price_to: float | None = None, willhaben_url: str | None = None) -> dict:
+                              price_to: float | None = None, willhaben_url: str | None = None,
+                              sites: list[str] | None = None) -> dict:
     """Create a search agent from a result-list URL of any supported site (set the filters in the browser first),
-    or from a keyword with an optional price range on one platform (list_platforms)."""
+    or from a keyword with an optional price range on one platform (list_platforms). `sites`: one agent watching
+    several platforms (the URL, if given, is the main search; the other sites get its keyword)."""
     return await _call("POST", "/api/agents",
                        json={"url": url or willhaben_url, "platform": platform or "willhaben", "keyword": keyword,
                              "price_from": price_from, "price_to": price_to, "name": name,
-                             "interval_s": interval_minutes * 60})
+                             "interval_s": interval_minutes * 60, "sites": sites})
 
 
 @mcp.tool(annotations=READ)

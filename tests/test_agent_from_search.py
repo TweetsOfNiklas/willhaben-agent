@@ -291,7 +291,7 @@ def test_create_route_errors(app_client):
 
 
 
-def test_one_agent_per_site_from_a_search(app_client):
+def test_one_agent_for_every_site_of_a_search(app_client):
     from app import platforms
     from tests.fake_platform import FakePlatform
 
@@ -304,15 +304,32 @@ def test_one_agent_per_site_from_a_search(app_client):
             db.add(row)
             db.commit()
         page = app_client.get(f"/deals?search={sid}").text
-        assert "One agent per site:" in page and 'name="sites" value="fake"' in page
+        assert "Sites:" in page and 'name="sites" value="fake"' in page
         r = app_client.post(f"/deals/search/{sid}/agent", data={"name": "Spüler", "interval_min": "",
                                                                 "sites": ["willhaben", "fake"]}, follow_redirects=False)
         assert r.status_code == 303
         with dbmod.session() as db:
             agents = list(db.exec(select(dbmod.SearchAgent).order_by(dbmod.SearchAgent.id)))
-        assert [(a.platform, a.name) for a in agents] == [("willhaben", "Spüler"), ("fake", "Spüler (Fake)")]
-        assert agents[1].queries[0]["platform"] == "fake" and agents[1].search_id == sid
+        assert [(a.platform, a.name) for a in agents] == [("willhaben", "Spüler")]        # one agent, both sites
+        a = agents[0]
+        n = len(a.queries) // 2
+        assert [q["platform"] for q in a.queries] == ["willhaben"] * n + ["fake"] * n and a.search_id == sid
+        from app.services.search_agents import agent_platforms, default_interval_s
+        assert agent_platforms(a) == ["willhaben", "fake"] and a.interval_s == default_interval_s(n)   # per site
+        assert platforms.multi() is True
         page = app_client.get(f"/deals?search={sid}").text
-        assert page.count("exists") >= 2 and "Create a search agent from this search" not in page
+        assert "exists" in page and "Create a search agent from this search" not in page
+        listing = app_client.get("/agents").text
+        assert "willhaben · Fake" in listing
+
+        # removing every willhaben search moves the main search to the other site
+        r = app_client.post(f"/agents/{a.id}/edit", data={"name": a.name, "interval_min": "15",
+                                                          "drop_query": [str(i) for i in range(n)]},
+                            follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/agents"
+        b = _agent(a.id)
+        first = b.queries[0]
+        assert agent_platforms(b) == ["fake"] and b.platform == "fake" and b.spec == first["spec"]
+        assert b.source_url == first["source_url"] and b.webapi_url == (first["webapi_url"] or first["source_url"])
     finally:
         platforms.reset()

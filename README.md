@@ -12,7 +12,8 @@ It runs on your own server, from your home internet connection, and you control 
 (English or German).
 
 - **Search agents**: build a search with willhaben's own filters, or paste a search link or type a search term for
-  another supported site (kleinanzeigen.de, Shpock, Vinted, Preisjäger; see "Supported platforms"), and get notified about new listings and
+  another supported site (kleinanzeigen.de, Shpock, Vinted, Preisjäger; see "Supported platforms"); one agent can
+  watch several sites at once (the same search term and price range on each), and get notified about new listings and
   price drops, usually much faster than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
   predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
@@ -55,7 +56,8 @@ It runs on your own server, from your home internet connection, and you control 
   push and a "Pay now!" card in the chat, and every order is listed under Purchases. **Nothing is paid automatically:**
   you pay in the willhaben app or with the PayLivery button, where the 3-D Secure approval happens on your phone, or you
   transfer the amount yourself and press Paid.
-- **Price check** (same tab): paste a willhaben link (or search by text) and see whether the price is cheap or expensive: a
+- **Direct search and price check** (same tab, "Direct search" next to the AI search): a search text lists the ads of
+  every ticked site with their price position; paste an ad link of any supported site and see whether the price is cheap or expensive: a
   green-to-red bar against comparable listings of the **same kind of item** (same willhaben category, without accessories,
   other variants and extreme prices; you can pick another category), the Geizhals new price and, on click, Claude's verdict.
   Also in the hit viewer.

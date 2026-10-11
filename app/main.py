@@ -37,7 +37,7 @@ from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
-from app.services.search_agents import create_agent, refile_screened, run_agent
+from app.services.search_agents import refile_screened, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -216,6 +216,9 @@ def _platform_name(pid: str | None) -> str:
 
 
 # platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
+from app.services.search_agents import agent_platforms as _agent_platforms  # noqa: E402
+
+templates.env.globals.update(agent_sites=_agent_platforms)
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled)
 
@@ -371,6 +374,8 @@ async def agents_new(request: Request):
     qp = request.query_params
     url = (qp.get("url") or "").strip()
     keyword = (qp.get("keyword") or "").strip()
+    choices = platforms.all()                                   # switched on, in display order
+    picked = {x.strip().lower() for x in qp.getlist("sites") if x.strip()}
     error = None
     p = None
     if url:
@@ -379,7 +384,7 @@ async def agents_new(request: Request):
         except InvalidSearchUrl as e:
             error, url = str(e), ""
     if p is None:
-        pid = (qp.get("platform") or "").strip().lower()
+        pid = (qp.get("platform") or next((c.id for c in choices if c.id in picked), "")).strip().lower()
         try:
             p = platforms.get(pid or "willhaben")
         except platforms.UnknownPlatform as e:
@@ -387,8 +392,11 @@ async def agents_new(request: Request):
         if not platforms.enabled(p.id):
             error = error or t("{name} is switched off in Settings → Platforms", name=p.name)
             p = platforms.get("willhaben")
+    # one agent, several sites: the main one (p: its link or willhaben's filters) and the others with the same term
+    others = [c for c in choices if c.id in picked and c.id != p.id and c.can("keyword_search")]
     preview: dict[str, Any] = {"url": None, "rows_found": 0, "ads": [], "name": "", "keyword": keyword,
-                               "price_from": _num_or_none(qp.get("price_from")), "price_to": _num_or_none(qp.get("price_to"))}
+                               "price_from": _num_or_none(qp.get("price_from")), "price_to": _num_or_none(qp.get("price_to")),
+                               "sites": []}
     filters = None
     if p.can("filters"):
         base = url or BUILDER_START
@@ -405,7 +413,9 @@ async def agents_new(request: Request):
             error = error or str(e)
         if filters:
             preview.update(url=filters.url, rows_found=filters.rows_found, ads=filters.ads,
-                           name=filters.suggested_name(), keyword=filters.keyword)
+                           name=filters.suggested_name(), keyword=filters.keyword,
+                           price_from=_num_or_none(url_param(filters.url, "PRICE_FROM")),
+                           price_to=_num_or_none(url_param(filters.url, "PRICE_TO")))
     else:
         spec = None
         try:
@@ -424,8 +434,26 @@ async def agents_new(request: Request):
                 error = error or str(e)
             else:
                 preview.update(rows_found=page.rows_found, ads=page.ads)
+    if preview["url"]:
+        preview["sites"].append({"p": p, "rows_found": preview["rows_found"], "url": preview["url"], "error": None})
+    if others and preview["url"] and preview["keyword"]:
+        merged = list(preview["ads"][:6])
+        for o in others:
+            row: dict[str, Any] = {"p": o, "rows_found": 0, "url": None, "error": None}
+            try:
+                spec = o.keyword_search(preview["keyword"], preview["price_from"], preview["price_to"])
+                row["url"] = spec.url
+                page = await o.search(spec, rows=6, cache_s=120)
+            except (PlatformError, InvalidSearchUrl) as e:
+                row["error"] = str(e)
+            else:
+                row["rows_found"] = page.rows_found
+                merged += page.ads[:6]
+            preview["sites"].append(row)
+        preview["ads"] = merged
+        preview["rows_found"] = sum(r["rows_found"] for r in preview["sites"])
     return render(request, "agent_new.html", f=filters, url=url, preview=preview, platform=p,
-                  platform_choices=platforms.all(), error=error, url_param=url_param,
+                  platform_choices=choices, chosen=[p.id] + [o.id for o in others], error=error, url_param=url_param,
                   platform_off=[x for x in platforms.all(enabled_only=False) if not platforms.enabled(x.id)
                                 and (x.can("search_url") or x.can("keyword_search"))],
                   settings=get_settings(), thresholds=screening.thresholds())
@@ -435,9 +463,9 @@ async def agents_new(request: Request):
 async def agents_create(url: str = Form(""), platform: str = Form("willhaben"), keyword: str = Form(""),
                         price_from: str = Form(""), price_to: str = Form(""), name: str = Form(""),
                         interval_min: int = Form(5), screen_on: str | None = Form(None), screen_brief: str = Form(""),
-                        screen_min: str = Form("match"), screen_hide: list[str] = Form([])):
+                        screen_min: str = Form("match"), screen_hide: list[str] = Form([]), sites: list[str] = Form([])):
     try:
-        agent = _create_agent(url, platform, keyword, price_from, price_to, name or None, interval_min * 60)
+        agent = _create_agent(url, platform, keyword, price_from, price_to, name or None, interval_min * 60, sites)
     except InvalidSearchUrl as e:
         return back(f"/agents?error={quote(str(e), safe='')}")
     if screen_on:
@@ -447,26 +475,42 @@ async def agents_create(url: str = Form(""), platform: str = Form("willhaben"), 
 
 
 def _create_agent(url: str, platform: str, keyword: str, price_from: Any, price_to: Any, name: str | None,
-                  interval_s: int | None) -> SearchAgent:
-    """An agent from a pasted link of any site, or from a search term on the chosen site. Raises InvalidSearchUrl."""
-    from app.services.search_agents import create_agent_from_spec
+                  interval_s: int | None, sites: list[str] | None = None) -> SearchAgent:
+    """One agent from a pasted link of any site and/or a search term, on one site or several (`sites`): the link is
+    the main search, every other chosen site gets its search term and price range. Raises InvalidSearchUrl."""
+    from app.services.search_agents import create_agent_on_sites
 
     url, keyword = (url or "").strip(), (keyword or "").strip()
-    if url:
-        return create_agent(url, name, interval_s)
-    if not keyword:
-        raise InvalidSearchUrl(t("Give a search link or a search term."))
-    try:
-        p = platforms.get((platform or "willhaben").strip().lower())
-    except platforms.UnknownPlatform as e:
-        raise InvalidSearchUrl(t("Unknown platform: {id}", id=platform)) from e
-    if not platforms.enabled(p.id):
-        raise InvalidSearchUrl(t("{name} is switched off in Settings → Platforms", name=p.name))
-    if not p.can("keyword_search"):
-        raise InvalidSearchUrl(t("{name} has no keyword search.", name=p.name))
     pf = price_from if isinstance(price_from, (int, float)) else _num_or_none(price_from)
     pt = price_to if isinstance(price_to, (int, float)) else _num_or_none(price_to)
-    return create_agent_from_spec(p.keyword_search(keyword, pf, pt), name, interval_s)
+    specs: list[Any] = []
+    if url:
+        base = platforms.for_url(url).parse_search_url(url)
+        specs.append(base)
+        keyword = keyword or (base.keyword or "")
+        pf = base.price_from if pf is None else pf
+        pt = base.price_to if pt is None else pt
+    wanted = list(dict.fromkeys(x.strip().lower() for x in sites or [] if x and x.strip()))
+    if not wanted and not url:
+        wanted = [(platform or "willhaben").strip().lower()]
+    for pid in wanted:
+        if specs and pid == specs[0].platform:
+            continue
+        try:
+            p = platforms.get(pid)
+        except platforms.UnknownPlatform as e:
+            raise InvalidSearchUrl(t("Unknown platform: {id}", id=pid)) from e
+        if not platforms.enabled(p.id):
+            raise InvalidSearchUrl(t("{name} is switched off in Settings → Platforms", name=p.name))
+        if not p.can("keyword_search"):
+            raise InvalidSearchUrl(t("{name} has no keyword search.", name=p.name))
+        if not keyword:
+            raise InvalidSearchUrl(t("Give a search term for {name} (the link has none).", name=p.name) if url
+                                   else t("Give a search link or a search term."))
+        specs.append(p.keyword_search(keyword, pf, pt))
+    if not specs:
+        raise InvalidSearchUrl(t("Give a search link or a search term."))
+    return create_agent_on_sites(specs, name, interval_s)
 
 
 @app.post("/agents/{agent_id}/run")
@@ -509,7 +553,9 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
             if not keep:
                 return back(f"/agents?error={quote(t('Keep at least one search, or delete the agent.'), safe='')}")
             a.queries = keep            # a new list: the JSON column does not see changes in place
-            a.source_url, a.webapi_url = keep[0]["source_url"], keep[0]["webapi_url"]
+            first = keep[0]             # the main search follows the first one left, maybe on another site
+            a.platform, a.spec = first.get("platform") or a.platform, first.get("spec")
+            a.source_url, a.webapi_url = first["source_url"], first["webapi_url"] or first["source_url"]
         a.name = name.strip() or a.name
         a.interval_s = max(interval_min * 60, s.min_agent_interval_s)
         a.notify, a.notify_price_drops = bool(notify_on), bool(drops_on)
@@ -2350,11 +2396,14 @@ async def api_agents():
 
 @app.post("/api/agents")
 async def api_agents_create(payload: dict[str, Any]):
-    """{url} of any supported site, or {platform, keyword, price_from?, price_to?}."""
+    """{url} of any supported site, or {platform, keyword, price_from?, price_to?}; {sites: [...]} watches several
+    sites with one agent (the url, if any, is the main search; the others get its search term)."""
+    sites = payload.get("sites")
     try:
         a = _create_agent(str(payload.get("url") or ""), str(payload.get("platform") or "willhaben"),
                           str(payload.get("keyword") or ""), payload.get("price_from"), payload.get("price_to"),
-                          payload.get("name"), payload.get("interval_s"))
+                          payload.get("name"), payload.get("interval_s"),
+                          [str(x) for x in sites] if isinstance(sites, list) else None)
     except (KeyError, InvalidSearchUrl) as e:
         raise HTTPException(400, str(e)) from e
     scheduler.schedule_agent(a)
