@@ -144,15 +144,20 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
 
 
 def _agent_ctx(shown: Any) -> dict[str, Any]:
-    """"Search agent from this search": the existing agent, or the form's defaults."""
+    """"Search agent from this search": the existing agents (one per site), or the form's defaults."""
+    sites = [p for p in product_search.search_platforms()]
     if shown is None or shown.id is None:
-        return {"ps_agent": None, "ps_agent_n": 0, "ps_agent_interval_min": 0, "ps_agent_name": ""}
+        return {"ps_agent": None, "ps_agents": [], "ps_agent_n": 0, "ps_agent_interval_min": 0, "ps_agent_name": "",
+                "ps_sites": sites, "ps_agent_sites": []}
     with session() as db:
-        agent = db.exec(select(SearchAgent).where(SearchAgent.search_id == shown.id)
-                        .order_by(SearchAgent.id)).first()
+        agents = list(db.exec(select(SearchAgent).where(SearchAgent.search_id == shown.id).order_by(SearchAgent.id)))
     n = len((shown.plan or {}).get("queries") or [])
-    return {"ps_agent": agent, "ps_agent_n": n, "ps_agent_interval_min": search_agents.default_interval_s(n) // 60,
-            "ps_agent_name": search_agents.agent_name(shown)}
+    used = [s for s in ((shown.settings or {}).get("platforms") or ["willhaben"])]
+    taken = {a.platform for a in agents}
+    agent_sites = [p for p in platforms.all() if p.can("keyword_search") and p.id in used and p.id not in taken]
+    return {"ps_agent": agents[0] if agents else None, "ps_agents": agents, "ps_agent_n": n,
+            "ps_agent_interval_min": search_agents.default_interval_s(n) // 60,
+            "ps_agent_name": search_agents.agent_name(shown), "ps_sites": sites, "ps_agent_sites": agent_sites}
 
 
 @router.get("/search")
@@ -163,10 +168,11 @@ async def search_alias():
 @router.post("/deals/search")
 async def product_search_start(description: str = Form(""), depth: str = Form("normal"), unusual: str = Form(""),
                                categories: str = Form(""), sort: str = Form("relevance"), photos: str = Form(""),
-                               ask: str = Form("")):
+                               ask: str = Form(""), sites: list[str] = Form([])):
     if not description.strip():
         return RedirectResponse("/deals?msg=empty", status_code=303)
-    settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask))
+    settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask),
+                                            sites=sites)
     try:
         sid = product_search.start(description, settings)
     except product_search.Busy:
@@ -216,17 +222,27 @@ async def product_search_answers(request: Request, search_id: int):
 
 @router.post("/deals/search/{search_id}/agent")
 async def product_search_agent(search_id: int, name: str = Form(""), interval_min: str = Form(""),
-                               screen_on: str | None = Form(None)):
-    """Search agent that keeps running this search's keyword searches (no further Claude planning call)."""
+                               screen_on: str | None = Form(None), sites: list[str] = Form([])):
+    """Search agents that keep running this search's keyword searches, one per chosen site (no further Claude
+    planning call)."""
     minutes = int(interval_min) if interval_min.strip().isdigit() else None
-    try:
-        agent = search_agents.create_agent_from_search(search_id, name or None, minutes * 60 if minutes else None,
-                                                       screen=bool(screen_on))
-    except KeyError as e:
-        raise HTTPException(404) from e
-    except ValueError:
-        return RedirectResponse(f"/deals?search={search_id}&msg=noplan#ps-result", status_code=303)
-    scheduler.schedule_agent(agent)
+    row = product_search.get(search_id)
+    chosen = [s for s in dict.fromkeys(sites) if s] or ((row.settings or {}).get("platforms") if row else None) or ["willhaben"]
+    created = []
+    for pid in chosen:
+        label = name.strip() or None
+        if label and len(chosen) > 1 and pid != "willhaben":
+            label = f"{label} ({_platform(pid).name})"
+        try:
+            created.append(search_agents.create_agent_from_search(search_id, label, minutes * 60 if minutes else None,
+                                                                  screen=bool(screen_on), platform=pid))
+        except KeyError as e:
+            raise HTTPException(404) from e
+        except (ValueError, UnknownPlatform):
+            if not created and pid == chosen[-1]:
+                return RedirectResponse(f"/deals?search={search_id}&msg=noplan#ps-result", status_code=303)
+    for agent in created:
+        scheduler.schedule_agent(agent)
     return RedirectResponse("/agents", status_code=303)
 
 

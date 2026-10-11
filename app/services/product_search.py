@@ -53,8 +53,8 @@ from app.llm.prompts import (
     search_rank_prompt,
 )
 from app.services import ad_images, deals, scam
-from app.willhaben.parse import AdSummary, keyword_search_url
-from app.willhaben.public import Blocked, WillhabenError, get_public
+from app import platforms
+from app.platforms import Blocked, Listing, PlatformError
 from app.services import timeline
 
 log = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ log = logging.getLogger(__name__)
 DEPTHS = {"normal": 3, "thorough": 6, "deep": 12}   # max. queries (= willhaben requests) per depth
 MAX_QUERIES = 12
 ROWS = 30
-SORTS = {"relevance": 7, "newest": 1}
+SORTS = {"relevance": 7, "newest": 1}        # willhaben's codes; the adapters map the names
 MAX_CANDIDATES = 40
 TOP_N = 10
 OVER_BUDGET = 1.5            # ads above 1.5 × the budget are not worth a look
@@ -94,10 +94,24 @@ class Busy(RuntimeError):
 
 
 # ------------------------------------------------------------------ settings + plan
+def search_platforms() -> list[platforms.Platform]:
+    """Sites the product search may use: switched on, with a keyword search, "Use for the product search" on."""
+    from app.db import get_setting
+
+    out = [p for p in platforms.all() if p.can("keyword_search")
+           and get_setting(f"platform_{p.id}_product_search") != "0"]
+    return out or [platforms.get("willhaben")]
+
+
 def make_settings(depth: str | None = "normal", unusual: bool = False, categories: bool = False,
-                  sort: str | None = "relevance", photos: bool = True, ask: bool = True) -> dict[str, Any]:
+                  sort: str | None = "relevance", photos: bool = True, ask: bool = True,
+                  sites: list[str] | None = None) -> dict[str, Any]:
+    """The search's options; `sites` = platform ids to search on (default: search_platforms())."""
+    usable = {p.id for p in platforms.all() if p.can("keyword_search")}
+    chosen = [s for s in dict.fromkeys(sites or []) if s in usable] or [p.id for p in search_platforms()]
     return {"depth": depth if depth in DEPTHS else "normal", "unusual": bool(unusual), "categories": bool(categories),
-            "sort": sort if sort in SORTS else "relevance", "photos": bool(photos), "ask": bool(ask)}
+            "sort": sort if sort in SORTS else "relevance", "photos": bool(photos), "ask": bool(ask),
+            "platforms": chosen}
 
 
 def max_queries(settings: dict[str, Any] | None) -> int:
@@ -223,7 +237,7 @@ def preferences_text(plan: dict[str, Any] | None, answers: dict[str, Any] | None
 
 
 # ------------------------------------------------------------------ searching
-def drop_reason(ad: AdSummary, plan: dict[str, Any], q: dict[str, Any] | None = None) -> str | None:
+def drop_reason(ad: Listing, plan: dict[str, Any], q: dict[str, Any] | None = None) -> str | None:
     """Why an ad is not a candidate (cheap checks in code), or None. The query's price_to is applied here,
     not sent to willhaben, so pricier ads of the same search still count as price comparables."""
     if deals._wanted(ad.heading):
@@ -242,73 +256,99 @@ def drop_reason(ad: AdSummary, plan: dict[str, Any], q: dict[str, Any] | None = 
     return None
 
 
-def _url(q: dict[str, Any], sort: int) -> str:
-    # no price_to: the more expensive ads stay in the comparables (drop_reason filters them as candidates)
-    return keyword_search_url(q["keyword"], ROWS, q.get("price_from"), None, sort,
-                              path=q.get("category_path") or DEFAULT_PATH)
-
-
-def _remaining_budget() -> int | None:
-    lim = get_public().limiter
+def _remaining_budget(p: platforms.Platform) -> int | None:
+    lim = p.limiter
     return max(0, lim.per_hour - lim.last_hour) if lim.per_hour else None
+
+
+def _sites(settings: dict[str, Any]) -> list[platforms.Platform]:
+    out = []
+    for pid in settings.get("platforms") or ["willhaben"]:
+        try:
+            p = platforms.get(pid)
+        except platforms.UnknownPlatform:
+            continue
+        if platforms.enabled(p.id) and p.can("keyword_search"):
+            out.append(p)
+    return out or [platforms.get("willhaben")]
 
 
 async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
                       on_progress: Callable[[int, int, int], None] | None = None) -> dict[str, Any]:
-    """Run the plan's queries one after another. Returns {per_query, pools, prices, requests, warning}:
-    pools[i] = the new, kept ads of query i (relevance order), prices[i] = all prices of query i (comparables).
-    requests counts only requests that actually went out (not those the shared limiter refused);
-    on_progress(done, total, requests)."""
+    """Run each of the plan's queries on every site of the search, one after another.
+
+    Returns {per_query, pools, prices, query_of, requests, warning}: one entry per (query, site) run, query-major;
+    pools[i] = the new, kept ads of run i (relevance order), prices[i] = all prices of run i (comparables from the
+    same site), query_of[i] = the plan query's index. requests counts only requests that actually went out (not those
+    a limiter refused); on_progress(done, total, requests). A block stops only that site's remaining searches."""
     queries = plan.get("queries") or []
-    sort = SORTS.get(settings.get("sort") or "relevance", 7)
-    per_query = [{**q, "found": None, "kept": 0, "error": None, "skipped": False} for q in queries]
-    pools: list[list[AdSummary]] = [[] for _ in queries]
-    prices: list[list[float]] = [[] for _ in queries]
+    sort = settings.get("sort") or "relevance"
+    sites = _sites(settings)
+    runs = [(qi, q, p) for qi, q in enumerate(queries) for p in sites]
+    per_query = []
+    for _qi, q, p in runs:
+        spec = p.keyword_search(q["keyword"], q.get("price_from"), None, sort=sort,
+                                category=q.get("category_path") if p.id == "willhaben" else None)
+        # no price_to in the search: the more expensive ads stay in the comparables (drop_reason filters candidates)
+        per_query.append({**q, "platform": p.id, "url": spec.url, "spec": spec.to_json(), "found": None, "kept": 0,
+                          "error": None, "skipped": False})
+    pools: list[list[Listing]] = [[] for _ in runs]
+    prices: list[list[float]] = [[] for _ in runs]
     seen: set[str] = set()
-    requests, warning = 0, None
-    budget = _remaining_budget()
-    if budget is not None and budget < len(queries):
-        warning = t("Hourly willhaben request limit almost used up: only {n} of {total} searches run.",
-                    n=budget, total=len(queries))
-    client = get_public()
-    stopped = False
-    for i, q in enumerate(queries):
-        if stopped or (budget is not None and i >= budget):
+    requests, warnings = 0, []
+    left: dict[str, int | None] = {}
+    for p in sites:
+        budget = _remaining_budget(p)
+        wanted = sum(1 for _, _, rp in runs if rp.id == p.id)
+        left[p.id] = budget
+        if budget is not None and budget < wanted:
+            warnings.append(t("Hourly request limit of {platform} almost used up: only {n} of {total} searches run.",
+                              platform=p.name, n=budget, total=wanted))
+    stopped: set[str] = set()
+    for i, (_qi, q, p) in enumerate(runs):
+        if p.id in stopped or (left[p.id] is not None and left[p.id] <= 0):
             per_query[i]["skipped"] = True
             continue
+        if left[p.id] is not None:
+            left[p.id] -= 1
         try:
-            page = await client.search(_url(q, sort))      # uncached: the count shown is the real request count
+            from app.platforms import SearchSpec
+            page = await p.search(SearchSpec.from_json(per_query[i]["spec"]), rows=ROWS)   # uncached: real requests
             requests += 1
         except Blocked as e:
             requests += int(getattr(e, "sent", False))      # False: refused by the limiter, nothing was sent
             per_query[i]["error"] = str(e)
-            stopped = True
-            msg = t("willhaben paused the search ({error}): stopped after {n} searches, the offers found so far are ranked.", error=e, n=i)
-            warning = f"{warning} {msg}" if warning else msg
+            stopped.add(p.id)
+            done = sum(1 for k in range(i) if runs[k][2].id == p.id)
+            warnings.append(t("{platform} paused the search ({error}): stopped after {n} searches there, the offers "
+                              "found so far are ranked.", platform=p.name, error=e, n=done))
             continue
-        except WillhabenError as e:
+        except PlatformError as e:
             requests += 1                                   # went through the limiter (network error / HTTP status)
             per_query[i]["error"] = str(e)
             continue
         finally:
             if on_progress:
-                on_progress(i + 1, len(queries), requests)
+                on_progress(i + 1, len(runs), requests)
         per_query[i]["found"] = page.rows_found
         for ad in page.ads:
             if ad.price and ad.price > 0 and not deals._wanted(ad.heading):
                 prices[i].append(ad.price)
-            if not ad.ad_id or ad.ad_id in seen:
+            if not ad.ad_id or ad.ref in seen:
                 continue
-            seen.add(ad.ad_id)
+            seen.add(ad.ref)
             if drop_reason(ad, plan, q) is None:
                 pools[i].append(ad)
         per_query[i]["kept"] = len(pools[i])
-    return {"per_query": per_query, "pools": pools, "prices": prices, "requests": requests, "warning": warning}
+    for e in per_query:
+        e.pop("spec", None)
+    return {"per_query": per_query, "pools": pools, "prices": prices, "query_of": [qi for qi, _, _ in runs],
+            "requests": requests, "warning": " ".join(warnings) or None}
 
 
-def pick_candidates(pools: list[list[AdSummary]], cap: int = MAX_CANDIDATES) -> list[tuple[int, AdSummary]]:
+def pick_candidates(pools: list[list[Listing]], cap: int = MAX_CANDIDATES) -> list[tuple[int, Listing]]:
     """Round-robin over the queries (each keeps its relevance order) so every query gets a say; (query idx, ad)."""
-    out: list[tuple[int, AdSummary]] = []
+    out: list[tuple[int, Listing]] = []
     depth = max((len(p) for p in pools), default=0)
     for k in range(depth):
         for i, pool in enumerate(pools):
@@ -331,19 +371,20 @@ def _one_line(text: str | None) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def card(qi: int, ad: AdSummary, plan: dict[str, Any], prices: list[float]) -> dict[str, Any]:
+def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dict[str, Any]:
     """Everything the result list shows about one ad, price position and scam flags included (no request)."""
     comp = _price_without(prices, ad.price)
     st = deals.stats(comp)
     pos = deals.position(ad.price, st, None)
     item = {"heading": ad.heading, "body": ad.body, "price": ad.price, "is_private": ad.is_private}
-    return {"ad_id": ad.ad_id, "title": ad.heading, "price": ad.price, "price_display": ad.price_display,
+    return {"ad_id": ad.ad_id, "platform": ad.platform, "ref": ad.ref, "title": ad.heading, "price": ad.price,
+            "price_display": ad.price_display,
             "location": ad.location, "url": ad.url, "image_url": ad.image_url, "is_private": ad.is_private,
             "published_at": ad.published_at.isoformat() if ad.published_at else None,
             "text": _one_line(ad.body)[:TEXT_CHARS], "query": (plan.get("queries") or [{}])[qi].get("keyword"),
             "position": pos, "median": st["median"] if st else None, "min": st["min"] if st else None,
             "p25": st["p25"] if st else None, "comparables": st["count"] if st else 0,
-            "scam_flags": scam.flags(item, scam.median_context(comp))}
+            "scam_flags": scam.flags(item, scam.median_context(comp), home_country=scam.home_country_of(ad.platform))}
 
 
 # ------------------------------------------------------------------ ranking
@@ -590,7 +631,7 @@ async def run(search_id: int, replan: bool = True) -> None:
                                   on_progress=lambda d, total, sent: _update(search_id, requests=sent,
                                                                              progress={"done": d, "total": total}))
         picked = pick_candidates(found["pools"])
-        cards = [card(qi, ad, plan, found["prices"][qi]) for qi, ad in picked]
+        cards = [card(found["query_of"][pi], ad, plan, found["prices"][pi]) for pi, ad in picked]
         searched = {"queries": found["per_query"], "requests": found["requests"], "candidates": len(cards),
                     "warning": found["warning"]}
         if cards and plan.get("questions") and row.answers is None and settings.get("ask"):

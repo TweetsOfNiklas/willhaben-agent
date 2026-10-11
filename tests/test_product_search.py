@@ -331,7 +331,7 @@ async def test_background_search_is_stored_and_refuses_a_second(wh, claude):
     row = ps.get(sid)
     assert row.status == "done" and row.requests == 3 and row.finished_at and row.started_at
     assert row.settings == {"depth": "normal", "unusual": True, "categories": False, "sort": "relevance",
-                            "photos": False, "ask": True}
+                            "photos": False, "ask": True, "platforms": ["willhaben"]}
     assert row.plan["summary"].startswith("Leiser") and len(row.queries) == 3
     assert [r["fit"] for r in row.results] == [92, 70] and row.note == "Gute Auswahl unter 300 €."
     assert row.progress == {"done": 3, "total": 3} and row.candidates >= 5
@@ -406,7 +406,7 @@ def test_page_renamed_and_search_flow(app_client):
     assert "Fit 92" in frag and "Leise, 60 cm, gut im Budget." in frag and 'data-ad=' in frag
     assert 'data-ad="2000000001"' in frag and "/deals/ad/2000000001?q=Geschirrsp%C3%BCler" in frag
     assert ">Check price<" in frag and "deal-track" in frag and "Generated searches (3)" in frag
-    assert "3 willhaben searches" in frag and "Zustand unklar" in frag
+    assert "3 searches" in frag and "Zustand unklar" in frag
     assert ps.get(sid).settings["depth"] == "deep"
     assert "Höchstzahl an Suchen: 12" in app_client.fake.calls[0]["prompt"]
 
@@ -626,14 +626,14 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
     assert "Claude has 2 short questions" in frag and "Sind Kratzer okay, wenn der Preis niedriger ist?" in frag
     assert 'name="a_kratzer" value="Nur kleine"' in frag and 'name="o_haendler"' in frag
     assert 'placeholder="other answer"' in frag and "Answer and rank" in frag and 'name="skip" value="1"' in frag
-    assert "The 3 willhaben searches are already done; answering costs no extra Claude call." in frag
+    assert "The 3 searches are already done; answering costs no extra Claude call." in frag
     assert f'action="/deals/search/{sid}/answers"' in frag and f"/deals/search/{sid}/rerun" not in frag
     assert "aria-busy" not in frag and "waiting for your answers" in frag              # recent list (out of band)
 
     dbmod.set_setting("ui_lang", "de")
     de = app_client.get(f"/deals/search/{sid}").text
     assert "Claude hat 2 kurze Rückfragen" in de and "Antworten und bewerten" in de and "Fragen überspringen" in de
-    assert 'placeholder="andere Antwort"' in de and "Die 3 willhaben-Suchen sind schon erledigt" in de
+    assert 'placeholder="andere Antwort"' in de and "Die 3 Suchen sind schon erledigt" in de
     dbmod.set_setting("ui_lang", "en")
 
     r = app_client.post(f"/deals/search/{sid}/answers", follow_redirects=False,
@@ -768,3 +768,69 @@ def test_apply_photos_has_no_fixed_caps():
                                             {"nr": 3, "photo": "match", "condition": "good", "fit": 90}]})
     assert [(r["id"], r["fit"], r["fit_text"]) for r in out] == [("a", 70, 70), ("b", 60, 80), ("c", 60, 50)]  # c: +40 asked, +10 kept
     assert not hasattr(ps, "PHOTO_CAPS") and not hasattr(ps, "CONDITION_CAPS")
+
+
+
+# ------------------------------------------------------------------ several sites
+@pytest.fixture
+def fake_site():
+    from app import platforms
+    from tests.fake_platform import FakePlatform
+
+    site = FakePlatform()
+    platforms.set_platform("fake", site)
+    yield site
+    platforms.reset()
+
+
+async def test_queries_fan_out_to_every_chosen_site(wh, fake_site):
+    from tests.fake_platform import listing
+
+    plan = ps.normalize_plan(PLAN, 3)
+    fake_site.pages = [[listing("1", "Geschirrspüler Bosch 60 cm", 150.0), listing("2", "Geschirrspüler Siemens", 900.0)]]
+    settings = ps.make_settings(sites=["willhaben", "fake", "nope"])
+    assert settings["platforms"] == ["willhaben", "fake"]
+    found = await ps.run_queries(plan, settings)
+    assert [(q["keyword"], q["platform"]) for q in found["per_query"]] == [
+        ("Geschirrspüler", "willhaben"), ("Geschirrspüler", "fake"), ("Spülmaschine", "willhaben"), ("Spülmaschine", "fake"),
+        ("Geschirspüler", "willhaben"), ("Geschirspüler", "fake")]
+    assert found["query_of"] == [0, 0, 1, 1, 2, 2] and found["requests"] == 6
+    assert [s.keyword for s in fake_site.searched] == ["Geschirrspüler", "Spülmaschine", "Geschirspüler"]
+    assert fake_site.searched[1].price_from == 20 and fake_site.searched[1].price_to is None   # price_to via drop_reason
+    assert found["per_query"][1]["url"] == "https://fake.example/s/Geschirrspüler"
+    fake_pool = found["pools"][1]
+    assert [a.ref for a in fake_pool] == ["fake:1"]                    # 900 € is far over the budget: dropped
+    assert found["pools"][3] == [] and found["pools"][5] == []         # the same ads again: not candidates twice
+    picked = ps.pick_candidates(found["pools"])
+    cards = [ps.card(found["query_of"][pi], ad, plan, found["prices"][pi]) for pi, ad in picked]
+    fake_card = next(c for c in cards if c["platform"] == "fake")
+    assert fake_card["ref"] == "fake:1" and fake_card["query"] == "Geschirrspüler"
+    assert fake_card["comparables"] == 0          # comparables come from the same site's search only, never willhaben's
+
+
+async def test_a_block_stops_only_that_site(wh, fake_site):
+    from app.platforms import Blocked
+
+    plan = ps.normalize_plan(PLAN, 3)
+    blocked = Blocked("Fake: pause")
+    blocked.sent = True
+    fake_site.pages = [blocked, []]
+    found = await ps.run_queries(plan, ps.make_settings(sites=["willhaben", "fake"]))
+    fake_rows = [q for q in found["per_query"] if q["platform"] == "fake"]
+    assert fake_rows[0]["error"] == "Fake: pause" and fake_rows[1]["skipped"] and fake_rows[2]["skipped"]
+    assert len(wh["keywords"]) == 3 and "Fake paused the search" in found["warning"]
+    fake_site._limiter = __import__("app.platforms.ratelimit", fromlist=["RateLimiter"]).RateLimiter(0, per_hour=1, name="Fake")
+    fake_site.pages = [[]]
+    found = await ps.run_queries(plan, ps.make_settings(sites=["fake"]))
+    assert [q["skipped"] for q in found["per_query"]] == [False, True, True]
+    assert "Hourly request limit of Fake almost used up: only 1 of 3" in found["warning"]
+
+
+def test_default_sites_follow_the_settings(fake_site):
+    from app.db import set_setting
+
+    assert ps.make_settings()["platforms"] == ["willhaben", "fake"]
+    set_setting("platform_fake_product_search", "0")
+    assert ps.make_settings()["platforms"] == ["willhaben"]
+    set_setting("platform_willhaben_product_search", "0")
+    assert ps.make_settings()["platforms"] == ["willhaben"]              # never none at all

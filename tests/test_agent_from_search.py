@@ -233,7 +233,7 @@ def test_create_from_the_product_search_page(app_client):
     sid = _search_row()
     page = app_client.get(f"/deals?search={sid}").text
     assert "Create a search agent from this search" in page and f'action="/deals/search/{sid}/agent"' in page
-    assert "3 willhaben searches per check" in page and 'name="interval_min" value="15"' in page
+    assert "3 searches per check" in page and 'name="interval_min" value="15"' in page
 
     r = app_client.post(f"/deals/search/{sid}/agent", data={"name": "", "interval_min": "", "screen_on": "on"},
                         follow_redirects=False)
@@ -288,3 +288,31 @@ def test_create_route_errors(app_client):
     assert "Create a search agent" not in app_client.get(f"/deals?search={sid}").text
     with dbmod.session() as db:
         assert not list(db.exec(select(dbmod.SearchAgent)))
+
+
+
+def test_one_agent_per_site_from_a_search(app_client):
+    from app import platforms
+    from tests.fake_platform import FakePlatform
+
+    platforms.set_platform("fake", FakePlatform())
+    try:
+        sid = _search_row()
+        with dbmod.session() as db:
+            row = db.get(dbmod.ProductSearch, sid)
+            row.settings = {**(row.settings or {}), "platforms": ["willhaben", "fake"]}
+            db.add(row)
+            db.commit()
+        page = app_client.get(f"/deals?search={sid}").text
+        assert "One agent per site:" in page and 'name="sites" value="fake"' in page
+        r = app_client.post(f"/deals/search/{sid}/agent", data={"name": "Spüler", "interval_min": "",
+                                                                "sites": ["willhaben", "fake"]}, follow_redirects=False)
+        assert r.status_code == 303
+        with dbmod.session() as db:
+            agents = list(db.exec(select(dbmod.SearchAgent).order_by(dbmod.SearchAgent.id)))
+        assert [(a.platform, a.name) for a in agents] == [("willhaben", "Spüler"), ("fake", "Spüler (Fake)")]
+        assert agents[1].queries[0]["platform"] == "fake" and agents[1].search_id == sid
+        page = app_client.get(f"/deals?search={sid}").text
+        assert page.count("exists") >= 2 and "Create a search agent from this search" not in page
+    finally:
+        platforms.reset()

@@ -59,5 +59,15 @@
  "paused for {s} s after a block": "nach einer Sperre {s} s pausiert",
  "Statistics": "Statistik",
  "Give a search link or a search term.": "Gib einen Suchlink oder einen Suchbegriff an.",
- "Requests in the last hour: {n}": "Anfragen in der letzten Stunde: {n}"
+ "Requests in the last hour: {n}": "Anfragen in der letzten Stunde: {n}",
+ "Hourly request limit of {platform} almost used up: only {n} of {total} searches run.": "Stündliches Anfragelimit von {platform} fast aufgebraucht: nur {n} von {total} Suchen laufen.",
+ "{platform} paused the search ({error}): stopped after {n} searches there, the offers found so far are ranked.": "{platform} hat die Suche pausiert ({error}): nach {n} Suchen dort gestoppt, die bisher gefundenen Angebote werden gereiht.",
+ "Searching: {done} of {total} searches done …": "Suche läuft: {done} von {total} Suchen erledigt …",
+ "The {k} searches are already done; answering costs no extra Claude call.": "Die {k} Suchen sind schon erledigt; Antworten kostet keinen zusätzlichen Claude-Aufruf.",
+ "{n} searches · {c} candidates looked at · {k} Claude calls": "{n} Suchen · {c} Kandidaten angesehen · {k} Claude-Aufrufe",
+ "{n} searches per check": "{n} Suchen pro Prüfung",
+ "Site": "Seite",
+ "Sites": "Seiten",
+ "One agent per site:": "Ein Agent pro Seite:",
+ "requests per site (one per search; {used} of {budget} willhaben requests used in the last hour)": "Anfragen pro Seite (eine pro Suche; {used} von {budget} willhaben-Anfragen in der letzten Stunde verbraucht)"
 }

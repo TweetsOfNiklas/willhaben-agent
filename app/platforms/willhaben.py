@@ -36,9 +36,10 @@ class WillhabenPlatform(Platform):
 
     @property
     def limiter(self):
-        from app.willhaben.public import willhaben_limiter
+        """The anonymous client's limiter, which is the shared willhaben limiter (tests may give the client its own)."""
+        from app.willhaben.public import get_public
 
-        return willhaben_limiter()
+        return get_public().limiter
 
     def parse_search_url(self, url: str) -> SearchSpec:
         api = to_webapi_url(url, rows=get_settings().search_rows)   # raises InvalidSearchUrl

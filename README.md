@@ -29,7 +29,8 @@ It runs on your own server, from your home internet connection, and you control 
   items at once and Claude sorts them into one draft per item. Publish directly on willhaben (free private ads; the
   category comes from willhaben's suggestion or your own pick).
 - **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
-  Claude plans a few willhaben searches, the app runs them anonymously and Claude picks the best offers, each with a
+  Claude plans a few searches, the app runs them anonymously on willhaben and on every other site switched on for it
+  (Settings → Platforms; the search form lets you pick), and Claude picks the best offers, each with a
   fit score, a short reason, red flags, the price bar and the scam check. An optional photo check (on by default)
   shows Claude the photos of the best offers (at most 10) and weighs damage, wear, wrong variants, stock photos or a
   different item against what you care about (a scratch barely counts if you prefer the lower price). When the
@@ -128,7 +129,7 @@ pacing and budget.
 | Site | Country | Access | Search agents | Ad viewer | Price check | Buying, chats, own ads | Status |
 |---|---|---|---|---|---|---|---|
 | willhaben.at | AT | direct requests + the logged-in browser | own filters, link, keyword | yes | yes | yes | done |
-| kleinanzeigen.de | DE | the Kleinanzeigen app's JSON API (direct requests) | link, keyword with a price range | yes | against willhaben listings | no | built; search, ad details and places checked once against the live API (2026-10-11), no agent has run for days yet |
+| kleinanzeigen.de | DE | the Kleinanzeigen app's JSON API (direct requests) | link, keyword with a price range, product search | yes | against willhaben listings | no | built; search, ad details and places checked once against the live API (2026-10-11), no agent has run for days yet |
 
 Links from any of these sites can be pasted on "New search agent"; hits of other sites are listed with the site's
 name, and their links in pushes and the dashboard carry the site (`kleinanzeigen:<id>`).

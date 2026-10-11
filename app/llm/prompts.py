@@ -562,8 +562,8 @@ def _answers_block(answers: list[tuple[str, str]] | None) -> list[str]:
 
 
 SEARCH_RANK_SYSTEM = """\
-Du wählst für eine Privatperson aus willhaben-Anzeigen (österreichisches Kleinanzeigenportal) die besten Angebote
-für ihren Bedarf aus.
+Du wählst für eine Privatperson aus Kleinanzeigen (willhaben.at und gegebenenfalls weitere Portale wie kleinanzeigen.de)
+die besten Angebote für ihren Bedarf aus.
 
 - Bewerte nur die Anzeigen aus der Liste (nr wie angegeben) und gib die besten zurück, höchstens so viele wie
   verlangt, die beste zuerst. Anzeigen, die nicht passen (anderes Produkt, nur Zubehör, Suche-/Tauschanzeige,
@@ -635,7 +635,7 @@ def search_rank_prompt(*, description: str, plan: dict[str, Any], candidates: li
 
 
 SEARCH_PHOTO_SYSTEM = """\
-Du prüfst für eine Privatperson die Fotos der besten willhaben-Angebote (österreichisches Kleinanzeigenportal). Eine
+Du prüfst für eine Privatperson die Fotos der besten Kleinanzeigen-Angebote (willhaben.at, ggf. weitere Portale). Eine
 erste Bewertung hat sie nur nach den Anzeigentexten ausgewählt. Sieh dir jedes angegebene Foto an.
 
 - nr: wie in der Liste; nur Anzeigen mit Foto.
