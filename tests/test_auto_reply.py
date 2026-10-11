@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 import pytest
@@ -185,6 +186,9 @@ def test_settings_and_myads_forms():
         assert "Automatic answers" in c.get("/myads?show_inactive=1").text
         c.post("/myads/222/auto-reply", data={"on": "1", "instructions": "Preis fix\r\nAbholung Wien"})
         c.post("/settings", data={"auto_reply_rules": "nur Verfügbarkeit"})
+        # the toggle is on in the HTML itself: no flip when Alpine starts, and switching it off is a change to save
+        page = c.get("/myads?ad=222&show_inactive=1").text
+        assert re.search(r'<input type="checkbox"[^>]*name="on" x-model="on" checked>', page)
     with session() as db:
         ad = db.get(MyAd, "222")
     assert ad.auto_reply and ad.auto_reply_instructions == "Preis fix\nAbholung Wien"

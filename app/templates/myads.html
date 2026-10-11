@@ -76,10 +76,12 @@
     {% for a in ads %}
     {% if loop.index0 in sections %}{{ ui.eyebrow(sections[loop.index0], 'px-2.5 pt-3 pb-1') }}{% endif %}
     {% set on = cur and cur.ad_id == a.ad_id %}
+    {# the columns without the checkbox are plain classes, so a row is laid out before Alpine starts (page load,
+       fresh copy after a job); Alpine only adds the checkbox column while selecting #}
     <a href="/myads?ad={{ a.ad_id }}{{ keep }}" id="row-{{ a.ad_id }}" @click="rowClick($event)"
        {% if a.pending_action %}data-pending-key="ad:{{ a.ad_id }}"{% endif %}
-       class="grid w-full items-center gap-3 rounded-[10px] p-2.5 text-left text-base-content no-underline {{ 'bg-brand-soft' if on else 'hover:bg-hover' }}"
-       :class="selecting ? 'grid-cols-[20px_52px_minmax(0,1fr)_auto]' : 'grid-cols-[52px_minmax(0,1fr)_auto]'">
+       class="grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] p-2.5 text-left text-base-content no-underline {{ 'bg-brand-soft' if on else 'hover:bg-hover' }}"
+       :class="selecting && 'grid-cols-[20px_52px_minmax(0,1fr)_auto]!'">
       {% if not a.replaced_by and not a.pending_action %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel checkbox checkbox-primary checkbox-sm"
              data-title="{{ a.heading or a.ad_id }}" x-show="selecting" x-cloak x-model="picked" @click.stop>
       {% else %}<span x-show="selecting" x-cloak></span>{% endif %}
@@ -149,7 +151,7 @@
         <div>{{ ui.eyebrow(_("Automatic answers"), 'mb-1') }}
           <div class="text-base" x-text="on ? {{ _('On — Claude answers simple questions')|tojson|forceescape }} : {{ _('Off')|tojson|forceescape }}">{{ _("On — Claude answers simple questions") if a.auto_reply else _("Off") }}</div>
           <div class="text-[13px] text-muted">{{ _("Uncertain cases (price negotiation, open questions, suspected scam) end up as a draft, with a push via Home Assistant.") }}</div></div>
-        <input type="checkbox" class="toggle toggle-primary mt-[22px]" name="on" x-model="on">
+        <input type="checkbox" class="toggle toggle-primary mt-[22px]" name="on" x-model="on" {% if a.auto_reply %}checked{% endif %}>
       </label>
       <div class="grid grid-cols-1 items-start gap-3 sm:grid-cols-[1fr_180px]">
         <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Instruction for this ad") }}</span>

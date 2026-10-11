@@ -48,8 +48,8 @@
   <div id="chat-list-items" class="flex flex-col gap-0.5 px-2.5 pb-4">
     {% for c in convs if not role_filter or c.role == role_filter %}
     <a href="/chats/{{ c.id }}" @click="rowClick($event)"
-       class="grid w-full items-start gap-3 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if conv is defined and conv and conv.id == c.id else '' }}"
-       :class="selecting ? 'grid-cols-[24px_36px_minmax(0,1fr)_auto]' : 'grid-cols-[36px_minmax(0,1fr)_auto]'">
+       class="grid w-full grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if conv is defined and conv and conv.id == c.id else '' }}"
+       :class="selecting && 'grid-cols-[24px_36px_minmax(0,1fr)_auto]!'">
       <input type="checkbox" class="sel chat-sel checkbox checkbox-primary checkbox-sm mt-1" name="ids" value="{{ c.id }}" form="chat-bulk"
              x-show="selecting" x-cloak x-model="picked" aria-label="{{ _('Select') }}">
       <span class="grid size-9 shrink-0 place-items-center rounded-full bg-hover text-[13px] font-bold text-base-content">{{ (c.partner_name or '?')[:1]|upper }}</span>
