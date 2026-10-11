@@ -8,7 +8,7 @@
     <summary class="grid cursor-pointer list-none grid-cols-[72px_minmax(0,1fr)_auto] items-start gap-3 px-4 py-2.5 hover:bg-hover [&::-webkit-details-marker]:hidden">
       <span class="pt-0.5 text-[12.5px] text-muted tabular-nums" title="{{ e.ts|local('%d.%m.%Y %H:%M:%S') }}">{{ e.ts|local('%d.%m. %H:%M') }}</span>
       <span class="min-w-0">
-        <span class="flex min-w-0 items-center gap-2">{{ ui.pill(tl_kind_label(e.kind), tl_kind_tones.get(e.kind, ''), dot=false) }}<span class="truncate font-medium">{{ tl_title(e) }}</span></span>
+        <span class="flex min-w-0 items-center gap-2">{{ ui.pill(tl_pill_label(e), tl_kind_tones.get(e.kind, ''), dot=false) }}<span class="truncate font-medium">{{ tl_title(e) }}</span></span>
         <span class="mt-0.5 block truncate text-[12.5px] text-muted">
           {%- set meta = [] %}
           {%- if e.actor and e.actor != 'system' %}{% set _x = meta.append(tl_actor_label(e.actor)) %}{% endif %}

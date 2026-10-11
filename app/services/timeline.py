@@ -1,6 +1,7 @@
 """The timeline: what happened, for which ad / chat / search / purchase, and why (page /timeline).
 
-Every Claude call (with the full prompt and answer), every willhaben request (app/willhaben/recorder.py), every
+Every Claude call (with the full prompt and answer), every request to willhaben or another platform
+(app/willhaben/recorder.py; the entry's payload names the platform when it is not willhaben), every
 state-changing click, background job, search agent run and notification becomes one `TimelineEvent`. Which things
 an entry belongs to comes from a context variable: the place that knows the ids sets them once
 (`with timeline.context(conversation_id=...)`), and everything recorded inside, also in background jobs started from
@@ -9,7 +10,7 @@ the page can show one run with all its steps.
 
 Long texts (prompts, answers) live in `TimelineBlob`, compressed. Nothing here is ever part of the bug report.
 Recording never breaks the work it describes: errors are logged and swallowed. Both the timeline and the recording of
-willhaben requests are opt-in (Settings → Timeline, off by default); while the timeline is off nothing is stored here.
+requests to the sites are opt-in (Settings → Timeline, off by default); while the timeline is off nothing is stored here.
 Retention is off unless switched on there too (days and/or a size budget; the oldest entries go first).
 """
 from __future__ import annotations
@@ -476,11 +477,17 @@ class Filters:
     limit: int = 50
     job: int | None = None         # a run and everything inside it
     ids: dict[str, str] = field(default_factory=dict)   # FILTER_PARAMS keys -> value
+    site: str = ""                 # requests to this platform only ("willhaben", "vinted", …)
 
     @property
     def flat(self) -> bool:
         """The plain "All" view folds the steps of a run into the run's entry; filters show every match."""
-        return bool(self.kind or self.errors or self.q or self.job or self.ids)
+        return bool(self.kind or self.errors or self.q or self.job or self.ids or self.site)
+
+
+def _site_of() -> Any:
+    """The platform of a request entry: payload.platform, absent (NULL) for willhaben."""
+    return func.coalesce(func.json_extract(TimelineEvent.payload, "$.platform"), "willhaben")
 
 
 def _where(f: Filters) -> list[Any]:
@@ -497,6 +504,9 @@ def _where(f: Filters) -> list[Any]:
         w.append(TimelineEvent.ts >= utcnow() - RANGES[f.range])
     if f.job:
         w.append(or_(TimelineEvent.id == f.job, TimelineEvent.run_id == f.job))
+    if f.site:
+        w.append(TimelineEvent.kind == "wh")
+        w.append(_site_of() == f.site)
     for param, value in f.ids.items():
         column = FILTER_PARAMS.get(param)
         if column and value not in (None, ""):
@@ -504,7 +514,7 @@ def _where(f: Filters) -> list[Any]:
             if v is not None:
                 w.append(getattr(TimelineEvent, column) == v)
     if not f.flat:      # the overview: steps stay inside their run (notifications are shown on their own as well),
-        # plain willhaben requests only in the willhaben tab, a filter or their run; failed ones always
+        # plain requests to the sites only in the requests tab, a filter or their run; failed ones always
         w.append(or_(col(TimelineEvent.run_id).is_(None), TimelineEvent.kind == "notify"))
         w.append(or_(TimelineEvent.kind != "wh", col(TimelineEvent.ok).is_not(True)))
     return w
@@ -555,6 +565,18 @@ def counts_by_kind() -> dict[str, int]:
         rows = db.exec(select(TimelineEvent.kind, func.count()).group_by(TimelineEvent.kind)).all()
     by = {k: int(n) for k, n in rows}
     return {g: sum(by.get(k, 0) for k in kinds) for g, kinds in KIND_GROUPS.items()}
+
+
+def counts_by_site() -> dict[str, int]:
+    """Request entries per platform, most first ({"willhaben": 120, "vinted": 4})."""
+    with session() as db:
+        rows = db.exec(select(_site_of(), func.count()).where(TimelineEvent.kind == "wh").group_by(_site_of())).all()
+    return dict(sorted(((str(k), int(n)) for k, n in rows), key=lambda kv: -kv[1]))
+
+
+def site_of(e: TimelineEvent) -> str:
+    """The platform a request entry went to (willhaben when the entry does not say)."""
+    return str((e.payload or {}).get("platform") or "willhaben") if e.kind == "wh" else ""
 
 
 def links(e: TimelineEvent) -> list[dict[str, Any]]:

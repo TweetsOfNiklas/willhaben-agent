@@ -1,11 +1,11 @@
-{# One timeline entry opened (htmx from _timeline_rows.html): facts, links, long texts, a willhaben request/response,
+{# One timeline entry opened (htmx from _timeline_rows.html): facts, links, long texts, a request/response of a site,
    the steps of a run. Context: e, facts, texts [(name, label, text)], steps, narrow [(label, href)], rec. #}
 {% import "_ui.html" as ui %}
 <div class="flex flex-col gap-3 text-[13px]">
   {% if e.error %}<div class="rounded-field bg-bad-soft px-3 py-2 whitespace-pre-wrap text-error">{{ e.error }}</div>{% endif %}
   <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1">
     <dt class="text-muted">{{ _("Time") }}</dt><dd class="tabular-nums">{{ e.ts|local('%d.%m.%Y %H:%M:%S') }}</dd>
-    <dt class="text-muted">{{ _("Kind") }}</dt><dd>{{ tl_kind_label(e.kind) }}{% if e.name %} · <code class="text-[12px]">{{ e.name }}</code>{% endif %}</dd>
+    <dt class="text-muted">{{ _("Kind") }}</dt><dd>{{ tl_kind_label(e.kind) }}{% if e.kind == 'wh' %} · {{ tl_pill_label(e) }}{% endif %}{% if e.name %} · <code class="text-[12px]">{{ e.name }}</code>{% endif %}</dd>
     {% if e.actor %}<dt class="text-muted">{{ _("By") }}</dt><dd>{{ tl_actor_label(e.actor) }}</dd>{% endif %}
     {% if e.duration_ms is not none %}<dt class="text-muted">{{ _("Duration") }}</dt><dd class="tabular-nums">{{ tl_duration(e.duration_ms) }}</dd>{% endif %}
     {% if e.run_id %}<dt class="text-muted">{{ _("Part of") }}</dt><dd><a class="link link-primary" href="/timeline?job={{ e.run_id }}">{{ _("Run {id}", id=e.run_id) }}</a></dd>{% endif %}

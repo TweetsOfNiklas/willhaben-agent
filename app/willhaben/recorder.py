@@ -1,6 +1,8 @@
-"""Every willhaben request with its answer, stored for the timeline, offline replay and test fixtures.
+"""Every request to willhaben and the other sites with its answer, stored for the timeline, offline replay and test
+fixtures (WhRecording.platform says which site; the name stayed from when there was only willhaben).
 
-The two choke points (PublicClient._get for anonymous requests, BrowserSession.api/upload/ws_* for the account) and
+The choke points (HttpPlatformClient._get for the anonymous requests of every site, BrowserSession.api/upload/ws_* for
+the willhaben account) and
 the side channels (page loads, the live chat socket, label and image downloads, the manual API recording) call
 `record_http()` / `record_ws()` / `record_push()`. Each call becomes a WhRecording row plus a "wh" timeline entry that
 carries the timeline context (which ad, chat, search, run it belongs to).
@@ -9,7 +11,7 @@ What is stored: method, URL, a canonical key for replay matching, status, durati
 CSRF tokens, authorization never), and both bodies zlib-compressed up to a cap per content type. Images are kept as
 size + sha256 only. Bodies over the cap keep their head and are flagged `truncated` (replay never uses those).
 
-Opt-in: nothing is stored unless "Record willhaben requests" is switched on in Settings → Timeline (setting
+Opt-in: nothing is stored unless "Record requests to the sites" is switched on in Settings → Timeline (setting
 wh_recording). The timeline entry of a request needs the timeline switched on as well; without it the recording is
 still kept for replay and export.
 
@@ -195,7 +197,7 @@ class Pending:
 
 
 def enabled() -> bool:
-    """Recording is switched on (Settings → Timeline → Record willhaben requests)."""
+    """Recording is switched on (Settings → Timeline → Record requests to the sites)."""
     from app.services import timeline
 
     return timeline.flag(timeline.SETTING_WH)
@@ -394,8 +396,10 @@ def stats() -> dict[str, Any]:
         rows = int(db.exec(select(func.count()).select_from(WhRecording)).one())
         oldest, newest = db.exec(select(func.min(WhRecording.ts), func.max(WhRecording.ts))).one()
         by_channel = {c: int(n) for c, n in db.exec(select(WhRecording.channel, func.count()).group_by(WhRecording.channel))}
-        by_platform = {(p or "willhaben"): int(n) for p, n in db.exec(select(WhRecording.platform, func.count())
-                                                                        .group_by(WhRecording.platform))}
+        by_platform: dict[str, int] = {}
+        for p, n in db.exec(select(WhRecording.platform, func.count()).group_by(WhRecording.platform)):
+            by_platform[p or "willhaben"] = by_platform.get(p or "willhaben", 0) + int(n)
+        by_platform = dict(sorted(by_platform.items(), key=lambda kv: -kv[1]))     # most first
     return {"rows": rows, "bytes": storage_size(), "oldest": oldest, "newest": newest, "by_channel": by_channel,
             "by_platform": by_platform}
 

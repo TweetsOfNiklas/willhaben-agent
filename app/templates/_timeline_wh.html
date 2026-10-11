@@ -1,9 +1,10 @@
-{# The stored willhaben request of a timeline entry (_timeline_detail.html). rec = recorder.view_for_event(). #}
+{# The stored request of a timeline entry to willhaben or another site (_timeline_detail.html). rec = recorder.view_for_event(). #}
 <div class="flex flex-col gap-2.5">
   <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1">
+    <dt class="text-muted">{{ _("Site") }}</dt><dd>{{ tl_site_name(rec.platform) }}</dd>
     <dt class="text-muted">{{ _("Request") }}</dt><dd class="break-all"><code class="text-[12px]">{{ rec.method }} {{ rec.url }}</code></dd>
     {% if rec.final_url %}<dt class="text-muted">{{ _("Ended at") }}</dt><dd class="break-all"><code class="text-[12px]">{{ rec.final_url }}</code></dd>{% endif %}
-    <dt class="text-muted">{{ _("Answer") }}</dt><dd>{% if rec.status is not none %}HTTP {{ rec.status }}{% elif rec.ws_status %}{{ rec.ws_status }}{% else %}–{% endif %} · {{ rec.outcome }}{% if rec.cached %} · {{ _("from the app's cache, no request to willhaben") }}{% endif %}{% if rec.content_type %} · {{ rec.content_type }}{% endif %}</dd>
+    <dt class="text-muted">{{ _("Answer") }}</dt><dd>{% if rec.status is not none %}HTTP {{ rec.status }}{% elif rec.ws_status %}{{ rec.ws_status }}{% else %}–{% endif %} · {{ rec.outcome }}{% if rec.cached %} · {{ _("from the app's cache, no request to {platform}", platform=tl_site_name(rec.platform)) }}{% endif %}{% if rec.content_type %} · {{ rec.content_type }}{% endif %}</dd>
     <dt class="text-muted">{{ _("Channel") }}</dt><dd>{{ rec.channel }} · {{ rec.kind }}</dd>
     <dt class="text-muted">{{ _("Replay key") }}</dt><dd><code class="text-[12px]">{{ rec.key }}</code></dd>
   </dl>

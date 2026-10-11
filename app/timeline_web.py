@@ -29,10 +29,10 @@ def _(text: str) -> str:
     return text
 
 
-KIND_LABELS = {"llm": _("Claude"), "wh": _("willhaben"), "action": _("Action"), "job": _("Job"),
+KIND_LABELS = {"llm": _("Claude"), "wh": _("Request"), "action": _("Action"), "job": _("Job"),
                "agent_run": _("Agent run"), "sched": _("Scheduled"), "notify": _("Notification")}
 KIND_TONES = {"llm": "brand", "action": "ok", "notify": "warn"}
-GROUP_LABELS = [("", _("All")), ("llm", _("Claude")), ("wh", _("willhaben")), ("action", _("Actions")),
+GROUP_LABELS = [("", _("All")), ("llm", _("Claude")), ("wh", _("Requests")), ("action", _("Actions")),
                 ("runs", _("Jobs & runs")), ("notify", _("Notifications"))]
 ACTOR_LABELS = {"user": _("you"), "api": _("API"), "mcp": _("MCP"), "telegram": _("Telegram"), "ha": _("Home Assistant"),
                 "scheduler": _("scheduler"), "system": _("app")}
@@ -46,6 +46,21 @@ BLOB_LABELS = {"system": _("System prompt"), "prompt": _("Prompt"), "schema": _(
 
 def kind_label(kind: str) -> str:
     return t(KIND_LABELS.get(kind, kind))
+
+
+def site_name(pid: str | None) -> str:
+    """A platform's display name ("Vinted"); the id itself when the platform is gone."""
+    from app import platforms
+
+    try:
+        return platforms.get(pid or "willhaben").name
+    except Exception:  # noqa: BLE001 - an entry of a platform that no longer exists
+        return pid or "willhaben"
+
+
+def pill_label(e) -> str:
+    """The row's label: the site for a request ("willhaben", "Vinted"), else the kind."""
+    return site_name(timeline.site_of(e)) if e.kind == "wh" else kind_label(e.kind)
 
 
 def actor_label(actor: str | None) -> str:
@@ -62,6 +77,8 @@ def title_of(e) -> str:
     """The list line: actions by their label (the stored title is the fallback)."""
     if e.kind == "action":
         return timeline.action_label(e.name or "", e.title)
+    if e.kind == "wh":
+        return re.sub(r"^\[[a-z0-9_]+\] ", "", e.title)     # the pill names the site ("[vinted] GET …" before)
     return e.title
 
 
@@ -105,15 +122,17 @@ def _filters(request: Request) -> timeline.Filters:
         return int(raw) if raw.isdigit() else None
 
     rng = qp.get("range") or "all"
+    site = (qp.get("site") or "").strip().lower()
     return timeline.Filters(kind=qp.get("kind") or "", errors=qp.get("errors") in ("1", "on", "true"),
                             q=(qp.get("q") or "").strip()[:100], range=rng if rng in timeline.RANGES else "all",
                             before=_int("before"), limit=_int("limit") or 50, job=_int("job"),
-                            ids={p: qp[p].strip() for p in timeline.FILTER_PARAMS if (qp.get(p) or "").strip()})
+                            ids={p: qp[p].strip() for p in timeline.FILTER_PARAMS if (qp.get(p) or "").strip()},
+                            site=site if re.fullmatch(r"[a-z][a-z0-9_]{0,30}", site) else "")
 
 
 def _params(f: timeline.Filters, **change: Any) -> str:
     """Query string for these filters with some values changed (None/"" drops one)."""
-    base: dict[str, Any] = {"kind": f.kind, "errors": "1" if f.errors else "", "q": f.q,
+    base: dict[str, Any] = {"kind": f.kind, "site": f.site, "errors": "1" if f.errors else "", "q": f.q,
                             "range": "" if f.range == "all" else f.range, "job": f.job or "", **f.ids}
     base.update(change)
     clean = {k: v for k, v in base.items() if v not in (None, "")}
@@ -174,7 +193,8 @@ def install(app: FastAPI, templates: Jinja2Templates) -> None:
     global _templates
     _templates = templates
     templates.env.globals.update(tl_kind_label=kind_label, tl_actor_label=actor_label, tl_duration=duration,
-                                 tl_links=timeline.links, tl_title=title_of, tl_kind_tones=KIND_TONES)
+                                 tl_links=timeline.links, tl_title=title_of, tl_kind_tones=KIND_TONES,
+                                 tl_pill_label=pill_label, tl_site_name=site_name)
     app.include_router(router)
 
     @app.middleware("http")
@@ -217,12 +237,20 @@ async def timeline_page(request: Request):
     if request.headers.get("hx-request") and f.before:      # "Load more": only the next rows
         return _templates.TemplateResponse(request, "_timeline_rows.html", ctx)
     counts = timeline.counts_by_kind()
-    tabs = [("/timeline" + _params(f, kind=k, before=None), t(label), counts.get(k) if k else None, f.kind == k)
-            for k, label in GROUP_LABELS]
+    tabs = [("/timeline" + _params(f, kind=k, site=None, before=None), t(label), counts.get(k) if k else None,
+             f.kind == k or (k == "wh" and bool(f.site))) for k, label in GROUP_LABELS]
+    site_tabs = []
+    if f.kind == "wh" or f.site:      # the requests tab: one more row to pick a site
+        by_site = timeline.counts_by_site()
+        if len(by_site) > 1 or f.site:
+            site_tabs = [("/timeline" + _params(f, kind="wh", site=None, before=None), t("All sites"),
+                          sum(by_site.values()), not f.site)]
+            site_tabs += [("/timeline" + _params(f, kind="wh", site=pid, before=None), site_name(pid), n, f.site == pid)
+                          for pid, n in by_site.items()]
     chips = [(t(PARAM_LABELS[p]) + f" {v}", "/timeline" + _params(f, **{p: None})) for p, v in f.ids.items()]
     if f.job:
         chips.append((t("Run {id}", id=f.job), "/timeline" + _params(f, job=None)))
-    return render(request, "timeline.html", **ctx, tabs=tabs, chips=chips,
+    return render(request, "timeline.html", **ctx, tabs=tabs, site_tabs=site_tabs, chips=chips,
                   ranges=[(k, t(label)) for k, label in RANGE_LABELS], size=timeline.size(), cfg=timeline.config())
 
 
@@ -252,7 +280,7 @@ async def timeline_text(event_id: int, name: str):
 
 @router.get("/timeline/wh/{recording_id:int}/{side}")
 async def timeline_wh_body(recording_id: int, side: str):
-    """A whole stored willhaben request or response body (the detail view shows the beginning)."""
+    """A whole stored request or response body of a site (the detail view shows the beginning)."""
     from fastapi.responses import Response
 
     from app.willhaben import recorder
@@ -262,7 +290,7 @@ async def timeline_wh_body(recording_id: int, side: str):
     body, ctype = recorder.body_of(recording_id, side)
     if body is None:
         raise HTTPException(404)
-    # shown as text, never rendered: a recorded willhaben page must not run its scripts in the dashboard
+    # shown as text, never rendered: a recorded page must not run its scripts in the dashboard
     text_like = not ctype or ctype.startswith("text/") or "json" in ctype or "xml" in ctype or "javascript" in ctype
     media = "text/plain; charset=utf-8" if text_like else ctype
     return Response(body, media_type=media, headers={"Content-Disposition": f'inline; filename="wh-{recording_id}-{side}"',
@@ -270,8 +298,9 @@ async def timeline_wh_body(recording_id: int, side: str):
 
 
 @router.post("/settings/timeline/recordings/export")
-async def settings_recordings_export(since: str = Form("7d"), kinds: str = Form(""), keep_texts: str | None = Form(None)):
-    """Redacted fixture files of the stored willhaben requests, as one ZIP download."""
+async def settings_recordings_export(since: str = Form("7d"), kinds: str = Form(""), keep_texts: str | None = Form(None),
+                                     site: str = Form("")):
+    """Redacted fixture files of the stored requests (of one site, or all), as one ZIP download."""
     import io
     import tempfile
     import zipfile
@@ -286,10 +315,12 @@ async def settings_recordings_export(since: str = Form("7d"), kinds: str = Form(
     except ValueError:
         window = None
     wanted = {k.strip() for k in kinds.split(",") if k.strip()} or None
+    site = site.strip().lower() if re.fullmatch(r"[a-z][a-z0-9_]{0,30}", site.strip().lower()) else ""
 
     def build() -> bytes:
         with tempfile.TemporaryDirectory(prefix="wh-export-") as tmp:
-            files = export.export_recordings(Path(tmp), since=window, kinds=wanted, keep_texts=bool(keep_texts))
+            files = export.export_recordings(Path(tmp), since=window, kinds=wanted, keep_texts=bool(keep_texts),
+                                             platforms={site} if site else None)
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
                 for f in files:
@@ -298,7 +329,7 @@ async def settings_recordings_export(since: str = Form("7d"), kinds: str = Form(
 
     data = await asyncio.to_thread(build)
     return Response(data, media_type="application/zip",
-                    headers={"Content-Disposition": 'attachment; filename="willhaben-fixtures.zip"'})
+                    headers={"Content-Disposition": f'attachment; filename="{site or "all-sites"}-fixtures.zip"'})
 
 
 @router.post("/settings/timeline/recordings/delete")
@@ -306,7 +337,7 @@ async def settings_recordings_delete():
     from app.willhaben import recorder
 
     n = await asyncio.to_thread(recorder.delete_all)
-    return RedirectResponse(f"/settings/timeline?msg={quote(t('{n} willhaben recordings deleted.', n=n), safe='')}",
+    return RedirectResponse(f"/settings/timeline?msg={quote(t('{n} stored requests deleted.', n=n), safe='')}",
                             status_code=303)
 
 
@@ -351,9 +382,9 @@ async def settings_timeline(record: str | None = Form(None), enabled: str | None
 
 @router.post("/settings/timeline/recording")
 async def settings_timeline_recording(record_wh: str | None = Form(None)):
-    """The willhaben requests card's own switch (the timeline form above does not touch it)."""
+    """The requests card's own switch (the timeline form above does not touch it)."""
     timeline.set_recording(willhaben=bool(record_wh))
-    msg = t("willhaben requests are recorded from now on.") if record_wh else t("willhaben requests are no longer recorded.")
+    msg = t("Requests to the sites are recorded from now on.") if record_wh else t("Requests to the sites are no longer recorded.")
     return RedirectResponse(f"/settings/timeline?msg={quote(msg, safe='')}", status_code=303)
 
 
@@ -364,5 +395,5 @@ async def settings_timeline_prune():
         msg = t("Set a number of days or a size first.")
     else:
         res = await asyncio.to_thread(timeline.prune, cfg["days"], cfg["max_mb"])
-        msg = t("{n} entries deleted, {b} willhaben answers emptied.", n=res["deleted"], b=res["bodies_dropped"])
+        msg = t("{n} entries deleted, {b} stored answers emptied.", n=res["deleted"], b=res["bodies_dropped"])
     return RedirectResponse(f"/settings/timeline?msg={quote(msg, safe='')}", status_code=303)

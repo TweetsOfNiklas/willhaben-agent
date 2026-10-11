@@ -1,8 +1,11 @@
-{# Settings → Timeline → willhaben requests: download redacted fixture files (app/willhaben/export.py) as a ZIP. #}
+{# Settings → Timeline → requests to the sites: download redacted fixture files (app/willhaben/export.py) as a ZIP,
+   of one site or all; other sites' files sit in a folder named after the site. #}
 <details class="text-[13px]">
   <summary class="cursor-pointer font-medium">{{ _("Export as test fixtures") }}</summary>
   <form method="post" action="/settings/timeline/recordings/export" class="mt-2 flex flex-col gap-2.5">
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Site") }}</span>
+        <select name="site" class="select w-full min-w-0 bg-base-200"><option value="">{{ _("All sites") }}</option>{% for pid in (tl_rec.by_platform or {}) %}<option value="{{ pid }}">{{ tl_site_name(pid) }}</option>{% endfor %}</select></label>
       <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Recorded in the last") }}</span>
         <select name="since" class="select w-full min-w-0 bg-base-200"><option value="1d">{{ _("24 hours") }}</option><option value="7d" selected>{{ _("7 days") }}</option><option value="30d">{{ _("30 days") }}</option><option value="">{{ _("any time") }}</option></select></label>
       <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Kinds (comma-separated, empty = all)") }}</span><input name="kinds" placeholder="search,detail,chat" class="input w-full min-w-0 bg-base-200"></label>

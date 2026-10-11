@@ -1,10 +1,11 @@
-"""Turn stored willhaben recordings into redacted fixture files for tests (and the fake willhaben in tests/).
+"""Turn stored recordings (willhaben and the other sites) into redacted fixture files for tests.
 
     uv run python -m app.willhaben.export --out tests/fixtures/rec --since 7d --kinds search,detail,chat
-        [--channels anonymous,account] [--all] [--keep-texts] [--raw]
+        [--channels anonymous,account] [--platforms willhaben,vinted] [--all] [--keep-texts] [--raw]
 
 One JSON file per request, the newest one per canonical request unless --all:
-    <out>/<kind>/<METHOD>-<path-slug>-<key8>.json
+    <out>/<kind>/<METHOD>-<path-slug>-<key8>.json              (willhaben, as the fake willhaben in tests/ expects)
+    <out>/<platform>/<kind>/<METHOD>-<path-slug>-<key8>.json   (the other sites)
     {"method", "url", "final_url", "kind", "channel", "status", "ws_status", "content_type", "recorded_at",
      "truncated", "request": {"headers", "body"}, "response": {"headers", "body"}}
 Bodies are parsed JSON when they are JSON, else text. Images and emptied (pruned) recordings are skipped. Personal data
@@ -56,7 +57,9 @@ def _clean(value: Any, content_type: str | None, ctx: redact.RedactContext | Non
         return value
     if isinstance(value, (dict, list)):
         return redact.redact_json(value, ctx)
-    if "html" in (content_type or "") or "__NEXT_DATA__" in value:
+    if "x-component" in (content_type or "") or redact.FLIGHT_LINE_RE.match(value.split("\n", 1)[0]):
+        return redact.redact_flight(value, ctx)
+    if "html" in (content_type or "") or "__NEXT_DATA__" in value or "data-vue3" in value:
         return redact.redact_html(value, ctx)
     return value
 
@@ -71,8 +74,9 @@ def _slug(url: str) -> str:
 
 def export_recordings(out: Path, *, since: timedelta | None = None, kinds: set[str] | None = None,
                       channels: set[str] | None = None, all_versions: bool = False, keep_texts: bool = False,
-                      raw: bool = False) -> list[Path]:
+                      raw: bool = False, platforms: set[str] | None = None) -> list[Path]:
     """Write one fixture file per recording (newest per request unless all_versions). Returns the files written."""
+    from sqlalchemy import or_
     from sqlmodel import col, select
 
     from app.db import WhRecording, session, utcnow
@@ -85,6 +89,9 @@ def export_recordings(out: Path, *, since: timedelta | None = None, kinds: set[s
         q = q.where(col(WhRecording.kind).in_(sorted(kinds)))
     if channels:
         q = q.where(col(WhRecording.channel).in_(sorted(channels)))
+    if platforms:
+        site = col(WhRecording.platform).in_(sorted(platforms))
+        q = q.where(or_(site, col(WhRecording.platform).is_(None)) if "willhaben" in platforms else site)
     with session() as db:
         rows = list(db.exec(q.order_by(col(WhRecording.id).desc())))
     ctx = None if raw else redact.RedactContext(keep_texts=keep_texts)
@@ -120,7 +127,8 @@ def export_recordings(out: Path, *, since: timedelta | None = None, kinds: set[s
             entry = json.loads(text)
         body = entry["request"]["body"]
         key = recorder.canonical_key(r.method, entry["url"], body, upload=_upload_of(r.method, body))
-        path = out / r.kind / f"{r.method}-{_slug(entry['url'])}-{key[:8]}{'-' + str(r.id) if all_versions else ''}.json"
+        folder = out if (r.platform or "willhaben") == "willhaben" else out / r.platform
+        path = folder / r.kind / f"{r.method}-{_slug(entry['url'])}-{key[:8]}{'-' + str(r.id) if all_versions else ''}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text + "\n", encoding="utf-8")
         written.append(path)
@@ -140,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--since", default="", help="only recordings of the last 7d / 12h / 30m")
     ap.add_argument("--kinds", default="", help="comma-separated: search,detail,chat,send,myads,publish,upload,…")
     ap.add_argument("--channels", default="", help="comma-separated: anonymous,account,chat,navigation,download,browser")
+    ap.add_argument("--platforms", default="", help="comma-separated: willhaben,kleinanzeigen,shpock,vinted,preisjaeger")
     ap.add_argument("--all", action="store_true", help="every recording, not only the newest per request")
     ap.add_argument("--keep-texts", action="store_true", help="keep chat message texts (names etc. are still replaced)")
     ap.add_argument("--raw", action="store_true", help="no redaction at all (never commit these files)")
@@ -149,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     init_db()
     split = lambda v: {x.strip() for x in v.split(",") if x.strip()} or None  # noqa: E731
     files = export_recordings(a.out, since=parse_since(a.since), kinds=split(a.kinds), channels=split(a.channels),
-                              all_versions=a.all, keep_texts=a.keep_texts, raw=a.raw)
+                              all_versions=a.all, keep_texts=a.keep_texts, raw=a.raw, platforms=split(a.platforms))
     print(f"{len(files)} files written to {a.out}" + (" (NOT redacted)" if a.raw else " – review them before committing"))
     return 0
 

@@ -1,8 +1,8 @@
 {# Settings → Timeline: retention of the timeline (app/services/timeline.py). tl_cfg = timeline.config(),
-   tl_size = timeline.size(), tl_rec = recorder stats (willhaben requests) or none. #}
+   tl_size = timeline.size(), tl_rec = recorder stats (requests to willhaben and the other sites) or none. #}
 {% import "_ui.html" as ui %}
 <form method="post" action="/settings/timeline" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  <p class="text-muted">{{ _("The timeline keeps every Claude call with its full prompt and answer, every willhaben request with its answer, your actions and the background jobs, so you can see why something happened.") }} <a class="link link-primary" href="/timeline">{{ _("Open the timeline") }}</a></p>
+  <p class="text-muted">{{ _("The timeline keeps every Claude call with its full prompt and answer, every request to willhaben and the other sites with its answer, your actions and the background jobs, so you can see why something happened.") }} <a class="link link-primary" href="/timeline">{{ _("Open the timeline") }}</a></p>
   <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block font-medium">{{ _("Record the timeline") }}</span><span class="block text-[12.5px] text-muted">{{ _("Claude calls with prompt and answer, your actions, background jobs, agent runs and notifications. Off: nothing is recorded.") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="record" {% if tl_cfg.record %}checked{% endif %}></label>
   <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
     <div class="rounded-field bg-base-200 px-3 py-2.5"><div class="text-[20px] leading-none font-semibold tabular-nums">{{ tl_size.events }}</div><div class="mt-1 text-[12.5px] text-muted">{{ _("entries") }}</div></div>
@@ -14,7 +14,7 @@
     <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Keep for (days, empty = no limit)") }}</span><input type="number" name="days" value="{{ tl_cfg.days or '' }}" min="1" class="input w-full min-w-0 bg-base-200"></label>
     <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("At most (MB, empty = no limit)") }}</span><input type="number" name="max_mb" value="{{ tl_cfg.max_mb or '' }}" min="10" class="input w-full min-w-0 bg-base-200"></label>
   </div>
-  <small class="text-[12.5px] text-muted">{{ _("Over the size limit, the answers of the oldest willhaben requests are emptied first, then the oldest entries are deleted. The database file does not shrink by itself; freed space is reused.") }}</small>
+  <small class="text-[12.5px] text-muted">{{ _("Over the size limit, the stored answers of the oldest requests are emptied first, then the oldest entries are deleted. The database file does not shrink by itself; freed space is reused.") }}</small>
   <div class="flex flex-wrap gap-2"><button class="btn btn-primary">{{ _("Save") }}</button><button class="btn" formaction="/settings/timeline/prune">{{ _("Delete old entries now") }}</button></div>
 </form>
 {% if tl_rec is defined and tl_rec %}{% include "settings/_timeline_recordings.html" %}{% endif %}
