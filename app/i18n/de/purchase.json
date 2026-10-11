@@ -196,5 +196,18 @@
   "The stroke is the asking price among the comparable ads (cheap on the left, expensive on the right), the ring is your maximum without shipping and fee - drag it to change the price. The ends are the cheapest and the most expensive comparable ad.": "Der Strich ist der Angebotspreis unter den vergleichbaren Anzeigen (links günstig, rechts teuer), der Ring dein Höchstpreis ohne Versand und Gebühr – zieh ihn, um den Preis zu ändern. Die Enden sind die günstigste und die teuerste vergleichbare Anzeige.",
   "Maximum incl. shipping & fee": "Höchstpreis inkl. Versand & Gebühr",
   "Maximum {price} incl. shipping & fee (−{pct} % below the asking price)": "Höchstpreis {price} inkl. Versand & Gebühr (−{pct} % unter dem Angebotspreis)",
-  "Maximum {price} incl. shipping & fee": "Höchstpreis {price} inkl. Versand & Gebühr"
+  "Maximum {price} incl. shipping & fee": "Höchstpreis {price} inkl. Versand & Gebühr",
+  "Q: {question}\nA: {answer}": "F: {question}\nA: {answer}",
+  "The seller agreed": "Kaufzusage vom Verkäufer",
+  "{title}, {price}": "{title}, {price}",
+  "Seller answered: {questions}": "Verkäufer hat geantwortet: {questions}",
+  "Answer from the seller": "Antwort vom Verkäufer",
+  "Pickup place": "Abholort",
+  "Google Maps; the exact address comes from the seller": "Google Maps; die genaue Adresse nennt der Verkäufer",
+  "Questions for the seller": "Fragen an den Verkäufer",
+  "optional, one per line": "optional, eine pro Zeile",
+  "e.g. Is the original box included?": "z. B. Ist die Originalverpackung dabei?",
+  "The agent asks them in the chat; when the seller agrees to the sale you get the answers with the notification.": "Der Agent stellt sie im Chat; bei der Kaufzusage bekommst du die Antworten mit der Benachrichtigung.",
+  "Your questions": "Deine Fragen",
+  "(no answer yet)": "(noch keine Antwort)"
 }

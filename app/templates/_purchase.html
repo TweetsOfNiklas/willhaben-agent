@@ -41,6 +41,10 @@
   </div>
   {% set mk = pc.get('market') %}
   {% if mk or pc.median %}<div class="muted" style="padding:10px 20px;border-bottom:1px solid var(--border);font-size:12.5px">{% if mk %}{{ _("Comparable ads ({n})", n=mk.get('count') or 0) }}: {% if mk.get('min') is not none %}{{ _("cheapest {price}", price=mk.get('min')|eur) }}{% endif %}{% if mk.get('p25') is not none %} · {{ _("lower quartile {price}", price=mk.get('p25')|eur) }}{% endif %}{% if mk.get('median') is not none %} · {{ _("median {price}", price=mk.get('median')|eur) }}{% endif %}{% else %}{{ _("Comparable median {price}", price=pc.median|eur) }}{% endif %}</div>{% endif %}
+  {% if pc.get('questions') %}
+  <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px"><div class="eyebrow">{{ _("Your questions") }}</div>
+    {% for q in pc.questions %}<div style="font-size:13px"><div style="font-weight:600">{{ q.question }}</div><div class="{{ '' if q.answer else 'muted' }}">{{ q.answer or _("(no answer yet)") }}</div></div>{% endfor %}</div>
+  {% endif %}
   {% if pc.log %}
   <div style="padding:14px 20px 16px;display:flex;flex-direction:column;gap:6px"><div class="eyebrow" style="margin-bottom:4px">{{ _("History") }}</div>
     {% for h in pc.log %}<div style="display:grid;grid-template-columns:120px 1fr;gap:12px;font-size:13px"><span class="muted num">{{ (h.at or '')[:16]|replace('T', ' ') }}</span><span>{{ h.text }}</span></div>{% endfor %}</div>

@@ -87,8 +87,7 @@ search-agent builder and the price-check category selector)
 | User statistics | `GET /webapi/iad/user/statistics` | V |
 | Watchlist | `GET /webapi/iad/userfolders/all/{userId}` | Q |
 | Number of search alerts | `GET /webapi/ad-search/alert/user/activeCount` | V |
-| Create conversation for an ad (first message to the seller) | chat WebSocket `create_conversation` `{ad_id, client_conversation_id, message}`, see "Sending chat messages" → `conversation_id` from the answer, else found in the conversation list. Fallback (not used): `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` | from the bundle, live unverified |
-| First message to the seller | `POST /webapi/iad-messaging/sendrequest/chat` (JSON, fields ?) | V path |
+| Create conversation for an ad (first message to the seller) | only from the ad page's contact form: `POST /webapi/iad-messaging/sendrequest/chat` `{fromFullName, firstName?, lastName?, shareTenantProfile: false, from: <e-mail>, adId: <number>, copyToSender: false, showTelephoneNumber: false, telephone: "", selectedContactSuggestions: [], mailContent}` → `{sent, conversationId}`. The chat WebSocket cannot open a chat (a `create_conversation` frame went unanswered live, 2026-10-10). `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` → `{conversationId}` is what "Sofort kaufen" uses, without a message | from the ad-detail bundle (2026-10-10), first live use pending |
 | Contact request by e-mail | `POST /webapi/iad-messaging/sendrequest` | V path |
 | Messages of a conversation | `GET /webapi/chat-api/v1/conversations/{id}/messages?limit=100&offset=0` → `conversation_info` (same as list entry) + `messages[]` with `message_id`, `type` (`text` / `integration_message` / `system_message`), `text`, `is_mine`, `read`, `created_at`, `parameters` | V |
 | Send reply | REST: ? — sent via the chat WebSocket instead, see below | V (WebSocket) |
@@ -129,10 +128,9 @@ No REST call: the web app sends via the chat WebSocket `wss://chat-realtime-web.
 
 - Send: `{"req_type": "send_message", "request_id": "<uuid>", "payload": {"conversation_id": "…", "client_message_id": "<uuid>", "text": "…", "type": "text"}}`
   → responses with the same `request_id`, `req_type: "send_message"`, `status`: `ack` → `success` | `error`.
-- New conversation for an ad: `{"req_type": "create_conversation", "request_id": "<uuid>", "payload": {"ad_id": "…", "client_conversation_id": "<uuid>", "message": "…"}}`
-  (bundle, 2026-10-09). **Live unverified**: the answer's shape is unknown. `AccountClient.create_conversation` takes
-  `conversation_id` from the answer if present, otherwise polls `conversations` for the ad's entry whose newest message is ours
-  with that text. Used for purchase orders (buyer side, see below).
+- New conversation for an ad: **not** over the WebSocket. A `create_conversation` frame found in the chat bundle went
+  unanswered live (2026-10-10, timeout, no chat). A buyer opens a chat through the ad page's contact form, see the table row
+  "Create conversation for an ad" and `AccountClient.create_conversation`.
 - Health check: `{"req_type": "ping"}` → `{"req_type": "ping", "status": "success"}` (confirmed live).
 - Read receipt: `{"req_type": "mark_message_as_read", "payload": {"conversation_id": "…", "message_id": "…"}}`, no
   `request_id`, fire-and-forget; the web app sends one per unread incoming message (`read: false` in the history) when
@@ -151,8 +149,8 @@ unless the order says so). Planned flow (`app/services/purchase.py`):
 
 1. **Start**, mode `paylivery` (the ad has PayLivery and the buyer setting is on) or `direct` (no PayLivery: the own
    shipping address is sent after agreement, the seller's bank details come from the chat).
-2. **Opener**: `AccountClient.create_conversation(ad_id, text)` sends the first message as a new chat (WebSocket
-   `create_conversation`, see "Sending chat messages"). The new conversation is synced like any other chat
+2. **Opener**: `AccountClient.create_conversation(ad_id, text)` sends the first message through the ad page's contact
+   form (`POST iad-messaging/sendrequest/chat`, see the table above). The new conversation is synced like any other chat
    (`messages` endpoint, notices, role `buyer`).
 3. **Negotiation** in the chat: replies over `send_message`, price moves in small steps, never above the max price.
 4. **Closing**, `paylivery`: once agreed, the agent runs the PayLivery action `offer` in the browser (see "Actions"
@@ -161,6 +159,11 @@ unless the order says so). Planned flow (`app/services/purchase.py`):
    `direct`: after agreement the agent sends the own address and asks for the bank details; the user transfers the
    money and marks the order paid.
 5. The order shows as a card in the chat and in a list of purchase orders.
+6. **Questions** (optional, buy dialog step 3, one per line, at most 8): the opener asks them, the rules block lists them as
+   answered/open, Claude copies the seller's answers into `purchase_state.answers`, and the code merges them onto
+   `Purchase.questions` (only the user's own questions). The first agreement (`agreed`, a pickup appointment or an
+   accepted PayLivery offer) pushes "Kaufzusage" with all questions and answers once (`questions_sent_at`); a later
+   answer comes as its own push.
 
 **Shipping and maximum price.** The maximum price includes shipping. The buyer's delivery price of a PayLivery ad is read
 from `advertDetails.p2ppOptions.deliveryOptions[].price` (the cheapest option; numbers or German text such as "4,90";
@@ -188,11 +191,9 @@ PayLivery stage change of a chat, from a notice (`_apply_and_push`) or from an o
 fire hooks.
 
 **To record on the first live use** (Session → API recording, label `purchase-opener`): start one purchase order on a
-test ad you can leave, and keep the capture until the first seller answer. It must contain the `create_conversation`
-frame and its answer (look for `conversation_id`, its position and the status values: `ack`, `success`, `error`), and
-the conversation list entry afterwards (`ad_info.id`, `last_message.is_mine`, `last_message.preview`). If the frame is
-refused, switch to the REST fallback `PUT /webapi/iad-messaging/conversation/init/{adId}?chatSystem=chat` (record it
-under the same label) and update this section and the table row.
+test ad you can leave. The capture must contain the `POST iad-messaging/sendrequest/chat` and its answer (`sent`,
+`conversationId`), and the conversation list entry afterwards (`ad_info.id`, `last_message.is_mine`,
+`last_message.preview`). Update the table row with what willhaben really answers.
 
 ## Mark as sold / reserved (from the my-adverts bundle, 2026-10-09)
 

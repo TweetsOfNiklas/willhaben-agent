@@ -36,6 +36,7 @@
         <span><span style="display:block;font-weight:600">{{ label }}</span><span class="muted" style="font-size:12.5px">{{ fact }}</span></span>
       </label>
       {% endfor %}
+      {% if d.maps_url %}<p class="bd-place muted" style="font-size:13px;margin-top:4px">{{ _("Pickup place") }}: <a href="{{ d.maps_url }}" target="_blank" rel="noopener">{{ d.place }} ↗</a> <small>({{ _("Google Maps; the exact address comes from the seller") }})</small></p>{% endif %}
       <label class="bd-time field" style="margin-top:4px"><span>{{ _("Preferred time") }}</span><input type="text" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}"></label>
       <div class="bd-nav row" style="justify-content:flex-end"><button type="button" class="btn bd-next" onclick="wbBuy.next(this.form)">{{ _("Next") }}</button></div>
     </section>
@@ -60,6 +61,9 @@
         <li class="bd-row" style="display:grid;grid-template-columns:120px 1fr auto;gap:12px;padding:10px 14px;{% if fair %}border-bottom:1px solid var(--border);{% endif %}align-items:center"><span class="bd-k muted" style="font-size:13px">{{ _("Maximum") }}</span><span class="bd-v row" style="gap:8px"><strong class="bd-inl" data-s="max"></strong>{% if fair and fair.js %}<span class="bd-pill bd-live deal-lvl" data-tpl="{{ _('{n} % · {level}') }}" hidden></span>{% endif %}</span><button type="button" class="btn ghost xs" onclick="wbBuy.go(this.form, 2)">{{ _("Change") }}</button></li>
         {% if fair %}<li class="bd-row" style="display:grid;grid-template-columns:120px 1fr;gap:12px;padding:10px 14px;align-items:center"><span class="bd-k muted" style="font-size:13px">{{ _("Rating") }}</span><span class="bd-v bd-fairline row" style="gap:8px">{{ fair_line }}</span></li>{% endif %}
       </ul>
+      <label class="bd-questions field"><span>{{ _("Questions for the seller") }} <small class="muted">({{ _("optional, one per line") }})</small></span>
+        <textarea name="questions" rows="3" maxlength="1500" placeholder="{{ _('e.g. Is the original box included?') }}"></textarea>
+        <small class="muted">{{ _("The agent asks them in the chat; when the seller agrees to the sale you get the answers with the notification.") }}</small></label>
       <p class="muted" style="font-size:12.5px">{{ _("Nothing is paid automatically. The agent contacts the seller and negotiates within your maximum. With PayLivery you confirm the payment on your phone.") }} <a href="/settings/purchase">{{ _("Settings → Buying rules") }}</a></p>
       <div class="bd-nav row" style="justify-content:space-between"><button type="button" class="btn secondary bd-back" onclick="wbBuy.back(this.form)">{{ _("Back") }}</button><button type="submit" class="btn bd-start">{{ _("Start purchase") }}</button></div>
     </section>

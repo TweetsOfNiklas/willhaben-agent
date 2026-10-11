@@ -235,7 +235,8 @@ async def purchase_new(request: Request, ad_id: str, search: str = "", q: str = 
 async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price: str = Form(""),
                          pickup_window: str = Form(""), search_id: str = Form(""), query: str = Form(""),
                          title: str = Form(""), url: str = Form(""), image_url: str = Form(""),
-                         price: str = Form(""), back: str = Form(""), max_default: str = Form("")):
+                         price: str = Form(""), back: str = Form(""), max_default: str = Form(""),
+                         questions: str = Form("")):
     dest = _safe_back(back, "/purchases")
     try:
         ad = ad_id.strip()
@@ -245,7 +246,8 @@ async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price:
             ad, mode, None if max_default == "1" else _max_price(max_price),   # untouched prefill: asking + shipping (+ fee)
             search_id=_int(search_id), query=query.strip()[:200] or None,
             title=title.strip()[:200] or None, url=_https(url, "https://www.willhaben.at/"),
-            image_url=_https(image_url, "https://"), price=_float(price), pickup_window=pickup_window)
+            image_url=_https(image_url, "https://"), price=_float(price), pickup_window=pickup_window,
+            questions=questions)
     except PurchaseError as e:
         return _go(dest, str(e))
     return _go(f"/purchases/{pid}")

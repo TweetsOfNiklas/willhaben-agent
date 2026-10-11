@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit
 
 from app.i18n import t
 
@@ -197,6 +197,12 @@ class AdDetail:
     paylivery_enabled: bool = False    # the ad offers willhaben PayLivery (attribute payliveryEnabled)
     buy_now: bool = False              # "Sofort kaufen" (p2ppOptions.buyNowInformationDto.isBuyNowAd)
     shipping_price: float | None = None  # cheapest PayLivery delivery price for the buyer (p2ppOptions.deliveryOptions[].price)
+    place: str | None = None           # pickup place for a map search: "postcode municipality, country" (advertAddressDetails)
+
+    @property
+    def maps_url(self) -> str | None:
+        """Google Maps search for the place of the ad (postcode level, private sellers show no street)."""
+        return f"https://www.google.com/maps/search/?api=1&query={quote_plus(self.place)}" if self.place else None
 
     def as_context(self) -> dict[str, Any]:
         return {
@@ -284,6 +290,9 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
     canonical = (ad.get("seoMetaData") or {}).get("canonicalUrl")
     private = _first(a, "ISPRIVATE")
     location = ", ".join(x for x in [addr.get("postCode"), addr.get("postalName"), addr.get("province")] if x)
+    # postalName can be a part of the town ("Bergerviertel"), municipality is the town itself ("Sankt Gallen")
+    town = " ".join(x for x in [addr.get("postCode"), addr.get("municipality") or addr.get("postalName")] if x)
+    place = ", ".join(x for x in [town, addr.get("country") or ("Österreich" if town else None)] if x)
     return AdDetail(
         ad_id=str(ad.get("id")),
         heading=ad.get("description") or "",
@@ -309,6 +318,7 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
                                 _first(a, "payliveryEnabled")),
         buy_now=bool(((ad.get("p2ppOptions") or {}).get("buyNowInformationDto") or {}).get("isBuyNowAd")),
         shipping_price=_shipping_price(ad.get("p2ppOptions")),
+        place=place or None,
     )
 
 

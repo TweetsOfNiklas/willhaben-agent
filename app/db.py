@@ -270,6 +270,8 @@ class Purchase(SQLModel, table=True):
     mode: str = "paylivery"                # paylivery | direct | pickup
     pickup_window: str | None = None       # pickup: the user's preferred time window (free text)
     pickup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # pickup: {start, minutes, location}
+    questions: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # [{question, answer}] for the seller
+    questions_sent_at: datetime | None = None  # when the answers went to the user with the agreement push
     status: str = "new"                    # see app/services/purchase.py STATUSES
     conversation_id: str | None = Field(default=None, index=True)
     agreed_price: float | None = None      # item price (without shipping)
