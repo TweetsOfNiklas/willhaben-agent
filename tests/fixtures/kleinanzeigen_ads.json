@@ -2,15 +2,8 @@
  "{http://www.ebayclassifiedsgroup.com/schema/ad/v1}ads": {
   "value": {
    "paging": {
-    "numFound": {
-     "value": 1234
-    },
-    "pageNum": {
-     "value": 0
-    },
-    "pageSize": {
-     "value": 30
-    }
+    "numFound": "12345",
+    "exactNumFound": "true"
    },
    "ad": [
     {
@@ -50,9 +43,7 @@
       }
      },
      "category": {
-      "id": {
-       "value": "217"
-      },
+      "id": "217",
       "localized-name": {
        "value": "Fahrräder & Zubehör"
       }
@@ -112,7 +103,7 @@
      },
      "price": {
       "price-type": {
-       "value": "FIXED"
+       "value": "SPECIFIED_AMOUNT"
       },
       "amount": {
        "value": 60
@@ -139,9 +130,7 @@
       }
      },
      "category": {
-      "id": {
-       "value": "217"
-      },
+      "id": "217",
       "localized-name": {
        "value": "Fahrräder & Zubehör"
       }
@@ -241,9 +230,7 @@
       }
      },
      "category": {
-      "id": {
-       "value": "217"
-      },
+      "id": "217",
       "localized-name": {
        "value": "Fahrräder & Zubehör"
       }
@@ -284,7 +271,7 @@
      },
      "price": {
       "price-type": {
-       "value": "NEGOTIABLE"
+       "value": "PLEASE_CONTACT"
       }
      },
      "poster-type": {
@@ -308,9 +295,7 @@
       }
      },
      "category": {
-      "id": {
-       "value": "217"
-      },
+      "id": "217",
       "localized-name": {
        "value": "Fahrräder & Zubehör"
       }

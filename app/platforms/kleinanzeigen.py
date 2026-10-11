@@ -42,7 +42,6 @@ LOCATIONS_NS = "{http://www.ebayclassifiedsgroup.com/schema/location/v1}location
 SORTS = {"newest": "DATE_DESCENDING", "relevance": "DATE_DESCENDING", "price_asc": "PRICE_ASCENDING",
          "price_desc": "PRICE_DESCENDING"}
 MAX_ROWS = 50
-NUM_FOUND_CAP = 10000                        # the API never reports more
 LOCATION_CACHE_S = 24 * 3600
 PICTURE_RELS = ("XXL", "large", "teaser")
 
@@ -95,7 +94,8 @@ def _euro(amount: float) -> str:
 
 
 def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
-    """(price, display, negotiable): FREE -> 0 "Zu verschenken"; no amount -> None "VB"; "120 € VB" when negotiable."""
+    """(price, display, negotiable): FREE -> 0 "Zu verschenken"; no amount -> None "VB"; "120 € VB" when negotiable.
+    Seen live (2026-10): SPECIFIED_AMOUNT and PLEASE_CONTACT with an amount (shown as the plain price)."""
     price = ad.get("price") or {}
     kind = (str(_val(price.get("price-type")) or "")).upper()
     amount = to_float(_val(price.get("amount")))
@@ -103,7 +103,7 @@ def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
         return 0.0, "Zu verschenken", False
     vb = kind == "NEGOTIABLE"
     if amount is None:
-        return None, "VB" if vb or kind == "SEE_DESCRIPTION" else None, vb or None
+        return None, "VB" if vb or kind in ("SEE_DESCRIPTION", "PLEASE_CONTACT") else None, vb or None
     return amount, _euro(amount) + (" VB" if vb else ""), vb
 
 
@@ -143,7 +143,7 @@ def parse_ads(data: dict[str, Any]) -> SearchPage:
     found = to_float(_val((block.get("paging") or {}).get("numFound")))
     ads = [parse_listing(a) for a in _many(block.get("ad")) if isinstance(a, dict)]
     rows = int(found) if found is not None else len(ads)
-    return SearchPage(rows_found=min(rows, NUM_FOUND_CAP), ads=ads)
+    return SearchPage(rows_found=rows, ads=ads)
 
 
 def parse_ad(data: dict[str, Any]) -> AdDetail | None:

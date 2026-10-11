@@ -128,7 +128,7 @@ pacing and budget.
 | Site | Country | Access | Search agents | Ad viewer | Price check | Buying, chats, own ads | Status |
 |---|---|---|---|---|---|---|---|
 | willhaben.at | AT | direct requests + the logged-in browser | own filters, link, keyword | yes | yes | yes | done |
-| kleinanzeigen.de | DE | the Kleinanzeigen app's JSON API (direct requests) | link, keyword with a price range | yes | against willhaben listings | no | built and tested with fixtures; **not yet live-tested** |
+| kleinanzeigen.de | DE | the Kleinanzeigen app's JSON API (direct requests) | link, keyword with a price range | yes | against willhaben listings | no | built; search, ad details and places checked once against the live API (2026-10-11), no agent has run for days yet |
 
 Links from any of these sites can be pasted on "New search agent"; hits of other sites are listed with the site's
 name, and their links in pushes and the dashboard carry the site (`kleinanzeigen:<id>`).
@@ -284,7 +284,7 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Feature | Status |
 |---|---|
 | Search agents, hits, price drops, quiet hours, human pace | done |
-| Search agents on kleinanzeigen.de (platform adapter framework) | built and tested with fixtures; **not yet live-tested** |
+| Search agents on kleinanzeigen.de (platform adapter framework) | built; the API answers were checked once live, **no agent has run against it for days yet** |
 | Claude screening of hits (with reasons), scam check | done (thresholds still being tuned on real hits) |
 | willhaben login in the dashboard, session check, silent re-login | done |
 | Chat sync (live), history, Claude reply drafts, sending, read receipts | done |

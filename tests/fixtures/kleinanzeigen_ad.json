@@ -37,9 +37,7 @@
     }
    },
    "category": {
-    "id": {
-     "value": "217"
-    },
+    "id": "217",
     "localized-name": {
      "value": "Fahrräder & Zubehör"
     }

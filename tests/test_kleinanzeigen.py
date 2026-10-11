@@ -52,7 +52,7 @@ def platform(client):
 # ------------------------------------------------------------------ parsing
 def test_search_answer_becomes_listings():
     page = ka.parse_ads(load("kleinanzeigen_ads.json"))
-    assert page.rows_found == 1234 and [a.ad_id for a in page.ads] == ["2712345678", "2712345679", "2712345680", "2712345681"]
+    assert page.rows_found == 12345 and [a.ad_id for a in page.ads] == ["2712345678", "2712345679", "2712345680", "2712345681"]
     vb, dealer, free, novalue = page.ads
     assert vb.price == 1250 and vb.price_display == "1.250 € VB" and vb.is_private is True and vb.platform == "kleinanzeigen"
     assert vb.location == "10115 Berlin" and vb.postcode == "10115" and vb.published_at.isoformat() == "2026-10-10T07:15:30+00:00"
@@ -62,7 +62,7 @@ def test_search_answer_becomes_listings():
     assert free.price == 0 and free.price_display == "Zu verschenken" and free.image_url is None
     assert novalue.price is None and novalue.price_display == "VB"
     assert ka.parse_ads({}).rows_found == 0 and ka.parse_ads({"x": 1}).ads == []
-    single = {ka.ADS_NS: {"value": {"paging": {"numFound": {"value": 1}}, "ad": load("kleinanzeigen_ads.json")[ka.ADS_NS]["value"]["ad"][0]}}}
+    single = {ka.ADS_NS: {"value": {"paging": {"numFound": "1"}, "ad": load("kleinanzeigen_ads.json")[ka.ADS_NS]["value"]["ad"][0]}}}
     assert len(ka.parse_ads(single).ads) == 1                            # one result comes as a dict, not a list
 
 
@@ -118,7 +118,7 @@ def test_bad_links_and_keyword_search():
 async def test_search_sends_the_apps_headers_and_params(platform, client):
     spec = platform.parse_search_url("https://www.kleinanzeigen.de/s-preis:100:2000/berlin/rennrad/k0")
     page = await platform.search(spec, rows=20)
-    assert page.rows_found == 1234 and page.title == "rennrad"
+    assert page.rows_found == 12345 and page.title == "rennrad"
     urls = [u for u, _ in client._transport.calls]
     assert urls[0].startswith("https://api.kleinanzeigen.de/api/locations.json?q=berlin")   # the place, once
     search = urls[1]
@@ -158,7 +158,7 @@ async def test_detail_404_and_agent_end_to_end(platform, client):
     a = create_agent("https://www.kleinanzeigen.de/s-preis::2000/rennrad/k0")
     assert a.platform == "kleinanzeigen" and a.name == "rennrad" and a.interval_s >= 180
     res = await run_agent(a.id)
-    assert res.baseline and res.rows_found == 1234 and res.error is None
+    assert res.baseline and res.rows_found == 12345 and res.error is None
     from app.db import Hit, session
     from sqlmodel import select
     with session() as db:

@@ -32,15 +32,16 @@ SECRET_KEYS = re.compile(r"(?i)api[_-]?key|token|secret|password")
 PERSON_KEYS = {"emailAddress": "erika@example.org", "email": "erika@example.org", "firstName": "Erika",
                "lastName": "Muster", "nickname": "Erika M.", "displayName": "Erika M.", "partnerName": "Erika M.",
                "partner_name": "Erika M.", "userName": "erika", "username": "erika", "contactName": "Erika M.",
-               "fullName": "Erika Muster", "full_name": "Erika Muster"}
+               "fullName": "Erika Muster", "full_name": "Erika Muster", "contact-name": "Erika M.",
+               "contact-name-initials": "EM", "store-title": "Beispiel Shop"}
 PERSON_PARENTS = {"participant_info", "participantInfo", "participants", "partner", "sender", "receiver", "recipient",
                   "user", "userData", "seller", "buyer", "sellerProfileUserData", "otherParty", "counterpart"}
-ADDRESS_KEYS = {"street", "streetName", "street_name", "houseNumber", "house_number", "address", "addressLine1",
+ADDRESS_KEYS = {"street", "street-name", "streetName", "street_name", "houseNumber", "house_number", "address", "addressLine1",
                 "addressLine2", "address_line1", "address_line2"}
 IBAN_KEYS = {"iban", "IBAN", "bic", "BIC", "accountNumber"}
 ID_KEYS = {"loginId", "userId", "user_id", "uuid", "conversationId", "conversation_id", "messageId", "message_id",
            "senderId", "sender_id", "receiverId", "receiver_id", "partnerId", "partner_id", "participantId",
-           "participant_id", "orgId", "organisationId", "customerId", "customer_id"}
+           "participant_id", "orgId", "organisationId", "customerId", "customer_id", "user-id", "store-id"}
 MESSAGE_MARKERS = {"conversation_id", "conversationId", "message_id", "messageId", "sender", "senderId", "sender_id",
                    "isOwnMessage", "messageType", "message_type", "req_type", "participant_info"}
 MESSAGE_PARENTS = {"lastMessage", "last_message", "messages", "message", "payload"}
