@@ -355,3 +355,44 @@ async def test_other_actions_keep_an_unsaved_edit_text(monkeypatch):
     await finish_jobs()
     with session() as db:
         assert db.get(dbmod.MyAd, "6").pending_payload == {"unsaved": {"heading": "Neu"}}
+
+
+# ------------------------------------------------------------------ review fixes (PR #9)
+async def test_a_hung_job_times_out_and_frees_its_lane(monkeypatch):
+    monkeypatch.setattr(jobs, "JOB_TIMEOUT_S", 0.05)
+
+    async def hang(job):
+        await asyncio.sleep(3600)
+
+    async def quick(job):
+        return "ok"
+
+    stuck = jobs.submit("x", "stuck", hang)
+    after = jobs.submit("x", "after", quick)
+    await finish_jobs()
+    assert stuck.status == "failed" and "stopped" in stuck.result and after.status == "done"
+
+
+async def test_save_and_publish_wait_while_claude_revises(monkeypatch):
+    draft_id = _ad_draft()
+    gate = asyncio.Event()
+
+    async def slow_refine(did, instruction, label=None):
+        await gate.wait()
+        return ad_creator.update_draft(did, title="Claude's title")
+
+    monkeypatch.setattr(ad_creator, "refine_draft", slow_refine)
+    assert ad_creator.enqueue_refine(draft_id, "kürzer")
+    await asyncio.sleep(0)
+    d = ad_creator.save_fields(draft_id, "My own title", "Mein Text", "20")
+    assert d.title != "My own title" and "still revising" in d.error            # refused, not silently overwritten
+    assert not ad_creator.enqueue_publish(draft_id, 0, {})                     # no upload of the text being replaced
+    gate.set()
+    await finish_jobs()
+    assert ad_creator.save_fields(draft_id, "My own title", "Mein Text", "20").title == "My own title"
+
+
+def test_a_published_draft_is_not_revised():
+    draft_id = _ad_draft()
+    ad_creator.update_draft(draft_id, status="published")
+    assert not ad_creator.enqueue_refine(draft_id, "kürzer")

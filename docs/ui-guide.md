@@ -1,6 +1,6 @@
 # UI guide: Tailwind CSS + daisyUI + Alpine.js + htmx
 
-The dashboard keeps the 1b design (sidebar rail, list → detail screens, popovers, command palette), built on
+The dashboard keeps its design (sidebar rail, list → detail screens, popovers, command palette), built on
 [Tailwind CSS 4](https://tailwindcss.com) and [daisyUI 5](https://daisyui.com) instead of a hand-written stylesheet.
 No JavaScript framework and no Node: server-rendered Jinja templates, Alpine.js for state in the page, htmx for
 swapping fragments from the server.
@@ -9,7 +9,7 @@ swapping fragments from the server.
 
 | File | What |
 |---|---|
-| `app/styles/app.css` | Tailwind entry: daisyUI themes with the 1b tokens, extra colours, daisyUI tweaks |
+| `app/styles/app.css` | Tailwind entry: daisyUI themes with the design tokens, extra colours, daisyUI tweaks |
 | `app/static/app.css` | Built stylesheet (committed, so the Docker image needs no build step) |
 | `scripts/build-css.sh` | Builds it with Tailwind's standalone binary and daisyUI's plugin files (pinned, checksummed, cached in `build/`) |
 | `app/static/vendor/` | htmx and Alpine.js, served locally |
@@ -22,10 +22,10 @@ After changing classes in a template run `scripts/build-css.sh` (Tailwind only e
 
 ## Colours and sizes
 
-daisyUI's theme slots carry the 1b tokens; light and dark follow the system or the account menu's toggle
+daisyUI's theme slots carry the design tokens; light and dark follow the system or the account menu's toggle
 (`data-theme` on `<html>`).
 
-| 1b token | Use |
+| Design token | Use |
 |---|---|
 | `--bg` page background | `bg-base-200` |
 | `--surface` cards, panels | `bg-base-100` |
@@ -44,9 +44,9 @@ daisyUI's theme slots carry the 1b tokens; light and dark follow the system or t
 
 Body text is 14 px. Small print: `text-[12.5px] text-muted`; uppercase labels: `ui.eyebrow(text)`.
 
-## 1b classes → daisyUI / Tailwind
+## Former class names → daisyUI / Tailwind
 
-| 1b | Now |
+| Before | Now |
 |---|---|
 | `btn` (filled, brand) | `btn btn-primary` |
 | `btn secondary` | `btn` (surface + border, see `app.css`) |
@@ -148,4 +148,4 @@ lanes `ads` and `chat`); the page never waits for it and never reloads for it.
 - No `style="…"` except for data-driven values (a width in %, a channel colour from Python).
 - Keep ids, `name`s, form actions, routes and every visible text: tests and scripts rely on them.
   Translatable strings stay word for word (`app/i18n/de/*.json`); a new string needs a German entry.
-- `ui.css` and `legacy.css` are gone: no 1b class names (`row`, `muted`, `pill`, `seg`, `list-item`, …) in templates.
+- `ui.css` and `legacy.css` are gone: none of the former class names (`row`, `muted`, `pill`, `seg`, `list-item`, …) in templates.

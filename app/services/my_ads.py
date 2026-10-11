@@ -236,13 +236,14 @@ async def cleanup(ad_ids: list[str], job: jobs.Job | None = None) -> dict[str, A
 def enqueue_cleanup(ad_ids: list[str]) -> int:
     """"Clean up" as a background job: the picked ads are marked at once (the page returns right away), the job
     checks them against the fresh candidate list and deletes them one after another. Returns how many were queued."""
-    ids = list(dict.fromkeys(ad_ids))
+    ids = []                      # only the ads this call marked: a marker set by another queued job stays its own
     with session() as db:
-        for ad_id in ids:
+        for ad_id in dict.fromkeys(ad_ids):
             row = db.get(MyAd, ad_id)
-            if row and not row.pending_action:
+            if row and not row.pending_action and not row.replaced_by:
                 row.pending_action, row.last_error = "delete", None
                 db.add(row)
+                ids.append(ad_id)
         db.commit()
     if not ids:
         return 0

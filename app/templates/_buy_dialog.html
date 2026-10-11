@@ -37,7 +37,7 @@
         <span class="min-w-0"><span class="block font-semibold">{{ label }}</span><span class="text-[12.5px] text-muted">{{ fact }}</span></span>
       </label>
       {% endfor %}
-      {% if d.maps_url %}<p class="bd-place mt-1 text-[13px] text-muted">{{ _("Pickup place") }}: <a class="text-primary hover:underline" href="{{ d.maps_url }}" target="_blank" rel="noopener">{{ d.place }} ↗</a> <small>({{ _("Google Maps; the exact address comes from the seller") }})</small></p>{% endif %}
+      {% if d.maps_url %}<p class="bd-place mt-1 text-[13px] text-muted">{{ _("Pickup place") }}: <a class="text-primary hover:underline" href="{{ d.maps_url }}" target="_blank" rel="noopener noreferrer">{{ d.place }} ↗</a> <small>({{ _("Google Maps; the exact address comes from the seller") }})</small></p>{% endif %}
       <label class="bd-time mt-1 flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Preferred time") }}</span><input type="text" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}" class="input w-full bg-base-200"></label>
       <div class="bd-nav flex flex-wrap justify-end gap-2"><button type="button" class="btn btn-primary bd-next [.bd-form:not(.bd-js)_&]:hidden" onclick="wbBuy.next(this.form)">{{ _("Next") }}</button></div>
     </div></section>

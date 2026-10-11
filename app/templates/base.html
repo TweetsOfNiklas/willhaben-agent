@@ -1,4 +1,4 @@
-{# willhaben Agent: page shell (1b design on Tailwind CSS + daisyUI, Alpine.js, htmx). Guide: docs/ui-guide.md
+{# willhaben Agent: page shell (dashboard design on Tailwind CSS + daisyUI, Alpine.js, htmx). Guide: docs/ui-guide.md
    Expects: ui_lang(), _(), session_status, app_version, app_author, auth_enabled(), wh_limiter(), wh_used(), wh_budget(), wh_popup(),
    purchase_notice(), ui_lang_pref(), ui_langs, embed, msg, error. Optional: nav_counts, claude_usage, inbox_items, inbox_unread, current_user.
    Pages choose the layout with top-level sets: {% set layout = "split" %} (list → detail) and {% set has_detail = true %}
@@ -153,13 +153,20 @@
 {% endif %}
 
 {# ---- account menu ---- #}
+{% set more_pages = [('/agents', 'search', _("Search agents"), 0), ('/deals', 'box', _("Product search"), 0), ('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)), ('/new-ad', 'plus', _("New ad"), 0)] %}
 <div id="account-menu" x-cloak x-show="layer === 'account'" class="fixed inset-0 z-[90]" @click.self="close()">
-  <div class="{{ layer_box }} flex w-[248px] flex-col gap-0.5 p-1.5" role="menu">
+  <div class="{{ layer_box }} flex w-[248px] flex-col gap-0.5 p-1.5 max-md:max-h-[calc(100dvh-92px)] max-md:overflow-y-auto" role="menu">
     <div class="mb-1 flex items-center gap-2.5 border-b border-base-300 px-2 pt-2 pb-2.5">
       <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-sm font-bold text-primary">{{ (who or 'w')[:1]|upper }}</span>
       <span class="min-w-0"><span class="block truncate font-semibold">{{ who or 'willhaben Agent' }}</span>
         <span class="flex items-center gap-1.5 text-xs text-muted"><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span>{% if wh_state == 'bad' %}{{ _("not logged in to willhaben") }}{% elif wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben {{ _("logged in") }}{% endif %}</span></span>
     </div>
+    {# phone: the pages the tab bar has no room for #}
+    <ul class="menu mb-1 w-full gap-0.5 border-b border-base-300 p-0 pb-1 md:hidden">
+      {% for href, icon, label, count in more_pages %}
+      <li><a href="{{ href }}" role="menuitem" {% if is_current(href) %}aria-current="page" class="menu-active"{% endif %}>{{ ui.icon(icon, 16) }}<span class="flex-1">{{ label }}</span>{% if count %}<span class="min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ count }}</span>{% endif %}</a></li>
+      {% endfor %}
+    </ul>
     <ul class="menu w-full gap-0.5 p-0">
       <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}{{ _("willhaben account") }}</a></li>
       <li><a href="/session" data-remote role="menuitem">{{ ui.icon('monitor', 16) }}<span class="flex-1">{{ _("Browser window") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
@@ -340,9 +347,13 @@
   {% for href, icon, label, count in [('/', 'home', _("Home"), 0), ('/hits', 'target', _("Hits"), counts.get('hits', 0)), ('/chats', 'chat', _("Chats"), counts.get('chats', 0)), ('/myads', 'tag', _("My ads"), 0)] %}
   <a href="{{ href }}" {% if is_current(href) %}aria-current="page"{% endif %}
      class="relative flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted no-underline aria-[current=page]:font-semibold aria-[current=page]:text-primary">
-    {{ ui.icon(icon) }}{{ label }}{% if count %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ count }}</span>{% endif %}</a>
+    {{ ui.icon(icon) }}<span class="text-center leading-tight">{{ label }}</span>{% if count %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ count }}</span>{% endif %}</a>
   {% endfor %}
-  <button type="button" @click="toggle('account')" class="flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted">{{ ui.icon('settings') }}{{ _("More") }}</button>
+  {% set more = namespace(count=0, current=false) %}
+  {% for href, icon, label, count in more_pages %}{% set more.count = more.count + count %}{% if is_current(href) %}{% set more.current = true %}{% endif %}{% endfor %}
+  <button type="button" @click="toggle('account')" {% if more.current %}aria-current="page"{% endif %}
+          class="relative flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted aria-[current=page]:font-semibold aria-[current=page]:text-primary">
+    {{ ui.icon('dots', 18, 3.5) }}<span class="text-center leading-tight">{{ _("More") }}</span>{% if more.count %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ more.count }}</span>{% endif %}</button>
 </nav>
 {% else %}
 <main class="min-w-0 px-2.5 pt-1.5">
@@ -515,7 +526,7 @@ function refreshInPlace(els) {
     let doc;
     try {
       const r = await fetch(url, {headers: {accept: 'text/html'}});
-      if (!r.ok) return;
+      if (!r.ok || r.redirected) return;     // e.g. an expired login answers with the login page: keep what is shown
       doc = new DOMParser().parseFromString(await r.text(), 'text/html');
     } catch (e) { return; }
     new Set(ids).forEach(id => {

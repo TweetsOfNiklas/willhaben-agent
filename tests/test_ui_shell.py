@@ -1,4 +1,4 @@
-"""The 1b shell (app/static/ui.css + base.html): sidebar, badges, static files."""
+"""The page shell (base.html + app/static/app.css): sidebar, badges, static files."""
 from fastapi.testclient import TestClient
 
 from app.db import Conversation, Hit, SearchAgent, session, utcnow

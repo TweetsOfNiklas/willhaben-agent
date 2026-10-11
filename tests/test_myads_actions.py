@@ -645,3 +645,42 @@ async def test_cleanup_logged_out_leaves_the_reason_on_the_ads(account, monkeypa
         row = db.get(MyAd, "1000000002")
     assert row.pending_action is None and "401" in row.last_error
     assert jobs.snapshot()["recent"][0]["status"] == "failed"
+
+
+def test_bulk_hide_and_show_again_without_willhaben():
+    from app.db import MyAd, session
+    from app.main import app
+    from fastapi.testclient import TestClient
+    with session() as db:
+        for i in ("11", "12", "13"):
+            db.add(MyAd(ad_id=i, heading=f"Ad {i}", status="active"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/myads").text
+        assert 'formaction="/myads/bulk/hide"' in page and "Hide from this list" not in page   # no link in the detail any more
+        r = c.post("/myads/bulk/hide", data={"ids": ["11", "12"]}, follow_redirects=False)
+        assert r.status_code == 303
+        assert 'formaction="/myads/bulk/unhide"' in c.get("/myads?show_hidden=1").text
+        c.post("/myads/bulk/unhide", data={"ids": ["12"]})
+    with session() as db:
+        assert db.get(MyAd, "11").hidden and not db.get(MyAd, "12").hidden and not db.get(MyAd, "13").hidden
+
+
+def test_cleanup_marks_only_its_own_ads():
+    from app.db import MyAd, session
+    from app.services import jobs, my_ads
+    with session() as db:
+        db.add(MyAd(ad_id="21", heading="Alt", status="Passiv"))
+        db.add(MyAd(ad_id="22", heading="Wird bearbeitet", status="Passiv", pending_action="edit"))
+        db.commit()
+    seen = []
+    orig = jobs.submit
+    jobs.submit = lambda kind, label, run, **kw: seen.append((kind, label))   # no job run here
+    try:
+        assert my_ads.enqueue_cleanup(["21", "22", "21"]) == 1                  # 22 belongs to another queued job
+    finally:
+        jobs.submit = orig
+    with session() as db:
+        assert db.get(MyAd, "21").pending_action == "delete" and db.get(MyAd, "22").pending_action == "edit"
+    assert seen and "1" in seen[0][1]
+

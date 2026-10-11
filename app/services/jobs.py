@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Any
 
 from app.db import utcnow
+from app.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -83,13 +84,19 @@ def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *
     return job
 
 
+JOB_TIMEOUT_S = 15 * 60     # longest a job may run (a big clean-up or update fits); the lane is freed afterwards
+
+
 async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
     try:
         async with _locks.setdefault(job.lane, asyncio.Lock()):
             job.status = "running"
             try:
-                job.result = await run(job) or ""
+                job.result = await asyncio.wait_for(run(job), JOB_TIMEOUT_S) or ""
                 job.status = "done"
+            except TimeoutError:          # a stuck request (e.g. a willhaben page that never answers) frees the lane
+                log.warning("job %r timed out after %d s", job.label, JOB_TIMEOUT_S)
+                job.status, job.result = "failed", t("Took longer than {n} min – stopped", n=JOB_TIMEOUT_S // 60)
             except Exception as e:  # noqa: BLE001 - nobody awaits the task: the error goes to the header
                 log.warning("job %r failed: %s", job.label, e)
                 job.status, job.result = "failed", str(e)

@@ -834,12 +834,18 @@ async def myads_photos_save(ad_id: str, order: list[str] = Form(default=[]),
 
 @app.post("/myads/bulk/{action}")
 async def myads_bulk(request: Request, action: str):
-    if action not in ("activate", "deactivate", "delete"):
+    if action not in ("activate", "deactivate", "delete", "hide", "unhide"):
         raise HTTPException(404)
     form = await request.form()
     ids = [str(i) for i in form.getlist("ids") if str(i).isdigit()]
     if not ids:
         return _myads_back(request, t("No ads selected"), form=form)
+    if action in ("hide", "unhide"):          # only this list: nothing happens on willhaben, so no queue
+        for ad_id in ids:
+            my_ads.set_hidden(ad_id, action == "hide")
+        msg = t("Hidden from the list (still online on willhaben): {n}", n=len(ids)) if action == "hide" \
+            else t("Shown in the list again: {n}", n=len(ids))
+        return _myads_back(request, msg, form=form)
     return _queued(request, my_ads.enqueue(action, ids), form)
 
 
@@ -953,9 +959,11 @@ async def sold_notices_send(request: Request, ad_id: str):
     ids = [int(x) for x in form.getlist("send") if str(x).isdigit()]
     if form.get("action") == "discard":
         msg = t("{n} drafts discarded", n=sold.discard_notices(ad_id, ids))
-    else:
+    elif form.get("action") == "send":    # only an explicit "Send": a form without the button never sends
         msg = t("{n} messages queued – they go out in the background, one after another",
                 n=sold.send_notices(ad_id, [(i, str(form.get(f"text_{i}") or "")) for i in ids]))
+    else:
+        msg = t("Nothing done")
     return back(_sold_url(ad_id, kind, buyer, msg, "#step2"))
 
 
@@ -1004,8 +1012,9 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 @app.post("/new-ad/{draft_id:int}")
 async def ad_draft_save(draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
-    ad_creator.save_fields(draft_id, title, description, price)
-    return back(f"/new-ad/{draft_id}?msg={quote(t('Changes saved'), safe='')}")
+    d = ad_creator.save_fields(draft_id, title, description, price)
+    msg = d.error if d.refining else t('Changes saved')
+    return back(f"/new-ad/{draft_id}?msg={quote(msg, safe='')}")
 
 
 @app.post("/new-ad/{draft_id:int}/refine")

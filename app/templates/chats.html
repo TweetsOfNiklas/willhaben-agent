@@ -106,6 +106,12 @@
     }
     return document.scrollingElement;
   };
+  // a thread opens at its newest message, right above the composer, instead of at the oldest one
+  const msgs = document.getElementById('chat-messages'), composer = document.getElementById('chat-composer');
+  if (msgs && composer && !location.hash) {
+    const gap = msgs.getBoundingClientRect().bottom - composer.getBoundingClientRect().top;
+    if (gap > 0) scroller(msgs).scrollTop += gap;
+  }
   const pageUrl = () => { const q = new URLSearchParams(location.search); q.delete('msg'); return location.pathname + (q.toString() ? '?' + q : ''); };
   let busy = false;
   const tick = async () => {

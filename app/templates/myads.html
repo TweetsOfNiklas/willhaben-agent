@@ -65,6 +65,8 @@
     <span class="flex-1"></span>
     <button class="btn btn-xs" formaction="/myads/bulk/activate" hx-post="/myads/bulk/activate" data-act="activate" :disabled="!picked.length">{{ _("Activate") }}</button>
     <button class="btn btn-xs" formaction="/myads/bulk/deactivate" hx-post="/myads/bulk/deactivate" data-act="deactivate" :disabled="!picked.length">{{ _("Deactivate") }}</button>
+    <button class="btn btn-xs" formaction="/myads/bulk/hide" hx-post="/myads/bulk/hide" data-act="hide" :disabled="!picked.length" title="{{ _('Only from this list – the ads stay online on willhaben') }}">{{ _("Hide from list") }}</button>
+    {% if show_hidden %}<button class="btn btn-xs" formaction="/myads/bulk/unhide" hx-post="/myads/bulk/unhide" data-act="unhide" :disabled="!picked.length">{{ _("Show again") }}</button>{% endif %}
     <button class="btn btn-xs btn-outline btn-error bg-base-100" formaction="/myads/bulk/delete" hx-post="/myads/bulk/delete" data-act="delete" :disabled="!picked.length">{{ _("Delete") }}</button>
     <button type="button" class="btn btn-ghost btn-xs" id="sel-done" @click="mode(false)">{{ _("Done") }}</button>
   </form>
@@ -160,8 +162,6 @@
     </form>
   </section>
   <div class="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
-    <form method="post" action="/myads/{{ a.ad_id }}/hide" hx-post="/myads/{{ a.ad_id }}/hide" hx-target="#myads-detail" hx-select="#myads-detail"
-          hx-swap="outerHTML" hx-select-oob="#myads-rows,#myads-chips,#myads-count"><input type="hidden" name="hidden" value="{{ '0' if a.hidden else '1' }}"><button class="link text-muted no-underline hover:text-base-content">{{ _("Show in list again") if a.hidden else _("Hide from this list") }}</button></form>
     {% if a.replaced_by %}<span>· {{ _("renewed as") }} <a class="link link-primary no-underline" href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></span>{% endif %}
   </div>
 {% else %}
@@ -173,7 +173,8 @@
 document.addEventListener('alpine:init', () => Alpine.data('myadsList', () => ({
   selecting: false, picked: [], total: 0,
   T: {none: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}, activate: {{ _("Put these ads online again on willhaben?")|tojson }},
-      deactivate: {{ _("Take these ads offline on willhaben? You can activate them again.")|tojson }}, delete: {{ _("Delete these ads on willhaben for good? This cannot be undone.")|tojson }}},
+      deactivate: {{ _("Take these ads offline on willhaben? You can activate them again.")|tojson }}, delete: {{ _("Delete these ads on willhaben for good? This cannot be undone.")|tojson }},
+      hide: {{ _("Hide these ads from this list? They stay online on willhaben.")|tojson }}, unhide: {{ _("Show these ads in the list again?")|tojson }}},
   boxes() { return [...this.$root.querySelectorAll('input.sel')]; },
   init() { this.total = this.boxes().length; },
   mode(on) { this.selecting = on; if (!on) this.picked = []; },

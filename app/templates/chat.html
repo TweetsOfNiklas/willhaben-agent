@@ -36,7 +36,7 @@
   {% set sending = drafts|selectattr('status', 'equalto', 'sending')|list %}
   {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
   {# an answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done #}
-  <div id="chat-composer" class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[64px]"
+  <div id="chat-composer" class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[60px]"
        {% if sending %}data-pending-key="draft:{{ (sending|last).id }}" data-refresh-also="chat-messages"{% elif conv.drafting %}data-pending-key="drafting:{{ conv.id }}"{% endif %}>
     {% if conv.drafting %}
     {# Claude writes in the background (lane claude): the draft appears here by itself #}

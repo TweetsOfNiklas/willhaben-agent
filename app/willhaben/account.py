@@ -45,6 +45,11 @@ class SendFailed(RuntimeError):
     """willhaben did not take the message."""
 
 
+class OpenerUnconfirmed(SendFailed):
+    """willhaben accepted a new conversation (2xx) but the chat could not be found yet: the message HAS gone out, so
+    starting again would write to the seller a second time."""
+
+
 @dataclass
 class ConversationSummary:
     id: str
@@ -392,6 +397,7 @@ class AccountClient:
             body["lastName"] = last
         r = await self.s.api("POST", SEND_REQUEST_CHAT, body)
         if r.status in (401, 403):
+            self.s.logged_in = False           # like api_json: the session check shows it at once (no retry here)
             raise NotLoggedIn(f"{SEND_REQUEST_CHAT}: HTTP {r.status}")
         try:
             res = r.json()
@@ -404,13 +410,20 @@ class AccountClient:
         if cid:
             return str(cid)
         # sent, but no id in the answer: the conversation list decides
-        for attempt in range(3):
+        cid = await self.find_conversation(ad_id, text)
+        if cid:
+            return cid
+        raise OpenerUnconfirmed(t("Conversation did not show up in the list (response: {status}) – check on willhaben",
+                                  status=r.status))
+
+    async def find_conversation(self, ad_id: str, text: str, tries: int = 3) -> str | None:
+        """The chat of an ad whose newest message is ours with this text (after a contact-form opener), or None."""
+        for attempt in range(tries):
             await asyncio.sleep(1.5 * (attempt + 1))
             for c in await self.conversations(limit=20):
                 if c.ad_id == str(ad_id) and c.last_is_mine is not False and _preview_matches(c.last_text, text):
                     return c.id
-        raise SendFailed(t("Conversation did not show up in the list (response: {status}) – check on willhaben",
-                           status=r.status))
+        return None
 
     async def my_adverts(self) -> AdvertList:
         """The account's ads; willhaben renders them server-side into the my-adverts page."""

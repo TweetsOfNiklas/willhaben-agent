@@ -1,4 +1,4 @@
-/* willhaben Agent UI: Tailwind CSS + daisyUI with the 1b design tokens.
+/* willhaben Agent UI: Tailwind CSS + daisyUI with the dashboard's design tokens.
    Build: scripts/build-css.sh -> app/static/app.css (committed). Guide: docs/ui-guide.md */
 @import "tailwindcss" source(none);
 @source "../templates";
@@ -7,7 +7,7 @@
   themes: light --default, dark --prefersdark;
 }
 
-/* 1b tokens on daisyUI's names: base-100 = surface, base-200 = page background, base-300 = borders */
+/* design tokens on daisyUI's names: base-100 = surface, base-200 = page background, base-300 = borders */
 @plugin "../../build/css-tools/daisyui-theme.mjs" {
   name: "light";
   default: true;
@@ -73,7 +73,7 @@
   --noise: 0;
 }
 
-/* 1b colours daisyUI has no slot for: text-muted, bg-hover, bg-brand-soft, bg-ok-soft, … */
+/* design colours daisyUI has no slot for: text-muted, bg-hover, bg-brand-soft, bg-ok-soft, … */
 @theme {
   --color-muted: var(--wh-muted);
   --color-hover: var(--wh-hover);
@@ -132,7 +132,7 @@
   /* phone layout: the fixed tab bar is as wide as the window minus a classic scrollbar, so the track is always shown;
      otherwise the tabs shift a few pixels between pages that scroll and pages that don't (overlay scrollbars show nothing) */
   @media (max-width: 767px) { :where(html) { overflow-y: scroll; } }
-  /* 1b buttons: medium weight; a plain .btn is the 1b "secondary" button (surface + border), .btn-primary the filled one */
+  /* buttons: medium weight; a plain .btn is the design's "secondary" button (surface + border), .btn-primary the filled one */
   :where(.btn) { font-weight: 500; }
   :where(.btn:not(:is(.btn-primary, .btn-secondary, .btn-accent, .btn-neutral, .btn-info, .btn-success, .btn-warning, .btn-error,
                       .btn-ghost, .btn-link, .btn-outline, .btn-soft, .btn-dash, .btn-disabled, :disabled))) {

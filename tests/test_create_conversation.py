@@ -127,3 +127,17 @@ async def test_counts_as_a_send_in_the_access_log():
     s = _session([{"status": 200, "text": '{"sent": true, "conversationId": "c1"}', "url": "x"}])
     await s.api("POST", SEND_REQUEST_CHAT, {"adId": 1})
     assert _counts() == {("account", "send", "ok"): 1}
+
+
+async def test_unconfirmed_opener_is_its_own_error_and_logs_out_on_403():
+    from app.willhaben.account import OpenerUnconfirmed
+
+    s = _FakeSession(post=(200, {"sent": True}), lists=[{"conversations": []}])
+    with pytest.raises(OpenerUnconfirmed):                      # sent (2xx) but not found: must not be retried blindly
+        await AccountClient(s).create_conversation("77", TEXT)
+    s = _FakeSession(post=(403, {}))
+    s.logged_in = True
+    with pytest.raises(NotLoggedIn):
+        await AccountClient(s).create_conversation("77", TEXT)
+    assert s.logged_in is False and len(s.posts) == 1          # marked logged out, no second POST
+

@@ -295,6 +295,9 @@ def test_web_flow(ad_with_chats, monkeypatch):
                                                  "mode": "template"})
         assert "2 drafts prepared" in r.text and "Send selected" in r.text and not ad_with_chats.sent
         drafts = {o.conv.id: o.draft.id for o in sold.others(AD, "c-buyer")}
+        r = c.post(f"/sold/{AD}/notices/send", data={"kind": "sold", "buyer": "c-buyer",   # no button value: nothing
+                                                      "send": [str(drafts["c-2"])], f"text_{drafts['c-2']}": "Schon weg, sorry."})
+        assert "Nothing done" in r.text and not ad_with_chats.sent
         r = c.post(f"/sold/{AD}/notices/send", data={"kind": "sold", "buyer": "c-buyer", "action": "send",
                                                       "send": [str(drafts["c-2"])], f"text_{drafts['c-2']}": "Schon weg, sorry."})
         assert "1 messages queued" in r.text

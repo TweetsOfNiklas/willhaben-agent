@@ -209,5 +209,8 @@
   "e.g. Is the original box included?": "z. B. Ist die Originalverpackung dabei?",
   "The agent asks them in the chat; when the seller agrees to the sale you get the answers with the notification.": "Der Agent stellt sie im Chat; bei der Kaufzusage bekommst du die Antworten mit der Benachrichtigung.",
   "Your questions": "Deine Fragen",
-  "(no answer yet)": "(noch keine Antwort)"
+  "(no answer yet)": "(noch keine Antwort)",
+  "The opening message was sent, but the chat did not show up yet – check on willhaben. Resume looks for the chat again; it does not write to the seller a second time.": "Die Eröffnungsnachricht wurde gesendet, aber der Chat ist noch nicht aufgetaucht – schau auf willhaben nach. Fortsetzen sucht den Chat erneut; es schreibt dem Verkäufer kein zweites Mal.",
+  "The chat of the sent opening message is still not visible – check on willhaben, then resume again.": "Der Chat zur gesendeten Eröffnungsnachricht ist noch nicht zu sehen – schau auf willhaben nach und setze dann erneut fort.",
+  "Looking for the chat of the sent opening message": "Suche den Chat zur gesendeten Eröffnungsnachricht"
 }

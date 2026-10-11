@@ -1,7 +1,7 @@
 #!/bin/sh
-# Builds app/static/app.css (Tailwind CSS + daisyUI) for the v2 templates (UI prototype, app/templates/v2).
+# Builds app/static/app.css (Tailwind CSS + daisyUI) from the classes used in app/templates.
 # No Node: Tailwind's standalone binary plus daisyUI's plugin files, downloaded once into build/ (gitignored).
-# The built CSS is committed, so the Docker image needs no build step. Run after changing classes in v2 templates.
+# The built CSS is committed, so the Docker image needs no build step. Run after changing classes in templates.
 # Usage: scripts/build-css.sh [--watch]
 set -e
 cd "$(dirname "$0")/.."

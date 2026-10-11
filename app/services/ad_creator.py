@@ -145,8 +145,16 @@ def parse_price(text: str | None) -> float | None:
         return None
 
 
+REFINING_BUSY = "Claude is still revising this draft – save or publish again when it is done"
+
+
 def save_fields(draft_id: int, title: str, description: str, price: str | None) -> AdDraft:
-    """The user's edits of title, description and price (form values)."""
+    """The user's edits of title, description and price (form values). Refused while Claude revises the draft: its
+    result would overwrite the edit (the revision started from the text before it)."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d is not None and d.refining:
+        return update_draft(draft_id, error=t(REFINING_BUSY))
     return update_draft(draft_id, title=title.strip(), description=description.replace("\r\n", "\n").strip(),
                         price_suggestion=parse_price(price))
 
@@ -361,6 +369,9 @@ def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping
         d = db.get(AdDraft, draft_id)
     if d.publishing:
         return False
+    if d.refining:                        # publishing now would upload the text the revision is about to replace
+        update_draft(draft_id, error=t(REFINING_BUSY))
+        return False
     try:
         _publish_inputs(d, option, values, shipping)
     except insert.InsertError as e:
@@ -392,8 +403,8 @@ def enqueue_refine(draft_id: int, instruction: str) -> bool:
 
     with session() as db:
         d = db.get(AdDraft, draft_id)
-    if d is None or d.refining or not instruction.strip():
-        return False
+    if d is None or d.refining or d.publishing or d.status == "published" or not instruction.strip():
+        return False                      # never rewrite a draft that is on its way to willhaben or already there
     update_draft(draft_id, refining=True, error=None)
 
     async def run(job) -> str:

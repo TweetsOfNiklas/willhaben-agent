@@ -223,5 +223,15 @@
  "Saving …": "Speichert …",
  "Not saved – check the connection": "Nicht gespeichert – Verbindung prüfen",
  "The list of contributors comes from GitHub and could not be loaded right now.": "Die Liste der Mitwirkenden kommt von GitHub und konnte gerade nicht geladen werden.",
- "No other contributors yet.": "Noch keine weiteren Mitwirkenden."
+ "No other contributors yet.": "Noch keine weiteren Mitwirkenden.",
+ "Hidden from the list (still online on willhaben): {n}": "Aus der Liste ausgeblendet (auf willhaben noch online): {n}",
+ "Shown in the list again: {n}": "Wieder in der Liste: {n}",
+ "Only from this list – the ads stay online on willhaben": "Nur aus dieser Liste – die Anzeigen bleiben auf willhaben online",
+ "Show again": "Wieder zeigen",
+ "Hide these ads from this list? They stay online on willhaben.": "Diese Anzeigen aus der Liste ausblenden? Sie bleiben auf willhaben online.",
+ "Show these ads in the list again?": "Diese Anzeigen wieder in der Liste zeigen?",
+ "Hide from list": "Ausblenden",
+ "Claude is still revising this draft – save or publish again when it is done": "Claude überarbeitet diesen Entwurf noch – speichere oder veröffentliche erneut, wenn es fertig ist.",
+ "Took longer than {n} min – stopped": "Hat länger als {n} Min. gedauert – abgebrochen",
+ "Nothing done": "Nichts getan"
 }
