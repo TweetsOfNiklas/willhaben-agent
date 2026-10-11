@@ -1,27 +1,30 @@
 {% extends "base.html" %}
-{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
+{% import "_ui.html" as ui %}
+{# Restore step 1 of 2: what the uploaded backup contains. Nothing is changed until the confirm tick and "Restore now". #}
 {% block content %}
-<h3>{{ _("Restore backup") }}</h3>
-<article class="card">
+{{ ui.head(_("Restore backup")) }}
+<div class="flex min-w-0 max-w-[720px] flex-col gap-3.5">
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <p>{{ _("Backup from {date}", date=p.created_at|local("%d.%m.%Y %H:%M")) }}
-    <small class="muted">· {{ _("app version {v}", v=p.app_version) }}{% if filename %} · {{ filename }}{% endif %}</small></p>
-  {% if not p.same_version %}<p class="msg">{{ _("This backup was made with a different app version ({v}). Missing columns are added on start; check the app afterwards.", v=p.app_version) }}</p>{% endif %}
-  <table class="stack">
-    <tr><th>{{ _("Database") }}</th><td>{{ p.db_size|filesizeformat }}
-      {% if p.db_counts %}<br><small class="muted">{% for label, n in p.db_counts.items() %}{{ n }} {{ label }}{% if not loop.last %} · {% endif %}{% endfor %}</small>{% endif %}</td></tr>
-    <tr><th>{{ _("Logins and tokens") }}</th><td>{% if p.secrets %}{{ p.secrets|join(", ") }}{% else %}<span class="muted">{{ _("none") }}</span>{% endif %}</td></tr>
-    <tr><th>{{ _("Ad photos") }}</th><td>{{ _("{n} files", n=p.photos) }} · {{ p.photos_size|filesizeformat }}</td></tr>
-    <tr><th>{{ _("Parcel labels") }}</th><td>{{ _("{n} files", n=p.labels) }}</td></tr>
-    <tr><th>{{ _("willhaben login (browser profile)") }}</th><td>{% if p.profile %}{{ _("{n} files", n=p.profile_files) }} · {{ p.profile_size|filesizeformat }}{% else %}<span class="muted">{{ _("not included – the current login stays") }}</span>{% endif %}</td></tr>
-  </table>
-  <p class="msg">{{ _("Restoring replaces the database, tokens, ad photos and labels of this installation with the backup. The current state is saved first in data/backups/. Afterwards the app restarts.") }}</p>
-  <form method="post" action="/settings/backup/restore">
+    <small class="text-[12.5px] text-muted">· {{ _("app version {v}", v=p.app_version) }}{% if filename %} · {{ filename }}{% endif %}</small></p>
+  {% if not p.same_version %}<div class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-[13px] text-warning">{{ _("This backup was made with a different app version ({v}). Missing columns are added on start; check the app afterwards.", v=p.app_version) }}</div>{% endif %}
+  <dl class="flex flex-col gap-3 text-[13px]">
+    <div class="flex flex-col gap-0.5 sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4"><dt class="text-muted">{{ _("Database") }}</dt><dd class="min-w-0 break-words">{{ p.db_size|filesizeformat }}
+      {% if p.db_counts %}<br><small class="text-[12.5px] text-muted">{% for label, n in p.db_counts.items() %}{{ n }} {{ label }}{% if not loop.last %} · {% endif %}{% endfor %}</small>{% endif %}</dd></div>
+    <div class="flex flex-col gap-0.5 sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4"><dt class="text-muted">{{ _("Logins and tokens") }}</dt><dd class="min-w-0 break-words">{% if p.secrets %}{{ p.secrets|join(", ") }}{% else %}<span class="text-muted">{{ _("none") }}</span>{% endif %}</dd></div>
+    <div class="flex flex-col gap-0.5 sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4"><dt class="text-muted">{{ _("Ad photos") }}</dt><dd class="min-w-0 break-words">{{ _("{n} files", n=p.photos) }} · {{ p.photos_size|filesizeformat }}</dd></div>
+    <div class="flex flex-col gap-0.5 sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4"><dt class="text-muted">{{ _("Parcel labels") }}</dt><dd class="min-w-0 break-words">{{ _("{n} files", n=p.labels) }}</dd></div>
+    <div class="flex flex-col gap-0.5 sm:grid sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4"><dt class="text-muted">{{ _("willhaben login (browser profile)") }}</dt><dd class="min-w-0 break-words">{% if p.profile %}{{ _("{n} files", n=p.profile_files) }} · {{ p.profile_size|filesizeformat }}{% else %}<span class="text-muted">{{ _("not included – the current login stays") }}</span>{% endif %}</dd></div>
+  </dl>
+  <div class="rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]">{{ _("Restoring replaces the database, tokens, ad photos and labels of this installation with the backup. The current state is saved first in data/backups/. Afterwards the app restarts.") }}</div>
+  <form method="post" action="/settings/backup/restore" class="flex flex-col gap-3.5 border-t border-base-300 pt-3.5">
     <input type="hidden" name="token" value="{{ token }}">
-    <label><input type="checkbox" name="confirm" required> {{ _("Yes, replace the current data with this backup") }}</label>
-    <div class="row-actions">
-      <button>{{ _("Restore now") }}</button>
-      <button class="secondary" formaction="/settings/backup/cancel" formnovalidate>{{ _("Cancel") }}</button>
+    <label class="flex cursor-pointer items-start gap-2.5 text-[13.5px]"><input type="checkbox" name="confirm" required class="checkbox checkbox-primary checkbox-sm mt-0.5"> <span class="min-w-0">{{ _("Yes, replace the current data with this backup") }}</span></label>
+    <div class="flex flex-wrap gap-2">
+      <button class="btn btn-primary">{{ _("Restore now") }}</button>
+      <button class="btn" formaction="/settings/backup/cancel" formnovalidate>{{ _("Cancel") }}</button>
     </div>
   </form>
-</article>
+</section>
+</div>
 {% endblock %}

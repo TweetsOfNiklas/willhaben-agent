@@ -1,13 +1,18 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block content %}
-{% if not embed %}<p><a href="/settings">← {{ _("Settings") }}</a></p>
-<h3>{{ _("willhaben account") }}</h3>{% endif %}
+{% if not embed %}
+<a href="/settings" class="btn btn-ghost btn-sm -ml-2 mb-2">{{ ui.icon('back', 16) }}{{ _("Settings") }}</a>
+{{ ui.head(_("willhaben account")) }}
+{% endif %}
+<div class="flex flex-col gap-4">
 {% include "_session_panel.html" %}
-<article id="label-buy">
-  <form method="post" action="/session/label-buy/step" class="row-actions" style="margin:0;align-items:center">
+<section id="label-buy" class="rounded-box border border-base-300 bg-base-100 px-4 py-3">
+  <form method="post" action="/session/label-buy/step" class="flex flex-wrap items-center gap-2.5">
     <input type="hidden" name="next" value="{{ session_next or '/session' }}">
-    <span><small class="muted">{{ _("Checkout step (if a purchase is running)") }}</small></span>
-    <button class="secondary outline" style="width:auto">{{ _("Run next step") }}</button>
+    <span class="text-[12.5px] text-muted">{{ _("Checkout step (if a purchase is running)") }}</span>
+    <button class="btn btn-sm">{{ _("Run next step") }}</button>
   </form>
-</article>
+</section>
+</div>
 {% endblock %}

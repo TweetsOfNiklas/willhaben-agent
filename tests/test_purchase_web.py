@@ -369,7 +369,7 @@ def test_paylivery_card_is_disabled_without_paylivery_at_the_ad(client, monkeypa
     _use(monkeypatch, _ad(paylivery=False, shipping=None, price=100.0))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert 'value="paylivery" required disabled' in frag
-    assert "Not available" in frag and "opacity:.55" in frag
+    assert "Not available" in frag and "opacity-55" in frag
     assert 'value="direct" required' in frag and 'value="pickup" required' in frag
 
 
@@ -384,9 +384,9 @@ def test_step2_has_one_fairness_hint_from_the_product_search_bar(client, monkeyp
     step2 = _step2(frag)
     pos = deals.position(250.0, _market_res(180.0, 200.0, 220.0)["comparables"]["stats"], None)
     # the bar of the product search: gradient track, needle at the position of the asking price, the level badge
-    assert 'class="bd-gauge bd-drag"' in step2 and 'class="deal-track"' in step2
-    assert f'class="deal-needle" style="left:{round(pos["pos"] * 100, 1)}%;top:6px"' in step2
-    assert f'<span class="deal-lvl lvl-{pos["level"]}">' in step2 and deals.level_label(pos["level"]) in step2
+    assert 'bd-drag ' in step2 and 'class="deal-track"' in step2
+    assert 'class="deal-needle ' in step2 and f'style="left:{round(pos["pos"] * 100, 1)}%"' in step2
+    assert f'bg-lvl-{pos["level"]}">' in step2 and deals.level_label(pos["level"]) in step2
     # one short line, worded as on the product search card; the numbers of the old pills and the market line are gone
     assert "14 % above the median · 9 comparable ads" in step2
     for gone in ["Lower quartile € 200", "−10 %", "median € 220", "bd-ceil", "bd-pct", "bd-market"]:
@@ -396,7 +396,7 @@ def test_step2_has_one_fairness_hint_from_the_product_search_bar(client, monkeyp
     summary = re.search(r'<ul class="bd-summary[^"]*".*?</ul>', frag, re.S).group(0)
     assert "14 % above the median · 9 comparable ads" in summary and deals.level_label(pos["level"]) in summary
     assert '>Rating</span>' in summary and "Market" not in summary
-    assert summary.count('class="bd-pill bd-live deal-lvl"') == 1 and step2.count('class="bd-pill bd-live deal-lvl"') == 1
+    assert summary.count('data-tpl="{n} % · {level}"') == 1 and step2.count('data-tpl="{n} % · {level}"') == 1
 
 
 def test_step2_scale_for_the_browser_is_the_one_position_reads(client, monkeypatch):  # noqa: F811
@@ -411,14 +411,14 @@ def test_step2_scale_for_the_browser_is_the_one_position_reads(client, monkeypat
     assert js["scale"] == [[v, q] for v, q in deals.anchors(stats)] and js["scale"][3] == [220.0, 0.5]
     assert js["pos"] == res["position"]["pos"] and js["levels"][0] == [0.12, "bargain"] and js["levels"][-1][1] == "very_expensive"
     assert js["labels"]["cheap"] == "cheap" and set(js["labels"]) == {n for _, n in deals.LEVELS}
-    assert 'class="bd-pin" hidden' in frag and 'data-tpl="{n} % · {level}"' in frag and 'class="bd-gauge bd-drag"' in frag
+    assert re.search(r'class="bd-pin [^"]*" hidden', frag) and 'data-tpl="{n} % · {level}"' in frag and 'bd-drag ' in frag
 
 
 def test_step2_has_three_chips_with_the_item_price_and_the_label_of_the_mode(client, monkeypatch):  # noqa: F811
     _switch_on()
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    chips = re.findall(r'<button type="button" class="chip k-(\w+)" data-v="([\d.]+)"[^>]*data-tpl="([^"]*)"[^>]*>([^<]*)</button>', step2)
+    chips = re.findall(r'<button type="button" class="k-(\w+) [^"]*" data-v="([\d.]+)"[^>]*data-tpl="([^"]*)"[^>]*>([^<]*)</button>', step2)
     # the cheapest comparable first, then lower quartile and median (item prices; the script adds the shipping of the mode); no −10 %
     assert chips == [("min", "180.00", "Cheapest · {x}", "Cheapest · € 180"), ("cheap", "200.00", "Cheap · {x}", "Cheap · € 200"),
                      ("market", "220.00", "Market price · {x}", "Market price · € 220")]
@@ -441,13 +441,13 @@ def test_chips_only_below_the_asking_price_and_not_twice(client, monkeypatch):  
     assert "bd-sugg" not in step2 and "bd-gauge" in step2                  # the bar stays, no chips
     _use(monkeypatch, _ad(), _market_res(180.0, 249.0, 260.0))            # only the cheapest is worth a chip
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert step2.count('data-v="') == 1 and 'class="chip k-min"' in step2
+    assert step2.count('data-v="') == 1 and 'class="k-min ' in step2
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 200.4))            # median rounds to the same price as the quartile
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert step2.count('data-v="') == 2 and 'class="chip k-cheap"' in step2 and 'class="chip k-market"' not in step2
+    assert step2.count('data-v="') == 2 and 'class="k-cheap ' in step2 and 'class="k-market ' not in step2
     _use(monkeypatch, _ad(), _market_res(200.0, 200.2, 220.0))            # quartile rounds to the cheapest: one chip less
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert re.findall(r'class="chip k-(\w+)"', step2) == ["min", "market"]
+    assert re.findall(r'class="k-(\w+) ', step2) == ["min", "market"]
     _use(monkeypatch, _ad(), _market_res(300.0, 280.0, 290.0, price=250.0))   # everything above the asking price
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert 'name="max_price" min="1" step="0.01" value="250.00"' in frag    # still prefilled
@@ -459,13 +459,13 @@ def test_step2_bar_ends_name_the_cheapest_and_the_dearest_comparable(client, mon
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))             # min 180, max 320
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert '<span>€ 180</span><span>€ 320</span>' in step2 and 'class="bd-ends' in step2
-    assert step2.index('class="bd-gauge bd-drag"') < step2.index('class="bd-ends') < step2.index('class="bd-sugg')
+    assert step2.index('class="bd-gauge ') < step2.index('class="bd-ends') < step2.index('class="bd-sugg')
     # too few comparable ads: no scale, no ends, no drag
     res = _market_res(180.0, 200.0, 220.0, count=3)
     res["position"] = {"pos": 0.4, "level": "fair", "basis": "geizhals"}
     _use(monkeypatch, _ad(), res)
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert "bd-ends" not in step2 and "bd-drag" not in step2 and 'class="bd-gauge"' in step2
+    assert "bd-ends" not in step2 and "bd-drag" not in step2 and 'class="bd-gauge ' in step2
     from app import purchase_routes
     assert purchase_routes._fair(_ad(), _market_res(180.0, 200.0, 220.0))["min"] == 180.0
     assert purchase_routes._fair(_ad(), res)["min"] is None and purchase_routes._fair(_ad(), res)["max"] is None
@@ -523,7 +523,7 @@ def test_mode_cards_span_the_column_and_the_number_field_has_no_spinner(client, 
     assert frag.count('<label class="bd-mode') == 3            # the three ways to buy, one card each
     assert 'inputmode="decimal"' in frag
     # the bar: a draggable target (touch-action none), the ring is shown at the default too
-    assert re.search(r"\.bd-drag \{[^}]*touch-action: none", BUY_PANEL)
+    assert "touch-none" in (Path(__file__).resolve().parent.parent / "app" / "templates" / "_buy_dialog.html").read_text(encoding="utf-8")
 
 
 def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # noqa: F811
@@ -532,18 +532,18 @@ def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # 
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     # no hidden attribute in the markup: all three panels show without JavaScript (the script hides two of them)
     assert re.findall(r'<section class="bd-step" data-step="(\d)"[^>]*>', frag) == ["1", "2", "3"]
-    assert re.findall(r'class="bd-chip" data-n="(\d)"', frag) == ["1", "2", "3"]
-    assert re.findall(r'<span class="bd-n">\d</span>([^<]+)</button>', frag) == ["How to buy", "Maximum", "Start"]
-    assert frag.count('class="btn bd-next"') == 2 and frag.count('class="btn secondary bd-back"') == 2
+    assert re.findall(r'class="bd-chip[^"]*" data-n="(\d)"', frag) == ["1", "2", "3"]
+    assert re.findall(r'<span class="bd-n[^"]*">\d</span>([^<]+)</button>', frag) == ["How to buy", "Maximum", "Start"]
+    assert frag.count('class="btn btn-primary bd-next ') == 2 and frag.count('class="btn bd-back ') == 2
     assert 'onkeydown="wbBuy.enter(event)"' in frag and 'data-empty="–"' in frag
     assert frag.count(">Change</button>") == 3 and 'data-s="timerow"' in frag
     for key in ["mode", "ship", "time", "max"]:
         assert f'data-s="{key}"' in frag
     assert 'data-s="max"' in frag and ">Ad<" not in frag             # the ad is on the left, not a summary row again
-    assert 'class="btn bd-start"' in frag and 'type="submit"' in frag and "Start purchase" in frag
+    assert 'class="btn btn-primary ml-auto bd-start"' in frag and 'type="submit"' in frag and "Start purchase" in frag
     assert "Nothing is paid automatically." in frag
     assert 'href="/settings/purchase"' in frag and "Settings → Buying rules" in frag
-    assert 'class="bd-time field"' in frag and "Preferred time" in frag and "e.g. Saturday morning" in frag
+    assert 'class="bd-time ' in frag and "Preferred time" in frag and "e.g. Saturday morning" in frag
     assert "Description" in frag and ">Viewer</a>" in frag and "willhaben ↗" in frag
     assert "Buy now" in frag and 'data-ad="2000000001"' in frag
     assert "Shipping about" not in frag or "data-ship-text" in frag
@@ -553,7 +553,7 @@ def test_dialog_has_one_pill_in_step2_and_one_in_the_summary(client, monkeypatch
     _switch_on()
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    assert frag.count('class="bd-pill bd-live deal-lvl" data-tpl="{n} % · {level}" hidden') == 2
+    assert frag.count('data-tpl="{n} % · {level}" hidden') == 2
 
 
 def test_dialog_with_purchases_off_shows_one_notice_and_fetches_nothing(client, monkeypatch):  # noqa: F811
@@ -716,7 +716,7 @@ function form(o) {
     scrolled: false, scrollIntoView() { this.scrolled = true; },
     closest: sel => (o.dialog && sel === 'dialog' ? { querySelector: () => ({ scrollTop: 99 }) } : null) });
   const map = { 'input[name=mode]:checked': () => Object.values(radios).find(r => r.checked) || null,
-                '.bd-chip.on': () => chips.find(c => c.classList.contains('on')) || null, '.bd-summary': () => summary };
+                '.bd-chip.bd-on': () => chips.find(c => c.classList.contains('bd-on')) || null, '.bd-summary': () => summary };
   const lists = { '.bd-step': steps, '.bd-chip': chips, '.bd-next': nexts, '.bd-live': lives, '.bd-pin': pins, '.bd-sugg button': sugg, '.bd-drag': gauges };
   f.querySelector = s => (map[s] ? map[s]() : null);
   f.querySelectorAll = s => lists[s] || [];
@@ -725,20 +725,20 @@ function form(o) {
 }
 const base = { ask: 250, ship: { paylivery: 7.9, direct: 6, pickup: 0 }, shipText: { paylivery: 'Shipping € 7.90', direct: 'Shipping about € 6', pickup: 'cash, no shipping' } };
 const shown = f => f.steps.map(s => !s.hidden);
-const pill = f => [f.lives[0].textContent, f.lives[0].hidden, f.lives[0].classList.contains('deal-lvl')];
+const pill = f => [f.lives[0].textContent, f.lives[0].hidden, ['fair', 'cheap', 'bargain', 'expensive', 'very_expensive'].some(t => f.lives[0].classList.contains('bg-lvl-' + t))];
 const results = {};
 // 1. opening: step 1 only, no mode yet, Next disabled
 let f = form({ ...base, chips: [200, 150] }); wbBuy.init(f);
-results.init = { js: f.classList.contains('bd-js'), shown: shown(f), chips: f.chips.map(c => [c.disabled, c.classList.contains('on')]), next1: f.nexts[0].disabled };
+results.init = { js: f.classList.contains('bd-js'), shown: shown(f), chips: f.chips.map(c => [c.disabled, c.classList.contains('bd-on')]), next1: f.nexts[0].disabled };
 // 2. choose PayLivery (untouched maximum follows the mode), Next enabled, Next goes to step 2
 f.elements.max_price.value = '250.00';
 f.radios.paylivery.checked = true; wbBuy.mode(f);
 results.mode = { max: f.elements.max_price.value, next1: f.nexts[0].disabled, sumMode: f.sm.mode.textContent, sumShip: f.sm.ship.textContent,
                  maxDefault: f.elements.max_default.value, sumMax: f.sm.max.textContent };
 wbBuy.next(f);
-results.step2 = { step: String(f.dataset.step), shown: shown(f), chipDone: f.chips[0].classList.contains('done'), chipOn: f.chips[1].classList.contains('on'), next2: f.nexts[1].disabled };
+results.step2 = { step: String(f.dataset.step), shown: shown(f), chipDone: f.chips[0].classList.contains('bd-done'), chipOn: f.chips[1].classList.contains('bd-on'), next2: f.nexts[1].disabled };
 // the default itself: the ad's own position (0.75, expensive), 0 %, the ring is shown (around the needle)
-results.dflt = { pill: pill(f), pinHidden: f.pins[0].hidden, chips: f.sugg.map(c => c.textContent), on: f.sugg.map(c => c.classList.contains('on')) };
+results.dflt = { pill: pill(f), pinHidden: f.pins[0].hidden, chips: f.sugg.map(c => c.textContent), on: f.sugg.map(c => c.classList.contains('bd-on')) };
 // 3. a cleared field: still valid (no pill while empty, the summary names the default); leaving the field refills the number
 f.elements.max_price.value = ''; wbBuy.input(f);
 results.empty = { next2: f.nexts[1].disabled, maxDefault: f.elements.max_default.value, pill: pill(f), pinHidden: f.pins[0].hidden, sumMax: f.sm.max.textContent };
@@ -765,8 +765,8 @@ f.elements.max_price.value = '0.5'; wbBuy.input(f);
 results.below1 = { next2: f.nexts[1].disabled, maxDefault: f.elements.max_default.value, pill: pill(f) };
 f.elements.max_price.value = '216.90'; wbBuy.input(f);
 // 4. one pill: 216.90 = item 200 + 7.90 shipping + 9 buyer protection = the median (0.5, fair), 19 % below 269.15; the ring at 50 %
-results.fairPill = { pill: pill(f), cls: f.lives[0].classList.contains('lvl-fair'), summaryPill: f.lives[1].textContent, pin: [f.pins[0].hidden, f.pins[0].style.left],
-                     sumMax: f.sm.max.textContent, chips: f.sugg.map(c => c.textContent), on: f.sugg.map(c => c.classList.contains('on')) };
+results.fairPill = { pill: pill(f), cls: f.lives[0].classList.contains('bg-lvl-fair'), summaryPill: f.lives[1].textContent, pin: [f.pins[0].hidden, f.pins[0].style.left],
+                     sumMax: f.sm.max.textContent, chips: f.sugg.map(c => c.textContent), on: f.sugg.map(c => c.classList.contains('bd-on')) };
 // 5. enter in the number field goes to step 3, never submits; a radio Enter is swallowed
 let prevented = 0;
 const ev = (key, target) => ({ key, target, preventDefault() { prevented++; } });
@@ -776,9 +776,9 @@ let linkPrev = 0;
 wbBuy.enter({ key: 'Enter', target: { form: f, tagName: 'A', type: '' }, preventDefault() { linkPrev++; } });
 results.linkEnter = linkPrev;
 f.elements.max_price.value = '400'; wbBuy.input(f);          // item 375.22 (400 - 7.90 - 16.88): 0.9752 (very expensive), 49 % above
-results.above = { pill: pill(f), cls: f.lives[0].classList.contains('lvl-very_expensive'), pin: [f.pins[0].hidden, f.pins[0].style.left] };
+results.above = { pill: pill(f), cls: f.lives[0].classList.contains('bg-lvl-very_expensive'), pin: [f.pins[0].hidden, f.pins[0].style.left] };
 f.elements.max_price.value = '110'; wbBuy.input(f);          // item 97.70 (110 - 7.90 - 4.40): below the cheapest comparable (bargain)
-results.bargain = { pill: pill(f), cls: f.lives[0].classList.contains('lvl-bargain'), pin: f.pins[0].style.left };
+results.bargain = { pill: pill(f), cls: f.lives[0].classList.contains('bg-lvl-bargain'), pin: f.pins[0].style.left };
 f.elements.max_price.checkValidity = () => false;             // e.g. 220.555: the browser refuses the cents
 results.invalidStep2 = wbBuy.valid(f, 2);
 delete f.elements.max_price.checkValidity;
@@ -803,7 +803,7 @@ wbBuy.pick(h, 200);
 wbBuy.pick(h, 250);                                           // the default again (250 + 6): the flag goes back to untouched
 results.pickDefault = h.elements.max_default.value;
 wbBuy.pick(h, 200);
-results.pick = { max: h.elements.max_price.value, maxDefault: h.elements.max_default.value, chip: h.sugg[0].textContent, on: h.sugg[0].classList.contains('on'),
+results.pick = { max: h.elements.max_price.value, maxDefault: h.elements.max_default.value, chip: h.sugg[0].textContent, on: h.sugg[0].classList.contains('bd-on'),
                  pill: pill(h) };
 // 9. no comparable ads (no data-fair): no pill, no ring, the field alone
 let k = form({ ...base, checked: 'direct', max: '300', fair: false }); wbBuy.init(k);
@@ -850,7 +850,7 @@ results.bound = { listeners: Object.keys(d.gauge.listeners).sort(), once: d.gaug
 wbBuy.init(d);                                                       // a second init does not bind again
 const drags = {};
 d.gauge.listeners.pointerdown({ pointerType: 'mouse', button: 0, pointerId: 7, clientX: 300, preventDefault() {} });   // 50 % = the median 200
-drags.down = { value: d.elements.max_price.value, flag: d.elements.max_default.value, pin: d.pins[0].style.left, pill: pill(d), drag: d.gauge.classList.contains('drag'), captured: [...d.gauge.captured] };
+drags.down = { value: d.elements.max_price.value, flag: d.elements.max_default.value, pin: d.pins[0].style.left, pill: pill(d), drag: d.gauge.classList.contains('bd-dragging'), captured: [...d.gauge.captured] };
 d.gauge.listeners.pointermove({ clientX: 100 + 400 * 0.625 });      // item 225 (between median and p75): 232.90
 drags.move = { value: d.elements.max_price.value, pill: pill(d), sum: d.sm.max.textContent };
 d.gauge.listeners.pointermove({ clientX: 9999 });                    // far right: clamped to the dearest comparable (400)
@@ -859,7 +859,7 @@ d.gauge.listeners.pointermove({ clientX: -50 });                     // far left
 drags.left = { value: d.elements.max_price.value, pin: d.pins[0].style.left };
 d.gauge.listeners.pointerup({});
 d.gauge.listeners.pointermove({ clientX: 300 });                     // released: no longer follows
-drags.after = { value: d.elements.max_price.value, drag: d.gauge.classList.contains('drag') };
+drags.after = { value: d.elements.max_price.value, drag: d.gauge.classList.contains('bd-dragging') };
 d.gauge.listeners.pointerdown({ pointerType: 'mouse', button: 2, pointerId: 8, clientX: 400, preventDefault() {} });   // right button: ignored
 drags.right_button = d.elements.max_price.value;
 d.gauge.listeners.pointerdown({ pointerType: 'touch', button: 0, pointerId: 9, clientX: 100 + 400 * 0.75, preventDefault() {} });   // a finger on the needle: 250 + 7.90 = the default

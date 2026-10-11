@@ -1,33 +1,37 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 {% block title %}{{ _("Credits") }} · willhaben Agent{% endblock %}
 {% block content %}
 {# contributors: pass `contributors = [{login, html_url, avatar_url, contributions}]` from a cached GitHub API call (GET /repos/lumascet/willhaben-agent/contributors), bots filtered. #}
-<div class="page-head"><div class="row" style="gap:16px;flex-wrap:nowrap;align-items:flex-start"><span class="logo" style="width:48px;height:48px;border-radius:14px;font-size:26px">w</span><div><h1>{{ _("Credits") }}</h1><p>willhaben Agent v{{ app_version }} — {{ _("an independent, self-hosted project by {author}. Not affiliated with willhaben.", author=app_author) }}</p></div></div></div>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:start">
-  <section class="card pad" style="grid-column:1 / -1;display:flex;flex-direction:column;gap:14px">
-    <div><h3>{{ _("Special thanks") }}</h3><p class="muted" style="font-size:13px">{{ _("To everyone who committed, tested, reported and translated.") }} {% if contributors is defined %}{{ _("Generated from the repository's contributors.") }}{% endif %}</p></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px">
-      {% set tints = ['#c7d3ef', '#cfe3d4', '#e9c5c9', '#f0dcc0', '#d7d2e6', '#d9e8f0'] %}
+<div class="mb-5 flex items-start gap-4">
+  <span class="grid size-12 shrink-0 place-items-center rounded-[14px] bg-primary text-[26px] font-extrabold text-primary-content">w</span>
+  <div class="min-w-0"><h1>{{ _("Credits") }}</h1><p class="mt-1 text-muted">willhaben Agent v{{ app_version }} — {{ _("an independent, self-hosted project by {author}. Not affiliated with willhaben.", author=app_author) }}</p></div>
+</div>
+<div class="grid items-start gap-5 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
+  <section class="col-span-full flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <div><h3>{{ _("Special thanks") }}</h3><p class="text-[13px] text-muted">{{ _("To everyone who committed, tested, reported and translated.") }} {% if contributors is defined %}{{ _("Generated from the repository's contributors.") }}{% endif %}</p></div>
+    <div class="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
+      {% set tints = ['bg-[#c7d3ef]', 'bg-[#cfe3d4]', 'bg-[#e9c5c9]', 'bg-[#f0dcc0]', 'bg-[#d7d2e6]', 'bg-[#d9e8f0]'] %}
       {% for c in (contributors if contributors is defined else []) %}
-      <a href="{{ c.html_url }}" target="_blank" rel="noopener" class="card row" style="gap:12px;padding:12px 14px;color:var(--text);flex-wrap:nowrap;border-radius:10px">
-        <span class="avatar" style="width:38px;height:38px;font-size:14px;background:{{ tints[loop.index0 % 6] }};color:#1f2430;overflow:hidden;{% if c.avatar_url %}background-image:url({{ c.avatar_url }}&s=76);background-size:cover{% endif %}">{% if not c.avatar_url %}{{ c.login[:2]|upper }}{% endif %}</span>
-        <span style="min-width:0"><span style="display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.login }}</span><span class="muted" style="display:block;font-size:12.5px">{% if c.contributions == 1 %}{{ _("1 commit") }}{% else %}{{ _("{n} commits", n=c.contributions) }}{% endif %}</span></span>
+      <a href="{{ c.html_url }}" target="_blank" rel="noopener" class="flex min-w-0 items-center gap-3 rounded-[10px] border border-base-300 bg-base-100 px-3.5 py-3 text-base-content no-underline hover:border-primary">
+        <span class="relative grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-full text-sm font-bold text-[#1f2430] {{ tints[loop.index0 % 6] }}">{% if c.avatar_url %}<img src="{{ c.avatar_url }}&amp;s=76" alt="" loading="lazy" class="absolute inset-0 size-full object-cover">{% else %}{{ c.login[:2]|upper }}{% endif %}</span>
+        <span class="min-w-0"><span class="block truncate font-semibold">{{ c.login }}</span><span class="block text-[12.5px] text-muted">{% if c.contributions == 1 %}{{ _("1 commit") }}{% else %}{{ _("{n} commits", n=c.contributions) }}{% endif %}</span></span>
       </a>
       {% else %}
-      <p class="muted" style="font-size:13px">{{ _("The list of contributors comes from GitHub and could not be loaded right now.") if contributors is not defined else _("No other contributors yet.") }}</p>
+      <p class="col-span-full text-[13px] text-muted">{{ _("The list of contributors comes from GitHub and could not be loaded right now.") if contributors is not defined else _("No other contributors yet.") }}</p>
       {% endfor %}
     </div>
   </section>
-  <section class="card pad" style="display:flex;flex-direction:column;gap:10px">
+  <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <h3>{{ _("Built with") }}</h3>
-    <div class="row" style="gap:6px">{% for name, note, url in [('FastAPI', 'web framework', 'https://fastapi.tiangolo.com'), ('Uvicorn', 'ASGI server', 'https://www.uvicorn.org'), ('Jinja2', 'templates', 'https://jinja.palletsprojects.com'), ('SQLModel', 'database', 'https://sqlmodel.tiangolo.com'), ('APScheduler', 'agents & intervals', 'https://apscheduler.readthedocs.io'), ('httpx', 'willhaben requests', 'https://www.python-httpx.org'), ('Playwright', "the app's browser", 'https://playwright.dev'), ('htmx', 'partial updates', 'https://htmx.org'), ('pypdf', 'label PDFs', 'https://pypdf.readthedocs.io'), ('segno', 'QR codes', 'https://segno.readthedocs.io'), ('MCP', 'Claude Desktop / Code tools', 'https://modelcontextprotocol.io')] %}<a class="chip" href="{{ url }}" target="_blank" rel="noopener" title="{{ note }}">{{ name }}</a>{% endfor %}</div>
-    <p class="muted" style="font-size:12.5px">{{ _("Spec sheets and new prices from Geizhals; parcel prices from Post, GLS, Hermes and DPD; pushes via Home Assistant and Telegram; appointments via Google Calendar.") }}</p>
+    <div class="flex flex-wrap gap-1.5">{% for name, note, url in [('FastAPI', 'web framework', 'https://fastapi.tiangolo.com'), ('Uvicorn', 'ASGI server', 'https://www.uvicorn.org'), ('Jinja2', 'templates', 'https://jinja.palletsprojects.com'), ('SQLModel', 'database', 'https://sqlmodel.tiangolo.com'), ('APScheduler', 'agents & intervals', 'https://apscheduler.readthedocs.io'), ('httpx', 'willhaben requests', 'https://www.python-httpx.org'), ('Playwright', "the app's browser", 'https://playwright.dev'), ('htmx', 'partial updates', 'https://htmx.org'), ('pypdf', 'label PDFs', 'https://pypdf.readthedocs.io'), ('segno', 'QR codes', 'https://segno.readthedocs.io'), ('MCP', 'Claude Desktop / Code tools', 'https://modelcontextprotocol.io')] %}<a class="inline-flex items-center rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] text-base-content no-underline hover:border-primary" href="{{ url }}" target="_blank" rel="noopener" title="{{ note }}">{{ name }}</a>{% endfor %}</div>
+    <p class="text-[12.5px] text-muted">{{ _("Spec sheets and new prices from Geizhals; parcel prices from Post, GLS, Hermes and DPD; pushes via Home Assistant and Telegram; appointments via Google Calendar.") }}</p>
   </section>
-  <section class="card pad" style="display:flex;flex-direction:column;gap:10px">
+  <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <h3>{{ _("Contribute") }}</h3>
-    <p class="muted" style="font-size:13px">{{ _("Bugs, ideas and German translations are welcome. Fixture recordings from real willhaben responses help most – redact them first.") }}</p>
-    <div class="row"><a class="btn secondary" href="https://github.com/{{ app_author }}/willhaben-agent" target="_blank" rel="noopener">github.com/{{ app_author }}/willhaben-agent ↗</a><a class="btn secondary" href="/bugreport">{{ _("Report a bug") }}</a></div>
-    <p class="muted" style="font-size:12px">{{ _("willhaben's terms forbid automated access; this tool polls sparingly, writes nothing without your click and is used at your own risk.") }}</p>
+    <p class="text-[13px] text-muted">{{ _("Bugs, ideas and German translations are welcome. Fixture recordings from real willhaben responses help most – redact them first.") }}</p>
+    <div class="flex flex-wrap gap-2"><a class="btn" href="https://github.com/{{ app_author }}/willhaben-agent" target="_blank" rel="noopener">github.com/{{ app_author }}/willhaben-agent ↗</a><a class="btn" href="/bugreport">{{ _("Report a bug") }}</a></div>
+    <p class="text-[12px] text-muted">{{ _("willhaben's terms forbid automated access; this tool polls sparingly, writes nothing without your click and is used at your own risk.") }}</p>
   </section>
 </div>
 {% endblock %}

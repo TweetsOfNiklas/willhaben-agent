@@ -6,6 +6,7 @@ import pytest
 from app.db import Conversation, Draft, Hit, MyAd, get_setting, session, set_setting
 from app.services import feedback, ha_actions, telegram
 from tests.test_dashboard import client  # noqa: F401  (pytest fixture)
+from tests.conftest import wait_jobs  # noqa: E402
 
 CHAT = 4242
 
@@ -264,6 +265,7 @@ def test_draft_reply_shows_typing(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(telegram, "typing", lambda: Spy())
     _conversation()
     client.post("/chats/c1/draft", data={"hint": ""})
+    wait_jobs()
     assert seen == ["start", "stop"] and client.fake.calls
 
 

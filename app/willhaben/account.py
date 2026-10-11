@@ -202,6 +202,15 @@ class OwnAdvert:
     reasons_query: bool = False   # non-empty deleteReasonQueryParameter: willhaben asks for a reason before "sold"
 
 
+class AdvertList(list):
+    """The account's ads as the my-adverts page lists them; `complete` = every ad of the account is in it."""
+    total: int | None = None      # initialUserAdsList.totalNumberOfAdvertDetails
+
+    @property
+    def complete(self) -> bool:
+        return self.total is not None and len(self) >= self.total
+
+
 # Link ids in an own ad's advertEditStatusActionsList (from the /bbx-adin myadverts bundle, 2026-10-09)
 ACTION_ACTIVATE = "4"     # deactivated ad back online: PUT, no body
 ACTION_REPUBLISH = "6"    # expired / passive ad: POST -> new insertion draft (new adId), finished like a new ad
@@ -220,13 +229,15 @@ def has_ended(ad: OwnAdvert) -> bool:
                                       and ACTION_REPUBLISH in links)
 
 
-def parse_my_adverts(next_data: dict[str, Any]) -> list[OwnAdvert]:
+def parse_my_adverts(next_data: dict[str, Any]) -> AdvertList:
     """Own ads from the `__NEXT_DATA__` of /iad/myprofile/myadverts (all verticals, first 50)."""
     try:
         lst = next_data["props"]["pageProps"]["initialUserAdsList"]
     except (KeyError, TypeError) as e:
         raise ValueError(t("Page contains no ad list")) from e
-    out = []
+    out = AdvertList()
+    total = lst.get("totalNumberOfAdvertDetails")
+    out.total = total if isinstance(total, int) else None
     for vertical in lst.get("verticalList") or []:
         for ad in vertical.get("advertDetails") or []:
             ad_id = str(ad.get("id") or "")
@@ -401,7 +412,7 @@ class AccountClient:
         raise SendFailed(t("Conversation did not show up in the list (response: {status}) – check on willhaben",
                            status=r.status))
 
-    async def my_adverts(self) -> list[OwnAdvert]:
+    async def my_adverts(self) -> AdvertList:
         """The account's ads; willhaben renders them server-side into the my-adverts page."""
         r = await self.s.api("GET", MYADVERTS_PAGE, accept="text/html")
         nd = extract_next_data(r.text) if r.ok else None

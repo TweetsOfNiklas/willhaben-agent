@@ -1,25 +1,24 @@
 {# Buying (Kaufauftrag) settings: purchase_settings() from app/purchase_routes.py #}
 {% set pu = purchase_settings() %}
-<section id="purchase">
-  <h4>{{ _("Buying") }}</h4>
-  <p class="lead">{{ _("Purchase orders from the product search: the agent contacts the seller, negotiates within your maximum price, sends the PayLivery offer itself and prepares the payment. Only you pay: in the willhaben app, or here with the saved card and the 3-D Secure approval on your phone.") }}</p>
-  <form method="post" action="/settings/purchase">
-    <label><input type="checkbox" role="switch" name="enabled" value="1" {% if pu.enabled %}checked{% endif %}>
-      {{ _("Allow purchase orders (Buy in the product search and the ad viewer; includes PayLivery offers)") }}</label>
-    <label><input type="checkbox" role="switch" name="prefer_paylivery" value="1" {% if pu.prefer_paylivery %}checked{% endif %}
-                  {% if not pu.enabled %}disabled{% endif %} data-needs="enabled">
-      {{ _("Prefer buying with PayLivery (preselected in the buy dialog)") }}</label>
+<section id="purchase" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <h3>{{ _("Buying") }}</h3>
+  <p class="text-muted">{{ _("Purchase orders from the product search: the agent contacts the seller, negotiates within your maximum price, sends the PayLivery offer itself and prepares the payment. Only you pay: in the willhaben app, or here with the saved card and the 3-D Secure approval on your phone.") }}</p>
+  <form method="post" action="/settings/purchase" class="flex flex-col gap-3.5">
+    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Allow purchase orders (Buy in the product search and the ad viewer; includes PayLivery offers)") }}</span>
+      <input type="checkbox" class="toggle toggle-primary" name="enabled" value="1" {% if pu.enabled %}checked{% endif %}></label>
+    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Prefer buying with PayLivery (preselected in the buy dialog)") }}</span>
+      <input type="checkbox" class="toggle toggle-primary" name="prefer_paylivery" value="1" {% if pu.prefer_paylivery %}checked{% endif %}
+                  {% if not pu.enabled %}disabled{% endif %} data-needs="enabled"></label>
     <script>(function (f) { var a = f.elements.enabled, b = f.elements.prefer_paylivery;
       a.addEventListener("change", function () { b.disabled = !a.checked; if (!a.checked) b.checked = false; }); })(document.currentScript.parentNode);</script>
-    <label>{{ _("My rules for purchases") }}
-      <textarea name="rules" rows="6" maxlength="4000"
+    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("My rules for purchases") }}</span>
+      <textarea name="rules" rows="6" maxlength="4000" class="textarea w-full min-w-0 bg-base-200"
                 placeholder="{{ _('e.g. only private sellers, ask for the invoice, pickup only in Vienna') }}">{{ pu.rules }}</textarea></label>
-    <p><small class="muted">{{ _("Empty rules use the built-in default: only buy at a fair price, no prepayment to third parties, short and friendly messages.") }}</small></p>
-    <label>{{ _("Discount for the target price (%)") }}
-      <input type="number" name="discount_pct" min="0" max="50" step="1" value="{{ pu.discount_pct }}" style="max-width:9rem">
-    </label>
-    <p><small class="muted">{{ _("Target price: this much below the asking price or the median of comparable ads, whichever is lower. The ceiling is the maximum price you enter per order (default: the asking price).") }}</small></p>
-    <p><small class="muted">{{ _("The maximum price includes shipping and, with PayLivery, willhaben's buyer protection fee (4.5 % of the item price, at least € 0.99, at most € 49.99, paid by the buyer): the agent keeps the item price below the maximum minus both. The buy dialog shows how fair the asking price is and suggests a cheap and a market price.") }}</small></p>
-    <button type="submit">{{ _("Save") }}</button>
+    <p class="text-[12.5px] text-muted">{{ _("Empty rules use the built-in default: only buy at a fair price, no prepayment to third parties, short and friendly messages.") }}</p>
+    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Discount for the target price (%)") }}</span>
+      <input type="number" name="discount_pct" min="0" max="50" step="1" value="{{ pu.discount_pct }}" class="input w-36 min-w-0 bg-base-200"></label>
+    <p class="text-[12.5px] text-muted">{{ _("Target price: this much below the asking price or the median of comparable ads, whichever is lower. The ceiling is the maximum price you enter per order (default: the asking price).") }}</p>
+    <p class="text-[12.5px] text-muted">{{ _("The maximum price includes shipping and, with PayLivery, willhaben's buyer protection fee (4.5 % of the item price, at least € 0.99, at most € 49.99, paid by the buyer): the agent keeps the item price below the maximum minus both. The buy dialog shows how fair the asking price is and suggests a cheap and a market price.") }}</p>
+    <div><button type="submit" class="btn btn-primary">{{ _("Save") }}</button></div>
   </form>
 </section>

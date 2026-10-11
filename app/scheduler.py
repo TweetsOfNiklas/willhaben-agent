@@ -118,7 +118,7 @@ def start() -> None:
                       replace_existing=True, max_instances=1, coalesce=True)   # idle CPU: see session.park_idle_ui
     scheduler.add_job(access_log.flush_job, IntervalTrigger(seconds=access_log.FLUSH_INTERVAL_S), id="access-log",
                       replace_existing=True, max_instances=1, coalesce=True)   # write + prune willhaben access counts
-    scheduler.add_job(my_ads.check_all, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",
+    scheduler.add_job(my_ads.scheduled_update, CronTrigger(hour=s.myads_check_hour, minute=7), id="myads-check",
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.start()
     # Stagger the first agent runs so a restart does not burst requests.

@@ -1,11 +1,15 @@
 {# Settings → Language & appearance (handoff design). Language: POST /lang; theme: this browser (localStorage). #}
-<form method="post" action="/lang" class="card pad" style="display:flex;flex-direction:column;gap:14px">
+<form method="post" action="/lang" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <input type="hidden" name="next" value="/settings/language">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    <label class="field"><span>{{ _("Interface") }}</span><select name="lang">{% set pref = ui_lang_pref() %}<option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic (browser)") }}</option>{% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}</select><small class="muted">{{ _("Language of the dashboard and of notifications.") }}</small></label>
-    <label class="field"><span>{{ _("Theme") }}</span><select id="theme-select"><option value="system">{{ _("System") }}</option><option value="light">{{ _("Light") }}</option><option value="dark">{{ _("Dark") }}</option></select><small class="muted">{{ _("Saved in this browser.") }}</small></label>
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Interface") }}</span>
+      <select name="lang" class="select w-full min-w-0 bg-base-200">{% set pref = ui_lang_pref() %}<option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic (browser)") }}</option>{% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+      <small class="text-[12.5px] text-muted">{{ _("Language of the dashboard and of notifications.") }}</small></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Theme") }}</span>
+      <select id="theme-select" class="select w-full min-w-0 bg-base-200"><option value="system">{{ _("System") }}</option><option value="light">{{ _("Light") }}</option><option value="dark">{{ _("Dark") }}</option></select>
+      <small class="text-[12.5px] text-muted">{{ _("Saved in this browser.") }}</small></label>
   </div>
-  <div><button class="btn">{{ _("Save") }}</button></div>
+  <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
 </form>
 <script>(() => { const s = document.getElementById('theme-select'); try { s.value = localStorage.getItem('theme') || 'system'; } catch (e) {}
   s.addEventListener('change', () => { const v = s.value; try { if (v === 'system') { localStorage.removeItem('theme'); delete document.documentElement.dataset.theme; } else { localStorage.setItem('theme', v); document.documentElement.dataset.theme = v; } } catch (e) {} }); })();</script>

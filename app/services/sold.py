@@ -75,6 +75,7 @@ class Other:
     last_in: str | None          # the buyer's latest message
     informed: bool               # a sold/reserved notice was already sent in this chat
     draft: Draft | None          # open notice draft, if any
+    sending: Draft | None = None # notice queued / being sent right now
 
 
 def others(ad_id: str, buyer: str | None) -> list[Other]:
@@ -91,7 +92,8 @@ def others(ad_id: str, buyer: str | None) -> list[Other]:
                                    .order_by(col(Draft.created_at).desc())))
             out.append(Other(conv=conv, last_in=msgs[0].text if msgs else conv.last_message_text,
                              informed=any(d.status == "sent" for d in notices),
-                             draft=next((d for d in notices if d.status == "draft"), None)))
+                             draft=next((d for d in notices if d.status == "draft"), None),
+                             sending=next((d for d in notices if d.status == "sending"), None)))
     return out
 
 
@@ -115,6 +117,61 @@ async def on_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: 
         db.add(row)
         db.commit()
     return msg
+
+
+def enqueue_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: str | None = None) -> bool:
+    """Step 1 as a background job (lane ads). When willhaben asks for a sold reason first, nothing is written: the
+    reasons wait on the ad (pending_payload) and the page offers them; the next click queues it again.
+    False: the ad already waits for another action."""
+    from app.services import jobs
+
+    kind = kind_of(kind)
+    action = "sold" if kind == "sold" else ("unreserve" if undo else "reserved")
+    with session() as db:
+        row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
+        if row.pending_action:
+            return False
+        unsaved = (row.pending_payload or {}).get("unsaved")      # an edit text waiting to be saved again stays
+        row.pending_action, row.pending_payload, row.last_error = action, ({"unsaved": unsaved} if unsaved else None), None
+        db.add(row)
+        db.commit()
+
+    def unmark(error: str | None = None, payload: dict[str, Any] | None = None) -> None:
+        with session() as db:
+            r = db.get(MyAd, ad_id)
+            unsaved = (r.pending_payload or {}).get("unsaved")
+            r.pending_action, r.pending_payload = None, ({**(payload or {}), "unsaved": unsaved} if unsaved else payload)
+            if error is not None:
+                r.last_error = error
+            db.add(r)
+            db.commit()
+
+    async def run(job: jobs.Job) -> str:
+        try:
+            msg = await on_willhaben(ad_id, kind, undo=undo, reason_id=reason_id)
+        except sales.ReasonRequired as e:     # nothing written: the user picks willhaben's reason, then confirms again
+            unmark(t("willhaben asks why the ad is sold. Pick a reason."),
+                   {"reasons": [{"id": r.id, "label": r.label} for r in e.reasons]})
+            return t("willhaben asks why the ad is sold. Pick a reason.")
+        except Exception as e:
+            unmark(t("Not changed on willhaben: {error}", error=e))
+            raise
+        unmark()
+        return msg
+
+    label = {"sold": t("Mark „{title}“ as sold on willhaben", title=title_of(ad_id)[:60]),
+             "reserved": t("Mark „{title}“ as reserved on willhaben", title=title_of(ad_id)[:60]),
+             "unreserve": t("Remove the reservation of „{title}“ on willhaben", title=title_of(ad_id)[:60])}[action]
+    jobs.submit(f"sold-{action}", label, run, current=f"ad:{ad_id}")
+    return True
+
+
+def pending_reasons(ad_id: str) -> list[sales.SoldReason] | None:
+    """Sold reasons a background step left behind (willhaben asked for one), for the reason picker."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    raw = ((row.pending_payload or {}) if row else {}).get("reasons")
+    return [sales.SoldReason(id=str(r["id"]), label=str(r["label"])) for r in raw] if raw else None
 
 
 # ------------------------------------------------------------------ step 2: notices to the other buyers
@@ -150,21 +207,55 @@ async def prepare_notices(ad_id: str, kind: str, conversation_ids: list[str], *,
     return made, errors
 
 
-async def send_notices(ad_id: str, items: list[tuple[int, str]]) -> tuple[int, list[str]]:
-    """Send the chosen notice drafts through the normal send path (chats.send_draft), one after another."""
-    convs = {c.id: c for c in seller_conversations(ad_id)}
-    sent, errors = 0, []
+def enqueue_notice_drafts(ad_id: str, kind: str, conversation_ids: list[str], *, buyer: str | None = None) -> int:
+    """"Prepare drafts with Claude" as a background job (lane claude, 10–60 s per chat): the chats show "Claude is
+    writing…" until their draft is there. Nothing is sent. Returns how many chats were queued."""
+    from app.services import jobs
+
+    allowed = {o.conv.id for o in others(ad_id, buyer)}
+    picked = [c for c in dict.fromkeys(conversation_ids) if c in allowed]
+    with session() as db:
+        picked = [c for c in picked if not (db.get(Conversation, c) or Conversation(id=c)).drafting]
+    for cid in picked:
+        chats._set_drafting(cid, True)
+    if not picked:
+        return 0
+
+    async def run(job: jobs.Job) -> str:
+        made, errors = 0, []
+        try:
+            for i, cid in enumerate(picked):
+                job.progress(i, t("Draft {i} of {n}", i=i + 1, n=len(picked)), f"drafting:{cid}")
+                m, err = await prepare_notices(ad_id, kind, [cid], buyer=buyer, use_claude=True)
+                made += m
+                errors += err
+                chats._set_drafting(cid, False, err[0] if err else None)
+        finally:
+            for cid in picked:
+                with session() as db:
+                    c = db.get(Conversation, cid)
+                    still = bool(c and c.drafting)
+                if still:
+                    chats._set_drafting(cid, False)
+        job.problems = len(errors)
+        return t("{n} drafts prepared – nothing sent yet", n=made)
+
+    jobs.submit("notice-drafts", t("Claude writes {n} notices", n=len(picked)), run, lane="claude", total=len(picked))
+    return len(picked)
+
+
+def send_notices(ad_id: str, items: list[tuple[int, str]]) -> int:
+    """Queue the chosen notice drafts on the normal send path (chats.enqueue_send): one background job per chat,
+    sent one after another; a failure goes back to that draft with its reason. Returns how many were queued."""
+    convs = {c.id for c in seller_conversations(ad_id)}
+    queued = 0
     for draft_id, text in items:
         with session() as db:
             d = db.get(Draft, draft_id)
         if d is None or d.status != "draft" or d.conversation_id not in convs or d.intent not in NOTICE_INTENTS.values():
             continue
-        try:
-            await chats.send_draft(draft_id, text)
-            sent += 1
-        except Exception as e:  # noqa: BLE001 - report per chat, keep going
-            errors.append(f"{convs[d.conversation_id].partner_name or d.conversation_id}: {e}")
-    return sent, errors
+        queued += chats.enqueue_send(draft_id, text)
+    return queued
 
 
 def discard_notices(ad_id: str, draft_ids: list[int]) -> int:

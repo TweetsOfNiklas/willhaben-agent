@@ -27,7 +27,7 @@ def test_page_renders(data, path):
     with TestClient(app) as c:
         r = c.get(path)
     assert r.status_code == 200, path
-    assert 'class="rail"' in r.text or "embed" in path
+    assert 'id="rail"' in r.text or "embed" in path
 
 
 def test_unknown_settings_section_is_404(data):

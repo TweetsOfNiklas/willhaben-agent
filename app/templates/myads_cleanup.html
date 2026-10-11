@@ -1,30 +1,36 @@
 {% extends "base.html" %}
-{% block main_class %}page legacy{% endblock %}{# not ported to the 1b design yet #}
+{% import "_ui.html" as ui %}
 {% block content %}
-<p><a href="/myads">← {{ _("My ads") }}</a></p>
-<h3>{{ _("Clean up old ads") }}</h3>
-<p><small class="muted">{{ _("Offline ads without photos (willhaben cannot put them online again), sold or given-away ads and the old copy of republished ads. Active and reserved ads are never listed.") }}</small></p>
-{% if cands %}
-<form method="post" action="/myads/cleanup"
-      onsubmit='return confirm({{ _("Delete the selected ads on willhaben for good? This cannot be undone.")|tojson }})'>
-<table class="stack">
-  <thead><tr><th></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Reason") }}</th></tr></thead>
-  <tbody>
-  {% for c in cands %}
-  <tr>
-    <td><input type="checkbox" name="ids" value="{{ c.ad_id }}" class="sel" checked aria-label="{{ _('Select') }}"></td>
-    <td><a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.heading }}</a></td>
-    <td><span class="badge muted">{{ c.status }}</span></td>
-    <td>{{ c.reasons|join(" · ") }}{% if not c.deletable %}<br><small class="muted">{{ _("willhaben offers no deleting – only hidden here") }}</small>{% endif %}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-<p><small class="muted">{{ _("Shift-click selects or clears every ad in between.") }}</small></p>
-<button class="btn-danger" style="width:auto">{{ _("Delete selected on willhaben") }}</button>
-</form>
-<p><small class="muted">{{ _("The app no longer answers buyers of a deleted ad automatically.") }}</small></p>
-{% else %}
-<p>{{ _("Nothing to clean up.") }}</p>
-{% endif %}
+<div class="mx-auto flex max-w-[860px] min-w-0 flex-col gap-4">
+  <a href="/myads" class="btn btn-ghost btn-sm -ml-2 self-start">{{ ui.icon('back', 16) }}{{ _("My ads") }}</a>
+  {{ ui.head(_("Clean up old ads"), _("Offline ads without photos (willhaben cannot put them online again), sold or given-away ads and the old copy of republished ads. Active and reserved ads are never listed.")) }}
+  {% if cands %}
+  <form method="post" action="/myads/cleanup" class="flex flex-col gap-3"
+        onsubmit='return confirm({{ _("Delete the selected ads on willhaben for good? This cannot be undone.")|tojson }})'>
+    <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+      <table class="table table-sm">
+        <thead><tr class="text-[11.5px] tracking-wide text-muted uppercase"><th class="w-8"></th><th>{{ _("Ad") }}</th><th>{{ _("Status") }}</th><th>{{ _("Reason") }}</th></tr></thead>
+        <tbody>
+        {% for c in cands %}
+        <tr>
+          <td>{% if c.ad_id not in pending %}<input type="checkbox" name="ids" value="{{ c.ad_id }}" class="sel checkbox checkbox-primary checkbox-sm" checked aria-label="{{ _('Select') }}">{% endif %}</td>
+          <td class="min-w-0 break-words"><a class="link link-primary" href="{{ c.url }}" target="_blank" rel="noopener">{{ c.heading }}</a></td>
+          <td>{% if c.ad_id in pending %}<span class="text-[12.5px] text-muted">{{ ui.icon('clock', 13) }} {{ _("already queued") }}</span>{% else %}{{ ui.pill(c.status, '', dot=false) }}{% endif %}</td>
+          <td class="break-words">{{ c.reasons|join(" · ") }}{% if not c.deletable %}<br><small class="text-xs text-muted">{{ _("willhaben offers no deleting – only hidden here") }}</small>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-muted">{{ _("Shift-click selects or clears every ad in between.") }}</p>
+    <div class="flex flex-wrap items-center gap-2">
+      <button class="btn btn-error">{{ _("Delete selected on willhaben") }}</button>
+      <small class="text-muted">{{ _("Runs in the background, one willhaben request after another – you can leave the page. Progress in the sidebar.") }}</small>
+    </div>
+    <p class="text-xs text-muted">{{ _("The app no longer answers buyers of a deleted ad automatically.") }}</p>
+  </form>
+  {% else %}
+  <p>{{ _("Nothing to clean up.") }}</p>
+  {% endif %}
+</div>
 {% endblock %}

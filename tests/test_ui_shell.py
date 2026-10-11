@@ -8,15 +8,14 @@ from app.main import app
 def test_shell_and_static_files():
     with TestClient(app) as c:
         page = c.get("/chats").text
-        assert 'class="rail"' in page and 'href="/static/ui.css"' in page and 'href="/static/legacy.css"' in page
-        assert "picocss" not in page and "window.wbBuy" in page              # Pico gone; buy maths moved to the include
-        assert '<main class="split">' in page                                 # ported: list → detail
-        from pathlib import Path
-        assert "page legacy" in Path("app/templates/myads_cleanup.html").read_text()   # not ported yet: transitional styles
-        assert 'class="badge dot"' not in page                                # nothing to count
-        for f in ("ui.css", "legacy.css"):
-            r = c.get(f"/static/{f}")
-            assert r.status_code == 200 and r.headers["content-type"].startswith("text/css")
+        assert 'id="rail"' in page and 'href="/static/app.css' in page
+        assert "/static/vendor/htmx-" in page and "/static/vendor/alpinejs-" in page   # served locally, no CDN
+        assert "picocss" not in page and "unpkg.com" not in page and "window.wbBuy" in page
+        assert "/static/ui.css" not in page and "/static/legacy.css" not in page      # Tailwind + daisyUI only
+        assert "data-split>" in page                                                # list → detail
+        assert "data-count" not in page                                             # nothing to count
+        r = c.get("/static/app.css")
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/css")
         assert c.get("/static/nope.css").status_code == 404
 
 
@@ -30,7 +29,7 @@ def test_sidebar_badges_count_new_hits_and_unread_chats():
         db.commit()
     with TestClient(app) as c:
         page = c.get("/myads").text
-    assert '<span class="badge dot">1</span>' in page and '<span class="badge dot">2</span>' in page
+    assert 'data-count="1"' in page and 'data-count="2"' in page
 
 
 def test_credits_lists_github_contributors_without_the_author(monkeypatch):

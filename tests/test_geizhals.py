@@ -3,6 +3,7 @@ import pytest
 
 from app.services import geizhals
 from tests.test_dashboard import client  # noqa: F401,F811  (pytest fixture)
+from tests.conftest import wait_jobs  # noqa: E402
 
 # Trimmed copies of the real page structure (2026-10-09)
 SEARCH = """
@@ -107,6 +108,8 @@ def test_draft_with_geizhals_refine_and_undo(client, gh, monkeypatch):  # noqa: 
                                              "description": (d.description + "\n\n" + block).replace("\n", "\r\n")})
 
     client.post(f"/new-ad/{draft_id}/refine", data={"instruction": "kürzer"})
+
+    wait_jobs()
     refine_prompt = fake.calls[-1]["prompt"]
     assert "Herstellerdaten laut Geizhals" in refine_prompt and "- Typ: Bohrschrauber" in refine_prompt
     assert block not in refine_prompt                     # Claude gets the prose only

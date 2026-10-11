@@ -1,15 +1,16 @@
 {# Handover inside a publish form. Same names: handover, paylivery, parcel_size, parcel_carrier. #}
 {% set sh = plan.shipping or {} %}{% set ho = sh.handover or 'pickup' %}
-<fieldset class="wh-handover" style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:10px" onchange="this.querySelector('.wh-ship').hidden = this.querySelector('[name=handover]:checked').value === 'pickup'; this.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.querySelector('input').checked))">
-  <div class="row" style="gap:6px">
+<fieldset class="wh-handover m-0 flex flex-col gap-2.5 border-0 p-0" x-data="{ ho: '{{ ho }}' }">
+  <div class="flex flex-wrap gap-1.5">
     {% for v, lbl in [('pickup', _("Self pickup")), ('shipping', _("Shipping")), ('both', _("Self pickup or shipping"))] %}
-    <label class="chip {{ 'on' if ho == v else '' }}" style="cursor:pointer;padding:5px 12px"><input type="radio" name="handover" value="{{ v }}" {% if ho == v %}checked{% endif %} hidden>{{ lbl }}</label>
+    <label class="inline-flex cursor-pointer items-center rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:font-semibold has-[:checked]:text-primary">
+      <input type="radio" name="handover" value="{{ v }}" {% if ho == v %}checked{% endif %} x-model="ho" class="sr-only">{{ lbl }}</label>
     {% endfor %}
   </div>
-  <div class="wh-ship row" style="gap:12px;align-items:flex-end;padding:10px 12px;background:var(--bg);border-radius:10px" {% if ho == 'pickup' %}hidden{% endif %}>
-    <label class="row" style="gap:8px;padding-bottom:8px"><input type="checkbox" name="paylivery" value="1" {% if sh.paylivery %}checked{% endif %}>{{ _("with PayLivery (buyer protection)") }}</label>
-    <label class="field"><span style="font-size:12px">{{ _("Parcel size") }}</span><select name="parcel_size" style="padding:7px 10px;font-size:13px;background-color:var(--surface)">{% for s in parcel_sizes %}<option value="{{ s }}" {% if s == (sh.size or 'S') %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
-    <label class="field"><span style="font-size:12px">{{ _("Carrier") }}</span><select name="parcel_carrier" style="padding:7px 10px;font-size:13px;background-color:var(--surface)"><option value="">{{ _("cheapest") }}</option>{% for c in parcel_carriers %}<option value="{{ c }}" {% if c == sh.carrier %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
-    <small style="color:var(--warn);flex-basis:100%;font-size:12px">{{ _("Parcel size and carrier only count with PayLivery; the buyer pays the shipping. Shipping has not been tested with willhaben yet – if a step fails, the ad stays an unpublished draft on willhaben.") }}</small>
+  <div class="wh-ship flex flex-wrap items-end gap-3 rounded-[10px] bg-base-200 px-3 py-2.5" x-show="ho !== 'pickup'" x-cloak>
+    <label class="flex items-center gap-2 pb-2 text-[13px]"><input type="checkbox" name="paylivery" value="1" {% if sh.paylivery %}checked{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("with PayLivery (buyer protection)") }}</label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-xs text-muted">{{ _("Parcel size") }}</span><select name="parcel_size" class="select select-sm bg-base-100 text-[13px]">{% for s in parcel_sizes %}<option value="{{ s }}" {% if s == (sh.size or 'S') %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-xs text-muted">{{ _("Carrier") }}</span><select name="parcel_carrier" class="select select-sm bg-base-100 text-[13px]"><option value="">{{ _("cheapest") }}</option>{% for c in parcel_carriers %}<option value="{{ c }}" {% if c == sh.carrier %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+    <small class="basis-full text-xs text-warning">{{ _("Parcel size and carrier only count with PayLivery; the buyer pays the shipping. Shipping has not been tested with willhaben yet – if a step fails, the ad stays an unpublished draft on willhaben.") }}</small>
   </div>
 </fieldset>

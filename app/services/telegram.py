@@ -639,7 +639,8 @@ async def _cmd_drafts() -> None:
 
 async def _cmd_auto() -> None:
     with session() as db:
-        ads = db.exec(select(MyAd).where(MyAd.status != "expired", col(MyAd.replaced_by).is_(None)).order_by(col(MyAd.heading))).all()
+        ads = db.exec(select(MyAd).where(col(MyAd.status).not_in(("expired", "deleted")), col(MyAd.replaced_by).is_(None))
+                      .order_by(col(MyAd.heading))).all()
     if not ads:
         await _say(t("No own ads imported yet."))
         return

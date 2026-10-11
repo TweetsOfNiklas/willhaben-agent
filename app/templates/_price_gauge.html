@@ -1,6 +1,7 @@
 {# Price gauge: g = price_gauge(price, stats) → g.pos (0..100 %), g.verdict (low/fair/high), g.diff_pct; basis = caption #}
+{% import "_ui.html" as ui %}
 {% if g %}
 {% set level = {'low': 'cheap', 'fair': 'fair', 'high': 'expensive'}[g.verdict] %}
-<div class="row" style="gap:10px;flex-wrap:nowrap"><span class="deal-track" style="flex:1"><span class="deal-needle" style="left:{{ g.pos|round(1) }}%"></span></span><span class="deal-lvl lvl-{{ level }}">{{ deal_level_label(level) }}</span></div>
-<small class="muted" style="font-size:12px">{% if g.diff_pct is defined and g.diff_pct %}{{ _("{n} % above the median", n=g.diff_pct) if g.diff_pct > 0 else _("{n} % below the median", n=-g.diff_pct) }}{% else %}{{ _("exactly the median") }}{% endif %}{% if basis %} · {{ basis }}{% endif %}</small>
+<div class="flex flex-nowrap items-center gap-2.5"><span class="deal-track flex-1"><span class="absolute -top-1 h-4 w-[3px] -translate-x-1/2 rounded-sm bg-base-content shadow-[0_0_0_2px_var(--color-base-100)]" style="left:{{ g.pos|round(1) }}%"></span></span>{{ ui.deal_lvl(level, deal_level_label(level)) }}</div>
+<small class="mt-1 block text-xs text-muted">{% if g.diff_pct is defined and g.diff_pct %}{{ _("{n} % above the median", n=g.diff_pct) if g.diff_pct > 0 else _("{n} % below the median", n=-g.diff_pct) }}{% else %}{{ _("exactly the median") }}{% endif %}{% if basis %} · {{ basis }}{% endif %}</small>
 {% endif %}

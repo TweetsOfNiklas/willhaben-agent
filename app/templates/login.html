@@ -1,29 +1,43 @@
 <!doctype html>
-<html lang="{{ ui_lang() }}">
+{# Log-in page: standalone (no rail, no base.html). Own head with the built stylesheet; the only script is the show/hide toggle. #}
+<html lang="{{ ui_lang() }}" class="h-full">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ _("Log in") }} · willhaben Agent</title>
   <script>try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
-  <link rel="stylesheet" href="/static/ui.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_version() }}">
 </head>
-<body class="login-wrap">
-  <div style="width:min(400px,100%);display:flex;flex-direction:column;gap:14px">
-    <div class="card" style="border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.05),0 16px 48px rgba(0,0,0,.08);padding:28px 28px 22px;display:flex;flex-direction:column;gap:20px">
-      <div class="row" style="gap:12px;flex-wrap:nowrap"><span class="logo" style="width:40px;height:40px;border-radius:11px;font-size:21px">w</span><div><div style="font-weight:650;font-size:17px;letter-spacing:-.01em">willhaben Agent</div><div class="muted" style="font-size:13px">{{ _("Log in to the dashboard") }}</div></div></div>
-      {% if error %}<div class="msg error" role="alert" style="margin:0;font-size:13px">{{ error }}</div>{% endif %}
-      <form method="post" action="/login" style="display:flex;flex-direction:column;gap:14px">
+<body class="flex min-h-screen flex-col items-center justify-center gap-3.5 bg-base-200 bg-[radial-gradient(900px_420px_at_50%_-10%,var(--wh-brand-soft),transparent_70%)] p-6 text-base-content">
+  <div class="flex w-[min(400px,100%)] min-w-0 flex-col gap-3.5">
+    <div class="flex flex-col gap-5 rounded-[16px] border border-base-300 bg-base-100 px-7 pt-7 pb-[22px] shadow-[0_1px_2px_rgba(0,0,0,.05),0_16px_48px_rgba(0,0,0,.08)]">
+      <div class="flex items-center gap-3">
+        <span class="grid size-10 shrink-0 place-items-center rounded-[11px] bg-primary text-[21px] font-extrabold text-primary-content">w</span>
+        <div><div class="text-[17px] font-semibold tracking-tight">willhaben Agent</div><div class="text-[13px] text-muted">{{ _("Log in to the dashboard") }}</div></div>
+      </div>
+      {% if error %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-[13px] text-error">{{ error }}</div>{% endif %}
+      <form method="post" action="/login" class="flex flex-col gap-3.5">
         <input type="hidden" name="next" value="{{ next }}">
-        <label class="field"><span>{{ _("User name") }}</span><input name="username" value="{{ user or '' }}" autocomplete="username" autocapitalize="none" spellcheck="false" required style="font-size:15px"></label>
-        <label class="field"><span>{{ _("Password") }}</span><span style="position:relative;display:flex"><input type="password" name="password" id="pw" autocomplete="current-password" required {% if user %}autofocus{% endif %} style="padding-right:68px;font-size:15px"><button type="button" id="pw-toggle" class="btn ghost xs" style="position:absolute;right:6px;top:50%;transform:translateY(-50%)">{{ _("Show") }}</button></span></label>
-        <label class="switch-row" style="margin-top:2px"><span style="font-size:13.5px">{{ _("Stay logged in for 30 days") }}</span><input type="checkbox" class="switch" name="remember" checked></label>
-        <button class="btn" style="height:42px;font-size:15px;font-weight:600;margin-top:4px" onclick="this.setAttribute('aria-busy','true')">{{ _("Log in") }}</button>
+        <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("User name") }}</span>
+          <input name="username" value="{{ user or '' }}" autocomplete="username" autocapitalize="none" spellcheck="false" required class="input w-full min-w-0 bg-base-200 text-[15px]"></label>
+        <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Password") }}</span>
+          <span class="relative flex min-w-0">
+            <input type="password" name="password" id="pw" autocomplete="current-password" required {% if user %}autofocus{% endif %} class="input w-full min-w-0 bg-base-200 pr-[68px] text-[15px]">
+            <button type="button" id="pw-toggle" class="btn btn-ghost btn-xs absolute top-1/2 right-1.5 -translate-y-1/2">{{ _("Show") }}</button>
+          </span></label>
+        <label class="flex cursor-pointer items-center justify-between gap-3 pt-0.5"><span class="text-[13.5px]">{{ _("Stay logged in for 30 days") }}</span><input type="checkbox" class="toggle toggle-primary" name="remember" checked></label>
+        <button class="btn btn-primary mt-1 h-[42px] text-[15px] font-semibold">{{ _("Log in") }}</button>
       </form>
-      <div class="muted" style="font-size:12px;text-align:center;border-top:1px solid var(--border);padding-top:14px">{{ _("The password is DASHBOARD_PASSWORD from the .env file.") }}</div>
+      <div class="border-t border-base-300 pt-3.5 text-center text-xs text-muted">{{ _("The password is DASHBOARD_PASSWORD from the .env file.") }}</div>
     </div>
-    <div class="row muted" style="justify-content:space-between;font-size:12px;padding:0 6px"><span>v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span>
-      <form method="post" action="/lang" style="margin:0"><select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()" style="width:auto;padding:2px 26px 2px 6px;font-size:12px;background-color:var(--surface)">
-        {% set pref = ui_lang_pref() %}<option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic (browser)") }}</option>
-        {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></form></div>
+    <div class="flex items-center justify-between gap-3 px-1.5 text-xs text-muted">
+      <span>v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span>
+      <form method="post" action="/lang" class="m-0">
+        <select name="lang" aria-label="{{ _('Language') }}" onchange="this.form.submit()" class="select select-xs w-auto bg-base-100">
+          {% set pref = ui_lang_pref() %}<option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic (browser)") }}</option>
+          {% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select>
+      </form>
+    </div>
   </div>
   <script>
     const pw = document.getElementById('pw'), b = document.getElementById('pw-toggle'), T = {show: {{ _("Show")|tojson }}, hide: {{ _("Hide")|tojson }}};

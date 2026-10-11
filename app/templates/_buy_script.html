@@ -83,9 +83,9 @@
       fill: function (el, text, tone) {
         if (!el) return;
         el.textContent = text; el.hidden = !text;
-        ['bargain', 'cheap', 'fair', 'expensive', 'very_expensive'].forEach(function (t) { el.classList.remove('lvl-' + t); });
-        el.classList.remove('deal-lvl');
-        if (tone) { el.classList.add('deal-lvl'); el.classList.add('lvl-' + tone); }
+        var lvl = {bargain: 'bg-lvl-bargain', cheap: 'bg-lvl-cheap', fair: 'bg-lvl-fair', expensive: 'bg-lvl-expensive', very_expensive: 'bg-lvl-very_expensive'};
+        Object.keys(lvl).forEach(function (t) { el.classList.remove(lvl[t]); });
+        if (tone && lvl[tone]) el.classList.add(lvl[tone]);
       },
       // the pill(s), the ring on the bar (always shown with a rating, also on the needle) and the suggestion chips
       lines: function (f) {
@@ -101,7 +101,7 @@
         f.querySelectorAll('.bd-sugg button').forEach(function (btn) {   // item price of the comparable + shipping and fee of the mode
           var t = self.costs(f, +btn.dataset.v).total;
           btn.textContent = btn.dataset.tpl.replace('{x}', self.eur(t));
-          btn.classList.toggle('on', v > 0 && Math.abs(v - t) < 0.005);
+          btn.classList.toggle('bd-on', v > 0 && Math.abs(v - t) < 0.005);
         });
       },
       sum: function (f) {
@@ -132,8 +132,8 @@
         f.querySelectorAll('.bd-chip').forEach(function (c) {
           var k = +c.dataset.n;
           c.disabled = k > n;
-          c.classList.toggle('on', k === n);
-          c.classList.toggle('done', k < n);
+          c.classList.toggle('bd-on', k === n);
+          c.classList.toggle('bd-done', k < n);
           if (k === n) c.setAttribute('aria-current', 'step'); else c.removeAttribute('aria-current');
         });
         f.querySelectorAll('.bd-next').forEach(function (b) { b.disabled = !self.valid(f, n); });
@@ -154,10 +154,10 @@
           g.dataset.bound = '1';
           var on = false;
           var at = function (e) { var r = g.getBoundingClientRect(); self.drag(f, r.width > 0 ? (e.clientX - r.left) / r.width : 0); };
-          var end = function () { on = false; g.classList.remove('drag'); };
+          var end = function () { on = false; g.classList.remove('bd-dragging'); };
           g.addEventListener('pointerdown', function (e) {
             if (e.pointerType === 'mouse' && e.button !== 0) return;
-            on = true; g.classList.add('drag');
+            on = true; g.classList.add('bd-dragging');
             try { g.setPointerCapture(e.pointerId); } catch (x) {}
             if (e.preventDefault) e.preventDefault();
             at(e);
@@ -185,7 +185,7 @@
         this.show(f);
         var dlg = f.closest('dialog');
         if (dlg) dlg.querySelector('article').scrollTop = 0; else f.scrollIntoView({block: 'start'});
-        var chip = f.querySelector('.bd-chip.on'); if (chip) chip.focus({preventScroll: true});
+        var chip = f.querySelector('.bd-chip.bd-on'); if (chip) chip.focus({preventScroll: true});
       },
       next: function (f) { this.refill(f); var n = this.cur(f); if (n < 3 && this.valid(f, n)) this.go(f, n + 1); },
       back: function (f) { var n = this.cur(f); if (n > 1) this.go(f, n - 1); },

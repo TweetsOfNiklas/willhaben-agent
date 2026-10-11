@@ -1,0 +1,115 @@
+"""Background jobs on the user's behalf (ad actions, publishing, chat messages), one after another per lane.
+
+The page that starts a job returns at once; the header shows what is running right now, what is queued and the
+last results (GET /jobs). Lanes: "ads" (own ads: update, delete, publish, ...), "chat" (messages, sync) and "claude"
+(answers and revisions Claude writes). Within a lane
+jobs run strictly in order (an update must not overlap a delete run); the lanes run side by side, so a chat answer
+never waits behind twenty deletes. The pacing towards willhaben stays the shared limiter's: requests of both lanes
+still go out one by one. Jobs live in memory only: a restart drops the queue (callers persist their own markers and
+clean them up at startup, see my_ads.recover, chats.recover_sending, ad_creator.recover_publishing).
+"""
+from __future__ import annotations
+
+import asyncio
+import itertools
+import logging
+from collections import deque
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+from app.db import utcnow
+
+log = logging.getLogger(__name__)
+
+KEEP_FINISHED = 8
+SHOW_FINISHED_S = 15 * 60      # finished jobs stay visible in the header this long
+
+
+@dataclass
+class Job:
+    id: int
+    kind: str                  # e.g. "myads-update": a still queued job of the same kind is reused, not doubled
+    label: str
+    lane: str = "ads"
+    status: str = "queued"     # queued | running | done | failed
+    step: str = ""             # what happens right now, e.g. "Delete „Fahrrad“"
+    current: str | None = None  # the item being worked on right now, as a page marker key ("ad:123", "draft:5")
+    done: int = 0
+    total: int = 0
+    result: str = ""
+    problems: int = 0          # items that did not work out (job itself finished)
+    created_at: datetime = field(default_factory=utcnow)
+    finished_at: datetime | None = None
+    task: asyncio.Task | None = field(default=None, repr=False)
+
+    def progress(self, done: int, step: str = "", current: str | None = None) -> None:
+        self.done, self.step, self.current = done, step, current
+
+    def view(self) -> dict[str, Any]:
+        return {"id": self.id, "label": self.label, "lane": self.lane, "status": self.status, "step": self.step, "current": self.current,
+                "done": self.done, "total": self.total, "result": self.result, "problems": self.problems,
+                "finished_at": self.finished_at.isoformat() if self.finished_at else None}
+
+
+LANES = ("ads", "chat", "claude")   # claude: drafts and revisions (no willhaben account request, can take a minute)
+
+_ids = itertools.count(1)
+_locks: dict[str, asyncio.Lock] = {}
+_active: list[Job] = []                                  # running first, then queued, in order
+_finished: deque[Job] = deque(maxlen=KEEP_FINISHED)      # newest first
+
+
+def reset() -> None:
+    """Forget everything (tests: every test has its own event loop)."""
+    _locks.clear()
+    _active.clear()
+    _finished.clear()
+
+
+def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *, lane: str = "ads", total: int = 0,
+           current: str | None = None, reuse_queued: bool = False) -> Job:
+    """Queue `run(job)` in `lane`; it returns the result line shown in the header. Needs a running event loop."""
+    if lane not in LANES:
+        raise ValueError(lane)
+    if reuse_queued:
+        for j in _active:
+            if j.kind == kind and j.status == "queued":
+                return j
+    job = Job(next(_ids), kind, label, lane=lane, total=total, current=current)
+    _active.append(job)
+    job.task = asyncio.create_task(_run(job, run))
+    return job
+
+
+async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
+    try:
+        async with _locks.setdefault(job.lane, asyncio.Lock()):
+            job.status = "running"
+            try:
+                job.result = await run(job) or ""
+                job.status = "done"
+            except Exception as e:  # noqa: BLE001 - nobody awaits the task: the error goes to the header
+                log.warning("job %r failed: %s", job.label, e)
+                job.status, job.result = "failed", str(e)
+    finally:
+        job.finished_at, job.step, job.current = utcnow(), "", None
+        if job in _active:
+            _active.remove(job)
+        _finished.appendleft(job)
+
+
+def working() -> set[str]:
+    """Marker keys of the items running jobs work on right now (pages show a spinner instead of an hourglass)."""
+    return {j.current for j in _active if j.status == "running" and j.current}
+
+
+def busy(kind_prefix: str = "") -> bool:
+    return any(j.kind.startswith(kind_prefix) for j in _active)
+
+
+def snapshot() -> dict[str, Any]:
+    now = utcnow()
+    recent = [j for j in _finished if j.finished_at and (now - j.finished_at).total_seconds() < SHOW_FINISHED_S]
+    return {"active": [j.view() for j in _active], "recent": [j.view() for j in recent]}

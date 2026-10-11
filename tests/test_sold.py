@@ -9,6 +9,7 @@ from app.services import chats, sold
 from app.willhaben import sales
 from app.willhaben.account import parse_my_adverts
 from app.willhaben.session import ApiResponse, NotLoggedIn
+from tests.conftest import finish_jobs, wait_jobs
 
 AD = "1000000001"
 
@@ -147,7 +148,10 @@ async def test_sold_reasons_http_error_is_sale_failed(ad_with_chats, monkeypatch
     monkeypatch.setattr(sold, "get_session", lambda: s)
     with TestClient(app) as c:
         r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
-    assert r.status_code == 200 and "Not changed on willhaben" in r.text and not s.writes
+        assert r.status_code == 200 and not s.writes
+        wait_jobs()                                                      # the step runs as a background job
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+    assert "Not changed on willhaben" in page and not s.writes
 
 
 def test_action_path_rejects_odd_links():
@@ -202,8 +206,10 @@ async def test_notices_for_other_buyers_only_after_send(ad_with_chats):
         open_ = list(db.exec(select(Draft).where(Draft.conversation_id == "c-2", Draft.status == "draft")))
     assert len(open_) == 1
 
-    sent, errors = await sold.send_notices(AD, [(open_[0].id, "Leider schon verkauft, sorry!")])
-    assert (sent, errors) == (1, []) and account.sent == [("c-2", "Leider schon verkauft, sorry!")]
+    assert sold.send_notices(AD, [(open_[0].id, "Leider schon verkauft, sorry!")]) == 1
+    assert sold.others(AD, "c-buyer")[0].sending is not None                    # queued: shown as "sending"
+    await finish_jobs()
+    assert account.sent == [("c-2", "Leider schon verkauft, sorry!")]
     others = {o.conv.id: o for o in sold.others(AD, "c-buyer")}
     assert others["c-2"].informed and others["c-3"].draft is not None and not others["c-3"].informed
 
@@ -220,7 +226,7 @@ async def test_send_notices_ignores_foreign_drafts(ad_with_chats):
         db.add(foreign)
         db.commit()
         ids = [normal.id, foreign.id]
-    assert await sold.send_notices(AD, [(i, "x") for i in ids]) == (0, [])
+    assert sold.send_notices(AD, [(i, "x") for i in ids]) == 0
     assert not account.sent
 
 
@@ -275,9 +281,15 @@ def test_web_flow(ad_with_chats, monkeypatch):
         assert not any('name="conv"' in line and "checked" in line for line in nobuyer.splitlines())
 
         r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
-        assert r.status_code == 200 and "Über willhaben" in r.text and not s.writes   # reason first, nothing written
-        r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer", "reason_id": "2"})
-        assert "Marked as sold on willhaben" in r.text and len(s.writes) == 2
+        assert r.status_code == 200 and "On its way to willhaben" in r.text
+        wait_jobs()                                                      # background job: willhaben asks for a reason
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        assert "Über willhaben" in page and 'name="reason_id"' in page and not s.writes   # reason first, nothing written
+        c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer", "reason_id": "2"})
+        wait_jobs()
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        assert len(s.writes) == 2 and sold.ad_row(AD).last_action == "Marked as sold on willhaben"
+        assert 'name="reason_id"' not in page                            # the reasons are used up
 
         r = c.post(f"/sold/{AD}/notices", data={"kind": "sold", "buyer": "c-buyer", "conv": ["c-2", "c-3"],
                                                  "mode": "template"})
@@ -285,7 +297,10 @@ def test_web_flow(ad_with_chats, monkeypatch):
         drafts = {o.conv.id: o.draft.id for o in sold.others(AD, "c-buyer")}
         r = c.post(f"/sold/{AD}/notices/send", data={"kind": "sold", "buyer": "c-buyer", "action": "send",
                                                       "send": [str(drafts["c-2"])], f"text_{drafts['c-2']}": "Schon weg, sorry."})
-        assert "1 messages sent" in r.text and ad_with_chats.sent == [("c-2", "Schon weg, sorry.")]
+        assert "1 messages queued" in r.text
+        wait_jobs()
+        assert ad_with_chats.sent == [("c-2", "Schon weg, sorry.")]
+        assert "informed" in c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
 
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "auto_off": "1"})
         assert "Saved" in r.text

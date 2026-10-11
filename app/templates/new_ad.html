@@ -1,74 +1,90 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{# Photo drop zone: click to pick, drop files, preview thumbnails with a remove button. The state lives in Alpine (photoDrop below). #}
+{% macro photos(max, label, required=false, hint='') -%}
+<div x-data="photoDrop({{ max }})" class="flex min-w-0 flex-col gap-2">
+  <div><span class="font-semibold">{{ label }}</span> <small class="text-muted">· {{ _("up to {n}", n=max) }}</small></div>
+  <label class="flex cursor-pointer flex-col items-center gap-1.5 rounded-[10px] border-2 border-dashed px-5 py-[22px] text-center transition-colors focus-within:border-primary focus-within:bg-brand-soft focus-within:text-primary"
+         :class="over ? 'border-primary bg-brand-soft text-primary' : 'border-base-300 text-muted hover:border-primary'"
+         @dragenter.prevent="over = true" @dragover.prevent="over = true"
+         @dragleave="if (!$el.contains($event.relatedTarget)) over = false" @dragend="over = false"
+         @drop.prevent="over = false; pick([...$event.dataTransfer.files])">
+    <input type="file" name="photos" accept="image/*" multiple x-ref="input" class="sr-only" @change="pick([...$el.files])"{% if required %} required{% endif %}>
+    <span>{{ _("Drag photos here or") }} <u>{{ _("choose them") }}</u> <span x-text="files.length ? T.selected.replace('{n}', files.length) : ''"></span></span>
+    {% if hint %}<small>{{ hint }}</small>{% endif %}
+  </label>
+  <div class="flex flex-wrap gap-1.5" x-show="urls.length" x-cloak>
+    <template x-for="(u, i) in urls" :key="u">
+      <span class="relative"><img :src="u" :alt="files[i].name" :title="files[i].name" class="size-[68px] rounded-md object-cover"><button type="button" class="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-black/60 text-xs leading-none text-white" :aria-label="T.remove.replace('{name}', files[i].name)" @click="remove(i)">×</button></span>
+    </template>
+  </div>
+</div>
+{%- endmacro %}
+
 {% block content %}
-<div class="page-head"><div><h1>{{ _("New ad") }}</h1><p>{{ _("Drop in notes and photos. Claude writes title, description and category; the price suggestion comes from comparable ads.") }}</p></div></div>
-<div class="side-col">
-  <div style="display:flex;flex-direction:column;gap:16px">
-    <nav class="seg" style="align-self:flex-start" id="mode"><button type="button" class="on" data-mode="single">{{ _("One item") }}</button><button type="button" data-mode="batch">{{ _("Several items at once") }}</button></nav>
-    <section class="card pad" id="single" style="display:flex;flex-direction:column;gap:14px">
-      <form method="post" action="/new-ad" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:14px">
-        <label class="field"><span style="font-weight:600;color:var(--text)">{{ _("Notes about the item") }}</span><textarea name="notes" rows="5" placeholder="{{ _('KTM mountain bike, frame M, 2019, new brake pads, small scratch on the top tube, pickup Vienna 15') }}"></textarea></label>
-        <label class="drop" data-max="8"><span style="font-weight:600">{{ _("Photos") }}</span> <small class="muted">· {{ _("up to {n}", n=8) }}</small>
-          <input type="file" name="photos" accept="image/*" multiple>
-          <span class="drop-hint"><span>{{ _("Drag photos here or") }} <u>{{ _("choose them") }}</u> <span class="drop-count"></span></span></span>
-          <span class="drop-preview"></span>
-        </label>
-        <div class="row" style="gap:12px"><button class="btn" onclick="this.setAttribute('aria-busy','true')">{{ _("Create listing with Claude") }}</button><small class="muted">{{ _("Takes up to 2 minutes.") }}</small></div>
+{{ ui.head(_("New ad"), _("Drop in notes and photos. Claude writes title, description and category; the price suggestion comes from comparable ads.")) }}
+<div class="grid grid-cols-1 items-start gap-5 md:grid-cols-[minmax(0,1fr)_340px]">
+  <div x-data="{ mode: 'single' }" class="flex min-w-0 flex-col gap-4">
+    <nav id="mode" class="inline-flex flex-wrap gap-0.5 self-start rounded-field border border-base-300 bg-base-100 p-[3px]">
+      <button type="button" data-mode="single" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1" :class="mode === 'single' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" @click="mode = 'single'">{{ _("One item") }}</button>
+      <button type="button" data-mode="batch" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1" :class="mode === 'batch' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" @click="mode = 'batch'">{{ _("Several items at once") }}</button>
+    </nav>
+
+    <section id="single" x-show="mode === 'single'" class="rounded-box border border-base-300 bg-base-100 px-5 py-4">
+      <form method="post" action="/new-ad" enctype="multipart/form-data" class="flex flex-col gap-3.5" x-data="{ busy: false }" @submit="busy = true">
+        <label class="flex flex-col gap-1.5"><span class="font-semibold">{{ _("Notes about the item") }}</span><textarea name="notes" rows="5" class="textarea w-full bg-base-200" placeholder="{{ _('KTM mountain bike, frame M, 2019, new brake pads, small scratch on the top tube, pickup Vienna 15') }}"></textarea></label>
+        {{ photos(8, _("Photos")) }}
+        <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Create listing with Claude") }}</button><small class="text-muted">{{ _("Takes up to 2 minutes.") }}</small></div>
       </form>
     </section>
-    <section class="card pad" id="batch" hidden style="display:flex;flex-direction:column;gap:14px">
-      <form method="post" action="/new-ad/batch" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:14px">
-        <label class="drop" data-max="{{ max_batch }}"><span style="font-weight:600">{{ _("All photos, in any order") }}</span> <small class="muted">· {{ _("up to {n}", n=max_batch) }}</small>
-          <input type="file" name="photos" accept="image/*" multiple required>
-          <span class="drop-hint" style="padding:28px"><span>{{ _("Drag photos here or") }} <u>{{ _("choose them") }}</u> <span class="drop-count"></span></span><small>{{ _("Claude sorts them into one draft per item") }}</small></span>
-          <span class="drop-preview"></span>
-        </label>
-        <label class="field"><span style="font-weight:600;color:var(--text)">{{ _("Details for all items") }} <small class="muted">({{ _("optional") }})</small></span><textarea name="notes" rows="2" placeholder="{{ _('everything from the storage room, pickup Vienna 15, no shipping') }}"></textarea></label>
-        <div class="row" style="gap:12px"><button class="btn" onclick="this.setAttribute('aria-busy','true')">{{ _("Upload photos and let Claude sort them") }}</button><small class="muted">{{ _("Then you correct the groups and get a draft per item.") }}</small></div>
+
+    <section id="batch" x-show="mode === 'batch'" x-cloak class="rounded-box border border-base-300 bg-base-100 px-5 py-4">
+      <form method="post" action="/new-ad/batch" enctype="multipart/form-data" class="flex flex-col gap-3.5" x-data="{ busy: false }" @submit="busy = true">
+        {{ photos(max_batch, _("All photos, in any order"), true, _("Claude sorts them into one draft per item")) }}
+        <label class="flex flex-col gap-1.5"><span class="font-semibold">{{ _("Details for all items") }} <small class="font-normal text-muted">({{ _("optional") }})</small></span><textarea name="notes" rows="2" class="textarea w-full bg-base-200" placeholder="{{ _('everything from the storage room, pickup Vienna 15, no shipping') }}"></textarea></label>
+        <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Upload photos and let Claude sort them") }}</button><small class="text-muted">{{ _("Then you correct the groups and get a draft per item.") }}</small></div>
       </form>
     </section>
   </div>
-  <aside class="card">
-    <header><h3>{{ _("Recent drafts") }}</h3></header>
+
+  <aside class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100">
+    <h3 class="border-b border-base-300 px-4 py-3">{{ _("Recent drafts") }}</h3>
     {% set st = {'draft': ('', _('draft')), 'error': ('bad', _('error')), 'published': ('ok', _('published')), 'discarded': ('', _('discarded'))} %}
     {% for b in batches %}
-    <a class="list-item" href="/new-ad/batch/{{ b.id }}" style="grid-template-columns:1fr auto;border-radius:0;border-bottom:1px solid var(--border)">
-      <span style="min-width:0"><span class="title">{{ _("Batch #{id}", id=b.id) }} · {{ _("{n} photos", n=b.image_paths|length) }} · {{ _("{n} items", n=b.groups|length) }}</span><span class="sub">{{ b.created_at|local }}</span></span>
-      <span class="pill brand plain">{{ {'sorting': _('sorting'), 'review': _('ready for review'), 'creating': _('drafts being written'), 'error': _('error')}.get(b.status, b.status) }}</span>
+    <a href="/new-ad/batch/{{ b.id }}" class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-base-300 px-4 py-2.5 text-base-content no-underline hover:bg-hover">
+      <span class="min-w-0"><span class="block truncate font-semibold">{{ _("Batch #{id}", id=b.id) }} · {{ _("{n} photos", n=b.image_paths|length) }} · {{ _("{n} items", n=b.groups|length) }}</span><span class="block text-[12.5px] text-muted">{{ b.created_at|local }}</span></span>
+      {{ ui.pill({'sorting': _('sorting'), 'review': _('ready for review'), 'creating': _('drafts being written'), 'error': _('error')}.get(b.status, b.status), 'brand', false) }}
     </a>
     {% endfor %}
     {% for d in drafts %}
-    <a class="list-item" href="/new-ad/{{ d.id }}" style="grid-template-columns:1fr auto;border-radius:0;border-bottom:1px solid var(--border)">
-      <span style="min-width:0"><span class="title">{{ d.title or (d.input_text[:60] ~ '…') }}</span><span class="sub">{{ d.created_at|local }}</span></span>
-      <span class="pill plain {{ st.get(d.status, ('', d.status))[0] }}">{{ st.get(d.status, ('', d.status))[1] }}</span>
+    {% set s = st.get(d.status, ('', d.status)) %}
+    <a href="/new-ad/{{ d.id }}" class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-base-300 px-4 py-2.5 text-base-content no-underline hover:bg-hover">
+      <span class="min-w-0"><span class="block truncate font-semibold">{{ d.title or (d.input_text[:60] ~ '…') }}</span><span class="block text-[12.5px] text-muted">{{ d.created_at|local }}</span></span>
+      {{ ui.pill(s[1], s[0], false) }}
     </a>
-    {% else %}{% if not batches %}<p class="muted" style="padding:14px 16px">{{ _("None.") }}</p>{% endif %}{% endfor %}
+    {% else %}{% if not batches %}<p class="px-4 py-3.5 text-muted">{{ _("None.") }}</p>{% endif %}{% endfor %}
   </aside>
 </div>
 <script>
 const T = {{ {"remove": _("Remove {name}"), "selected": _("· {n} selected"), "tooMany": _("At most {max} photos – the rest were left out.")}|tojson }};
-(() => {
-  document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
-    document.getElementById('single').hidden = b.dataset.mode !== 'single'; document.getElementById('batch').hidden = b.dataset.mode !== 'batch';
-  }));
-  document.querySelectorAll('.drop').forEach(zone => {
-    const input = zone.querySelector('input[type=file]'), max = +zone.dataset.max, preview = zone.querySelector('.drop-preview'), count = zone.querySelector('.drop-count');
-    let files = [], urls = [];
-    const render = () => { urls.forEach(URL.revokeObjectURL); urls = files.map(f => URL.createObjectURL(f));
-      preview.replaceChildren(...files.map((f, i) => { const tile = document.createElement('span'), img = document.createElement('img'), rm = document.createElement('button');
-        img.src = urls[i]; img.alt = f.name; img.title = f.name; rm.type = 'button'; rm.textContent = '×'; rm.setAttribute('aria-label', T.remove.replace('{name}', f.name));
-        rm.addEventListener('click', e => { e.preventDefault(); files.splice(i, 1); sync(); }); tile.append(img, rm); return tile; }));
-      count.textContent = files.length ? T.selected.replace('{n}', files.length) : ''; };
-    const sync = () => { const dt = new DataTransfer(); files.forEach(f => dt.items.add(f)); input.files = dt.files; render(); };
-    const add = list => { const before = files.length; for (const f of list) if (f.type.startsWith('image/') && !files.some(g => g.name === f.name && g.size === f.size)) files.push(f);
-      if (files.length > max) { files = files.slice(0, max); alert(T.tooMany.replace('{max}', max)); } if (files.length !== before || list.length) sync(); };
-    input.addEventListener('change', () => add([...input.files]));
-    preview.addEventListener('click', e => e.preventDefault());
-    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add('over'); }));
-    ['dragleave', 'dragend'].forEach(ev => zone.addEventListener(ev, e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('over'); }));
-    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('over'); add([...e.dataTransfer.files]); });
-  });
-  ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files') && !e.target.closest('.drop')) e.preventDefault(); }));
-})();
+document.addEventListener('alpine:init', () => Alpine.data('photoDrop', max => ({
+  max, over: false, files: [], urls: [], T,
+  // adds the picked images (no duplicates by name and size), keeps at most max; the input always holds the list
+  pick(list) {
+    const before = this.files.length;
+    for (const f of list) if (f.type.startsWith('image/') && !this.files.some(g => g.name === f.name && g.size === f.size)) this.files.push(f);
+    if (this.files.length > this.max) { this.files = this.files.slice(0, this.max); alert(this.T.tooMany.replace('{max}', this.max)); }
+    if (this.files.length !== before || list.length) this.sync();
+  },
+  sync() {
+    const dt = new DataTransfer(); this.files.forEach(f => dt.items.add(f));
+    this.$root.querySelector('input[type=file]').files = dt.files;
+    this.urls.forEach(URL.revokeObjectURL);
+    this.urls = this.files.map(f => URL.createObjectURL(f));
+  },
+  remove(i) { this.files.splice(i, 1); this.sync(); },
+})));
+// a photo dropped outside a zone must not open the file in the browser tab
+['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files') && !e.target.closest('[x-data^="photoDrop"]')) e.preventDefault(); }));
 </script>
 {% endblock %}

@@ -1,23 +1,27 @@
+{% import "_ui.html" as ui %}
 {# PayLivery card on the chat page — paylivery_card(conv) as before. #}
 {% set pl = paylivery_card(conv) %}
 {% if pl %}
-<section class="card" id="paylivery">
-  <div class="row" style="justify-content:space-between"><h3>PayLivery <span style="font-weight:400;text-transform:none;letter-spacing:0">· {{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span></h3><span class="pill {{ 'ok' if pl.stage in ('paid_out', 'received') else 'warn' if pl.actions else '' }}">{{ pl.stage_label }}</span></div>
-  {% if pl.busy %}<span class="pill brand plain" style="align-self:flex-start">{{ _("working in the browser…") }} {{ pl.busy_label }}</span>{% endif %}
-  <p style="font-size:13px">{{ pl.next }}</p>
-  {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<div class="muted" style="font-size:12.5px">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</div>{% endif %}
-  <div class="row" style="gap:6px">
+<section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="paylivery">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">PayLivery <span class="font-normal tracking-normal normal-case">· {{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span></h3>
+    {{ ui.pill(pl.stage_label, 'ok' if pl.stage in ('paid_out', 'received') else 'warn' if pl.actions else '') }}
+  </div>
+  {% if pl.busy %}{{ ui.pill(_("working in the browser…") ~ ' ' ~ pl.busy_label, 'brand', dot=false) }}{% endif %}
+  <p class="break-words text-[13px]">{{ pl.next }}</p>
+  {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<div class="break-words text-[12.5px] text-muted">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</div>{% endif %}
+  <div class="flex flex-wrap items-center gap-1.5">
     {% for a in pl.actions %}
-    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" class="row" style="margin:0;gap:6px;flex-wrap:nowrap">
-      {% if a.input %}<input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required placeholder="€" aria-label="{{ _('Offer amount in euros') }}" style="width:90px;padding:6px 8px;font-size:13px" {% if a.disabled %}disabled{% endif %}>{% endif %}
-      <button class="btn sm {{ '' if a.name == 'buy' else 'secondary' }}" {% if a.disabled %}disabled{% endif %} {% if a.confirm %}data-confirm="{{ a.confirm }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
-      {% if a.disabled %}<small class="muted">{{ a.note }}</small>{% endif %}
+    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" class="flex flex-wrap items-center gap-1.5">
+      {% if a.input %}<input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required placeholder="€" aria-label="{{ _('Offer amount in euros') }}" class="input input-sm w-[90px] bg-base-200" {% if a.disabled %}disabled{% endif %}>{% endif %}
+      <button class="btn btn-sm {{ 'btn-primary' if a.name == 'buy' else '' }}" {% if a.disabled %}disabled{% endif %} {% if a.confirm %}data-confirm="{{ a.confirm }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
+      {% if a.disabled %}<small class="text-xs text-muted">{{ a.note }}</small>{% endif %}
     </form>
     {% endfor %}
-    {% if pl.label_saved and pl.shipment_id %}<a class="btn secondary sm" href="/shipments/{{ pl.shipment_id }}/label.pdf" target="_blank">{{ _("Label") }}</a>{% endif %}
-    <a class="btn secondary sm" href="{{ pl.open_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }} ↗</a>
+    {% if pl.label_saved and pl.shipment_id %}<a class="btn btn-sm" href="/shipments/{{ pl.shipment_id }}/label.pdf" target="_blank">{{ _("Label") }}</a>{% endif %}
+    <a class="btn btn-sm" href="{{ pl.open_url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}{{ ui.icon('external', 13) }}</a>
   </div>
-  {% if pl.history %}<details class="muted" style="font-size:12px"><summary style="cursor:pointer">{{ _("History") }}</summary><div style="padding-top:6px;display:flex;flex-direction:column;gap:3px">{% for h in pl.history %}<span>{{ h.at[:16]|replace('T', ' ') }} · {{ h.text }}</span>{% endfor %}</div></details>{% endif %}
-  <p class="muted" style="font-size:11.5px">{{ _("Each step runs on willhaben in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet.") }}</p>
+  {% if pl.history %}<details class="text-xs text-muted"><summary class="cursor-pointer">{{ _("History") }}</summary><div class="flex flex-col gap-[3px] pt-1.5">{% for h in pl.history %}<span class="break-words">{{ h.at[:16]|replace('T', ' ') }} · {{ h.text }}</span>{% endfor %}</div></details>{% endif %}
+  <p class="text-[11.5px] text-muted">{{ _("Each step runs on willhaben in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet.") }}</p>
 </section>
 {% endif %}

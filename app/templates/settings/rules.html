@@ -1,15 +1,14 @@
-{# Settings → rules: the old section of settings.html, markup unchanged (not ported yet: transitional styles) #}
+{# Settings → rules: the general rules textarea (posted with section=rules) and the Geizhals switch #}
 <form id="general" method="post" action="/settings"><input type="hidden" name="section" value="rules"></form>
-<div class="legacy">
-<p class="lead">{{ _("Included in every Claude prompt: chat replies, automatic replies and new listings.") }}</p>
-<label>{{ _("Rules for replies and listings") }}
-  <textarea name="reply_rules" form="general" rows="10">{{ values.reply_rules }}</textarea></label>
-<button type="submit" form="general" formaction="/settings">{{ _("Save") }}</button>
-<form method="post" action="/settings/listings" style="margin-top:1.2rem">
-  <label><input type="checkbox" role="switch" name="geizhals_auto_specs" onchange="this.form.submit()"
-    {% if geizhals_auto_specs %}checked{% endif %}>
-    {{ _("Always add the Geizhals spec sheet to new listings when the product is found") }}</label>
-  <small class="muted">{{ _("Otherwise you tick it per draft. The sheet is the manufacturer data from Geizhals, appended below the description.") }}</small>
-  <noscript><button class="secondary">{{ _("Save") }}</button></noscript>
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<p class="text-muted">{{ _("Included in every Claude prompt: chat replies, automatic replies and new listings.") }}</p>
+<label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Rules for replies and listings") }}</span>
+  <textarea name="reply_rules" form="general" rows="10" class="textarea w-full min-w-0 bg-base-200">{{ values.reply_rules }}</textarea></label>
+<div><button type="submit" form="general" formaction="/settings" class="btn btn-primary">{{ _("Save") }}</button></div>
+</section>
+<form method="post" action="/settings/listings" class="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Always add the Geizhals spec sheet to new listings when the product is found") }}</span>
+    <input type="checkbox" class="toggle toggle-primary" name="geizhals_auto_specs" onchange="this.form.submit()" {% if geizhals_auto_specs %}checked{% endif %}></label>
+  <small class="text-[12.5px] text-muted">{{ _("Otherwise you tick it per draft. The sheet is the manufacturer data from Geizhals, appended below the description.") }}</small>
+  <noscript><button class="btn">{{ _("Save") }}</button></noscript>
 </form>
-</div>

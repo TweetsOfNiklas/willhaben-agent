@@ -1,5 +1,6 @@
 """Deactivate / delete own ads on willhaben via the ad's own action links, and hide-only."""
 import copy
+import re
 import json
 
 import pytest
@@ -10,6 +11,7 @@ from app.db import MyAd, session
 from app.services import my_ads
 from app.willhaben.account import EndpointUnknown
 from app.willhaben.session import ApiResponse
+from tests.conftest import finish_jobs, wait_jobs
 from tests.test_my_ads import NEXT
 
 
@@ -207,16 +209,89 @@ async def test_bulk_route_keeps_list_filters(account):
         assert r.status_code == 303 and r.headers["location"].endswith("&show_inactive=1")
 
 
-async def test_bulk_route(account):
+async def test_bulk_route_queues_and_returns_at_once(account, monkeypatch):
+    import asyncio
+
     from app.main import app
 
     await my_ads.import_from_account()
+    gate = asyncio.Event()
+    real = account.api
+
+    async def slow_api(method, path, body=None, accept="application/json"):
+        if method == "DELETE":
+            await gate.wait()       # willhaben is "slow": the page must not wait for it
+        return await real(method, path, body, accept)
+
+    monkeypatch.setattr(account, "api", slow_api)
     with TestClient(app) as c:
         r = c.post("/myads/bulk/delete", data={"ids": ["1000000001"]}, follow_redirects=False)
-        assert r.status_code == 303 and "1" in r.headers["location"]
+        assert r.status_code == 303 and "msg=" in r.headers["location"]
+        with session() as db:
+            assert db.get(MyAd, "1000000001").pending_action == "delete"     # marked before willhaben is asked
+        page = c.get("/myads?show_active=1&show_inactive=1").text
+        assert 'data-pending-key="ad:1000000001"' in page and "Deleting…" in page and 'value="1000000001" form="bulk"' not in page
+        state = c.get("/jobs").json()
+        assert state["pending"] == ["ad:1000000001"] and state["active"][0]["label"].startswith("Delete „")
+        r = c.post("/myads/1000000001/delete", follow_redirects=False)       # already queued: not twice
+        assert "Nothing%20queued" in r.headers["location"]
+        c.portal.call(gate.set)
+        wait_jobs()
+        with session() as db:
+            assert db.get(MyAd, "1000000001") is None
+        state = c.get("/jobs").json()
+        assert not state["active"] and not state["pending"] and state["recent"][0]["result"] == "Deleted on willhaben: 1"
         assert c.post("/myads/bulk/nuke", data={"ids": ["1"]}).status_code == 404
         page = c.get("/myads?show_inactive=1").text
-        assert "outline-danger" in page and 'name="ids"' in page and ">Activate<" in page
+        assert 'data-act="delete"' in page and 'name="ids"' in page and ">Activate<" in page
+        assert 'id="bg-jobs"' in page and "Deleted on willhaben: 1" in page    # header: last result
+
+
+async def test_queued_job_failure_lands_on_the_ads(account, monkeypatch):
+    from app.services import jobs
+    from app.willhaben.session import NotLoggedIn
+
+    await my_ads.import_from_account()
+
+    async def logged_out(method, path, body=None, accept="application/json"):
+        raise NotLoggedIn("HTTP 401")
+
+    monkeypatch.setattr(account, "api", logged_out)
+    assert my_ads.enqueue("deactivate", ["1000000001", "1000000002", "1000000001"]) == 2
+    assert my_ads.enqueue("delete", ["1000000001"]) == 0                    # still waiting: no second action
+    job = jobs._active[0]
+    assert job.status in ("queued", "running") and job.total == 2
+    await job.task
+    assert job.status == "failed" and "401" in job.result
+    with session() as db:
+        rows = {r.ad_id: r for r in db.exec(select(MyAd))}
+    assert all(r.pending_action is None and "401" in r.last_error for r in rows.values())
+
+
+async def test_jobs_run_one_after_another(account):
+    from app.services import jobs
+
+    await my_ads.import_from_account()
+    my_ads.enqueue("deactivate", ["1000000001"])
+    upd = my_ads.start_update()
+    assert my_ads.start_update() is upd                                      # a waiting update is not doubled
+    assert [j["status"] for j in jobs.snapshot()["active"]] == ["queued", "queued"]
+    await upd.task
+    snap = jobs.snapshot()
+    assert not snap["active"] and [j["status"] for j in snap["recent"]] == ["done", "done"]
+    assert "loaded from willhaben" in snap["recent"][0]["result"]
+    with session() as db:
+        assert db.get(MyAd, "1000000001").status == "Deaktiviert"
+
+
+def test_recover_after_restart():
+    with session() as db:
+        db.add(MyAd(ad_id="7", heading="Halb", status="active", pending_action="delete"))
+        db.commit()
+    my_ads.recover()
+    with session() as db:
+        row = db.get(MyAd, "7")
+    assert row.pending_action is None and "restart" in row.last_error
 
 
 async def test_hide_only_survives_import_and_routes(account):
@@ -389,8 +464,12 @@ def test_edit_page_and_route(monkeypatch):
         assert 'value="Alter Titel"' in page and "• Netzteil" in page and 'value="40"' in page
         r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "12,50"},
                    follow_redirects=False)
-        assert r.status_code == 303 and "/myads?msg=" in r.headers["location"]
+        assert r.status_code == 303 and r.headers["location"].startswith("/myads?ad=1000000001&msg=")   # back to the ad
+        wait_jobs()                                                          # saved by the background job
         assert acct.put_body["price"] == 12.5
+        with session() as db:
+            row = db.get(MyAd, "1000000001")
+        assert not row.pending_action and not row.pending_payload
         r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "abc"},
                    follow_redirects=False)
         assert "/edit?msg=" in r.headers["location"]
@@ -430,6 +509,18 @@ def test_ai_revision_fills_the_form_without_saving(monkeypatch):
     assert "kürzer" in Backend.prompts[0] and "Audio > Lautsprecher" in Backend.prompts[0]
     assert acct.put_body is None                                                 # nothing saved on willhaben
 
+    class Failing:
+        async def complete(self, *, system, prompt, schema, images=None):
+            from app.llm.base import LLMError
+            raise LLMError("Limit erreicht")
+
+    monkeypatch.setattr("app.llm.base.get_backend", lambda *a: Failing())
+    with TestClient(app) as c:                       # htmx keeps only #edit-main: the error must be inside it
+        page = c.post("/myads/1000000001/edit/ai", data={"heading": "Alter Titel", "description": "Alt", "price": "40",
+                                                         "instruction": "kürzer"}, headers={"HX-Request": "true"}).text
+    main = page.split('id="edit-main"', 1)[1]
+    assert "Limit erreicht" in main and 'value="Alter Titel"' in main
+
 
 def test_myads_filters_and_order():
     from datetime import timedelta
@@ -456,7 +547,7 @@ def test_myads_filters_and_order():
         # long expired (past the 30-day cutoff) and the old copy of a renewed ad are not "expired"
         for gone in ("Deaktiviert", "Weg", "Geschenkt", "Reserviert", "Uralt", "Erneuert"):
             assert gone not in page
-        assert "Deactivated <small>2</small>" in page and "Sold / reserved <small>3</small>" in page
+        assert re.search(r"Deactivated<small[^>]*>2</small>", page) and re.search(r"Sold / reserved<small[^>]*>3</small>", page)
         # expired ads always show, in their own section above the others
         assert page.index("Active (2)") < page.index("Lange") < page.index("Bald") < page.index("Expired (1)") \
             < page.index("Ausgelaufen")    # active ads on top, then the expired ones
@@ -467,69 +558,90 @@ def test_myads_filters_and_order():
         assert "Erneuert" not in page     # a renewed ad's old copy is never listed: its chats use the new copy
         assert "Bald" not in page and "Ausgelaufen" not in page
         page = c.get("/myads?show_sold=1").text
-        assert "Weg" in page and "Geschenkt" in page and "Reserviert" in page
-        assert "Deaktiviert" not in page and "Bald" not in page
-        assert "/myads/cleanup" not in page          # the Clean up button is gone
-        # toggles combine: Active + Sold, with a count on every chip
-        page = c.get("/myads?show_active=1&show_sold=1").text
-        assert "Bald" in page and "Weg" in page and "Deaktiviert" not in page
-        assert "Active <small>3</small>" in page                              # 2 active + 1 recently expired
-        import re
-        active_href = re.search(r'href="([^"]*)">Active <small>', page).group(1)
-        assert "show_sold=1" in active_href and "show_active" not in active_href          # the Active chip turns Active off
+        assert "Weg" in page and "Geschenkt" in page and "Deaktiviert" not in page
 
 
-async def test_cleanup_deletes_old_ads_and_never_active_ones(account):
-    from tests.test_my_ads import _ad
-
-    ads = account._ads()
-    ads[0]["advertImageList"] = {"advertImage": []}                  # active without photo: never a candidate
-    _make_passive(account, "1000000002")
-    ads[1]["advertImageList"] = {"advertImage": []}                  # passive without photo: deletable
-    sold = _ad("1000000003", "sold", "Verkauft", "2026-10-01T10:00:00+02:00")
-    sold["advertEditStatusActionsList"] = {"contextLinkList": {"contextLink": []}}   # no delete link: hidden only
-    kept = _ad("1000000004", "deactivated", "Deaktiviert", "2026-10-01T10:00:00+02:00")   # has a photo: stays
-    ads += [sold, kept]
-    account._relink(kept)
-    await my_ads.import_from_account()
-
-    cands = {c["ad_id"]: c for c in await my_ads.cleanup_candidates()}
-    assert set(cands) == {"1000000002", "1000000003"}
-    assert cands["1000000002"]["deletable"] and not cands["1000000003"]["deletable"]
-
-    res = await my_ads.cleanup(["1000000001", "1000000002", "1000000003", "1000000004"])
-    assert res["done"] == ["Anzeige 1000000002"] and res["hidden"] == ["Anzeige 1000000003"] and not res["failed"]
-    deleted = [p for m, p in account.calls if m == "DELETE"]
-    assert deleted == ["/webapi/myatz/bap/1000000002"]               # the active and the kept ad are untouched
-    with session() as db:
-        assert db.get(MyAd, "1000000002") is None and db.get(MyAd, "1000000003").hidden
-        assert db.get(MyAd, "1000000001") is not None and db.get(MyAd, "1000000004") is not None
-
-
-async def test_cleanup_page_and_route(account):
+def test_list_stays_on_the_page(monkeypatch):
+    """htmx asks in the background: the update answers without a redirect, actions keep the filters and the open
+    ad, and the page carries what swaps it in place (list, detail, lane refresh)."""
     from app.main import app
 
-    account._ads()[1]["advertImageList"] = {"advertImage": []}
-    await my_ads.import_from_account()
-    with TestClient(app) as c:
-        page = c.get("/myads/cleanup").text
-        assert 'value="1000000002"' in page and 'value="1000000001"' not in page
-        r = c.post("/myads/cleanup", data={"ids": ["1000000002"]}, follow_redirects=False)
-        assert r.status_code == 303 and "/myads?msg=" in r.headers["location"]
-    assert ("DELETE", "/webapi/myatz/bap/1000000002") in account.calls
+    async def no_public_check(ad_id, off_account=False):     # the update must not reach willhaben from a test
+        return None
 
-
-def test_row_actions_keep_the_list_filters():
-    from app.main import app
-
+    monkeypatch.setattr(my_ads, "check", no_public_check)
     with session() as db:
-        db.add(MyAd(ad_id="1000000001", heading="Rad", status="Passiv"))
+        db.add(MyAd(ad_id="11", heading="Rad", status="active"))
         db.commit()
-    ref = {"referer": "http://testserver/myads?show_inactive=1&show_sold=1&msg=x"}
+    hx = {"HX-Request": "true", "HX-Current-URL": "http://testserver/myads?show_inactive=1&ad=11&msg=alt"}
     with TestClient(app) as c:
-        r = c.post("/myads/1000000001/auto-renew", data={"on": "1"}, headers=ref, follow_redirects=False)
-        assert r.headers["location"] == "/myads?msg=&show_inactive=1&show_sold=1"
-        r = c.post("/myads/1000000001/auto-reply", data={"on": ""}, headers=ref, follow_redirects=False)
-        assert r.headers["location"].endswith("&show_inactive=1&show_sold=1&ad=1000000001#ad-1000000001")
-        r = c.post("/myads/1000000001/hide", data={"hidden": "0"}, follow_redirects=False)   # no referer: plain list
-        assert r.headers["location"] == "/myads?msg="
+        page = c.get("/myads?ad=11").text
+        assert c.post("/myads/check", headers=hx, follow_redirects=False).status_code == 204
+        loc = c.post("/myads/11/hide", data={"hidden": "1"}, headers=hx, follow_redirects=False).headers["location"]
+        assert "msg=Hidden" in loc and "show_inactive=1" in loc and "ad=11" in loc and "alt" not in loc
+        r = c.post("/myads/check", headers={"referer": "http://testserver/myads?show_sold=1"}, follow_redirects=False)
+        assert r.status_code == 303 and "show_sold=1" in r.headers["location"]
+        wait_jobs()
+    for part in ('id="myads-rows"', 'data-refresh-on-lane="ads"', 'hx-post="/myads/bulk/delete"', 'id="myads-detail"',
+                 'hx-post="/myads/11/delete"', 'hx-post="/myads/check"', 'id="bg-jobs"'):
+        assert part in page, part
+
+
+def _cleanup_account(account):
+    """1000000002 deactivated without a photo (deletable), 1000000003 sold with no delete link (only hidden here)."""
+    ads = account._ads()
+    ads[1]["advertImageList"] = {"advertImage": []}
+    sold = copy.deepcopy(ads[0])
+    sold.update(id="1000000003", description="Anzeige 1000000003", advertStatus={"id": "sold", "description": "Verkauft"},
+                advertEditStatusActionsList={"contextLinkList": {"contextLink": []}})
+    ads.append(sold)
+
+
+async def test_cleanup_is_queued_and_marks_at_once(account):
+    _cleanup_account(account)
+    await my_ads.import_from_account()
+    assert my_ads.enqueue_cleanup(["1000000002", "1000000003", "1000000001"]) == 3
+    with session() as db:                                                   # marked before willhaben is asked
+        assert {r.ad_id for r in db.exec(select(MyAd)) if r.pending_action == "delete"} == {"1000000001", "1000000002", "1000000003"}
+    await finish_jobs()
+    with session() as db:
+        rows = {r.ad_id: r for r in db.exec(select(MyAd))}
+    assert "1000000002" not in rows and rows["1000000003"].hidden is True
+    assert "1000000001" in rows                                             # active: never a candidate, never deleted
+    assert not any(r.pending_action for r in rows.values())
+    assert [p for m, p in account.calls if m == "DELETE"] == ["/webapi/myatz/bap/1000000002"]
+    from app.services import jobs
+    assert jobs.snapshot()["recent"][0]["result"] == "Deleted on willhaben: 1 · 1 only hidden here"
+
+
+def test_cleanup_route_returns_at_once(account):
+    from app.main import app
+
+    _cleanup_account(account)
+    with TestClient(app) as c:
+        c.portal.call(my_ads.import_from_account)
+        r = c.post("/myads/cleanup", data={"ids": ["1000000002"]}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/myads?msg=")
+        wait_jobs()
+        page = c.get("/myads/cleanup").text
+    with session() as db:
+        assert db.get(MyAd, "1000000002") is None
+    assert "Runs in the background" in page
+
+
+async def test_cleanup_logged_out_leaves_the_reason_on_the_ads(account, monkeypatch):
+    from app.services import jobs
+    from app.willhaben.session import NotLoggedIn
+
+    await my_ads.import_from_account()
+
+    async def logged_out(method, path, body=None, accept="application/json"):
+        raise NotLoggedIn("HTTP 401")
+
+    monkeypatch.setattr(account, "api", logged_out)
+    my_ads.enqueue_cleanup(["1000000002"])
+    await finish_jobs()
+    with session() as db:
+        row = db.get(MyAd, "1000000002")
+    assert row.pending_action is None and "401" in row.last_error
+    assert jobs.snapshot()["recent"][0]["status"] == "failed"

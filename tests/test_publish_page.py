@@ -10,6 +10,7 @@ from app import db as dbmod
 from app.services import ad_creator
 from app.willhaben import insert
 from tests.test_dashboard import client  # noqa: F401  (pytest fixture)
+from tests.conftest import wait_jobs
 
 TREE = {
     "categoryNode": {"label": "Marktplatz", "code": "ROOT", "children": [
@@ -214,8 +215,10 @@ def wh(monkeypatch):
         return state.suggest
 
     async def publish(s, ad, photos, existing_ad_id=None, on_presaved=None, stop_after=None, shipping=None,
-                      on_delivery=None):
+                      on_delivery=None, on_step=None):
         state.published.append({"ad": ad, "shipping": shipping, "existing": existing_ad_id})
+        if on_step:
+            on_step("presave")
         on_presaved("1000000001")
         if shipping and on_delivery:
             on_delivery()
@@ -303,6 +306,7 @@ def test_manual_category_saved_and_published(client, wh):  # noqa: F811
                     data={"option": "1", "o1_Zustand": "neu", "o0_Zustand": "gebraucht", "handover": "pickup",
                           "title": "Logitech S125i Lautsprecher", "description": "Gut erhalten.", "price": "15"})
     assert r.status_code == 303 and "msg=" in r.headers["location"]
+    wait_jobs()
     sent = wh.published[-1]
     assert sent["shipping"] is None                                                   # pickup: verified path
     assert sent["ad"]["categoryPath"]["path"][-1]["code"] == "MOBILE_SPEAKER"
@@ -313,10 +317,11 @@ def test_manual_category_saved_and_published(client, wh):  # noqa: F811
     assert (d2.status, d2.wh_ad_id, d2.error) == ("published", "1000000001", None)
 
     page = client.get(f"/new-ad/{d.id}").text
-    assert "https://www.willhaben.at/iad/object?adId=1000000001" in page and 'pill ok' in page
+    assert "https://www.willhaben.at/iad/object?adId=1000000001" in page and 'bg-ok-soft text-success' in page
     assert "/willhaben/publish" not in page
 
     client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "1"})               # never twice
+    wait_jobs()
     assert len(wh.published) == 1 and "Schon veröffentlicht" in _get(d.id).error
 
 
@@ -325,6 +330,7 @@ def test_publish_with_shipping_from_form(client, wh):  # noqa: F811
     client.post(f"/new-ad/{d.id}/willhaben/prepare", data={})
     client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "0", "handover": "both", "paylivery": "1",
                                                            "parcel_size": "m", "parcel_carrier": "Hermes"})
+    wait_jobs()
     sent = wh.published[-1]
     assert sent["shipping"] == {"handover": "both", "paylivery": True, "size": "M", "carrier": "Hermes"}
     ho = [a for a in sent["ad"]["treeAttributes"] if a["attributeNode"]["code"] == "Uebergabe"]
@@ -363,7 +369,11 @@ def test_batch_card_picker_and_inline_category(client, wh):  # noqa: F811
 
     card = client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "o0_Zustand": "gebraucht",
                                                                   "handover": "shipping"}).text
-    assert "View on willhaben" in card
+    assert f'data-pending-key="addraft:{d.id}"' in card and f'data-refresh="/ad-drafts/{d.id}/card"' in card
+    assert "/inline/publish" not in card                                             # no second click while queued
+    wait_jobs()
+    card = client.get(f"/ad-drafts/{d.id}/card").text
+    assert "View on willhaben" in card and "data-pending-key" not in card
     assert wh.published[-1]["shipping"] == {"handover": "shipping", "paylivery": False, "size": None, "carrier": None}
 
 

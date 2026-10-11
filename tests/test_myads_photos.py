@@ -6,6 +6,7 @@ from app.db import MyAd, session
 from app.services import my_ads
 from app.willhaben.session import ApiResponse
 from tests.test_myads_actions import _Editor
+from tests.conftest import wait_jobs  # noqa: E402
 
 LIST = "/webapi/iad/atimage/1000000001"
 ASSOC = "/webapi/iad-upload/atimage/1000000001/order-and-associate"
@@ -116,7 +117,12 @@ def test_page_and_route(editor):
         assert 'id="photo-form"' in page and f'value="{ref("b")}"' in page and "0001_b_thumb.jpg" in page
         r = c.post("/myads/1000000001/photos", data={"order": [ref("b"), ref("a")], "new_first": "1"},
                    files=[("photos", ("neu.png", b"x", "image/png"))], follow_redirects=False)
-        assert r.status_code == 303 and "/edit?msg=" in r.headers["location"]
+        assert r.status_code == 303 and r.headers["location"].startswith("/myads?ad=1000000001&msg=")
+        wait_jobs()                                                          # uploaded by the background job
         assert [x["reference"] for x in editor.assoc_body["advertImage"]] == ["temp-1", ref("b"), ref("a")]
         r = c.post("/myads/1000000001/photos", data={"order": ["1/999/foreign.jpg"]}, follow_redirects=False)
-        assert "failed" in r.headers["location"] or "fehlgeschlagen" in r.headers["location"]
+        assert r.status_code == 303
+        wait_jobs()
+        with session() as db:                                                # the reason lands on the ad
+            err = db.get(MyAd, "1000000001").last_error
+        assert "failed" in err or "fehlgeschlagen" in err
