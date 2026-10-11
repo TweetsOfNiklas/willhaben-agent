@@ -232,6 +232,7 @@ class VintedPlatform(Platform):
     id = "vinted"
     name = "Vinted"
     host = "vinted.at"
+    api_host = HOST
     home_country = "AT"
     hosts = HOSTS
     image_hosts = ("vinted.net",)

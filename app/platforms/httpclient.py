@@ -8,6 +8,10 @@ platform), a fresh cookie jar every few hours and after a block, and the 403/429
 The wire is behind `Transport`: `HttpxTransport` (willhaben) or `CurlTransport` (sites whose bot protection checks
 the TLS fingerprint; curl_cffi impersonates a browser). Tests hand in a fake transport or an httpx MockTransport.
 Adapters never import the logged-in willhaben session (tests/test_anonymous_public.py).
+
+With the site's VPN switch on (app/platforms/vpn.py) every request goes through the tunnel's local proxy; a refused
+or unreachable exit is left for the next one (up to VPN_ATTEMPTS per request), and with no working exit the request
+fails instead of going out directly. An injected transport means no VPN (tests, unless they pass `tunnel`).
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import httpx
 
@@ -24,11 +28,15 @@ from app.platforms.base import Blocked, PlatformError
 from app.platforms.ratelimit import RateLimiter
 from app.willhaben import access_log, recorder, replay
 
+if TYPE_CHECKING:
+    from app.platforms.vpn import Tunnel
+
 log = logging.getLogger(__name__)
 
 NOT_FOUND_CACHE_S = 30
 ANON_SESSION_S = 6 * 3600   # fresh anonymous visitor every 6 h
 TIMEOUT_S = 30
+VPN_ATTEMPTS = 3            # exits one request may use before it gives up (each one through the limiter)
 
 
 @dataclass
@@ -51,6 +59,11 @@ class FetchResponse:
     def json(self) -> Any:
         return json.loads(self.text)
 
+    def header(self, name: str) -> str:
+        """A response header, whatever case the transport kept (curl_cffi keeps the server's)."""
+        name = name.lower()
+        return next((v for k, v in self.headers.items() if k.lower() == name), "")
+
 
 class TransportError(Exception):
     """The request could not be sent or answered (network, timeout, TLS)."""
@@ -66,15 +79,19 @@ class Transport(Protocol):
 
 
 class HttpxTransport:
-    """httpx with its own cookie jar; `transport` lets tests serve canned answers (httpx.MockTransport)."""
+    """httpx with its own cookie jar; `transport` lets tests serve canned answers (httpx.MockTransport); `proxy` is
+    the VPN tunnel's local proxy."""
 
-    def __init__(self, headers: dict[str, str], transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self._headers, self._transport = headers, transport
+    def __init__(self, headers: dict[str, str], transport: httpx.AsyncBaseTransport | None = None,
+                 proxy: str | None = None) -> None:
+        if transport is not None and proxy:      # httpx would take the proxy and quietly ignore the mock
+            raise ValueError("a mock transport and a proxy at the same time")
+        self._headers, self._transport, self.proxy = headers, transport, proxy
         self.client = self._new()
 
     def _new(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(headers=self._headers, timeout=TIMEOUT_S, follow_redirects=True, transport=self._transport,
-                                 cookies=httpx.Cookies())
+                                 proxy=self.proxy, cookies=httpx.Cookies())
 
     async def send(self, method: str, url: str, *, params: dict[str, Any] | None = None,
                    headers: dict[str, str] | None = None) -> FetchResponse:
@@ -97,10 +114,14 @@ class CurlTransport:
     """curl_cffi impersonating a current Chrome (TLS fingerprint and HTTP/2 settings), for sites behind Akamai and
     the like. Imported lazily: willhaben-only installs never load it."""
 
-    def __init__(self, headers: dict[str, str], impersonate: str = "chrome") -> None:
+    def __init__(self, headers: dict[str, str], impersonate: str = "chrome", proxy: str | None = None) -> None:
+        from curl_cffi import CurlOpt
         from curl_cffi.requests import AsyncSession
 
-        self.session = AsyncSession(impersonate=impersonate, headers=headers, timeout=TIMEOUT_S, allow_redirects=True)
+        # NOPROXY "": libcurl would honour a NO_PROXY environment variable and skip the tunnel for those hosts
+        self.proxy = proxy
+        self.session = AsyncSession(impersonate=impersonate, headers=headers, timeout=TIMEOUT_S, allow_redirects=True,
+                                    proxy=proxy, curl_options={CurlOpt.NOPROXY: ""} if proxy else None)
 
     async def send(self, method: str, url: str, *, params: dict[str, Any] | None = None,
                    headers: dict[str, str] | None = None) -> FetchResponse:
@@ -123,7 +144,11 @@ class HttpPlatformClient:
     def __init__(self, platform_id: str, limiter: RateLimiter, *, name: str | None = None,
                  headers: dict[str, str] | None = None, transport: Transport | None = None,
                  httpx_transport: httpx.AsyncBaseTransport | None = None, backend: str = "httpx",
-                 channel: str = "anonymous", session_s: float = ANON_SESSION_S) -> None:
+                 channel: str = "anonymous", session_s: float = ANON_SESSION_S,
+                 transport_factory: Callable[[str | None], Transport] | None = None,
+                 tunnel: Callable[[], Tunnel | None] | None = None) -> None:
+        """`transport_factory(proxy)` builds the transport for a route (None: direct); `tunnel()` gives the site's VPN
+        tunnel or None (default: the site's switch in Settings → VPN; never when a transport is injected)."""
         self.platform = platform_id
         self.name = name or platform_id
         self.channel = channel
@@ -131,12 +156,24 @@ class HttpPlatformClient:
         self.session_s = session_s
         self._cache: dict[Any, tuple[float, FetchResponse]] = {}
         headers = headers or {}
-        if transport is not None:
-            self._transport: Transport = transport
-        elif backend == "curl":
-            self._transport = CurlTransport(headers)
-        else:
-            self._transport = HttpxTransport(headers, httpx_transport)
+        injected = transport is not None or httpx_transport is not None
+        if transport_factory is None:
+            if transport is not None:
+                transport_factory = lambda proxy: transport                                  # noqa: E731
+            elif httpx_transport is not None:
+                transport_factory = lambda proxy: HttpxTransport(headers, httpx_transport)   # noqa: E731
+            elif backend == "curl":
+                transport_factory = lambda proxy: CurlTransport(headers, proxy=proxy)        # noqa: E731
+            else:
+                transport_factory = lambda proxy: HttpxTransport(headers, proxy=proxy)       # noqa: E731
+        if tunnel is None and not injected:
+            from app.platforms import vpn
+
+            tunnel = lambda: vpn.tunnel_for(platform_id)                                    # noqa: E731
+        self._factory = transport_factory
+        self._tunnel: Callable[[], Tunnel | None] = tunnel or (lambda: None)
+        self._proxy: str | None = None
+        self._transport: Transport | None = transport_factory(None) if injected else None   # else built on first use
         self._jar_since = time.monotonic()
 
     @property
@@ -144,17 +181,24 @@ class HttpPlatformClient:
         """The httpx client of the default transport (tests look at its cookie jar)."""
         return getattr(self._transport, "client", None)
 
+    @property
+    def proxy(self) -> str | None:
+        """The VPN route the last request went through (None: direct)."""
+        return self._proxy
+
     def classify(self, url: str) -> str:
         """Access-log kind of a request; willhaben's path rules by default, a site overrides."""
         return access_log.classify(url)
 
     def new_anonymous_session(self) -> None:
         """Forget the site's cookies; the next request starts as a new visitor."""
-        self._transport.clear_cookies()
+        if self._transport is not None:
+            self._transport.clear_cookies()
         self._jar_since = time.monotonic()
 
     async def aclose(self) -> None:
-        await self._transport.aclose()
+        if self._transport is not None:
+            await self._transport.aclose()
 
     def _check_status(self, r: FetchResponse) -> None:
         """403/429 = the site throttles or blocks this IP: new visitor, back-off, Blocked. A site may treat some
@@ -166,6 +210,25 @@ class HttpPlatformClient:
                                 s=f"{delay:.0f}"))
             blocked.sent = True
             raise blocked
+
+    def _exit_blocked(self, r: FetchResponse) -> bool:
+        """Through the VPN: does this answer refuse the exit (then the next one is tried)? 403 = the site blocks the
+        exit's IP (willhaben: Cloudflare), 429 = others on the shared exit used up its rate. A site overrides this
+        when one of these codes means something else there."""
+        return r.status_code in (403, 429)
+
+    async def _use(self, proxy: str | None) -> Transport:
+        """The transport for this route; a new route gets a new one (new connections, new visitor). Called with the
+        limiter held, so no request of this client is in flight on the old one."""
+        if self._transport is None or proxy != self._proxy:
+            old, self._transport, self._proxy = self._transport, self._factory(proxy), proxy
+            self._jar_since = time.monotonic()
+            if old is not None and old is not self._transport:
+                try:
+                    await old.aclose()
+                except Exception as e:  # noqa: BLE001 - closing the transport of a dead route
+                    log.debug("closing transport of %s: %s", self.platform, e)
+        return self._transport
 
     async def _get(self, url: str, *, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None,
                    cache_s: float = 0, kind: str | None = None) -> FetchResponse:
@@ -187,21 +250,14 @@ class HttpPlatformClient:
         if replay.enabled() and (rec := replay.find("GET", full)):     # WH_REPLAY=1: no request, no waiting
             replay.note(rec, kind)
             return replay.as_fetch_response(rec, full)
-        if time.monotonic() - self._jar_since > self.session_s:
-            self.new_anonymous_session()
-        async with self.limiter:
-            with access_log.track(self.channel, kind, platform=self.platform) as tr:
-                started = time.monotonic()
-                try:
-                    r = await self._transport.send("GET", full, headers=headers)
-                except TransportError as e:
-                    recorder.record_http(self.channel, kind, "GET", full, req_headers=headers, outcome="error", error=str(e),
-                                         duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
-                    raise PlatformError(t("Network error: {error}", error=e)) from e
-                tr.status = r.status_code
-        recorder.record_http(self.channel, kind, "GET", full, req_headers=headers, status=r.status_code,
-                             resp_headers=r.headers, resp_body=r.content, final_url=r.url,
-                             duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
+        tunnel = self._tunnel()
+        if tunnel is None:
+            try:
+                r = await self._send_once(full, kind, headers, None)
+            except TransportError as e:
+                raise PlatformError(t("Network error: {error}", error=e)) from e
+        else:
+            r = await self._send_vpn(tunnel, full, kind, headers)
         self._check_status(r)
         self.limiter.reward()
         if cache_s and r.status_code in (200, 404):
@@ -210,3 +266,46 @@ class HttpPlatformClient:
                 self._cache = {k: v for k, v in self._cache.items() if now - v[0] < 600}
             self._cache[key] = (now, r)
         return r
+
+    async def _send_once(self, full: str, kind: str, headers: dict[str, str] | None, proxy: str | None) -> FetchResponse:
+        """One request through the limiter on the route `proxy` (None: direct), counted and recorded."""
+        async with self.limiter:
+            transport = await self._use(proxy)
+            if time.monotonic() - self._jar_since > self.session_s:
+                self.new_anonymous_session()
+            with access_log.track(self.channel, kind, platform=self.platform) as tr:
+                started = time.monotonic()
+                try:
+                    r = await transport.send("GET", full, headers=headers)
+                except TransportError as e:
+                    recorder.record_http(self.channel, kind, "GET", full, req_headers=headers, outcome="error", error=str(e),
+                                         duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
+                    raise
+                tr.status = r.status_code
+        recorder.record_http(self.channel, kind, "GET", full, req_headers=headers, status=r.status_code,
+                             resp_headers=r.headers, resp_body=r.content, final_url=r.url,
+                             duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
+        return r
+
+    async def _send_vpn(self, tunnel: Tunnel, full: str, kind: str, headers: dict[str, str] | None) -> FetchResponse:
+        """Through the site's VPN: a refused or unreachable exit is left for the next one, at most VPN_ATTEMPTS times.
+        No limiter.penalize() for a refused exit: willhaben's limiter is shared with the logged-in session on the home
+        IP, which the refusal says nothing about. No working exit: PlatformError, never a direct request."""
+        last: PlatformError | None = None
+        for _ in range(VPN_ATTEMPTS):
+            route = await tunnel.ensure()                 # PlatformError when no exit works (fail closed)
+            try:
+                r = await self._send_once(full, kind, headers, route.proxy)
+            except TransportError as e:
+                await tunnel.failed(route, "unreachable")
+                last = PlatformError(t("Network error through the VPN: {error}", error=e))
+                continue
+            if self._exit_blocked(r):
+                await tunnel.failed(route, "rate" if r.status_code == 429 else "blocked")
+                self.new_anonymous_session()
+                last = Blocked(t("{name} refused the VPN exit (HTTP {status})", name=self.name, status=r.status_code))
+                last.sent = True
+                continue
+            return r
+        assert last is not None
+        raise last

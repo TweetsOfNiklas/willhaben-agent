@@ -24,3 +24,4 @@
     <span class="text-[12.5px] text-muted">{{ _("Requests in the last hour: {n}", n=site.last_hour) }}{% if site.status.cooling_down_s %} · {{ _("paused for {s} s after a block", s=site.status.cooling_down_s|round|int) }}{% endif %} · <a class="link link-primary" href="/stats/requests?platform={{ p.id }}">{{ _("Statistics") }}</a></span>
   </div>
 </form>
+{% if vpn is defined %}{% with vpn_site = p.id %}{% include "_vpn_switch.html" %}{% endwith %}{% endif %}

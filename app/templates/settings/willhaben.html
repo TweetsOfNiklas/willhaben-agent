@@ -19,3 +19,4 @@
   <div class="flex flex-wrap items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="font-medium">{{ _("Requests to willhaben") }}</span><a href="/stats/requests?platform=willhaben" class="btn btn-sm">{{ _("Full statistics") }} →</a></div>
   {# optional inline preview: include the chart section of stats_willhaben.html via a macro, or embed <iframe src="/stats/willhaben?embed=1"> #}
 </section>
+{% if vpn is defined %}{% with vpn_site = 'willhaben' %}{% include "_vpn_switch.html" %}{% endwith %}{% endif %}

@@ -46,6 +46,16 @@ willhaben one) would implement the same `Transport` protocol.
 
 Give the client its own `get_client()/set_client()` so tests can hand in a fake transport.
 
+The VPN (`app/platforms/vpn.py`, Settings → VPN) comes with `HttpPlatformClient`: with the site's switch on, each
+request goes through its tunnel's local proxy. A refused exit is left for the next one; with no working exit the
+request fails and is never sent directly. Two things to set for a new site:
+- `api_host` on the adapter: the host its requests go to. A new exit is checked with a `CONNECT` to it.
+- `_exit_blocked(r)` on the client, when 403 or 429 means something else there. kleinanzeigen counts only Akamai's
+  HTML 403 and 429 as a refused exit; its JSON 401/403 still reports rotated credentials.
+
+A transport you build yourself must take the route's `proxy` (see `transport_factory`) and must not read proxy
+settings from the environment.
+
 ## Registering
 
 - `app/platforms/registry.py`: add `"<id>": "app.platforms.<module>:<Class>"` to `_FACTORIES`.

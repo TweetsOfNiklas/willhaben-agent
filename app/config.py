@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     platform_preisjaeger_min_gap_s: float = 4.0
     platform_preisjaeger_per_hour: int = 60
     kleinanzeigen_api_auth: str = ""            # "user:pw" of the kleinanzeigen app API; empty = the bundled default
+    # --- VPN for the anonymous requests (app/platforms/vpn.py): WireGuard configs are uploaded in Settings → VPN
+    wireproxy_bin: str = "wireproxy"             # userspace WireGuard with a local proxy; part of the image
 
     # --- logged-in browser session (Playwright persistent profile) ---
     browser_enabled: bool = True
@@ -90,6 +92,10 @@ class Settings(BaseSettings):
     @property
     def uploads_dir(self) -> Path:
         return self.data_dir / "ad-drafts"
+
+    @property
+    def wireguard_dir(self) -> Path:
+        return self.data_dir / "wireguard"
 
 
 def address_check(url: str | None) -> dict[str, bool]:

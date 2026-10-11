@@ -41,7 +41,7 @@ from app.services.search_agents import create_agent, refile_screened, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
-from app.platforms import PlatformError, ad_ref
+from app.platforms import PlatformError, ad_ref, vpn
 from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with_params
 from app.willhaben.public import WillhabenError, get_public, willhaben_limiter
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
     chats.recover_sending()
     deals_web.product_search.recover()
     purchase_svc.recover()
+    vpn.secure()                                   # WireGuard configs owner-only (also after a backup restore)
     if s.browser_enabled or s.wh_replay:            # WH_REPLAY without a browser: the login comes from recordings
         sess = get_session()
         await sess.start()
@@ -96,7 +97,9 @@ async def lifespan(app: FastAPI):
     try:
         await get_session().stop()
         await get_public().aclose()
+        await platforms.aclose_all()              # the other sites' clients
     finally:
+        await vpn.shutdown()                      # wireproxy processes of the VPN exits
         from app.willhaben import recorder
         await recorder.drain()                    # willhaben recordings still being written
         access_log.flush()                        # last unwritten willhaben access counts
@@ -217,7 +220,8 @@ def _platform_name(pid: str | None) -> str:
 
 # platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
-                             platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled)
+                             platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled,
+                             vpn_health=vpn.health)
 
 
 def _inbox_seen_at() -> datetime:
@@ -1548,7 +1552,7 @@ async def capture_download(name: str):
 
 
 # ------------------------------------------------------------------ settings
-SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "shipping", "printers", "calendar",
+SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
                      "claude", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language")   # settings.html groups
 
 
@@ -1704,6 +1708,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
                   **({"site": _platform_row(sites[section])} if section in sites else {}),
+                  **({"vpn": vpn.status()} if section == "vpn" or section == "willhaben" or section in sites else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(),
                   purposes=[(p, label, hint, _alias(model_for(p))) for p, (_, label, hint) in PURPOSES.items()],
@@ -1755,6 +1760,59 @@ async def settings_platform(request: Request, pid: str):
             set_setting("kleinanzeigen_api_auth", auth if re.fullmatch(r"[^:\s]+:[^\s]+", auth) else "")
             ka.set_client(None)           # the next request builds a client with the new credentials
     return back(f"/settings/{p.id}?msg={quote(t('Changes saved'), safe='')}")
+
+
+# ------------------------------------------------------------------ VPN for the anonymous requests (app/platforms/vpn.py)
+def _vpn_back(msg: str, next_url: str = "") -> RedirectResponse:
+    target = next_url if next_url.startswith("/settings/") and not next_url.startswith("//") else "/settings/vpn"
+    return back(f"{target}?msg={quote(msg, safe='')}")
+
+
+@app.post("/settings/vpn/upload")
+async def settings_vpn_upload(file: UploadFile | None = File(None)):
+    """A .zip of WireGuard configs (the app works through them) or one .conf (a dedicated profile); replaces the old
+    source. The first upload switches the VPN on for willhaben (a later removal then pauses it, never goes direct)."""
+    if file is None or not file.filename:
+        return _vpn_back(t("Choose a file first"))
+    data = await file.read(vpn.MAX_UPLOAD + 1)
+    try:
+        mode, n, skipped = vpn.import_upload(file.filename, data)
+    except ValueError as e:
+        return _vpn_back(str(e))
+    await vpn.source_changed()
+    if get_setting("platform_willhaben_vpn") == "":
+        vpn.set_enabled("willhaben", True)
+    msg = (t("{n} configs uploaded; the sites with the VPN on go through them one after another", n=n)
+           if mode == "collection" else t("Profile uploaded"))
+    if skipped:
+        msg += "\n" + t("Skipped {n}: {first}", n=len(skipped), first=skipped[0])
+    return _vpn_back(msg)
+
+
+@app.post("/settings/vpn/forget")
+async def settings_vpn_forget():
+    vpn.forget()
+    return _vpn_back(t("Blocks forgotten; every exit gets a new chance"))
+
+
+@app.post("/settings/vpn/clear")
+async def settings_vpn_clear():
+    vpn.remove_source()
+    await vpn.source_changed()
+    return _vpn_back(t("WireGuard configs removed; sites with the VPN on pause until you upload new ones"))
+
+
+@app.post("/settings/vpn/site/{pid}")
+async def settings_vpn_site(pid: str, enabled: str = Form(""), next: str = Form("")):
+    """One site's VPN switch (Settings → VPN or the site's own page via `next`)."""
+    try:
+        p = platforms.get(pid)
+    except platforms.UnknownPlatform:
+        raise HTTPException(404) from None
+    vpn.set_enabled(p.id, bool(enabled))
+    if not enabled:
+        await vpn.stop_site(p.id)
+    return _vpn_back(t("Changes saved"), next)
 
 
 def _timeline_section() -> dict[str, Any]:

@@ -226,6 +226,7 @@ class ShpockPlatform(Platform):
     id = "shpock"
     name = "Shpock"
     host = "shpock.com"
+    api_host = "www.shpock.com"
     home_country = "AT"
     hosts = ("shpock.com",)
     image_hosts = ("secondhandapp.at",)

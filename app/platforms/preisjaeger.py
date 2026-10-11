@@ -180,6 +180,7 @@ class PreisjaegerPlatform(Platform):
     id = "preisjaeger"
     name = "Preisjäger"
     host = "preisjaeger.at"
+    api_host = "www.preisjaeger.at"
     home_country = "AT"
     hosts = ("preisjaeger.at",)
     image_hosts = ("static.preisjaeger.at",)

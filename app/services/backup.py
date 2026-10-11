@@ -54,8 +54,9 @@ FORMAT_VERSION = 1
 SUPPORTED_VERSIONS = {1}
 MANIFEST = "manifest.json"
 DB_NAME = "app.db"
-TREES = ("ad-drafts", "labels")           # always part of a backup
+TREES = ("ad-drafts", "labels", "wireguard")   # always part of a backup (wireguard: the VPN configs, Settings → VPN)
 PROFILE = "browser-profile"               # only on request (can be large)
+TREE_KINDS = {"ad-drafts": "photo", "labels": "label", "wireguard": "vpn", PROFILE: "profile"}
 KNOWN_SECRETS = ("claude-token", "ha-token", "telegram-token", "action-secret", "google-calendar.json")
 _SECRET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}(?:-token|-secret|\.json)")
 SECRET_MAX = 1 << 20                      # a token/secret file larger than 1 MiB is not a token
@@ -214,7 +215,7 @@ def create_backup(dest: Path, include_profile: bool = False, passphrase: str | N
             _add_file(zf, snap, DB_NAME, entries, "database")
             for p in secret_files(root):
                 _add_file(zf, p, p.name, entries, "secret")
-            trees = [(t_, False, "photo" if t_ == "ad-drafts" else "label") for t_ in TREES]
+            trees = [(t_, False, TREE_KINDS[t_]) for t_ in TREES]
             if include_profile:
                 trees.append((PROFILE, True, "profile"))
             for tree, is_profile, kind in trees:
@@ -480,7 +481,7 @@ def summarize(path: Path, m: dict[str, Any]) -> dict[str, Any]:
         "db_size": sum(e["size"] for e in of("database")), "db_counts": counts,
         "secrets": sorted(e["path"] for e in of("secret")),
         "photos": len(of("photo")), "photos_size": sum(e["size"] for e in of("photo")),
-        "labels": len(of("label")),
+        "labels": len(of("label")), "vpn_configs": len(of("vpn")),
         "profile": includes_profile(m), "profile_files": len(of("profile")),
         "profile_size": sum(e["size"] for e in of("profile")),
         "total_size": sum(e["size"] for e in entries),
@@ -498,7 +499,7 @@ def _kind(name: str) -> str:
         return "database"
     if "/" not in name:
         return "secret"
-    return {"ad-drafts": "photo", "labels": "label", PROFILE: "profile"}[name.split("/", 1)[0]]
+    return TREE_KINDS[name.split("/", 1)[0]]
 
 
 # ------------------------------------------------------------------ import: upload → pending

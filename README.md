@@ -213,6 +213,7 @@ Every variable is optional. Values set in the dashboard win over the environment
 | `DEFAULT_AGENT_INTERVAL_S`, `MIN_AGENT_INTERVAL_S`, `CHAT_POLL_INTERVAL_S` | Polling intervals |
 | `VNC_PASSWORD`, `NOVNC_URL` | Optional noVNC view of the login browser (port 6080, LAN only) |
 | `PROXY_VIA`, `PROXY_HOSTS` | Map hostnames (e.g. your HA domain) to a reverse-proxy container on a shared network |
+| `WIREPROXY_BIN` | The wireproxy binary for the VPN of the anonymous requests (default `wireproxy`, part of the image); the configs are uploaded in Settings → VPN |
 | `WH_REPLAY` | `1`: answer willhaben requests from the recorded ones (Settings → Timeline); unknown requests still go to willhaben. With `BROWSER_ENABLED=0` the app runs without any willhaben access for what was recorded |
 
 See `.env.example` for all of them. Host-specific compose additions (extra networks, proxy settings) belong in
@@ -358,8 +359,39 @@ Only actions that need your account go through the logged-in browser (`app/willh
 replies, "Meine Anzeigen", publishing, reserving/sold, reactivating. Each of these happens on your click or for
 ads where you switched automation on.
 
-What is still shared: the **home IP address** (unavoidable without a proxy) — which is why *all* willhaben requests,
-anonymous and logged-in, go through one rate limiter with a minimum gap and an hourly budget, and back off on 403/429.
+What is still shared: the **home IP address**, unless the anonymous requests go through the VPN (next section). That is
+why *all* willhaben requests, anonymous and logged-in, go through one rate limiter with a minimum gap and an hourly
+budget, and back off on 403/429.
+
+## VPN for the anonymous requests (WireGuard)
+
+The anonymous requests can leave through a WireGuard VPN instead of your home connection. That covers search agents,
+the Claude screening, the price check, the product search and the ad viewer, with their photos. The logged-in browser
+never uses it, so chats, your ads and publishing keep your own IP. Set it up in **Settings → Platforms → VPN** with one
+of two uploads:
+
+- **Config collection (.zip):** many configs, e.g. Mullvad's "all servers, Linux" download as it comes. Each site starts
+  with servers in its own country, then nearby ones, then the rest. When the site blocks an exit (willhaben's
+  Cloudflare answers 403 for some VPN addresses) or it does not answer, the app moves on to the next config. That
+  config is skipped for that site for a day (blocked) or an hour (rate limit, unreachable).
+- **Dedicated profile (.conf):** one config, used as it is.
+
+Each site has its own switch, on its settings page and on the VPN page. The first upload switches it on for willhaben;
+Kleinanzeigen stays off until you switch it on.
+
+**Fail closed:** when a site's switch is on and no exit works, its anonymous requests pause with an error, and the
+connection tile on Home turns red. They never fall back to your home connection. "Forget blocks" gives every exit a
+new chance.
+
+How it works: each config in use runs as one [wireproxy](https://github.com/windtf/wireproxy) process (userspace
+WireGuard, part of the image: no root, no tun device, no `NET_ADMIN`). It offers an HTTP proxy on `127.0.0.1` that
+only the anonymous clients are given. Host names are resolved inside the tunnel. Before an exit is used, a `CONNECT`
+to the site checks that it gets through, without sending an HTTP request to it. A blocked exit does not trigger
+willhaben's back-off, because that limiter also paces the logged-in session on your home IP.
+
+Configs live in `DATA_DIR/wireguard` (readable only by the app) and are part of backups. All configs of one Mullvad
+download share one key, so sites that need the same server share its tunnel. Give the app its **own Mullvad device**:
+if the same key is also connected from another device to the same server, both connections drop.
 
 ## Risks
 
