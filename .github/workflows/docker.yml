@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only superseded PR runs are cancelled, so a release on master is never cut off between image and tag.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -30,11 +31,38 @@ jobs:
       - name: Tests
         run: uv run --no-sync pytest -q
 
-  # The image is built for pull requests (build only, nothing pushed) and for release tags v* (pushed);
-  # a plain push to master only runs the tests.
+  # On a push to master: the version in pyproject.toml is a new release if there is no tag v<version> yet.
+  version:
+    if: github.event_name == 'push' && github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version
+        id: version
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "Tag v$version already exists, nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif [ $? -eq 2 ]; then
+            echo "New version $version, releasing as v$version."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            exit 1
+          fi
+
+  # The image is built for pull requests (build only, nothing pushed), for pushes to master that raise the
+  # version, and for tags v* pushed by hand (both pushed); any other push to master only runs the tests.
   image:
-    needs: test
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: [test, version]
+    if: >-
+      !cancelled() && needs.test.result == 'success' && (
+        github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/v') || needs.version.outputs.release == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,9 +86,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/willhaben-agent
           tags: |
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || needs.version.outputs.release == 'true' }}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.version }}
             type=sha,format=short
 
       - name: Build and push
@@ -73,3 +101,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Tag the release once its image is pushed. A tag pushed with GITHUB_TOKEN doesn't start another run,
+  # so the image isn't built twice.
+  tag:
+    needs: [version, image]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create tag v${{ needs.version.outputs.version }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Version $VERSION"
+          git push origin "v$VERSION"
