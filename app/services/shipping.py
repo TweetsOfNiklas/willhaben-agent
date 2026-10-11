@@ -277,8 +277,8 @@ async def detect(conversation_id: str, force: bool = False) -> Shipment | None:
     msgs = [(m.direction, m.created_at, m.text) for m in messages_of(conversation_id)]
     if not msgs:
         return None
-    res = await get_backend("chat").complete(system=EXTRACT_SYSTEM, schema=EXTRACT_SCHEMA,
-                                             prompt=_extract_prompt(conv, msgs))
+    res = await get_backend("shipping").complete(system=EXTRACT_SYSTEM, schema=EXTRACT_SCHEMA,
+                                                 prompt=_extract_prompt(conv, msgs))
     d = res.data
     claimed = bool(d.get("payment_claimed"))
     agreed = _price(d.get("agreed_price"))

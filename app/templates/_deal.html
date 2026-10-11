@@ -25,7 +25,7 @@
   {% if gh %}<a href="{{ gh.url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=(ad.price * 100 / gh.price_from)|round|int) }}</span>{% endif %}</a>{% endif %}
   {% if not (compact and h and h.screen_relevant is not none) %}{% with q=res.asked_query or '', hit=(h.id if h else '') %}{% include "_deal_claude.html" %}{% endwith %}{% endif %}
   {% if c.closest %}
-  <details {% if not compact %}open{% endif %} class="text-[13px]"><summary class="flex cursor-pointer items-center justify-between gap-2 font-semibold">{{ _("Comparable ads") }} <small class="font-normal text-muted">{{ _("closest by price") }}</small></summary>
+  <details {% if not compact %}open{% endif %} class="group text-[13px]"><summary class="flex cursor-pointer list-none items-center gap-1.5 font-semibold hover:text-primary [&::-webkit-details-marker]:hidden"><span class="text-muted transition-transform group-open:rotate-90">{{ ui.icon('chevron-right', 14) }}</span>{{ _("Comparable ads ({n})", n=c.closest|length) }}<small class="ml-auto font-normal text-muted">{{ _("closest by price") }}</small></summary>
     <div class="mt-1.5 flex flex-col">
       {% set ns = namespace(done=ad.price is none or ad.price <= 0) %}
       {% macro this_row() %}<div class="grid grid-cols-[1fr_auto_auto] gap-3 rounded-md bg-hover px-2 py-1.5 font-semibold tabular-nums"><span>→ {{ _("this ad") }}</span><span></span><span>{{ ad.price|eur }}</span></div>{% endmacro %}

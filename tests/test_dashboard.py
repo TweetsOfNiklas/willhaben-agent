@@ -229,12 +229,27 @@ def test_agent_builder_rejects_foreign_url(client):
 def test_model_selector(client):
     from app.llm.base import get_backend
 
+    import re
+
+    def selected(page, p):           # the option(s) marked selected in the model_<p> select
+        box = re.search(rf'<select name="model_{p}"[^>]*>(.*?)</select>', page, re.S).group(1)
+        return re.findall(r'<option value="([^"]+)" selected>', box)
+
     page = client.get("/settings/claude").text
     assert 'name="model_chat"' in page and 'name="model_ads"' in page and 'name="claude_token_limit_m"' in page
+    assert 'name="model_shipping"' in page and 'name="model_purchase"' in page
+    assert selected(page, "shipping") == selected(page, "purchase") == ["claude-sonnet-5-5"]
+    assert selected(page, "ads") == ["claude-opus-5-5"] and 'value="claude-fable-5-1"' in page
     assert client.post("/settings/claude", data={"model_chat": "haiku", "model_screen": "sonnet", "claude_token_limit_m": "12",
+                                                 "model_purchase": "claude-fable-5-1", "model_shipping": "fable",
                                                  "claude_limit_mode": "haiku"}, follow_redirects=False).status_code == 303
-    from app.db import get_setting
+    from app.db import get_setting, set_setting
     assert get_setting("claude_token_limit_m") == "12" and get_setting("claude_limit_mode") == "haiku"
+    assert get_setting("llm_model_purchase") == get_setting("llm_model_shipping") == "claude-fable-5-1"
+    assert get_setting("llm_model_chat") == "claude-haiku-5-5" and get_setting("llm_model_screen") == "claude-sonnet-5-5"
+    page = client.get("/settings/claude").text
+    assert selected(page, "purchase") == selected(page, "shipping") == ["claude-fable-5-1"]
+    assert selected(page, "chat") == ["claude-haiku-5-5"]
     home = client.get("/").text
     assert 'href="/settings/claude" data-pop="claude" title="Claude tokens this month"' in home and 'id="claude-pop"' in home   # meter + popover
     assert client.post("/settings/model", data={"purpose": "ads", "model": "claude-fable-5-1"},
@@ -246,6 +261,10 @@ def test_model_selector(client):
     assert get_backend(None).model == "opus"            # test-llm etc. still use the default
     assert client.post("/settings/model", data={"purpose": "chat", "model": "gpt-4"}).status_code == 400
     assert client.post("/settings/model", data={"purpose": "x", "model": "claude-opus-5-5"}).status_code == 400
+    set_setting("llm_model_search", "claude-sonnet-4-5")     # not in the list: shown as it is, Save keeps it
+    assert selected(client.get("/settings/claude").text, "search") == ["claude-sonnet-4-5"]
+    client.post("/settings/claude", data={"model_search": "claude-sonnet-4-5"}, follow_redirects=False)
+    assert get_setting("llm_model_search") == "claude-sonnet-4-5"
 
 
 def test_hit_detail_viewer(client):

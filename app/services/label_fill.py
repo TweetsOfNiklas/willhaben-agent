@@ -366,7 +366,7 @@ async def fill_current() -> str:
     data = _data_for(s)
     note = ""
     try:
-        res = await get_backend("chat").complete(system=FILL_SYSTEM, schema=FILL_SCHEMA, prompt=_prompt(data, fields))
+        res = await get_backend("shipping").complete(system=FILL_SYSTEM, schema=FILL_SCHEMA, prompt=_prompt(data, fields))
         fills, note = res.data.get("fills") or [], (res.data.get("note") or "").strip()
     except LLMError as e:
         log.info("Claude mapping failed, using keyword fill: %s", e)

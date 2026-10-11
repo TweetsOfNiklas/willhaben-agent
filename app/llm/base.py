@@ -49,6 +49,8 @@ PURPOSES = {
     "ads": ("llm_model_ads", _("Creating listings"), _("title, description and category from notes and photos")),
     "screen": ("llm_model_screen", _("Screening search hits"), _("right item? good deal? – runs for every new hit, a fast model is enough")),
     "search": ("llm_model_search", _("Product search"), _("plans willhaben searches from your description and picks the best offers – two or three calls per search")),
+    "shipping": ("llm_model_shipping", _("Shipping & labels"), _("reads address and parcel size from chats, fills and buys carrier labels")),
+    "purchase": ("llm_model_purchase", _("Purchases & PayLivery"), _("opening message and negotiation as buyer, PayLivery steps")),
 }
 
 
@@ -58,6 +60,8 @@ PURPOSE_DEFAULTS = {
     "chat": "claude-sonnet-5-5",
     "screen": "claude-sonnet-5-5",
     "search": "claude-sonnet-5-5",
+    "shipping": "claude-sonnet-5-5",
+    "purchase": "claude-sonnet-5-5",
 }
 
 
@@ -83,7 +87,7 @@ class LLMBackend(Protocol):
 
 
 def get_backend(purpose: str | None = None) -> LLMBackend:
-    """Backend for one job ("chat" or "ads"), using the model chosen for it in Settings."""
+    """Backend for one job (a PURPOSES key: "chat", "ads", "shipping", …), using the model chosen for it in Settings."""
     from app.config import get_settings
 
     from app.db import get_setting

@@ -449,7 +449,8 @@ def browser(monkeypatch):
     ns.sess = FakeSess(ns.page)
     monkeypatch.setattr(willhaben_session, "get_session", lambda: ns.sess)
     ns.backend = FakeBackend([])
-    monkeypatch.setattr("app.llm.base.get_backend", lambda *a, **k: ns.backend)
+    ns.purposes = []                                # the get_backend(purpose) of each call
+    monkeypatch.setattr("app.llm.base.get_backend", lambda purpose=None: ns.purposes.append(purpose) or ns.backend)
     return ns
 
 
@@ -469,6 +470,7 @@ async def test_accept_offer_clicks_once_and_moves_the_stage(browser):
     browser.backend.replies = [_step(action_idx=1, status="done", note="angenommen")]
     msg = await paylivery.run_action("c1", "accept")
     assert browser.clicked == ["Angebot annehmen"]
+    assert browser.purposes == ["purchase"]                          # Settings → Claude → "Purchases & PayLivery"
     assert browser.sess.opened == [CHAT]
     assert browser.sess.starts == ["paylivery-accept"] and browser.sess.stops == 1
     assert "/tmp/capture-1.json" not in msg and "capture-1.json" in msg

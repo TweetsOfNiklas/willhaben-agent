@@ -45,7 +45,7 @@ class SendFailed(RuntimeError):
     """willhaben did not take the message."""
 
 
-class OpenerUnconfirmed(SendFailed):
+class OpenerUnconfirmed(RuntimeError):     # not a SendFailed: the message DID go out
     """willhaben accepted a new conversation (2xx) but the chat could not be found yet: the message HAS gone out, so
     starting again would write to the seller a second time."""
 
@@ -380,12 +380,13 @@ class AccountClient:
         /bbx-search, 2026-10-10, see docs/willhaben-api.md "Purchase orders"). The chat WebSocket cannot open one:
         a `create_conversation` frame went unanswered live (timeout). The sender's name and e-mail come from the
         profile, like the form fills them in. Without an id in the answer the conversation list is polled for the
-        entry of this ad whose newest message is ours with this text.
+        chat of this ad that holds our text (find_conversation). Once the POST went through, any failure is
+        OpenerUnconfirmed: the opener reached the seller, so it must never be sent a second time.
         """
         text = text.strip()
         if not text:
             raise ValueError(t("Empty message"))
-        me = await self.me()
+        me = await self._profile()
         u = (me.get("userData") if isinstance(me, dict) and isinstance(me.get("userData"), dict) else me) or {}
         first, last = (u.get("firstName") or "").strip(), (u.get("lastName") or "").strip()
         body = {"fromFullName": " ".join(x for x in (first, last) if x), "shareTenantProfile": False,
@@ -396,9 +397,9 @@ class AccountClient:
         if last:
             body["lastName"] = last
         r = await self.s.api("POST", SEND_REQUEST_CHAT, body)
-        if r.status in (401, 403):
-            self.s.logged_in = False           # like api_json: the session check shows it at once (no retry here)
-            raise NotLoggedIn(f"{SEND_REQUEST_CHAT}: HTTP {r.status}")
+        if r.status in (401, 403):             # nothing was sent; logged out only if the profile fails as well
+            await self._profile()              # raises NotLoggedIn (and marks the session) when the login is gone
+            raise SendFailed(t("willhaben refused the contact form (HTTP {status})", status=r.status))
         try:
             res = r.json()
         except ValueError:
@@ -410,20 +411,49 @@ class AccountClient:
         if cid:
             return str(cid)
         # sent, but no id in the answer: the conversation list decides
-        cid = await self.find_conversation(ad_id, text)
+        try:
+            cid = await self.find_conversation(ad_id, text)
+        except Exception as e:  # noqa: BLE001 - the opener went out: whatever fails now, it must never be sent again
+            raise OpenerUnconfirmed(t("Conversation could not be looked up ({error}) – check on willhaben",
+                                      error=e)) from e
         if cid:
             return cid
         raise OpenerUnconfirmed(t("Conversation did not show up in the list (response: {status}) – check on willhaben",
                                   status=r.status))
 
-    async def find_conversation(self, ad_id: str, text: str, tries: int = 3) -> str | None:
-        """The chat of an ad whose newest message is ours with this text (after a contact-form opener), or None."""
+    async def _profile(self) -> dict[str, Any]:
+        """me() around the contact form: NotLoggedIn as is, any other error as SendFailed (nothing was sent)."""
+        try:
+            return await self.me()
+        except NotLoggedIn:
+            raise
+        except Exception as e:  # noqa: BLE001 - the caller may simply fail the order
+            raise SendFailed(t("Profile could not be read: {error}", error=e)) from e
+
+    async def find_conversation(self, ad_id: str, text: str, tries: int = 3, pages: int = 3) -> str | None:
+        """The chat of an ad that holds our message with this text (after a contact-form opener), or None. The seller
+        may have answered already, so for the ad's chats whose newest message is not ours the history decides."""
         for attempt in range(tries):
             await asyncio.sleep(1.5 * (attempt + 1))
-            for c in await self.conversations(limit=20):
-                if c.ad_id == str(ad_id) and c.last_is_mine is not False and _preview_matches(c.last_text, text):
-                    return c.id
+            for page in range(pages):
+                convs = await self.conversations(limit=50, offset=50 * page)
+                for c in convs:
+                    if c.ad_id != str(ad_id):
+                        continue
+                    if c.last_is_mine is not False and _preview_matches(c.last_text, text):
+                        return c.id
+                    if await self._holds_mine(c.id, text):
+                        return c.id
+                if len(convs) < 50:
+                    break
         return None
+
+    async def _holds_mine(self, conversation_id: str, text: str) -> bool:
+        try:
+            msgs = await self.messages(conversation_id)
+        except (EndpointUnknown, ValueError):
+            return False
+        return any(m.direction == "out" and _preview_matches(m.text, text) for m in msgs)
 
     async def my_adverts(self) -> AdvertList:
         """The account's ads; willhaben renders them server-side into the my-adverts page."""

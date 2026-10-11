@@ -146,10 +146,15 @@ def test_default_models_per_purpose():
     for p in PURPOSES:
         set_setting(PURPOSES[p][0], "")
     assert model_for("ads") == "claude-opus-5-5"
-    assert {model_for(p) for p in ("chat", "screen", "search")} == {"claude-sonnet-5-5"}
+    assert {model_for(p) for p in ("chat", "screen", "search", "shipping", "purchase")} == {"claude-sonnet-5-5"}
     set_setting("llm_model_chat", "claude-haiku-5-5")
     assert model_for("chat") == "claude-haiku-5-5"
-    set_setting("llm_model_chat", "")
+    set_setting("llm_model_shipping", "claude-haiku-5-5")
+    set_setting("llm_model_purchase", "claude-fable-5-1")
+    assert (model_for("shipping"), model_for("purchase"), model_for("chat")) == \
+        ("claude-haiku-5-5", "claude-fable-5-1", "claude-haiku-5-5")
+    for p in ("chat", "shipping", "purchase"):
+        set_setting(f"llm_model_{p}", "")
 
 
 def test_chat_sync_window():

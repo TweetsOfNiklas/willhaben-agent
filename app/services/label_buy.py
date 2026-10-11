@@ -505,7 +505,7 @@ async def _ask(prep: dict[str, Any]) -> dict[str, Any]:
     from app.llm.base import LLMError, get_backend
 
     try:
-        res = await get_backend("chat").complete(system=BUY_SYSTEM, schema=BUY_SCHEMA, prompt=prep["prompt"])
+        res = await get_backend("shipping").complete(system=BUY_SYSTEM, schema=BUY_SCHEMA, prompt=prep["prompt"])
     except LLMError as e:
         raise BuyError(t("Claude could not read the checkout page: {error}", error=e)) from e
     return res.data

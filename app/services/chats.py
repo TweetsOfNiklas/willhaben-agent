@@ -332,7 +332,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         examples = _style_examples()
     prompt = reply_prompt(role=conv.role, ad=conv.ad_context, partner=conv.partner_name, messages=msgs_t,
                           rules=rules, examples=examples, hint=hint, availability=availability)
-    backend = get_backend("chat")
+    backend = get_backend("purchase" if buy is not None else "chat")   # chats of a purchase order: Settings → "Purchases"
     async with telegram.typing():                 # "typing…" in Telegram while Claude writes
         result = await backend.complete(system=system, prompt=prompt, schema=schema)
     d = result.data

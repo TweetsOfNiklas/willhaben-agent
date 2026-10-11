@@ -37,7 +37,8 @@ async def notify(kind: str, title: str, message: str, *, url: str | None = None,
     Returns True if HA accepted the event. `channel` overrides the push channel setting (the connection
     watchdog uses "both" when one channel is broken).
     """
-    log_event(kind, f"{title}: {message}", url)
+    ids = {k: str(v) for k in ("ad_id", "conversation_id") if (v := (data or {}).get(k))}
+    log_event(kind, f"{title}: {message}", url, **ids)
     from app.services import telegram
     from app.services.ha_auth import ha_token, ha_url, notify_service
 

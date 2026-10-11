@@ -87,7 +87,8 @@
                       'auto_reply_pending': _('Reply waiting for you'), 'ad_expiring': _('Ad expiring soon'), 'ad_expired': _('Ad expired'), 'test': _('Test'), 'health': _('Connections')} %}
       {% for e in events %}
       <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-base-300 px-4 py-2" title="{{ kinds.get(e.kind, e.kind) }}">
-        <span class="min-w-0 truncate">{% if e.url %}<a href="{{ e.url }}" target="_blank" class="text-base-content no-underline hover:underline">{{ e.message }}</a>{% else %}{{ e.message }}{% endif %}</span>
+        {% set l = event_link(e) %}
+        <span class="min-w-0 truncate">{% if l %}<a href="{{ l.href }}"{% if l.ad %} data-ad="{{ l.ad }}"{% endif %}{% if l.external %} target="_blank" rel="noopener"{% endif %} class="text-base-content no-underline hover:underline">{{ e.message }}</a>{% else %}{{ e.message }}{% endif %}</span>
         <span class="text-[12.5px] whitespace-nowrap text-muted tabular-nums">{{ e.ts|local('%H:%M') }}</span>
       </div>
       {% else %}<p class="px-4 py-3.5 text-muted">{{ _("Nothing has happened yet.") }}</p>{% endfor %}
@@ -100,7 +101,7 @@
       </header>
       {% for a in soon %}
       <div class="flex items-center justify-between gap-2.5 border-b border-base-300 px-4 py-2.5">
-        <a href="{{ a.url }}" target="_blank" class="min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ a.heading or a.ad_id }}</a>
+        <a href="/myads?ad={{ a.ad_id }}" class="min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ a.heading or a.ad_id }}</a>
         <span class="text-[12.5px] whitespace-nowrap text-warning">{{ a.end_date|ago }}</span>
       </div>
       {% else %}<p class="px-4 py-3.5 text-muted">{{ _("No own ads recorded.") }}</p>{% endfor %}

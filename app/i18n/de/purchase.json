@@ -212,5 +212,8 @@
   "(no answer yet)": "(noch keine Antwort)",
   "The opening message was sent, but the chat did not show up yet – check on willhaben. Resume looks for the chat again; it does not write to the seller a second time.": "Die Eröffnungsnachricht wurde gesendet, aber der Chat ist noch nicht aufgetaucht – schau auf willhaben nach. Fortsetzen sucht den Chat erneut; es schreibt dem Verkäufer kein zweites Mal.",
   "The chat of the sent opening message is still not visible – check on willhaben, then resume again.": "Der Chat zur gesendeten Eröffnungsnachricht ist noch nicht zu sehen – schau auf willhaben nach und setze dann erneut fort.",
-  "Looking for the chat of the sent opening message": "Suche den Chat zur gesendeten Eröffnungsnachricht"
+  "Looking for the chat of the sent opening message": "Suche den Chat zur gesendeten Eröffnungsnachricht",
+  "Already looking for the chat – wait a moment.": "Der Chat wird schon gesucht – einen Moment bitte.",
+  "Sending the opening message broke off ({error}) – it may have reached the seller. Resume looks for the chat; it does not write to the seller a second time.": "Das Senden der Eröffnungsnachricht brach ab ({error}) – sie kann beim Verkäufer angekommen sein. Fortsetzen sucht den Chat; es schreibt dem Verkäufer kein zweites Mal.",
+  "Interrupted by a restart while the opening message was sent – Resume looks for the chat; it does not write to the seller a second time.": "Durch einen Neustart beim Senden der Eröffnungsnachricht unterbrochen – Fortsetzen sucht den Chat; es schreibt dem Verkäufer kein zweites Mal."
 }

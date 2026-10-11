@@ -35,6 +35,9 @@ _SPECS_RE = re.compile(r'<dl\s+class="specs-grid[^"]*"[^>]*>(.*?)</dl>', re.S)
 _ITEM_RE = re.compile(r"<dt>(.*?)</dt>\s*<dd>(.*?)</dd>", re.S)
 _H1_RE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
 _LOW_RE = re.compile(r"lowPrice:\s*([\d.]+)")
+_UNIT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(gb|tb|mb|mah)\b", re.I)
+CAPACITY_RE = re.compile(r"\d+(?:[.,]\d+)?(?:gb|tb|mb|mah)", re.I)   # a variant-defining size: "4GB", "1.5TB"
+_QTOK_RE = re.compile(r"[^\s,;:()\[\]{}\"'!?/|]+")
 
 
 class GeizhalsError(RuntimeError):
@@ -122,16 +125,50 @@ async def product(url: str) -> Product:
     return parse_product(await _get(url), url)
 
 
+def glue_units(s: str) -> str:
+    """Number and capacity unit as one word, case kept: "4 GB" -> "4GB", "1,5 TB" -> "1.5TB"."""
+    return _UNIT_RE.sub(lambda m: m.group(1).replace(",", ".") + m.group(2), s or "")
+
+
+def _norm(s: str) -> str:
+    return glue_units(s).lower()
+
+
+def _has_word(name: str, w: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(w)}(?!\w)", name) is not None
+
+
+def matches(name: str, query: str) -> bool:
+    """Is this product really the one asked for (the variant too)? Every word with a digit – also a bare "4" as in
+    "Pi 4", and capacities like "4GB" – appears in the name as a whole word ("13" is not "113" or "230cm", "4" not
+    "400" or "4GB"), and most other words appear. "4 GB" equals "4GB"; a capacity only in the name is fine."""
+    n = _norm(name)
+    toks = [w for w in (x.strip(".-") for x in _QTOK_RE.findall(_norm(query))) if w]
+    model = [w for w in toks if re.search(r"\d", w)]
+    words = [w for w in toks if not re.search(r"\d", w) and len(w) >= 2]
+    if not toks or not all(_has_word(n, w) for w in model):
+        return False
+    return not words or sum(w in n for w in words) / len(words) >= 0.6
+
+
+def best_hit(hits: list[Hit], query: str) -> Hit | None:
+    """The first hit (Geizhals' order) that is really this product and variant."""
+    return next((h for h in hits if matches(h.name, query)), None)
+
+
 async def lookup(query: str) -> dict[str, Any] | None:
-    """Best match for a product name, as stored on the draft; None if nothing usable was found."""
+    """Best match for a product name, as stored on the draft; None if nothing usable was found. `verified`: the
+    product (search card and page title) matches the query, variant included; False = Geizhals' first hit as a guess."""
     query = query.strip()
     if not query:
         return None
     hits = await search(query)
     if not hits:
-        return {"query": query, "match": None, "candidates": []}
-    prod = await product(hits[0].url)
-    return {"query": query, "match": asdict(prod), "candidates": [asdict(h) for h in hits]}
+        return {"query": query, "match": None, "candidates": [], "verified": False}
+    best = best_hit(hits, query)
+    prod = await product((best or hits[0]).url)
+    verified = best is not None and (not prod.name or matches(prod.name, query))   # the h1 can be more precise
+    return {"query": query, "match": asdict(prod), "candidates": [asdict(h) for h in hits], "verified": verified}
 
 
 def spec_block(match: dict[str, Any] | None) -> str:

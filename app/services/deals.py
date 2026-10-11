@@ -124,30 +124,20 @@ def _model_token(toks: list[str], i: int) -> bool:
 
 
 def geizhals_query(title: str | None, category_path: list[str] | None = None) -> str | None:
-    """Product name for Geizhals: words up to the last model identifier (max 4), or None for generic titles."""
+    """Product name for Geizhals: words up to the last model identifier (max 4) plus capacities further on ("4GB",
+    "256GB": they make the variant, max 6 words), or None for generic titles. "4 GB" counts as one word "4GB"."""
     if any(g in c.lower() for c in category_path or [] for g in _GENERIC_CATEGORIES):
         return None
-    toks = tokens(title)
+    toks = tokens(geizhals.glue_units(title or ""))
     last = max((i for i in range(len(toks)) if _model_token(toks, i)), default=-1)
     if last < 0:
         return None
-    picked = toks[:max(last + 1, 2)][:4]
+    picked = toks[:max(last + 1, 2)]
+    picked = (picked[:4] + [w for w in picked[4:] if geizhals.CAPACITY_RE.fullmatch(w)])[:6]
     return " ".join(picked) if len(picked) >= 2 else None
 
 
-def _has_word(name: str, w: str) -> bool:
-    return re.search(rf"(?<!\w){re.escape(w)}(?!\w)", name) is not None
-
-
-def _matches(name: str, query: str) -> bool:
-    """Geizhals' first hit must really be this product: every model number (as a whole word, so "13" does not
-    match "113" or "230cm") and most words appear in its name."""
-    n = name.lower()
-    toks = [w.lower() for w in query.split() if len(w) >= 2]
-    found = [_has_word(n, w) if re.search(r"\d", w) else w in n for w in toks]
-    if not toks or not all(f for w, f in zip(toks, found, strict=True) if re.search(r"\d", w)):
-        return False
-    return sum(found) / len(toks) >= 0.6
+_matches = geizhals.matches     # is the Geizhals product this one, variant included (old name, tests use it)
 
 
 # ------------------------------------------------------------------ numbers
@@ -392,8 +382,8 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
         _put(_geizhals_fail, key, None, GEIZHALS_FAIL_TTL_S)   # short negative cache: retried after 15 min
         return None
     m = (found or {}).get("match") or {}
-    best = None
-    if m.get("url") and m.get("price_from") and _matches(m.get("name") or "", query):
+    best = None                    # an unverified guess (Geizhals' first hit, maybe another variant) is no price
+    if (found or {}).get("verified") and m.get("url") and m.get("price_from") and _matches(m.get("name") or "", query):
         best = {"name": m["name"], "url": m["url"], "price_from": m["price_from"]}
     _put(_geizhals, key, best, GEIZHALS_TTL_S)
     return best

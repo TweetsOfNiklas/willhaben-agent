@@ -107,7 +107,8 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
         db.add(d)
         db.commit()
         db.refresh(d)
-    if ((gh or {}).get("match") or {}).get("specs"):
+    if (gh or {}).get("verified") and ((gh or {}).get("match") or {}).get("specs"):
+        # only a confirmed product/variant: a guessed one (e.g. the 8GB model for a 4GB ad) would rewrite the text
         d = await reconcile_with_geizhals(d.id)
         d = attach_specs_if_wanted(d.id)
     return d
@@ -190,7 +191,7 @@ async def choose_geizhals(draft_id: int, url: str) -> AdDraft:
         had_block = bool(old_block) and old_block in (d.description or "")
         if had_block:                      # the sheet of the previous product goes; the new one replaces it
             d.description = (d.description or "").replace(old_block, "").rstrip()
-        gh["match"] = asdict(prod)
+        gh["match"], gh["verified"] = asdict(prod), True      # the user's own pick counts as confirmed
         gh.pop("error", None)
         d.geizhals = gh
         db.add(d)
@@ -200,6 +201,7 @@ async def choose_geizhals(draft_id: int, url: str) -> AdDraft:
 
 
 async def search_geizhals(draft_id: int, query: str) -> AdDraft:
+    """User typed a product name: confirmed (`verified`) only if a hit matches it, variant included."""
     gh = await _geizhals_lookup(query)
     return update_draft(draft_id, product_query=query.strip() or None, geizhals=gh)
 
@@ -228,9 +230,11 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
     current = {k: getattr(d, k) for k in _VERSION_FIELDS}
     if had_block:   # Claude rewrites the prose only; the spec sheet is re-attached unchanged
         current["description"] = (d.description or "").replace(block, "").rstrip()
+    # an unconfirmed variant's sheet is no "reliable" data for a plain revision; the explicit check still uses it
+    trusted = (d.geizhals or {}).get("verified") is not False or instruction == RECONCILE_INSTRUCTION
     prompt = ad_refine_prompt(notes=d.input_text, rules=get_setting("reply_rules"), n_images=len(d.image_paths),
-                              current=current, specs=match.get("specs"), product_name=match.get("name"),
-                              instruction=instruction)
+                              current=current, specs=match.get("specs") if trusted else None,
+                              product_name=match.get("name"), instruction=instruction)
     try:
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA,
                                                    images=[Path(p) for p in d.image_paths])

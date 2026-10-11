@@ -876,12 +876,6 @@ async def myads_cleanup(request: Request):
     return back(f"/myads?msg={quote(t('Clean-up of {n} ads started – it runs in the background', n=n), safe='')}")
 
 
-@app.post("/myads/{ad_id}/hide")
-async def myads_hide(request: Request, ad_id: str, hidden: str = Form("1")):
-    my_ads.set_hidden(ad_id, hidden == "1")
-    return _myads_back(request, t("Hidden from the list (still online on willhaben)") if hidden == "1" else "")
-
-
 @app.post("/myads/{ad_id}/deactivate")
 async def myads_deactivate(request: Request, ad_id: str):
     return _queued(request, my_ads.enqueue("deactivate", [ad_id]))
@@ -1424,6 +1418,29 @@ INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "message": "New mes
                "ad_renewed": "Ad renewed", "paylivery": "Pay now!", "purchase": "Purchase order", "health": "Connections", "test": "Test"}
 
 
+_WH_AD_ID = re.compile(r"willhaben\.at/.*?(?:adId=|-)(\d{6,})(?:/?$|[/?&#])")
+
+
+def event_link(e: EventLog) -> dict[str, Any] | None:
+    """Where an activity entry leads in this app: {href, ad, external}. `ad` opens the ad viewer (_ad_panel.html);
+    willhaben only when no page here fits. Older rows without ids get the ad id from their willhaben link."""
+    url = e.url or ""
+    base = get_settings().public_url.rstrip("/")
+    if base and url.startswith(base):
+        return {"href": url[len(base):] or "/", "ad": None, "external": False}
+    if e.conversation_id:
+        return {"href": f"/chats/{e.conversation_id}", "ad": None, "external": False}
+    ad_id = e.ad_id or (m.group(1) if (m := _WH_AD_ID.search(url)) else None)
+    if ad_id and e.kind in ("hit", "price_drop"):
+        return {"href": url or "/hits", "ad": ad_id, "external": False}
+    if ad_id and e.kind.startswith("ad_"):
+        return {"href": f"/myads?ad={ad_id}", "ad": None, "external": False}
+    return {"href": url, "ad": None, "external": True} if url else None
+
+
+templates.env.globals.update(event_link=event_link)
+
+
 def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
     """The inbox popover (base.html): the latest events, unread = newer than the last "Mark all read"."""
     seen = _inbox_seen_at()
@@ -1431,7 +1448,7 @@ def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
     for e in recent_events(limit):
         ts = e.ts if e.ts.tzinfo else e.ts.replace(tzinfo=timezone.utc)
         out.append({"kind": "pay" if e.kind == "paylivery" else e.kind, "title": t(INBOX_KINDS.get(e.kind, "Notification")),
-                    "text": e.message, "time": _ago(ts), "url": e.url, "unread": ts > seen})
+                    "text": e.message, "time": _ago(ts), "link": event_link(e), "unread": ts > seen})
     return out
 
 
@@ -1486,7 +1503,8 @@ def _claude_section() -> dict[str, Any]:
         rows.append({"label": t(PURPOSES[g["purpose"]][1]) if g["purpose"] in PURPOSES else t("Other (tests, misc.)"),
                      "model": g["model"], "calls": g["calls"], "tokens_in": fmt(g["input"]), "tokens_out": fmt(g["output"]),
                      "cost": g["cost_usd"]})
-    return {"models": {p: model_for(p).split("-")[1] for p in PURPOSES}, "claude_usage": {"used": lim["used"], "limit": lim["limit"]},
+    return {"models": {p: _alias(model_for(p)) for p in PURPOSES}, "model_choices": MODELS,   # full model ids
+            "claude_usage": {"used": lim["used"], "limit": lim["limit"]},
             "claude_limit_mode": lim["mode"], "token_usage": rows,
             **({"claude_last_call": last_call["at"]} if last_call.get("at") else {})}
 

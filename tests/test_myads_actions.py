@@ -299,7 +299,7 @@ async def test_hide_only_survives_import_and_routes(account):
 
     await my_ads.import_from_account()
     with TestClient(app) as c:
-        assert c.post("/myads/1000000001/hide", data={"hidden": "1"}, follow_redirects=False).status_code == 303
+        assert c.post("/myads/bulk/hide", data={"ids": ["1000000001"]}, follow_redirects=False).status_code == 303
         page = c.get("/myads?show_inactive=1").text
         assert "Anzeige 1000000001" not in page and "Show 1 hidden ads" in page
         assert "Anzeige 1000000001" in c.get("/myads?show_hidden=1").text   # an active ad: in the Active view
@@ -577,7 +577,7 @@ def test_list_stays_on_the_page(monkeypatch):
     with TestClient(app) as c:
         page = c.get("/myads?ad=11").text
         assert c.post("/myads/check", headers=hx, follow_redirects=False).status_code == 204
-        loc = c.post("/myads/11/hide", data={"hidden": "1"}, headers=hx, follow_redirects=False).headers["location"]
+        loc = c.post("/myads/bulk/hide", data={"ids": ["11"]}, headers=hx, follow_redirects=False).headers["location"]
         assert "msg=Hidden" in loc and "show_inactive=1" in loc and "ad=11" in loc and "alt" not in loc
         r = c.post("/myads/check", headers={"referer": "http://testserver/myads?show_sold=1"}, follow_redirects=False)
         assert r.status_code == 303 and "show_sold=1" in r.headers["location"]

@@ -44,6 +44,7 @@ async def test_choosing_another_product_replaces_the_sheet(monkeypatch):
     d = _draft(f"Gut erhalten.\n\n{geizhals.spec_block(MATCH)}")      # user had ticked the old sheet
     d = await ad_creator.choose_geizhals(d.id, other.url)
     assert "X1" not in d.description and "Muster Lautsprecher X2" in d.description and "schwarz" in d.description
+    assert d.geizhals["verified"] is True                              # a manual pick counts as confirmed
     d2 = _draft()                                                      # no sheet before, setting off: none after
     d2 = await ad_creator.choose_geizhals(d2.id, other.url)
     assert d2.description == "Gut erhalten."

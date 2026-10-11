@@ -281,6 +281,8 @@ class Purchase(SQLModel, table=True):
     questions_sent_at: datetime | None = None  # when the answers went to the user with the agreement push
     status: str = "new"                    # see app/services/purchase.py STATUSES
     conversation_id: str | None = Field(default=None, index=True)
+    opener_text: str | None = None         # the opening message, stored right before it is sent: never send it twice
+    opener_sent_at: datetime | None = None
     agreed_price: float | None = None      # item price (without shipping)
     shipping_cost: float | None = None     # shipping in euro; the effective value is purchase.shipping_of(row)
     shipping_source: str | None = None     # "ad" (PayLivery price of the ad) | "chat" (named by the seller); else estimate
@@ -320,7 +322,7 @@ class LLMCall(SQLModel, table=True):
     """One Claude call (one row per model it used), for the token usage table in Settings → Claude."""
     id: int | None = Field(default=None, primary_key=True)
     ts: datetime = Field(default_factory=utcnow, index=True)
-    purpose: str = Field(index=True)          # chat | ads | screen | other
+    purpose: str = Field(index=True)          # a llm.base.PURPOSES key (chat | ads | screen | search | shipping | purchase) or other
     model: str
     ok: bool = True
     call_part: int | None = None              # 0 = first model of the call (counts as the call), 1.. = further models
@@ -347,7 +349,9 @@ class EventLog(SQLModel, table=True):
     ts: datetime = Field(default_factory=utcnow, index=True)
     kind: str
     message: str
-    url: str | None = None
+    url: str | None = None                 # the push's link (often willhaben); the dashboard prefers its own pages
+    ad_id: str | None = None
+    conversation_id: str | None = None
 
 
 _engine = None
@@ -393,9 +397,10 @@ def session() -> Session:
     return Session(get_engine(), expire_on_commit=False)
 
 
-def log_event(kind: str, message: str, url: str | None = None) -> None:
+def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | None = None,
+              conversation_id: str | None = None) -> None:
     with session() as db:
-        db.add(EventLog(kind=kind, message=message, url=url))
+        db.add(EventLog(kind=kind, message=message, url=url, ad_id=ad_id, conversation_id=conversation_id))
         db.commit()
 
 

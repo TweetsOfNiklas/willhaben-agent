@@ -19,6 +19,7 @@ happen only in after_reply and the hooks, never in the guards.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import math
 import re
@@ -33,7 +34,9 @@ from app.llm.base import get_backend
 from app.llm.prompts import PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, purchase_opener_prompt, purchase_rules
 from app.services import deals, meetups, paylivery, shipping
 from app.services.notify import notify
+from app.willhaben.account import OpenerUnconfirmed, SendFailed
 from app.willhaben.public import WillhabenError, get_public
+from app.willhaben.session import NotLoggedIn, SessionUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -394,6 +397,16 @@ def _q_key(s: str | None) -> str:
     return re.sub(r"[^\w]+", " ", _norm(s)).strip()
 
 
+def _news(old: str | None, new: str | None) -> bool:
+    """A first answer, a correction or a fuller answer – not a reworded or shortened copy of the stored one."""
+    o, n = _q_key(old), _q_key(new)
+    if not n or o == n:
+        return False
+    if not o:
+        return True
+    return n not in o and difflib.SequenceMatcher(None, o, n).ratio() < 0.5
+
+
 def merge_answers(row: Purchase, answers: list[dict[str, str]] | None) -> list[dict[str, str]]:
     """Claude's answers (purchase_state.answers) onto the row's questions, matched by the question text. Returns the
     questions that got a new or changed answer; questions Claude made up are ignored."""
@@ -402,7 +415,7 @@ def merge_answers(row: Purchase, answers: list[dict[str, str]] | None) -> list[d
     for a in answers or []:
         key = _q_key(a.get("question"))
         q = next((q for q in qs if _q_key(q.get("question")) == key), None)
-        if q is None or not key or (q.get("answer") or "").strip():   # first answer wins: a reworded copy is no news
+        if q is None or not key or not _news(q.get("answer"), a["answer"]):
             continue
         q["answer"] = a["answer"]
         changed.append(q)
@@ -635,7 +648,7 @@ async def _begin_inner(pid: int) -> None:
                                     item_ceiling=item_ceiling(row), market=row.market,
                                     fee=fee_rule() if row.mode == "paylivery" else None,
                                     questions=[q["question"] for q in row.questions or []])
-    out = await get_backend("chat").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
+    out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
     data = out.data or {}
     text = str(data.get("message") or "").strip()
     if not text:
@@ -645,36 +658,40 @@ async def _begin_inner(pid: int) -> None:
         return await _fail(pid, t("The opening message was refused: {why}", why="; ".join(problems)))
     from app.services import chats  # lazy: chats imports this module
 
-    from app.willhaben.account import OpenerUnconfirmed
-
+    # stored before the POST: after a restart in between, recover() looks for the chat instead of writing again
+    _change(pid, lambda r: (setattr(r, "opener_text", text), setattr(r, "opener_sent_at", utcnow())))
     try:
         cid = await chats._account().create_conversation(row.ad_id, text)
-    except OpenerUnconfirmed:     # the message went out, the chat is not visible yet: never send a second opener
-        reason = t("The opening message was sent, but the chat did not show up yet – check on willhaben. Resume looks for the chat again; it does not write to the seller a second time.")  # noqa: E501
-
-        def pause(r: Purchase) -> None:
-            _move(r, "paused", reason, note=reason)
-            r.log = r.log[:-1] + [{**r.log[-1], OPENER_KEY: text}]     # the sent text, for finding the chat later
-        row = _change(pid, pause)
-        if row is not None:
-            await _push(row, t("Purchase paused"), reason)
-        return
-    except Exception as e:  # noqa: BLE001 - nothing was sent: no chat to follow, the order fails visibly
+    except (SendFailed, NotLoggedIn, SessionUnavailable, ValueError) as e:   # refused: nothing went out
+        _change(pid, lambda r: (setattr(r, "opener_text", None), setattr(r, "opener_sent_at", None)))
         return await _fail(pid, t("willhaben did not open the chat: {error}", error=e))
+    except OpenerUnconfirmed:     # the message went out, the chat is not visible yet: never send a second opener
+        return await _pause_unconfirmed(pid, t("The opening message was sent, but the chat did not show up yet – check on willhaben. Resume looks for the chat again; it does not write to the seller a second time."))  # noqa: E501
+    except Exception as e:  # noqa: BLE001 - broken off while sending: it may have gone out, so never send it again
+        log.warning("opener of purchase %s broke off: %s", pid, e)
+        return await _pause_unconfirmed(pid, t("Sending the opening message broke off ({error}) – it may have reached the seller. Resume looks for the chat; it does not write to the seller a second time.", error=e))  # noqa: E501
     await _attach_chat(pid, cid, text, heading=detail.heading, seller=detail.seller_name, context=detail.as_context())
 
 
-OPENER_KEY = "opener_unconfirmed"     # log entry key: the opener that was sent while its chat was not found
+_LOOKING: set[int] = set()     # purchases whose unconfirmed opener's chat is being looked for (one lookup each)
 
 
 def _unconfirmed_opener(row: Purchase) -> str | None:
-    """The text of an opener that went out without a chat to follow (see _begin_inner), or None."""
-    return next((e.get(OPENER_KEY) for e in reversed(row.log or []) if e.get(OPENER_KEY)), None)
+    """The text of an opener that went out (or may have) without a chat to follow, or None."""
+    return row.opener_text if row.conversation_id is None else None
+
+
+async def _pause_unconfirmed(pid: int, reason: str, *, push: bool = True) -> None:
+    row = _change(pid, lambda r: _move(r, "paused", reason, note=reason) if r.status != "paused"
+                  else (setattr(r, "note", reason), _line(r, reason)))
+    if row is not None and push:
+        await _push(row, t("Purchase paused"), reason)
 
 
 async def _attach_chat(pid: int, cid: str, text: str, *, heading: str | None, seller: str | None,
                        context: dict[str, Any] | None) -> None:
-    """The opener is in a chat: store the conversation, move on to contacting, sync the history."""
+    """The opener is in a chat: store the conversation, move on to contacting, sync the history. A purchase that was
+    cancelled meanwhile only gets its chat noted; it stays cancelled."""
     from app.services import chats  # lazy: chats imports this module
 
     with session() as db:
@@ -684,11 +701,15 @@ async def _attach_chat(pid: int, cid: str, text: str, *, heading: str | None, se
         conv.partner_name = conv.partner_name or seller
         conv.ad_context = context or conv.ad_context
         db.add(conv)
-        db.add(Message(conversation_id=cid, ext_id=f"draft-purchase-{pid}", direction="out", text=text,
-                       created_at=utcnow()))
+        ext_id = f"draft-purchase-{pid}"
+        if db.exec(select(Message).where(Message.conversation_id == cid, Message.ext_id == ext_id)).first() is None:
+            # stamped with the send time, so the sync can match it with willhaben's copy (SENT_MATCH_WINDOW)
+            db.add(Message(conversation_id=cid, ext_id=ext_id, direction="out", text=text,
+                           created_at=(row.opener_sent_at if row else None) or utcnow()))
         db.commit()
     _change(pid, lambda r: (setattr(r, "conversation_id", cid),
-                            _move(r, "contacting", t("Opening message sent: {text}", text=text[:200]), note=None)))
+                            r.status in ("new", "paused")
+                            and _move(r, "contacting", t("Opening message sent: {text}", text=text[:200]), note=None)))
     try:
         await chats.sync_messages(cid)
         await chats.ensure_ad_context(cid)
@@ -696,24 +717,37 @@ async def _attach_chat(pid: int, cid: str, text: str, *, heading: str | None, se
         log.info("first sync of purchase chat %s failed: %s", cid, e)
 
 
+def _look_for_chat(pid: int, text: str) -> None:
+    """Start one lookup for the chat of an unconfirmed opener (resume / start again / after a restart)."""
+    if pid in _LOOKING:
+        raise PurchaseError(t("Already looking for the chat – wait a moment."))
+    _LOOKING.add(pid)
+    _spawn(_find_unconfirmed_chat(pid, text))
+
+
 async def _find_unconfirmed_chat(pid: int, text: str) -> None:
-    """Resume / start again after an unconfirmed opener: look for its chat; never send the opener again."""
+    """Look for the chat of an unconfirmed opener; never send the opener again."""
     from app.services import chats  # lazy: chats imports this module
 
-    row = get(pid)
-    if row is None:
-        return
     try:
-        cid = await chats._account().find_conversation(row.ad_id, text)
-    except Exception as e:  # noqa: BLE001 - stays paused, the user can try again
-        cid = None
-        log.info("looking for the chat of purchase %s failed: %s", pid, e)
-    if cid:
-        await _attach_chat(pid, cid, text, heading=row.ad_title, seller=None, context=None)
-        return
-    reason = t("The chat of the sent opening message is still not visible – check on willhaben, then resume again.")
-    _change(pid, lambda r: (_move(r, "paused", reason, note=reason),
-                            setattr(r, "log", r.log[:-1] + [{**r.log[-1], OPENER_KEY: text}])))
+        row = get(pid)
+        if row is None:
+            return
+        try:
+            cid = await chats._account().find_conversation(row.ad_id, text)
+        except Exception as e:  # noqa: BLE001 - stays paused, the user can try again
+            cid = None
+            log.info("looking for the chat of purchase %s failed: %s", pid, e)
+        row = get(pid)
+        if row is None or row.conversation_id is not None:
+            return
+        if cid:
+            await _attach_chat(pid, cid, text, heading=row.ad_title, seller=None, context=None)
+        elif row.status == "paused":     # cancelled meanwhile: stays cancelled
+            await _pause_unconfirmed(pid, t("The chat of the sent opening message is still not visible – check on willhaben, then resume again."),  # noqa: E501
+                                     push=False)
+    finally:
+        _LOOKING.discard(pid)
 
 
 # ------------------------------------------------------------------ prompts, guards
@@ -961,7 +995,7 @@ def card_for(row: Purchase, log_limit: int | None = 8) -> dict[str, Any]:
 
 def actions(row: Purchase) -> list[dict[str, Any]]:
     s, out = row.status, []
-    if s == "paused":
+    if s == "paused" and row.id not in _LOOKING:
         out.append({"name": "resume", "label": t("Resume")})
     if s in ("contacting", "negotiating", "agreed", "meetup", "pay_now"):
         out.append({"name": "pause", "label": t("Pause")})
@@ -997,8 +1031,8 @@ async def resume(pid: int) -> None:
     if row.conversation_id is None:
         sent = _unconfirmed_opener(row)
         if sent:                           # the opener already went out: find its chat, never send it again
+            _look_for_chat(pid, sent)
             _change(pid, lambda r: _line(r, t("Looking for the chat of the sent opening message")))
-            _spawn(_find_unconfirmed_chat(pid, sent))
             return
         row = _change(pid, lambda r: _move(r, "new", t("Resumed")))
         _spawn(_begin(pid))
@@ -1012,9 +1046,9 @@ async def restart(pid: int) -> None:
         raise PurchaseError(t("Only a failed purchase can be started again."))
     if row.conversation_id is None:
         sent = _unconfirmed_opener(row)
-        if sent:                           # (a paused order normally; kept for safety) never a second opener
+        if sent:                           # the opener went out (or may have): find its chat, never send it again
+            _look_for_chat(pid, sent)
             _change(pid, lambda r: _move(r, "paused", t("Looking for the chat of the sent opening message")))
-            _spawn(_find_unconfirmed_chat(pid, sent))
             return
         _change(pid, lambda r: _move(r, "new", t("Started again"), note=None))
         _spawn(_begin(pid))
@@ -1126,13 +1160,17 @@ async def on_paylivery_action(conv: Conversation, action: str, ok: bool, text: s
 
 # ------------------------------------------------------------------ startup
 def recover() -> None:
-    """After a restart no purchase task is running any more: unfinished starts are marked failed."""
+    """After a restart no purchase task is running any more: unfinished starts are marked failed, or paused when the
+    opener may already have gone out (Resume then looks for its chat instead of writing again)."""
     with session() as db:
         for row in db.exec(select(Purchase).where(col(Purchase.status).in_(("new", "contacting")),
                                                   Purchase.conversation_id.is_(None))):
-            row.status, row.note, row.updated_at = "failed", t("Interrupted by a restart."), utcnow()
-            row.log = (list(row.log or []) + [{"at": utcnow().isoformat(), "status": "failed",
-                                               "text": t("Interrupted by a restart."), "from": "new"}])[-LOG_CAP:]
+            if row.opener_text:
+                note = t("Interrupted by a restart while the opening message was sent – Resume looks for the chat; it does not write to the seller a second time.")  # noqa: E501
+                _move(row, "paused", note, note=note)
+            else:
+                _move(row, "failed", t("Interrupted by a restart."), note=t("Interrupted by a restart."))
+            row.updated_at = utcnow()
             db.add(row)
         db.commit()
 

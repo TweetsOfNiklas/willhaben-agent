@@ -239,7 +239,7 @@
 </div>
 {% endif %}
 
-{# ---- inbox (inbox_items = [{kind, title, text, time, url, unread}]) ---- #}
+{# ---- inbox (inbox_items = [{kind, title, text, time, link, unread}], link = main.event_link) ---- #}
 {% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
                 'auto_reply_pending': ('bot', 'bg-ok-soft text-success'), 'auto_reply': ('bot', 'bg-ok-soft text-success'), 'pay': ('cart', 'bg-warn-soft text-warning'),
                 'ad_expiring': ('tag', 'bg-warn-soft text-warning'), 'ad_expired': ('tag', 'bg-bad-soft text-error'), 'health': ('bell', 'bg-bad-soft text-error')} %}
@@ -254,7 +254,8 @@
     </div>
     <div class="overflow-auto">
       {% for n in inbox_items if inbox_items is defined %}{% set k = kinds.get(n.kind, ('bell', 'bg-hover text-muted')) %}
-      <a href="{{ n.url or '/' }}" class="grid grid-cols-[28px_1fr_auto] items-start gap-2.5 border-b border-base-300 px-3.5 py-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if n.unread else '' }}">
+      {% set l = n.link or {'href': '/'} %}
+      <a href="{{ l.href }}"{% if l.ad %} data-ad="{{ l.ad }}" @click="close()"{% endif %}{% if l.external %} target="_blank" rel="noopener"{% endif %} class="grid grid-cols-[28px_1fr_auto] items-start gap-2.5 border-b border-base-300 px-3.5 py-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if n.unread else '' }}">
         <span class="grid size-7 place-items-center rounded-lg {{ k[1] }}">{{ ui.icon(k[0], 14) }}</span>
         <span class="min-w-0"><span class="block {{ 'font-semibold' if n.unread else 'font-medium' }}">{{ n.title }}</span><span class="block text-[12.5px] text-muted">{{ n.text }}</span></span>
         <span class="flex flex-col items-end gap-1.5"><small class="whitespace-nowrap text-muted">{{ n.time }}</small>{% if n.unread %}<span class="size-2 rounded-full bg-primary"></span>{% endif %}</span>

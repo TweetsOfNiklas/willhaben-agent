@@ -126,4 +126,86 @@ def test_draft_with_geizhals_refine_and_undo(client, gh, monkeypatch):  # noqa: 
     client.post(f"/new-ad/{draft_id}/geizhals",
                 data={"url": "https://geizhals.at/bosch-gsr-18v-55-set-a2221733.html"})
     with session() as db:
-        assert db.get(AdDraft, draft_id).geizhals["match"]["url"].endswith("-a2221733.html")
+        gh = db.get(AdDraft, draft_id).geizhals
+    assert gh["match"]["url"].endswith("-a2221733.html") and gh["verified"] is True     # the user's pick counts
+
+
+# ------------------------------------------------------------------ variants: the 8GB model is not the 4GB one
+PI8 = "https://geizhals.at/raspberry-pi-4-modell-b-8gb-ram-a2297397.html"
+PI4 = "https://geizhals.at/raspberry-pi-4-modell-b-4gb-ram-a2115430.html"
+SEARCH_PI = f"""
+<article class="galleryview__item card"><h3 class="galleryview__name">
+ <a href="{PI8}" class="galleryview__name-link">Raspberry Pi 4 Modell B, 8GB RAM</a></h3>
+ <span class="price">€ 89,90</span></article>
+<article class="galleryview__item card"><h3 class="galleryview__name">
+ <a href="{PI4}" class="galleryview__name-link">Raspberry Pi 4 Modell B, 4 GB RAM</a></h3>
+ <span class="price">€ 59,90</span></article>
+"""
+
+
+def _pi_page(gb):
+    return f"""<h1 class="variant__header__headline">Raspberry Pi 4 Modell B, {gb}GB RAM</h1>
+<script>window.x={{lowPrice: {89.9 if gb == 8 else 59.9}}}</script>
+<dl class="specs-grid"><div class="specs-grid__item"><dt>RAM</dt><dd>{gb}GB</dd></div></dl>"""
+
+
+@pytest.fixture
+def pi(monkeypatch):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.path == "/":
+            return httpx.Response(200, text=SEARCH_PI)
+        if request.url.path.endswith(".html"):
+            return httpx.Response(200, text=_pi_page(8 if "-8gb-" in request.url.path else 4))
+        return httpx.Response(404)
+
+    monkeypatch.setattr(geizhals, "_transport", httpx.MockTransport(handler))
+    monkeypatch.setattr(geizhals, "_limiter", geizhals.RateLimiter(0))
+    return seen
+
+
+async def test_lookup_picks_the_matching_variant(pi):
+    res = await geizhals.lookup("Raspberry Pi 4 Model B 4GB")
+    assert pi[1] == PI4 and res["match"]["url"] == PI4 and res["verified"] is True
+    assert res["match"]["price_from"] == 59.9 and [c["url"] for c in res["candidates"]] == [PI8, PI4]   # picker
+
+
+async def test_lookup_without_matching_card_is_a_guess(pi):
+    res = await geizhals.lookup("Raspberry Pi 5 16GB")
+    assert res["match"]["url"] == PI8 and res["verified"] is False             # Geizhals' first hit, unconfirmed
+    assert len(res["candidates"]) == 2
+
+
+def test_unconfirmed_variant_does_not_rewrite_the_draft(client, pi, monkeypatch):  # noqa: F811
+    fake = client.fake
+    orig = fake.complete
+
+    async def complete(**kw):
+        r = await orig(**kw)
+        if "title" in r.data:
+            r.data = {**r.data, "product_query": "Raspberry Pi 5 16GB"}
+        return r
+
+    monkeypatch.setattr(fake, "complete", complete)
+    client.post("/settings/listings", data={"geizhals_auto_specs": "on"})
+    r = client.post("/new-ad", data={"notes": "Raspberry Pi"}, follow_redirects=False)
+    draft_id = int(r.headers["location"].rsplit("/", 1)[1])
+    from app.db import AdDraft, session
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    assert d.geizhals["verified"] is False and d.geizhals["match"]["url"] == PI8
+    assert len(fake.calls) == 1 and not d.revisions                          # no automatic reconcile pass
+    assert "Technische Daten" not in (d.description or "")                    # no automatic spec sheet either
+    page = client.get(f"/new-ad/{draft_id}").text
+    assert "Variant not confirmed" in page and "matched automatically" not in page
+
+    client.post(f"/new-ad/{draft_id}/refine", data={"instruction": "kürzer"})
+    wait_jobs()
+    assert "Herstellerdaten laut Geizhals" not in fake.calls[-1]["prompt"]    # the guessed sheet is no "reliable" data
+
+    client.post(f"/new-ad/{draft_id}/geizhals", data={"query": "Raspberry Pi 4 Modell B 4GB"})   # typed search
+    with session() as db:
+        gh = db.get(AdDraft, draft_id).geizhals
+    assert gh["verified"] is True and gh["match"]["url"] == PI4

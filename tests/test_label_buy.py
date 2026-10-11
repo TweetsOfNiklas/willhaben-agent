@@ -306,7 +306,12 @@ def claude(monkeypatch):
 
     def use(script):
         fake = FakeClaude(script)
-        monkeypatch.setattr("app.llm.base.get_backend", lambda *a, **k: fake)
+        fake.purposes = []                          # the get_backend(purpose) of each call
+
+        def backend(purpose=None):
+            fake.purposes.append(purpose)
+            return fake
+        monkeypatch.setattr("app.llm.base.get_backend", backend)
         holder["fake"] = fake
         return fake
     return use
@@ -322,6 +327,7 @@ async def test_buy_fills_pays_and_saves_the_label(checkout, claude, monkeypatch)
     s = await label_buy.buy(sid)
 
     assert s.status == "labelled" and s.error is None and s.paid_price == shipping.by_key("gls:S:home").price
+    assert fake.purposes and set(fake.purposes) == {"shipping"}       # Settings → Claude → "Shipping & labels"
     assert (label_buy.get_settings().data_dir / "labels" / s.label_path).read_bytes() == PDF
     steps = [e["step"] for e in s.buy_log]
     assert steps == sorted(steps) and len(steps) >= 3

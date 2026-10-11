@@ -83,7 +83,8 @@ def limit() -> dict[str, Any]:
     return {"used": used, "limit": lim, "mode": mode if mode in LIMIT_MODES else "notify", "over": bool(lim) and used >= lim}
 
 
-TASK_COLORS = {"chat": "var(--brand)", "ads": "#8b5cf6", "screen": "#eb6834", "search": "#1baf7a"}
+TASK_COLORS = {"chat": "var(--brand)", "ads": "#8b5cf6", "screen": "#eb6834", "search": "#1baf7a", "shipping": "#3b82f6",
+               "purchase": "#db4b9a"}
 
 
 def month_by_task() -> list[dict[str, Any]]:

@@ -145,6 +145,18 @@ def test_geizhals_query_only_for_products():
     assert deals.geizhals_query("Jacke Größe 38", ["Mode & Accessoires"]) is None
 
 
+@pytest.mark.parametrize("title, query", [
+    ("Raspberry Pi 4 4GB", "Raspberry Pi 4 4GB"),
+    ("Raspberry Pi 4 Model B 4GB", "Raspberry Pi 4 Model 4GB"),                 # capacity past the 4-word cap
+    ("Raspberry Pi 4 Modell B 4GB RAM mit Gehäuse", "Raspberry Pi 4 Modell 4GB"),
+    ("Raspberry Pi 4 Model B 4 GB", "Raspberry Pi 4 Model 4GB"),                # "4 GB" is one word, not a 2nd "4"
+    ("Neuwertiger Raspberry Pi 4 (4 GB)", "Raspberry Pi 4 4GB"),
+    ("MacBook Air M1 8GB 256GB", "MacBook Air M1 8GB 256GB"),
+])
+def test_geizhals_query_keeps_the_variant(title, query):
+    assert deals.geizhals_query(title) == query
+
+
 def test_stats_percentiles():
     st = deals.stats(PRICES + [0, None])
     assert st["count"] == 10 and st["min"] == 40 and st["max"] == 200 and st["median"] == 105
@@ -373,6 +385,39 @@ def test_matches_model_numbers_as_whole_words():
     assert deals._matches("Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo", "Bosch GSR 18V-55")
     assert not deals._matches("Apple iPhone 113 Pro", "Apple iPhone 13")
     assert not deals._matches("Tisch 230cm Eiche", "Tisch 23 Eiche")
+
+
+@pytest.mark.parametrize("name, query, ok", [
+    ("Raspberry Pi 4 Modell B, 8GB RAM", "Raspberry Pi 4 4GB", False),         # other variant
+    ("Raspberry Pi 4 Modell B, 4GB RAM", "Raspberry Pi 4 4GB", True),
+    ("Raspberry Pi 4 Modell B 4 GB", "Raspberry Pi 4 4GB", True),               # "4 GB" = "4GB"
+    ("Raspberry Pi 5, 8GB RAM", "Raspberry Pi 4", False),                       # single digit counts too
+    ("Raspberry Pi 400", "Raspberry Pi 4", False),
+    ("Raspberry Pi 4 Modell B, 8GB RAM", "Raspberry Pi 4", True),               # query without capacity
+])
+def test_matches_variants(name, query, ok):
+    assert deals._matches(name, query) is ok
+
+
+async def test_geizhals_cache_per_variant_and_only_verified(wh, monkeypatch):
+    asked = []
+
+    async def lookup(q):
+        asked.append(q)
+        gb = "8GB" if "8GB" in q else "4GB"
+        return {"query": q, "verified": True, "candidates": [],
+                "match": {"name": f"Raspberry Pi 4 Modell B, {gb} RAM", "url": f"https://geizhals.at/pi4-{gb}-a1.html",
+                          "price_from": 89.9 if gb == "8GB" else 59.9}}
+    monkeypatch.setattr(deals.geizhals, "lookup", lookup)
+    four = await deals.geizhals_match(deals.geizhals_query("Raspberry Pi 4 Model B 4 GB"))
+    eight = await deals.geizhals_match(deals.geizhals_query("Raspberry Pi 4 Model B 8GB"))
+    assert four["price_from"] == 59.9 and eight["price_from"] == 89.9 and len(asked) == 2
+    assert len(deals._geizhals) == 2                                         # one cache entry per variant
+
+    async def guess(q):                                                      # Geizhals' first hit, not confirmed
+        return {**await lookup(q), "verified": False}
+    monkeypatch.setattr(deals.geizhals, "lookup", guess)
+    assert await deals.geizhals_match("Raspberry Pi 4 Modell 4GB") is None
 
 
 async def test_geizhals_error_is_negatively_cached(wh, monkeypatch):

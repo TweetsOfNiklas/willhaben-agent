@@ -52,7 +52,8 @@ def chat(monkeypatch):
                                               "contents": "Buch"}}, model="fake")
 
     backend = Backend()
-    monkeypatch.setattr("app.llm.base.get_backend", lambda *a: backend)
+    backend.purposes = []                           # the get_backend(purpose) of each call
+    monkeypatch.setattr("app.llm.base.get_backend", lambda purpose=None: backend.purposes.append(purpose) or backend)
 
     async def no_ctx(cid):
         with session() as db:
@@ -72,6 +73,7 @@ def chat(monkeypatch):
 async def test_detect_creates_shipment_and_remembers_parcel(chat):
     s = await shipping.detect("c1")
     assert s.recipient["street"] == "Hauptstraße" and s.parcel["weight_kg"] == 1.1 and s.parcel["source"] == "claude"
+    assert chat.purposes == ["shipping"]                             # Settings → Claude → "Shipping & labels"
     assert s.option == "gls:S:shop"                                 # 30 + 6 = 36 > XS; cheapest online option
     s = shipping.set_parcel(s.id, {"length_cm": 30, "width_cm": 22, "height_cm": 8, "weight_kg": 1.4})
     with session() as db:
