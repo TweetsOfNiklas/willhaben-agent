@@ -118,7 +118,8 @@ curl -fsSLO https://raw.githubusercontent.com/lumascet/willhaben-agent/master/co
 docker compose up -d
 ```
 
-This pulls the prebuilt image `ghcr.io/lumascet/willhaben-agent:latest`, which GitHub Actions builds from every push.
+This pulls the prebuilt image `ghcr.io/lumascet/willhaben-agent:latest`, which GitHub Actions builds for every release
+tag (`v0.2.1`, …; also as `0.2.1` and `0.2`).
 Update later with `docker compose pull && docker compose up -d`. To build from source instead, clone the repository and run
 `docker compose up -d --build`. An optional `.env` next to `compose.yaml` (see `.env.example`) holds overrides such as
 the dashboard password.

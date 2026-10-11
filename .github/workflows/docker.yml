@@ -30,8 +30,11 @@ jobs:
       - name: Tests
         run: uv run --no-sync pytest -q
 
+  # The image is built for pull requests (build only, nothing pushed) and for release tags v* (pushed);
+  # a plain push to master only runs the tests.
   image:
     needs: test
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,7 +58,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/willhaben-agent
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
