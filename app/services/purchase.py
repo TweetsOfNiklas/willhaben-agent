@@ -642,20 +642,28 @@ async def _begin_inner(pid: int) -> None:
                                   info and _line(r, info)))
     target = target_price(row)
     cost, src = shipping_of(row)
-    prompt = purchase_opener_prompt(ad_context=detail.as_context(), target=target, max_price=row.max_price,
-                                    mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
-                                    seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
-                                    item_ceiling=item_ceiling(row), market=row.market,
-                                    fee=fee_rule() if row.mode == "paylivery" else None,
-                                    questions=[q["question"] for q in row.questions or []])
-    out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
-    data = out.data or {}
-    text = str(data.get("message") or "").strip()
-    if not text:
-        return await _fail(pid, t("Claude wrote no opening message."))
-    problems = text_problems(text, max_price=row.max_price, address_ok=False)
-    if problems:
-        return await _fail(pid, t("The opening message was refused: {why}", why="; ".join(problems)))
+    refused: tuple[str, list[str]] | None = None
+    for _attempt in range(2):      # a refused opener gets one retry with the reason, then the order fails
+        prompt = purchase_opener_prompt(ad_context=detail.as_context(), target=target, max_price=row.max_price,
+                                        mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
+                                        seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
+                                        item_ceiling=item_ceiling(row), market=row.market,
+                                        fee=fee_rule() if row.mode == "paylivery" else None,
+                                        questions=[q["question"] for q in row.questions or []],
+                                        asking=detail.price, refused=refused)
+        out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
+                                                 schema=PURCHASE_OPENER_SCHEMA)
+        text = str((out.data or {}).get("message") or "").strip()
+        if not text:
+            return await _fail(pid, t("Claude wrote no opening message."))
+        problems = text_problems(text, max_price=row.max_price, address_ok=False)
+        if not problems:
+            break
+        log.info("purchase %s: opening message refused (%s): %s", pid, "; ".join(problems), text)
+        refused = (text, problems)
+    else:
+        return await _fail(pid, t("The opening message was refused: {why}. Claude's text: {text}",
+                                  why="; ".join(problems), text=text[:300]))
     from app.services import chats  # lazy: chats imports this module
 
     # stored before the POST: after a restart in between, recover() looks for the chat instead of writing again

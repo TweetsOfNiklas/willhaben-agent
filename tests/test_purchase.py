@@ -245,8 +245,30 @@ async def test_begin_refuses_opener_above_maximum(fx):
         return await orig(**kw)
     fx.backend.complete = bad
     pid = await open_order(fx, max_price=250)
-    assert row(pid).status == "failed" and "refused" in row(pid).note
+    assert row(pid).status == "failed" and "refused" in row(pid).note and "Ich biete 400 €." in row(pid).note
     assert fx.account.created == []
+
+
+async def test_begin_retries_a_refused_opener_once(fx):
+    """Asking price above the maximum: Claude quotes it ("statt 300 €"), the code refuses, the retry goes out."""
+    openers, prompts = iter([{"message": "Hallo Anna, statt 300 € würdest du 220 € nehmen?", "opening_offer": 220},
+                             OPENER]), []
+    orig = fx.backend.complete
+
+    async def quoting(**kw):
+        if "purchase_state" not in kw["schema"]["properties"]:
+            prompts.append(kw["prompt"])
+            return LLMResult(data=next(openers), model="fake")
+        return await orig(**kw)
+    fx.backend.complete = quoting
+    pid = await open_order(fx, max_price=280)
+    assert row(pid).status == "contacting"
+    assert fx.account.created == [("555", OPENER["message"])]
+    assert len(prompts) == 2
+    assert "Angebotspreis der Anzeige (300 €) liegt über dem Höchstpreis" in prompts[0]
+    assert "Dein erster Entwurf" not in prompts[0]
+    retry = prompts[1].split("Dein erster Entwurf wurde nicht gesendet")[1]
+    assert "statt 300 €" in retry and "above your maximum" in retry
 
 
 # ------------------------------------------------------------------ buyer automatic answers
@@ -944,3 +966,13 @@ async def test_begin_opener_prompt_carries_the_fee_for_paylivery_only(fx):
     sender_ok()
     await open_order(fx, mode="direct", max_price=300.0)
     assert "Käuferschutz" not in fx.backend.calls[-1]["prompt"]
+
+
+def test_rules_block_forbids_quoting_amounts_above_the_maximum():
+    from app.llm.prompts import purchase_rules
+    kw = dict(median=None, target=500.0, mode="pickup", sender_address=None, stage="contacting", user_rules="")
+    over = purchase_rules(asking=619.0, max_price=600.0, **kw)
+    assert "Kein Eurobetrag in deiner Nachricht darf über 600 € liegen" in over
+    assert "Angebotspreis der Anzeige (619 €) liegt über dem Höchstpreis" in over
+    under = purchase_rules(asking=580.0, max_price=600.0, **kw)
+    assert "Kein Eurobetrag" in under and "liegt über dem Höchstpreis" not in under

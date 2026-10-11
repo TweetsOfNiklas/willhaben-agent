@@ -18,7 +18,7 @@
   "This ad has no willhaben PayLivery.": "Diese Anzeige hat kein willhaben PayLivery.",
   "The asking price is far above your maximum – the agent starts anyway.": "Der Angebotspreis liegt weit über deinem Höchstpreis – der Agent startet trotzdem.",
   "Claude wrote no opening message.": "Claude hat keine Eröffnungsnachricht geschrieben.",
-  "The opening message was refused: {why}": "Die Eröffnungsnachricht wurde abgelehnt: {why}",
+  "The opening message was refused: {why}. Claude's text: {text}": "Die Eröffnungsnachricht wurde abgelehnt: {why}. Claudes Text: {text}",
   "willhaben did not open the chat: {error}": "willhaben hat den Chat nicht eröffnet: {error}",
   "Opening message sent: {text}": "Eröffnungsnachricht gesendet: {text}",
   "Claude needs your decision: {reason}": "Claude braucht deine Entscheidung: {reason}",
