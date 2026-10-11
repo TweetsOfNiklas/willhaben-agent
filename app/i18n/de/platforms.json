@@ -20,5 +20,14 @@
  "Open on {platform}": "Auf {platform} öffnen",
  "Ad link, willhaben ad id or search text": "Anzeigenlink, willhaben-Anzeigen-ID oder Suchtext",
  "Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.": "Ein Klick auf einen Treffer öffnet die Anzeige hier; ← / → blättert, Strg-Klick öffnet die Anzeige auf ihrer Seite.",
- "{name} responded {status}; pausing {s}s": "{name} hat {status} geantwortet; Pause {s} s"
+ "{name} responded {status}; pausing {s}s": "{name} hat {status} geantwortet; Pause {s} s",
+ "Kleinanzeigen refused the app credentials (HTTP {status}); enter current ones in Settings → Platforms": "Kleinanzeigen hat die App-Zugangsdaten abgelehnt (HTTP {status}); trag aktuelle in Einstellungen → Plattformen ein",
+ "Kleinanzeigen search returned HTTP {status}": "Kleinanzeigen-Suche hat HTTP {status} geantwortet",
+ "Kleinanzeigen search returned no JSON": "Kleinanzeigen-Suche hat kein JSON geliefert",
+ "Kleinanzeigen ad {id}: HTTP {status}": "Kleinanzeigen-Anzeige {id}: HTTP {status}",
+ "Kleinanzeigen ad {id}: no JSON": "Kleinanzeigen-Anzeige {id}: kein JSON",
+ "Price in the link is not a number": "Der Preis im Link ist keine Zahl",
+ "Not a kleinanzeigen.de link": "Kein kleinanzeigen.de-Link",
+ "Path must start with /s- (copy a result list from kleinanzeigen.de)": "Der Pfad muss mit /s- beginnen (kopiere eine Ergebnisliste von kleinanzeigen.de)",
+ "Not a kleinanzeigen.de result list (the link should end in k0 or c<number>)": "Keine kleinanzeigen.de-Ergebnisliste (der Link sollte mit k0 oder c<Zahl> enden)"
 }

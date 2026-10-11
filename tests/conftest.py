@@ -11,6 +11,7 @@ os.environ.update({
     "HUMANIZE_CHAT": "0",       # auto replies answer immediately in tests (test_humanize covers the timing)
     "TELEGRAM_BOT_TOKEN": "",
     "REQUEST_MIN_GAP_S": "0",
+    "PLATFORM_KLEINANZEIGEN_MIN_GAP_S": "0",
     "HA_URL": "",
     "HA_TOKEN": "",
     "HA_NOTIFY_SERVICE": "",

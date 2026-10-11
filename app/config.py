@@ -38,7 +38,10 @@ class Settings(BaseSettings):
     wh_replay: bool = False
     # --- platforms (app/platforms): which search-agent adapters exist besides willhaben; switching them on for
     # the user happens in Settings → Platforms
-    platforms_enabled: str = "willhaben"
+    platforms_enabled: str = "willhaben,kleinanzeigen"
+    platform_kleinanzeigen_min_gap_s: float = 3.0
+    platform_kleinanzeigen_per_hour: int = 120
+    kleinanzeigen_api_auth: str = ""            # "user:pw" of the kleinanzeigen app API; empty = the bundled default
 
     # --- logged-in browser session (Playwright persistent profile) ---
     browser_enabled: bool = True

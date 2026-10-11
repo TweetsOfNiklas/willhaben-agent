@@ -1,0 +1,29 @@
+{
+ "{http://www.ebayclassifiedsgroup.com/schema/location/v1}locations": {
+  "value": {
+   "location": [
+    {
+     "id": {
+      "value": 3331
+     },
+     "localized-name": {
+      "value": "Berlin"
+     },
+     "id-name": {
+      "value": "berlin"
+     },
+     "location": [
+      {
+       "id": {
+        "value": 3360
+       },
+       "localized-name": {
+        "value": "Berlin Mitte"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

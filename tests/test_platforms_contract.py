@@ -28,7 +28,57 @@ def _willhaben_client():
     return c
 
 
+class KaTransport:
+    """The kleinanzeigen app API from fixtures (search, one ad, places); unknown ads are 404."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def send(self, method, url, *, params=None, headers=None):
+        from app.platforms.httpclient import FetchResponse
+        self.calls.append((url, headers))
+        if url.endswith("/ads.json") or "/ads.json?" in url:
+            body = json.dumps(load("kleinanzeigen_ads.json")).encode()
+        elif "/ads/2712345678.json" in url:
+            body = json.dumps(load("kleinanzeigen_ad.json")).encode()
+        elif "/locations.json" in url:
+            body = json.dumps(load("kleinanzeigen_locations.json")).encode()
+        else:
+            return FetchResponse(404, {}, b"", url)
+        return FetchResponse(200, {"content-type": "application/json"}, body, url)
+
+    def clear_cookies(self):
+        pass
+
+    async def aclose(self):
+        pass
+
+
+def _install_ka():
+    from app.platforms import kleinanzeigen as ka
+    ka.set_client(ka.KleinanzeigenClient(transport=KaTransport()))
+    ka.get_client().limiter = RateLimiter(0, name="Kleinanzeigen")
+
+
+def _uninstall_ka():
+    from app.platforms import kleinanzeigen as ka
+    ka.set_client(None)
+
+
 CASES = {
+    "kleinanzeigen": {
+        "url": "https://www.kleinanzeigen.de/s-preis:100:2000/rennrad/k0",
+        "volatile": "https://www.kleinanzeigen.de/s-sortierung:preis/s-preis:100:2000/s-seite:2/rennrad/k0",
+        "invalid": ["https://www.kleinanzeigen.de/s-anzeige/rennrad/2712345678-217-3331", "https://example.com/s-rad/k0",
+                    "https://www.kleinanzeigen.de/", "https://www.kleinanzeigen.de/s-rad/kx"],
+        "ad_url": "https://www.kleinanzeigen.de/s-anzeige/rennrad-canyon/2712345678-217-3331",
+        "ad_id": "2712345678",
+        "keyword": "rennrad",
+        "install": _install_ka,
+        "uninstall": _uninstall_ka,
+        "expect_ads": 4,
+        "detail_id": "2712345678",
+    },
     "willhaben": {
         "url": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=fahrrad&PRICE_TO=300",
         "volatile": "https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=fahrrad&PRICE_TO=300&page=2&sfId=abc&rows=5",

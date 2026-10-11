@@ -1,0 +1,366 @@
+{
+ "{http://www.ebayclassifiedsgroup.com/schema/ad/v1}ads": {
+  "value": {
+   "paging": {
+    "numFound": {
+     "value": 1234
+    },
+    "pageNum": {
+     "value": 0
+    },
+    "pageSize": {
+     "value": 30
+    }
+   },
+   "ad": [
+    {
+     "id": "2712345678",
+     "title": {
+      "value": "Rennrad Canyon Endurace"
+     },
+     "description": {
+      "value": "Gut erhalten, Abholung in Berlin."
+     },
+     "price": {
+      "price-type": {
+       "value": "NEGOTIABLE"
+      },
+      "amount": {
+       "value": 1250
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-10T09:15:30.000+02:00"
+     },
+     "ad-address": {
+      "zip-code": {
+       "value": "10115"
+      },
+      "state": {
+       "value": "Berlin"
+      },
+      "latitude": {
+       "value": 52.5
+      },
+      "longitude": {
+       "value": 13.4
+      }
+     },
+     "category": {
+      "id": {
+       "value": "217"
+      },
+      "localized-name": {
+       "value": "Fahrräder & Zubehör"
+      }
+     },
+     "link": [
+      {
+       "rel": "self",
+       "href": "https://api.kleinanzeigen.de/api/ads/2712345678.json"
+      },
+      {
+       "rel": "self-public-website",
+       "href": "https://www.kleinanzeigen.de/s-anzeige/rennrad-canyon-endurace/2712345678-217-3331"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "rel": "thumbnail",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345678-0?rule=$_2.JPG"
+         },
+         {
+          "rel": "XXL",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345678-0?rule=$_59.JPG"
+         },
+         {
+          "rel": "teaser",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345678-0?rule=$_35.JPG"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "fahrraeder.art",
+        "localized-label": "Art",
+        "value": [
+         {
+          "value": "Rennrad",
+          "localized-label": "Rennrad"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "2712345679",
+     "title": {
+      "value": "Kinderrad 16 Zoll"
+     },
+     "description": {
+      "value": "Gewerblicher Verkauf <b>mit</b> Rechnung &amp; Garantie."
+     },
+     "price": {
+      "price-type": {
+       "value": "FIXED"
+      },
+      "amount": {
+       "value": 60
+      }
+     },
+     "poster-type": {
+      "value": "COMMERCIAL"
+     },
+     "start-date-time": {
+      "value": "2026-10-10T09:15:30.000+02:00"
+     },
+     "ad-address": {
+      "zip-code": {
+       "value": "14467"
+      },
+      "state": {
+       "value": "Potsdam"
+      },
+      "latitude": {
+       "value": 52.5
+      },
+      "longitude": {
+       "value": 13.4
+      }
+     },
+     "category": {
+      "id": {
+       "value": "217"
+      },
+      "localized-name": {
+       "value": "Fahrräder & Zubehör"
+      }
+     },
+     "link": [
+      {
+       "rel": "self",
+       "href": "https://api.kleinanzeigen.de/api/ads/2712345679.json"
+      },
+      {
+       "rel": "self-public-website",
+       "href": "https://www.kleinanzeigen.de/s-anzeige/kinderrad-16-zoll/2712345679-217-3331"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "rel": "thumbnail",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345679-0?rule=$_2.JPG"
+         },
+         {
+          "rel": "XXL",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345679-0?rule=$_59.JPG"
+         },
+         {
+          "rel": "teaser",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345679-0?rule=$_35.JPG"
+         }
+        ]
+       },
+       {
+        "link": [
+         {
+          "rel": "thumbnail",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345679-1?rule=$_2.JPG"
+         },
+         {
+          "rel": "XXL",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345679-1?rule=$_59.JPG"
+         },
+         {
+          "rel": "teaser",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345679-1?rule=$_35.JPG"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "fahrraeder.art",
+        "localized-label": "Art",
+        "value": [
+         {
+          "value": "Rennrad",
+          "localized-label": "Rennrad"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "2712345680",
+     "title": {
+      "value": "Fahrrad zu verschenken"
+     },
+     "description": {
+      "value": "Gut erhalten, Abholung in Berlin."
+     },
+     "price": {
+      "price-type": {
+       "value": "FREE"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-09T18:00:00.000+02:00"
+     },
+     "ad-address": {
+      "zip-code": {
+       "value": "10115"
+      },
+      "state": {
+       "value": "Berlin"
+      },
+      "latitude": {
+       "value": 52.5
+      },
+      "longitude": {
+       "value": 13.4
+      }
+     },
+     "category": {
+      "id": {
+       "value": "217"
+      },
+      "localized-name": {
+       "value": "Fahrräder & Zubehör"
+      }
+     },
+     "link": [
+      {
+       "rel": "self",
+       "href": "https://api.kleinanzeigen.de/api/ads/2712345680.json"
+      },
+      {
+       "rel": "self-public-website",
+       "href": "https://www.kleinanzeigen.de/s-anzeige/fahrrad-zu-verschenken/2712345680-217-3331"
+      }
+     ],
+     "pictures": {},
+     "attributes": {
+      "attribute": [
+       {
+        "name": "fahrraeder.art",
+        "localized-label": "Art",
+        "value": [
+         {
+          "value": "Rennrad",
+          "localized-label": "Rennrad"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "2712345681",
+     "title": {
+      "value": "Rennrad Rahmen"
+     },
+     "description": {
+      "value": "Gut erhalten, Abholung in Berlin."
+     },
+     "price": {
+      "price-type": {
+       "value": "NEGOTIABLE"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-10T09:15:30.000+02:00"
+     },
+     "ad-address": {
+      "zip-code": {
+       "value": "10115"
+      },
+      "state": {
+       "value": "Berlin"
+      },
+      "latitude": {
+       "value": 52.5
+      },
+      "longitude": {
+       "value": 13.4
+      }
+     },
+     "category": {
+      "id": {
+       "value": "217"
+      },
+      "localized-name": {
+       "value": "Fahrräder & Zubehör"
+      }
+     },
+     "link": [
+      {
+       "rel": "self",
+       "href": "https://api.kleinanzeigen.de/api/ads/2712345681.json"
+      },
+      {
+       "rel": "self-public-website",
+       "href": "https://www.kleinanzeigen.de/s-anzeige/rennrad-rahmen/2712345681-217-3331"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "rel": "thumbnail",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345681-0?rule=$_2.JPG"
+         },
+         {
+          "rel": "XXL",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345681-0?rule=$_59.JPG"
+         },
+         {
+          "rel": "teaser",
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2712345681-0?rule=$_35.JPG"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "fahrraeder.art",
+        "localized-label": "Art",
+        "value": [
+         {
+          "value": "Rennrad",
+          "localized-label": "Rennrad"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}
