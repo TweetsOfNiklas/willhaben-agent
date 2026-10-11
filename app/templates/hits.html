@@ -4,13 +4,14 @@
 <div class="mb-4 flex items-start justify-between gap-3 sm:mb-5 sm:gap-6">
   <div class="min-w-0">
     <h1>{{ _("Hits") }}{% if agent_id and agents.get(agent_id) %} <span class="text-base font-normal text-muted">· {{ agents[agent_id].name }}</span>{% endif %}</h1>
-    <p class="mt-1 max-w-[640px] text-muted max-sm:hidden">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens willhaben.") }}</p>
+    {% if state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening held back: no push, kept here in case you want a look.") }}</p>
+    {% else %}<p class="mt-1 max-w-[640px] text-muted max-sm:hidden">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens willhaben.") }}</p>{% endif %}
   </div>
   {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" class="m-0 shrink-0"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Mark all as seen') }}" aria-label="{{ _('Mark all as seen') }}">{{ ui.icon('check', 15, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Mark all as seen") }}</span></button></form>{% endif %}
 </div>
 <form method="get" action="/hits" class="mb-3.5 flex flex-wrap items-center gap-2.5">
   {% set seg_items = [] %}
-  {% for s, label in [('new', _('New')), ('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('all', _('All'))] %}
+  {% for s, label in [('new', _('New')), ('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
     {% set added = seg_items.append(('/hits?state=' ~ s ~ ('&agent_id=' ~ agent_id if agent_id else ''), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
   {% endfor %}
   {{ ui.seg(seg_items, 'max-sm:w-full') }}
@@ -26,7 +27,7 @@
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
-  <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored') else '' }}" id="hit-{{ h.id }}">
+  <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered') else '' }}" id="hit-{{ h.id }}">
     <a href="{{ h.url }}" target="_blank" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" class="relative block">
       {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
       {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-2 border-0 bg-black/55 font-medium whitespace-nowrap text-white">{{ agents[h.agent_id].name }}</span>{% endif %}
@@ -36,9 +37,11 @@
       <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
         {% if h.old_price and h.price and h.old_price > h.price %}<span class="text-[13px] text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}</div>
       {% if h.screen_relevant is not none %}
-      <div class="flex items-start gap-1.5 text-[12.5px] text-muted" title="{{ h.screen_reason or '' }}">
+      {# verdict above, reason below at full width: cut by lines (ellipsis), the tooltip has the whole text #}
+      <div class="flex flex-col items-start gap-1 text-[12.5px] text-muted" title="{{ h.screen_reason or '' }}">
         {% set good = h.screen_relevant and h.screen_deal in ('great', 'good') %}
-        {{ ui.pill(screen_labels(h)|first, 'ok' if good else ('brand' if h.screen_relevant else ''), false, 'shrink-0') }}<span>{{ (h.screen_reason or '')[:90] }}</span>
+        {{ ui.pill(screen_labels(h)|first, 'ok' if good else ('brand' if h.screen_relevant else ''), false) }}
+        {% if h.screen_reason %}<span class="line-clamp-3 leading-snug max-sm:line-clamp-2">{{ h.screen_reason }}</span>{% endif %}
       </div>
       {% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}

@@ -59,7 +59,7 @@ class Hit(SQLModel, table=True):
     is_private: bool | None = None
     first_seen_at: datetime = Field(default_factory=utcnow)
     last_seen_at: datetime = Field(default_factory=utcnow)
-    state: str = "new"  # new | seen | saved | ignored
+    state: str = "new"  # new | seen | saved | ignored | filtered (held back by the screening, no push)
     price_dropped_at: datetime | None = None
     bumped_count: int = 0
     screen_relevant: bool | None = None  # Claude: the item searched for? None = not screened

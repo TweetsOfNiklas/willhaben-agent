@@ -15,7 +15,8 @@ It runs on your own server, from your home internet connection, and you control 
   price drops, usually much faster than willhaben's e-mail alerts. Hits open in a detail view inside the dashboard.
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
   predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
-  only hits that pass reach your phone. Agents check at irregular, human-like intervals and slow down at night.
+  only hits that pass reach your phone, the others go to their own "Filtered out" list instead of New. Agents check
+  at irregular, human-like intervals and slow down at night.
   A search agent can also be created from a finished product search: it then runs all of that search's keyword
   searches on every check and drops new ads over the plan's budget or with an exclusion word before they are stored.
 - **Chats**: your willhaben conversations, synced live. Claude drafts replies in your style and nothing is sent

@@ -37,7 +37,7 @@ from app.services import min_price as min_price_svc
 from app.services import scam
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, printing_routes, purchase_routes
-from app.services.search_agents import create_agent, run_agent
+from app.services.search_agents import create_agent, refile_screened, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI):
     s = get_settings()
     init_db()
     apply_public_url()                             # Settings → Web address wins over PUBLIC_URL in .env
+    refile_screened()                              # once: screened-out hits leave "new" for "filtered"
     ad_batch.recover()
     my_ads.recover()                               # queued jobs died with the last process: unmark what they held
     ad_creator.recover_publishing()

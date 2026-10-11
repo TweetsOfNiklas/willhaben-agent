@@ -71,7 +71,7 @@
  "Your maximum": "Dein Maximum",
  "incl. shipping & fee": "inkl. Versand & Gebühr",
  "Agreed": "Vereinbart",
- "Claude checks every new hit before you are notified. Other hits still appear under Hits and fire the Home Assistant event, just without a push.": "Claude prüft jeden neuen Treffer, bevor du benachrichtigt wirst. Andere Treffer erscheinen trotzdem unter Treffer und lösen das Home-Assistant-Event aus, nur ohne Push.",
+ "Claude checks every new hit before you are notified. Other hits go to Hits → Filtered out and still fire the Home Assistant event, just without a push.": "Claude prüft jeden neuen Treffer, bevor du benachrichtigt wirst. Andere Treffer landen unter Treffer → Aussortiert und lösen trotzdem das Home-Assistant-Event aus, nur ohne Push.",
  "Browser running": "Browser läuft",
  "Review & publish": "Prüfen & veröffentlichen",
  "cover": "Titelbild",

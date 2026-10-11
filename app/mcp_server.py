@@ -84,7 +84,7 @@ async def create_search_agent(willhaben_url: str, name: str | None = None, inter
 
 @mcp.tool(annotations=READ)
 async def list_hits(agent_id: int | None = None, state: str = "new", limit: int = 20) -> list:
-    """Hits of the search agents. state: new, saved, seen, ignored or all."""
+    """Hits of the search agents. state: new, saved, seen, ignored, filtered (held back by the screening) or all."""
     params: dict[str, Any] = {"state": state, "limit": limit}
     if agent_id:
         params["agent_id"] = agent_id

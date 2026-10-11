@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.config import get_settings
-from app.db import Hit, ProductSearch, SearchAgent, session, utcnow
+from app.db import Hit, ProductSearch, SearchAgent, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services import product_search, scam, screening
 from app.services.notify import notify
@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 MAX_PUSH_PER_RUN = 5
 NAME_CHARS = 60
+SETTING_REFILED = "hits_filtered_refiled"    # refile_screened() ran
 
 
 @dataclass
@@ -261,6 +262,7 @@ async def run_agent(agent_id: int) -> RunResult:
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
     if agent.screen and to_notify:      # Claude: right item? good deal? (a new price is a new deal)
         await screening.screen(agent_id, to_notify)
+        _file_screened(agent, res.new, res.price_drops)
 
     if notify_new and res.new:
         good = [h.id for h in res.new if screening.passes(agent, h)]
@@ -283,6 +285,36 @@ async def run_agent(agent_id: int) -> RunResult:
                          data={"agent": name, "ad_id": h.ad_id, "price": h.price, "old_price": h.old_price,
                                **_screen_data(h), **_scam_data(h)})
     return res
+
+
+def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit]) -> None:
+    """A new hit the screening holds back gets no push, so it goes to "filtered" instead of "new"; a filtered hit
+    that passes after a price drop is pushed and becomes new again."""
+    moves = [(h, "new", "filtered") for h in new if not screening.passes(agent, h)]
+    moves += [(h, "filtered", "new") for h in drops if screening.passes(agent, h)]
+    if not moves:
+        return
+    with session() as db:
+        for h, old, state in moves:
+            row = db.get(Hit, h.id)
+            if row is not None and row.state == old:      # unless it was saved, seen or ignored meanwhile
+                row.state = h.state = state
+                db.add(row)
+        db.commit()
+
+
+def refile_screened() -> None:
+    """Once, at startup: new hits the screening held back before the "filtered" state existed move there."""
+    if get_setting(SETTING_REFILED):
+        return
+    with session() as db:
+        agents = {a.id: a for a in db.exec(select(SearchAgent).where(SearchAgent.screen == True))}  # noqa: E712
+        for h in db.exec(select(Hit).where(Hit.state == "new", col(Hit.screen_relevant).is_not(None))):
+            if h.agent_id in agents and not screening.passes(agents[h.agent_id], h):
+                h.state = "filtered"
+                db.add(h)
+        db.commit()
+    set_setting(SETTING_REFILED, "1")
 
 
 def _screen_line(h: Hit) -> str:

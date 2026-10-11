@@ -8,7 +8,7 @@ from app import db as dbmod
 from app.db import set_setting
 from app.llm.base import LLMError, LLMResult
 from app.services import screening
-from app.services.search_agents import create_agent, run_agent
+from app.services.search_agents import SETTING_REFILED, create_agent, refile_screened, run_agent
 from tests.conftest import load
 from tests.test_dashboard import client  # noqa: F401  (pytest fixture)
 from tests.test_search_agents import URL, _set_attr, ha, responses  # noqa: F401  (pytest fixtures)
@@ -85,6 +85,32 @@ async def test_screening_limits_pushes_but_keeps_events(responses, ha, images, m
     with dbmod.session() as db:
         tube = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == "999000112")).one()
     assert (tube.screen_relevant, tube.screen_deal) == (False, "unknown")
+    assert (tube.state, _hit("999000111").state) == ("filtered", "new")   # no push: not under New
+
+
+def _hit(ad_id):
+    with dbmod.session() as db:
+        return db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == ad_id)).one()
+
+
+async def test_filtered_hit_is_new_again_after_a_passing_price_drop(responses, ha, images, monkeypatch):  # noqa: F811
+    queue, _ = responses
+    agent = await _agent_with_two_new(queue)
+    queue.append(copy.deepcopy(queue[-1]))           # third check: same ads
+    monkeypatch.setattr(screening, "get_backend", lambda *a: FakeScreen(
+        [{"nr": 1, "relevant": False, "deal": "unknown", "reason": "Nur ein Schlauch"},
+         {"nr": 2, "relevant": True, "deal": "good", "reason": "Passt"}]))
+    await run_agent(agent.id)
+    assert _hit("999000112").state == "filtered"
+    with dbmod.session() as db:
+        tube = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == "999000112")).one()
+        tube.price = 120                                # the third check sees 100 €: a price drop
+        db.add(tube)
+        db.commit()
+    monkeypatch.setattr(screening, "get_backend", lambda *a: FakeScreen(
+        [{"nr": 1, "relevant": True, "deal": "great", "reason": "Jetzt ein Schnäppchen"}]))
+    r = await run_agent(agent.id)
+    assert [h.ad_id for h in r.price_drops] == ["999000112"] and _hit("999000112").state == "new"
 
 
 async def test_screening_fails_open(responses, ha, images, monkeypatch):  # noqa: F811
@@ -95,6 +121,33 @@ async def test_screening_fails_open(responses, ha, images, monkeypatch):  # noqa
     monkeypatch.setattr(screening, "get_backend", lambda *a: FakeScreen(fail=True))
     await run_agent(agent.id)
     assert len(_pushes(ha)) == 2                                     # Claude down: every hit pushes as before
+    assert {_hit("999000111").state, _hit("999000112").state} == {"new"}
+
+
+def test_refile_screened_moves_held_back_new_hits_once(client):  # noqa: F811
+    agent = create_agent(URL)
+    with dbmod.session() as db:
+        a = db.get(dbmod.SearchAgent, agent.id)
+        a.screen, a.screen_min = True, "good"
+        db.add(a)
+        for ad_id, state, relevant, deal in (("1", "new", False, "unknown"), ("2", "new", True, "great"),
+                                             ("3", "new", None, None), ("4", "seen", False, "unknown")):
+            db.add(dbmod.Hit(agent_id=agent.id, ad_id=ad_id, heading=f"Hit {ad_id}", url="https://x", state=state,
+                             screen_relevant=relevant, screen_deal=deal))
+        db.commit()
+    set_setting(SETTING_REFILED, "")                  # the client's startup already ran it on the empty database
+    refile_screened()
+    assert [_hit(x).state for x in "1234"] == ["filtered", "new", "new", "seen"]
+    page = client.get(f"/hits?state=filtered&agent_id={agent.id}").text
+    assert "Filtered out" in page and "Hit 1" in page and "Hit 2" not in page
+    assert "Hit 1" not in client.get(f"/hits?agent_id={agent.id}").text
+    with dbmod.session() as db:                       # moved back by hand: a restart leaves it alone
+        h = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == "1")).one()
+        h.state = "new"
+        db.add(h)
+        db.commit()
+    refile_screened()
+    assert _hit("1").state == "new"
 
 
 def test_passes_thresholds():
