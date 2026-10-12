@@ -354,6 +354,64 @@ async def test_no_raw_message_push_when_auto_reply_on(env, monkeypatch):
     assert [n[0] for n in notes] == ["message"]
 
 
+async def test_auto_draft_turns_the_message_push_into_the_offer(env, monkeypatch):
+    backend, account, notes = env
+    from app.services import telegram
+    from app.willhaben.account import ConversationSummary
+
+    class _Sess:
+        started, logged_in = True, True
+
+    class _Acct:
+        async def conversations(self, limit=50):
+            return [ConversationSummary(id="c1", ad_id="111", ad_title="Logitech S315i", partner_name="Anna",
+                                        unread_count=2, last_text="Und Versand?", last_at=utcnow(), raw={},
+                                        role="seller")]
+
+    async def no_msgs(cid):
+        return "full"
+
+    progress, retags, cleared = [], [], []
+
+    async def fake_progress(tag, line):
+        progress.append((tag, line))
+
+    async def fake_clear(tag):
+        cleared.append(tag)
+
+    monkeypatch.setattr(chats, "get_session", lambda: _Sess())
+    monkeypatch.setattr(chats, "_account", lambda: _Acct())
+    monkeypatch.setattr(chats, "sync_messages", no_msgs)
+    monkeypatch.setattr(telegram, "progress", fake_progress)
+    monkeypatch.setattr(telegram, "retag", lambda old, new: retags.append((old, new)) or True)
+    monkeypatch.setattr("app.services.notify.clear_push", fake_clear)
+    with session() as db:                       # auto reply off: the raw message is pushed, then drafted
+        ad = db.get(MyAd, "111")
+        ad.auto_reply = False
+        db.add(ad)
+        db.commit()
+    set_setting("notify_messages", "1")
+    set_setting("auto_draft", "1")
+    await chats.sync()
+    assert [n[0] for n in notes] == ["message", "auto_reply_pending"]
+    assert notes[0][3]["tag"] == "wh-msg-c1" and progress == [("wh-msg-c1", "✍️ Claude is writing a draft …")]
+    with session() as db:
+        d = db.exec(select(Draft).where(Draft.status == "draft")).one()
+    assert notes[1][3]["tag"] == f"wh-draft-{d.id}" and "drafted automatically" in notes[1][2]
+    assert retags == [("wh-msg-c1", f"wh-draft-{d.id}")] and cleared == ["wh-msg-c1"]
+    assert not account.sent                                               # never sent automatically
+
+    notes.clear()                                                         # no message push: silent draft as before
+    set_setting("notify_messages", "0")
+    with session() as db:
+        c = db.get(Conversation, "c1")
+        c.last_message_at = None
+        db.add(c)
+        db.commit()
+    await chats.sync()
+    assert notes == [] and len(backend.calls) == 2
+
+
 def test_sent_message_not_duplicated_by_history():
     from app.services.chats import _drop_sent_placeholders, _upsert_message
 

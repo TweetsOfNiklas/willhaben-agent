@@ -311,6 +311,7 @@ class TelegramMessage(SQLModel, table=True):
     chat_id: int
     message_id: int
     photo: bool = False
+    text: str | None = None          # last text we put there, so a status line can be appended by an edit
 
 
 class Setting(SQLModel, table=True):

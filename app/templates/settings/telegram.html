@@ -31,8 +31,11 @@
   <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block font-medium">{{ _("Send notifications to Telegram") }}</span><span class="block text-[12.5px] text-muted">{{ _("Home Assistant events keep firing either way. To avoid getting every push twice, choose “events only” under Home Assistant.") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="enabled" {% if tg.enabled %}checked{% endif %}></label>
   <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Which notifications") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for k, label in tg_kinds.items() %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary"><input type="checkbox" name="kind" value="{{ k }}" {% if k in tg.kinds %}checked{% endif %} class="checkbox checkbox-primary checkbox-xs">{{ label }}</label>{% endfor %}</div></div>
+  <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("One-tap revisions under a held-back answer") }}</span>
+    <textarea name="presets" rows="4" spellcheck="false" class="textarea w-full min-w-0 bg-base-200 text-[13px]">{{ tg.presets }}</textarea>
+    <small class="text-[12.5px] text-muted">{{ _("One per line: button label | instruction for Claude. Empty: none. Max. 6.") }}</small></label>
   <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
-  <small class="text-[12.5px] text-muted"><code>/drafts</code> {{ _("Open answer drafts") }} · <code>/auto</code> {{ _("Automatic answers per ad") }} · <code>/status</code> {{ _("Session and counters") }}</small>
+  <small class="text-[12.5px] text-muted">{{ _("To answer a chat, reply (swipe) to its notification and type – no button needed.") }} <code>/drafts</code> {{ _("Open answer drafts") }} · <code>/auto</code> {{ _("Automatic answers per ad") }} · <code>/status</code> {{ _("Session and counters") }}</small>
 </form>
 {% endif %}
 {% if tg.configured and not tg.linked %}

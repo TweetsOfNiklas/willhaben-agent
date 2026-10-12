@@ -38,6 +38,7 @@
       <input type="number" name="buffer" value="{{ gcal_cfg.buffer }}" min="0" max="240" step="5" class="input w-full min-w-0 max-w-40 bg-base-200"></label>
     <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0">{{ _("Use my free times in reply drafts") }}</span><input type="checkbox" class="toggle toggle-primary" name="in_drafts" {% if gcal_cfg.in_drafts %}checked{% endif %}></label>
     <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block">{{ _("Also in automatic answers") }}</span><span class="block text-[12.5px] text-muted">{{ _("only proposes times; your rules for automatic answers still decide whether appointments may be promised") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="in_auto" {% if gcal_cfg.in_auto %}checked{% endif %}></label>
+    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block">{{ _("Add agreed appointments to the calendar by myself") }}</span><span class="block text-[12.5px] text-muted">{{ _("the push then only reports it, with an undo button") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="auto_add" {% if gcal_cfg.auto_add %}checked{% endif %}></label>
     <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
   </form>
   <p class="text-[12.5px] text-muted">{{ _("Only free/busy blocks are read – titles of your appointments never reach Claude.") }}</p>

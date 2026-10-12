@@ -7,15 +7,21 @@ Updates from any other chat are ignored.
 
 Buttons carry a short random token (`t:<token>`, table TelegramAction) instead of the action itself:
   D_SEND / D_REPLY / D_REVISE / D_DISCARD  held-back answer -> ha_actions.handle (the one send path)
-  D_CAL                                     agreed appointment -> Google Calendar (ha_actions.handle)
+  D_PRESET                                  revise with a fixed instruction ("Preis halten"), one tap, no typing
+  D_CAL / D_UNCAL                           agreed appointment -> Google Calendar / out again (ha_actions.handle)
   D_SHIP                                    address received -> fill the carrier's label form (ha_actions.handle)
   D_PAID / D_BUY / D_DECL / D_CANCEL        payment and approval of a parcel (ha_actions.handle)
   C_DRAFT / C_REPLY                         new chat message -> Claude draft / answer typed in Telegram
   F_UP / F_DOWN                             feedback on an automatic answer (👎 asks for a note)
   A_ON / A_OFF                              automatic answers for one own ad
   H_SAVE / H_IGNORE                         search hit: keep / ignore
-Buttons that need text ("Direkte Antwort", "Mit Claude überarbeiten", 👎 note) send a ForceReply prompt;
-the user's reply to it is the text.
+  P_BUY                                     search hit: start a purchase order (when purchases are on in Settings)
+Buttons that need text ("Direkte Antwort", "Mit Claude überarbeiten", 👎 note) send a ForceReply prompt that
+quotes the notification; the user's reply to it is the text. Replying to a notification directly (swipe) works
+without any button: the text goes to that chat (and sends the held-back draft when the notification shows one).
+
+One notification, one message: every tagged message keeps its text (TelegramMessage), so progress ("Claude is
+writing …") and results ("Sent") are edited into the same message instead of piling up new ones.
 """
 from __future__ import annotations
 
@@ -50,7 +56,7 @@ logging.getLogger("httpx").addFilter(_HideBotToken())
 API = "https://api.telegram.org"
 _transport: httpx.AsyncBaseTransport | None = None   # tests inject a mock transport
 _tasks: set[asyncio.Task] = set()
-_pending: dict[int, tuple[str, str, float]] = {}     # ForceReply prompt message id -> (verb, ref, time)
+_pending: dict[int, tuple[str, str, float, str | None]] = {}   # prompt message id -> (verb, ref, time, origin tag)
 PENDING_TTL = 30 * 60
 # chat id -> (display name, time, pairing code) while no chat is linked. The bot sends the code to that chat and
 # Settings shows it next to the button: anyone can find the bot and pick the owner's name, the code tells them apart.
@@ -142,11 +148,41 @@ def candidates() -> list[dict[str, Any]]:
             for k, v in sorted(_candidates.items(), key=lambda kv: -kv[1][1])]
 
 
+# German on purpose: the instruction goes into the (German) revise prompt, the label is shown as a button.
+DEFAULT_PRESETS = "💶 Preis halten | Bleib beim Preis, geh nicht runter.\n" \
+                  "🤝 Annehmen | Nimm das Angebot des Käufers an.\n" \
+                  "❌ Absagen | Sag freundlich ab.\n" \
+                  "🏠 Nur Abholung | Kein Versand, nur Abholung."
+MAX_PRESETS = 6
+
+
+def presets_text() -> str:
+    raw = get_setting("telegram_presets")
+    return DEFAULT_PRESETS if raw == "" else ("" if raw == "-" else raw)
+
+
+def presets() -> list[tuple[str, str]]:
+    """One-tap revisions under a held-back answer: (button label, instruction for Claude)."""
+    out = []
+    for line in presets_text().splitlines():
+        label, _, instruction = line.partition("|")
+        if label.strip() and instruction.strip():
+            out.append((label.strip()[:30], instruction.strip()[:200]))
+    return out[:MAX_PRESETS]
+
+
+def set_presets(text: str) -> None:
+    text = "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
+    set_setting("telegram_presets", "-" if not text else text)   # "-" = none wanted (empty = defaults)
+
+
+
 def status() -> dict[str, Any]:
     return {"configured": bool(token()), "source": token_source(), "username": get_setting("telegram_username"),
             "linked": chat_id() is not None, "chat_name": get_setting("telegram_chat_name"),
             "enabled": get_setting("telegram_enabled") != "0", "kinds": enabled_kinds(), "bot_url": bot_url(),
-            "candidates": candidates() if chat_id() is None else []}
+            "candidates": candidates() if chat_id() is None else [],
+            "presets": presets_text()}
 
 
 COMMANDS = [("drafts", "Open answer drafts"), ("auto", "Automatic answers per ad"),
@@ -246,10 +282,15 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
         parsed = ha_actions.parse_action(str(a.get("action") or ""))
         if parsed:
             verb, draft_id = parsed
-            icon = {"SEND": "✅ ", "REPLY": "↩️ ", "REVISE": "✍️ ", "DISCARD": "🗑 ", "CAL": "📅 ", "SHIP": "📦 ",
-                    "PAID": "💶 ", "BUY": "📦 ", "DECL": "✖️ ", "CANCEL": "⏹ "}.get(verb, "")
+            icon = {"SEND": "✅ ", "REPLY": "↩️ ", "REVISE": "✍️ ", "DISCARD": "🗑 ", "CAL": "📅 ", "UNCAL": "↩️ ",
+                    "SHIP": "📦 ", "PAID": "💶 ", "BUY": "📦 ", "DECL": "✖️ ", "CANCEL": "⏹ "}.get(verb, "")
             buttons.append(_button(icon + str(a.get("title") or verb), f"D_{verb}", str(draft_id)))
     conv, ad_id = data.get("conversation_id"), data.get("ad_id")
+    rows = _rows(buttons)
+    if kind == "auto_reply_pending" and data.get("draft_id") and any(b["text"].startswith("✍️") for b in buttons):
+        # one tap instead of "Revise" + typing: the usual decisions
+        rows += _rows([_button(label, "D_PRESET", f"{data['draft_id']}|{label}|{instruction}") for label, instruction in presets()])
+    buttons = []
     if kind == "message" and conv:
         buttons += [_button("✍️ " + t("Draft with Claude"), "C_DRAFT", conv), _button("↩️ " + t("Reply"), "C_REPLY", conv)]
     elif kind == "auto_reply" and conv:
@@ -259,7 +300,9 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
             buttons.append(_button("⏸ " + t("Auto answers off for this ad"), "A_OFF", ad_id))
     elif kind in ("hit", "price_drop") and ad_id:
         buttons += [_button("⭐ " + t("Keep"), "H_SAVE", ad_id), _button("🚫 " + t("Ignore"), "H_IGNORE", ad_id)]
-    rows = _rows(buttons)
+        if get_setting("purchase_enabled") == "1":
+            buttons.append(_button("🛒 " + t("Start purchase order"), "P_BUY", ad_id))
+    rows += _rows(buttons)
     if url and url.startswith("https://"):
         rows.append([{"text": "🔗 " + t("Open"), "url": url}])
     return {"inline_keyboard": rows} if rows else None
@@ -279,6 +322,7 @@ async def send(kind: str, title: str, message: str, *, url: str | None = None, i
         if prev is not None:
             try:
                 await _edit(prev, text, markup)
+                _remember(tag, {"chat": {"id": prev.chat_id}, "message_id": prev.message_id}, photo=prev.photo, text=text)
                 return True
             except TelegramError as e:
                 if "not modified" in str(e):
@@ -292,11 +336,11 @@ async def send(kind: str, title: str, message: str, *, url: str | None = None, i
                 log.info("telegram photo failed: %s", e)
                 image, msg = None, None
             else:
-                _remember(tag, msg, photo=True)
+                _remember(tag, msg, photo=True, text=text)
                 return True
         msg = await api("sendMessage", chat_id=chat_id(), text=text[:4096], parse_mode="HTML",
                         reply_markup=markup, link_preview_options={"is_disabled": True})
-        _remember(tag, msg, photo=False)
+        _remember(tag, msg, photo=False, text=text)
         return True
     except (TelegramError, httpx.HTTPError) as e:
         log.warning("telegram send failed: %s", e)
@@ -339,7 +383,35 @@ async def clear(tag: str) -> None:
         await api("editMessageReplyMarkup", chat_id=prev.chat_id, message_id=prev.message_id,
                   reply_markup={"inline_keyboard": []})
     except (TelegramError, httpx.HTTPError) as e:
-        log.info("telegram clear failed: %s", e)
+        if "not modified" not in str(e):        # buttons already gone (a progress line took them)
+            log.info("telegram clear failed: %s", e)
+
+
+async def progress(tag: str, line: str) -> None:
+    """Progress into the tagged message ("✍️ Claude is writing …"): text + line, buttons gone while it runs."""
+    prev = _message_for(tag) if active() else None
+    if prev is None or not prev.text:
+        return
+    try:
+        await _edit(prev, f"{prev.text}\n\n<i>{_esc(line)}</i>", None)
+    except (TelegramError, httpx.HTTPError) as e:
+        log.info("telegram progress failed: %s", e)
+
+
+def retag(old: str, new: str) -> bool:
+    """The message sent for `old` is now the one for `new` (a chat message becomes its draft offer)."""
+    if old == new:
+        return True
+    with session() as db:
+        row = db.get(TelegramMessage, old)
+        if row is None:
+            return False
+        if (dup := db.get(TelegramMessage, new)) is not None:
+            db.delete(dup)
+        db.delete(row)
+        db.add(TelegramMessage(tag=new, chat_id=row.chat_id, message_id=row.message_id, photo=row.photo, text=row.text))
+        db.commit()
+    return True
 
 
 def _message_for(tag: str) -> TelegramMessage | None:
@@ -347,12 +419,41 @@ def _message_for(tag: str) -> TelegramMessage | None:
         return db.get(TelegramMessage, tag)
 
 
-def _remember(tag: str | None, msg: dict[str, Any] | None, photo: bool) -> None:
+def _tag_of(chat: int | None, message_id: int | None) -> str | None:
+    """Which notification a message in the chat was (for replies to it)."""
+    if not chat or not message_id:
+        return None
+    with session() as db:
+        row = db.exec(select(TelegramMessage).where(TelegramMessage.chat_id == chat,
+                                                    TelegramMessage.message_id == message_id)).first()
+    return row.tag if row else None
+
+
+def _target_of(tag: str) -> tuple[str, int | None] | None:
+    """(conversation id, held-back draft id or None) behind a notification tag."""
+    from app.db import Shipment
+
+    kind, _, ref = tag.rpartition("-")
+    with session() as db:
+        if kind == "wh-msg":
+            return (ref, None) if db.get(Conversation, ref) else None
+        if kind in ("wh-draft", "wh-meetup") and ref.isdigit():
+            d = db.get(Draft, int(ref))
+            return (d.conversation_id, d.id if d.status == "draft" else None) if d else None
+        if kind == "wh-ship" and ref.isdigit():
+            s = db.get(Shipment, int(ref))
+            return (s.conversation_id, None) if s else None
+    return None
+
+
+def _remember(tag: str | None, msg: dict[str, Any] | None, photo: bool, text: str | None = None) -> None:
     if not tag or not msg:
         return
     with session() as db:
         row = db.get(TelegramMessage, tag) or TelegramMessage(tag=tag, chat_id=0, message_id=0)
         row.chat_id, row.message_id, row.photo = msg["chat"]["id"], msg["message_id"], photo
+        if text is not None:
+            row.text = text
         db.add(row)
         db.commit()
 
@@ -377,11 +478,12 @@ async def _say(text: str, markup: dict | None = None, reply_to: int | None = Non
         return None
 
 
-async def _ask(prompt: str, verb: str, ref: str, placeholder: str) -> None:
-    """ForceReply prompt; the user's reply to it carries the text for verb/ref."""
-    msg = await _say(prompt, {"force_reply": True, "input_field_placeholder": placeholder[:64]})
+async def _ask(prompt: str, verb: str, ref: str, placeholder: str, origin: dict[str, Any] | None = None) -> None:
+    """ForceReply prompt quoting the notification it belongs to; the user's reply carries the text for verb/ref."""
+    msg = await _say(prompt, {"force_reply": True, "input_field_placeholder": placeholder[:64]},
+                     reply_to=(origin or {}).get("message_id"))
     if msg:
-        _pending[msg["message_id"]] = (verb, ref, time.monotonic())
+        _pending[msg["message_id"]] = (verb, ref, time.monotonic(), _tag_of(chat_id(), (origin or {}).get("message_id")))
 
 
 # ------------------------------------------------------------------ incoming
@@ -405,11 +507,22 @@ async def _on_message(msg: dict[str, Any]) -> None:
         return                                          # not our user: stay silent
     reply_to = (msg.get("reply_to_message") or {}).get("message_id")
     pending = _pending.pop(reply_to, None) if reply_to else None
+    if pending is None and reply_to and text and not text.startswith("/"):
+        tag = _tag_of(chat.get("id"), reply_to)            # swipe-reply to a notification: answer that chat
+        target = _target_of(tag) if tag else None
+        if target:
+            await _reply_in(target[0], target[1], text, msg.get("message_id"), tag)
+            return
     if pending is None and text and not text.startswith("/"):
-        pending = _latest_pending()
+        open_prompts = _open_prompts()
+        if len(open_prompts) > 1:
+            await _say(t("Several questions are open – please reply (swipe) to the one you mean."),
+                       reply_to=msg.get("message_id"))
+            return
+        pending = _pending.pop(open_prompts[0], None) if open_prompts else None
     if pending:
-        verb, ref, _ = pending
-        await _complete(verb, ref, text, msg.get("message_id"))
+        verb, ref, _, origin = pending
+        await _complete(verb, ref, text, msg.get("message_id"), origin)
         return
     cmd = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
     if cmd in ("/drafts", "/entwuerfe"):
@@ -437,21 +550,18 @@ async def _on_candidate(chat: dict[str, Any]) -> None:
             "Request received – confirm the link in the app under Settings → Telegram. Your code: {code}", code=code))
 
 
-def _latest_pending() -> tuple[str, str, float] | None:
-    """Plain text without "reply": use the newest open prompt (the usual case on a phone)."""
+def _open_prompts() -> list[int]:
+    """Prompt message ids still waiting for text, newest first (plain text without "reply" goes to a lone one)."""
     now = time.monotonic()
     for k in [k for k, v in _pending.items() if now - v[2] > PENDING_TTL]:
         _pending.pop(k, None)
-    if not _pending:
-        return None
-    key = max(_pending, key=lambda k: _pending[k][2])
-    return _pending.pop(key)
+    return sorted(_pending, key=lambda k: _pending[k][2], reverse=True)
 
 
 def _help() -> str:
     return "\n".join([
         t("Buttons under each notification: send, answer, let Claude rewrite, feedback."),
-        t("To type an answer, just write it after tapping the button."),
+        t("To answer a chat, reply (swipe) to its notification and type – no button needed."),
         "", "/drafts – " + t("Open answer drafts"), "/auto – " + t("Automatic answers per ad"),
         "/status – " + t("Session and counters"),
     ])
@@ -476,25 +586,42 @@ async def _on_callback(cq: dict[str, Any]) -> None:
         from app.services import timeline
         timeline.action(f"telegram.{verb.lower()}", t("Telegram button: {verb}", verb=verb), ref=ref)
 
-    if verb in ("D_SEND", "D_DISCARD", "D_CAL", "D_SHIP", "D_PAID", "D_BUY", "D_DECL", "D_CANCEL"):
+    tag = _tag_of((msg.get("chat") or {}).get("id"), msg.get("message_id"))
+    if verb in ("D_SEND", "D_DISCARD", "D_CAL", "D_UNCAL", "D_SHIP", "D_PAID", "D_BUY", "D_DECL", "D_CANCEL"):
         await _answer(cq_id, "…")
+        if verb == "D_SHIP" and tag:
+            await progress(tag, "📦 " + t("Preparing the label form …"))
         res = await ha_actions.handle({"action": ha_actions.action_id(verb[2:], int(ref))})
+        if res is None:
+            await _say("ℹ️ " + t("Already done."), reply_to=msg.get("message_id"))
+            await _drop_buttons(msg)
+        return
+    if verb == "D_PRESET":
+        draft_id, label, instruction = ref.split("|", 2)
+        await _answer(cq_id, "✍️ " + label)
+        if tag:
+            await progress(tag, "✍️ " + t("Claude is revising: {what} …", what=label))
+        res = await ha_actions.handle({"action": ha_actions.action_id("REVISE", int(draft_id)), "reply_text": instruction})
         if res is None:
             await _say("ℹ️ " + t("Already done."), reply_to=msg.get("message_id"))
             await _drop_buttons(msg)
         return
     if verb == "D_REPLY":
         await _answer(cq_id)
-        await _ask(t("Type the answer – it is sent exactly like this:"), verb, ref, t("Your answer"))
+        await _ask(t("Type the answer – it is sent exactly like this:"), verb, ref, t("Your answer"), msg)
     elif verb == "D_REVISE":
         await _answer(cq_id)
-        await _ask(t("How should Claude change the answer?"), verb, ref, t("e.g. friendlier, offer 18 €"))
+        await _ask(t("How should Claude change the answer?"), verb, ref, t("e.g. friendlier, offer 18 €"), msg)
     elif verb == "C_REPLY":
         await _answer(cq_id)
-        await _ask(t("Type your answer:"), verb, ref, t("Your answer"))
+        await _ask(t("Type your answer:"), verb, ref, t("Your answer"), msg)
     elif verb == "C_DRAFT":
         await _answer(cq_id, t("Claude is writing a draft …"))
-        await _draft_for(ref)
+        if tag:
+            await progress(tag, "✍️ " + t("Claude is writing a draft …"))
+        else:
+            await _drop_buttons(msg)
+        await _draft_for(ref, replaces=tag)
     elif verb == "F_UP":
         d = _resolve_draft(ref)
         if d:
@@ -508,15 +635,23 @@ async def _on_callback(cq: dict[str, Any]) -> None:
             feedback.rate(d.id, "down")
             await _answer(cq_id)
             await _ask(t("What was wrong? Your note is used for future automatic answers."), "F_NOTE", str(d.id),
-                       t("e.g. never promise shipping"))
+                       t("e.g. never promise shipping"), msg)
         else:
             await _answer(cq_id, t("Answer not found."))
     elif verb in ("A_ON", "A_OFF"):
-        name = _set_auto(ref, verb == "A_ON")
-        await _answer(cq_id, t("Automatic answers on: {ad}", ad=name) if verb == "A_ON" else t("Automatic answers off: {ad}", ad=name))
-        if verb == "A_OFF":
-            await _say("⏸ " + t("Automatic answers off: {ad}", ad=_esc(name)),
-                       {"inline_keyboard": [[_button("▶️ " + t("Switch on again"), "A_ON", ref)]]})
+        on = verb == "A_ON"
+        name = _set_auto(ref, on)
+        await _answer(cq_id, t("Automatic answers on: {ad}", ad=name) if on else t("Automatic answers off: {ad}", ad=name))
+        # the tapped button flips in place (notification: "off" <-> "on again"; /auto list: the checkbox)
+        in_list = msg.get("text", "").startswith(t("Automatic answers – tap to switch:"))
+        if in_list:
+            new = _button(("✅ " if on else "⬜ ") + name[:40], "A_OFF" if on else "A_ON", ref)
+        else:
+            new = _button("⏸ " + t("Auto answers off for this ad"), "A_OFF", ref) if on else \
+                _button("▶️ " + t("Switch on again"), "A_ON", ref)
+        await _swap_button(msg, raw, new)
+    elif verb == "P_BUY":
+        await _start_purchase(cq_id, msg, raw, ref)
     elif verb in ("H_SAVE", "H_IGNORE"):
         n = _set_hit_state(ref, "saved" if verb == "H_SAVE" else "ignored")
         await _answer(cq_id, ("⭐ " + t("Kept")) if verb == "H_SAVE" else ("🚫 " + t("Ignored")) if n else t("Hit not found."))
@@ -526,37 +661,73 @@ async def _on_callback(cq: dict[str, Any]) -> None:
         await _answer(cq_id)
 
 
-async def _complete(verb: str, ref: str, text: str, msg_id: int | None) -> None:
-    """The text for a ForceReply prompt arrived."""
-    from app.services import chats, feedback, ha_actions
+async def _complete(verb: str, ref: str, text: str, msg_id: int | None, origin: str | None = None) -> None:
+    """The text for a ForceReply prompt arrived (`origin`: tag of the notification the prompt belonged to)."""
+    from app.services import feedback, ha_actions
 
     if not text:
         return
+    if verb == "D_REVISE":
+        await progress(ha_actions.tag_for(int(ref)), "✍️ " + t("Claude is revising: {what} …", what=text[:60]))
     if verb in ("D_REPLY", "D_REVISE"):
         res = await ha_actions.handle({"action": ha_actions.action_id(verb[2:], int(ref)), "reply_text": text})
         if res is None:     # failures are reported by handle() itself (notify -> also Telegram)
             await _say("ℹ️ " + t("Already done."), reply_to=msg_id)
     elif verb == "C_REPLY":
-        with session() as db:
-            if db.get(Conversation, ref) is None:
-                await _say(t("Chat not found."), reply_to=msg_id)
-                return
-            d = Draft(conversation_id=ref, text=text, model="telegram")
-            db.add(d)
-            db.commit()
-            db.refresh(d)
-        try:
-            await chats.send_draft(d.id, text)
-        except Exception as e:  # noqa: BLE001 - report every failure back
-            await _say("⚠️ " + t("Sending failed: {error}", error=_esc(str(e)[:200])), reply_to=msg_id)
-        else:
-            await _say("✅ " + t("Sent."), reply_to=msg_id)
+        await _reply_in(ref, None, text, msg_id, origin)
     elif verb == "F_NOTE":
         feedback.rate(int(ref), "down", text)
         await _say("📝 " + t("Noted – future automatic answers will take it into account."), reply_to=msg_id)
 
 
-async def _draft_for(conversation_id: str) -> None:
+async def _reply_in(conversation_id: str, draft_id: int | None, text: str, msg_id: int | None,
+                    origin: str | None) -> None:
+    """Text typed for a chat: sends the held-back draft with it, or a new message. Result edits the notification."""
+    from app.services import chats, ha_actions
+
+    if draft_id is not None:       # ha_actions.handle pushes "Sent" with the draft's tag -> edits that message
+        res = await ha_actions.handle({"action": ha_actions.action_id("REPLY", draft_id), "reply_text": text})
+        if res is not None:
+            return
+    with session() as db:
+        if db.get(Conversation, conversation_id) is None:
+            await _say(t("Chat not found."), reply_to=msg_id)
+            return
+        d = Draft(conversation_id=conversation_id, text=text, model="telegram")
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+    try:
+        await chats.send_draft(d.id, text)
+    except Exception as e:  # noqa: BLE001 - report every failure back
+        await _say("⚠️ " + t("Sending failed: {error}", error=_esc(str(e)[:200])), reply_to=msg_id)
+        return
+    prev = _message_for(origin) if origin else None
+    if prev is not None and prev.text:
+        try:
+            await _edit(prev, f"{prev.text}\n\n✅ <b>{_esc(t('Sent'))}:</b> {_esc(text[:300])}", None)
+            _remember(origin, {"chat": {"id": prev.chat_id}, "message_id": prev.message_id}, photo=prev.photo,
+                      text=f"{prev.text}\n\n✅ <b>{_esc(t('Sent'))}:</b> {_esc(text[:300])}")
+            return
+        except (TelegramError, httpx.HTTPError) as e:
+            log.info("telegram edit failed, replying instead: %s", e)
+    await _say("✅ " + t("Sent."), reply_to=msg_id)
+
+
+async def _swap_button(msg: dict[str, Any], pressed: str, new: dict[str, str]) -> None:
+    """Replace the tapped button in the message's keyboard (the message itself stays)."""
+    rows = [[new if b.get("callback_data") == pressed else b for b in row]
+            for row in ((msg.get("reply_markup") or {}).get("inline_keyboard") or [])]
+    if not any(b is new for row in rows for b in row):
+        rows.append([new])
+    try:
+        await api("editMessageReplyMarkup", chat_id=(msg.get("chat") or {}).get("id"), message_id=msg.get("message_id"),
+                  reply_markup={"inline_keyboard": rows})
+    except (TelegramError, httpx.HTTPError) as e:
+        log.info("telegram button swap failed: %s", e)
+
+
+async def _draft_for(conversation_id: str, replaces: str | None = None) -> None:
     from app.services import chats
 
     with session() as db:
@@ -569,7 +740,7 @@ async def _draft_for(conversation_id: str) -> None:
     except Exception as e:  # noqa: BLE001
         await _say("⚠️ " + t("Claude could not write a draft: {error}", error=_esc(str(e)[:200])))
         return
-    await chats.offer_draft(conv, d, t("requested in Telegram"))
+    await chats.offer_draft(conv, d, t("requested in Telegram"), replaces=replaces)
 
 
 def _resolve_draft(ref: str) -> Draft | None:
@@ -603,6 +774,29 @@ def _set_hit_state(ad_id: str, state: str) -> int:
             db.add(h)
         db.commit()
     return len(hits)
+
+
+async def _start_purchase(cq_id: str | None, msg: dict[str, Any], pressed: str, ad_id: str) -> None:
+    """One tap on a hit: a purchase order with the defaults of the buy dialog (mode from Settings, max price =
+    asking price + shipping). The button becomes a link to the order; refusals come back as the toast."""
+    from app.services import purchase
+    from app.services.notify import push_url
+
+    with session() as db:
+        h = db.exec(select(Hit).where(Hit.ad_id == ad_id).order_by(col(Hit.id).desc())).first()
+    mode = "paylivery" if get_setting(purchase.SETTING_PREFER_PAYLIVERY) == "1" else "pickup"
+    try:
+        pid = purchase.start(ad_id, mode, None, title=h.heading if h else None, url=h.url if h else None,
+                             image_url=h.image_url if h else None, price=h.price if h else None)
+    except purchase.PurchaseError as e:
+        await _answer(cq_id, "⚠️ " + str(e))
+        return
+    await _answer(cq_id, "🛒 " + t("Purchase order #{id} started", id=pid))
+    url = push_url("purchase", f"/purchases/{pid}")
+    if url and url.startswith("https://"):
+        await _swap_button(msg, pressed, {"text": "🛒 " + t("Purchase order #{id}", id=pid), "url": url})
+    else:
+        await _swap_button(msg, pressed, _button("🛒 " + t("Purchase order #{id}", id=pid), "P_NOOP", str(pid)))
 
 
 async def _answer(cq_id: str | None, text: str = "") -> None:
@@ -640,6 +834,7 @@ async def _cmd_drafts() -> None:
         label = t("Draft")
         await send("auto_reply_pending", f"{label}: {conv.partner_name if conv else ''}".strip(),
                    f"„{d.text[:300]}“\n{(conv.ad_title if conv else '') or ''}",
+                   data={"conversation_id": d.conversation_id, "draft_id": d.id},
                    actions=ha_actions.draft_actions(d.id, can_send(d)), tag=ha_actions.tag_for(d.id), fresh=True)
 
 

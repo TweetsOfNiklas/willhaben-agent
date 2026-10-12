@@ -123,5 +123,6 @@
  "Remove from the app": "Aus der App entfernen",
  "Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.": "Diesen Chat aus der App entfernen? Nachrichten und Entwürfe werden hier gelöscht, auf willhaben bleibt der Chat. Schreibt die Person wieder, taucht er wieder auf.",
  "Chat hidden here (still on willhaben); it comes back when they write again": "Chat hier ausgeblendet (auf willhaben noch da); schreibt die Person wieder, taucht er wieder auf",
- "Chat removed here (still on willhaben); it comes back when they write again": "Chat hier entfernt (auf willhaben noch da); schreibt die Person wieder, taucht er wieder auf"
+ "Chat removed here (still on willhaben); it comes back when they write again": "Chat hier entfernt (auf willhaben noch da); schreibt die Person wieder, taucht er wieder auf",
+ "drafted automatically": "automatisch entworfen"
 }

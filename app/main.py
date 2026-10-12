@@ -1823,7 +1823,8 @@ async def gcal_save(request: Request):
         gcal.save_config([str(c) for c in f.getlist("calendar")], str(f.get("target") or "primary"),
                          int(f.get("days") or 7), str(f.get("window_start") or "09:00"),
                          str(f.get("window_end") or "20:00"), int(f.get("duration") or 30),
-                         bool(f.get("in_drafts")), bool(f.get("in_auto")), int(f.get("buffer") or 0))
+                         bool(f.get("in_drafts")), bool(f.get("in_auto")), int(f.get("buffer") or 0),
+                         bool(f.get("auto_add")))
     except ValueError:
         return _gcal_back(t("Invalid value"))
     return _gcal_back(t("Changes saved"))
@@ -2106,6 +2107,8 @@ async def settings_telegram_kinds(request: Request):
     form = await request.form()
     set_setting("telegram_enabled", "1" if form.get("enabled") else "0")
     telegram.set_kinds([str(k) for k in form.getlist("kind")])
+    if "presets" in form:
+        telegram.set_presets(str(form.get("presets") or ""))
     return _tg_back(t("Changes saved"))
 
 

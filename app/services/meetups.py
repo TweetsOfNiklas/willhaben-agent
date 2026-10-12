@@ -63,7 +63,11 @@ def remember(conversation_id: str, meetup: dict[str, Any] | None) -> dict[str, A
 
 
 async def on_sent(draft: Draft) -> None:
-    """After an answer went out: remember its appointment and offer it for the calendar (push/Telegram)."""
+    """After an answer went out: remember its appointment and offer it for the calendar (push/Telegram).
+
+    With "add automatically" on (Settings → Calendar) the entry is created right away and the push only
+    reports it, with an undo button.
+    """
     m = remember(draft.conversation_id, draft.meetup)
     if not m or m.get("event_id") or not gcal.connected():
         return
@@ -73,6 +77,18 @@ async def on_sent(draft: Draft) -> None:
 
     with session() as db:
         conv = db.get(Conversation, draft.conversation_id)
+    if gcal.config()["auto_add"]:
+        try:
+            added = await add(conv.id, start=m["start"], minutes=m.get("minutes") or 30, location=m.get("location") or "")
+        except gcal.CalendarError as e:
+            log.warning("automatic calendar entry failed: %s", e)
+        else:
+            await notify("meetup", t("In your calendar"),
+                         f"{format_when(added)} · {added['summary']}\n{conv.ad_title or ''} · {conv.partner_name or ''}",
+                         url=added.get("event_link"),
+                         data={"conversation_id": conv.id, "ad_id": conv.ad_id, "draft_id": draft.id},
+                         actions=ha_actions.meetup_undo_actions(draft.id), tag=ha_actions.meetup_tag(draft.id))
+            return
     await notify("meetup", t("Add appointment to calendar?"),
                  f"{format_when(m)}{' · ' + m['location'] if m.get('location') else ''}\n{conv.ad_title or ''} · {conv.partner_name or ''}",
                  url=f"{get_settings().public_url.rstrip('/')}/chats/{conv.id}",
@@ -124,6 +140,25 @@ async def add_from_draft(draft_id: int) -> dict[str, Any] | None:
         return None                                     # second tap
     return await add(conv.id, start=d.meetup["start"], minutes=d.meetup.get("minutes") or 30,
                      location=d.meetup.get("location") or "")
+
+
+async def remove_from_draft(draft_id: int) -> dict[str, Any] | None:
+    """Undo button: delete the calendar entry made for this answer's appointment (the appointment itself stays)."""
+    with session() as db:
+        d = db.get(Draft, draft_id)
+        conv = db.get(Conversation, d.conversation_id) if d else None
+    m = conv.meetup if conv else None
+    if not d or not m or not m.get("event_id") or m.get("start") != (d.meetup or {}).get("start"):
+        return None
+    await gcal.delete_event(m["event_id"])
+    gone = {**m, "event_id": None, "event_link": None}
+    with session() as db:
+        conv = db.get(Conversation, d.conversation_id)
+        conv.meetup = gone
+        db.add(conv)
+        db.commit()
+    log.info("calendar entry removed for %s", d.conversation_id)
+    return gone
 
 
 def forget(conversation_id: str) -> None:
