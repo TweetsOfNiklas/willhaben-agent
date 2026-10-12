@@ -57,6 +57,14 @@
     {% if d.intent == 'scam_suspect' %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error">{{ _("Caution: possible scam attempt.") }}</div>{% endif %}
     {% if d.needs_info %}<ul class="list-disc pl-[18px] text-[12.5px] text-muted">{% for n in d.needs_info %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
     {% if d.meetup %}<div class="text-[12.5px] text-muted">{{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}</div>{% endif %}
+    {% if d.alternatives %}
+    {# Claude's other decisions for this situation (same buttons as in Telegram): one click revises the draft in the background #}
+    <form method="post" action="/drafts/{{ d.id }}/revise" class="flex flex-wrap items-center gap-1.5" hx-disabled-elt="find button"
+          hx-post="/drafts/{{ d.id }}/revise" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
+      <span class="text-[12.5px] text-muted">{{ _("Instead:") }}</span>
+      {% for a in d.alternatives %}<button name="instruction" value="{{ a.instruction }}" title="{{ a.instruction }}" class="btn btn-sm">{{ a.label }}</button>{% endfor %}
+    </form>
+    {% endif %}
     {# in the background: the answer is queued and the composer swaps to "Sending…" (no reload) #}
     <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" class="flex flex-col gap-2.5"
           hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML" hx-select-oob="#chat-messages">

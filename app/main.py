@@ -651,6 +651,17 @@ async def draft_send(draft_id: int, text: str = Form(...)):
     return back(f"/chats/{d.conversation_id}#draft-{draft_id}")
 
 
+@app.post("/drafts/{draft_id}/revise")
+async def draft_revise(draft_id: int, instruction: str = Form("")):
+    """One of Claude's alternative decisions (buttons under the draft): revised in the background like a redraft."""
+    with session() as db:
+        d = db.get(Draft, draft_id)
+    if d is None:
+        raise HTTPException(404)
+    chats.enqueue_revise(draft_id, instruction)
+    return back(f"/chats/{d.conversation_id}")
+
+
 @app.post("/drafts/{draft_id}/mark-sent")
 async def draft_mark_sent(draft_id: int, text: str = Form("")):
     d = chats.mark_sent(draft_id, text or None)

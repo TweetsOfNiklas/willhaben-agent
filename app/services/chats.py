@@ -893,10 +893,9 @@ async def offer_draft(conv: Conversation, d: Draft, reason: str, replaces: str |
                  actions=ha_actions.draft_actions(d.id, can_send), tag=ha_actions.tag_for(d.id))
 
 
-async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
-    """"Revise with Claude" from the push: new draft from the instruction, old one dropped, same push updated."""
-    from app.services import ha_actions
-
+async def revise(draft_id: int, instruction: str) -> Draft | None:
+    """New draft from an instruction about the old one (Telegram alternative / button on the chat page); the old
+    draft is dropped. None when it is not an open draft any more."""
     with session() as db:
         old = db.get(Draft, draft_id)
         conv = db.get(Conversation, old.conversation_id) if old else None
@@ -913,9 +912,46 @@ async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
         db.add(row)
         db.commit()
         db.refresh(row)
-    await offer_draft(conv, row, t("revised: {instruction}", instruction=instruction[:80]),
+    return row
+
+
+async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
+    """"Revise with Claude" from the push: new draft from the instruction, old one dropped, same push updated."""
+    from app.services import ha_actions
+
+    row = await revise(draft_id, instruction)
+    if row is None:
+        return None
+    with session() as db:
+        conv = db.get(Conversation, row.conversation_id)
+    await offer_draft(conv, row, t("revised: {instruction}", instruction=instruction.strip()[:80]),
                       replaces=ha_actions.tag_for(draft_id))
     return row
+
+
+def enqueue_revise(draft_id: int, instruction: str) -> bool:
+    """One of Claude's alternatives tapped on the chat page: revise in the background (lane claude), the composer
+    shows "Claude is writing…" and the new draft appears by itself. False: no open draft / already drafting."""
+    with session() as db:
+        d = db.get(Draft, draft_id)
+        c = db.get(Conversation, d.conversation_id) if d else None
+    if d is None or c is None or d.status != "draft" or c.drafting:
+        return False
+    conversation_id = c.id
+    _set_drafting(conversation_id, True)
+
+    async def run(job: jobs.Job) -> str:
+        try:
+            await revise(draft_id, instruction)
+        except Exception as e:               # the reason shows in the chat, next to the draft
+            _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
+            raise
+        _set_drafting(conversation_id, False)
+        return t("Draft ready")
+
+    jobs.submit("chat-draft", t("Claude revises the answer to {name}", name=c.partner_name or t("unknown")), run,
+                lane="claude", current=f"drafting:{conversation_id}")
+    return True
 
 
 def mark_sent(draft_id: int, text: str | None = None) -> Draft:
