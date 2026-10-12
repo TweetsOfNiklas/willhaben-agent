@@ -10,5 +10,6 @@
  "{n} searches: {keywords}": "{n} Suchen: {keywords}",
  "Searches from product search #{id}": "Suchen aus Produktsuche #{id}",
  "Searches": "Suchen",
- "from {price}": "ab {price}"
+ "from {price}": "ab {price}",
+ "Keep at least one search, or delete the agent.": "Mindestens eine Suche muss bleiben – sonst den Agenten löschen."
 }

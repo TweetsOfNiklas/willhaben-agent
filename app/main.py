@@ -403,10 +403,16 @@ async def agents_toggle(agent_id: int):
 async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = Form(...),
                       notify_on: str | None = Form(None), drops_on: str | None = Form(None),
                       screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
-                      screen_hide: list[str] = Form([])):
+                      screen_hide: list[str] = Form([]), drop_query: list[int] = Form([])):
     s = get_settings()
     with session() as db:
         a = db.get(SearchAgent, agent_id)
+        if a.queries and drop_query:    # an agent from a product search: remove single searches
+            keep = [q for i, q in enumerate(a.queries) if i not in set(drop_query)]
+            if not keep:
+                return back(f"/agents?error={quote(t('Keep at least one search, or delete the agent.'), safe='')}")
+            a.queries = keep            # a new list: the JSON column does not see changes in place
+            a.source_url, a.webapi_url = keep[0]["source_url"], keep[0]["webapi_url"]
         a.name = name.strip() or a.name
         a.interval_s = max(interval_min * 60, s.min_agent_interval_s)
         a.notify, a.notify_price_drops = bool(notify_on), bool(drops_on)
