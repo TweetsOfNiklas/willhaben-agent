@@ -16,6 +16,29 @@ INTERNAL = (r"purchase_state|opening_offer|suggested_price|needs_info|auto_send|
             r"als (?:ein )?(?:ki-)?assistent\w*|as an ai\b")
 _INTERNAL = re.compile(rf"\b(?:{INTERNAL})", re.I)
 MAX_CHARS = 700                     # a chat answer on willhaben is a few sentences; longer ones wait for the user
+LEAK_WORDS = 7                      # this many words in a row from a system prompt: the instructions are leaking
+_WORD = re.compile(r"[a-zäöüß0-9]+")
+_shingles: set[tuple[str, ...]] | None = None
+
+
+def _windows(text: str) -> set[tuple[str, ...]]:
+    words = _WORD.findall((text or "").lower())
+    return {tuple(words[i:i + LEAK_WORDS]) for i in range(len(words) - LEAK_WORDS + 1)}
+
+
+def _prompt_shingles() -> set[tuple[str, ...]]:
+    """Every run of LEAK_WORDS words of the chat system prompts (built once)."""
+    global _shingles
+    if _shingles is None:
+        from app.llm import prompts       # lazy: prompts is big and only needed when an answer is checked
+        _shingles = set().union(*(_windows(x) for x in (prompts.REPLY_SYSTEM, prompts.AUTO_REPLY_SYSTEM,
+                                                         prompts.PURCHASE_SYSTEM, prompts.PURCHASE_OPENER_SYSTEM)))
+    return _shingles
+
+
+def leaks_prompt(text: str | None) -> bool:
+    """Our own message quotes a system prompt (LEAK_WORDS words in a row, case and punctuation ignored)."""
+    return bool(_windows(text or "") & _prompt_shingles())
 
 
 def internal_word(text: str | None, pattern: re.Pattern[str] = _INTERNAL) -> str | None:
@@ -26,7 +49,9 @@ def internal_word(text: str | None, pattern: re.Pattern[str] = _INTERNAL) -> str
 
 def internal_problem(text: str | None, pattern: re.Pattern[str] = _INTERNAL) -> list[str]:
     word = internal_word(text, pattern)
-    return [t("Internal instructions or AI talk in our own message ({word})", word=word)] if word else []
+    if word:
+        return [t("Internal instructions or AI talk in our own message ({word})", word=word)]
+    return [t("Our own message quotes the agent's instructions")] if leaks_prompt(text) else []
 
 
 def too_long(text: str | None) -> list[str]:

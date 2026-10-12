@@ -303,6 +303,9 @@ def auto_rules(general: str, ad_instructions: str | None, min_price: float | Non
         parts += ["", "Anweisung speziell für diese Anzeige (verlässliche Fakten, haben Vorrang):", ad_instructions.strip()]
     if min_price is not None:
         parts += ["", price_floor(min_price, asking_price)]
+    else:
+        parts += ["", "Kein Mindestpreis für diese Anzeige: Nichts unter dem Angebotspreis zusagen oder anbieten. Will "
+                      "jemand weniger zahlen, setze auto_send = false; die Person entscheidet selbst."]
     return "\n".join(parts)
 
 

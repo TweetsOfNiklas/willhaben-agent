@@ -68,9 +68,34 @@ def euro_amounts(text: str) -> list[float]:
     return out
 
 
-def blockers(min_price: float | None, suggested_price: float | None, text: str) -> list[str]:
-    """Reasons to hold an automatic answer back. No floor set -> nothing (the model's auto_send decides, as before)."""
+def _below(floor: float, suggested_price: float | None, text: str) -> list[float]:
+    """Amounts of an answer below a floor: the suggested price first, then the euro amounts of the text."""
+    out = [suggested_price] if suggested_price is not None and suggested_price < floor - 0.005 else []
+    return out + [a for a in euro_amounts(text) if a < floor - 0.005]
+
+
+def asking_value(raw: float | str | None) -> float | None:
+    """The asking price of the ad context: a number, or the first euro amount of the display text ("20 €", "VB 20 €");
+    None for "Zu verschenken" or nothing."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw)
+    found = euro_amounts(str(raw or ""))
+    if found:
+        return found[0]
+    s = str(raw or "").strip()
+    return to_float(s) if re.fullmatch(_NUM, s) else None
+
+
+def blockers(min_price: float | None, suggested_price: float | None, text: str, *,
+             asking: float | None = None, intent: str | None = None) -> list[str]:
+    """Reasons to hold an automatic answer back. Without a floor the asking price is the floor, so a buyer can't talk
+    the agent into "ok, 1 € passt" (prompt injection included); without either, any price talk waits for the user."""
     if min_price is None:
+        if asking is not None:
+            return [t("No minimum price set: {amount} is below the asking price {asking}", amount=_fmt(a),
+                      asking=_fmt(asking)) for a in _below(asking, suggested_price, text)[:1]]
+        if suggested_price is not None or intent == "price_negotiation" or euro_amounts(text):
+            return [t("No minimum price and no asking price known – price talks wait for you")]
         return []
     why = []
     if suggested_price is not None and suggested_price < min_price:
