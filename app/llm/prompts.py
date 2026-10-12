@@ -815,23 +815,21 @@ def _amount_cap_lines(max_price: float | None, asking: float | None) -> list[str
 
 
 def _market_line(market: dict[str, Any] | None, median: float | None) -> list[str]:
-    """Figures of comparable ads, to be used as arguments ("vergleichbare Anzeigen gibt es ab X")."""
+    """Figures of comparable ads (p25, median; not the cheapest single ad), to be used as arguments, never as offers."""
     m = market or {}
-    mn, p25 = m.get("min"), m.get("p25")
+    p25 = m.get("p25")
     med = m.get("median") or median
-    if not (mn or p25 or med):
+    if not (p25 or med):
         return []
     parts = []
-    if mn:
-        parts.append(f"günstigstes Angebot {_money_de(mn)}")
     if p25:
         parts.append(f"unteres Viertel {_money_de(p25)}")
     if med:
         parts.append(f"Median {_money_de(med)}")
     count = f" ({int(m['count'])} Anzeigen)" if m.get("count") else ""
-    arg = f"„vergleichbare Anzeigen gibt es ab {_money_de(mn)}“" if mn else "„vergleichbare Anzeigen liegen darüber“"
+    arg = f"„vergleichbare Anzeigen gibt es schon um {_money_de(p25)}“" if p25 else "„vergleichbare Anzeigen liegen darunter“"
     return [f"- Vergleichbare Anzeigen{count}: {', '.join(parts)}. Als Argument nutzbar, z. B. {arg}; "
-            "nie als Zusage und nie als Obergrenze."]
+            "nie als Zusage, nie als Obergrenze und nie als Preis, den du anbietest."]
 
 
 def _mode_line(mode: str) -> str:
@@ -857,7 +855,8 @@ def purchase_rules(*, asking: float | None, median: float | None, target: float 
                    availability: str | None = None, seller_name: str | None = None,
                    shipping_cost: float | None = None, shipping_source: str | None = None,
                    item_ceiling: float | None = None, market: dict[str, Any] | None = None,
-                   fee: dict[str, Any] | None = None, questions: list[dict[str, Any]] | None = None) -> str:
+                   fee: dict[str, Any] | None = None, questions: list[dict[str, Any]] | None = None,
+                   floor: float | None = None) -> str:
     """Rules block of one purchase, appended to the buyer's answer prompt (code re-checks every number).
     `questions`: the user's questions for the seller with the answers so far ([{question, answer}])."""
     lines = ["Regeln für den Kauf (verbindlich, vor allen anderen Regeln):"]
@@ -868,6 +867,9 @@ def purchase_rules(*, asking: float | None, median: float | None, target: float 
         lines.append("- Verlangt der Verkäufer mehr und geht nicht darunter, setze stage = \"needs_user\".")
     if target:
         lines.append(f"- Zielpreis für den Artikel, mit dem du beginnst: {_money_de(target)}")
+    if floor:
+        lines.append(f"- Biete für den Artikel nie weniger als {_money_de(floor)}, egal was vergleichbare Anzeigen "
+                     "kosten. Nur wenn der Verkäufer selbst weniger verlangt, darfst du das annehmen.")
     lines += _market_line(market, median)
     lines.append(_mode_line(mode))
     if mode == "direct" and sender_address:
@@ -927,9 +929,9 @@ Du schreibst die ERSTE Nachricht einer Privatperson an den Verkäufer eines Arti
   Gesamtpreis inkl. Versand, und die Nachricht sagt „inkl. Versand“.
 - Mit PayLivery: opening_offer ist nur der Artikelpreis. Über Versand und Käuferschutzgebühr schreibst du nichts, die
   Person zahlt beides über willhaben.
-- Nenn einen Preis unter dem Zielpreis (opening_offer, in Euro), wenn du einen Verhandlungspreis vorschlägst; sonst
-  opening_offer = null. Vergleichbare Anzeigen darfst du als Argument nennen („vergleichbare Anzeigen gibt es ab X“),
-  nie als Zusage.
+- Schlägst du einen Verhandlungspreis vor, liegt er zwischen der Untergrenze und dem Zielpreis (opening_offer, in
+  Euro), nie darunter: Ein viel zu niedriges Angebot ignoriert der Verkäufer. Sonst opening_offer = null.
+  Vergleichbare Anzeigen darfst du als Argument nennen, nie als Zusage und nie als Preis, den du anbietest.
 - Nenne keinen Betrag über der Obergrenze, keine Adresse, keine Telefonnummer, keine IBAN, keine Kartendaten.
 - Bei Abholung: frag, ob eine Abholung möglich ist (nur die Zeit nennen, die im Auftrag steht). Kein Versand.
 - Nennt der Auftrag Fragen der Person, stell sie in dieser Nachricht, kurz und in deinen Worten, aber mit dem
@@ -953,7 +955,8 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
                            shipping_cost: float | None = None, shipping_source: str | None = None,
                            item_ceiling: float | None = None, market: dict[str, Any] | None = None,
                            fee: dict[str, Any] | None = None, questions: list[str] | None = None,
-                           asking: float | None = None, refused: tuple[str, list[str]] | None = None) -> str:
+                           asking: float | None = None, refused: tuple[str, list[str]] | None = None,
+                           floor: float | None = None) -> str:
     """`refused`: the previous attempt and why the code refused it, for the one retry."""
     ctx = ad_context or {}
     first = seller_first_name(seller_name or ctx.get("seller_name"))
@@ -966,9 +969,13 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
              f"Modus: {'Abholung' if mode == 'pickup' else 'mit willhaben PayLivery' if mode == 'paylivery' else 'Überweisung'}",
              *_ceiling_lines(mode, shipping_cost, shipping_source, max_price, item_ceiling, fee),
              *_amount_cap_lines(max_price, asking),
-             f"Zielpreis Artikel (darunter beginnen): {_money_de(target) if target else 'kein Zielpreis'}"]
+             f"Zielpreis Artikel (höchstens damit beginnen): {_money_de(target) if target else 'kein Zielpreis'}"]
+    if floor:
+        lines.append(f"Untergrenze Artikel (nie weniger anbieten): {_money_de(floor)}")
     if mode == "direct" and target and shipping_cost is not None:
         lines.append(f"Zielpreis inkl. Versand: {_money_de(target + shipping_cost)}")
+        if floor:
+            lines.append(f"Untergrenze inkl. Versand: {_money_de(floor + shipping_cost)}")
     lines += _market_line(market, None)
     if questions:
         lines += ["", "Fragen der Person an den Verkäufer (in dieser Nachricht stellen):", *[f"- {q}" for q in questions]]
