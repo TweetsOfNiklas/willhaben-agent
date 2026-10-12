@@ -32,7 +32,7 @@ from app.db import Conversation, Draft, Message, Purchase, get_setting, session,
 from app.i18n import t
 from app.llm.base import get_backend
 from app.llm.prompts import PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, purchase_opener_prompt, purchase_rules
-from app.services import deals, meetups, paylivery, shipping
+from app.services import deals, meetups, paylivery, shipping, topic
 from app.services.notify import notify
 from app.willhaben.account import OpenerUnconfirmed, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -88,11 +88,8 @@ _NUMBER = r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+\.\d{1,2}|\d+"
 _AMOUNT = re.compile(rf"(?:€|\bEUR\b)\s*({_NUMBER})|(?<![\w.,])({_NUMBER})\s*(?:€|\bEUR\b)", re.I)
 _IBAN_TEXT = re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,8}\b", re.I)
 _CARD_TEXT = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}\d(?!\d)")
-# Words of the agent's own instructions, or of an AI talking about itself: never in a message to the seller
-_INTERNAL_TEXT = re.compile(
-    r"\b(?:höchstpreis\w*|obergrenze\w*|regelblock\w*|purchase_state|opening_offer|auto_send|needs_user|system-?prompt\w*|"
-    r"prompts?|sprachmodell\w*|language model|als (?:eine )?ki\b|als (?:ein )?(?:ki-)?assistent\w*|as an ai\b)", re.I)
-MAX_REPLY_CHARS = 700               # a buyer's chat answer is a few sentences; longer ones wait for the user
+# Words of the agent's instructions or AI self-talk (topic.INTERNAL) plus the purchase's own: never to the seller
+_INTERNAL_TEXT = re.compile(rf"\b(?:höchstpreis\w*|obergrenze\w*|regelblock\w*|{topic.INTERNAL})", re.I)
 
 
 def _to_float(num: str) -> float:
@@ -177,9 +174,7 @@ def text_problems(text: str | None, *, max_price: float | None, address_ok: bool
         why.append(t("Card or account number in our own message"))
     if not address_ok and _address_hits(text or ""):
         why.append(t("Own address or contact details in a message before they are allowed"))
-    hit = _INTERNAL_TEXT.search(text or "")
-    if hit:
-        why.append(t("Internal instructions or AI talk in our own message ({word})", word=hit.group(0)))
+    why += topic.internal_problem(text, _INTERNAL_TEXT)
     return why
 
 
@@ -813,8 +808,7 @@ def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
     if ps.get("stage") == "needs_user":
         why.append(t("Claude needs your decision: {reason}", reason=ps.get("reason") or "-"))
     why += text_problems(d.text, max_price=p.max_price, address_ok=p.mode == "direct" and p.status in AFTER_AGREEMENT)
-    if len(d.text or "") > MAX_REPLY_CHARS:
-        why.append(t("Answer is unusually long ({n} characters) – a purchase chat needs a few sentences", n=len(d.text)))
+    why += topic.too_long(d.text)                     # the instruction words are in text_problems already
     if p.max_price:
         # PayLivery: the offer is the item price, the buyer pays shipping and buyer protection on willhaben (the ceiling
         # is the maximum minus both)

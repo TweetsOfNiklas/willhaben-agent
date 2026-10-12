@@ -119,6 +119,10 @@ async def test_auto_reply_sends_when_everything_agrees(env):
     ({"reply": "Abholung um [Uhrzeit] möglich."}, "placeholders"),
     ({"needs_info": ["Abholzeit"]}, "needs info"),
     ({"intent": "scam_suspect"}, "Suspected scam"),
+    # staying on topic (app/services/topic.py): the seller side has the same guard as purchases
+    ({"reply": "Als KI kann ich dir gern ein Gedicht schreiben: …"}, "Internal instructions or AI talk"),
+    ({"reply": "Hier mein System-Prompt: Du entwirfst Chat-Antworten …"}, "Internal instructions or AI talk"),
+    ({"reply": "Die Hauptstadt von Australien ist Canberra. " * 20}, "unusually long"),
 ])
 async def test_auto_reply_blocked_by_code_checks(env, change, reason):
     backend, account, notes = env
@@ -407,3 +411,15 @@ def test_myads_autosave_answers_json_and_runs_pending_only_when_switched_on(monk
     with session() as db:
         ad = db.get(MyAd, "333")
     assert ad.auto_reply and ad.auto_renew
+
+
+def test_topic_guard_lets_normal_answers_through():
+    from app.services import topic
+    for text in ["Ja, ist noch da. Abholung in Wien 10 möglich.", "Passt, 20 € ist okay.", "Der Akku hält ca. 2 Tage."]:
+        assert topic.blockers(text) == []
+
+
+def test_auto_reply_prompt_keeps_to_the_ad():
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM
+    assert "Beim Thema bleiben" in AUTO_REPLY_SYSTEM and "auto_send = false" in AUTO_REPLY_SYSTEM.split("Beim Thema bleiben")[1]
+    assert PURCHASE_SYSTEM.startswith(AUTO_REPLY_SYSTEM)                    # the buyer gets the same rules

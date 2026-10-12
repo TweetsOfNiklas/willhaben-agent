@@ -225,5 +225,5 @@
   "Enter the wish price in euros.": "Gib den Wunschpreis in Euro ein.",
   "Opening offer {amount} is below your wish price {wish}": "Erstes Angebot {amount} liegt unter deinem Wunschpreis {wish}",
   "Internal instructions or AI talk in our own message ({word})": "Interne Anweisungen oder KI-Gerede in unserer Nachricht ({word})",
-  "Answer is unusually long ({n} characters) – a purchase chat needs a few sentences": "Antwort ist ungewöhnlich lang ({n} Zeichen) – ein Kaufchat braucht ein paar Sätze"
+  "Answer is unusually long ({n} characters) – a chat answer needs a few sentences": "Antwort ist ungewöhnlich lang ({n} Zeichen) – eine Chatantwort braucht ein paar Sätze"
 }

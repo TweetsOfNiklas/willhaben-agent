@@ -22,7 +22,7 @@ from app.llm.prompts import (
     AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules,
     price_floor, reply_prompt,
 )
-from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram
+from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -551,6 +551,7 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
         with session() as db:
             ad = current_ad(db, conv.ad_id) if conv and conv.ad_id else None
         why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text)
+        why += topic.blockers(d.text)     # staying on topic: no instruction words or AI talk, no essays
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":
         why.append(t("last message is not from the other person"))
