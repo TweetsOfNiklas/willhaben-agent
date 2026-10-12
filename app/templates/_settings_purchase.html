@@ -15,9 +15,9 @@
       <textarea name="rules" rows="6" maxlength="4000" class="textarea w-full min-w-0 bg-base-200"
                 placeholder="{{ _('e.g. only private sellers, ask for the invoice, pickup only in Vienna') }}">{{ pu.rules }}</textarea></label>
     <p class="text-[12.5px] text-muted">{{ _("Empty rules use the built-in default: only buy at a fair price, no prepayment to third parties, short and friendly messages.") }}</p>
-    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Discount for the target price (%)") }}</span>
+    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Discount for the suggested wish price (%)") }}</span>
       <input type="number" name="discount_pct" min="0" max="50" step="1" value="{{ pu.discount_pct }}" class="input w-36 min-w-0 bg-base-200"></label>
-    <p class="text-[12.5px] text-muted">{{ _("Target price: this much below the asking price or the median of comparable ads, whichever is lower. The ceiling is the maximum price you enter per order (default: the asking price).") }}</p>
+    <p class="text-[12.5px] text-muted">{{ _("The buy dialog suggests your wish price this much below the asking price (plus shipping and fee); you can change it per order. The agent offers the wish price first and goes up to the maximum price at most (default: the asking price).") }}</p>
     <p class="text-[12.5px] text-muted">{{ _("The maximum price includes shipping and, with PayLivery, willhaben's buyer protection fee (4.5 % of the item price, at least € 0.99, at most € 49.99, paid by the buyer): the agent keeps the item price below the maximum minus both. The buy dialog shows how fair the asking price is and suggests a cheap and a market price.") }}</p>
     <div><button type="submit" class="btn btn-primary">{{ _("Save") }}</button></div>
   </form>

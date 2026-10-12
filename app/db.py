@@ -274,6 +274,7 @@ class Purchase(SQLModel, table=True):
     asking_price: float | None = None      # price of the ad when the order started
     median_price: float | None = None      # median of comparable ads (deals.analyze), if there are enough
     max_price: float | None = None         # code-enforced ceiling incl. shipping; default = asking price
+    wish_price: float | None = None        # the user's wish price incl. shipping (and fee): the first offer; None = discount
     mode: str = "paylivery"                # paylivery | direct | pickup
     pickup_window: str | None = None       # pickup: the user's preferred time window (free text)
     pickup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # pickup: {start, minutes, location}
