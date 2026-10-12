@@ -7,7 +7,7 @@ Updates from any other chat are ignored.
 
 Buttons carry a short random token (`t:<token>`, table TelegramAction) instead of the action itself:
   D_SEND / D_REPLY / D_REVISE / D_DISCARD  held-back answer -> ha_actions.handle (the one send path)
-  D_PRESET                                  revise with a fixed instruction ("Preis halten"), one tap, no typing
+  D_ALT                                     revise along one of Claude's alternative decisions, one tap, no typing
   D_CAL / D_UNCAL                           agreed appointment -> Google Calendar / out again (ha_actions.handle)
   D_SHIP                                    address received -> fill the carrier's label form (ha_actions.handle)
   D_PAID / D_BUY / D_DECL / D_CANCEL        payment and approval of a parcel (ha_actions.handle)
@@ -148,41 +148,11 @@ def candidates() -> list[dict[str, Any]]:
             for k, v in sorted(_candidates.items(), key=lambda kv: -kv[1][1])]
 
 
-# German on purpose: the instruction goes into the (German) revise prompt, the label is shown as a button.
-DEFAULT_PRESETS = "💶 Preis halten | Bleib beim Preis, geh nicht runter.\n" \
-                  "🤝 Annehmen | Nimm das Angebot des Käufers an.\n" \
-                  "❌ Absagen | Sag freundlich ab.\n" \
-                  "🏠 Nur Abholung | Kein Versand, nur Abholung."
-MAX_PRESETS = 6
-
-
-def presets_text() -> str:
-    raw = get_setting("telegram_presets")
-    return DEFAULT_PRESETS if raw == "" else ("" if raw == "-" else raw)
-
-
-def presets() -> list[tuple[str, str]]:
-    """One-tap revisions under a held-back answer: (button label, instruction for Claude)."""
-    out = []
-    for line in presets_text().splitlines():
-        label, _, instruction = line.partition("|")
-        if label.strip() and instruction.strip():
-            out.append((label.strip()[:30], instruction.strip()[:200]))
-    return out[:MAX_PRESETS]
-
-
-def set_presets(text: str) -> None:
-    text = "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
-    set_setting("telegram_presets", "-" if not text else text)   # "-" = none wanted (empty = defaults)
-
-
-
 def status() -> dict[str, Any]:
     return {"configured": bool(token()), "source": token_source(), "username": get_setting("telegram_username"),
             "linked": chat_id() is not None, "chat_name": get_setting("telegram_chat_name"),
             "enabled": get_setting("telegram_enabled") != "0", "kinds": enabled_kinds(), "bot_url": bot_url(),
-            "candidates": candidates() if chat_id() is None else [],
-            "presets": presets_text()}
+            "candidates": candidates() if chat_id() is None else []}
 
 
 COMMANDS = [("drafts", "Open answer drafts"), ("auto", "Automatic answers per ad"),
@@ -288,8 +258,12 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
     conv, ad_id = data.get("conversation_id"), data.get("ad_id")
     rows = _rows(buttons)
     if kind == "auto_reply_pending" and data.get("draft_id") and any(b["text"].startswith("✍️") for b in buttons):
-        # one tap instead of "Revise" + typing: the usual decisions
-        rows += _rows([_button(label, "D_PRESET", f"{data['draft_id']}|{label}|{instruction}") for label, instruction in presets()])
+        # one tap instead of "Revise" + typing: the other decisions Claude saw for this situation
+        draft_id = int(data["draft_id"])
+        with session() as db:
+            draft = db.get(Draft, draft_id)
+        alts = (draft.alternatives or []) if draft else []
+        rows += _rows([_button(a["label"], "D_ALT", f"{draft_id}|{a['label']}|{a['instruction']}") for a in alts])
     buttons = []
     if kind == "message" and conv:
         buttons += [_button("✍️ " + t("Draft with Claude"), "C_DRAFT", conv), _button("↩️ " + t("Reply"), "C_REPLY", conv)]
@@ -596,7 +570,7 @@ async def _on_callback(cq: dict[str, Any]) -> None:
             await _say("ℹ️ " + t("Already done."), reply_to=msg.get("message_id"))
             await _drop_buttons(msg)
         return
-    if verb == "D_PRESET":
+    if verb == "D_ALT":
         draft_id, label, instruction = ref.split("|", 2)
         await _answer(cq_id, "✍️ " + label)
         if tag:

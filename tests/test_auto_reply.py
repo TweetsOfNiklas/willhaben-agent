@@ -174,6 +174,36 @@ async def test_manual_send_marks_sending_verified(env):
     assert get_setting("send_verified") == "1" and account.sent == [("c1", "Ja, ist noch da.")]
 
 
+async def test_draft_keeps_claudes_alternatives_cleaned(env):
+    from app.llm.prompts import AUTO_REPLY_SCHEMA, PURCHASE_SCHEMA, REPLY_SCHEMA
+
+    for schema in (REPLY_SCHEMA, AUTO_REPLY_SCHEMA, PURCHASE_SCHEMA):
+        assert "alternatives" in schema["required"] and "maxItems" not in schema["properties"]["alternatives"]
+    backend, account, notes = env
+    assert (await chats.draft_reply("c1")).alternatives is None      # backends without the key: no buttons
+    backend.data = {"alternatives": [
+        {"label": "  💶 Preis halten ", "instruction": " Bleib beim Preis. "},
+        {"label": "", "instruction": "ohne Beschriftung"},
+        {"label": "ohne Anweisung", "instruction": "  "},
+        "kaputt",
+        {"label": "🤝 18 € | fix", "instruction": "Sag 18 € zu | ohne Versand."},
+        {"label": "x" * 50, "instruction": "y" * 300},
+        {"label": "❌ Absagen", "instruction": "Sag freundlich ab."},
+    ]}
+    d = await chats.draft_reply("c1")
+    assert d.alternatives == [{"label": "💶 Preis halten", "instruction": "Bleib beim Preis."},
+                              {"label": "🤝 18 € / fix", "instruction": "Sag 18 € zu | ohne Versand."},
+                              {"label": "x" * 30, "instruction": "y" * 200}]
+    with session() as db:
+        assert db.get(Draft, d.id).alternatives == d.alternatives
+    backend.data = {"alternatives": [{"label": "", "instruction": ""}]}
+    assert (await chats.draft_reply("c1")).alternatives is None
+    # a revision is a new draft with its own alternatives
+    backend.data = {"alternatives": [{"label": "🏠 Nur Abholung", "instruction": "Kein Versand."}]}
+    new = await chats.revise_and_offer(d.id, "freundlicher")
+    assert new.alternatives == [{"label": "🏠 Nur Abholung", "instruction": "Kein Versand."}]
+
+
 def test_settings_and_myads_forms():
     from fastapi.testclient import TestClient
 

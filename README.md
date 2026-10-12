@@ -81,8 +81,8 @@ It runs on your own server, from your home internet connection, and you control 
 - **Notifications** through Home Assistant (events always, phone pushes with action buttons: send / revise with Claude /
   discard) and/or a **Telegram bot** with the same buttons, feedback buttons, commands and a typing indicator. One
   Telegram message per matter: the draft, Claude's progress and the result are edited into the notification; a
-  swipe-reply answers the chat without any button, one-tap presets ("Preis halten") revise a draft, and a search hit
-  can become a purchase order with one tap.
+  swipe-reply answers the chat without any button, Claude's alternative decisions for the situation (accept,
+  counter-offer, hold the price …) are one-tap buttons, and a search hit can become a purchase order with one tap.
 - **Connection watchdog**: tiles on the home page and a warning push when the willhaben login, Claude, Home Assistant,
   Telegram, live chat or disk space fails.
 - **Polite by design**: every willhaben request goes through one shared rate limiter (minimum gap plus an

@@ -43,8 +43,6 @@
  "Noted – future automatic answers will take it into account.": "Notiert – künftige automatische Antworten berücksichtigen das.",
  "Notifications with buttons in Telegram: approve and send answers, let Claude rewrite them, give feedback.": "Benachrichtigungen mit Buttons in Telegram: Antworten freigeben und senden, von Claude überarbeiten lassen, Feedback geben.",
  "On a computer without Telegram: scan the code with your phone.": "Am Computer ohne Telegram: Code mit dem Handy scannen.",
- "One per line: button label | instruction for Claude. Empty: none. Max. 6.": "Eine je Zeile: Button-Text | Anweisung an Claude. Leer: keine. Max. 6.",
- "One-tap revisions under a held-back answer": "Ein-Tipp-Überarbeitungen unter einer zurückgehaltenen Antwort",
  "Open": "Öffnen",
  "Open BotFather": "BotFather öffnen",
  "Open answer drafts": "Offene Antwortentwürfe",

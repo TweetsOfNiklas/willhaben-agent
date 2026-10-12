@@ -2107,8 +2107,6 @@ async def settings_telegram_kinds(request: Request):
     form = await request.form()
     set_setting("telegram_enabled", "1" if form.get("enabled") else "0")
     telegram.set_kinds([str(k) for k in form.getlist("kind")])
-    if "presets" in form:
-        telegram.set_presets(str(form.get("presets") or ""))
     return _tg_back(t("Changes saved"))
 
 

@@ -304,6 +304,25 @@ def _style_examples(limit: int = 3) -> list[str]:
         return [r.text for r in rows]
 
 
+MAX_ALTERNATIVES = 3
+
+
+def clean_alternatives(raw: Any) -> list[dict[str, str]] | None:
+    """Claude's other decisions for the situation (one-tap buttons under a held-back answer), None when there are none."""
+    out: list[dict[str, str]] = []
+    for a in raw if isinstance(raw, list) else []:
+        if not isinstance(a, dict):
+            continue
+        # "|" separates the parts of a Telegram button ref (draft_id|label|instruction)
+        label = " ".join(str(a.get("label") or "").replace("|", "/").split())[:30].strip()
+        instruction = str(a.get("instruction") or "").strip()[:200].strip()
+        if label and instruction:
+            out.append({"label": label, "instruction": instruction})
+        if len(out) == MAX_ALTERNATIVES:
+            break
+    return out or None
+
+
 @timeline.scoped(conversation_id="conversation_id")
 async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool = False) -> Draft:
     conv = await ensure_ad_context(conversation_id)
@@ -354,6 +373,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
     draft = Draft(conversation_id=conversation_id, text=d.get("reply", "").strip(), intent=d.get("intent"),
                   needs_info=(d.get("needs_info") or []) + ([f"Hinweis: {note}"] if note else []),
                   suggested_price=d.get("suggested_price"), model=result.model, meetup=meetups.clean(d.get("meetup")),
+                  alternatives=clean_alternatives(d.get("alternatives")),
                   auto=True if auto else None,
                   auto_reason=(("✓ " if d.get("auto_send") else "✗ ") + (d.get("auto_reason") or "").strip()) if auto else None,
                   purchase=purchase.clean_state(d.get("purchase_state")) if buyer_auto else None)

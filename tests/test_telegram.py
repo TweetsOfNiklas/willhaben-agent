@@ -107,7 +107,10 @@ async def test_draft_buttons_use_the_ha_action_path(tg, monkeypatch):
     await _linked(tg)
     with session() as db:
         db.add(Conversation(id="c1", ad_id="5", ad_title="Rad", partner_name="Max"))
-        db.add(Draft(id=11, conversation_id="c1", text="Ja, noch da."))
+        db.add(Draft(id=11, conversation_id="c1", text="Ja, noch da.", alternatives=[
+            {"label": "💶 Preis halten", "instruction": "Bleib beim Preis."},
+            {"label": "🤝 Annehmen", "instruction": "Nimm das Angebot an."},
+            {"label": "❌ Absagen", "instruction": "Sag freundlich ab."}]))
         db.add(Draft(id=12, conversation_id="c1", text="[Uhrzeit] passt"))
         db.commit()
     sent = []
@@ -126,7 +129,8 @@ async def test_draft_buttons_use_the_ha_action_path(tg, monkeypatch):
                         data={"conversation_id": "c1", "draft_id": 11}, actions=ha_actions.draft_actions(11, True))
     b = _buttons(tg[-1][1])
     assert list(b) == ["✅ Send", "↩️ Direct answer", "✍️ Revise with Claude", "🗑 Discard",
-                       "💶 Preis halten", "🤝 Annehmen", "❌ Absagen", "🏠 Nur Abholung"]
+                       "💶 Preis halten", "🤝 Annehmen", "❌ Absagen"]               # Claude's alternatives, 2 per row
+    assert [len(r) for r in tg[-1][1]["reply_markup"]["inline_keyboard"]] == [2, 2, 2, 1]
     offer_id = _sent_ids(tg)[-1]
 
     # "Direct answer": ForceReply prompt quoting the offer, the reply text is sent through ha_actions.handle
@@ -141,9 +145,11 @@ async def test_draft_buttons_use_the_ha_action_path(tg, monkeypatch):
     await telegram.handle_update(_press(b["✅ Send"]))
     assert sent == [(11, "Ja, Abholung heute ab 18 Uhr.")] and "Already done." in tg[-2][1]["text"]
 
-    await telegram.send("auto_reply_pending", "x", "y", actions=ha_actions.draft_actions(12, False))
+    await telegram.send("auto_reply_pending", "x", "y", data={"conversation_id": "c1", "draft_id": 12},
+                        actions=ha_actions.draft_actions(12, False))
     b12 = _buttons(tg[-1][1])
     assert "✅ Send" not in b12                                         # placeholders: no plain send
+    assert list(b12) == ["↩️ Direct answer", "✍️ Revise with Claude", "🗑 Discard"]   # no alternatives: none shown
     await telegram.handle_update(_press(b12["🗑 Discard"]))
     with session() as db:
         assert db.get(Draft, 12).status == "discarded"
@@ -290,11 +296,13 @@ async def test_bot_token_never_logged(tg, caplog):
     assert "SECRET-token" not in caplog.text
 
 
-async def test_preset_button_revises_in_place(tg, monkeypatch):
+async def test_alternative_button_revises_in_place(tg, monkeypatch):
     await _linked(tg)
     with session() as db:
         db.add(Conversation(id="c1", ad_id="5", ad_title="Rad", partner_name="Max"))
-        db.add(Draft(id=11, conversation_id="c1", text="Ich könnte auf 18 € runter."))
+        db.add(Draft(id=11, conversation_id="c1", text="Ich könnte auf 18 € runter.", alternatives=[
+            {"label": "💶 Preis halten", "instruction": "Bleib beim Preis, geh nicht runter."},
+            {"label": "🤝 18 € annehmen", "instruction": "Sag 18 € zu."}]))
         db.commit()
     revised = []
 
@@ -479,15 +487,3 @@ async def test_hit_starts_a_purchase_order(tg, monkeypatch):
     await telegram.handle_update(_press(b["🛒 Start purchase order"], markup=markup))
     assert tg[-1][0] == "answerCallbackQuery" and "already an open purchase" in tg[-1][1]["text"]
     set_setting("purchase_enabled", "0")
-
-
-def test_presets_setting(client):  # noqa: F811
-    assert telegram.presets()[0] == ("💶 Preis halten", "Bleib beim Preis, geh nicht runter.")
-    telegram.set_presets("  Ok | Sag zu.  \n\nkaputt ohne trenner\n| keine Beschriftung\n")
-    assert telegram.presets() == [("Ok", "Sag zu.")]
-    telegram.set_presets("")
-    assert telegram.presets() == [] and telegram.status()["presets"] == ""
-    set_setting("telegram_chat_id", str(CHAT))
-    client.post("/settings/telegram/kinds", data={"enabled": "on", "kind": ["message"], "presets": "A | a\nB | b"})
-    assert telegram.presets() == [("A", "a"), ("B", "b")]
-    set_setting("telegram_presets", "")
