@@ -51,8 +51,6 @@ TERMINAL = ("done", "failed", "cancelled")
 AFTER_AGREEMENT = ("agreed", "meetup", "pay_now", "paid", "shipped", "done")  # own address allowed (direct only)
 PER_CONVERSATION_PER_DAY = 6        # own limit (a negotiation needs more than the 3 of a seller chat)
 DEFAULT_DISCOUNT_PCT = 10           # target = 10 % below min(asking price, median)
-MARKET_MIN = 0.5                    # comparables with a median below half the asking price are another product
-OPENING_BAND = 0.7                  # first offer between 70 % of the target and the target
 # Shipping in euro while nothing better is known (no PayLivery price of the ad, no price named by the seller)
 SHIPPING_ESTIMATE = {"paylivery": 6.0, "direct": 6.0, "pickup": 0.0}   # € when the ad names no price (Post M is 7.90)
 # willhaben buyer protection fee ("Käuferschutzgebühr") of PayLivery: paid by the BUYER, the seller pays nothing. Source: help
@@ -339,24 +337,10 @@ def _price_line(row: Purchase) -> str:
              source=shipping_label(src), total=_money(item + shipping))
 
 
-def market_ok(asking: float | None, median: float | None) -> bool:
-    """Comparables fit the ad: their median is at least MARKET_MIN of the asking price. Below that the keyword search
-    found accessories or another product (a 620 € ad with comparables around 55 €), not a cheaper market."""
-    return bool(median) and (not asking or median >= asking * MARKET_MIN)
-
-
-def market_of(row: Purchase) -> tuple[float | None, dict[str, Any] | None]:
-    """Median and figures of comparable ads, only when they fit the asking price (checked on read: older orders too)."""
-    median = row.median_price or _num((row.market or {}).get("median"))
-    if not market_ok(row.asking_price, median):
-        return None, None
-    return median, row.market
-
-
 def target_price(row: Purchase) -> float | None:
     """Opening target: discount below the cheaper of asking price and comparable median, never above the item ceiling
     (the maximum minus shipping and, with PayLivery, the buyer protection fee)."""
-    refs = [x for x in (row.asking_price, market_of(row)[0]) if x]
+    refs = [x for x in (row.asking_price, row.median_price) if x]
     if not refs:
         return None
     target = min(refs) * (1 - _discount() / 100)
@@ -365,15 +349,6 @@ def target_price(row: Purchase) -> float | None:
     if ceiling:
         target = min(target, ceiling)
     return target
-
-
-def opening_floor(row: Purchase) -> float | None:
-    """The lowest first offer for the item: OPENING_BAND of the target. Lower is a lowball the seller ignores."""
-    target = target_price(row)
-    if not target:
-        return None
-    floor = round(target * OPENING_BAND, 2)                       # 180 x 0.7 = 125.999…
-    return float(math.floor(floor)) if floor >= 1 else floor
 
 
 def clean_state(raw: Any) -> dict[str, Any]:
@@ -658,10 +633,6 @@ async def _begin_inner(pid: int) -> None:
                  max=_money(default_max), ship=_money(ship), fee=_money(fee))
     elif default_max:
         info = t("Maximum set to {max}: asking price plus shipping {ship}", max=_money(default_max), ship=_money(ship))
-    if median and not market_ok(detail.price, median):
-        off = t("Comparable ads (median {median}) do not fit the asking price {asking} – not used for the offer.",
-                median=_money(median), asking=_money(detail.price))
-        info = f"{info} · {off}" if info else off
     row = _change(pid, lambda r: (setattr(r, "ad_title", detail.heading), setattr(r, "ad_url", detail.url),
                                   setattr(r, "image_url", detail.images[0] if detail.images else r.image_url),
                                   setattr(r, "asking_price", detail.price), setattr(r, "median_price", median),
@@ -671,27 +642,21 @@ async def _begin_inner(pid: int) -> None:
                                   info and _line(r, info)))
     target = target_price(row)
     cost, src = shipping_of(row)
-    floor = opening_floor(row)
     refused: tuple[str, list[str]] | None = None
     for _attempt in range(2):      # a refused opener gets one retry with the reason, then the order fails
         prompt = purchase_opener_prompt(ad_context=detail.as_context(), target=target, max_price=row.max_price,
                                         mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
                                         seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
-                                        item_ceiling=item_ceiling(row), market=market_of(row)[1],
+                                        item_ceiling=item_ceiling(row), market=row.market,
                                         fee=fee_rule() if row.mode == "paylivery" else None,
                                         questions=[q["question"] for q in row.questions or []],
-                                        asking=detail.price, refused=refused, floor=floor)
+                                        asking=detail.price, refused=refused)
         out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
                                                  schema=PURCHASE_OPENER_SCHEMA)
         text = str((out.data or {}).get("message") or "").strip()
         if not text:
             return await _fail(pid, t("Claude wrote no opening message."))
         problems = text_problems(text, max_price=row.max_price, address_ok=False)
-        offer = _num((out.data or {}).get("opening_offer"))
-        item = offer - cost if offer and row.mode == "direct" else offer     # direct: the offer includes shipping
-        if item and floor and item < floor - 0.005:
-            problems.append(t("Opening offer {amount} is below the lowest sensible offer {floor}",
-                              amount=_money(offer), floor=_money(floor)))
         if not problems:
             break
         log.info("purchase %s: opening message refused (%s): %s", pid, "; ".join(problems), text)
@@ -804,14 +769,12 @@ def rules_block(p: Purchase, conv: Conversation | None = None, availability: str
     if conv is not None:
         seller = conv.partner_name or (conv.ad_context or {}).get("seller_name")
     cost, src = shipping_of(p)
-    median, market = market_of(p)
-    return purchase_rules(asking=p.asking_price, median=median, target=target_price(p), max_price=p.max_price,
+    return purchase_rules(asking=p.asking_price, median=p.median_price, target=target_price(p), max_price=p.max_price,
                           mode=p.mode, sender_address=sender, stage=p.status,
                           user_rules=get_setting(SETTING_RULES) or DEFAULT_RULES, note=p.note,
                           pickup_window=p.pickup_window, availability=availability, seller_name=seller,
-                          shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p), market=market,
-                          fee=fee_rule() if p.mode == "paylivery" else None, questions=p.questions,
-                          floor=opening_floor(p))
+                          shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p), market=p.market,
+                          fee=fee_rule() if p.mode == "paylivery" else None, questions=p.questions)
 
 
 def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
@@ -821,11 +784,6 @@ def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
     if ps.get("stage") == "needs_user":
         why.append(t("Claude needs your decision: {reason}", reason=ps.get("reason") or "-"))
     why += text_problems(d.text, max_price=p.max_price, address_ok=p.mode == "direct" and p.status in AFTER_AGREEMENT)
-    floor = opening_floor(p)
-    if d.suggested_price and floor and d.suggested_price < floor - 0.005 \
-            and not _in_text(d.suggested_price, _seller_text_of(msgs)):    # a price the seller named is fine
-        why.append(t("Offer {amount} is below the lowest sensible offer {floor}", amount=_money(d.suggested_price),
-                     floor=_money(floor)))
     if p.max_price:
         # PayLivery: the offer is the item price, the buyer pays shipping and buyer protection on willhaben (the ceiling
         # is the maximum minus both)

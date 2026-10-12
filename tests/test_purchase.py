@@ -666,8 +666,7 @@ async def test_begin_stores_market_and_paylivery_shipping_of_the_ad(fx):
     assert p.shipping_cost == 4.9 and p.shipping_source == "ad"
     assert purchase.item_ceiling(p) == 282.39 and purchase.shipping_of(p) == (4.9, "ad")
     prompt = fx.backend.calls[0]["prompt"]
-    assert "unteres Viertel 280 €" in prompt and "vergleichbare Anzeigen gibt es schon um 280 €" in prompt
-    assert "günstigstes" not in prompt
+    assert "250 €" in prompt and "vergleichbare Anzeigen gibt es ab 250 €" in prompt
     assert "4,90 €" in prompt and "Vorname des Verkäufers: Anna" in prompt
 
 
@@ -821,7 +820,7 @@ def test_rules_block_first_name_and_market_argument():
            market={"min": 180.0, "p25": 200.0, "median": 220.0, "count": 9})
     text = purchase.rules_block(p, conv)
     assert "Vorname des Verkäufers: Anna." in text and "Muster" not in text
-    assert "vergleichbare Anzeigen gibt es schon um 200 €" in text and "180 €" not in text
+    assert "vergleichbare Anzeigen gibt es ab 180 €" in text and "unteres Viertel 200 €" in text
     assert "Vorname" in purchase.rules_block(p, Conversation(id="c-y", role="buyer", partner_name="Autohaus Müller GmbH"))
     assert "keine Anrede" in purchase.rules_block(p, Conversation(id="c-y", role="buyer", partner_name="Autohaus Müller GmbH"))
 
@@ -843,7 +842,7 @@ def test_opener_prompt_direct_with_market_and_name():
                                     market={"min": 250.0, "p25": 280.0, "median": 300.0, "count": 8})
     assert "Vorname des Verkäufers: Anna" in prompt and "Muster" not in prompt
     assert "Zielpreis inkl. Versand: 276 €" in prompt and "Versand: 6 € (Schätzung)" in prompt
-    assert "gibt es schon um 280 €" in prompt
+    assert "gibt es ab 250 €" in prompt
 
 
 async def test_default_maximum_is_asking_price_plus_shipping(fx):
@@ -977,46 +976,3 @@ def test_rules_block_forbids_quoting_amounts_above_the_maximum():
     assert "Angebotspreis der Anzeige (619 €) liegt über dem Höchstpreis" in over
     under = purchase_rules(asking=580.0, max_price=600.0, **kw)
     assert "Kein Eurobetrag" in under and "liegt über dem Höchstpreis" not in under
-
-
-# ------------------------------------------------------------------ lowball guard
-async def test_comparables_far_below_the_asking_price_are_not_used(fx):
-    """A 300 € ad with comparables around 55 € (accessories, another product): the target comes from the asking price."""
-    fx.median = 55.0
-    pid = await open_order(fx)
-    p = row(pid)
-    assert purchase.market_of(p) == (None, None)
-    assert purchase.target_price(p) == 270.0 and purchase.opening_floor(p) == 189.0
-    prompt = fx.backend.calls[0]["prompt"]
-    assert "Vergleichbare Anzeigen" not in prompt and "Untergrenze Artikel (nie weniger anbieten): 189 €" in prompt
-    assert any("do not fit the asking price" in (e.get("text") or "") for e in p.log or [])
-    assert "Vergleichbare Anzeigen" not in purchase.rules_block(p)
-
-
-def test_plausible_comparables_still_lower_the_target():
-    p = _p(max_price=None, median_price=200.0, market={"median": 200.0, "p25": 180.0, "count": 8})
-    assert purchase.market_of(p)[0] == 200.0 and purchase.target_price(p) == 180.0
-    assert purchase.opening_floor(p) == 126.0
-    assert "Biete für den Artikel nie weniger als 126 €" in purchase.rules_block(p)
-
-
-async def test_begin_retries_a_lowball_opener(fx):
-    openers, prompts = iter([{"message": "Hallo Anna, würdest du 50 € nehmen?", "opening_offer": 50}, OPENER]), []
-    orig = fx.backend.complete
-
-    async def lowball(**kw):
-        if "purchase_state" not in kw["schema"]["properties"]:
-            prompts.append(kw["prompt"])
-            return LLMResult(data=next(openers), model="fake")
-        return await orig(**kw)
-    fx.backend.complete = lowball
-    pid = await open_order(fx)
-    assert row(pid).status == "contacting" and fx.account.created == [("555", OPENER["message"])]
-    assert "below the lowest sensible offer" in prompts[1].split("Dein erster Entwurf")[1]
-
-
-async def test_blockers_lowball_unless_the_seller_named_it(fx):
-    p = _p(max_price=300.0)                                  # target 270, floor 189
-    assert any("below the lowest sensible offer" in w for w in purchase.blockers(p, _draft("Ich biete 50 €.", suggested_price=50), []))
-    seller = [Message(conversation_id="c", ext_id="s1", direction="in", text="Du kannst ihn um 150 € haben.")]
-    assert purchase.blockers(p, _draft("Passt, 150 € nehme ich.", suggested_price=150), seller) == []
