@@ -832,11 +832,12 @@ def _wish_lines(target: float | None, asking: float | None, mode: str, shipping_
     if asking and target >= asking - 0.005:
         return [f"- Der Angebotspreis ({_money_de(asking)}) passt zum Wunschpreis der Person: nicht verhandeln, "
                 "sag zu, den Artikel zum Angebotspreis zu nehmen."]
-    lines = [f"- Wunschpreis der Person für den Artikel: {_money_de(target)}. Das ist dein erstes Angebot: genau "
-             "diesen Preis nennen, nie weniger."]
-    if mode == "direct" and shipping_cost is not None:
-        lines.append(f"- Wunschpreis inkl. Versand: {_money_de(target + shipping_cost)}.")
-    return lines
+    if mode == "direct" and shipping_cost is not None:      # without PayLivery the offer is the total incl. shipping
+        return [f"- Wunschpreis der Person für den Artikel: {_money_de(target)} (ohne Versand, nur zur Info).",
+                f"- Wunschpreis inkl. Versand: {_money_de(target + shipping_cost)}. Das ist dein erstes Angebot: genau "
+                "diesen Gesamtpreis „inkl. Versand“ nennen, nie weniger."]
+    return [f"- Wunschpreis der Person für den Artikel: {_money_de(target)}. Das ist dein erstes Angebot: genau "
+            "diesen Preis nennen, nie weniger."]
 
 
 def _mode_line(mode: str) -> str:

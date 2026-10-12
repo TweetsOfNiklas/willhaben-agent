@@ -680,7 +680,8 @@ async def test_direct_opener_negotiates_inclusive_of_shipping(fx):
     sender_ok()
     pid = await open_order(fx, mode="direct")
     prompt = fx.backend.calls[0]["prompt"]
-    assert "Wunschpreis inkl. Versand: 276 €" in prompt and "Schätzung" in prompt
+    assert "Wunschpreis inkl. Versand: 276 €. Das ist dein erstes Angebot" in prompt and "Schätzung" in prompt
+    assert "270 € (ohne Versand, nur zur Info)" in prompt
     assert row(pid).shipping_source is None           # no PayLivery price for a bank transfer
 
 
