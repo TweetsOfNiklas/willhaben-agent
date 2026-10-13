@@ -144,3 +144,65 @@ async def test_agent_end_to_end(platform, client):
     with session() as db:
         hits = list(db.exec(select(Hit).where(Hit.agent_id == a.id)))
     assert sorted(h.ad_id for h in hits) == sorted(IDS) and {h.platform for h in hits} == {"ebay"}
+
+
+# ------------------------------------------------------------------ the item page
+ITEM, SHOP = "920036165580", "168768204140"
+ITEM_PAGE = (FIXTURES / "ebay_item.html").read_text(encoding="utf-8")
+SHOP_PAGE = (FIXTURES / "ebay_item_shop.html").read_text(encoding="utf-8")
+DESC_PAGE = (FIXTURES / "ebay_desc.html").read_text(encoding="utf-8")
+
+
+def test_item_pages_become_details():
+    desc = ebay.parse_description(DESC_PAGE)
+    assert desc.startswith("Verkaufe ein gut erhaltenes Maxi-Cosi Kinderwagen-Set in Braun.\n\nDas Set besteht aus:")
+    d = ebay.parse_item_page(ITEM_PAGE, ITEM, desc)
+    assert d.heading.startswith("Maxi-Cosi Mura 4 Kinderwagen Set") and d.price == 200 and d.price_display == "200 €"
+    assert d.place == d.location == "Thalgau, Österreich" and d.is_private is True and d.seller_name == "verkaeufer-a"
+    assert d.status == "active" and d.published_at.isoformat() == "2026-10-13T15:13:03+00:00" and d.ref == f"ebay:{ITEM}"
+    assert len(d.images) == 4 and all(u.endswith("/s-l1600.jpg") for u in d.images) and len(set(d.images)) == 4
+    assert d.category_path == ["Baby", "Kinderwagen & Zubehör", "Kinderwagen"]
+    assert d.description.startswith(desc) and "Condition: Gebraucht" in d.description and "Pickup possible" in d.description
+    assert "1170" not in d.description                                    # the visitor's postcode, not the item's
+
+    s = ebay.parse_item_page(SHOP_PAGE, SHOP)
+    assert s.heading == "Lenovo ThinkPad x1 Carbon Gen 8 | i7 16GB Touch |QWERTY|GARANTIE&RECHNUNG"   # <wbr> joined
+    assert s.price == 384 and s.place == "Wien, Österreich" and s.is_private is False and s.seller_name == "Beispiel Laptops GmbH"
+    assert "Top Zustand" in s.description and "Marke: Lenovo" in s.description and "Artikelzustand" not in s.description
+    assert "EUR 30,00" in s.description and "48,00" not in s.description   # shipping yes, the unit price no
+
+
+def test_item_page_traps():
+    with pytest.raises(PlatformError, match="without the item page"):
+        ebay.parse_item_page("<html><title>Error Page | eBay</title>SORRY</html>", ITEM)
+    assert ebay.parse_item_page(ITEM_PAGE, "111111111111") is None           # eBay showed another item
+    ended = ebay.parse_item_page(ITEM_PAGE.replace('"listingStatus":"ACTIVE"', '"listingStatus":"ENDED"'), ITEM)
+    assert ended.status == "expired"
+    assert ebay.parse_description("<html><body>nothing</body></html>") is None
+
+
+async def test_detail_loads_the_page_and_the_description(platform, client):
+    d = await platform.detail(ITEM)
+    assert d.place == "Thalgau, Österreich" and d.description.startswith("Verkaufe ein gut erhaltenes")
+    urls = [u for u, _ in client._transport.calls]
+    assert urls[0] == f"https://www.ebay.at/itm/{ITEM}" and urls[1].startswith(f"https://itm.ebaydesc.com/itmdesc/{ITEM}?")
+    assert await platform.detail("123456789012") is None                     # 404
+
+
+async def test_item_page_after_the_warm_up():
+    t = CookieQueue([(403, b""), (200, ITEM_PAGE.encode()), (500, b"")])
+    c = ebay.EbayClient(transport=t)
+    c.limiter = RateLimiter(0, name="eBay")
+    d = await c.item(ITEM)
+    assert d.heading.startswith("Maxi-Cosi") and d.description and "Verkaufe" not in d.description   # no description page
+    assert len(t.calls) == 3 and t.cleared == 0
+
+
+def test_viewer_shows_the_item(platform):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get(f"/hits/ad/ebay/{ITEM}").text
+    assert "Thalgau, Österreich" in page and "Maxi-Cosi Mura 4" in page and "Verkaufe ein gut erhaltenes" in page
+    assert "no longer online" not in page and "shows no details here" not in page

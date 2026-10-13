@@ -91,7 +91,8 @@ SHPOCK_ROUTES = [("/graphql", "shpock_search.json", "application/json"),
 VINTED_ROUTES = [("/catalog", "vinted_catalog.rsc", "text/x-component"),
                  ("/items/10341874098", "vinted_item.rsc", "text/x-component")]
 PREISJAEGER_ROUTES = [("/search", "preisjaeger_search.html", "text/html")]
-EBAY_ROUTES = [("/sch/i.html", "ebay_search.html", "text/html")]
+EBAY_ROUTES = [("/itmdesc/920036165580", "ebay_desc.html", "text/html"),
+               ("/itm/920036165580", "ebay_item.html", "text/html"), ("/sch/i.html", "ebay_search.html", "text/html")]
 
 
 def _installer(module, client_cls, routes):
@@ -119,7 +120,7 @@ CASES = {
         "install": _installer("ebay", "EbayClient", EBAY_ROUTES)[0],
         "uninstall": _installer("ebay", "EbayClient", EBAY_ROUTES)[1],
         "expect_ads": 5,
-        "detail_id": None,
+        "detail_id": "920036165580",
     },
     "shpock": {
         "url": "https://www.shpock.com/de-at/results?q=iphone+15+pro&priceFrom=100&priceTo=500",

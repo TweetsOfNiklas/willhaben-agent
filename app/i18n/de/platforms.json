@@ -104,9 +104,12 @@
  "Seller {name}, {rating}": "Verkäufer {name}, {rating}",
  "eBay answered without a result list": "eBay antwortete ohne Ergebnisliste",
  "eBay search returned HTTP {status}": "eBay-Suche antwortete mit HTTP {status}",
- "Reads the result pages of ebay.at: only Buy It Now offers located in Austria, no auctions. Listings show condition, private or commercial seller, shipping and the listing time but no place; there is no details page.": "Liest die Ergebnisseiten von ebay.at: nur Sofort-Kaufen-Angebote mit Standort Österreich, keine Auktionen. Die Liste zeigt Zustand, privaten oder gewerblichen Verkäufer, Versand und Einstellzeit, aber keinen Ort; eine Detailseite gibt es nicht.",
+ "Reads the result pages of ebay.at: only Buy It Now offers located in Austria, no auctions. Listings show condition, private or commercial seller, shipping and the listing time but no place; opening an ad loads its page with the place, all photos, the specifics and the seller's description.": "Liest die Ergebnisseiten von ebay.at: nur Sofort-Kaufen-Angebote mit Standort Österreich, keine Auktionen. Die Liste zeigt Zustand, privaten oder gewerblichen Verkäufer, Versand und Einstellzeit, aber keinen Ort; eine geöffnete Anzeige lädt ihre Seite mit Ort, allen Fotos, den Artikelmerkmalen und der Beschreibung des Verkäufers.",
  "Not an ebay.at link": "Kein ebay.at-Link",
  "Not an eBay result list (copy the link of a search: …/sch/i.html?_nkw=…)": "Keine eBay-Ergebnisliste (kopiere den Link einer Suche: …/sch/i.html?_nkw=…)",
  "The eBay link has no search term (_nkw=…)": "Der eBay-Link enthält keinen Suchbegriff (_nkw=…)",
- "{platform} could not be reached ({error}); this is what the list showed.": "{platform} war nicht erreichbar ({error}); das hier zeigte die Liste."
+ "{platform} could not be reached ({error}); this is what the list showed.": "{platform} war nicht erreichbar ({error}); das hier zeigte die Liste.",
+ "eBay answered without the item page": "eBay antwortete ohne die Artikelseite",
+ "eBay ad {id}: HTTP {status}": "eBay-Anzeige {id}: HTTP {status}",
+ "Pickup possible": "Abholung möglich"
 }

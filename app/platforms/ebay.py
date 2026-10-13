@@ -5,7 +5,14 @@ Austria) and LH_BIN=1 (Buy It Now). Auctions are left out, also those with a Buy
 their price is only the current bid. Each result is an `li.s-card` (data-listingid) with title, condition, private or
 commercial seller, price, "oder Preisvorschlag", shipping, the listing time (Vienna time, without a year) and the
 seller's name and rating. The page has no machine-readable data, so the adapter reads the card texts. Cards name no
-place (items from abroad say "aus <country>"), and there is no ad-detail call: the viewer shows the card.
+place (items from abroad say "aus <country>").
+
+An ad is its item page www.ebay.at/itm/<id>: the canonical link confirms the item (a block page has none), the JSON-LD
+Product gives price and photos, the markup title, condition, seller and its kind, shipping and the item specifics, the
+page model `"listingStatus"`, `"startDate"` and `"itemLocation"` ("Thalgau, Österreich"). The seller's description is
+a second page (the iframe on itm.ebaydesc.com). Words like "beendet" or "Preisvorschlag" are in every page's text
+dictionary, so they are never searched for in the raw page; the postcode eBay shows next to pickup and delivery is the
+visitor's, not the item's.
 
 eBay sits behind Akamai Bot Manager. Requests go through curl_cffi impersonating Chrome, and a new visitor's first
 requests are often refused (403) while the bot manager sets its cookies. Until a search of this visitor went through, a
@@ -14,10 +21,13 @@ after that a 403 is a block as on every other site. No login, no API keys.
 """
 from __future__ import annotations
 
+import html as html_lib
+import json
 import logging
 import re
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -25,8 +35,8 @@ from app.i18n import t
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import FetchResponse, HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
-from app.platforms.text import euro, one_line
-from app.platforms.types import Listing, SearchPage, SearchSpec
+from app.platforms.text import clean_text, euro, one_line, parse_iso, to_float
+from app.platforms.types import AdDetail, Listing, SearchPage, SearchSpec
 
 log = logging.getLogger(__name__)
 
@@ -181,6 +191,192 @@ def parse_search(page: str, now: datetime | None = None) -> SearchPage:
     return SearchPage(rows_found=total if total is not None else len(ads), ads=ads)
 
 
+# ------------------------------------------------------------------ the item page
+_CANONICAL = re.compile(r'<link\b[^>]*rel="?canonical"?[^>]*href="?https://www\.ebay\.[a-z.]+/itm/(\d+)', re.I)
+_LD_JSON = re.compile(r'<script\b[^>]*type="?application/ld\+json"?[^>]*>(.*?)</script>', re.S | re.I)
+_STATUS = re.compile(r'"listingStatus":"([A-Z_]+)"')
+_START = re.compile(r'"startDate":\{"value":"([^"]+)"')
+_ITEM_LOCATION = re.compile(r'"itemLocation":\{"_type":"LabelsValues".{0,300}?"values":\[\{"_type":"TextualDisplay",'
+                            r'"textSpans":\[\{"_type":"TextSpan","text":"([^"]+)"', re.S)
+_DESC_FRAME = re.compile(r'<iframe\b[^>]*\bid="?desc_ifr"?[^>]*\bsrc="?([^"\s>]+)', re.I)
+_PHOTO_ID = re.compile(r"i\.ebayimg\.com/(?:thumbs/)?images/g/([^/\s\"']+)/s-l\d+")
+_HIDDEN = {"clipped", "hide", "ux-bubble-help"}             # screen-reader copies, folded text, tooltips
+_SKIP = {"script", "style", "noscript", "svg", "template", "button"}
+
+
+class _Node:
+    __slots__ = ("tag", "attrs", "children", "parent")
+
+    def __init__(self, tag: str, attrs: dict[str, str], parent: _Node | None) -> None:
+        self.tag, self.attrs, self.children, self.parent = tag, attrs, [], parent
+
+    @property
+    def classes(self) -> list[str]:
+        return (self.attrs.get("class") or "").split()
+
+    def find_all(self, tag: str | None = None, cls: str | None = None):
+        for c in self.children:
+            if isinstance(c, _Node):
+                if (tag is None or c.tag == tag) and (cls is None or cls in c.classes):
+                    yield c
+                yield from c.find_all(tag, cls)
+
+    def find(self, tag: str | None = None, cls: str | None = None) -> _Node | None:
+        return next(self.find_all(tag, cls), None)
+
+    def text(self) -> str:
+        """The visible text, joined without spaces (eBay splits words with <wbr>)."""
+        out = []
+        for c in self.children:
+            if isinstance(c, str):
+                out.append(c)
+            elif c.tag not in _SKIP and not (_HIDDEN & set(c.classes)) and "hidden" not in c.attrs:
+                out.append(c.text())
+        return "".join(out)
+
+
+class _Tree(HTMLParser):
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = _Node("#root", {}, None)
+        self.cur = self.root
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        n = _Node(tag, {k: v or "" for k, v in attrs}, self.cur)
+        self.cur.children.append(n)
+        if tag not in self.VOID:
+            self.cur = n
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.cur.children.append(_Node(tag, {k: v or "" for k, v in attrs}, self.cur))
+
+    def handle_endtag(self, tag: str) -> None:
+        n = self.cur
+        while n is not self.root and n.tag != tag:
+            n = n.parent
+        if n is not self.root:
+            self.cur = n.parent
+
+    def handle_data(self, data: str) -> None:
+        self.cur.children.append(data)
+
+
+def _text(n: _Node | None) -> str | None:
+    return one_line((n.text() if n else "").replace("\xa0", " "))
+
+
+def _ld_json(page: str, kind: str) -> dict[str, Any]:
+    for m in _LD_JSON.finditer(page):
+        try:
+            d = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("@type") == kind:
+            return d
+    return {}
+
+
+def _photos(product: dict[str, Any], root: _Node) -> list[str]:
+    """Full-size photos in order: the JSON-LD images, else the gallery's zoom images (lazy slides have no src)."""
+    images = product.get("image") or []
+    urls = [images] if isinstance(images, str) else [u for u in images if isinstance(u, str)]
+    if not urls and (gallery := root.find("div", "ux-image-carousel")):
+        urls = [img.attrs.get("data-zoom-src") or img.attrs.get("src") or "" for img in gallery.find_all("img")]
+    out: list[str] = []
+    for u in urls:
+        m = _PHOTO_ID.search(u)
+        url = f"https://i.ebayimg.com/images/g/{m.group(1)}/s-l1600.jpg" if m else None
+        if url and url not in out:
+            out.append(url)
+    return out
+
+
+def _rows(root: _Node) -> dict[str, tuple[str, str]]:
+    """The shipping section's rows by kind (shipping, localPickup, deliverto, ...): (label, first value line)."""
+    section = root.find("div", "ux-layout-section--shipping")
+    rows = {}
+    for lv in section.find_all("div", "ux-labels-values") if section else []:
+        kind = next((c.split("--", 1)[1] for c in lv.classes if c.startswith("ux-labels-values--")), None)
+        values = lv.find("div", "ux-labels-values__values-content")
+        first = next((c for c in values.children if isinstance(c, _Node)), None) if values else None
+        if kind and kind not in rows:
+            rows[kind] = (_text(lv.find("div", "ux-labels-values__labels-content")) or "", _text(first) or "")
+    return rows
+
+
+def _specifics(root: _Node) -> list[tuple[str, str]]:
+    """The item specifics (Marke: Lenovo, …) without the condition, which has its own line."""
+    section = root.find("div", "ux-layout-section--features")
+    out = []
+    for col in section.find_all("div", "ux-layout-section-evo__col") if section else []:
+        label = _text(col.find("div", "ux-labels-values__labels-content"))
+        value = _text(col.find("div", "ux-labels-values__values-content"))
+        if label and value and label.rstrip(":") != "Artikelzustand":
+            out.append((label.rstrip(":"), value))
+    return out
+
+
+def parse_description(page: str) -> str | None:
+    """The seller's description page (itm.ebaydesc.com) -> plain text."""
+    tree = _Tree()
+    tree.feed(page or "")
+    box = tree.root.find("div", "x-item-description-child")
+    if box is None:
+        return None
+    inner = re.sub(r"<(script|style)\b.*?</\1>", "", page[page.find(">", page.find("x-item-description-child")) + 1:],
+                   flags=re.S | re.I)
+    end = inner.find("<!--M_")
+    return clean_text(inner[:end] if end >= 0 else inner) or None
+
+
+def parse_item_page(page: str, ad_id: str, description: str | None = None, now: datetime | None = None) -> AdDetail | None:
+    """An item page -> AdDetail; None when eBay shows another item (an ended one is redirected). A page without the
+    canonical item link is no item page (bot check, error): PlatformError."""
+    m = _CANONICAL.search(page or "")
+    if not m:
+        raise PlatformError(t("eBay answered without the item page"))
+    if m.group(1) != ad_id:
+        return None
+    tree = _Tree()
+    tree.feed(page)
+    root = tree.root
+    product = _ld_json(page, "Product")
+    offers = product.get("offers") or {}
+    offers = offers[0] if isinstance(offers, list) and offers else offers
+    title = _text(root.find("h1", "x-item-title__mainTitle")) or one_line(
+        html_lib.unescape(re.sub(r"<wbr\s*/?>", "", product.get("name") or ""))) or ""
+    price = to_float(offers.get("price") if isinstance(offers, dict) else None)
+    if price is None and (amounts := _amounts(_text(root.find("div", "x-price-primary")) or "")):
+        price = amounts[0]
+    condition_box = root.find("div", "x-item-condition-text")
+    condition = _text(condition_box.find("span", "ux-textspans")) if condition_box else None
+    note = (_text(root.find("div", "x-item-condition-desc")) or "").strip("“”\" ") or None
+    about = root.find("div", "x-sellercard-atf__about-seller")
+    kinds = [_text(i.find("span", "ux-textspans")) for i in about.find_all("div", "x-sellercard-atf__about-seller-item")] \
+        if about else []
+    seller_type = next((k for k in kinds if k in _SELLER_TYPES), None)
+    rows = _rows(root)
+    facts = [f"{t('Condition')}: {condition}" if condition else None, note,
+             " ".join(rows["shipping"]) if rows.get("shipping") else None,
+             t("Pickup possible") if "localPickup" in rows else None]
+    specifics = " · ".join(f"{k}: {v}" for k, v in _specifics(root))
+    text = "\n\n".join(x for x in (description, "\n".join(f for f in facts if f), specifics) if x)
+    status = (m2.group(1) if (m2 := _STATUS.search(page)) else "ACTIVE")
+    start = parse_iso(m3.group(1)) if (m3 := _START.search(page)) else None
+    place = html_lib.unescape(m4.group(1)) if (m4 := _ITEM_LOCATION.search(page)) else None
+    crumbs = _ld_json(page, "BreadcrumbList").get("itemListElement") or []
+    path = [one_line(c.get("name")) for c in crumbs if isinstance(c, dict) and (c.get("position") or 0) > 1 and c.get("name")]
+    return AdDetail(ad_id=ad_id, heading=title, description=text or None, price=price,
+                    price_display=euro(price) if price is not None else None,
+                    status="active" if status == "ACTIVE" else "expired", published_at=start, first_published_at=start,
+                    end_date=None, url=f"{WEB}/itm/{ad_id}", images=_photos(product, root), location=place, place=place,
+                    seller_name=_text(root.find("div", "x-sellercard-atf__about-seller-item--seller-name")),
+                    is_private=_SELLER_TYPES.get(seller_type) if seller_type else None,
+                    category_path=[p for p in path if p], platform="ebay")
+
+
 # ------------------------------------------------------------------ the client
 def classify(url: str) -> str:
     path = urlsplit(url).path
@@ -226,18 +422,39 @@ class EbayClient(HttpPlatformClient):
             raise _WarmingUp("eBay: warming up")
         super()._check_status(r)
 
-    async def search_page(self, params: dict[str, str], *, cache_s: float = 0) -> SearchPage:
+    async def _page(self, url: str, *, params: dict[str, str] | None = None, cache_s: float = 0,
+                    kind: str = "search") -> FetchResponse:
+        """GET a page; a new visitor's warm-up refusals are asked again (see the module docstring)."""
         while True:
             try:
-                r = await self._get(SEARCH, params=params, headers=PAGE_HEADERS, cache_s=cache_s, kind="search")
-                break
+                return await self._get(url, params=params, headers=PAGE_HEADERS, cache_s=cache_s, kind=kind)
             except _WarmingUp:
                 log.info("eBay refused a new visitor while its bot check sets the cookies; asking again")
+
+    async def search_page(self, params: dict[str, str], *, cache_s: float = 0) -> SearchPage:
+        r = await self._page(SEARCH, params=params, cache_s=cache_s)
         if r.status_code != 200:
             raise PlatformError(t("eBay search returned HTTP {status}", status=r.status_code))
         page = parse_search(r.text)
         self._warm = True
         return page
+
+    async def item(self, ad_id: str) -> AdDetail | None:
+        """The item page and the seller's description (a second page; without it the ad still shows)."""
+        r = await self._page(f"{WEB}/itm/{ad_id}", cache_s=300, kind="detail")
+        if r.status_code in (404, 410):
+            return None
+        if r.status_code != 200:
+            raise PlatformError(t("eBay ad {id}: HTTP {status}", id=ad_id, status=r.status_code))
+        self._warm = True
+        description = None
+        if m := _DESC_FRAME.search(r.text):
+            try:
+                d = await self._page(m.group(1).replace("&amp;", "&"), cache_s=300, kind="detail")
+                description = parse_description(d.text) if d.status_code == 200 else None
+            except PlatformError as e:
+                log.info("eBay description of %s: %s", ad_id, e)
+        return parse_item_page(r.text, ad_id, description)
 
 
 _client: EbayClient | None = None
@@ -274,7 +491,7 @@ class EbayPlatform(Platform):
     hosts = ("ebay.at",)
     image_hosts = ("ebayimg.com", "ebaystatic.com")
     locale = "de-AT"
-    capabilities = frozenset({"search_url", "keyword_search", "images"})
+    capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
     access = "http"
     min_interval_s = 300                      # every search is a whole result page (about 1.5 MB)
 
@@ -288,8 +505,8 @@ class EbayPlatform(Platform):
 
     def about(self) -> str:
         return t("Reads the result pages of ebay.at: only Buy It Now offers located in Austria, no auctions. Listings "
-                 "show condition, private or commercial seller, shipping and the listing time but no place; there is "
-                 "no details page.")
+                 "show condition, private or commercial seller, shipping and the listing time but no place; opening an "
+                 "ad loads its page with the place, all photos, the specifics and the seller's description.")
 
     def parse_search_url(self, url: str) -> SearchSpec:
         u = urlsplit(url.strip())
@@ -345,6 +562,9 @@ class EbayPlatform(Platform):
         page.ads = page.ads[:rows or get_settings().search_rows]
         page.title = spec.keyword
         return page
+
+    async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:
+        return await self.client.item(ad_id)
 
     def ad_url(self, ad_id: str) -> str:
         return f"{WEB}/itm/{ad_id}"
