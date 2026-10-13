@@ -79,11 +79,20 @@ def _platform(platform_id: str) -> platforms.Platform:
         raise HTTPException(404) from e
 
 
+def _known(p: platforms.Platform, ad_id: str, hit: Hit | None) -> AdDetail | None:
+    """What the hit or the list that showed the ad knows (product search, direct search)."""
+    if hit is not None:
+        return AdDetail.from_hit(hit)
+    r = deals.shown_result(p.id, ad_id)
+    return AdDetail.from_result(r) if r else None
+
+
 async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str | None = None,
                     use_claude: bool = False, cat: str | None = None,
                     hit: Hit | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """(result, error). A fresh cached result costs no request; otherwise ad detail (cached) + analysis. Sites
-    without an ad-detail call use what the hit knows; the comparables are willhaben listings either way."""
+    without an ad-detail call, and a site that fails, use what the hit or the list that showed the ad knows (as the
+    ad viewer does); the comparables are willhaben listings either way."""
     p = _platform(platform_id)
     res = deals.cached(p.ref(ad_id), q, cat)
     if res is not None and not use_claude:
@@ -92,10 +101,9 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
         try:
             d = await p.detail(ad_id, url=hit.url if hit else None)
         except PlatformError as e:
-            return res, str(e)
-    elif hit is not None:
-        d = AdDetail.from_hit(hit)
-    else:
+            if (d := _known(p, ad_id, hit)) is None:
+                return res, str(e)
+    elif (d := _known(p, ad_id, hit)) is None:
         return None, t("No details for this ad; open it on {platform}.", platform=p.name)
     if d is None:
         return None, t("This ad is no longer online (sold, expired or deleted).")

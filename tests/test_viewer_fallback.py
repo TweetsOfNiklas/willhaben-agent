@@ -54,3 +54,33 @@ def test_the_memory_keeps_the_latest():
     assert len(deals._shown) == deals.SHOWN_MAX and deals.shown_result("x", "0") is None
     assert deals.shown_result("x", str(deals.SHOWN_MAX + 4))["title"] == str(deals.SHOWN_MAX + 4)
     deals._shown.clear()
+
+
+async def test_the_price_check_uses_what_the_list_showed(monkeypatch):
+    """The price section checks the same ad the viewer shows: no hit and no ad details still give a verdict."""
+    from app import deals_web
+
+    seen = []
+
+    async def analyze(d, **kw):
+        seen.append(d)
+        return {"ad": {"title": d.heading}}
+    monkeypatch.setattr(deals, "analyze", analyze)
+    deals._shown.clear()
+    with session() as db:
+        db.add(ProductSearch(description="Hülle", status="done", results=[RESULT]))
+        db.commit()
+    res, error = await deals_web._analysis("preisjaeger", "369807", None)
+    assert error is None and seen[-1].heading == "EKE Case 2.0 für iPhone 18" and seen[-1].price == 19.92
+    res, error = await deals_web._analysis("preisjaeger", "111111", None)           # nothing known: as before
+    assert res is None and "No details for this ad" in error
+
+    platforms.set_platform("fake", Unreachable())
+    try:
+        deals.remember_shown([{**RESULT, "platform": "fake", "ad_id": "77", "title": "Rennrad Carbon", "price": 900}])
+        res, error = await deals_web._analysis("fake", "77", None)                  # the site fails: the list's ad
+        assert error is None and seen[-1].heading == "Rennrad Carbon" and seen[-1].price == 900
+        assert await deals_web._analysis("fake", "78", None) == (None, "HTTP 503")
+    finally:
+        deals._shown.clear()
+        platforms.reset()
