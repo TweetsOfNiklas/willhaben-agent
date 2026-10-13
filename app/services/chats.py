@@ -69,6 +69,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
 
     changed: list[str] = []
     incoming: list[Conversation] = []
+    known_until: dict[str, datetime | None] = {}     # newest message time before this sync
     with session() as db:
         first_sync = db.exec(select(Conversation).limit(1)).first() is None
         for c in convs:
@@ -76,6 +77,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
             is_new = row is None
             if row is None:
                 row = Conversation(id=c.id)
+            known_until[c.id] = row.last_message_at
             newer = c.last_at is not None and (row.last_message_at is None or c.last_at > row.last_message_at)
             more_unread = c.unread_count > (row.unread_count or 0)
             if row.hidden_at is not None:
@@ -101,6 +103,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
 
     for cid in changed:
         await sync_messages(cid)
+    incoming = [r for r in incoming if _partner_wrote(r, known_until.get(r.id), fetched=r.id in changed)]
 
     notify_on = get_setting("notify_messages") == "1"
     for row in incoming:
@@ -130,6 +133,36 @@ async def sync(force: bool = False) -> dict[str, Any]:
     last_sync_at[0] = utcnow()
     answered = await process_pending_auto()
     return {"conversations": len(convs), "changed": len(changed), "incoming": len(incoming), "auto": answered}
+
+
+HISTORY_SLACK = timedelta(seconds=2)     # the list's last-message time vs. that message's created_at (same on 10-13)
+
+
+def _history_reaches(msgs: list[Message], conv: Conversation) -> bool:
+    """The stored history holds the list's newest message: one at its time whose text starts like its preview (the
+    list cuts it at 80 characters)."""
+    if conv.last_message_at is None:
+        return bool(msgs)
+    at, head = _aware(conv.last_message_at), " ".join((conv.last_message_text or "").split())[:40].rstrip("…").strip()
+    return any(m.created_at and abs(_aware(m.created_at) - at) <= HISTORY_SLACK and " ".join(m.text.split()).startswith(head)
+               for m in msgs)
+
+
+def _partner_wrote(conv: Conversation, since: datetime | None, fetched: bool) -> bool:
+    """Did the other person write since the last sync? The list only says that something new and unread came: a
+    willhaben notice (PayLivery, shipping, status – the list marks it is_mine false) or our own answer counts there
+    too. The history just fetched tells; when it does not reach the list's newest message (not fetched, endpoint
+    unknown) the list has to do. On True, `conv.last_message_text` becomes their newest message: the push and the
+    address check quote it, not a notice."""
+    msgs = messages_of(conv.id)
+    if not fetched or not _history_reaches(msgs, conv):
+        return True
+    theirs = [m for m in msgs if m.direction == "in" and not m.kind
+              and (since is None or m.created_at is None or _aware(m.created_at) > _aware(since))]
+    if not theirs:
+        return False
+    conv.last_message_text = theirs[-1].text
+    return True
 
 
 def _is_fallback_id(ext_id: str) -> bool:

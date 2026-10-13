@@ -10,6 +10,8 @@ def clean_text(s: str | None) -> str | None:
     """HTML fragments as plain text: breaks and list items become lines, tags go, entities are unescaped."""
     if s is None:
         return None
+    # a snippet cut off inside a tag ("… Nichtgebrauch. <br...", Kleinanzeigen's search list)
+    s = re.sub(r"</?(?:br|p|div|span|li|ul|ol|b|i|u|em|strong|a|h[1-6])\b[^>]*$", "…", s, flags=re.I)
     s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
     s = re.sub(r"<li[^>]*>", "\n• ", s, flags=re.I)                      # dealers format with lists ...
     s = re.sub(r"</(p|div|ul|ol|h[1-6]|tr)>", "\n", s, flags=re.I)       # ... and paragraphs

@@ -23,7 +23,8 @@
 
   <div id="chat-messages" class="flex flex-col gap-2 px-5 py-5">
     {% for m in messages %}
-      {% if m.kind %}
+      {% if m.kind or m.direction == 'unknown' %}{# willhaben's notices (PayLivery, shipping, status); rows stored before
+         notices got their kind only carry direction "unknown" – neither side wrote them #}
       <div data-notice class="mx-auto max-w-[80%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
       {% else %}
       <div class="chat {{ 'chat-end' if m.direction == 'out' else 'chat-start' }}">
