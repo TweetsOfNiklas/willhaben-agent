@@ -161,7 +161,7 @@ docker compose up -d
 
 This pulls the prebuilt image `ghcr.io/lumascet/willhaben-agent:latest`, which GitHub Actions builds for every release
 (also as `0.2.1` and `0.2`). A push to master that raises the version in `pyproject.toml` is a release: the workflow
-builds the image and then creates the tag `v0.2.1`.
+builds the image, creates the tag `v0.2.1` and publishes a GitHub release listing the changes since the previous version.
 Update later with `docker compose pull && docker compose up -d`. To build from source instead, clone the repository and run
 `docker compose up -d --build`. An optional `.env` next to `compose.yaml` (see `.env.example`) holds overrides such as
 the dashboard password.
@@ -353,8 +353,10 @@ Locally a real Chromium window opens for the login. Use `BROWSER_HEADLESS=1` for
   willhaben requests from the database (see `docs/willhaben-api.md`, "Recording, replay and fixtures").
 - **CI**: `.github/workflows/docker.yml` runs lint and tests, then builds the image and pushes it to GitHub
   Container Registry. The default branch gets `latest`, tags `v1.2.3` get `1.2.3` and `1.2`, and every build gets
-  `sha-<commit>`. Pull requests build without pushing. To release, bump `app/__init__.py` and `pyproject.toml` and
-  push a `vX.Y.Z` tag.
+  `sha-<commit>`. Pull requests build without pushing. To release, bump the version in `app/__init__.py` and
+  `pyproject.toml` (the workflow fails when they differ) and push to master: the image is built, `vX.Y.Z` is tagged
+  and a GitHub release is published with the commits since the previous version. A `vX.Y.Z` tag pushed by hand gets
+  its image and release too.
 
 How the app talks to willhaben (endpoints, verification status) is documented in `docs/willhaben-api.md`.
 
