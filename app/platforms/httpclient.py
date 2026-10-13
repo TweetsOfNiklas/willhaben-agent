@@ -231,8 +231,11 @@ class HttpPlatformClient:
         return self._transport
 
     async def _get(self, url: str, *, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None,
-                   cache_s: float = 0, kind: str | None = None) -> FetchResponse:
+                   cache_s: float = 0, kind: str | None = None,
+                   valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
         """GET through the platform's limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same request.
+        `valid(r)` judges every fetched 200, never a cached or replayed one: False is a page in place of the one asked
+        for (a bot check, an error page), which is not cached.
 
         Every call is counted in the access log and, when switched on, recorded; `kind` defaults to classify(url).
         """
@@ -259,6 +262,8 @@ class HttpPlatformClient:
         else:
             r = await self._send_vpn(tunnel, full, kind, headers)
         self._check_status(r)
+        if r.status_code == 200 and valid is not None and not valid(r):
+            return r                            # no answer to keep, and no sign that the site lets us in again
         self.limiter.reward()
         if cache_s and r.status_code in (200, 404):
             now = time.monotonic()

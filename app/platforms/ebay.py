@@ -15,10 +15,11 @@ dictionary, so they are never searched for in the raw page; the postcode eBay sh
 visitor's, not the item's.
 
 eBay sits behind Akamai Bot Manager. Requests go through curl_cffi impersonating Chrome, and a new visitor's first
-requests are often refused (403) while the bot manager sets its cookies. Until a search of this visitor went through, a
-403 is that warm-up: the client keeps its cookies and asks again (paced by the limiter, at most WARMUP_RETRIES times);
-after that a 403 is a block as on every other site. Through the VPN, every exit is a new visitor with its own
-warm-up, so a warm-up 403 is no refused exit. No login, no API keys.
+requests are often refused (403) while the bot manager sets its cookies. Until this visitor fetched a result list or an
+item page (not a cached answer, not a bot check's page that comes with 200), a 403 is that warm-up: the client keeps its
+cookies and asks again (paced by the limiter, at most WARMUP_RETRIES times); after that a 403 is a block as on every
+other site. Through the VPN, every exit is a new visitor with its own warm-up, so a warm-up 403 is no refused exit. The
+description host is optional: a refusal there only leaves the ad without its description. No login, no API keys.
 """
 from __future__ import annotations
 
@@ -26,9 +27,9 @@ import html as html_lib
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -43,13 +44,13 @@ log = logging.getLogger(__name__)
 
 WEB = "https://www.ebay.at"
 SEARCH = f"{WEB}/sch/i.html"
+DESC_HOST = "ebaydesc.com"              # the seller's description (itm.ebaydesc.com)
 PAGE_HEADERS = {"Accept": "text/html,application/xhtml+xml", "Accept-Language": "de-AT,de;q=0.9", "Referer": f"{WEB}/"}
 PAGE_SIZE = "60"
 WARMUP_RETRIES = 2
 VIENNA = ZoneInfo("Europe/Vienna")
 DEFAULT_LOCATION = "1"                  # LH_PrefLoc: 1 = Austria, 3 = EU, 2 = worldwide
 SORTS = {"newest": "10", "relevance": "12", "price_asc": "15", "price_desc": "16"}
-_SORT_OF = {v: k for k, v in SORTS.items()}
 _MONTHS = {m: i for i, names in enumerate((("jan",), ("feb",), ("mar", "mär"), ("apr",), ("may", "mai"), ("jun",),
                                            ("jul",), ("aug",), ("sep",), ("oct", "okt"), ("nov",), ("dec", "dez")), 1)
            for m in names}
@@ -120,7 +121,8 @@ def _amounts(text: str) -> list[float]:
 
 
 def listed_at(text: str, now: datetime | None = None) -> datetime | None:
-    """"Oct-9 23:33" (Vienna time, no year) -> aware datetime; a date after today belongs to last year."""
+    """"Oct-9 23:33" (Vienna time, no year) -> aware UTC datetime, like every site's times (the database keeps them
+    without the offset); a date after today belongs to last year."""
     m = _WHEN.match(text or "")
     month = _MONTHS.get(m.group(1).lower()) if m else None
     if not m or not month:
@@ -128,11 +130,11 @@ def listed_at(text: str, now: datetime | None = None) -> datetime | None:
     now = (now or datetime.now(VIENNA)).astimezone(VIENNA)
     try:
         dt = datetime(now.year, month, int(m.group(2)), int(m.group(3)), int(m.group(4)), tzinfo=VIENNA)
-    except ValueError:
+        if dt > now + timedelta(days=1):
+            dt = dt.replace(year=now.year - 1)
+    except ValueError:                      # Feb-30, or a Feb-29 whose year (this one or last) has none
         return None
-    if dt > now + timedelta(days=1):
-        dt = dt.replace(year=now.year - 1)
-    return dt
+    return dt.astimezone(timezone.utc)
 
 
 def parse_card(card: str, now: datetime | None = None) -> Listing | None:
@@ -175,11 +177,16 @@ def parse_card(card: str, now: datetime | None = None) -> Listing | None:
                    is_private=is_private, is_bumped=None, status="active", platform="ebay")
 
 
+def _has_results(page: str) -> bool:
+    """A result page (also one with "0 Ergebnisse"), not a bot check's or error page."""
+    return bool(_COUNT.search(page or "")) or "srp-results" in (page or "")
+
+
 def parse_search(page: str, now: datetime | None = None) -> SearchPage:
     """The result page -> SearchPage. "0 Ergebnisse" gives an empty page (the cards below are only suggestions)."""
-    m = _COUNT.search(page or "")
-    if not m and "srp-results" not in (page or ""):
+    if not _has_results(page):
         raise PlatformError(t("eBay answered without a result list"))
+    m = _COUNT.search(page)
     total = int(m.group(1).replace(".", "")) if m else None
     if total == 0:
         return SearchPage(rows_found=0, ads=[])
@@ -201,6 +208,8 @@ _ITEM_LOCATION = re.compile(r'"itemLocation":\{"_type":"LabelsValues".{0,300}?"v
                             r'"textSpans":\[\{"_type":"TextSpan","text":"([^"]+)"', re.S)
 _DESC_FRAME = re.compile(r'<iframe\b[^>]*\bid="?desc_ifr"?[^>]*\bsrc="?([^"\s>]+)', re.I)
 _PHOTO_ID = re.compile(r"i\.ebayimg\.com/(?:thumbs/)?images/g/([^/\s\"']+)/s-l\d+")
+_CODE_LABEL = re.compile(r"(?:EAN|GTIN|UPC|ISBN|MPN|Herstellernummer)\b", re.I)
+_NUMBER_CODE = re.compile(r"[\d ,;/-]{7,}[\dX]", re.I)      # 4006381333931, 978-3-16-148410-0, 3-16-148410-X, lists
 _HIDDEN = {"clipped", "hide", "ux-bubble-help"}             # screen-reader copies, folded text, tooltips
 _SKIP = {"script", "style", "noscript", "svg", "template", "button"}
 
@@ -308,14 +317,18 @@ def _rows(root: _Node) -> dict[str, tuple[str, str]]:
 
 
 def _specifics(root: _Node) -> list[tuple[str, str]]:
-    """The item specifics (Marke: Lenovo, …) without the condition, which has its own line."""
+    """The item specifics (Marke: Lenovo, …) without the condition, which has its own line, and without product codes
+    that are bare numbers (EAN 0045496420253): nothing to read, and the scam rules would take them for phone numbers."""
     section = root.find("div", "ux-layout-section--features")
     out = []
     for col in section.find_all("div", "ux-layout-section-evo__col") if section else []:
         label = _text(col.find("div", "ux-labels-values__labels-content"))
         value = _text(col.find("div", "ux-labels-values__values-content"))
-        if label and value and label.rstrip(":") != "Artikelzustand":
-            out.append((label.rstrip(":"), value))
+        if not label or not value or label.rstrip(":") == "Artikelzustand":
+            continue
+        if _CODE_LABEL.match(label) and _NUMBER_CODE.fullmatch(value):
+            continue
+        out.append((label.rstrip(":"), value))
     return out
 
 
@@ -404,6 +417,11 @@ class _WarmingUp(PlatformError):
     """403 before this visitor's first answer: eBay's bot manager is still setting its cookies."""
 
 
+def _from_description_host(r: FetchResponse) -> bool:
+    """An answer of itm.ebaydesc.com, where the seller's description lives: not www.ebay.at's bot check."""
+    return (urlsplit(r.url).hostname or "").endswith(DESC_HOST)
+
+
 class EbayClient(HttpPlatformClient):
     def __init__(self, transport: Transport | None = None) -> None:
         super().__init__("ebay", ebay_limiter(), name="eBay", headers={"Accept-Language": "de-AT,de;q=0.9"},
@@ -421,14 +439,17 @@ class EbayClient(HttpPlatformClient):
         return r.status_code == 403 and not self._warm and self._warmups > 0
 
     def _check_status(self, r: FetchResponse) -> None:
+        if _from_description_host(r):
+            return                      # optional: item() leaves the ad without it, the visitor and the pace stay
         if self._warming_up(r):
             self._warmups -= 1
             raise _WarmingUp("eBay: warming up")
         super()._check_status(r)
 
     def _exit_blocked(self, r: FetchResponse) -> bool:
-        """Through the VPN a warm-up 403 keeps the exit: _check_status asks again through it."""
-        return not self._warming_up(r) and super()._exit_blocked(r)
+        """Through the VPN a warm-up 403 keeps the exit: _check_status asks again through it. So does a refused
+        description: another host, and optional."""
+        return not _from_description_host(r) and not self._warming_up(r) and super()._exit_blocked(r)
 
     async def _use(self, proxy: str | None) -> Transport:
         if self._transport is not None and proxy != self._proxy:      # another exit: a new visitor, a new warm-up
@@ -436,37 +457,48 @@ class EbayClient(HttpPlatformClient):
         return await super()._use(proxy)
 
     async def _page(self, url: str, *, params: dict[str, str] | None = None, cache_s: float = 0,
-                    kind: str = "search") -> FetchResponse:
-        """GET a page; a new visitor's warm-up refusals are asked again (see the module docstring)."""
+                    kind: str = "search", is_page: Callable[[str], Any] | None = None) -> FetchResponse:
+        """GET a page; a new visitor's warm-up refusals are asked again (see the module docstring). `is_page(text)`
+        tells the page asked for from a bot check's or error page that came with 200: only the page asked for is
+        cached and makes this visitor warm. _get asks about fetched answers only, so a cached or replayed one (no
+        news about this visitor) never does."""
+        def valid(r: FetchResponse) -> bool:
+            if not is_page(r.text):
+                return False
+            self._warm = True
+            return True
+
         while True:
             try:
-                return await self._get(url, params=params, headers=PAGE_HEADERS, cache_s=cache_s, kind=kind)
+                return await self._get(url, params=params, headers=PAGE_HEADERS, cache_s=cache_s, kind=kind,
+                                       valid=valid if is_page else None)
             except _WarmingUp:
                 log.info("eBay refused a new visitor while its bot check sets the cookies; asking again")
 
     async def search_page(self, params: dict[str, str], *, cache_s: float = 0) -> SearchPage:
-        r = await self._page(SEARCH, params=params, cache_s=cache_s)
+        r = await self._page(SEARCH, params=params, cache_s=cache_s, is_page=_has_results)
         if r.status_code != 200:
             raise PlatformError(t("eBay search returned HTTP {status}", status=r.status_code))
-        page = parse_search(r.text)
-        self._warm = True
-        return page
+        return parse_search(r.text)
 
     async def item(self, ad_id: str) -> AdDetail | None:
         """The item page and the seller's description (a second page; without it the ad still shows)."""
-        r = await self._page(f"{WEB}/itm/{ad_id}", cache_s=300, kind="detail")
+        r = await self._page(f"{WEB}/itm/{ad_id}", cache_s=300, kind="detail", is_page=_CANONICAL.search)
         if r.status_code in (404, 410):
             return None
         if r.status_code != 200:
             raise PlatformError(t("eBay ad {id}: HTTP {status}", id=ad_id, status=r.status_code))
-        self._warm = True
         description = None
         if m := _DESC_FRAME.search(r.text):
             try:
                 d = await self._page(m.group(1).replace("&amp;", "&"), cache_s=300, kind="detail")
-                description = parse_description(d.text) if d.status_code == 200 else None
             except PlatformError as e:
                 log.info("eBay description of %s: %s", ad_id, e)
+            else:
+                if d.status_code == 200:
+                    description = parse_description(d.text)
+                else:
+                    log.info("eBay description of %s: HTTP %s, the ad shows without it", ad_id, d.status_code)
         return parse_item_page(r.text, ad_id, description)
 
 
@@ -539,9 +571,9 @@ class EbayPlatform(Platform):
         extra = {k: qs[k] for k in ("LH_ItemCondition",) if qs.get(k)}
         if qs.get("LH_PrefLoc", DEFAULT_LOCATION) != DEFAULT_LOCATION:
             extra["LH_PrefLoc"] = qs["LH_PrefLoc"]
+        # the link's sort (_sop) is dropped: agents diff on newness, a price-sorted window would miss new ads
         spec = SearchSpec(platform=self.id, url="", keyword=keyword or None, price_from=_num(qs.get("_udlo")),
-                          price_to=_num(qs.get("_udhi")), category=category, sort=_SORT_OF.get(qs.get("_sop", ""), "newest"),
-                          extra=extra)
+                          price_to=_num(qs.get("_udhi")), category=category, sort="newest", extra=extra)
         spec.url = self._url(spec)
         return spec
 

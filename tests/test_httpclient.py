@@ -252,6 +252,35 @@ async def test_ebay_warms_up_on_an_exit_instead_of_leaving_it():
     assert len((await c.search_page({"_nkw": "ipod"})).ads) == 5            # warm: a 403 refuses the exit
     assert tunnel.failures[1:] == [("http://exit2", "blocked")] and len(exits["http://exit3"].calls) == 2
 
+
+async def test_ebay_keeps_the_exit_when_the_description_is_refused():
+    from app.platforms import ebay
+    from tests.conftest import FIXTURES
+
+    exits = {"http://exit1": FakeTransport([(200, (FIXTURES / "ebay_item.html").read_bytes()), (403, b"")])}
+    tunnel = FakeTunnel()
+    c = ebay.EbayClient(transport=FakeTransport([]))
+    c.limiter = RateLimiter(0, name="eBay")
+    c._factory, c._tunnel, c._transport = exits.__getitem__, (lambda: tunnel), None
+    d = await c.item("920036165580")                                       # itm.ebaydesc.com answers 403
+    assert d.place == "Thalgau, Österreich" and tunnel.failures == [] and c.proxy == "http://exit1"
+    assert exits["http://exit1"].cleared == 0 and c._warm and c.limiter.cooling_down_s == 0
+
+
+async def test_a_page_in_place_of_the_one_asked_for_is_not_kept():
+    c, tr = _client([(200, b"<html>bot check</html>"), (200, b'{"a": 1}')])
+    asked = []
+
+    def valid(r):
+        asked.append(r.text)
+        return r.text.startswith("{")
+
+    assert (await c._get("https://fake.example/api", cache_s=60, valid=valid)).text == "<html>bot check</html>"
+    r = await c._get("https://fake.example/api", cache_s=60, valid=valid)        # the bot check was not kept
+    again = await c._get("https://fake.example/api", cache_s=60, valid=valid)    # the answer was
+    assert r.json() == {"a": 1} and again is r and len(tr.calls) == 2 and len(asked) == 2   # cached: not judged again
+
+
 def test_a_proxy_and_a_mock_transport_do_not_mix():
     with pytest.raises(ValueError):
         HttpxTransport({}, httpx.MockTransport(lambda r: httpx.Response(200)), proxy="http://127.0.0.1:1")

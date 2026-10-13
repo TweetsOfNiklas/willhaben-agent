@@ -43,7 +43,7 @@ def test_result_cards_become_listings():
     first, shop, offer, _, abroad = page.ads
     assert first.heading == "Apple iPhone 13 – Top Zustand – 100 % Akkukapazität" and first.ref == f"ebay:{IDS[0]}"
     assert first.price == 229.99 and first.price_display == "229,99 €" and first.is_private is True
-    assert first.published_at.isoformat() == "2026-10-09T23:33:00+02:00" and first.location is None
+    assert first.published_at == datetime(2026, 10, 9, 23, 33, tzinfo=ebay.VIENNA) and first.location is None
     assert first.url == f"https://www.ebay.at/itm/{IDS[0]}" and first.image_url.endswith("/s-l500.webp")
     assert first.body == "Refurbished · +EUR 6,99 Versand · Seller verkaeufer-1, 100% positiv (1)"
     assert shop.is_private is False and "Kostenloser Versand" in shop.body
@@ -63,10 +63,14 @@ def test_no_results_and_fewer_words():
 
 
 def test_listing_time_has_no_year():
-    assert ebay.listed_at("Oct-9 23:33", NOW).isoformat() == "2026-10-09T23:33:00+02:00"
-    assert ebay.listed_at("Okt-9 7:05", NOW).isoformat() == "2026-10-09T07:05:00+02:00"
-    assert ebay.listed_at("Dec-30 10:00", NOW).year == 2025                  # later than today: last year
+    assert ebay.listed_at("Oct-9 23:33", NOW).isoformat() == "2026-10-09T21:33:00+00:00"   # Vienna time, kept as UTC
+    assert ebay.listed_at("Okt-9 7:05", NOW) == datetime(2026, 10, 9, 7, 5, tzinfo=ebay.VIENNA)
+    last_year = ebay.listed_at("Dec-30 10:00", NOW)                          # later than today: last year
+    assert last_year == datetime(2025, 12, 30, 10, 0, tzinfo=ebay.VIENNA) and last_year.hour == 9   # winter time
     assert ebay.listed_at("Feb-30 10:00", NOW) is None and ebay.listed_at("vor 3 Tagen", NOW) is None
+    leap = datetime(2028, 1, 15, 12, 0, tzinfo=ebay.VIENNA)                  # Feb 29 still ahead, none last year
+    assert ebay.listed_at("Feb-29 10:00", leap) is None
+    assert ebay.listed_at("Feb-29 10:00", datetime(2028, 3, 1, tzinfo=ebay.VIENNA)).date().isoformat() == "2028-02-29"
 
 
 def test_links_and_ids():
@@ -76,7 +80,7 @@ def test_links_and_ids():
     assert spec.url == "https://www.ebay.at/sch/i.html?_nkw=rennrad+carbon&_sacat=0&_sop=10&LH_BIN=1&LH_PrefLoc=1&_udhi=900"
     wide = p.parse_search_url("https://www.ebay.at/sch/Handys/9355/i.html?_nkw=iphone&LH_PrefLoc=3&LH_ItemCondition=3000"
                               "&LH_Auction=1&_sop=15")
-    assert wide.category == "9355" and wide.sort == "price_asc"
+    assert wide.category == "9355" and wide.sort == "newest" and "_sop=10" in wide.url   # agents watch newest first
     assert wide.extra == {"LH_ItemCondition": "3000", "LH_PrefLoc": "3"}       # a link may widen the place
     assert "LH_BIN=1" in wide.url and "LH_Auction" not in wide.url            # never auctions
     assert p.parse_search_url("https://www.ebay.at/sch/i.html?_sacat=9355").keyword is None
@@ -136,14 +140,49 @@ async def test_warm_up_gives_up_and_errors():
         await c.search_page({"_nkw": "x"})
 
 
+async def test_a_cached_answer_does_not_warm_a_new_visitor():
+    t = CookieQueue([(200, PAGE.encode()), (403, b""), (403, b""), (200, PAGE.encode())])
+    c = ebay.EbayClient(transport=t)
+    c.limiter = RateLimiter(0, name="eBay")
+    await c.search_page({"_nkw": "iphone"}, cache_s=60)
+    with pytest.raises(Blocked):                                           # warm: a block, then a new visitor
+        await c.search_page({"_nkw": "ipad"})
+    assert t.cleared == 1 and not c._warm
+    c.limiter.reset()                                                      # the pause is over
+    assert len((await c.search_page({"_nkw": "iphone"}, cache_s=60)).ads) == 5 and len(t.calls) == 2   # cached
+    assert not c._warm                                                     # the old visitor's answer
+    assert len((await c.search_page({"_nkw": "ipod"})).ads) == 5          # the new one's first 403: its warm-up
+    assert t.cleared == 1 and len(t.calls) == 4 and c._warm
+
+
+async def test_a_bot_check_answered_with_200_is_no_pass_and_not_kept():
+    challenge = b"<html><head><title>Pardon Our Interruption...</title></head><body>Bitte warten</body></html>"
+    t = CookieQueue([(200, challenge), (200, challenge), (403, b""), (200, ITEM_PAGE.encode()), (500, b""),
+                     (200, PAGE.encode())])
+    c = ebay.EbayClient(transport=t)
+    c.limiter = RateLimiter(0, name="eBay")
+    with pytest.raises(PlatformError, match="without the item page"):
+        await c.item(ITEM)
+    with pytest.raises(PlatformError, match="without a result list"):
+        await c.search_page({"_nkw": "iphone"}, cache_s=60)
+    assert not c._warm and t.cleared == 0
+    d = await c.item(ITEM)                         # asked again, no cached bot check; its first 403 is the warm-up
+    assert d.heading.startswith("Maxi-Cosi") and len(t.calls) == 5 and t.cleared == 0 and c._warm
+    assert len((await c.search_page({"_nkw": "iphone"}, cache_s=60)).ads) == 5 and len(t.calls) == 6
+
+
 async def test_agent_end_to_end(platform, client):
-    a = create_agent("https://www.ebay.at/sch/i.html?_nkw=iphone+13&LH_PrefLoc=1&LH_BIN=1&_sop=10")
+    a = create_agent("https://www.ebay.at/sch/i.html?_nkw=iphone+13&LH_PrefLoc=1&LH_BIN=1&_sop=15")
     assert a.platform == "ebay" and a.name == "iphone 13" and a.interval_s >= 300
     res = await run_agent(a.id)
     assert res.baseline and res.error is None
+    assert parse_qs(urlsplit(client._transport.calls[-1][0]).query)["_sop"] == ["10"]   # the link's price sort: dropped
     with session() as db:
         hits = list(db.exec(select(Hit).where(Hit.agent_id == a.id)))
     assert sorted(h.ad_id for h in hits) == sorted(IDS) and {h.platform for h in hits} == {"ebay"}
+    first = next(h for h in hits if h.ad_id == IDS[0])                       # "Oct-9 23:33", Vienna summer time
+    assert first.published_at.replace(tzinfo=None) == ebay.listed_at("Oct-9 23:33").replace(tzinfo=None)
+    assert first.published_at.hour == 21                                     # stored as UTC like every site's times
 
 
 # ------------------------------------------------------------------ the item page
@@ -196,6 +235,26 @@ async def test_item_page_after_the_warm_up():
     d = await c.item(ITEM)
     assert d.heading.startswith("Maxi-Cosi") and d.description and "Verkaufe" not in d.description   # no description page
     assert len(t.calls) == 3 and t.cleared == 0
+
+
+async def test_a_refused_description_leaves_the_visitor_and_the_pace():
+    for status in (403, 429):
+        t = CookieQueue([(200, ITEM_PAGE.encode()), (status, b"")])
+        c = ebay.EbayClient(transport=t)
+        c.limiter = RateLimiter(0, name="eBay")
+        d = await c.item(ITEM)
+        assert d.heading.startswith("Maxi-Cosi") and "Verkaufe" not in d.description      # the ad, no description
+        assert t.cleared == 0 and c._warm and c.limiter.cooling_down_s == 0
+        assert t.calls[1][0].startswith(f"https://itm.ebaydesc.com/itmdesc/{ITEM}?")
+
+
+def test_number_codes_stay_out_of_the_description():
+    from app.services import scam
+
+    s = ebay.parse_item_page(SHOP_PAGE.replace(">Nicht zutreffend<", ">0045496420253<"), SHOP)
+    assert "0045496420253" not in s.description and "EAN" not in s.description and "Marke: Lenovo" in s.description
+    assert "Herstellernummer: Lenovo ThinkPad x1 Carbon Gen 8" in s.description          # a code in words stays
+    assert not [f for f in scam.for_viewer(s) if "phone" in f["code"]]                  # no "+45" phone number
 
 
 def test_viewer_shows_the_item(platform):
