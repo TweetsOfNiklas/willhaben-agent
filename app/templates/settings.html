@@ -9,6 +9,8 @@
 {% set sub_ids = wh_sub|map('first')|list %}
 {% set sites = [("willhaben", "willhaben", ('bad' if session_status.started and not session_status.logged_in else ''))] + wh_sub %}
 {% for p in platforms_all(false) %}{% if p.id != 'willhaben' %}{% set _x = sites.append((p.id, p.name, ('' if platform_enabled(p.id) else 'off'))) %}{% endif %}{% endfor %}
+{# VPN: the WireGuard exits of every site's anonymous requests (settings/vpn.html); a dot when a site has none working #}
+{% set _x = sites.append(("vpn", _("VPN"), ('bad' if vpn_health()[0] == 'problem' else ''))) %}
 {% set groups = [
   (_("Platforms"), sites),
   (_("Shipping & pickup"), [("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("printers", _("Printers"), ''), ("calendar", "Google Calendar", '')]),

@@ -11,6 +11,7 @@ disk – it makes no calls to willhaben, Claude, HA, Telegram or Google itself:
   Live chat   BrowserSession.chat_live_ok()
   Calendar    gcal client + refresh token present (a revoked Google grant shows only when the calendar is used)
   Disk        free space of DATA_DIR
+  VPN         the sites with their VPN switch on have a working WireGuard exit (Tunnel state in memory)
 
 Each item is "ok", "problem", "off" (not set up / switched off) or "unknown" (no data yet, ignored).
 Optional services (Home Assistant, Telegram, Google Calendar) are "off" while they are not (fully) set up; they are a
@@ -207,7 +208,16 @@ def _disk() -> Status:
     return st
 
 
-CHECKS = [_willhaben, _claude, _ha, _telegram, _live_chat, _gcal, _disk]
+def _vpn() -> Status:
+    """The anonymous requests' WireGuard exits (app/platforms/vpn.py): off unless a site has its VPN switch on;
+    a problem when such a site has no working exit (its requests pause, they never go out directly)."""
+    from app.platforms import vpn
+
+    state, reason = vpn.health()
+    return Status("vpn", "VPN", state, reason, href="/settings/vpn")
+
+
+CHECKS = [_willhaben, _claude, _ha, _telegram, _live_chat, _gcal, _disk, _vpn]
 
 
 def collect() -> list[Status]:

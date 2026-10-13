@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     platform_ebay_min_gap_s: float = 8.0            # Akamai watches the website; every search is a whole page
     platform_ebay_per_hour: int = 40
     kleinanzeigen_api_auth: str = ""            # "user:pw" of the kleinanzeigen app API; empty = the bundled default
+    # --- VPN for the anonymous requests (app/platforms/vpn.py): WireGuard configs are uploaded in Settings → VPN
+    wireproxy_bin: str = "wireproxy"             # userspace WireGuard with a local proxy; part of the image
 
     # --- logged-in browser session (Playwright persistent profile) ---
     browser_enabled: bool = True
@@ -92,6 +94,10 @@ class Settings(BaseSettings):
     @property
     def uploads_dir(self) -> Path:
         return self.data_dir / "ad-drafts"
+
+    @property
+    def wireguard_dir(self) -> Path:
+        return self.data_dir / "wireguard"
 
 
 def address_check(url: str | None) -> dict[str, bool]:

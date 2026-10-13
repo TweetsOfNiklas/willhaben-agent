@@ -226,6 +226,14 @@ class KleinanzeigenClient(HttpPlatformClient):
     def classify(self, url: str) -> str:
         return classify(url)
 
+    def _exit_blocked(self, r: FetchResponse) -> bool:
+        """Through the VPN: Akamai's HTML 403 or a 429 refuse the exit; the API's own 401/403 (JSON) means the app
+        credentials and stays an error (_check_status). Not seen live yet."""
+        if r.status_code == 429:
+            return True
+        return r.status_code == 403 and ("text/html" in r.header("content-type").lower()
+                                         or "akamai" in r.header("server").lower())
+
     def _check_status(self, r: FetchResponse) -> None:
         if r.status_code in (401, 403):          # the app credentials were rotated, not a block of this IP
             raise PlatformError(t("Kleinanzeigen refused the app credentials (HTTP {status}); enter current ones in "
@@ -307,6 +315,7 @@ class KleinanzeigenPlatform(Platform):
     id = "kleinanzeigen"
     name = "Kleinanzeigen"
     host = "kleinanzeigen.de"
+    api_host = "api.kleinanzeigen.de"
     home_country = "DE"
     hosts = ("kleinanzeigen.de",)
     image_hosts = ("kleinanzeigen.de", "ebayimg.com")

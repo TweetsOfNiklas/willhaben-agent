@@ -28,6 +28,7 @@ class WillhabenPlatform(Platform):
     id = "willhaben"
     name = "willhaben"
     host = "willhaben.at"
+    api_host = "www.willhaben.at"
     home_country = "AT"
     hosts = ("willhaben.at",)
     image_hosts = ("willhaben.at",)

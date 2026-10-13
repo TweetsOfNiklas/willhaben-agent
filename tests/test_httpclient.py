@@ -123,3 +123,120 @@ async def test_public_client_is_a_platform_client():
     assert page.rows_found == 0 and c.platform == "willhaben" and c._client is not None
     assert access_log.pending() and access_stats.last_hour() == 1
     await c.aclose()
+
+
+# ------------------------------------------------------------------ through the VPN (app/platforms/vpn.py)
+class FakeTunnel:
+    """Hands out routes http://exit1, http://exit2, ...; failed() moves on. `dead`: no exit works (fail closed)."""
+
+    def __init__(self, dead=False):
+        from app.platforms.vpn import Route
+
+        self.Route, self.dead, self.n, self.route, self.failures = Route, dead, 0, None, []
+
+    async def ensure(self):
+        if self.dead:
+            raise PlatformError("No working VPN exit for Fake")
+        if self.route is None:
+            self.n += 1
+            self.route = self.Route(f"http://exit{self.n}", self.n)
+        return self.route
+
+    async def failed(self, route, reason):
+        self.failures.append((route.proxy, reason))
+        if self.route is not None and route.gen == self.route.gen:
+            self.route = None
+
+
+def _vpn_client(answers_by_exit: dict, tunnel: FakeTunnel, cls=HttpPlatformClient, **kw):
+    transports = {proxy: FakeTransport(answers) for proxy, answers in answers_by_exit.items()}
+    built = []
+
+    def factory(proxy):
+        built.append(proxy)
+        return transports[proxy]
+
+    c = cls("fake", RateLimiter(0, name="Fake"), name="Fake", transport_factory=factory, tunnel=lambda: tunnel, **kw)
+    return c, transports, built
+
+
+async def test_a_refused_exit_moves_on_without_pausing_the_site():
+    tunnel = FakeTunnel()
+    c, transports, built = _vpn_client({"http://exit1": [(403, b"cloudflare")], "http://exit2": [(200, b"{}")]}, tunnel)
+    before = access_stats.last_hour(platform="fake")
+    r = await c._get("https://fake.example/api")
+    assert r.status_code == 200 and c.proxy == "http://exit2"
+    assert built == ["http://exit1", "http://exit2"] and tunnel.failures == [("http://exit1", "blocked")]
+    assert c.limiter.cooling_down_s == 0          # the shared limiter (logged-in session too) is not paused
+    assert access_stats.last_hour(platform="fake") - before == 2        # both requests count, the 403 as blocked
+
+
+async def test_three_refusals_give_up_for_this_request():
+    tunnel = FakeTunnel()
+    c, _, built = _vpn_client({f"http://exit{i}": [(429 if i == 2 else 403, b"")] for i in (1, 2, 3)}, tunnel)
+    with pytest.raises(Blocked) as info:
+        await c._get("https://fake.example/api")
+    assert info.value.sent and "refused the VPN exit" in str(info.value) and len(built) == 3
+    assert [f[1] for f in tunnel.failures] == ["blocked", "rate", "blocked"] and c.limiter.cooling_down_s == 0
+
+
+async def test_no_exit_means_no_request_at_all():
+    c, _, built = _vpn_client({}, FakeTunnel(dead=True))
+    with pytest.raises(PlatformError, match="No working VPN exit"):
+        await c._get("https://fake.example/api")
+    assert built == []                            # never a direct transport (factory(None))
+
+
+async def test_an_unreachable_exit_moves_on():
+    tunnel = FakeTunnel()
+    c, _, _ = _vpn_client({"http://exit1": [TransportError("proxy connect refused")], "http://exit2": [(200, b"{}")]}, tunnel)
+    assert (await c._get("https://fake.example/api")).status_code == 200
+    assert tunnel.failures == [("http://exit1", "unreachable")]
+
+
+async def test_cached_answers_do_not_touch_the_tunnel():
+    tunnel = FakeTunnel()
+    c, transports, _ = _vpn_client({"http://exit1": [(200, b"{}")]}, tunnel)
+    await c._get("https://fake.example/api", cache_s=60)
+    tunnel.dead = True
+    assert (await c._get("https://fake.example/api", cache_s=60)).status_code == 200
+
+
+async def test_the_vpn_follows_the_switch_without_a_new_client(monkeypatch):
+    from app.platforms import vpn
+
+    tunnel = FakeTunnel()
+    monkeypatch.setattr(vpn, "tunnel_for", lambda pid: tunnel if vpn.enabled(pid) else None)
+    transports = {None: FakeTransport([(200, b"{}")]), "http://exit1": FakeTransport([(200, b"{}")])}
+    c = HttpPlatformClient("fake", RateLimiter(0, name="Fake"), transport_factory=lambda p: transports[p])
+    await c._get("https://fake.example/a")
+    assert c.proxy is None and len(transports[None].calls) == 1
+    vpn.set_enabled("fake", True)
+    await c._get("https://fake.example/b")
+    assert c.proxy == "http://exit1" and len(transports["http://exit1"].calls) == 1
+
+
+async def test_kleinanzeigen_tells_an_exit_block_from_rotated_credentials():
+    from app.platforms.kleinanzeigen import KleinanzeigenClient
+
+    ka = KleinanzeigenClient(transport=FakeTransport([]))
+    html = FetchResponse(403, {"Content-Type": "text/html; charset=utf-8", "Server": "AkamaiGHost"}, b"<html>", "u")
+    creds = FetchResponse(403, {"content-type": "application/json"}, b"{}", "u")
+    assert ka._exit_blocked(html) and not ka._exit_blocked(creds)
+    assert ka._exit_blocked(FetchResponse(429, {}, b"", "u")) and not ka._exit_blocked(FetchResponse(401, {}, b"", "u"))
+
+    tunnel = FakeTunnel()
+    ka._factory = lambda proxy: FakeTransport([(403, b'{"error": "unauthorized"}')])
+    ka._tunnel, ka._transport = (lambda: tunnel), None
+    with pytest.raises(PlatformError, match="app credentials"):         # through the VPN too: no rotation
+        await ka._get("https://api.kleinanzeigen.de/api/ads.json")
+    assert tunnel.failures == []
+
+
+def test_a_proxy_and_a_mock_transport_do_not_mix():
+    with pytest.raises(ValueError):
+        HttpxTransport({}, httpx.MockTransport(lambda r: httpx.Response(200)), proxy="http://127.0.0.1:1")
+    tr = HttpxTransport({}, proxy="http://127.0.0.1:1")
+    assert tr.proxy == "http://127.0.0.1:1"
+    curl = CurlTransport({}, proxy="http://127.0.0.1:1")
+    assert curl.proxy == "http://127.0.0.1:1"

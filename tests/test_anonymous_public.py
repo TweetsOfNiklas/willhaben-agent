@@ -14,7 +14,7 @@ ANONYMOUS_MODULES = ["services/search_agents.py", "services/screening.py", "serv
                      "willhaben/export.py", "platforms/__init__.py", "platforms/base.py", "platforms/types.py",
                      "platforms/text.py", "platforms/ratelimit.py", "platforms/registry.py", "platforms/willhaben.py",
                      "platforms/httpclient.py", "platforms/kleinanzeigen.py", "platforms/shpock.py",
-                     "platforms/vinted.py", "platforms/preisjaeger.py", "platforms/ebay.py"]
+                     "platforms/vinted.py", "platforms/preisjaeger.py", "platforms/ebay.py", "platforms/vpn.py"]
 # the agent pipeline talks to platforms only through app.platforms (a new site needs no change there)
 PLATFORM_NEUTRAL = ["services/search_agents.py"]
 SITE_MODULES = {"app.willhaben.parse", "app.willhaben.public"}
@@ -50,6 +50,31 @@ def test_agent_pipeline_is_platform_neutral():
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module in SITE_MODULES:
                 raise AssertionError(f"{rel} imports {node.module}: go through app.platforms instead")
+
+
+ACCOUNT_MODULES = ["willhaben/session.py", "willhaben/account.py", "willhaben/insert.py", "willhaben/sales.py"]
+VPN_MODULES = {"app.platforms.vpn", "app.platforms.httpclient"}
+
+
+def test_the_logged_in_session_never_uses_the_vpn():
+    """The VPN is for the anonymous requests only: the account side never imports it, and the browser is launched
+    without a proxy (Chromium would otherwise send the login through the tunnel)."""
+    for rel in ACCOUNT_MODULES:
+        tree = ast.parse((APP / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = {node.module, *(f"{node.module}.{a.name}" for a in node.names)}
+                assert not names & VPN_MODULES, f"{rel} imports {names & VPN_MODULES}"
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "launch_persistent_context":
+                assert "proxy" not in {k.arg for k in node.keywords}, f"{rel}: the logged-in browser gets a proxy"
+
+
+def test_the_vpn_never_sets_proxy_variables():
+    """Proxies are passed to the anonymous clients explicitly; HTTP(S)_PROXY in the environment would reach Chromium."""
+    for rel in ("platforms/vpn.py", "platforms/httpclient.py", "services/ad_images.py"):
+        tree = ast.parse((APP / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            assert not (isinstance(node, ast.Attribute) and node.attr in ("environ", "putenv")), f"{rel} touches the environment"
 
 
 async def test_public_client_has_own_jar_and_starts_fresh(monkeypatch):

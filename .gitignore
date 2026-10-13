@@ -4,6 +4,9 @@ data/
 compose.override.yaml
 *.db
 *.sqlite
+# WireGuard configs hold a private key: upload them in Settings → VPN, never commit them
+mullvad_wireguard*/
+*wireguard*.zip
 
 # python / tooling
 .venv/

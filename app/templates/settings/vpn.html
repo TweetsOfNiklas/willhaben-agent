@@ -1,0 +1,56 @@
+{# Settings → Platforms → VPN: WireGuard exits for the anonymous requests of every site (app/platforms/vpn.py).
+   `vpn` from vpn.status(): {mode, count, profile, countries, binary, sites: [{id, name, on, exit, error, failing,
+   marks}], any_on}. Private keys never reach this page. #}
+{% import "_ui.html" as ui %}
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <span class="font-medium">{{ _("WireGuard configs") }}</span>
+    {% if vpn.mode == 'collection' %}{{ ui.pill(_("Config collection · {n} configs", n=vpn.count), 'ok') }}
+    {% elif vpn.mode == 'profile' %}{{ ui.pill(_("Dedicated profile · {name}", name=vpn.profile), 'ok') }}
+    {% else %}{{ ui.pill(_("Nothing uploaded"), '', false) }}{% endif %}
+  </div>
+  {% if vpn.mode == 'collection' %}<small class="text-[12.5px] text-muted">{% for cc, n in vpn.countries[:14] %}{{ cc|upper }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}{% if vpn.countries|length > 14 %} · …{% endif %}</small>{% endif %}
+  {% if not vpn.binary %}{{ ui.msg(_("wireproxy is not installed, so no tunnel can start. It is part of the app's Docker image; outside of it set WIREPROXY_BIN."), 'warn') }}{% endif %}
+  <small class="text-[12.5px] text-muted">{{ _("Only the anonymous requests use the VPN: search agents, hit screening, the price check, the ad viewer and the product search, with their photos. The logged-in willhaben browser never does. When no exit works, these requests pause; they never fall back to your own connection.") }}</small>
+</section>
+
+<section class="flex flex-col rounded-box border border-base-300 bg-base-100 px-5 py-2">
+  {% for s in vpn.sites %}
+  <div class="flex flex-col gap-1.5 py-3 {{ 'border-t border-base-300' if not loop.first else '' }}">
+    <form method="post" action="/settings/vpn/site/{{ s.id }}" class="m-0">
+      {{ ui.switch_row(_("{site} through the VPN", site=s.name), '', s.on, 'name="enabled" value="1" onchange="this.form.submit()"') }}
+    </form>
+    {% if s.on %}
+    <span class="text-[12.5px] {{ 'text-error' if s.failing else 'text-muted' }}">
+      {% if s.exit %}{{ _("Exit now: {name}", name=s.exit) }}{% elif s.error %}{{ s.error }}{% else %}{{ _("Starts with the next request") }}{% endif %}
+    </span>
+    {% if s.marks %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("{n} exits skipped for now", n=s.marks|length) }}</summary>
+      <ul class="mt-1 flex flex-col gap-0.5 pl-4">{% for name, reason, until in s.marks[:50] %}<li><span class="tabular-nums">{{ name }}</span> · {{ reason }}</li>{% endfor %}{% if s.marks|length > 50 %}<li>…</li>{% endif %}</ul>
+    </details>{% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+  <form method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <span class="font-medium">{{ _("Config collection (.zip)") }}</span>
+    <small class="text-[12.5px] text-muted">{{ _("Many configs, e.g. Mullvad's download of all servers. The sites start near home and move on to the next config whenever one is blocked or does not answer.") }}</small>
+    <input type="file" name="file" accept=".zip,application/zip" required class="file-input file-input-sm w-full bg-base-200">
+    <button class="btn btn-primary btn-sm self-start">{{ _("Upload collection") }}</button>
+  </form>
+  <form method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <span class="font-medium">{{ _("Dedicated profile (.conf)") }}</span>
+    <small class="text-[12.5px] text-muted">{{ _("One config, used as it is. If a site blocks it, that site pauses until you upload another one.") }}</small>
+    <input type="file" name="file" accept=".conf" required class="file-input file-input-sm w-full bg-base-200">
+    <button class="btn btn-primary btn-sm self-start">{{ _("Upload profile") }}</button>
+  </form>
+</section>
+<small class="text-[12.5px] text-muted">{{ _("A new upload replaces the current configs. They stay on this server, readable only by the app, and are part of backups. Give the app its own VPN device: a key that is also connected elsewhere to the same server would interrupt both.") }}</small>
+
+{% if vpn.mode %}
+<div class="flex flex-wrap items-center gap-2.5">
+  <form method="post" action="/settings/vpn/forget" class="m-0"><button class="btn btn-sm">{{ _("Forget blocks") }}</button></form>
+  <form method="post" action="/settings/vpn/clear" class="m-0" onsubmit="return confirm({{ _('Remove all WireGuard configs? Sites with the VPN on pause until you upload new ones.')|tojson|forceescape }})"><button class="btn btn-ghost btn-sm text-error">{{ _("Remove configs") }}</button></form>
+</div>
+{% endif %}

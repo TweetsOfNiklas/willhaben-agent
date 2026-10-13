@@ -58,6 +58,7 @@ class Platform(ABC):
     id: str = ""
     name: str = ""                       # shown in the UI ("willhaben", "Kleinanzeigen")
     host: str = ""                       # the site's main host, for texts ("kleinanzeigen.de")
+    api_host: str = ""                   # the host its requests go to (a VPN exit is probed against it); "" = host
     home_country: str = "AT"             # ISO code: IBAN rule, prompt wording
     currency: str = "€"
     hosts: tuple[str, ...] = ()          # host suffixes a pasted link may have
