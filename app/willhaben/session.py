@@ -334,7 +334,12 @@ class BrowserSession:
             raise NotLoggedIn(f"{path}: HTTP {r.status}")
         if not r.ok:
             raise RuntimeError(f"{method} {path}: HTTP {r.status} {r.text[:200]}")
-        return r.json()
+        try:
+            return r.json()
+        except ValueError:      # e.g. a redirect to one of willhaben's pages: name it instead of a JSON parse error
+            ended = f", {t('ended at')} {r.url}" if r.url and not r.url.endswith(path) else ""
+            raise RuntimeError(t("{method} {path}: willhaben answered with a web page instead of data (HTTP {status}{ended})",
+                                 method=method, path=path, status=r.status, ended=ended)) from None
 
     # ---------------------------------------------------------------- login state
     async def _me(self) -> dict[str, Any] | None:
