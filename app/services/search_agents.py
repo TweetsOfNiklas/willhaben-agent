@@ -8,6 +8,7 @@ URLs or JSON; the adapters do.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Iterable
@@ -441,18 +442,36 @@ def _apply(hit: Hit, ad: Listing) -> None:
     hit.last_seen_at = utcnow()
 
 
+_checking: dict[int, asyncio.Future] = {}     # agent id -> resolved when its current check ends
+
+
+def is_checking(agent_id: int) -> bool:
+    """A check of this agent is running right now (the scheduler then skips its turn)."""
+    return agent_id in _checking
+
+
 async def run_agent(agent_id: int) -> RunResult:
-    """One check of a search agent, as one timeline run (its searches, screening and pushes are the steps)."""
+    """One check of a search agent, as one timeline run (its searches, screening and pushes are the steps). Never two
+    checks of one agent at once: they send every search twice (eBay answered the second with 403, 10-13). A check
+    asked for while one runs ("Run now" during a scheduled one) waits for it, then runs with the current settings."""
     from app.services import timeline
 
-    with session() as db:
-        agent = db.get(SearchAgent, agent_id)
-        title = agent.name if agent else t("Agent {id}", id=agent_id)
-    async with timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
-        res = await _run_agent(agent_id)
-        tl.finish(not res.error, res.error, payload={k: v for k, v in {
-            "rows_found": res.rows_found, "new": len(res.new), "price_drops": len(res.price_drops), "bumped": res.bumped,
-            "baseline": res.baseline or None}.items() if v is not None})
+    while (running := _checking.get(agent_id)) is not None:
+        await asyncio.shield(running)
+    done = asyncio.get_running_loop().create_future()
+    _checking[agent_id] = done
+    try:
+        with session() as db:
+            agent = db.get(SearchAgent, agent_id)
+            title = agent.name if agent else t("Agent {id}", id=agent_id)
+        async with timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
+            res = await _run_agent(agent_id)
+            tl.finish(not res.error, res.error, payload={k: v for k, v in {
+                "rows_found": res.rows_found, "new": len(res.new), "price_drops": len(res.price_drops),
+                "bumped": res.bumped, "baseline": res.baseline or None}.items() if v is not None})
+    finally:
+        del _checking[agent_id]
+        done.set_result(None)
     return res
 
 

@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
 from app.services import chats, health, human_pace, my_ads, quiet_hours, timeline
-from app.services.search_agents import run_agent
+from app.services.search_agents import is_checking, run_agent
 from app.willhaben import access_log
 from app.willhaben.session import get_session
 
@@ -37,6 +37,9 @@ async def _run_agent_job(agent_id: int) -> None:
         return
     if human_pace.take_break():
         log.info("agent %s: skipping this check (human-like break)", agent_id)
+        return
+    if is_checking(agent_id):            # "Run now" is still at it: the next turn comes soon enough
+        log.info("agent %s: a check is still running, skipped", agent_id)
         return
     with timeline.fresh(actor="scheduler"):
         await run_agent(agent_id)
