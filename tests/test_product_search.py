@@ -897,3 +897,71 @@ def test_planned_searches_link_to_the_chosen_site(app_client):
     from app.deals_web import plan_query_url
     assert plan_query_url(plan["queries"][1]).startswith("https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/computer-4")
     assert plan_query_url({"keyword": "x", "url": "https://example.org/ran"}) == "https://example.org/ran"
+
+
+# ------------------------------------------------------------------ load more
+async def test_load_more_ranks_the_next_offers(wh, claude, monkeypatch):
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    row = ps.get(sid)
+    first = [r["ad_id"] for r in row.results]
+    pool = [c["ad_id"] for c in row.pool]
+    assert len(first) == 2 and row.candidates == 4 and not set(first) & set(pool)
+    ranked_first = claude.calls[-1]["prompt"]
+    assert row.pool[0]["title"] not in ranked_first                           # the unseen reserve comes first
+    assert ps.load_more(sid) is True and ps.get(sid).status == "more" and ps.running().id == sid
+    with pytest.raises(ps.Busy):
+        ps.start("noch was", ps.make_settings())
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and [r["ad_id"] for r in row.results][:2] == first and len(row.results) == 4
+    assert row.candidates == 4 + min(4, len(pool)) and row.progress["more"] == 1 and len(claude.calls) == 3
+    assert {r["ad_id"] for r in row.results[2:]} <= set(pool[:4])
+    while ps.load_more(sid):                                                   # until the pool is used up
+        await _finish()
+    row = ps.get(sid)
+    assert not row.pool and ps.load_more(sid) is False
+    assert len({r["ad_id"] for r in row.results}) == len(row.results)          # no offer twice
+
+
+async def test_load_more_without_claude_and_after_a_restart(wh, claude, monkeypatch):
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    claude.fail_rank = True
+    assert ps.load_more(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and len(row.results) > 2 and "showing the cheapest" in row.warning
+    ps._update(sid, status="more")                                             # interrupted by a restart
+    ps.recover()
+    assert ps.get(sid).status == "done" and ps.get(sid).results == row.results
+    with pytest.raises(KeyError):
+        ps.load_more(9999)
+
+
+def test_load_more_on_the_page(app_client, monkeypatch):
+    asked = []
+    monkeypatch.setattr(ps, "load_more", lambda sid: asked.append(sid) or True)   # the route only starts it
+    rows = [{"ad_id": str(n), "platform": "willhaben", "title": f"Spüler {n}", "price": 100.0 + n,
+             "price_display": f"{100 + n} €", "url": f"https://x/{n}", "fit": 80 - n, "position": {"pos": None}}
+            for n in range(3)]
+    with dbmod.session() as db:
+        row = dbmod.ProductSearch(description="Spüler", status="done", results=rows[:1], pool=rows[1:],
+                                  settings=ps.make_settings(photos=False), progress={"done": 3, "total": 3, "more": 1})
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    frag = app_client.get(f"/deals/search/{row.id}").text
+    assert f'action="/deals/search/{row.id}/more"' in frag and "2 more offers found" in frag
+    assert "3 Claude calls" in frag                                            # plan + ranking + one more ranking
+    r = app_client.post(f"/deals/search/{row.id}/more", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/deals?search={row.id}#ps-more" and asked == [row.id]
+    ps._update(row.id, status="more", pool=rows[1:])
+    ps._active.add(row.id)                                                     # the task that loads them runs
+    frag = app_client.get(f"/deals/search/{row.id}").text
+    ps._active.discard(row.id)
+    assert "Claude is ranking 2 more offers" in frag and "Spüler 0" in frag and 'hx-trigger="every 2s"' in frag
+    ps._update(row.id, status="done", pool=None)
+    assert "No more offers in this search." in app_client.get(f"/deals/search/{row.id}").text

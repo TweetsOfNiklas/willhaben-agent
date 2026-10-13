@@ -65,11 +65,12 @@ ROWS = 30
 SORTS = {"relevance": 7, "newest": 1}        # willhaben's codes; the adapters map the names
 MAX_CANDIDATES = 40
 TOP_N = 10
+MAX_POOL = 160               # offers kept after a search for "load more" (the next candidates, then the passed-over)
 OVER_BUDGET = 1.5            # ads above 1.5 × the budget are not worth a look
 TEXT_CHARS = 220             # ad text per candidate in the ranking prompt
 MAX_DESCRIPTION = 2000
 RECENT = 10
-RUNNING = ("planning", "searching", "ranking", "photos")    # "asking" waits for the person, no task runs
+RUNNING = ("planning", "searching", "ranking", "photos", "more")   # "asking" waits for the person, no task runs
 CLAUDE_CALLS = 2             # plan + ranking; the templates add one when settings["photos"] is on
 MAX_PHOTOS = TOP_N           # photos sent in the photo check
 PHOTO_RAISE = 10             # the photo check may raise the text fit by at most this much
@@ -572,7 +573,7 @@ def rerun(search_id: int) -> None:
     replan = not (row.plan and row.plan.get("queries"))
     # a re-run never asks again: the stored answers stay, a search that has none gets {} (= questions skipped)
     _update(search_id, status="planning" if replan else "searching", results=None, queries=None, requests=None,
-            candidates=None, note=None, warning=None, error=None, started_at=utcnow(), finished_at=None, cards=None,
+            candidates=None, note=None, warning=None, error=None, started_at=utcnow(), finished_at=None, cards=None, pool=None,
             answers=row.answers if row.answers is not None else {},
             progress={"done": 0, "total": len((row.plan or {}).get("queries") or []) or max_queries(row.settings)})
     _active.add(search_id)
@@ -600,7 +601,10 @@ def recover() -> None:
     """After a restart no search task is running any more (a search in "asking" has none: it stays)."""
     with session() as db:
         for row in db.exec(select(ProductSearch).where(col(ProductSearch.status).in_(RUNNING))):
-            row.status, row.error, row.finished_at = "error", t("Interrupted by a restart."), utcnow()
+            if row.status == "more":             # loading more: the offers shown before stay
+                row.status = "done"
+            else:
+                row.status, row.error, row.finished_at = "error", t("Interrupted by a restart."), utcnow()
             db.add(row)
         db.commit()
 
@@ -632,16 +636,18 @@ async def run(search_id: int, replan: bool = True) -> None:
         found = await run_queries(plan, settings,
                                   on_progress=lambda d, total, sent: _update(search_id, requests=sent,
                                                                              progress={"done": d, "total": total}))
-        picked = pick_candidates(found["pools"])
+        picked = pick_candidates(found["pools"], cap=MAX_CANDIDATES + MAX_POOL)
         cards = [card(found["query_of"][pi], ad, plan, found["prices"][pi]) for pi, ad in picked]
+        cards, reserve = cards[:MAX_CANDIDATES], cards[MAX_CANDIDATES:]      # the reserve is for "load more"
         searched = {"queries": found["per_query"], "requests": found["requests"], "candidates": len(cards),
                     "warning": found["warning"]}
         if cards and plan.get("questions") and row.answers is None and settings.get("ask"):
             # wait for the answers: the cards are kept, nothing more runs until continue_run
-            _update(search_id, status="asking", cards=cards, **searched)
+            _update(search_id, status="asking", cards=cards, pool=reserve or None, **searched)
             return
         _update(search_id, status="ranking", **searched)
-        await _rank_and_finish(search_id, row.description, plan, settings, cards, row.answers, found["warning"])
+        await _rank_and_finish(search_id, row.description, plan, settings, cards, row.answers, found["warning"],
+                               reserve)
     except Exception as e:  # noqa: BLE001 - a background task must leave a readable state behind
         log.exception("product search %s failed", search_id)
         _update(search_id, status="error", error=str(e) or e.__class__.__name__, finished_at=utcnow())
@@ -657,7 +663,7 @@ async def _continue(search_id: int) -> None:
         if row is None:
             return
         await _rank_and_finish(search_id, row.description, row.plan or {}, row.settings or make_settings(),
-                               list(row.cards or []), row.answers, row.warning)
+                               list(row.cards or []), row.answers, row.warning, list(row.pool or []))
     except Exception as e:  # noqa: BLE001 - a background task must leave a readable state behind
         log.exception("product search %s failed", search_id)
         _update(search_id, status="error", error=str(e) or e.__class__.__name__, finished_at=utcnow())
@@ -667,8 +673,10 @@ async def _continue(search_id: int) -> None:
 
 @timeline.scoped(search_id="search_id")
 async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any], settings: dict[str, Any],
-                           cards: list[dict[str, Any]], answers: dict[str, Any] | None, warning: str | None) -> None:
-    """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped (rows stay small)."""
+                           cards: list[dict[str, Any]], answers: dict[str, Any] | None, warning: str | None,
+                           reserve: list[dict[str, Any]] | None = None) -> None:
+    """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped. The offers not shown stay
+    in `pool` for "load more": the unseen reserve first, then the cards Claude passed over."""
     pairs = answer_pairs(plan, answers)
     note = ""
     if not cards:
@@ -688,4 +696,61 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                     warning = f"{warning} {msg}" if warning else msg
     await geo.locate(results)           # coordinates from postcodes, home geocoded once: the list can sort by distance
     _update(search_id, status="done", results=results, note=note or None, warning=warning, finished_at=utcnow(),
-            cards=None)
+            cards=None, pool=_pool(reserve or [], cards, results))
+
+
+def _key(c: dict[str, Any]) -> tuple[str, str]:
+    return c.get("platform") or "willhaben", str(c.get("ad_id"))
+
+
+def _pool(fresh: list[dict[str, Any]], seen: list[dict[str, Any]], shown: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """What "load more" can still show: the unseen offers first, then those Claude saw and passed over."""
+    taken = {_key(c) for c in shown}
+    out = [c for c in fresh + seen if _key(c) not in taken]
+    return out[:MAX_POOL] or None
+
+
+def load_more(search_id: int) -> bool:
+    """Rank the next offers of a finished search in the background and add the best below the others. False when
+    there is nothing more (not done, pool empty). Raises KeyError, Busy while a search runs."""
+    row = get(search_id)
+    if row is None:
+        raise KeyError(search_id)
+    if row.status != "done" or not row.pool:
+        return False
+    if running():
+        raise Busy(t("A product search is still running – wait for it to finish."))
+    _update(search_id, status="more")
+    _active.add(search_id)
+    _spawn(_more(search_id))
+    return True
+
+
+@timeline.scoped(search_id="search_id")
+async def _more(search_id: int) -> None:
+    _active.add(search_id)
+    try:
+        row = get(search_id)
+        if row is None:
+            return
+        plan, settings, pool = row.plan or {}, row.settings or make_settings(), list(row.pool or [])
+        batch, rest = pool[:MAX_CANDIDATES], pool[MAX_CANDIDATES:]
+        pairs = answer_pairs(plan, row.answers)
+        warning = None
+        try:
+            more, _note, _model = await rank(row.description, plan, batch, answers=pairs)
+        except LLMError as e:
+            more = unranked(batch)
+            warning = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
+        else:
+            if more and settings.get("photos"):
+                more, warning = await check_photos(row.description, plan, more, answers=pairs)
+        await geo.locate(more)
+        progress = {**(row.progress or {}), "more": int((row.progress or {}).get("more") or 0) + 1}
+        _update(search_id, status="done", results=list(row.results or []) + more, pool=_pool(rest, batch, more),
+                candidates=(row.candidates or 0) + len(batch), progress=progress, warning=warning or row.warning)
+    except Exception as e:  # noqa: BLE001 - the results shown so far stay; the failure is a warning
+        log.exception("loading more offers for product search %s failed", search_id)
+        _update(search_id, status="done", warning=t("Loading more offers failed: {error}", error=str(e) or type(e).__name__))
+    finally:
+        _active.discard(search_id)

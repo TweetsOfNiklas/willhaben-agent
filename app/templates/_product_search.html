@@ -6,7 +6,7 @@
     {% if not live and ps.status != 'asking' %}<a href="/deals?from={{ ps.id }}#ps-form" class="btn btn-xs ml-auto" title="{{ _('Copies the text and the options into the search form; you check them and start the search.') }}">{{ ui.icon('edit', 13) }}{{ _("New search") }}</a>{% endif %}</header>
   <div class="flex flex-col gap-3 px-4 py-3.5">
     <p class="italic text-muted">„{{ ps.description }}“</p>
-    {% if live %}{% set pr = ps.progress or {} %}
+    {% if live and ps.status != 'more' %}{% set pr = ps.progress or {} %}
     <div class="flex items-center gap-2.5"><div class="min-w-0 flex-1"><div class="font-semibold">{% if ps.status == 'planning' %}{{ _("Claude is planning the searches …") }}{% elif ps.status == 'searching' %}{{ _("Searching: {done} of {total} searches done …", done=pr.done or 0, total=pr.total or 0) }}{% elif ps.status == 'photos' %}{{ _("Claude is looking at the photos …") }}{% else %}{{ _("Claude is picking the best offers …") }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div></div><span class="loading loading-spinner loading-sm shrink-0 text-primary"></span></div>
     {{ ui.bar(((pr.done or 0) * 100 / pr.total)|round|int if ps.status == 'searching' and pr.total else (20 if ps.status == 'planning' else 85), 'brand', 'h-1') }}
     {% elif ps.status == 'asking' %}{% set qs = plan.questions or [] %}
@@ -20,7 +20,7 @@
     {% set pairs = ps_answer_pairs(plan, ps.answers) %}
     {% if plan.summary or pairs %}<div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-2.5 text-[13px]">{% if plan.summary %}<strong>{{ _("Claude's understanding") }}:</strong> {{ plan.summary }}{% endif %}<div class="mt-1 flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px] text-muted">{% if plan.max_price %}<span>{{ _("Budget: up to {price}", price=plan.max_price|eur) }}</span>{% endif %}{% if plan.must_have %}<span>{{ plan.must_have|join(" · ") }}</span>{% endif %}{% if plan.nice_to_have %}<span>{{ plan.nice_to_have|join(" · ") }}</span>{% endif %}{% if plan.exclude %}<span>{{ plan.exclude|join(" · ") }}</span>{% endif %}</div>
       {% if pairs %}<div class="mt-1 text-[12.5px] text-muted"><strong>{{ _("Your answers") }}:</strong> {% for q, a in pairs %}{{ q }} <strong>{{ a }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}</div>{% endif %}
-    {% if not live and ps.status == 'done' %}
+    {% if ps.status in ('done', 'more') %}
       {% if ps.warning %}{{ ui.msg(ps.warning, 'warn') }}{% endif %}{% if ps.note %}<p class="text-[13px]">{{ ps.note }}</p>{% endif %}
       {# the offers in Claude's order, by price or by distance from home: reordered in the browser, the choice remembered #}
       {% set home = home_point() %}
@@ -31,8 +31,9 @@
              apply() { const list = this.$refs.list; if (!list) return;
                        const key = { fit: 'i', price: 'price', distance: 'km' }[this.order] || 'i';
                        const v = (el) => el.dataset[key] === '' || el.dataset[key] === undefined ? Infinity : +el.dataset[key];
-                       [...list.children].sort((a, b) => v(a) - v(b) || a.dataset.i - b.dataset.i).forEach((el) => list.appendChild(el)) } }">
-      <div class="flex flex-wrap items-baseline justify-between gap-2"><h3>{{ _("Best offers") }} <span class="text-[13px] font-normal text-muted">· {{ _("{n} searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=ps_claude_calls + (1 if st.photos else 0)) }}{% if (st.platforms or [])|length > 1 %} · {% for pid in st.platforms %}{{ platform_name(pid) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</span></h3>
+                       [...list.children].sort((a, b) => v(a) - v(b) || a.dataset.i - b.dataset.i).forEach((el) => list.appendChild(el)) } }"
+           class="flex flex-col gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2"><h3>{{ _("Best offers") }} <span class="text-[13px] font-normal text-muted">· {{ _("{n} searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=ps_claude_calls + (1 if st.photos else 0) + ((ps.progress or {}).more or 0) * (2 if st.photos else 1)) }}{% if (st.platforms or [])|length > 1 %} · {% for pid in st.platforms %}{{ platform_name(pid) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</span></h3>
         {% if ps.results and ps.results|length > 1 %}<div role="group" aria-label="{{ _('Sort the offers') }}" class="inline-flex gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px] text-[12.5px]">
           {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('distance', _('Distance'))] %}<button type="button" @click="sort('{{ key }}')" :aria-pressed="order === '{{ key }}'" :class="order === '{{ key }}' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" class="rounded-md px-2.5 py-0.5 disabled:opacity-50"{% if key == 'distance' and not home %} disabled title="{{ _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}"{% endif %}>{{ label }}</button>{% endfor %}
         </div>{% endif %}</div>
@@ -49,12 +50,17 @@
         <div class="col-start-2 flex flex-col items-start gap-1.5 md:col-start-auto md:items-end md:text-right"><div class="text-[17px] font-semibold tabular-nums">{{ r.price_display or (r.price|eur) }}</div><div class="flex flex-wrap gap-1.5 md:justify-end"><a class="btn btn-xs" href="{{ r.url }}" data-ad="{{ ad_ref(r.get('platform'), r.ad_id) }}">{{ _("Open") }}</a>{% set rp = r.get('platform') or 'willhaben' %}<a class="btn btn-xs" href="{{ '/deals/ad/' ~ r.ad_id if rp == 'willhaben' else '/deals/ad/' ~ rp ~ '/' ~ r.ad_id }}?q={{ (r.query or '')|urlencode }}">{{ _("Check price") }}</a>{% if rp != 'willhaben' %}{% elif purchase_enabled() %}<a class="btn btn-primary btn-xs" data-buy="{{ r.ad_id }}" href="/purchases/new/{{ r.ad_id }}?search={{ ps.id }}&amp;q={{ (r.query or '')|urlencode }}">{{ _("Buy") }}</a>{% else %}<a class="btn btn-xs" href="/settings/purchase" title="{{ _('Turn on purchases in Settings') }}">{{ _("Buy") }}</a>{% endif %}</div></div>
       </article>{% endfor %}</div>
       {% else %}<p class="text-muted">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
+      {# more offers: the search found more than Claude ranked; the next ones are ranked on request and added below #}
+      {% set left = (ps.pool or [])|length %}
+      {% if ps.status == 'more' %}<div id="ps-more" class="flex items-center gap-2.5 text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span>{{ _("Claude is ranking {n} more offers …", n=[left, 40]|min) }}</div>
+      {% elif left %}<form id="ps-more" method="post" action="/deals/search/{{ ps.id }}/more" x-data="{ busy: false }" @submit="busy = true" class="flex flex-wrap items-center gap-2.5"><button class="btn btn-sm" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Load more offers") }}</button><small class="text-[12.5px] text-muted">{{ _("{n} more offers found; Claude ranks the next {k} and adds the best below.", n=left, k=[left, 40]|min) }}</small></form>
+      {% elif ps.results %}<p id="ps-more" class="text-[12.5px] text-muted">{{ _("No more offers in this search.") }}</p>{% endif %}
       </div>
     {% endif %}
     {% if plan.queries %}<details data-keep="queries" class="text-[13px] text-muted"><summary class="cursor-pointer">{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
       {% set multi_site = (st.platforms or [])|length > 1 %}<table class="table table-sm mt-2"><thead class="text-[11.5px] tracking-wide uppercase"><tr><th>{{ _("Search term") }}</th>{% if multi_site %}<th>{{ _("Site") }}</th>{% endif %}<th>{{ _("Why") }}</th><th>{{ _("Found") }}</th></tr></thead><tbody>
       {% for q in (ps.queries or plan.queries) %}<tr><td>{% set q_url = plan_query_url(q, st.platforms) %}{% if q_url %}<a class="link link-primary" href="{{ q_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% else %}{{ q.keyword }}{% endif %}{% if q.price_from or q.price_to %}<br><small class="text-muted">{{ q.price_from|eur if q.price_from else '' }}–{{ q.price_to|eur if q.price_to else '' }}</small>{% endif %}</td>{% if multi_site %}<td>{{ platform_name(q.platform) }}</td>{% endif %}<td>{{ q.why }}{% if q.category_hint %}<br><span class="text-muted">{{ q.category_hint }}</span>{% endif %}</td><td>{% if q.error %}{{ q.error }}{% elif q.skipped %}{{ _("skipped") }}{% elif q.found is defined and q.found is not none %}{{ _("{n} ads, {k} new candidates", n=q.found, k=q.kept) }}{% else %}–{% endif %}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
-    {% if not live and ps.status == 'done' and plan.queries %}
+    {% if ps.status in ('done', 'more') and plan.queries %}
       {% for a in ps_agents %}<small><a class="link link-primary" href="/agents">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% if ps_agents|length > 1 or ps_agent_sites %} ({{ platform_name(a.platform) }}){% endif %}</small>{% endfor %}
       {% if ps_agent_sites %}<details data-keep="agent" class="text-[13px]"><summary class="cursor-pointer">{{ _("Create a search agent from this search") }}</summary>
         <form method="post" action="/deals/search/{{ ps.id }}/agent" class="mt-2 flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-200 px-4 py-3.5">

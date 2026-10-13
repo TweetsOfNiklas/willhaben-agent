@@ -216,6 +216,18 @@ async def product_search_rerun(search_id: int):
     return RedirectResponse(f"/deals?search={search_id}#ps-result", status_code=303)
 
 
+@router.post("/deals/search/{search_id}/more")
+async def product_search_more(search_id: int):
+    """The next offers of a finished search: Claude ranks them, the best are added below (in the background)."""
+    try:
+        product_search.load_more(search_id)
+    except KeyError as e:
+        raise HTTPException(404) from e
+    except product_search.Busy:
+        return RedirectResponse(f"/deals?search={search_id}&msg=busy", status_code=303)
+    return RedirectResponse(f"/deals?search={search_id}#ps-more", status_code=303)
+
+
 @router.post("/deals/search/{search_id}/answers")
 async def product_search_answers(request: Request, search_id: int):
     """Answers to the plan's questions (a_<id> = a chosen option, o_<id> = free text, which wins) or `skip`; the

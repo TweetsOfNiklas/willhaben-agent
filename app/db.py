@@ -267,6 +267,7 @@ class ProductSearch(SQLModel, table=True):
     cards: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # candidates while "asking"
     queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # per query: found, error
     results: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # ranked offers
+    pool: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))     # offers left for "load more"
     progress: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {done, total}
     requests: int | None = None         # willhaben searches this run sent
     candidates: int | None = None
