@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app import platforms
 from app.db import Hit, SearchAgent, session
-from app.services import deals, search_agents
+from app.services import deals, geizhals, search_agents
 from app.services.search_agents import create_agent, geizhals_below_pct, geizhals_passes, run_agent
 from tests.fake_platform import FakePlatform, listing
 
@@ -104,6 +104,85 @@ async def test_held_back_hits_cost_no_claude_call(fake, world, monkeypatch):
     fake.pages = [[listing("1", "iPhone 13 128GB", 340.0), listing("2", "iPhone 13 128GB", 450.0)]]
     await run_agent(a.id)
     assert screened == ["1"]
+
+
+def test_exactly_x_percent_below_passes():
+    """Exactly X % below keeps the rule (700 € · 0.7 is 489.99999… in floats); the % shown never rounds up to X."""
+    a = SearchAgent(name="x", source_url="x", webapi_url="x")
+    for new, price, pct in ((700.0, 490.0, 30), (500.0, 465.0, 7), (300.0, 207.0, 31), (699.9, 489.93, 30)):
+        a.geizhals_pct = pct
+        h = Hit(agent_id=1, ad_id="1", heading="iPhone", url="x", price=price, geizhals={**GH, "price_from": new})
+        assert geizhals_passes(a, h) and geizhals_below_pct(h) == pct
+        h.price = round(price + 0.01, 2)                                      # a cent dearer: held back
+        assert not geizhals_passes(a, h) and geizhals_below_pct(h) == pct - 1
+    a.geizhals_pct = 30
+    held = Hit(agent_id=1, ad_id="1", heading="iPhone", url="x", price=352.0, geizhals=dict(GH))   # 29.6 % below
+    assert not geizhals_passes(a, held) and geizhals_below_pct(held) == 29
+    assert geizhals_below_pct(Hit(agent_id=1, ad_id="1", heading="x", url="x", price=601.0, geizhals=dict(GH))) == -20
+
+
+async def test_a_held_back_hit_returns_only_screened(fake, world, monkeypatch):
+    """Screening on, price drops not reported: a hit the rule held back was never screened, so a drop under the line
+    leaves it filtered (no way into New past Claude); reported drops are screened first and then it returns."""
+    screened = []
+
+    async def screen(agent_id, hits):
+        screened.extend(h.ad_id for h in hits)
+
+    monkeypatch.setattr(search_agents.screening, "screen", screen)
+    a = create_agent("https://fake.example/s/iphone")
+    fake.pages = [[]]
+    await run_agent(a.id)
+    _set(a.id, geizhals_pct=30, screen=True, notify_price_drops=False)
+    fake.pages = [[listing("1", "iPhone 13 128GB defekt", 400.0)]]
+    await run_agent(a.id)
+    assert _hits(a.id)["1"].state == "filtered" and screened == []
+    fake.pages = [[listing("1", "iPhone 13 128GB defekt", 300.0), listing("2", "Handyhülle", 10.0)]]
+    await run_agent(a.id)                                                     # under the line, but not screened
+    hits = _hits(a.id)
+    assert hits["1"].state == "filtered" and hits["2"].state == "new" and screened == ["2"]
+    _set(a.id, notify_price_drops=True)
+    fake.pages = [[listing("1", "iPhone 13 128GB defekt", 290.0), listing("2", "Handyhülle", 10.0)]]
+    await run_agent(a.id)
+    assert _hits(a.id)["1"].state == "new" and screened == ["2", "1"]
+
+
+async def test_a_failed_lookup_is_asked_again(fake, monkeypatch):
+    """Geizhals blocked or down: the hit passes as usual and is looked up again later, not kept as "no product"."""
+    sent, asked = [], []
+
+    async def notify(kind, title, text="", **kw):
+        sent.append((kind, (kw.get("data") or {}).get("ad_id"), kw.get("push", True)))
+
+    async def down(query):
+        asked.append(query)
+        raise geizhals.GeizhalsError("HTTP 429")
+
+    async def up(query):
+        asked.append(query)
+        return {"query": query, "verified": True, "candidates": [], "match": dict(GH)}
+
+    monkeypatch.setattr(search_agents, "notify", notify)
+    monkeypatch.setattr(deals.geizhals, "lookup", down)
+    deals.clear_cache()
+    try:
+        a = create_agent("https://fake.example/s/iphone")
+        fake.pages = [[]]
+        await run_agent(a.id)
+        _set(a.id, geizhals_pct=30)
+        fake.pages = [[listing("1", "iPhone 13 128GB", 480.0)]]
+        await run_agent(a.id)
+        hit = _hits(a.id)["1"]
+        assert hit.state == "new" and hit.geizhals is None and sent == [("hit", "1", True)] and len(asked) == 1
+        deals.clear_cache()                                                   # 15 min later Geizhals answers again
+        monkeypatch.setattr(deals.geizhals, "lookup", up)
+        sent.clear()
+        fake.pages = [[listing("1", "iPhone 13 128GB", 470.0)]]
+        await run_agent(a.id)                                                 # 470 € is far above 350 €
+        assert _hits(a.id)["1"].geizhals == GH and len(asked) == 2
+        assert sent == [("price_drop", "1", False)]
+    finally:
+        deals.clear_cache()
 
 
 def test_settings_drawer_and_pages(fake):

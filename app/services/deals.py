@@ -471,6 +471,15 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
     return best
 
 
+def geizhals_failed(query: str | None) -> bool:
+    """geizhals_match's None for this query means Geizhals failed (blocked, down) in the last 15 min, not that it
+    knows no such product: a caller that keeps the answer asks again later."""
+    key = (query or "").lower()
+    if not query or _cached(_geizhals, key, GEIZHALS_TTL_S):
+        return False
+    return bool(_cached(_geizhals_fail, key, GEIZHALS_FAIL_TTL_S))
+
+
 def _ad_summary(ad: AdDetail) -> dict[str, Any]:
     return {"ad_id": ad.ad_id, "ref": ad.ref, "platform": ad.platform, "title": ad.heading, "price": ad.price,
             "price_display": ad.price_display,

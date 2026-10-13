@@ -573,7 +573,7 @@ async def _run_agent(agent_id: int) -> RunResult:
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         await screening.screen(agent_id, to_screen)
     if (agent.screen or agent.geizhals_pct) and to_notify:
-        _file_screened(agent, res.new, res.price_drops)
+        _file_screened(agent, res.new, res.price_drops, {h.id for h in to_screen})
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
     multi = platforms.multi()
@@ -615,13 +615,21 @@ def _site(pid: str | None) -> platforms.Platform:
         return platforms.get("willhaben")
 
 
+def _geizhals_cents(hit: Hit) -> tuple[int, int] | None:
+    """(ad price, Geizhals new price) in whole cents, None without both: whole numbers compare exactly (in floats
+    700 € · 0.7 is 489.99999… €, so an ad exactly 30 % below would miss a 30 % rule)."""
+    new_price = round(((hit.geizhals or {}).get("price_from") or 0) * 100)
+    return None if new_price <= 0 or hit.price is None else (round(hit.price * 100), new_price)
+
+
 def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
     """The agent's Geizhals rule: the price is at least `geizhals_pct` % below the Geizhals new price. Without the rule,
     a known product (not found, Geizhals unreachable) or a price there is nothing to compare: the hit passes."""
-    new_price = (hit.geizhals or {}).get("price_from")
-    if not agent.geizhals_pct or not new_price or hit.price is None:
+    cents = _geizhals_cents(hit)
+    if not agent.geizhals_pct or cents is None:
         return True
-    return hit.price <= new_price * (1 - agent.geizhals_pct / 100)
+    price, new_price = cents
+    return price * 100 <= new_price * (100 - agent.geizhals_pct)
 
 
 def passes(agent: SearchAgent, hit: Hit) -> bool:
@@ -630,17 +638,24 @@ def passes(agent: SearchAgent, hit: Hit) -> bool:
 
 
 async def _geizhals_prices(hits: list[Hit]) -> None:
-    """The Geizhals product of every hit not asked yet (the price check's lookup, cached 6 h per product name)."""
+    """The Geizhals product of every hit not asked yet (the price check's lookup, cached 6 h per product name). When
+    Geizhals fails (blocked, down) the hit stays not asked: it passes now and a later run asks again."""
     from app.services import deals
 
-    todo = [h for h in hits if h.geizhals is None]
-    for h in todo:
-        gh = await deals.geizhals_match(deals.geizhals_query(h.heading))
+    answered = []
+    for h in hits:
+        if h.geizhals is not None:
+            continue
+        query = deals.geizhals_query(h.heading)
+        gh = await deals.geizhals_match(query)
+        if gh is None and deals.geizhals_failed(query):
+            continue
         h.geizhals = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}
-    if not todo:
+        answered.append(h)
+    if not answered:
         return
     with session() as db:
-        for h in todo:
+        for h in answered:
             row = db.get(Hit, h.id)
             if row is not None:
                 row.geizhals = h.geizhals
@@ -660,11 +675,14 @@ def remember_geizhals(hit_id: int, gh: dict[str, Any]) -> None:
         db.commit()
 
 
-def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit]) -> None:
+def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], screened: set[int]) -> None:
     """A new hit the screening or the Geizhals rule holds back gets no push, so it goes to "filtered" instead of
-    "new"; a filtered hit that passes after a price drop is pushed and becomes new again."""
+    "new"; a filtered hit that passes after a price drop is pushed and becomes new again. With screening on only a hit
+    Claude has judged or was asked about in this run (`screened`; a failed call lets it pass, as it does the push): one
+    the Geizhals rule held back has no verdict, and a drop that is not reported is not screened."""
     moves = [(h, "new", "filtered") for h in new if not passes(agent, h)]
-    moves += [(h, "filtered", "new") for h in drops if passes(agent, h)]
+    moves += [(h, "filtered", "new") for h in drops if passes(agent, h)
+              and (not agent.screen or h.screen_relevant is not None or h.id in screened)]
     if not moves:
         return
     with session() as db:
@@ -700,11 +718,14 @@ def _hit_text(h: Hit) -> str:
 
 
 def geizhals_below_pct(h: Hit) -> int | None:
-    """How many % the hit is below its Geizhals new price (negative: above); None without both prices."""
-    new_price = (h.geizhals or {}).get("price_from")
-    if not new_price or h.price is None:
+    """How many % the hit is below its Geizhals new price (negative: above); None without both prices. Whole % towards
+    zero, so it shows the rule's X % exactly when the hit keeps the rule (29.6 % below is 29, not 30)."""
+    cents = _geizhals_cents(h)
+    if cents is None:
         return None
-    return round((1 - h.price / new_price) * 100)
+    price, new_price = cents
+    pct = abs(new_price - price) * 100 // new_price
+    return pct if price <= new_price else -pct
 
 
 def _geizhals_line(h: Hit) -> str:
