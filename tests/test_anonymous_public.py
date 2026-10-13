@@ -14,7 +14,7 @@ ANONYMOUS_MODULES = ["services/search_agents.py", "services/screening.py", "serv
                      "willhaben/export.py", "platforms/__init__.py", "platforms/base.py", "platforms/types.py",
                      "platforms/text.py", "platforms/ratelimit.py", "platforms/registry.py", "platforms/willhaben.py",
                      "platforms/httpclient.py", "platforms/kleinanzeigen.py", "platforms/shpock.py",
-                     "platforms/vinted.py", "platforms/preisjaeger.py"]
+                     "platforms/vinted.py", "platforms/preisjaeger.py", "platforms/ebay.py"]
 # the agent pipeline talks to platforms only through app.platforms (a new site needs no change there)
 PLATFORM_NEUTRAL = ["services/search_agents.py"]
 SITE_MODULES = {"app.willhaben.parse", "app.willhaben.public"}

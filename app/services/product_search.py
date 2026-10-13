@@ -480,7 +480,8 @@ async def check_photos(description: str, plan: dict[str, Any], results: list[dic
         images: list[Path] = []
         items = []
         for nr, r in todo:
-            img = await ad_images.download(r["image_url"], Path(tmp), f"r{nr}", transport=_transport)
+            img = await ad_images.download(r["image_url"], Path(tmp), f"r{nr}", transport=_transport,
+                                           platform=r.get("platform"))
             if img is None:
                 continue
             images.append(img)

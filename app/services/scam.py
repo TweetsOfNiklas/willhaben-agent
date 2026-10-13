@@ -48,9 +48,9 @@ ABROAD = re.compile(r"\b(im ausland|aus dem ausland|ins ausland|beruflich (im au
 SHIP_ONLY = re.compile(r"\b(nur|ausschlie(?:ß|ss)lich)\s+(per\s+)?(post)?versand\b|" + NO_PICKUP.pattern, _I)
 OFF_PLATFORM = re.compile(r"\b(nur|ausschlie(?:ß|ss)lich)\s+(?:(?:über|per|via|auf|an|mit|unter)\s+)?"
                           r"(whats\s?app|telegram|signal|viber|e-?mail|mail)\b|"
-                          r"\bkeine (willhaben|kleinanzeigen|shpock|vinted|plattform|portal|app)[- ]?nachrichten\b|"
-                          r"\bantworte nicht (auf|über) (willhaben|kleinanzeigen|shpock|vinted|die plattform|die app)\b|"
-                          r"\b((willhaben|kleinanzeigen|shpock|vinted|plattform)[- ]?)?nachrichten (hier )?(werden )?nicht gelesen\b", _I)
+                          r"\bkeine (willhaben|kleinanzeigen|shpock|vinted|ebay|plattform|portal|app)[- ]?nachrichten\b|"
+                          r"\bantworte nicht (auf|über) (willhaben|kleinanzeigen|shpock|vinted|ebay|die plattform|die app)\b|"
+                          r"\b((willhaben|kleinanzeigen|shpock|vinted|ebay|plattform)[- ]?)?nachrichten (hier )?(werden )?nicht gelesen\b", _I)
 MESSENGER = re.compile(r"\b(whats\s?app|telegram|viber)\b", _I)
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]*[a-z]{2,}", _I)
 EMAIL_SPELLED = re.compile(r"\b[\w.+-]+\s*(\(at\)|\[at\])\s*[\w-]+\s*(\.|\(punkt\)|\(dot\))\s*[a-z]{2,}\b", _I)

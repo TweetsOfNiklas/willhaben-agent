@@ -3,8 +3,8 @@
 Search agents, the ad viewer, the Claude screening, the scam check and the price check talk to a site only through
 its adapter in `app/platforms/`. The adapters today: willhaben (`willhaben.py`), kleinanzeigen.de (`kleinanzeigen.py`,
 the app's JSON API), Shpock (`shpock.py`, the website's GraphQL API, asked with GET), Vinted (`vinted.py`, the
-React Server Components data of the website's own pages) and Preisjäger (`preisjaeger.py`, the deal cards of the
-search page). A new site is one module plus fixtures and tests. Buying, chats and your own ads stay willhaben's.
+React Server Components data of the website's own pages), Preisjäger (`preisjaeger.py`, the deal cards of the
+search page) and eBay (`ebay.py`, the result cards of ebay.at's search page). A new site is one module plus fixtures and tests. Buying, chats and your own ads stay willhaben's.
 Facebook Marketplace needs a login; a site like that would need the browser transport described below.
 
 ## The contract (`app/platforms/base.py`)
@@ -39,7 +39,8 @@ Ads are addressed by **refs** everywhere a bare id travels (links, `?view=`, pus
 Build the client on `HttpPlatformClient` (`app/platforms/httpclient.py`): it gives the limiter, a short cache,
 the offline replay (`WH_REPLAY=1`), the access log and the request recorder (both per platform), a fresh cookie jar
 after a while and after a block, and the 403/429 handling. Override `_check_status` when a code means something
-else on the site (kleinanzeigen: 401/403 = rotated app credentials). The transport is `HttpxTransport` or, for sites
+else on the site (kleinanzeigen: 401/403 = rotated app credentials; eBay: a 403 before the visitor's first answer
+is its bot check setting cookies, so the client keeps them and asks again). The transport is `HttpxTransport` or, for sites
 whose bot protection checks the TLS fingerprint, `CurlTransport` (curl_cffi impersonating Chrome). A browser-backed
 transport for sites that need a login or a real browser (a separate Chromium profile per platform, never the
 willhaben one) would implement the same `Transport` protocol.

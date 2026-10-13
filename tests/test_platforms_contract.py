@@ -91,6 +91,7 @@ SHPOCK_ROUTES = [("/graphql", "shpock_search.json", "application/json"),
 VINTED_ROUTES = [("/catalog", "vinted_catalog.rsc", "text/x-component"),
                  ("/items/10341874098", "vinted_item.rsc", "text/x-component")]
 PREISJAEGER_ROUTES = [("/search", "preisjaeger_search.html", "text/html")]
+EBAY_ROUTES = [("/sch/i.html", "ebay_search.html", "text/html")]
 
 
 def _installer(module, client_cls, routes):
@@ -107,6 +108,19 @@ def _installer(module, client_cls, routes):
 
 
 CASES = {
+    "ebay": {
+        "url": "https://www.ebay.at/sch/i.html?_nkw=iphone+13&_udlo=100&_udhi=500",
+        "volatile": "https://www.ebay.at/sch/i.html?_nkw=iphone+13&_udlo=100&_udhi=500&_pgn=2&_ipg=240&rt=nc&_from=R40",
+        "invalid": ["https://www.ebay.at/itm/287646086506", "https://example.com/sch/i.html?_nkw=x",
+                    "https://www.ebay.at/sch/i.html", "https://www.ebay.at/b/Handys/9355"],
+        "ad_url": "https://www.ebay.at/itm/287646086506?_skw=lego&hash=item42f90af56a",
+        "ad_id": "287646086506",
+        "keyword": "rennrad",
+        "install": _installer("ebay", "EbayClient", EBAY_ROUTES)[0],
+        "uninstall": _installer("ebay", "EbayClient", EBAY_ROUTES)[1],
+        "expect_ads": 5,
+        "detail_id": None,
+    },
     "shpock": {
         "url": "https://www.shpock.com/de-at/results?q=iphone+15+pro&priceFrom=100&priceTo=500",
         "volatile": "https://www.shpock.com/de-at/results?q=iphone+15+pro&priceFrom=100&priceTo=500&sort=x&page=2",

@@ -19,6 +19,7 @@ _FACTORIES: dict[str, str] = {        # id -> "module:Class"; order = display or
     "shpock": "app.platforms.shpock:ShpockPlatform",
     "vinted": "app.platforms.vinted:VintedPlatform",
     "preisjaeger": "app.platforms.preisjaeger:PreisjaegerPlatform",
+    "ebay": "app.platforms.ebay:EbayPlatform",
 }
 _instances: dict[str, Platform] = {}
 _overrides: dict[str, Platform | None] = {}

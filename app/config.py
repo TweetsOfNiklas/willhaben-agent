@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     wh_replay: bool = False
     # --- platforms (app/platforms): which search-agent adapters exist besides willhaben; switching them on for
     # the user happens in Settings → Platforms
-    platforms_enabled: str = "willhaben,kleinanzeigen,shpock,vinted,preisjaeger"
+    platforms_enabled: str = "willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay"
     platform_kleinanzeigen_min_gap_s: float = 3.0
     platform_kleinanzeigen_per_hour: int = 120
     platform_shpock_min_gap_s: float = 4.0
@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     platform_vinted_per_hour: int = 40
     platform_preisjaeger_min_gap_s: float = 4.0
     platform_preisjaeger_per_hour: int = 60
+    platform_ebay_min_gap_s: float = 8.0            # Akamai watches the website; every search is a whole page
+    platform_ebay_per_hour: int = 40
     kleinanzeigen_api_auth: str = ""            # "user:pw" of the kleinanzeigen app API; empty = the bundled default
 
     # --- logged-in browser session (Playwright persistent profile) ---

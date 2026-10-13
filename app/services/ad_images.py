@@ -16,15 +16,30 @@ MAX_IMAGE_BYTES = 3 * 1024 * 1024
 _EXT = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
 
 
-async def download(url: str | None, folder: Path, name: str,
-                   transport: httpx.AsyncBaseTransport | None = None) -> Path | None:
-    """Save the image at `url` as folder/name.<ext>; None unless https, an image and at most MAX_IMAGE_BYTES.
-    Downloads from the willhaben CDN count as anonymous willhaben accesses (access_log)."""
-    if not (url or "").startswith("https://"):
-        return None
+def _site(url: str, platform: str | None):
+    """The platform an image download counts for: the ad's own site when its CDN fits (Kleinanzeigen and eBay share
+    i.ebayimg.com), else whichever site owns the host."""
     from app import platforms
 
-    site = platforms.for_host(urlsplit(url).hostname)      # a CDN image of one of the platforms: counts as its access
+    host = urlsplit(url).hostname
+    if platform:
+        try:
+            p = platforms.get(platform)
+        except platforms.UnknownPlatform:
+            p = None
+        if p is not None and p.matches_host(host):
+            return p
+    return platforms.for_host(host)
+
+
+async def download(url: str | None, folder: Path, name: str,
+                   transport: httpx.AsyncBaseTransport | None = None, platform: str | None = None) -> Path | None:
+    """Save the image at `url` as folder/name.<ext>; None unless https, an image and at most MAX_IMAGE_BYTES.
+    Downloads from a platform's CDN count as anonymous accesses of that platform (access_log); `platform` is the
+    ad's site."""
+    if not (url or "").startswith("https://"):
+        return None
+    site = _site(url, platform)                           # a CDN image of one of the platforms: counts as its access
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True, transport=transport) as c:

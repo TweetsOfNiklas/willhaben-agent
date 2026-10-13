@@ -97,6 +97,7 @@ def test_off_platform_contact():
     assert "off_platform" in codes(ad(body="Bitte nur per E-Mail melden"))
     assert "off_platform" in codes(ad(body="Antworte nicht über Vinted, schreib mir"))
     assert "off_platform" in codes(ad(body="Shpock-Nachrichten werden nicht gelesen"))
+    assert "off_platform" in codes(ad(body="Keine eBay-Nachrichten, ruf an"))
     assert "email" in codes(ad(body="Schreib an max.muster@example.com"))
     assert "email" in codes(ad(body="max.muster(at)example(punkt)com"))
     # mentioning WhatsApp is common and harmless: info only, never a warning badge

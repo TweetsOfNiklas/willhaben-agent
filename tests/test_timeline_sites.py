@@ -93,3 +93,8 @@ def test_redaction_of_the_other_sites_formats():
     assert "dealjaeger" not in out and "EKE Case" in out and out.count("data-vue3=") == pj.count("data-vue3=")
     from app.platforms import preisjaeger
     assert [a.ad_id for a in preisjaeger.parse_search(out).ads] == ["369807", "369875", "369687", "369564"]   # still parses
+    page = (FIXTURES / "ebay_search.html").read_text(encoding="utf-8").replace("verkaeufer-2", "Echter.Haendler")
+    out = redact.redact_html(page, redact.RedactContext())
+    assert "Echter.Haendler" not in out and out.count("% positiv") == page.count("% positiv")
+    from app.platforms import ebay
+    assert len(ebay.parse_search(out).ads) == 5 and "verkaeufer-" in ebay.parse_search(out).ads[1].body

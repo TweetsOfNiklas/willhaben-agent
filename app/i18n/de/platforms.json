@@ -100,5 +100,12 @@
  "main search": "Hauptsuche",
  "The other sites need a search term: type one above.": "Die anderen Seiten brauchen einen Suchbegriff: gib oben einen ein.",
  "Give a search term for {name} (the link has none).": "Gib einen Suchbegriff für {name} an (der Link hat keinen).",
- "Sites:": "Seiten:"
+ "Sites:": "Seiten:",
+ "Seller {name}, {rating}": "Verkäufer {name}, {rating}",
+ "eBay answered without a result list": "eBay antwortete ohne Ergebnisliste",
+ "eBay search returned HTTP {status}": "eBay-Suche antwortete mit HTTP {status}",
+ "Reads the result pages of ebay.at: only Buy It Now offers located in Austria, no auctions. Listings show condition, private or commercial seller, shipping and the listing time but no place; there is no details page.": "Liest die Ergebnisseiten von ebay.at: nur Sofort-Kaufen-Angebote mit Standort Österreich, keine Auktionen. Die Liste zeigt Zustand, privaten oder gewerblichen Verkäufer, Versand und Einstellzeit, aber keinen Ort; eine Detailseite gibt es nicht.",
+ "Not an ebay.at link": "Kein ebay.at-Link",
+ "Not an eBay result list (copy the link of a search: …/sch/i.html?_nkw=…)": "Keine eBay-Ergebnisliste (kopiere den Link einer Suche: …/sch/i.html?_nkw=…)",
+ "The eBay link has no search term (_nkw=…)": "Der eBay-Link enthält keinen Suchbegriff (_nkw=…)"
 }

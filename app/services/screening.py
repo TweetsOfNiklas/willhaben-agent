@@ -114,8 +114,8 @@ def _stats(agent_id: int, exclude: set[int]) -> dict[str, Any] | None:
     return price_stats([p for p in prices if p])
 
 
-async def _download(url: str | None, folder: Path, name: str) -> Path | None:
-    return await ad_images.download(url, folder, name, transport=_transport)   # _transport read per call (tests)
+async def _download(url: str | None, folder: Path, name: str, platform: str | None = None) -> Path | None:
+    return await ad_images.download(url, folder, name, transport=_transport, platform=platform)   # _transport: tests
 
 
 @timeline.scoped(agent_id="agent_id")
@@ -133,7 +133,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         images: list[Path] = []
         items = []
         for nr, h in enumerate(hits, 1):
-            img = await _download(h.image_url, Path(tmp), f"hit{nr}")
+            img = await _download(h.image_url, Path(tmp), f"hit{nr}", h.platform)
             if img:
                 images.append(img)
             items.append({"nr": nr, "title": h.heading, "price": h.price_display or (f"{h.price:g} €" if h.price else None),

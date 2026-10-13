@@ -6,8 +6,9 @@ Replaced: seller/contact/partner names, e-mail addresses, phone numbers, street 
 seller/org ids, user / conversation / message ids, every UUID, chat message texts (numbered "Nachricht 1", …, unless
 kept on purpose), API keys and tokens. Public ad ids, prices, titles and categories stay: tests need them.
 Besides JSON and willhaben's __NEXT_DATA__ pages it reads the other sites' formats: Apollo state of Shpock pages
-(UserSummary entries are people), Preisjäger's data-vue3 attributes (HTML-escaped JSON) and the React Server
-Components data of Vinted pages (one JSON value per line; the "user_info_header" plugin names the seller).
+(UserSummary entries are people), Preisjäger's data-vue3 attributes (HTML-escaped JSON), the React Server
+Components data of Vinted pages (one JSON value per line; the "user_info_header" plugin names the seller) and eBay's
+result cards (the seller's name stands right before the rating "99.6% positiv").
 Deterministic: one value always maps to the same placeholder within one export, so cross-references (a conversation id
 in the list and in the message URL) stay consistent. Review the result before committing it.
 
@@ -30,6 +31,7 @@ PHONE_RE = re.compile(r"(?<![\d.])(?:\+43|0043|0)\s?6\d{1,3}[\s/-]?\d{3,}(?:[\s-
 NEXT_DATA_RE = re.compile(r'(<script id="__NEXT_DATA__" type="application/json">)(.*?)(</script>)', re.S)
 VUE_ATTR_RE = re.compile(r"""(data-vue3=)(?:'([^']*)'|"([^"]*)")""")
 FLIGHT_LINE_RE = re.compile(r"^([0-9a-z]{1,6}):([\[{].*)$")
+EBAY_SELLER_RE = re.compile(r"(<span[^>]*>)([^<>]{1,80}?)(\s*</span><span[^>]*>[\d.,]+\s?% positiv)")
 PERSON_TYPES = {"UserSummary", "User", "PublicUser", "UserProfile", "PublicProfile"}   # GraphQL types that are people
 SELLER_PLUGINS = {"user_info_header", "seller_badges_info"}                               # Vinted item page plugins
 COORD_KEYS = {"latitude", "longitude", "lat", "lng", "lon"}
@@ -196,8 +198,8 @@ def redact_text(text: str, ctx: RedactContext) -> str:
 
 
 def redact_html(html: str, ctx: RedactContext) -> str:
-    """A page: its __NEXT_DATA__ JSON and data-vue3 attributes redacted like any JSON, then the text pass over the
-    whole page."""
+    """A page: its __NEXT_DATA__ JSON and data-vue3 attributes redacted like any JSON, eBay's seller names replaced,
+    then the text pass over the whole page."""
     import html as html_lib
 
     def sub(m: re.Match[str]) -> str:
@@ -214,7 +216,13 @@ def redact_html(html: str, ctx: RedactContext) -> str:
         except ValueError:
             return m.group(0)
         return m.group(1) + "'" + html_lib.escape(json.dumps(data, ensure_ascii=False, separators=(",", ":")), quote=True) + "'"
-    return redact_text(VUE_ATTR_RE.sub(vue, NEXT_DATA_RE.sub(sub, html)), ctx)
+
+    def ebay_seller(m: re.Match[str]) -> str:
+        name = m.group(2).strip()
+        n = sum(1 for v in ctx.names.values() if v.startswith("verkaeufer-")) + 1
+        return m.group(1) + ctx.names.setdefault(name, f"verkaeufer-{n}") + m.group(3)
+    html = EBAY_SELLER_RE.sub(ebay_seller, VUE_ATTR_RE.sub(vue, NEXT_DATA_RE.sub(sub, html)))
+    return redact_text(html, ctx)
 
 
 def redact_flight(text: str, ctx: RedactContext) -> str:

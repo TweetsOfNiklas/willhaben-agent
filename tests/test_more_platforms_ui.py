@@ -10,7 +10,7 @@ from app.platforms.ratelimit import RateLimiter
 from app.services.deals import parse_ad_ref
 from tests.test_platforms_contract import PREISJAEGER_ROUTES, SHPOCK_ROUTES, FileTransport
 
-NEW = ("shpock", "vinted", "preisjaeger")
+NEW = ("shpock", "vinted", "preisjaeger", "ebay")
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def test_registered_off_by_default_with_a_settings_page(client):
     page = client.get("/settings/vinted").text
     assert "about 3 MB" in page and 'action="/settings/platform/vinted"' in page
     nav = page[page.index('<nav aria-label="Settings"'):]
-    assert all(f'href="/settings/{pid}"' in nav for pid in NEW) and nav.count(">off</small>") == 4
+    assert all(f'href="/settings/{pid}"' in nav for pid in NEW) and nav.count(">off</small>") == 5
     assert "the shop is shown where other sites show the place" in client.get("/settings/preisjaeger").text
     client.post("/settings/platform/shpock", data={"enabled": "on", "product_search": "on"})
     assert platforms.enabled("shpock") and platforms.get("shpock").limiter.min_gap_s == 4.0
@@ -48,15 +48,15 @@ def test_registered_off_by_default_with_a_settings_page(client):
 
 def test_product_search_names_the_switched_off_sites(client):
     page = client.get("/deals").text
-    assert "Kleinanzeigen, Shpock, Vinted, Preisjäger can also be searched once you switch them on" in page
+    assert "Kleinanzeigen, Shpock, Vinted, Preisjäger, eBay can also be searched once you switch them on" in page
     assert 'href="/settings/kleinanzeigen">Switch on' in page and 'name="sites"' not in page
     for pid in ("kleinanzeigen", "shpock"):
         set_setting(f"platform_{pid}_enabled", "1")
     page = client.get("/deals").text
-    assert "Vinted, Preisjäger can also be searched" in page and 'href="/settings/vinted">Switch on' in page
+    assert "Vinted, Preisjäger, eBay can also be searched" in page and 'href="/settings/vinted">Switch on' in page
     ai_form = page[page.index('id="ps-form"'):page.index("</form>", page.index('id="ps-form"'))]
     assert ai_form.count('name="sites"') == 3                            # willhaben, Kleinanzeigen, Shpock to tick
-    for pid in ("vinted", "preisjaeger"):
+    for pid in ("vinted", "preisjaeger", "ebay"):
         set_setting(f"platform_{pid}_enabled", "1")
     assert "can also be searched once you switch them on" not in client.get("/deals").text
 
@@ -96,7 +96,7 @@ def test_new_agent_shows_every_site(client):
     sites = page[page.index('id="agent-sites"'):page.index('id="agent-sites"') + 4000]
     assert '<input type="checkbox" name="sites" value="willhaben" class="checkbox checkbox-sm" checked' in sites
     assert all(f'href="/settings/{pid}"' in sites for pid in ("kleinanzeigen", *NEW))       # off: lead to their switch
-    assert "Kleinanzeigen, Shpock, Vinted, Preisjäger can also be watched once you switch them on" in page
+    assert "Kleinanzeigen, Shpock, Vinted, Preisjäger, eBay can also be watched once you switch them on" in page
     set_setting("platform_vinted_enabled", "1")
     sites = client.get("/agents/new?sites=vinted").text
     sites = sites[sites.index('id="agent-sites"'):sites.index('id="agent-sites"') + 4000]

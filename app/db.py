@@ -587,11 +587,15 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "platform_preisjaeger_enabled": "0",
     "platform_preisjaeger_per_hour": "",
     "platform_preisjaeger_min_gap_s": "",
+    "platform_ebay_enabled": "0",
+    "platform_ebay_per_hour": "",
+    "platform_ebay_min_gap_s": "",
     "platform_willhaben_product_search": "1",
     "platform_kleinanzeigen_product_search": "1",
     "platform_shpock_product_search": "1",
     "platform_vinted_product_search": "1",
     "platform_preisjaeger_product_search": "1",
+    "platform_ebay_product_search": "1",
     "kleinanzeigen_api_auth": "",
 }
 

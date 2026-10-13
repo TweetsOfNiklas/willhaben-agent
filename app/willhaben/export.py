@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--since", default="", help="only recordings of the last 7d / 12h / 30m")
     ap.add_argument("--kinds", default="", help="comma-separated: search,detail,chat,send,myads,publish,upload,…")
     ap.add_argument("--channels", default="", help="comma-separated: anonymous,account,chat,navigation,download,browser")
-    ap.add_argument("--platforms", default="", help="comma-separated: willhaben,kleinanzeigen,shpock,vinted,preisjaeger")
+    ap.add_argument("--platforms", default="", help="comma-separated: willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay")
     ap.add_argument("--all", action="store_true", help="every recording, not only the newest per request")
     ap.add_argument("--keep-texts", action="store_true", help="keep chat message texts (names etc. are still replaced)")
     ap.add_argument("--raw", action="store_true", help="no redaction at all (never commit these files)")
