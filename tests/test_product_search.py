@@ -875,3 +875,25 @@ def test_nav_icons_and_kept_open_sections(app_client):
     deals = page[page.index('href="/deals"'):page.index('href="/deals"') + 600]
     assert 'M21 21l-4.3-4.3' in deals                                              # the magnifier for the product search
     assert "sessionStorage" in page and "data-keep" in page
+
+
+def test_planned_searches_link_to_the_chosen_site(app_client):
+    """Before the searches ran, the plan's terms link to the site that will be searched, not to willhaben."""
+    from app.db import set_setting
+
+    set_setting("platform_ebay_enabled", "1")
+    plan = {"summary": "Router", "queries": [{"keyword": "unifi router", "price_from": 50, "price_to": 200, "why": "x"},
+                                             {"keyword": "ubiquiti", "category_path": "kaufen-und-verkaufen/marktplatz/computer-4",
+                                              "why": "y"}]}
+    with dbmod.session() as db:
+        row = dbmod.ProductSearch(description="Router", status="asking", plan=plan,
+                                  settings={**ps.make_settings(), "platforms": ["ebay"]})
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    frag = app_client.get(f"/deals/search/{row.id}").text
+    assert "https://www.ebay.at/sch/i.html?_nkw=unifi+router" in frag and "_udlo=50" in frag
+    assert "https://www.ebay.at/sch/i.html?_nkw=ubiquiti" in frag and "willhaben.at/iad" not in frag
+    from app.deals_web import plan_query_url
+    assert plan_query_url(plan["queries"][1]).startswith("https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/computer-4")
+    assert plan_query_url({"keyword": "x", "url": "https://example.org/ran"}) == "https://example.org/ran"

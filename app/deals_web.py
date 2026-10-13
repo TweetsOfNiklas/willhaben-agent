@@ -30,8 +30,23 @@ log = logging.getLogger(__name__)
 
 
 def install(app: FastAPI, templates: Jinja2Templates) -> None:
-    templates.env.globals.update(deal_level_label=deals.level_label, deal_explain=deals.explain)
+    templates.env.globals.update(deal_level_label=deals.level_label, deal_explain=deals.explain,
+                                 plan_query_url=plan_query_url)
     app.include_router(router)
+
+
+def plan_query_url(q: dict[str, Any], sites: list[str] | None = None) -> str:
+    """The link of one planned search: its own URL once it ran, before that the search on its site (or the first
+    chosen one) as run_queries will send it."""
+    if q.get("url"):
+        return q["url"]
+    pid = q.get("platform") or (sites or ["willhaben"])[0]
+    try:
+        p = platforms.get(pid)
+        return p.keyword_search(q.get("keyword") or "", q.get("price_from"), None,
+                                category=q.get("category_path") if p.id == "willhaben" else None).url
+    except Exception:  # noqa: BLE001 - a site that is gone: no link is better than a wrong one
+        return ""
 
 
 def _templates() -> Jinja2Templates:
