@@ -154,9 +154,9 @@ def test_geizhals_query_only_for_products():
 
 @pytest.mark.parametrize("title, query", [
     ("Raspberry Pi 4 4GB", "Raspberry Pi 4 4GB"),
-    ("Raspberry Pi 4 Model B 4GB", "Raspberry Pi 4 Model 4GB"),                 # capacity past the 4-word cap
-    ("Raspberry Pi 4 Modell B 4GB RAM mit Gehäuse", "Raspberry Pi 4 Modell 4GB"),
-    ("Raspberry Pi 4 Model B 4 GB", "Raspberry Pi 4 Model 4GB"),                # "4 GB" is one word, not a 2nd "4"
+    ("Raspberry Pi 4 Model B 4GB", "Raspberry Pi 4 4GB"),                       # capacity further on is added
+    ("Raspberry Pi 4 Modell B 4GB RAM mit Gehäuse", "Raspberry Pi 4 4GB"),
+    ("Raspberry Pi 4 Model B 4 GB", "Raspberry Pi 4 4GB"),                      # "4 GB" is one word, not a 2nd "4"
     ("Neuwertiger Raspberry Pi 4 (4 GB)", "Raspberry Pi 4 4GB"),
     ("MacBook Air M1 8GB 256GB", "MacBook Air M1 8GB 256GB"),
 ])

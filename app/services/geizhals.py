@@ -2,8 +2,14 @@
 
 Plain HTML pages (no API): search results are `galleryview__item` cards, an article page
 (`...-a<id>.html`) lists its properties as `<dl class="specs-grid">` with dt/dd pairs and the
-lowest offer as `lowPrice: <n>`. Requests are few (one search + one product page per draft) and
-spaced like the willhaben ones.
+lowest offer as `lowPrice: <n>`. Requests are few (a search or up to three, then one product page) and spaced
+like the willhaben ones; a 403/429 pauses Geizhals like any other site.
+
+Matching (checked against real searches, 2026-10-13): the first search result is often another variant ("iPhone 16"
+→ "16 Pro Max", "UniFi Switch 24" → "Switch Pro 24"), so a result counts only when every number of the query is in
+its name, an order code ("USW-24-POE") in its name or link, and it has no variant word (Pro, Max, Lite …), pack or
+accessory word the query lacks. Spelling is forgiven ("I-Phone" = "iPhone", "Rasperry" ≈ "Raspberry"). A query
+that finds nothing fitting is retried with its order code alone and with its key words.
 """
 from __future__ import annotations
 
@@ -11,6 +17,7 @@ import html
 import logging
 import re
 from dataclasses import asdict, dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import urlencode
 
@@ -18,12 +25,12 @@ import httpx
 
 from app.config import get_settings
 from app.i18n import t
-from app.willhaben.public import RateLimiter
+from app.willhaben.public import Blocked, RateLimiter
 
 log = logging.getLogger(__name__)
 
 BASE = "https://geizhals.at"
-_limiter = RateLimiter(2.0)
+_limiter = RateLimiter(2.0, name="Geizhals")
 _transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock transport
 
 _CARD_RE = re.compile(r'<article class="galleryview__item[^"]*"(.*?)</article>', re.S)
@@ -103,12 +110,19 @@ def parse_product(page: str, url: str) -> Product:
 
 async def _get(url: str) -> str:
     headers = {"user-agent": get_settings().user_agent, "accept": "text/html", "accept-language": "de-AT,de;q=0.9"}
-    async with _limiter:
-        try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True, transport=_transport) as c:
-                r = await c.get(url, headers=headers)
-        except httpx.HTTPError as e:
-            raise GeizhalsError(t("Geizhals unreachable: {error}", error=e)) from e
+    try:
+        async with _limiter:
+            try:
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True, transport=_transport) as c:
+                    r = await c.get(url, headers=headers)
+            except httpx.HTTPError as e:
+                raise GeizhalsError(t("Geizhals unreachable: {error}", error=e)) from e
+    except Blocked as e:              # still pausing after a block: no request at all
+        raise GeizhalsError(str(e)) from e
+    if r.status_code in (403, 429):   # blocked: pause (60 s, doubling) instead of asking again every 2 s
+        _limiter.penalize()
+    elif r.status_code == 200:
+        _limiter.reward()
     if r.status_code != 200:
         raise GeizhalsError(t("Geizhals answered HTTP {status}", status=r.status_code))
     return r.text
@@ -130,45 +144,124 @@ def glue_units(s: str) -> str:
     return _UNIT_RE.sub(lambda m: m.group(1).replace(",", ".") + m.group(2), s or "")
 
 
+_WATT_RE = re.compile(r"(\d)\s*w\b", re.I)
+_SLUG_RE = re.compile(r"https://geizhals\.at/(.+?)(?:-a\d+)?\.html")
+# words that make another product of the same line: "iPhone 16" is not the "16 Pro Max", "Switch 8" not "Enterprise 8"
+VARIANT_WORDS = {"max", "plus", "mini", "ultra", "lite", "pro", "se", "air", "fe", "neo", "enterprise", "flex", "xg",
+                 "compute"}
+# a result with one of these the query lacks is something else: an accessory, a multi-pack or a bundle
+OTHER_THING_WORDS = {"kit", "halterung", "mount", "hülle", "case", "cover", "adapter", "kabel", "netzteil", "upgrade",
+                     "ersatzteil", "ersatzteile", "zubehör", "pack", "bundle", "bundles"}
+
+
 def _norm(s: str) -> str:
-    return glue_units(s).lower()
+    return _WATT_RE.sub(r"\1w", glue_units(s)).lower()
+
+
+def _flat(s: str) -> str:
+    return re.sub(r"[^a-z0-9äöüß]", "", (s or "").lower())
+
+
+def _parts(s: str) -> list[str]:
+    return [x for x in re.split(r"[^a-z0-9äöüß]+", (s or "").lower()) if x]
+
+
+def _has_run(parts: list[str], within: list[str]) -> bool:
+    """The code's parts appear one after another: "USW-24-POE" in "…-switch-usw-24-poe", not "18V-55" in "18V-550"."""
+    k = len(parts)
+    return any(within[i:i + k] == parts for i in range(len(within) - k + 1))
 
 
 def _has_word(name: str, w: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(w)}(?!\w)", name) is not None
 
 
-def matches(name: str, query: str) -> bool:
+def is_code(token: str) -> bool:
+    """An order code such as "USW-24-POE", "UAP-AC-PRO", "BE-02001.02" or "UXG-Lite": parts joined by "-", each in
+    capitals or digits (or a variant word), at least five letters/digits; not "RJ-45", "Wi-Fi" or "WLAN-Repeater"."""
+    parts = token.split("-")
+    if len(parts) < 2 or len(_flat(token)) < 5 or not all(parts):
+        return False
+    return all(re.fullmatch(r"[A-Z0-9.]+", p) or p.lower() in VARIANT_WORDS for p in parts) \
+        and any(re.fullmatch(r"[A-Z]{2,}|[0-9.]+[A-Z]*", p) for p in parts)
+
+
+def strong_code(token: str) -> bool:
+    """A code that names one product ("USW-24-POE", "BE-02001.02"), worth a search of its own – unlike "18V-55"."""
+    return is_code(token) and (token.count("-") >= 2 or len(_flat(token)) >= 7)
+
+
+def _tokens(query: str) -> list[str]:
+    return [w for w in (x.strip(".-") for x in _QTOK_RE.findall(glue_units(query))) if w]
+
+
+def _similar(w: str, words: set[str]) -> bool:
+    """Typos in longer words: "rasperry" ≈ "raspberry"."""
+    return len(w) >= 5 and any(abs(len(x) - len(w)) <= 2 and SequenceMatcher(None, w, x).ratio() >= 0.85 for x in words)
+
+
+def matches(name: str, query: str, url: str = "") -> bool:
     """Is this product really the one asked for (the variant too)? Every word with a digit – also a bare "4" as in
     "Pi 4", and capacities like "4GB" – appears in the name as a whole word ("13" is not "113" or "230cm", "4" not
-    "400" or "4GB"), and most other words appear. "4 GB" equals "4GB"; a capacity only in the name is fine."""
+    "400" or "4GB"); an order code in the name or the product link; most other words appear (hyphens and small typos
+    forgiven); and query and name have the same variant words (Pro, Max, Lite …), the name no pack or accessory word
+    the query lacks. "4 GB" equals "4GB", "150 W" "150W"; a capacity only in the name is fine."""
     n = _norm(name)
-    toks = [w for w in (x.strip(".-") for x in _QTOK_RE.findall(_norm(query))) if w]
+    slug = _SLUG_RE.match(url or "")
+    flat = _flat(name)
+    raw = _tokens(query)
+    if not raw:
+        return False
+    codes = [w for w in raw if is_code(w)]
+    toks = [_norm(w) for w in raw if not is_code(w)]
     model = [w for w in toks if re.search(r"\d", w)]
     words = [w for w in toks if not re.search(r"\d", w) and len(w) >= 2]
-    if not toks or not all(_has_word(n, w) for w in model):
+    where = (_parts(name), _parts(slug.group(1) if slug else ""))
+    if not all(any(_has_run(_parts(c), w) for w in where) for c in codes) or not all(_has_word(n, w) for w in model):
         return False
-    return not words or sum(w in n for w in words) / len(words) >= 0.6
+    asked = {x for w in toks + codes for x in _parts(w)}
+    name_words = set(re.findall(r"[a-z0-9äöüß]+", n))
+    if (name_words & (VARIANT_WORDS | OTHER_THING_WORDS)) - asked or {w for w in words if w in VARIANT_WORDS} - name_words:
+        return False
+    found = sum(w in n or (_flat(w) and _flat(w) in flat) or _similar(w, name_words) for w in words)   # "i-phone"
+    return not words or found / len(words) >= 0.6
 
 
 def best_hit(hits: list[Hit], query: str) -> Hit | None:
     """The first hit (Geizhals' order) that is really this product and variant."""
-    return next((h for h in hits if matches(h.name, query)), None)
+    return next((h for h in hits if matches(h.name, query, h.url)), None)
+
+
+def search_queries(query: str) -> list[str]:
+    """What to search for, most promising first, at most three: an order code that names one product alone (Geizhals
+    finds "USW-24-POE" but often nothing for the code among other words), the query, then its key words – the first
+    two, variant words and numbers ("Ubiquiti UniFi Pro PoE 48" -> "Ubiquiti UniFi Pro 48")."""
+    raw = _tokens(query)
+    codes = [w for w in raw if strong_code(w)]
+    key = raw[:2] + [w for w in raw[2:] if not is_code(w) and (re.search(r"\d", w) or w.lower() in VARIANT_WORDS)]
+    out = codes[:1] + [query] + ([" ".join(key)] if len(key) >= 2 else [])
+    return list(dict.fromkeys(q for q in out if q))[:3]
 
 
 async def lookup(query: str) -> dict[str, Any] | None:
     """Best match for a product name, as stored on the draft; None if nothing usable was found. `verified`: the
-    product (search card and page title) matches the query, variant included; False = Geizhals' first hit as a guess."""
+    product (search card and page title) matches the query, variant included; False = Geizhals' first hit as a guess.
+    Searches again (search_queries) while nothing found fits; a failing search raises GeizhalsError as before."""
     query = query.strip()
     if not query:
         return None
-    hits = await search(query)
+    hits: list[Hit] = []
+    best = None
+    for q in search_queries(query):
+        hits += [h for h in await search(q, limit=12) if h.url not in {x.url for x in hits}]
+        best = best_hit(hits, query)
+        if best is not None:
+            break
     if not hits:
         return {"query": query, "match": None, "candidates": [], "verified": False}
-    best = best_hit(hits, query)
     prod = await product((best or hits[0]).url)
-    verified = best is not None and (not prod.name or matches(prod.name, query))   # the h1 can be more precise
-    return {"query": query, "match": asdict(prod), "candidates": [asdict(h) for h in hits], "verified": verified}
+    verified = best is not None and (not prod.name or matches(prod.name, query, prod.url))   # the h1 can be more precise
+    return {"query": query, "match": asdict(prod), "candidates": [asdict(h) for h in hits[:12]], "verified": verified}
 
 
 def spec_block(match: dict[str, Any] | None) -> str:

@@ -61,6 +61,7 @@ FILLER = {
     "abholung", "versand", "np", "vb", "preis", "gepflegt", "unbenutzt", "kaum", "benutzt", "wenig", "voll",
     "funktionsfähig", "funktionstüchtig", "defekt", "kaputt", "tausch", "oder", "gr", "größe", "groesse", "selten",
     "rarität", "neupreis", "garantie", "rechnung", "privat", "schnäppchen", "angebot", "dringend", "sale", "&", "+",
+    "verkauft", "reserviert",
 }
 _UNITS = {"zoll", "cm", "mm", "m", "kg", "g", "l", "liter", "jahre", "jahr", "stk", "stück", "x", "teilig", "tlg",
           "w", "watt", "personen", "pers", "mal", "euro", "eur", "€"}
@@ -129,20 +130,36 @@ def _model_token(toks: list[str], i: int) -> bool:
     if re.fullmatch(r"\d+([.,]\d+)?", tok):
         nxt = toks[i + 1].lower() if i + 1 < len(toks) else ""
         return nxt not in _UNITS and len(tok) <= 5
-    return not re.fullmatch(r"\d+([.,]\d+)?(cm|mm|m|kg|g|l|er|w|x\d+)", low)
+    return not re.fullmatch(r"\d+([.,]\d+)?(cm|mm|m|kg|g|l|er|w|x\d*|-?ports?)", low)   # "24x", "16-Port": counts
+
+
+_WATTS_RE = re.compile(r"\d+w", re.I)
+_COUNT_RE = re.compile(r"\d+(x|er|stk|stück)", re.I)     # "4x Ubiquiti …", "3er Set": how many, not which
 
 
 def geizhals_query(title: str | None, category_path: list[str] | None = None) -> str | None:
-    """Product name for Geizhals: words up to the last model identifier (max 4) plus capacities further on ("4GB",
-    "256GB": they make the variant, max 6 words), or None for generic titles. "4 GB" counts as one word "4GB"."""
+    """Product name for Geizhals, or None for generic titles: the words up to the first model identifier ("16",
+    "18V-55", an order code like "UAP-AC-PRO") and the variant words and identifiers right after it ("iPhone 16 Pro",
+    "MacBook Air M1 8GB 256GB"); of a long lead-in the first two words, its variant words and the word before the
+    model ("Ubiquiti UniFi USW Pro PoE 48" -> "Ubiquiti UniFi Pro PoE 48"). Capacities, wattages and order codes
+    further on are added ("4GB", "500W", "USW-24-POE": they make the variant), max 7 words. "4 GB" is one word;
+    counts ("4x", "16-Port") are left out."""
     if any(g in c.lower() for c in category_path or [] for g in _GENERIC_CATEGORIES):
         return None
-    toks = tokens(geizhals.glue_units(title or ""))
-    last = max((i for i in range(len(toks)) if _model_token(toks, i)), default=-1)
-    if last < 0:
+    toks = [w for w in tokens(geizhals.glue_units(title or "")) if not _COUNT_RE.fullmatch(w)]
+    is_model = [_model_token(toks, i) or geizhals.is_code(toks[i]) for i in range(len(toks))]
+    first = next((i for i, m in enumerate(is_model) if m), -1)
+    if first < 0:
         return None
-    picked = toks[:max(last + 1, 2)]
-    picked = (picked[:4] + [w for w in picked[4:] if geizhals.CAPACITY_RE.fullmatch(w)])[:6]
+    lead = toks[:first]
+    if len(lead) > 4:
+        lead = lead[:2] + [w for w in lead[2:-1] if w.lower() in geizhals.VARIANT_WORDS] + lead[-1:]
+    end = first + 1
+    while end < len(toks) and end - first <= 3 and (is_model[end] or toks[end].lower() in geizhals.VARIANT_WORDS):
+        end += 1
+    core = lead + toks[first:end]
+    extra = [w for w in toks[end:] if geizhals.is_code(w) or geizhals.CAPACITY_RE.fullmatch(w) or _WATTS_RE.fullmatch(w)]
+    picked = list(dict.fromkeys(core + extra))[:7]
     return " ".join(picked) if len(picked) >= 2 else None
 
 
@@ -447,7 +464,8 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
         return None
     m = (found or {}).get("match") or {}
     best = None                    # an unverified guess (Geizhals' first hit, maybe another variant) is no price
-    if (found or {}).get("verified") and m.get("url") and m.get("price_from") and _matches(m.get("name") or "", query):
+    if (found or {}).get("verified") and m.get("url") and m.get("price_from") and _matches(m.get("name") or "", query,
+                                                                                          m["url"]):
         best = {"name": m["name"], "url": m["url"], "price_from": m["price_from"]}
     _put(_geizhals, key, best, GEIZHALS_TTL_S)
     return best
