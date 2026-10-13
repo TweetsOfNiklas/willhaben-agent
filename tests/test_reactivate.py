@@ -123,3 +123,18 @@ async def test_republish_copies_settings_and_keeps_old_row(monkeypatch):
     assert (new.auto_renew, new.auto_reply, new.auto_reply_instructions, new.status) == (True, True, "Preis fix", "active")
     assert (old.replaced_by, old.auto_renew, old.auto_reply) == ("1000000002", False, True)   # old chats keep working
     assert sent == ["ad_renewed"]
+
+
+async def test_api_json_names_a_web_page_instead_of_failing_to_parse(monkeypatch):
+    """willhaben may answer a webapi call with one of its pages (text/html, e.g. after a redirect): a readable
+    RuntimeError, which the callers already catch, not a JSON parse error that ends the whole bulk job."""
+    from app.willhaben.session import ApiResponse, BrowserSession
+
+    s = BrowserSession()
+
+    async def api(method, path, body=None, accept="application/json"):
+        return ApiResponse(status=200, text="<!DOCTYPE html><html></html>",
+                           url="https://www.willhaben.at/iad/anzeigenaufgabe/marktplatz?adId=7")
+    monkeypatch.setattr(s, "api", api)
+    with pytest.raises(RuntimeError, match=r"POST /webapi/x: .*web page.*HTTP 200.*anzeigenaufgabe/marktplatz\?adId=7"):
+        await s.api_json("POST", "/webapi/x")

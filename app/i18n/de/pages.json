@@ -124,6 +124,8 @@
  "Request limit ({n}/h) reached, free again in {m} min": "Anfragelimit ({n}/h) erreicht, wieder frei in {m} min",
  "Network error: {error}": "Netzwerkfehler: {error}",
  "willhaben responded {status}; pausing {s}s": "willhaben antwortet {status}; Pause {s}s",
+ "{method} {path}: willhaben answered with a web page instead of data (HTTP {status}{ended})": "{method} {path}: willhaben hat eine Webseite statt Daten geschickt (HTTP {status}{ended})",
+ "ended at": "gelandet auf",
  "Search returned HTTP {status}": "Suche lieferte HTTP {status}",
  "Search returned no JSON": "Suche lieferte kein JSON",
  "Ad {id}: HTTP {status}": "Anzeige {id}: HTTP {status}",
