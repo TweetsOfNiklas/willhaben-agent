@@ -333,6 +333,7 @@ async def test_fill_login_in_real_browser(tmp_path, monkeypatch):
     pw_mod = pytest.importorskip("playwright.async_api")
     monkeypatch.setattr(shipping, "_logins_path", lambda: tmp_path / "carrier-logins.json")
     shipping.save_login("dpd", "max@example.com", "geheim-123")
+    monkeypatch.setattr(label_fill, "LOGIN_SETTLE_MS", 100)       # a static page: nothing loads after the login
     async with pw_mod.async_playwright() as pw:
         try:
             browser = await pw.chromium.launch()

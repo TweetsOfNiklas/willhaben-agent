@@ -33,6 +33,7 @@ _ERROR_RE = re.compile(r"(?:OAuth )?error[^\n]*", re.IGNORECASE)
 _CURSOR_RIGHT_RE = re.compile(r"\x1b\[(\d*)C")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[=>()][0-9A-Za-z]?")
 _SESSION_TIMEOUT_S = 600
+_ENTER_AFTER_PASTE_S = 0.8      # the CLI swallows an Enter sent together with a pasted code
 
 
 def token_path() -> Path:
@@ -156,7 +157,7 @@ class ClaudeLogin:
             # A long code written together with Enter counts as one paste and the Enter is swallowed
             # (verified with CLI 2.1.286); send Enter on its own once the paste has been taken.
             os.write(self._fd, code.encode())
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(_ENTER_AFTER_PASTE_S)
             os.write(self._fd, b"\r")
             m = await self._wait_for(_DONE_RE, 120, since=mark)
             token = _TOKEN_RE.search(self._buf, mark) or _TOKEN_RE.search(re.sub(r"\s+", "", self._buf[mark:]))

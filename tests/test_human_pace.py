@@ -19,10 +19,10 @@ def test_trigger_spreads_around_the_interval():
 def test_breaks_about_one_in_twelve():
     human_pace.save(30, True)
     rng = random.Random(1)
-    skipped = sum(human_pace.take_break(rng) for _ in range(12000))
-    assert 800 < skipped < 1200
+    skipped = sum(human_pace.take_break(rng) for _ in range(2400))     # each call reads the settings
+    assert 140 < skipped < 260
     human_pace.save(30, False)
-    assert not any(human_pace.take_break(rng) for _ in range(500))
+    assert not any(human_pace.take_break(rng) for _ in range(100))
 
 
 async def test_scheduled_run_takes_a_break(monkeypatch):

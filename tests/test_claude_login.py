@@ -1,10 +1,17 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 from app.llm import claude_login
 from app.llm.claude_login import ClaudeLogin, claude_token, clean_terminal, token_source
 
 FAKE = [sys.executable, str(Path(__file__).parent / "fake_setup_token.py")]
+
+
+@pytest.fixture(autouse=True)
+def _quick_enter(monkeypatch):
+    monkeypatch.setattr(claude_login, "_ENTER_AFTER_PASTE_S", 0.05)   # the fake CLI reads line by line
 
 
 def test_clean_terminal_keeps_spaces():

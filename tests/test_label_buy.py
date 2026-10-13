@@ -242,7 +242,10 @@ async def checkout(monkeypatch, tmp_path):
         await _serve(ctx, h)
         monkeypatch.setattr("app.willhaben.session.get_session", lambda: FakeSession(ctx))
         monkeypatch.setattr(label_buy, "_card_path", lambda: tmp_path / "payment-card.json")
-        monkeypatch.setattr(label_buy, "LABEL_WAIT_S", 6)
+        monkeypatch.setattr(label_buy, "LABEL_WAIT_S", 1.5)     # the fake site's last step clicks no download
+        monkeypatch.setattr(label_buy, "LABEL_POLL_S", 0.1)
+        monkeypatch.setattr(label_buy, "SETTLE_MS", 200)        # the fake site is local and static
+        monkeypatch.setattr(label_buy, "CARD_SETTLE_MS", 200)
         monkeypatch.setattr(label_buy, "_playbook_path", lambda carrier: tmp_path / "playbooks" / f"{carrier}.json")
         label_buy._active.update(shipment=None, page=None, step=0, bought=False, label_before=None, pos=0, learn=[],
                                  playbook=None)

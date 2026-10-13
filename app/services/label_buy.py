@@ -37,6 +37,9 @@ log = logging.getLogger(__name__)
 MAX_STEPS = 15
 STEP_TIMEOUT_S = 30          # the browser part of one step; Claude's call has its own timeout
 LABEL_WAIT_S = 20            # after "done": how long the label download may take
+LABEL_POLL_S = 0.5
+SETTLE_MS = 1500             # after a load or a click: single-page apps render their form late
+CARD_SETTLE_MS = 1000        # after picking "credit card": the card fields appear
 PRICE_TOLERANCE_EUR = 0.60
 STATUSES = ("continue", "done", "need_human", "abort")
 
@@ -432,7 +435,7 @@ async def _pick_card_method(page) -> bool:
 async def _card_step(page) -> None:
     cards = await _card_inputs(page)
     if not cards and await _pick_card_method(page):
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(CARD_SETTLE_MS)
         cards = await _card_inputs(page)
     if not cards:
         return
@@ -449,7 +452,7 @@ async def fill_card_fields(page) -> bool:
     """
     cards = await _card_inputs(page)
     if not cards and await _pick_card_method(page):
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(CARD_SETTLE_MS)
         cards = await _card_inputs(page)
     if not cards:
         return False
@@ -488,7 +491,7 @@ async def _pick_part(loc, value: str, month: bool) -> None:
 # ------------------------------------------------------------------ one step
 async def _prepare(page, s: Shipment, n: int) -> dict[str, Any]:
     await page.wait_for_load_state("domcontentloaded")
-    await page.wait_for_timeout(1500)            # single-page apps render their form after load
+    await page.wait_for_timeout(SETTLE_MS)
     await _screenshot(page, s.id, n)
     await label_fill.dismiss_consent(page)
     if await label_fill.fill_login(page, _active["carrier"]):
@@ -589,7 +592,7 @@ async def _act(page, s: Shipment, prep: dict[str, Any], res: dict[str, Any],
     except Exception as e:  # noqa: BLE001 - the next step looks at the page again
         entry["note"] = f"{entry['note']} · click failed: {type(e).__name__}".strip(" ·")
         return applied, None
-    await page.wait_for_timeout(1500)
+    await page.wait_for_timeout(SETTLE_MS)
     return applied, item
 
 
@@ -772,7 +775,7 @@ async def _wait_label(sid: int) -> bool:
     while loop.time() < deadline:
         if _label_arrived(sid):
             return True
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(LABEL_POLL_S)
     return _label_arrived(sid)
 
 

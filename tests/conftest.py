@@ -18,6 +18,8 @@ os.environ.update({
     "DASHBOARD_PASSWORD": "",
 })
 
+import socket  # noqa: E402
+
 import pytest  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 from sqlmodel import create_engine  # noqa: E402
@@ -25,6 +27,34 @@ from sqlmodel import create_engine  # noqa: E402
 from app import db as dbmod  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# Tests never reach the internet: a forgotten mock fails at once instead of waiting on a real site.
+_LOCAL = ("localhost", "127.0.0.1", "::1", "0.0.0.0", "testserver")
+_real_getaddrinfo, _real_connect, _real_connect_ex = socket.getaddrinfo, socket.socket.connect, socket.socket.connect_ex
+
+
+def _local(address) -> bool:
+    host = address[0] if isinstance(address, tuple) else address
+    return not isinstance(host, str) or host in _LOCAL or host.startswith("127.") or "/" in host   # "/": unix socket
+
+
+def _getaddrinfo(host, *args, **kwargs):
+    if not _local((host,)):
+        raise socket.gaierror(f"tests must not reach the network ({host})")
+    return _real_getaddrinfo(host, *args, **kwargs)
+
+
+def _connect(self, address):
+    if not _local(address):
+        raise ConnectionRefusedError(f"tests must not reach the network ({address})")
+    return _real_connect(self, address)
+
+
+def _connect_ex(self, address):
+    return _real_connect_ex(self, address) if _local(address) else 111     # ECONNREFUSED
+
+
+socket.getaddrinfo, socket.socket.connect, socket.socket.connect_ex = _getaddrinfo, _connect, _connect_ex
 
 
 def load(name: str):

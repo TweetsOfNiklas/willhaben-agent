@@ -25,6 +25,7 @@ from app.services import timeline
 log = logging.getLogger(__name__)
 
 MAX_FIELDS = 80
+LOGIN_SETTLE_MS = 2500       # after a carrier login: the site redirects and loads the account
 _active: dict[str, Any] = {"shipment": None, "page": None}
 
 # Collect visible, enabled form controls of one frame; tags them with data-whfill="<n>".
@@ -287,7 +288,7 @@ async def fill_login(page, carrier: str) -> bool:
             else:
                 await pw.press("Enter")
             await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_timeout(2500)
+            await page.wait_for_timeout(LOGIN_SETTLE_MS)
             log.info("logged in at %s", carrier)
             return True
         except Exception as e:  # noqa: BLE001 - the user can still log in by hand in the remote view
