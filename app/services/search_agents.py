@@ -9,8 +9,8 @@ URLs or JSON; the adapters do.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 
@@ -96,10 +96,16 @@ def agent_platforms(agent: SearchAgent) -> list[str]:
 
 
 def agent_spec(agent: SearchAgent) -> SearchSpec:
-    """The agent's search; rows from before `spec` existed are willhaben searches with their stored URLs."""
+    """The agent's search. Rows from before `spec` existed are willhaben searches with their stored URLs: the search
+    term and prices are read back from the link, the stored URLs stay what is requested."""
     if agent.spec:
         return SearchSpec.from_json(agent.spec)
-    return SearchSpec(platform=agent.platform or "willhaben", url=agent.source_url, api=agent.webapi_url)
+    pid = agent.platform or "willhaben"
+    try:
+        parsed = platforms.get(pid).parse_search_url(agent.source_url)
+    except (platforms.PlatformError, platforms.InvalidSearchUrl, ValueError):
+        parsed = SearchSpec(platform=pid, url=agent.source_url)
+    return replace(parsed, platform=pid, url=agent.source_url, api=agent.webapi_url)
 
 
 def agent_searches(agent: SearchAgent) -> list[dict[str, Any]]:

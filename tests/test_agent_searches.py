@@ -133,3 +133,22 @@ async def test_the_first_check_after_adding_counts_as_seen(fake):
         assert {h.ad_id: h.state for h in db.exec(select(Hit).where(Hit.agent_id == a.id))} == {"1": "seen", "2": "seen"}
     fake.pages = [[listing("3", "Gravel neu")]]
     assert [h.ad_id for h in (await run_agent(a.id)).new] == ["3"]             # afterwards new ads push again
+
+
+def test_an_agent_from_before_the_platforms_keeps_its_term(client, fake):
+    """Old rows have no `spec`: the search term is read back from the stored link (seen on a real install)."""
+    with session() as db:
+        a = SearchAgent(name="Echo Show 8", platform="willhaben", source_url=URL + "+neu&PRICE_TO=80",
+                        webapi_url="https://www.willhaben.at/webapi/iad/search/atz/seo/kaufen-und-verkaufen/marktplatz"
+                                   "?keyword=fahrrad+neu&PRICE_TO=80&rows=30", spec=None, baseline_done=True)
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+    q = agent_searches(a)[0]
+    assert (q["keyword"], q["price_to"], q["source_url"], q["webapi_url"]) == ("fahrrad neu", 80, a.source_url, a.webapi_url)
+    r = _edit(client, a, sites_shown="1", sites=["willhaben", "fake"])
+    assert r.headers["location"] == "/agents"
+    b = _agent(a.id)
+    assert [(q["platform"], q["keyword"], q["price_to"]) for q in b.queries] == [("willhaben", "fahrrad neu", 80),
+                                                                                 ("fake", "fahrrad neu", 80)]
+    assert b.webapi_url == a.webapi_url                                        # the old search runs unchanged
