@@ -72,6 +72,16 @@ def _query_of(spec: SearchSpec) -> dict[str, Any]:
             "source_url": spec.url, "price_from": spec.price_from, "price_to": spec.price_to}
 
 
+def _quiet(q: dict[str, Any] | None) -> bool:
+    """A search added in the settings drawer that has not had its first check: what it finds then counts as seen."""
+    return isinstance(q, dict) and bool(q.get("quiet"))
+
+
+def _unquiet(q: dict[str, Any]) -> dict[str, Any]:
+    """A search without its quiet flag: the same search before and after its first check."""
+    return {k: v for k, v in q.items() if k != "quiet"}
+
+
 def create_agent_on_sites(specs: list[SearchSpec], name: str | None = None, interval_s: int | None = None) -> SearchAgent:
     """One agent for several sites: one search per site, checked together (each site paced by its own limiter).
     The first search is the main one (name, "on <site>" link). One spec makes a plain agent."""
@@ -190,8 +200,10 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
     every chosen site that is switched on ends up with every term (also rows from before this rule that lack one),
     a watched site that is switched off or gone keeps what it has. `drop` removes single searches by index into
     agent_searches (the drawer sends it for searches without a term: a pasted filter link, one site each). `sites`:
-    the sites to watch (None = as now); a site no longer chosen loses its searches. Raises ValueError and changes
-    nothing on a mistake. True when searches were added: their first check should count what they find as seen."""
+    the sites to watch (None = as now); a site no longer chosen loses its searches, a watched one the drawer has no
+    chip for (keyword_sites: gone) keeps them. Raises ValueError and changes nothing on a mistake. True when searches
+    were added: they start quietly ("quiet" in their entry, see _run_agent), what their first check finds counts as
+    seen; a plain agent whose only search is new has no entry for it, so its whole next check is quiet."""
 
     def site(q: dict[str, Any]) -> str:
         return str(q.get("platform") or agent.platform or "willhaben")
@@ -201,8 +213,10 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
     kept = [q for i, q in enumerate(every) if i not in drop and _term(q) not in gone]
     if sites is None:      # as now: the sites that keep a search; all of them when none does (a new term replaces it)
         wanted = list(dict.fromkeys(site(q) for q in kept or every))
-    else:
-        wanted = list(dict.fromkeys(s.strip().lower() for s in sites if s.strip()))
+    else:                  # the ticked chips, and the watched sites without a chip: nothing could untick those
+        offered = {p.id for p in keyword_sites(agent)}
+        wanted = list(dict.fromkeys([s.strip().lower() for s in sites if s.strip()]
+                                    + [site(q) for q in every if site(q) not in offered]))
     if not wanted:
         raise ValueError(t("Choose at least one site."))
     new = [(" ".join((kw or "").split()), pf, pt) for kw, pf, pt in [(add, price_from, price_to), *add_terms]]
@@ -222,7 +236,7 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
                 continue
             q = _query_of(p.keyword_search(*term))
             if (pid, _term(q)) not in have:     # the site may word the term the way a search it has does
-                searches.append(q)
+                searches.append({**q, "quiet": True})
                 added = True
             have |= {(pid, term), (pid, _term(q))}
     if not searches:     # checked after adding: the only term can be swapped in one Save
@@ -231,6 +245,8 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
         if not any(site(q) == pid for q in searches):     # nothing to search there: say why
             raise ValueError(t("The searches have no search term to use on {name}.", name=_keyword_site(pid).name))
     set_searches(agent, searches)
+    if agent.queries is None and searches[0].get("quiet"):
+        agent.baseline_done = False     # a plain agent's only search is new: no entry keeps its flag
     return added
 
 
@@ -255,7 +271,7 @@ def agent_search_items(agent: SearchAgent) -> dict[str, Any]:
     watched = agent_platforms(agent)
     sites = keyword_sites(agent)
     choices = [p.id for p in sites]
-    ticked = [pid for pid in watched if pid in choices] if len(choices) > 1 else watched
+    ticked = watched        # a watched site without a chip (gone) stays too: Save keeps its searches
     fill = [pid for pid in dict.fromkeys(watched + choices) if _fillable(pid)]
     terms: dict[tuple[str, Any, Any], dict[str, Any]] = {}
     filters: list[dict[str, Any]] = []
@@ -395,13 +411,13 @@ def create_agent_from_search(search_id: int, name: str | None = None, interval_s
 
 
 async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> tuple[
-        list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, int]:
+        list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, list[dict[str, Any] | None]]:
     """Run an agent's searches one after another (uncached), each on its platform. Returns (ads with their query,
-    de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; number of
-    searches that succeeded). A block stops the remaining searches of this run."""
+    de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; the queries of
+    the searches that succeeded). A block stops the remaining searches of this run."""
     ads: list[tuple[Listing, dict[str, Any] | None]] = []
     seen: set[tuple[str, str]] = set()
-    rows, errors, first_exc, ok = 0, [], None, 0
+    rows, errors, first_exc, ok = 0, [], None, []
     n = len(specs)
     for i, (spec, q) in enumerate(specs, 1):
         try:
@@ -415,7 +431,7 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
                     errors.append(t("remaining searches skipped: {k}", k=n - i))
                 break
             continue
-        ok += 1
+        ok.append(q)
         rows += page.rows_found or 0
         for ad in page.ads:
             ad.platform = spec.platform               # the hit belongs to the site that was searched
@@ -484,6 +500,8 @@ async def _run_agent(agent_id: int) -> RunResult:
             return res
         name, queries, plan = agent.name, agent.queries, agent.plan
         specs = [(_query_spec(q, agent.platform), q) for q in queries] if queries else [(agent_spec(agent), None)]
+        # as the check starts: a Save while it runs changes the next check, not this one
+        baseline, before = not agent.baseline_done, [_unquiet(q) for q in agent_searches(agent)]
 
     def _fail(error: str) -> RunResult:
         with session() as db:
@@ -508,15 +526,17 @@ async def _run_agent(agent_id: int) -> RunResult:
     skipped = list(dict.fromkeys(skipped))
     if not usable:
         return _fail("; ".join(skipped))
+    # quiet searches last: an ad an older search finds too counts as that one's (first occurrence wins) and pushes
+    usable.sort(key=lambda x: _quiet(x[1]))
     found, rows_found, errors, first_exc, ok = await _search_all(usable)
     if not ok:
         return _fail(str(first_exc))         # every search failed (one search: its error)
     partial_error = "; ".join(skipped + errors) or None
 
     res.rows_found = rows_found
+    res.baseline = baseline
     with session() as db:
         agent = db.get(SearchAgent, agent_id)
-        res.baseline = not agent.baseline_done
         existing = {((h.platform or "willhaben"), h.ad_id): h for h in db.exec(select(Hit).where(Hit.agent_id == agent_id))}
         id_site = {ad_id: pid for pid, ad_id in existing}     # Hit is unique per (agent, ad id), whatever the site
         scam_ctx = _scam_context(existing.values(), [ad for ad, _ in found])
@@ -531,15 +551,16 @@ async def _run_agent(agent_id: int) -> RunResult:
             if hit is None:
                 if plan and product_search.drop_reason(ad, plan, query):
                     continue        # "Suche" ad, far over budget or an exclusion word: never stored or notified
+                quiet = res.baseline or _quiet(query)     # the agent's or this search's first check: seen, no push
                 hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
-                          state="seen" if res.baseline else "new")
+                          state="seen" if quiet else "new")
                 _apply(hit, ad)
                 hit.scam_flags = scam.flags(hit, scam_ctx, home_country=_site(ad.platform).home_country) or None   # before screening
                 _mark_scam_issue(hit)
                 db.add(hit)
                 existing[(ad.platform, ad.ad_id)] = hit
                 id_site[ad.ad_id] = ad.platform
-                if not res.baseline:
+                if not quiet:
                     res.new.append(hit)
                 continue
             prev_price, prev_published = hit.price, hit.published_at
@@ -558,7 +579,13 @@ async def _run_agent(agent_id: int) -> RunResult:
         agent.last_run_at = agent.last_ok_at = utcnow()
         agent.last_error = partial_error
         agent.last_rows_found = rows_found
-        agent.baseline_done = True
+        # on the row as it is now, so a Save during this check stays. The agent's first check is done, unless a Save
+        # meanwhile swapped a plain agent's only search: that one has not run (one added to a list is quiet itself)
+        if baseline and all(_quiet(q) or _unquiet(q) in before for q in agent_searches(agent)):
+            agent.baseline_done = True
+        ran = [_unquiet(q) for q in ok if _quiet(q)]     # quiet searches that ran: their first check is done
+        if ran and agent.queries:
+            agent.queries = [_unquiet(q) if _quiet(q) and _unquiet(q) in ran else q for q in agent.queries]   # new list
         notify_new, notify_drops = agent.notify, agent.notify and agent.notify_price_drops
         db.add(agent)
         db.commit()

@@ -58,7 +58,8 @@ def test_a_plain_agent_gets_more_searches(client):
     assert r.status_code == 303 and r.headers["location"] == "/agents"
     b = _agent(a.id)
     assert [(q["keyword"], q["price_to"]) for q in b.queries] == [("fahrrad", None), ("rennrad carbon", 900)]
-    assert b.source_url == a.source_url and not b.baseline_done                # the new search starts quietly
+    assert b.source_url == a.source_url and b.baseline_done                    # only the new search starts quietly
+    assert [q.get("quiet") for q in b.queries] == [None, True]
     page = client.get("/agents").text
     assert page.count('name="drop_term"') == 2 and 'value="[&#34;rennrad carbon&#34;, null, 900.0]"' in page
     assert " disabled aria-label=" not in page                                 # two searches: either can go
@@ -66,6 +67,7 @@ def test_a_plain_agent_gets_more_searches(client):
     _edit(client, b, drop_term='["fahrrad", null, null]')                     # one left: a plain agent again
     c = _agent(a.id)
     assert c.queries is None and c.spec["keyword"] == "rennrad carbon" and "rennrad" in c.source_url
+    assert not c.baseline_done                                                 # its first check is still to come
     assert [q["keyword"] for q in agent_searches(c)] == ["rennrad carbon"]
 
 
@@ -76,7 +78,8 @@ def test_sites_of_an_agent(client, fake):
     assert 'name="sites" value="fake"' in page and 'name="sites" value="willhaben" class="checkbox checkbox-primary checkbox-xs" checked' in page
     _edit(client, a, sites_shown="1", sites=["willhaben", "fake"])
     b = _agent(a.id)
-    assert agent_platforms(b) == ["willhaben", "fake"] and not b.baseline_done
+    assert agent_platforms(b) == ["willhaben", "fake"] and b.baseline_done
+    assert [q.get("quiet") for q in b.queries] == [None, True]                 # quiet: the new site's search
     assert [(q["platform"], q["keyword"]) for q in b.queries] == [("willhaben", "fahrrad"), ("fake", "fahrrad")]
     assert b.interval_s == 900                                                 # the slow site's floor
 
@@ -127,15 +130,113 @@ async def test_the_first_check_after_adding_counts_as_seen(fake):
     assert edit_searches(a, add="gravel")
     with session() as db:
         db.add(a)
-        a.baseline_done = False                                                # as the route does
         db.commit()
-    fake.pages = [[listing("1"), listing("2", "Gravelbike")]]
+    fake.pages = [[listing("1")], [listing("1"), listing("2", "Gravelbike")]]   # rad, then gravel
     res = await run_agent(a.id)
-    assert res.baseline and res.new == []
+    assert not res.baseline and res.new == []                                  # gravel's first check
     with session() as db:
         assert {h.ad_id: h.state for h in db.exec(select(Hit).where(Hit.agent_id == a.id))} == {"1": "seen", "2": "seen"}
-    fake.pages = [[listing("3", "Gravel neu")]]
-    assert [h.ad_id for h in (await run_agent(a.id)).new] == ["3"]             # afterwards new ads push again
+    assert [q.get("quiet") for q in _agent(a.id).queries] == [None, None]
+    fake.pages = [[], [listing("3", "Gravel neu")]]
+    assert [h.ad_id for h in (await run_agent(a.id)).new] == ["3"]             # afterwards its new ads push
+
+
+def _hit_states(agent_id):
+    from sqlmodel import select
+
+    from app.db import Hit
+
+    with session() as db:
+        return {h.ad_id: h.state for h in db.exec(select(Hit).where(Hit.agent_id == agent_id))}
+
+
+def _save_during_the_check(monkeypatch, fake, agent_id, **edit):
+    """The drawer is saved (edit_searches) while the next check's first search runs."""
+    search = fake.search
+
+    async def save_meanwhile(spec, **kw):
+        monkeypatch.setattr(fake, "search", search)
+        with session() as db:
+            row = db.get(SearchAgent, agent_id)
+            edit_searches(row, **edit)
+            db.add(row)
+            db.commit()
+        return await search(spec, **kw)
+
+    monkeypatch.setattr(fake, "search", save_meanwhile)
+
+
+async def test_adding_a_search_mutes_only_that_search(client, fake):
+    """The searches the agent had keep pushing in the check after a term was added (it once muted the whole agent)."""
+    from app.services.search_agents import run_agent
+    from tests.fake_platform import listing
+
+    a = create_agent("https://fake.example/s/rad")
+    fake.pages = [[listing("1")]]
+    await run_agent(a.id)
+    _edit(client, _agent(a.id), add_keyword="gravel")
+    fake.pages = [[listing("1"), listing("4", "Rad neu")], [listing("4", "Rad neu"), listing("2", "Gravelbike")]]
+    res = await run_agent(a.id)
+    assert [h.ad_id for h in res.new] == ["4"]                                 # rad's, though gravel finds it too
+    assert _hit_states(a.id) == {"1": "seen", "4": "new", "2": "seen"}
+
+
+async def test_a_save_during_a_check_leaves_the_quiet_first_check_to_the_next(fake, monkeypatch):
+    """A check that runs while the drawer is saved pushes as it started and does not count the searches the Save
+    added as checked: their quiet first check is the next one (it once flooded the pushes)."""
+    from app.services.search_agents import run_agent
+    from tests.fake_platform import listing
+
+    a = create_agent("https://fake.example/s/rad")
+    fake.pages = [[listing("1")]]
+    await run_agent(a.id)
+    _save_during_the_check(monkeypatch, fake, a.id, add="gravel")
+    fake.pages = [[listing("1"), listing("4", "Rad neu")]]
+    assert [h.ad_id for h in (await run_agent(a.id)).new] == ["4"]
+    assert [q.get("quiet") for q in _agent(a.id).queries] == [None, True]     # gravel did not run yet
+    fake.pages = [[], [listing("2", "Gravelbike")]]
+    assert (await run_agent(a.id)).new == [] and _hit_states(a.id)["2"] == "seen"
+    fake.pages = [[], [listing("3", "Gravel neu")]]
+    assert [h.ad_id for h in (await run_agent(a.id)).new] == ["3"]
+
+    # a plain agent whose only term is swapped meanwhile, during its first check or a later one: the next is quiet
+    for first in (True, False):
+        b = create_agent("https://fake.example/s/rad")
+        if not first:
+            fake.pages = [[listing("b1")]]
+            await run_agent(b.id)
+        _save_during_the_check(monkeypatch, fake, b.id, drop_terms=[("rad", None, None)], add="gravel")
+        fake.pages = [[listing("b1")]]
+        await run_agent(b.id)
+        assert _agent(b.id).spec["keyword"] == "gravel" and not _agent(b.id).baseline_done
+        fake.pages = [[listing("b2", "Gravelbike")]]
+        res = await run_agent(b.id)
+        assert res.baseline and res.new == [] and _agent(b.id).baseline_done
+
+
+def test_a_save_keeps_the_searches_on_a_site_without_a_chip(client, fake):
+    """A watched site that is gone (taken out of PLATFORMS_ENABLED) gets no chip in the drawer, so nothing can untick
+    it: Save keeps its searches, and an agent only there can still be renamed."""
+    from app.services.search_agents import agent_search_items, create_agent_from_spec
+
+    old = FakePlatform()
+    old.id, old.name = "old", "Old"
+    platforms.set_platform("old", old)
+    a = _settled(URL)
+    edit_searches(a, sites=["willhaben", "old"])
+    with session() as db:
+        db.add(a)
+        db.commit()
+    b = create_agent_from_spec(old.keyword_search("rad"))
+    platforms.set_platform("old", None)
+    assert agent_search_items(a)["js"]["sites"] == ["willhaben", "old"] and agent_search_items(a)["per_check"] == 2
+    page = client.get("/agents").text
+    assert 'name="sites" value="fake"' in page and 'name="sites" value="old"' not in page
+    r = _edit(client, _agent(a.id), sites_shown="1", sites=["willhaben"], name="Rad")    # a rename
+    assert r.headers["location"] == "/agents" and _agent(a.id).name == "Rad"
+    assert [(q["platform"], q["keyword"]) for q in _agent(a.id).queries] == [("willhaben", "fahrrad"), ("old", "fahrrad")]
+    r = _edit(client, _agent(b.id), sites_shown="1", name="Rad alt")           # no chip ticked
+    assert r.headers["location"] == "/agents" and _agent(b.id).name == "Rad alt" and _agent(b.id).spec["keyword"] == "rad"
 
 
 def test_an_agent_from_before_the_platforms_keeps_its_term(client, fake):

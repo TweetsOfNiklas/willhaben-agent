@@ -586,10 +586,9 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
     with session() as db:
         a = db.get(SearchAgent, agent_id)
         if drop_query or gone or adds or sites_shown:     # the drawer's searches and sites
-            try:
-                if search_agents.edit_searches(a, drop_query, sites if sites_shown else None,
-                                               drop_terms=gone, add_terms=adds):
-                    a.baseline_done = False      # new searches start quietly: what they find now counts as seen
+            try:       # new searches start quietly: what their first check finds counts as seen
+                search_agents.edit_searches(a, drop_query, sites if sites_shown else None,
+                                            drop_terms=gone, add_terms=adds)
             except ValueError as e:
                 return back(f"/agents?error={quote(str(e), safe='')}")
         a.name = name.strip() or a.name
