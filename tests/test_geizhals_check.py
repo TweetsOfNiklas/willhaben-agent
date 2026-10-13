@@ -64,7 +64,7 @@ async def test_right_product_is_kept_wrong_one_replaced(agent, monkeypatch):
         searched.append(queries)
         return [GHit(name=AUTO_PRO_24["name"], url=AUTO_PRO_24["url"], price=739.88), RIGHT_24]
 
-    monkeypatch.setattr(deals, "_gh_candidates", candidates)
+    monkeypatch.setattr(geizhals_check, "_candidates", candidates)
     fake = Script({"results": [{"nr": 1, "ok": True, "product": "", "queries": []},
                                {"nr": 2, "ok": False, "product": "Ubiquiti UniFi Switch 24 PoE (USW-24-POE)",
                                 "queries": ["USW-24-POE", "UniFi Switch 24 PoE"]}]},
@@ -93,13 +93,14 @@ async def test_no_product_no_price_and_failures_change_nothing(agent, monkeypatc
     async def nothing(queries):
         return []
 
-    monkeypatch.setattr(deals, "_gh_candidates", nothing)
+    monkeypatch.setattr(geizhals_check, "_candidates", nothing)
     fake = Script({"results": [{"nr": 1, "ok": False, "product": "", "queries": []},
                                {"nr": 2, "ok": False, "product": "Ubiquiti UniFi Switch 8 150W", "queries": ["US-8-150W"]}]})
     monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: fake)
     await geizhals_check.check(agent, [junk, wrong, failed])
-    assert _stored(junk) == {"checked": True} and _stored(wrong) == {"checked": True}   # the wrong price is gone
-    assert _stored(failed) is None and len(fake.calls) == 1                  # no results: no pick call
+    assert _stored(junk) == {"checked": True}                                # final: no specific product
+    assert _stored(wrong) == {} and len(fake.calls) == 1                     # no results: wrong price gone, asked again
+    assert _stored(failed) is None                                           # (and no pick call)
 
     other = _hit(agent, 6, "iPhone 16 Pro", {"name": "Apple iPhone 16 128GB", "url": "https://geizhals.at/i-a3.html",
                                              "price_from": 842.0})
@@ -116,13 +117,55 @@ async def test_searches_are_capped_and_stop_when_geizhals_blocks(agent, monkeypa
         calls.append(queries)
         raise geizhals.GeizhalsError("Geizhals answered HTTP 429")
 
-    monkeypatch.setattr(deals, "_gh_candidates", blocked)
+    monkeypatch.setattr(geizhals_check, "_candidates", blocked)
     verdicts = [{"nr": i + 1, "ok": False, "product": f"Produkt {i}", "queries": [f"Produkt {i}"]} for i in range(5)]
     monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: Script({"results": verdicts}))
     await geizhals_check.check(agent, hits)
     assert calls == [["Produkt 0"]]                                          # stopped at the first block
-    assert all(_stored(h) == {"checked": True} for h in hits)
+    assert all(_stored(h) == {} for h in hits)                               # not final: a later check asks again
     assert geizhals_check.MAX_SEARCHED == 3
+
+
+async def test_later_checks_take_older_unchecked_hits_and_stuck_ones_once(agent, monkeypatch):
+    """Hits marked "no product" by an aborted check (version 1) and products from before the switch get checked by
+    later runs too: up to MAX_BACKLOG per check, product only."""
+    from app.db import get_setting, set_setting
+
+    set_setting("geizhals_check_version", "1")
+    stuck = _hit(agent, 20, "Ubiquiti Unifi UAP-AC-pro + adapteur Poe", {"checked": True})
+    final = _hit(agent, 21, "Konvolut Kabel", {"checked": True, "name": "x"})       # a real answer stays
+    old = _hit(agent, 22, "Ubiquiti Unifi switch USW Lite 8 PoE",
+               {"name": "Ubiquiti UniFiSwitch Flex Desktop 2.5G", "url": "https://geizhals.at/f-a9.html", "price_from": 209.0})
+    fake = Script({"results": [{"nr": 1, "ok": False, "product": "Ubiquiti UniFi Switch Lite 8 PoE",   # most recent first
+                                "queries": ["USW-Lite-8-PoE"]},
+                               {"nr": 2, "ok": False, "product": "Ubiquiti UniFi AP AC Pro", "queries": ["UAP-AC-PRO"]}]},
+                  {"results": [{"nr": 1, "pick": 1}, {"nr": 2, "pick": 1}]})
+    monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: fake)
+
+    async def candidates(queries):
+        return [GHit(name="Ubiquiti UniFi AP AC Pro", url="https://geizhals.at/ap-a1325749.html", price=146.12)] \
+            if queries == ["UAP-AC-PRO"] else [GHit(name="Ubiquiti UniFiSwitch Lite 8 PoE", url="https://geizhals.at/l8-a1.html",
+                                                     price=99.0)]
+
+    monkeypatch.setattr(geizhals_check, "_candidates", candidates)
+    assert await geizhals_check.check(agent, []) == 2                        # no new hit, only the backlog
+    assert _stored(stuck)["price_from"] == 146.12 and _stored(old)["price_from"] == 99.0
+    assert _stored(final) == {"checked": True, "name": "x"} and get_setting("geizhals_check_version") == "2"
+    prompt = fake.calls[0]["prompt"]
+    assert prompt.index("[1] Ubiquiti Unifi switch USW Lite 8 PoE") < prompt.index("[2] Ubiquiti Unifi UAP-AC-pro")
+    assert "Geizhals: Ubiquiti UniFiSwitch Flex Desktop 2.5G (neu ab 209 €)" in prompt and "Konvolut" not in prompt
+    assert await geizhals_check.check(agent, []) == 0 and len(fake.calls) == 2   # nothing left: no Claude call
+
+
+async def test_candidates_stop_at_the_first_search_that_finds_something(monkeypatch):
+    asked = []
+
+    async def search(q, limit=5):
+        asked.append(q)
+        return [] if q == "a" else [GHit(name=q, url=f"https://geizhals.at/{q}-a1.html", price=1.0)]
+
+    monkeypatch.setattr(geizhals, "search", search)
+    assert [c.name for c in await geizhals_check._candidates(["a", "b", "c"])] == ["b"] and asked == ["a", "b"]
 
 
 def test_drawer_switch_saves_only_with_screening(agent):
@@ -167,7 +210,7 @@ async def test_agent_run_checks_before_the_rule(monkeypatch):
             return 0
 
         monkeypatch.setattr(deals, "geizhals_match", match)
-        monkeypatch.setattr(deals, "_gh_candidates", candidates)
+        monkeypatch.setattr(geizhals_check, "_candidates", candidates)
         monkeypatch.setattr(search_agents, "notify", notify)
         monkeypatch.setattr(search_agents.screening, "screen", screen)
         fake = Script({"results": [{"nr": 1, "ok": False, "product": "Ubiquiti UniFi Switch 24 PoE",

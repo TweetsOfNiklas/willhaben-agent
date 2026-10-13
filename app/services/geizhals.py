@@ -2,14 +2,14 @@
 
 Plain HTML pages (no API): search results are `galleryview__item` cards, an article page
 (`...-a<id>.html`) lists its properties as `<dl class="specs-grid">` with dt/dd pairs and the
-lowest offer as `lowPrice: <n>`. Requests are few (a search or up to three, then one product page) and spaced
-like the willhaben ones; a 403/429 pauses Geizhals like any other site.
+lowest offer as `lowPrice: <n>`. Requests are few (a search or up to three, then one product page, which a mere
+price lookup skips) and 3 s apart (bursts of searches got 403 at 2 s); a 403/429 pauses Geizhals like any other site.
 
 Matching (checked against real searches, 2026-10-13): the first search result is often another variant ("iPhone 16"
 → "16 Pro Max", "UniFi Switch 24" → "Switch Pro 24"), so a result counts only when every number of the query is in
 its name, an order code ("USW-24-POE") in its name or link, and it has no variant word (Pro, Max, Lite …), pack or
 accessory word the query lacks. Spelling is forgiven ("I-Phone" = "iPhone", "Rasperry" ≈ "Raspberry"). A query
-that finds nothing fitting is retried with its order code alone and with its key words.
+that finds nothing fitting is retried with its order code alone, and with its key words when nothing was found.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from app.willhaben.public import Blocked, RateLimiter
 log = logging.getLogger(__name__)
 
 BASE = "https://geizhals.at"
-_limiter = RateLimiter(2.0, name="Geizhals")
+_limiter = RateLimiter(3.0, name="Geizhals")
 _transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock transport
 
 _CARD_RE = re.compile(r'<article class="galleryview__item[^"]*"(.*?)</article>', re.S)
@@ -235,7 +235,8 @@ def best_hit(hits: list[Hit], query: str) -> Hit | None:
 def search_queries(query: str) -> list[str]:
     """What to search for, most promising first, at most three: an order code that names one product alone (Geizhals
     finds "USW-24-POE" but often nothing for the code among other words), the query, then its key words – the first
-    two, variant words and numbers ("Ubiquiti UniFi Pro PoE 48" -> "Ubiquiti UniFi Pro 48")."""
+    two, variant words and numbers ("Ubiquiti UniFi Pro PoE 48" -> "Ubiquiti UniFi Pro 48"); lookup() searches the
+    key words only when nothing was found at all."""
     raw = _tokens(query)
     codes = [w for w in raw if strong_code(w)]
     key = raw[:2] + [w for w in raw[2:] if not is_code(w) and (re.search(r"\d", w) or w.lower() in VARIANT_WORDS)]
@@ -243,22 +244,31 @@ def search_queries(query: str) -> list[str]:
     return list(dict.fromkeys(q for q in out if q))[:3]
 
 
-async def lookup(query: str) -> dict[str, Any] | None:
+async def lookup(query: str, page: bool = True) -> dict[str, Any] | None:
     """Best match for a product name, as stored on the draft; None if nothing usable was found. `verified`: the
     product (search card and page title) matches the query, variant included; False = Geizhals' first hit as a guess.
-    Searches again (search_queries) while nothing found fits; a failing search raises GeizhalsError as before."""
+    Searches again (search_queries) while nothing found fits; a failing search raises GeizhalsError as before.
+    page=False: no product page (no spec sheet; the card's price is the lowest offer too) – one request less for a
+    mere price lookup."""
     query = query.strip()
     if not query:
         return None
     hits: list[Hit] = []
     best = None
-    for q in search_queries(query):
+    queries = search_queries(query)
+    for i, q in enumerate(queries):
+        if i == 2 and hits:          # the key words only when the code and the query found nothing at all
+            break
         hits += [h for h in await search(q, limit=12) if h.url not in {x.url for x in hits}]
         best = best_hit(hits, query)
         if best is not None:
             break
     if not hits:
         return {"query": query, "match": None, "candidates": [], "verified": False}
+    if not page:
+        top = best or hits[0]
+        return {"query": query, "match": {"name": top.name, "url": top.url, "price_from": top.price, "specs": []},
+                "candidates": [asdict(h) for h in hits[:12]], "verified": best is not None}
     prod = await product((best or hits[0]).url)
     verified = best is not None and (not prod.name or matches(prod.name, query, prod.url))   # the h1 can be more precise
     return {"query": query, "match": asdict(prod), "candidates": [asdict(h) for h in hits[:12]], "verified": verified}

@@ -65,7 +65,7 @@ FILLER = {
     "verkauft", "reserviert",
 }
 _UNITS = {"zoll", "cm", "mm", "m", "kg", "g", "l", "liter", "jahre", "jahr", "stk", "stück", "x", "teilig", "tlg",
-          "w", "watt", "personen", "pers", "mal", "euro", "eur", "€"}
+          "w", "watt", "personen", "pers", "mal", "euro", "eur", "€", "ml", "cl", "oz"}   # "30 ml": a size, no model
 _GENERIC_CATEGORIES = ("mode", "kleidung", "immobilien", "haustier", "tiere", "jobs")
 _TOKEN_RE = re.compile(r"[\wÄÖÜäöüß][\w.+\-/ÄÖÜäöüß]*")
 
@@ -131,7 +131,7 @@ def _model_token(toks: list[str], i: int) -> bool:
     if re.fullmatch(r"\d+([.,]\d+)?", tok):
         nxt = toks[i + 1].lower() if i + 1 < len(toks) else ""
         return nxt not in _UNITS and len(tok) <= 5
-    return not re.fullmatch(r"\d+([.,]\d+)?(cm|mm|m|kg|g|l|er|w|x\d*|-?ports?)", low)   # "24x", "16-Port": counts
+    return not re.fullmatch(r"\d+([.,]\d+)?(cm|mm|m|kg|g|l|ml|cl|oz|er|w|x\d*|-?ports?)", low)   # "24x", "16-Port"
 
 
 _WATTS_RE = re.compile(r"\d+w", re.I)
@@ -467,7 +467,7 @@ async def geizhals_match(query: str | None, raise_errors: bool = False) -> dict[
             raise geizhals.GeizhalsError("failed less than 15 min ago")
         return None
     try:
-        found = await geizhals.lookup(query)
+        found = await geizhals.lookup(query, page=False)      # the price is on the search card: no product page
     except geizhals.GeizhalsError as e:
         log.info("geizhals lookup failed for %r: %s", query, e)
         _put(_geizhals_fail, key, None, GEIZHALS_FAIL_TTL_S)   # short negative cache: retried after 15 min

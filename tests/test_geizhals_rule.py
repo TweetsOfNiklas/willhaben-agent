@@ -186,11 +186,11 @@ async def test_a_failed_lookup_is_asked_again(fake, monkeypatch):
     async def notify(kind, title, text="", **kw):
         sent.append((kind, (kw.get("data") or {}).get("ad_id"), kw.get("push", True)))
 
-    async def down(query):
+    async def down(query, **kw):
         asked.append(query)
         raise geizhals.GeizhalsError("HTTP 429")
 
-    async def up(query):
+    async def up(query, **kw):
         asked.append(query)
         return {"query": query, "verified": True, "candidates": [], "match": dict(GH)}
 
@@ -224,7 +224,7 @@ async def test_a_lookup_that_fails_while_another_finds_it(fake, monkeypatch):
     other_found = asyncio.Event()
     calls = []
 
-    async def lookup(query):
+    async def lookup(query, **kw):
         calls.append(query)
         if len(calls) == 1:
             await other_found.wait()

@@ -610,7 +610,9 @@ async def _run_agent(agent_id: int) -> RunResult:
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (agent.geizhals_pct or gh_check) and to_notify:
         await _geizhals_prices(to_notify)
-    if gh_check and to_notify:          # Claude checks the products before the rule and the screening use their prices
+    # Claude checks the products before the rule and the screening use their prices (and, with room to spare, older
+    # unchecked hits of the agent: no Claude call when there are none)
+    if gh_check:
         from app.services import geizhals_check
 
         await geizhals_check.check(agent, to_notify)

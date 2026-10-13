@@ -224,7 +224,7 @@ def test_parse_ad_ref(text, ad_id):
 # ------------------------------------------------------------------ analysis with fakes
 async def test_comparables_exclude_ad_itself_and_wanted_ads(wh, monkeypatch):
     calls, _ = wh
-    async def no_gh(q):
+    async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     res = await deals.analyze(_ad(100))
@@ -239,11 +239,11 @@ async def test_comparables_exclude_ad_itself_and_wanted_ads(wh, monkeypatch):
 async def test_caching_avoids_repeat_requests(wh, gh):
     calls, _ = wh
     first = await deals.analyze(_ad(100))
-    assert calls["search"] == 1 and len(gh) == 2               # one Geizhals search + one product page
+    assert calls["search"] == 1 and len(gh) == 1               # one Geizhals search, no product page (card price)
     again = await deals.analyze(_ad(100))
-    assert again is first and calls["search"] == 1 and len(gh) == 2
+    assert again is first and calls["search"] == 1 and len(gh) == 1
     other = await deals.analyze(_ad(90, ad_id="1000000002"))    # other ad, same query: search + Geizhals cached
-    assert calls["search"] == 1 and len(gh) == 2 and other["ad"]["ad_id"] == "1000000002"
+    assert calls["search"] == 1 and len(gh) == 1 and other["ad"]["ad_id"] == "1000000002"
     await deals.analyze(_ad(100), query="Akkuschrauber Bosch")   # new query -> exactly one new search
     assert calls["search"] == 2
 
@@ -254,16 +254,16 @@ async def test_geizhals_match_and_optional(wh, gh):
                                "url": "https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html",
                                "price_from": 139.0}
     plain = await deals.analyze(_ad(100, heading="Alter Holzschrank Eiche", ad_id="1000000003"))
-    assert plain["geizhals"] is None and len(gh) == 2           # generic title: Geizhals not asked
+    assert plain["geizhals"] is None and len(gh) == 1           # generic title: Geizhals not asked
 
 
 async def test_geizhals_error_and_mismatch_give_none(wh, monkeypatch):
-    async def boom(q):
+    async def boom(q, **kw):
         raise geizhals.GeizhalsError("HTTP 503")
     monkeypatch.setattr(deals.geizhals, "lookup", boom)
     assert await deals.geizhals_match("Bosch GSR 18V-55") is None
 
-    async def other(q):
+    async def other(q, **kw):
         return {"match": {"name": "Makita DDF484Z", "url": "https://geizhals.at/x-a1.html", "price_from": 99.0}}
     monkeypatch.setattr(deals.geizhals, "lookup", other)
     assert await deals.geizhals_match("Bosch GSR 18V-55") is None
@@ -278,7 +278,7 @@ async def test_few_comparables_use_geizhals(wh, gh):
 
 
 async def test_claude_only_when_asked(wh, monkeypatch):
-    async def no_gh(q):
+    async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     fake = FakeClaude()
@@ -293,7 +293,7 @@ async def test_claude_only_when_asked(wh, monkeypatch):
 
 
 async def test_claude_failure_is_not_cached(wh, monkeypatch):
-    async def no_gh(q):
+    async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     monkeypatch.setattr(deals, "get_backend", lambda *a: FakeClaude(fail=True))
@@ -410,7 +410,7 @@ def test_matches_variants(name, query, ok):
 async def test_geizhals_cache_per_variant_and_only_verified(wh, monkeypatch):
     asked = []
 
-    async def lookup(q):
+    async def lookup(q, **kw):
         asked.append(q)
         gb = "8GB" if "8GB" in q else "4GB"
         return {"query": q, "verified": True, "candidates": [],
@@ -422,7 +422,7 @@ async def test_geizhals_cache_per_variant_and_only_verified(wh, monkeypatch):
     assert four["price_from"] == 59.9 and eight["price_from"] == 89.9 and len(asked) == 2
     assert len(deals._geizhals) == 2                                         # one cache entry per variant
 
-    async def guess(q):                                                      # Geizhals' first hit, not confirmed
+    async def guess(q, **kw):                                                      # Geizhals' first hit, not confirmed
         return {**await lookup(q), "verified": False}
     monkeypatch.setattr(deals.geizhals, "lookup", guess)
     assert await deals.geizhals_match("Raspberry Pi 4 Modell 4GB") is None
@@ -431,7 +431,7 @@ async def test_geizhals_cache_per_variant_and_only_verified(wh, monkeypatch):
 async def test_geizhals_error_is_negatively_cached(wh, monkeypatch):
     n = []
 
-    async def boom(q):
+    async def boom(q, **kw):
         n.append(q)
         raise geizhals.GeizhalsError("HTTP 429")
     monkeypatch.setattr(deals.geizhals, "lookup", boom)
@@ -444,7 +444,7 @@ async def test_geizhals_error_is_negatively_cached(wh, monkeypatch):
 
 
 async def test_viewing_does_not_extend_freshness(wh, monkeypatch):
-    async def no_gh(q):
+    async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     res = await deals.analyze(_ad(100))
@@ -460,7 +460,7 @@ async def test_viewing_does_not_extend_freshness(wh, monkeypatch):
 
 
 async def test_claude_verdict_tied_to_price(wh, monkeypatch):
-    async def no_gh(q):
+    async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     fake = FakeClaude()
@@ -476,7 +476,7 @@ async def test_claude_verdict_tied_to_price(wh, monkeypatch):
 
 
 async def test_results_before_the_size_filter_are_recomputed(wh, monkeypatch):
-    async def no_gh(q):
+    async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     res = await deals.analyze(_ad(100))
@@ -646,7 +646,7 @@ class ScriptedClaude:
 @pytest.fixture
 def no_auto_gh(monkeypatch):
     """The automatic lookup finds nothing; Geizhals' search pages (gh fixture) still answer Claude's searches."""
-    async def nothing(q):
+    async def nothing(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", nothing)
 
@@ -664,13 +664,13 @@ async def test_claude_finds_the_geizhals_product(wh, gh, no_auto_gh, monkeypatch
 
     res = await deals.analyze(_ad(70), find_geizhals=True)
     assert len(fake.calls) == 2 and "Bosch GSR 18V-55 Akkuschrauber" in fake.calls[0]["prompt"]
-    assert "1. Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo · ab 1139 €" in fake.calls[1]["prompt"]
+    assert "1. Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo · ab 139 €" in fake.calls[1]["prompt"]
     assert "2. Bosch GSR 18V-55 Set · ab 199.9 €" in fake.calls[1]["prompt"]
     assert gh == ["https://geizhals.at/?fs=Bosch+GSR+18V-55+solo&hloc=at",      # one request per search, no page
                   "https://geizhals.at/?fs=Bosch+GSR+18V-55&hloc=at"]
     assert res["geizhals"] == {"name": "Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo",
                                "url": "https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html",
-                               "price_from": 1139.0, "by": "claude", "reason": "Genau dieses Modell, ohne Akku."}
+                               "price_from": 139.0, "by": "claude", "reason": "Genau dieses Modell, ohne Akku."}
     assert res["position"]["basis"] == "geizhals"
 
     again = await deals.analyze(_ad(70), find_geizhals=True)     # found already: no further Claude call
@@ -756,12 +756,12 @@ def test_viewer_offers_claude_and_updates_the_hit(app_client, no_auto_gh, monkey
     assert fake.calls == []
 
     section = app_client.post(f"/deals/ad/willhaben/{AD_ID}/geizhals", data={"hit": str(h.id), "compact": "1"}).text
-    assert section.lstrip().startswith("<section") and "New from € 1.139 on Geizhals" in section
+    assert section.lstrip().startswith("<section") and "New from € 139 on Geizhals" in section
     assert "found by Claude" in section and "Let Claude search Geizhals" not in section
     from app.services import jobs
     shown = jobs.snapshot()["recent"][0]                         # shown in the jobs indicator while Claude searched
     assert shown["label"] == "Claude searches Geizhals: „Bosch GSR 18V-55“" and shown["quiet"] is True
     assert shown["result"] == "Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo"
     with dbmod.session() as db:
-        assert db.get(dbmod.Hit, h.id).geizhals["price_from"] == 1139.0
+        assert db.get(dbmod.Hit, h.id).geizhals["price_from"] == 139.0
         assert db.get(dbmod.DealCheck, AD_ID).result["geizhals"]["by"] == "claude"

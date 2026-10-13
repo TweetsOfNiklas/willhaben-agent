@@ -139,22 +139,39 @@ def _card(name, url, price):
 
 async def test_lookup_searches_again_until_something_fits(monkeypatch):
     seen = []
-    pages = {"USW-24-POE": "", "Ubiquiti UniFiSwitch 24 USW-24-POE": _card(SWITCH_24[0].name, SWITCH_24[0].url, "739,88"),
-             "Ubiquiti UniFiSwitch 24": _card(SWITCH_24[0].name, SWITCH_24[0].url, "739,88")
-             + _card(SWITCH_24[1].name, SWITCH_24[1].url, "406,87")}
+    pages = {"USW-24-POE": _card(SWITCH_24[0].name, SWITCH_24[0].url, "739,88"),
+             "Ubiquiti UniFiSwitch 24 USW-24-POE": _card(SWITCH_24[1].name, SWITCH_24[1].url, "406,87")}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.params.get("fs") or request.url.path)
         if request.url.path == "/":
-            return httpx.Response(200, text=pages[request.url.params["fs"]])
+            return httpx.Response(200, text=pages.get(request.url.params["fs"], ""))
         return httpx.Response(200, text=f"<h1>{SWITCH_24[1].name}</h1><script>x={{lowPrice: 406.87}}</script>")
 
     monkeypatch.setattr(geizhals, "_transport", httpx.MockTransport(handler))
     monkeypatch.setattr(geizhals, "_limiter", geizhals.RateLimiter(0, name="Geizhals"))
     res = await geizhals.lookup("Ubiquiti UniFiSwitch 24 USW-24-POE")
-    assert seen == ["USW-24-POE", "Ubiquiti UniFiSwitch 24 USW-24-POE", "Ubiquiti UniFiSwitch 24",
+    assert seen == ["USW-24-POE", "Ubiquiti UniFiSwitch 24 USW-24-POE",     # the code found only the Pro 24
                     "/ubiquiti-unifiswitch-24-rackmount-gigabit-managed-switch-usw-24-poe-a2189707.html"]
     assert res["verified"] and res["match"]["price_from"] == 406.87 and len(res["candidates"]) == 2
+
+    seen.clear()
+    res = await geizhals.lookup("Ubiquiti UniFiSwitch 24 USW-24-POE", page=False)   # a price lookup: no page
+    assert seen == ["USW-24-POE", "Ubiquiti UniFiSwitch 24 USW-24-POE"] and res["match"]["price_from"] == 406.87
+
+    seen.clear()
+    pages.clear()
+    pages["Ubiquiti UniFiSwitch 24"] = _card(SWITCH_24[1].name, SWITCH_24[1].url, "406,87")
+    res = await geizhals.lookup("Ubiquiti UniFiSwitch 24 USW-24-POE", page=False)
+    assert seen == ["USW-24-POE", "Ubiquiti UniFiSwitch 24 USW-24-POE", "Ubiquiti UniFiSwitch 24"]   # nothing at all yet
+    assert res["verified"]
+
+    seen.clear()
+    pages.clear()
+    pages["USW-24-POE"] = _card(SWITCH_24[0].name, SWITCH_24[0].url, "739,88")
+    res = await geizhals.lookup("Ubiquiti UniFiSwitch 24 USW-24-POE", page=False)
+    assert seen == ["USW-24-POE", "Ubiquiti UniFiSwitch 24 USW-24-POE"]     # something found, nothing fits: no 3rd
+    assert not res["verified"]
 
 
 async def test_a_block_pauses_geizhals(monkeypatch):

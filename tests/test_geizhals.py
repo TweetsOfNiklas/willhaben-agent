@@ -15,7 +15,7 @@ SEARCH = """
  <img src="https://gzhls.at/pix/91/89/x-m.webp" alt=""></a></div><h3 class="galleryview__name">
  <a href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html" class="galleryview__name-link"
     title="x"> Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo </a></h3>
- <a href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html#offerlist"><span class="price">€ 1.139,00</span></a></article>
+ <a href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html#offerlist"><span class="price">€ 139,00</span></a></article>
 <article class="galleryview__item card"><h3 class="galleryview__name">
  <a href="https://geizhals.at/bosch-gsr-18v-55-set-a2221733.html" class="galleryview__name-link">Bosch GSR 18V-55 Set</a></h3>
  <span class="price">€ 199,90</span></article>
@@ -56,7 +56,9 @@ def gh(monkeypatch):
 def test_parse_search_skips_families():
     hits = geizhals.parse_search(SEARCH)
     assert [h.name for h in hits] == ["Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo", "Bosch GSR 18V-55 Set"]
-    assert hits[0].price == 1139.0 and hits[0].image.startswith("https://gzhls.at/")
+    assert hits[0].price == 139.0 and hits[0].image.startswith("https://gzhls.at/")
+    big = SEARCH.replace("€ 139,00", "€ 1.139,00")                     # thousands separator
+    assert geizhals.parse_search(big)[0].price == 1139.0
 
 
 def test_parse_product():
