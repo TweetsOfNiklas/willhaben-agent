@@ -240,7 +240,8 @@ templates.env.globals.update(agent_sites=_agent_platforms, agent_search_items=_a
                              geizhals_below_pct=_geizhals_below_pct)
 from app.services import geo as _geo  # noqa: E402
 
-templates.env.globals.update(home_point=_geo.home_cached, result_km=_geo.distance_km)   # distance from home to ads
+templates.env.globals.update(home_point=_geo.home_cached, home_address=_geo.home_address,   # distance from home to ads
+                             result_km=_geo.distance_km)
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled,
                              vpn_health=vpn.health)
@@ -2296,6 +2297,11 @@ def _shipment_or_404(shipment_id: int):
 async def settings_shipping(request: Request):
     f = await request.form()
     shipping.save_sender({k: str(f.get(k) or "") for k in shipping.ADDRESS_FIELDS})
+    if _geo.home_address() and _geo.home_cached() is None:
+        # a new address is located now (in the background, paced): the product search can sort by distance at once
+        task = asyncio.create_task(_geo.home())
+        _background.add(task)
+        task.add_done_callback(_background.discard)
     shipping.save_carriers([str(c) for c in f.getlist("carrier")])
     set_setting("ship_detect", "1" if f.get("detect") else "0")
     return back(f"/settings/shipping?msg={quote(t('Changes saved'), safe='')}")

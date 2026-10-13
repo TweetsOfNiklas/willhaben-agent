@@ -894,9 +894,30 @@ def test_planned_searches_link_to_the_chosen_site(app_client):
     frag = app_client.get(f"/deals/search/{row.id}").text
     assert "https://www.ebay.at/sch/i.html?_nkw=unifi+router" in frag and "_udlo=50" in frag
     assert "https://www.ebay.at/sch/i.html?_nkw=ubiquiti" in frag and "willhaben.at/iad" not in frag
+    assert "_sop=12" in frag and "_sop=10" not in frag                # the search's sort (relevance), as the run sends it
     from app.deals_web import plan_query_url
     assert plan_query_url(plan["queries"][1]).startswith("https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz/computer-4")
     assert plan_query_url({"keyword": "x", "url": "https://example.org/ran"}) == "https://example.org/ran"
+    newest = {**ps.make_settings(sort="newest"), "platforms": ["ebay"]}
+    assert "_sop=10" in plan_query_url(plan["queries"][0], newest)
+    set_setting("platform_ebay_enabled", "0")                          # switched off: the run falls back to willhaben
+    frag = app_client.get(f"/deals/search/{row.id}").text
+    assert "ebay.at" not in frag and "willhaben.at/iad/kaufen-und-verkaufen/marktplatz?" in frag
+
+
+async def test_planned_searches_are_the_searches_the_run_sends(wh, fake_site):
+    """Before the run, the planned rows and their links pick the sites and the sort exactly as run_queries does: a site
+    that is switched off or unknown gets no row."""
+    from app.deals_web import plan_query_url
+
+    plan = ps.normalize_plan(PLAN, 3)
+    settings = {**ps.make_settings(sort="newest"), "platforms": ["ebay", "fake", "gone", "willhaben"]}   # eBay is off
+    rows = ps.planned(plan, settings)
+    found = await ps.run_queries(plan, settings)
+    assert [(q["keyword"], q["platform"]) for q in rows] == [(q["keyword"], q["platform"]) for q in found["per_query"]]
+    assert [plan_query_url(q, settings) for q in rows] == [q["url"] for q in found["per_query"]]
+    assert {q["platform"] for q in rows} == {"fake", "willhaben"}
+    assert plan_query_url({"keyword": "rad"}, {"platforms": ["ebay", "fake"]}) == "https://fake.example/s/rad"
 
 
 # ------------------------------------------------------------------ load more
@@ -925,6 +946,58 @@ async def test_load_more_ranks_the_next_offers(wh, claude, monkeypatch):
     assert len({r["ad_id"] for r in row.results}) == len(row.results)          # no offer twice
 
 
+async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch):
+    """An offer Claude ranked never goes back into the pool, also when it was passed over: "load more" runs out."""
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    row = ps.get(sid)
+    first, pool = list(row.results), list(row.pool)
+    passed_over = pool[-1]                                                     # ranked once, not picked
+    assert len(pool) > 4 and passed_over["title"] in claude.calls[-1]["prompt"]
+    claude.rank = {"results": []}                                              # nothing fits any more
+    loads = 0
+    while ps.load_more(sid):
+        loads += 1
+        assert loads <= len(pool), "load more never runs out"
+        await _finish()
+        row = ps.get(sid)
+        assert len(row.pool or []) == max(0, len(pool) - 4 * loads)            # the whole batch leaves the pool
+    assert loads == -(-len(pool) // 4) and row.results == first and not row.pool
+    assert passed_over["title"] in claude.calls[-1]["prompt"]                  # its one more look, at the end
+    assert row.candidates == 4 + len(pool) and row.progress["more"] == loads
+
+
+async def test_load_more_problems_stay_apart_from_the_search_warning(wh, claude, monkeypatch):
+    """A failed "load more" keeps the search's own warning and is cleared by the next load that works."""
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 2)
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    own = "Hourly request limit of willhaben almost used up: only 2 of 3 searches run."
+    ps._update(sid, warning=own)
+    claude.fail_rank = True
+    assert ps.load_more(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.warning == own and "showing the cheapest" in row.progress["more_warning"]
+
+    async def broken(*a, **kw):
+        raise RuntimeError("disk full")
+    rank = ps.rank
+    monkeypatch.setattr(ps, "rank", broken)
+    assert ps.load_more(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.warning == own and row.progress["more_warning"] == "Loading more offers failed: disk full"
+    assert row.status == "done" and row.pool
+    monkeypatch.setattr(ps, "rank", rank)
+    claude.fail_rank = False
+    assert ps.load_more(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.warning == own and row.progress["more_warning"] is None and row.progress["more"] == 2
+
+
 async def test_load_more_without_claude_and_after_a_restart(wh, claude, monkeypatch):
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
@@ -933,7 +1006,7 @@ async def test_load_more_without_claude_and_after_a_restart(wh, claude, monkeypa
     assert ps.load_more(sid)
     await _finish()
     row = ps.get(sid)
-    assert row.status == "done" and len(row.results) > 2 and "showing the cheapest" in row.warning
+    assert row.status == "done" and len(row.results) > 2 and "showing the cheapest" in row.progress["more_warning"]
     ps._update(sid, status="more")                                             # interrupted by a restart
     ps.recover()
     assert ps.get(sid).status == "done" and ps.get(sid).results == row.results
@@ -949,13 +1022,17 @@ def test_load_more_on_the_page(app_client, monkeypatch):
             for n in range(3)]
     with dbmod.session() as db:
         row = dbmod.ProductSearch(description="Spüler", status="done", results=rows[:1], pool=rows[1:],
-                                  settings=ps.make_settings(photos=False), progress={"done": 3, "total": 3, "more": 1})
+                                  plan={"queries": [{"keyword": "spüler", "why": "x"}]}, warning="Search warning.",
+                                  settings=ps.make_settings(photos=False),
+                                  progress={"done": 3, "total": 3, "more": 1, "more_warning": "Loading more offers failed: x"})
         db.add(row)
         db.commit()
         db.refresh(row)
     frag = app_client.get(f"/deals/search/{row.id}").text
     assert f'action="/deals/search/{row.id}/more"' in frag and "2 more offers found" in frag
     assert "3 Claude calls" in frag                                            # plan + ranking + one more ranking
+    assert "Search warning." in frag and "Loading more offers failed: x" in frag    # both shown, apart
+    assert "Create a search agent from this search" in frag and 'name="interval_min"' in frag
     r = app_client.post(f"/deals/search/{row.id}/more", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == f"/deals?search={row.id}#ps-more" and asked == [row.id]
     ps._update(row.id, status="more", pool=rows[1:])
@@ -963,5 +1040,7 @@ def test_load_more_on_the_page(app_client, monkeypatch):
     frag = app_client.get(f"/deals/search/{row.id}").text
     ps._active.discard(row.id)
     assert "Claude is ranking 2 more offers" in frag and "Spüler 0" in frag and 'hx-trigger="every 2s"' in frag
+    assert 'name="interval_min"' not in frag                                   # no form in a box that refreshes itself
+    assert "Loading more offers failed" not in frag and "Search warning." in frag
     ps._update(row.id, status="done", pool=None)
     assert "No more offers in this search." in app_client.get(f"/deals/search/{row.id}").text

@@ -106,6 +106,7 @@ def test_builder_keeps_the_typed_price_for_willhaben(client, monkeypatch):
 
 
 def test_planned_searches_name_each_chosen_site(client):
+    set_setting("platform_ebay_enabled", "1")
     plan = {"summary": "Rad", "queries": [{"keyword": "rennrad", "why": "x"}, {"keyword": "gravel", "why": "y"}]}
     with session() as db:
         row = ProductSearch(description="Rad", status="asking", plan=plan, settings={"platforms": ["fake", "ebay"]})
@@ -116,3 +117,8 @@ def test_planned_searches_name_each_chosen_site(client):
     table = frag[frag.index("<tbody>"):frag.index("</tbody>")]
     assert table.count("<tr>") == 4 and table.count("<td>Fake</td>") == 2 and table.count("<td>eBay</td>") == 2
     assert "willhaben" not in table and "https://www.ebay.at/sch/i.html?_nkw=gravel" in table
+    set_setting("platform_ebay_enabled", "0")              # switched off before the run: the run skips eBay, so do the rows
+    frag = client.get(f"/deals/search/{row.id}").text
+    table = frag[frag.index("<tbody>"):frag.index("</tbody>")]
+    assert table.count("<tr>") == 2 and table.count("<td>Fake</td>") == 2 and "ebay" not in table.lower()
+    assert "https://fake.example/s/gravel" in table

@@ -54,7 +54,7 @@ from app.llm.prompts import (
 )
 from app.services import ad_images, deals, geo, scam
 from app import platforms
-from app.platforms import Blocked, Listing, PlatformError
+from app.platforms import Blocked, Listing, PlatformError, SearchSpec
 from app.services import timeline
 
 log = logging.getLogger(__name__)
@@ -262,9 +262,11 @@ def _remaining_budget(p: platforms.Platform) -> int | None:
     return max(0, lim.per_hour - lim.last_hour) if lim.per_hour else None
 
 
-def _sites(settings: dict[str, Any]) -> list[platforms.Platform]:
+def run_sites(settings: dict[str, Any] | None) -> list[platforms.Platform]:
+    """The sites a run of the search uses: its chosen ones that are known, switched on and can search, else willhaben
+    (no settings: the defaults, as run() uses them)."""
     out = []
-    for pid in settings.get("platforms") or ["willhaben"]:
+    for pid in (settings or make_settings()).get("platforms") or ["willhaben"]:
         try:
             p = platforms.get(pid)
         except platforms.UnknownPlatform:
@@ -272,6 +274,20 @@ def _sites(settings: dict[str, Any]) -> list[platforms.Platform]:
         if platforms.enabled(p.id) and p.can("keyword_search"):
             out.append(p)
     return out or [platforms.get("willhaben")]
+
+
+def query_spec(p: platforms.Platform, q: dict[str, Any], settings: dict[str, Any] | None) -> SearchSpec:
+    """One planned query on one site as run_queries sends it: the search's sort, the willhaben category only on
+    willhaben, no price_to (drop_reason applies it, so the pricier ads stay comparables)."""
+    return p.keyword_search(q.get("keyword") or "", q.get("price_from"), None,
+                            sort=(settings or make_settings()).get("sort") or "relevance",
+                            category=q.get("category_path") if p.id == "willhaben" else None)
+
+
+def planned(plan: dict[str, Any] | None, settings: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The plan's searches before they ran: each query once per site the run will use, query-major like per_query."""
+    sites = run_sites(settings)
+    return [{**q, "platform": p.id} for q in (plan or {}).get("queries") or [] for p in sites]
 
 
 async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
@@ -283,14 +299,11 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
     same site), query_of[i] = the plan query's index. requests counts only requests that actually went out (not those
     a limiter refused); on_progress(done, total, requests). A block stops only that site's remaining searches."""
     queries = plan.get("queries") or []
-    sort = settings.get("sort") or "relevance"
-    sites = _sites(settings)
+    sites = run_sites(settings)
     runs = [(qi, q, p) for qi, q in enumerate(queries) for p in sites]
     per_query = []
     for _qi, q, p in runs:
-        spec = p.keyword_search(q["keyword"], q.get("price_from"), None, sort=sort,
-                                category=q.get("category_path") if p.id == "willhaben" else None)
-        # no price_to in the search: the more expensive ads stay in the comparables (drop_reason filters candidates)
+        spec = query_spec(p, q, settings)
         per_query.append({**q, "platform": p.id, "url": spec.url, "spec": spec.to_json(), "found": None, "kept": 0,
                           "error": None, "skipped": False})
     pools: list[list[Listing]] = [[] for _ in runs]
@@ -313,7 +326,6 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
         if left[p.id] is not None:
             left[p.id] -= 1
         try:
-            from app.platforms import SearchSpec
             page = await p.search(SearchSpec.from_json(per_query[i]["spec"]), rows=ROWS)   # uncached: real requests
             requests += 1
         except Blocked as e:
@@ -728,29 +740,35 @@ def load_more(search_id: int) -> bool:
 
 @timeline.scoped(search_id="search_id")
 async def _more(search_id: int) -> None:
+    """One "load more": Claude ranks the next batch of the pool. An offer Claude ranked leaves the pool whether it
+    was picked or passed over, so the pool runs out. A problem goes to progress["more_warning"], apart from the
+    search's own warning; the next load replaces it (None: cleared)."""
     _active.add(search_id)
+    progress: dict[str, Any] = {}
     try:
         row = get(search_id)
         if row is None:
             return
+        progress = dict(row.progress or {})
         plan, settings, pool = row.plan or {}, row.settings or make_settings(), list(row.pool or [])
         batch, rest = pool[:MAX_CANDIDATES], pool[MAX_CANDIDATES:]
         pairs = answer_pairs(plan, row.answers)
-        warning = None
+        warning, unseen = None, []
         try:
             more, _note, _model = await rank(row.description, plan, batch, answers=pairs)
         except LLMError as e:
-            more = unranked(batch)
+            more, unseen = unranked(batch), batch       # Claude never ranked them: those not shown keep their turn
             warning = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
         else:
             if more and settings.get("photos"):
                 more, warning = await check_photos(row.description, plan, more, answers=pairs)
         await geo.locate(more)
-        progress = {**(row.progress or {}), "more": int((row.progress or {}).get("more") or 0) + 1}
-        _update(search_id, status="done", results=list(row.results or []) + more, pool=_pool(rest, batch, more),
-                candidates=(row.candidates or 0) + len(batch), progress=progress, warning=warning or row.warning)
+        _update(search_id, status="done", results=list(row.results or []) + more, pool=_pool(rest, unseen, more),
+                candidates=(row.candidates or 0) + len(batch),
+                progress={**progress, "more": int(progress.get("more") or 0) + 1, "more_warning": warning})
     except Exception as e:  # noqa: BLE001 - the results shown so far stay; the failure is a warning
         log.exception("loading more offers for product search %s failed", search_id)
-        _update(search_id, status="done", warning=t("Loading more offers failed: {error}", error=str(e) or type(e).__name__))
+        _update(search_id, status="done", progress={**progress, "more_warning": t("Loading more offers failed: {error}",
+                                                                                  error=str(e) or type(e).__name__)})
     finally:
         _active.discard(search_id)

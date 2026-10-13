@@ -47,7 +47,8 @@ def km(a: tuple[float, float], b: tuple[float, float]) -> float:
     return dropoff._dist_m(a[0], a[1], b[0], b[1]) / 1000
 
 
-def _home_address() -> str | None:
+def home_address() -> str | None:
+    """The sender address as one line, None without a postcode or town (the page then asks for an address)."""
     from app.services import shipping
 
     s = shipping.sender()
@@ -56,7 +57,7 @@ def _home_address() -> str | None:
 
 def home_cached() -> tuple[float, float] | None:
     """Home, only when it is geocoded already (no request: for page rendering)."""
-    addr = _home_address()
+    addr = home_address()
     try:
         cached = json.loads(get_setting("ship_sender_geo") or "{}")
     except ValueError:
@@ -77,7 +78,7 @@ async def home() -> tuple[float, float] | None:
     """Home as coordinates; asks Nominatim once per address. None without an address or when it is not found."""
     if (p := home_cached()) is not None:
         return p
-    addr = _home_address()
+    addr = home_address()
     if not addr or _down():
         return None
     async with _lock:

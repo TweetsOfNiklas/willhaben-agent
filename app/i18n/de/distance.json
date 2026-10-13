@@ -3,5 +3,6 @@
  "Best match": "Passend",
  "Distance": "Entfernung",
  "Enter your address under Settings → Shipping & pickup to sort by distance.": "Trag deine Adresse unter Einstellungen → Versand & Abholung ein, um nach Entfernung zu sortieren.",
- "{km} km away": "{km} km entfernt"
+ "{km} km away": "{km} km entfernt",
+ "Your address under Settings → Shipping & pickup could not be located (yet), so the offers cannot be sorted by distance.": "Deine Adresse unter Einstellungen → Versand & Abholung wurde (noch) nicht gefunden; ohne sie lassen sich die Angebote nicht nach Entfernung sortieren."
 }

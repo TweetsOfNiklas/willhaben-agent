@@ -1,6 +1,7 @@
 """Distance from home to ads: coordinates from the sites, postcode centres from Nominatim (cached, paced, resting after
 a failure), and the product search's offers shown with their distance and sortable by it."""
 import json
+import time
 
 import httpx
 import pytest
@@ -92,3 +93,47 @@ def test_offers_show_and_sort_by_distance():
         frag = c.get(f"/deals/search/{row.id}").text
     assert "499 km away" in frag and "3,2 km away" in frag and 'disabled title="Enter' not in frag
     assert 'data-i="0" data-price="100.0" data-km="498.76' in frag and 'data-i="2" data-price="" data-km=""' in frag
+
+
+def _search_with_offers():
+    results = [{"ad_id": str(n), "platform": "willhaben", "title": f"Rad {n}", "price": 100.0 + n, "url": f"https://x/{n}",
+                "location": "Wien", "lat": 48.2, "lon": 16.37, "fit": 90 - n, "position": {"pos": None}} for n in range(2)]
+    with dbmod.session() as s:
+        row = dbmod.ProductSearch(description="Rad", status="done", results=results, settings={"platforms": ["willhaben"]})
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+    return row.id
+
+
+def _wait(cond, timeout=5.0):
+    end = time.monotonic() + timeout
+    while not cond() and time.monotonic() < end:
+        time.sleep(0.02)
+    assert cond()
+
+
+def test_saving_the_address_locates_it(nominatim):
+    """The address entered under Settings → Shipping is located in the background, so the distance sort works at once."""
+    from app.main import app
+
+    sid = _search_with_offers()
+    with TestClient(app) as c:
+        assert 'disabled title="Enter your address' in c.get(f"/deals/search/{sid}").text
+        assert c.post("/settings/shipping", data=HOME, follow_redirects=False).status_code == 303
+        _wait(lambda: geo.home_cached() is not None)
+        frag = c.get(f"/deals/search/{sid}").text
+    assert geo.home_cached() == (48.19, 16.33) and "km away" in frag and "disabled title=" not in frag
+    assert len(nominatim) == 1
+
+
+def test_an_address_not_found_gets_its_own_hint(nominatim):
+    from app.main import app
+
+    sid = _search_with_offers()
+    with TestClient(app) as c:
+        c.post("/settings/shipping", data={**HOME, "zip": "9999", "city": "Nirgendwo"}, follow_redirects=False)
+        _wait(lambda: len(nominatim) == 1)
+        frag = c.get(f"/deals/search/{sid}").text
+    assert geo.home_cached() is None and "km away" not in frag and "Enter your address" not in frag
+    assert 'disabled title="Your address under Settings → Shipping &amp; pickup could not be located (yet)' in frag

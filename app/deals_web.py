@@ -35,16 +35,14 @@ def install(app: FastAPI, templates: Jinja2Templates) -> None:
     app.include_router(router)
 
 
-def plan_query_url(q: dict[str, Any], sites: list[str] | None = None) -> str:
-    """The link of one planned search: its own URL once it ran, before that the search on its site (or the first
-    chosen one) as run_queries will send it."""
+def plan_query_url(q: dict[str, Any], settings: dict[str, Any] | None = None) -> str:
+    """The link of one planned search: its own URL once it ran, before that the search as run_queries will send it
+    with the search's settings (on its site, else the first site the run uses; the search's sort)."""
     if q.get("url"):
         return q["url"]
-    pid = q.get("platform") or (sites or ["willhaben"])[0]
     try:
-        p = platforms.get(pid)
-        return p.keyword_search(q.get("keyword") or "", q.get("price_from"), None,
-                                category=q.get("category_path") if p.id == "willhaben" else None).url
+        p = platforms.get(q["platform"]) if q.get("platform") else product_search.run_sites(settings)[0]
+        return product_search.query_spec(p, q, settings).url
     except Exception:  # noqa: BLE001 - a site that is gone: no link is better than a wrong one
         return ""
 
@@ -211,7 +209,7 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
     return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": notice, "ps_oob": oob,
             "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
             "ps_is_running": product_search.is_running, "ps_answer_pairs": product_search.answer_pairs,
-            **_agent_ctx(shown)}
+            "ps_planned": product_search.planned, **_agent_ctx(shown)}
 
 
 def _sites_off() -> list[platforms.Platform]:
