@@ -17,7 +17,8 @@ visitor's, not the item's.
 eBay sits behind Akamai Bot Manager. Requests go through curl_cffi impersonating Chrome, and a new visitor's first
 requests are often refused (403) while the bot manager sets its cookies. Until a search of this visitor went through, a
 403 is that warm-up: the client keeps its cookies and asks again (paced by the limiter, at most WARMUP_RETRIES times);
-after that a 403 is a block as on every other site. No login, no API keys.
+after that a 403 is a block as on every other site. Through the VPN, every exit is a new visitor with its own
+warm-up, so a warm-up 403 is no refused exit. No login, no API keys.
 """
 from __future__ import annotations
 
@@ -416,11 +417,23 @@ class EbayClient(HttpPlatformClient):
         super().new_anonymous_session()
         self._warm, self._warmups = False, WARMUP_RETRIES
 
+    def _warming_up(self, r: FetchResponse) -> bool:
+        return r.status_code == 403 and not self._warm and self._warmups > 0
+
     def _check_status(self, r: FetchResponse) -> None:
-        if r.status_code == 403 and not self._warm and self._warmups > 0:
+        if self._warming_up(r):
             self._warmups -= 1
             raise _WarmingUp("eBay: warming up")
         super()._check_status(r)
+
+    def _exit_blocked(self, r: FetchResponse) -> bool:
+        """Through the VPN a warm-up 403 keeps the exit: _check_status asks again through it."""
+        return not self._warming_up(r) and super()._exit_blocked(r)
+
+    async def _use(self, proxy: str | None) -> Transport:
+        if self._transport is not None and proxy != self._proxy:      # another exit: a new visitor, a new warm-up
+            self._warm, self._warmups = False, WARMUP_RETRIES
+        return await super()._use(proxy)
 
     async def _page(self, url: str, *, params: dict[str, str] | None = None, cache_s: float = 0,
                     kind: str = "search") -> FetchResponse:
@@ -487,6 +500,7 @@ class EbayPlatform(Platform):
     id = "ebay"
     name = "eBay"
     host = "ebay.at"
+    api_host = "www.ebay.at"
     home_country = "AT"
     hosts = ("ebay.at",)
     image_hosts = ("ebayimg.com", "ebaystatic.com")

@@ -233,6 +233,25 @@ async def test_kleinanzeigen_tells_an_exit_block_from_rotated_credentials():
     assert tunnel.failures == []
 
 
+async def test_ebay_warms_up_on_an_exit_instead_of_leaving_it():
+    from app.platforms import ebay
+    from tests.conftest import FIXTURES
+
+    page = (FIXTURES / "ebay_search.html").read_bytes()
+    exits = {"http://exit1": FakeTransport([(403, b""), (200, page), TransportError("down")]),
+             "http://exit2": FakeTransport([(403, b""), (200, page), (403, b"")]),
+             "http://exit3": FakeTransport([(403, b""), (200, page)])}
+    tunnel = FakeTunnel()
+    c = ebay.EbayClient(transport=FakeTransport([]))
+    c.limiter = RateLimiter(0, name="eBay")
+    c._factory, c._tunnel, c._transport = exits.__getitem__, (lambda: tunnel), None
+    assert len((await c.search_page({"_nkw": "iphone"})).ads) == 5          # the warm-up 403 keeps the exit
+    assert tunnel.failures == [] and len(exits["http://exit1"].calls) == 2
+    assert len((await c.search_page({"_nkw": "ipad"})).ads) == 5            # exit1 gone: exit2 warms up anew
+    assert tunnel.failures == [("http://exit1", "unreachable")] and len(exits["http://exit2"].calls) == 2
+    assert len((await c.search_page({"_nkw": "ipod"})).ads) == 5            # warm: a 403 refuses the exit
+    assert tunnel.failures[1:] == [("http://exit2", "blocked")] and len(exits["http://exit3"].calls) == 2
+
 def test_a_proxy_and_a_mock_transport_do_not_mix():
     with pytest.raises(ValueError):
         HttpxTransport({}, httpx.MockTransport(lambda r: httpx.Response(200)), proxy="http://127.0.0.1:1")
