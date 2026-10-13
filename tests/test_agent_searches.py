@@ -214,6 +214,30 @@ async def test_a_save_during_a_check_leaves_the_quiet_first_check_to_the_next(fa
         assert res.baseline and res.new == [] and _agent(b.id).baseline_done
 
 
+async def test_a_save_during_a_check_that_leaves_one_quiet_search_it_runs(fake, monkeypatch):
+    """A Save during a check drops every search but a quiet one that check runs: a plain agent then, its quiet flag
+    the agent's. That check was its first, so the next one pushes (it once muted the next one too)."""
+    from app.services.search_agents import run_agent
+    from tests.fake_platform import listing
+
+    a = create_agent("https://fake.example/s/rad")
+    fake.pages = [[listing("1")]]
+    await run_agent(a.id)
+    a = _agent(a.id)
+    edit_searches(a, add="gravel")
+    with session() as db:
+        db.add(a)
+        db.commit()
+    _save_during_the_check(monkeypatch, fake, a.id, drop_terms=[("rad", None, None)])
+    fake.pages = [[listing("1")], [listing("2", "Gravelbike")]]                # rad, then gravel (quiet)
+    assert (await run_agent(a.id)).new == [] and _hit_states(a.id)["2"] == "seen"
+    b = _agent(a.id)
+    assert b.queries is None and b.spec["keyword"] == "gravel" and b.baseline_done
+    fake.pages = [[listing("3", "Gravel neu")]]
+    res = await run_agent(a.id)
+    assert not res.baseline and [h.ad_id for h in res.new] == ["3"]
+
+
 def test_a_save_keeps_the_searches_on_a_site_without_a_chip(client, fake):
     """A watched site that is gone (taken out of PLATFORMS_ENABLED) gets no chip in the drawer, so nothing can untick
     it: Save keeps its searches, and an agent only there can still be renamed."""
@@ -237,6 +261,45 @@ def test_a_save_keeps_the_searches_on_a_site_without_a_chip(client, fake):
     assert [(q["platform"], q["keyword"]) for q in _agent(a.id).queries] == [("willhaben", "fahrrad"), ("old", "fahrrad")]
     r = _edit(client, _agent(b.id), sites_shown="1", name="Rad alt")           # no chip ticked
     assert r.headers["location"] == "/agents" and _agent(b.id).name == "Rad alt" and _agent(b.id).spec["keyword"] == "rad"
+
+
+def test_the_last_search_on_a_site_without_a_chip_can_go(client, fake):
+    """Dropping the last search on a gone site (no chip) drops the site with it: every such Save was once refused
+    ("Unknown platform"), the name and interval sent with it too. Unticking every chip still needs a site: one without
+    a chip cannot be the only one left."""
+    from app.services.search_agents import agent_search_items
+
+    old = FakePlatform()
+    old.id, old.name = "old", "Old"
+    platforms.set_platform("old", old)
+    on_both, with_filter, unticked, plain = (_settled(URL) for _ in range(4))
+    for a in (on_both, with_filter, unticked, plain):
+        edit_searches(a, sites=["willhaben", "old"])
+    set_searches(with_filter, [agent_searches(with_filter)[0], {"platform": "old", "keyword": "",
+                                                                "source_url": "https://fake.example/s/?cat=1"}])
+    with session() as db:
+        for a in (on_both, with_filter, unticked, plain):
+            db.add(a)
+        db.commit()
+    platforms.set_platform("old", None)
+
+    r = _edit(client, _agent(on_both.id), sites_shown="1", sites=["willhaben"], drop_term='["fahrrad", null, null]',
+              add_keyword="gravel", name="Gravel", interval_min="30")
+    a = _agent(on_both.id)
+    assert r.headers["location"] == "/agents" and a.name == "Gravel" and a.interval_s == 1800
+    assert a.queries is None and (a.platform, a.spec["keyword"]) == ("willhaben", "gravel")
+    r = _edit(client, _agent(with_filter.id), sites_shown="1", sites=["willhaben"], drop_query="1")   # the filter link
+    assert r.headers["location"] == "/agents" and _agent(with_filter.id).queries is None
+    assert agent_platforms(_agent(with_filter.id)) == ["willhaben"]
+    a = _agent(plain.id)                                                       # one chip: the drawer sends no sites
+    assert edit_searches(a, drop_terms=[("fahrrad", None, None)], add="gravel") is True
+    assert [(q["platform"], q["keyword"]) for q in agent_searches(a)] == [("willhaben", "gravel")]
+
+    assert agent_search_items(_agent(unticked.id))["js"]["fixed"] == ["old"]
+    assert 'x-show="noSite()"' in client.get("/agents").text                  # the hint counts the chips only
+    r = _edit(client, _agent(unticked.id), sites_shown="1", name="Nur alt")    # no chip ticked
+    assert r.headers["location"] == "/agents?error=Choose%20at%20least%20one%20site."
+    assert agent_platforms(_agent(unticked.id)) == ["willhaben", "old"] and _agent(unticked.id).name != "Nur alt"
 
 
 def test_an_agent_from_before_the_platforms_keeps_its_term(client, fake):

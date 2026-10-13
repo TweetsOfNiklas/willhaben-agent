@@ -201,9 +201,10 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
     a watched site that is switched off or gone keeps what it has. `drop` removes single searches by index into
     agent_searches (the drawer sends it for searches without a term: a pasted filter link, one site each). `sites`:
     the sites to watch (None = as now); a site no longer chosen loses its searches, a watched one the drawer has no
-    chip for (keyword_sites: gone) keeps them. Raises ValueError and changes nothing on a mistake. True when searches
-    were added: they start quietly ("quiet" in their entry, see _run_agent), what their first check finds counts as
-    seen; a plain agent whose only search is new has no entry for it, so its whole next check is quiet."""
+    chip for (keyword_sites: gone) keeps them until its last one is dropped. Raises ValueError and changes nothing on
+    a mistake. True when searches were added: they start quietly ("quiet" in their entry, see _run_agent), what their
+    first check finds counts as seen; a plain agent whose only search is new has no entry for it, so its whole next
+    check is quiet."""
 
     def site(q: dict[str, Any]) -> str:
         return str(q.get("platform") or agent.platform or "willhaben")
@@ -211,12 +212,14 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
     every = agent_searches(agent)
     drop, gone = set(drop), {x for x in drop_terms if x}
     kept = [q for i, q in enumerate(every) if i not in drop and _term(q) not in gone]
+    offered = {p.id for p in keyword_sites(agent)}      # the drawer's chips
     if sites is None:      # as now: the sites that keep a search; all of them when none does (a new term replaces it)
         wanted = list(dict.fromkeys(site(q) for q in kept or every))
-    else:                  # the ticked chips, and the watched sites without a chip: nothing could untick those
-        offered = {p.id for p in keyword_sites(agent)}
-        wanted = list(dict.fromkeys([s.strip().lower() for s in sites if s.strip()]
-                                    + [site(q) for q in every if site(q) not in offered]))
+    else:                  # the ticked chips, and the watched sites without a chip that keep a search (no box unticks)
+        ticked = [s.strip().lower() for s in sites if s.strip()]
+        if not ticked and any(site(q) in offered for q in every):
+            raise ValueError(t("Choose at least one site."))     # a site without a chip cannot be the only one left
+        wanted = list(dict.fromkeys(ticked + [site(q) for q in kept if site(q) not in offered]))
     if not wanted:
         raise ValueError(t("Choose at least one site."))
     new = [(" ".join((kw or "").split()), pf, pt) for kw, pf, pt in [(add, price_from, price_to), *add_terms]]
@@ -241,8 +244,8 @@ def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str]
             have |= {(pid, term), (pid, _term(q))}
     if not searches:     # checked after adding: the only term can be swapped in one Save
         raise ValueError(t("Keep at least one search, or delete the agent."))
-    for pid in wanted:
-        if not any(site(q) == pid for q in searches):     # nothing to search there: say why
+    for pid in wanted:     # nothing to search on a chip's site: say why (one without a chip just goes with its last)
+        if pid in offered and not any(site(q) == pid for q in searches):
             raise ValueError(t("The searches have no search term to use on {name}.", name=_keyword_site(pid).name))
     set_searches(agent, searches)
     if agent.queries is None and searches[0].get("quiet"):
@@ -272,6 +275,7 @@ def agent_search_items(agent: SearchAgent) -> dict[str, Any]:
     sites = keyword_sites(agent)
     choices = [p.id for p in sites]
     ticked = watched        # a watched site without a chip (gone) stays too: Save keeps its searches
+    fixed = [pid for pid in watched if pid not in choices]     # those without a chip: nothing can untick them
     fill = [pid for pid in dict.fromkeys(watched + choices) if _fillable(pid)]
     terms: dict[tuple[str, Any, Any], dict[str, Any]] = {}
     filters: list[dict[str, Any]] = []
@@ -303,7 +307,7 @@ def agent_search_items(agent: SearchAgent) -> dict[str, Any]:
     return {"terms": rows, "filters": filters, "per_check": per_check, "choices": sites,
             "js": {"terms": {r["k"]: {"t": [r["keyword"], r["price_from"], r["price_to"]], "sites": r["sites"],
                                       "missing": r["missing"]} for r in rows},
-                   "filters": {f["k"]: f["platform"] for f in filters}, "sites": ticked, "fill": fill}}
+                   "filters": {f["k"]: f["platform"] for f in filters}, "sites": ticked, "fixed": fixed, "fill": fill}}
 
 
 def agent_interval(agent: SearchAgent, interval_s: int) -> int:
@@ -586,6 +590,8 @@ async def _run_agent(agent_id: int) -> RunResult:
         ran = [_unquiet(q) for q in ok if _quiet(q)]     # quiet searches that ran: their first check is done
         if ran and agent.queries:
             agent.queries = [_unquiet(q) if _quiet(q) and _unquiet(q) in ran else q for q in agent.queries]   # new list
+        elif ran and not agent.baseline_done and agent_searches(agent)[0] in ran:
+            agent.baseline_done = True      # a Save meanwhile left a plain agent with one of them (the agent's flag)
         notify_new, notify_drops = agent.notify, agent.notify and agent.notify_price_drops
         db.add(agent)
         db.commit()

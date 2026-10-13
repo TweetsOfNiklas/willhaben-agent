@@ -158,7 +158,7 @@
               <span class="mr-0.5 text-[12.5px] text-muted">{{ _("Sites:") }}</span>
               {% for pc in choices %}{% set off = pc.id not in srch.js.fill %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"{% if off %} title="{{ _('{name} is switched off in Settings → Platforms', name=pc.name) }}"{% endif %}><input type="checkbox" name="sites" value="{{ pc.id }}" class="checkbox checkbox-primary checkbox-xs"{% if pc.id in srch.js.sites %} checked{% endif %} x-model="sites">{{ pc.name }}{% if off %}<small class="text-[11px] opacity-65">{{ _("off") }}</small>{% endif %}</label>{% endfor %}
             </div>
-            <p x-show="!sites.length" x-cloak class="mt-1.5 text-[12px] text-error">{{ _("Choose at least one site.") }}</p>
+            <p x-show="noSite()" x-cloak class="mt-1.5 text-[12px] text-error">{{ _("Choose at least one site.") }}</p>
             <p x-show="sites.length && left() && needsTerm()" x-cloak class="mt-1.5 text-[12px] text-warning">{{ _("The other sites need a search term: type one above.") }}</p>
             {% for pc in choices if pc.id not in srch.js.fill %}<p x-show="sites.includes({{ pc.id|tojson|forceescape }}) && !perSite({{ pc.id|tojson|forceescape }})" x-cloak class="mt-1.5 text-[12px] text-warning">{{ _("{name} is switched off in Settings → Platforms", name=pc.name) }}</p>{% endfor %}
             <small class="mt-2 block text-[12px] leading-snug text-muted">{{ _("Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.") }}</small>
@@ -188,7 +188,8 @@
 // The Searches block of each agent's settings drawer. Save posts plain form fields (drop_term, drop_query, add_*,
 // sites); this only shows what Save will do: the count, rows added before Save, the guard for the last search.
 // o = search_agents.agent_search_items(agent).js: terms {k: {t: [keyword, from, to], sites, missing}},
-// filters {k: site} (searches without a term), sites (ticked now), fill (sites that take every term: switched on)
+// filters {k: site} (searches without a term), sites (ticked now), fixed (watched sites without a chip: gone, they
+// stay in sites), fill (sites that take every term: switched on)
 document.addEventListener('alpine:init', () => Alpine.data('agentSearches', (o) => ({
   T: {one: {{ _("1 search per check")|tojson }}, n: {{ _("{n} searches per check")|tojson }},
       from: {{ _("from {price}")|tojson }}, upto: {{ _("up to {price}")|tojson }},
@@ -221,6 +222,8 @@ document.addEventListener('alpine:init', () => Alpine.data('agentSearches', (o) 
   },
   // what Save keeps (not counted per site): the last one cannot be removed
   left() { return (this.sites.length ? this.terms() : 0) + this.sites.reduce((sum, s) => sum + this.filtersOn(s), 0); },
+  // no chip ticked while the agent watches a site that has one: a site without a chip cannot be the only one left
+  noSite() { const chip = (s) => !o.fixed.includes(s); return !this.sites.some(chip) && o.sites.some(chip); },
   // a ticked site that would search nothing (a switched-off one has its own warning)
   needsTerm() { return this.sites.some(s => o.fill.includes(s) && !this.perSite(s)); },
   missing(k) { return o.terms[k].missing.some(s => this.sites.includes(s)); },
