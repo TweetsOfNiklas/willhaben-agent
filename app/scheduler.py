@@ -72,7 +72,7 @@ def unschedule_agent(agent_id: int) -> None:
 
 async def _session_check() -> None:
     sess = get_session()
-    if sess.started:
+    if sess.started and not quiet_hours.holds(sess.last_check):
         try:
             with timeline.fresh(actor="scheduler"):
                 await sess.check_login()
@@ -96,6 +96,8 @@ async def _chat_sync() -> None:
     # The live WebSocket triggers syncs as messages arrive; polling is only the safety net then.
     last = chats.last_sync_at[0]
     if get_session().chat_live_ok() and last and utcnow() - last < LIVE_FALLBACK:
+        return
+    if quiet_hours.holds(last):     # no polling at night; messages the live socket brings still sync
         return
     try:
         with timeline.fresh(actor="scheduler"):

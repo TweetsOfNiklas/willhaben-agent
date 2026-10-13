@@ -27,3 +27,42 @@ def test_slow_and_pause_modes():
     assert qh.should_skip(old, now)
     qh.save(False, "01:00", "07:00", "pause", 60)
     assert not qh.should_skip(old, now)
+
+
+def test_last_end():
+    qh.save(True, "01:00", "07:00", "pause", 60)
+    assert abs((qh.last_end(_vienna(12, 0)) - _vienna(7, 0)).total_seconds()) <= qh.JITTER_MIN * 60
+    assert qh.last_end(_vienna(4, 0)) < _vienna(0, 0)       # tonight's window still runs: the last one was yesterday
+    qh.save(False, "01:00", "07:00", "pause", 60)
+    assert qh.last_end(_vienna(12, 0)) is None
+
+
+async def test_account_polling_waits_in_quiet_hours(monkeypatch):
+    from app import scheduler
+
+    calls = []
+
+    class FakeSess:
+        started, last_check = True, None
+
+        async def check_login(self):
+            calls.append("login")
+
+        def chat_live_ok(self):
+            return False
+
+    async def fake_sync():
+        calls.append("sync")
+
+    monkeypatch.setattr(scheduler, "get_session", lambda: FakeSess())
+    monkeypatch.setattr(scheduler.chats, "sync", fake_sync)
+    monkeypatch.setattr(scheduler.chats, "last_sync_at", [None])
+    qh.save(True, "01:00", "07:00", "pause", 60)
+    monkeypatch.setattr(qh, "utcnow", lambda: _vienna(4, 0))
+    await scheduler._session_check()
+    await scheduler._chat_sync()
+    assert calls == []
+    monkeypatch.setattr(qh, "utcnow", lambda: _vienna(12, 0))
+    await scheduler._session_check()
+    await scheduler._chat_sync()
+    assert calls == ["login", "sync"]

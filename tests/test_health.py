@@ -1,6 +1,6 @@
 """Connection watchdog: debounce, transitions, channel fallback, check functions, home page tiles."""
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -10,7 +10,7 @@ from app.db import get_setting, set_setting, utcnow
 from app.llm import base as llm_base
 from app.llm.base import LLMError
 from app.llm.claude_cli import ClaudeCLI
-from app.services import ha_actions, ha_auth, health, notify as notify_mod, telegram
+from app.services import ha_actions, ha_auth, health, notify as notify_mod, quiet_hours, telegram
 from app.services.health import Status
 from tests.test_dashboard import client  # noqa: F401  (pytest fixture)
 
@@ -376,6 +376,7 @@ def test_willhaben_and_live_chat_checks(monkeypatch):
     s = health.get_settings()
     monkeypatch.setattr(s, "browser_enabled", True)
     monkeypatch.setattr(s, "chat_live", True)
+    quiet_hours.save(False, "01:00", "07:00", "pause", 60)     # any time of day
     st = health._willhaben()
     assert st.state == "ok" and "Max Muster" in st.reason
     assert health._live_chat().state == "ok"
@@ -390,6 +391,30 @@ def test_willhaben_and_live_chat_checks(monkeypatch):
     assert health._live_chat().state == "off"        # the willhaben tile already says why
     monkeypatch.setattr(s, "browser_enabled", False)
     assert health._willhaben().state == "off"
+
+
+def test_login_check_is_not_overdue_in_quiet_hours(monkeypatch):
+    from app.willhaben import session as sess_mod
+
+    def vienna(h, m=0):
+        return datetime(2026, 10, 9, h, m, tzinfo=quiet_hours.VIENNA).astimezone(timezone.utc)
+
+    class FakeSess:
+        started, logged_in, user, last_check = True, True, {"nickname": "Max Muster"}, vienna(0, 30)
+
+    monkeypatch.setattr(sess_mod, "get_session", lambda: FakeSess())
+    s = health.get_settings()
+    monkeypatch.setattr(s, "browser_enabled", True)
+    now = [vienna(4, 0)]
+    for mod in (health, quiet_hours):
+        monkeypatch.setattr(mod, "utcnow", lambda: now[0])
+    quiet_hours.save(True, "01:00", "07:00", "pause", 60)
+    assert health._willhaben().state == "ok"             # the scheduler holds the login check at night
+    end = quiet_hours.last_end(vienna(12, 0))
+    now[0] = end + timedelta(minutes=30)
+    assert health._willhaben().state == "ok"             # due again from the end of quiet hours
+    now[0] = end + timedelta(seconds=3 * s.session_check_interval_s + 180)
+    assert health._willhaben().state == "problem"
 
 
 def test_gcal_check(monkeypatch):

@@ -42,6 +42,7 @@ from typing import Any
 from app.config import get_settings
 from app.db import get_setting, set_setting, utcnow
 from app.i18n import t
+from app.services import quiet_hours
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,10 @@ def _willhaben() -> Status:
         st.sample = sess.last_check.isoformat() if sess.last_check else None
         return st
     overdue = timedelta(seconds=3 * s.session_check_interval_s + 120)
-    if sess.last_check and utcnow() - sess.last_check > overdue:
+    last, quiet, quiet_end = sess.last_check, quiet_hours.state(), quiet_hours.last_end()
+    if last and quiet_end and quiet_end > last:
+        last = quiet_end            # quiet hours held the login check: it is due again from their end
+    if last and not (quiet and quiet.active) and utcnow() - last > overdue:
         st.state, st.reason = "problem", t("Login check overdue")
         return st
     nick = (sess.user or {}).get("nickname")

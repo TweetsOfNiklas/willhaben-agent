@@ -143,6 +143,7 @@
  "Active until {time}.": "Aktiv bis {time}.",
  "Next quiet hours {start}–{end}.": "Nächste Ruhezeit {start}–{end}.",
  "Start and end shift randomly by up to 20 minutes every night. “Check now” always works.": "Beginn und Ende verschieben sich jede Nacht zufällig um bis zu 20 Minuten. „Jetzt prüfen“ geht immer.",
+ "The login check and the chat sync follow the same rule; new chat messages still arrive through the live chat.": "Login-Prüfung und Chat-Abgleich folgen derselben Regel; neue Chat-Nachrichten kommen über den Live-Chat trotzdem an.",
  "Language of the dashboard and of notifications.": "Sprache des Dashboards und der Benachrichtigungen.",
  "The browser is not running.": "Browser läuft nicht.",
  "Start browser": "Browser starten",

@@ -1,5 +1,8 @@
 """Quiet hours: a nightly window in which search agents pause or poll much less, like a person asleep.
 
+The logged-in account's own polling follows the same rule: the login check and the chat sync safety net
+(the scheduler asks `holds`). Chat messages the live socket delivers are still synced.
+
 Start and end move by up to ±JITTER_MIN minutes each night (fixed per date), so the pattern is not
 a sharp, machine-like edge at the same minute every day. Manual checks from the dashboard are not affected.
 """
@@ -81,15 +84,29 @@ def state(cfg: Config | None = None, now: datetime | None = None) -> State | Non
     return State(False, s, e)
 
 
+def last_end(now: datetime | None = None) -> datetime | None:
+    """When the latest quiet window that is over ended (local time); None when quiet hours are off."""
+    cfg = config()
+    if not cfg.enabled or cfg.start == cfg.end:
+        return None
+    now = (now or utcnow()).astimezone(VIENNA)
+    ends = [e for _, e in (_window(cfg, now.date() + timedelta(days=d)) for d in (-2, -1, 0)) if e <= now]
+    return max(ends) if ends else None
+
+
 def should_skip(agent: SearchAgent, now: datetime | None = None) -> bool:
     """True if a scheduled run of this agent should not hit willhaben right now."""
+    return holds(agent.last_run_at, now)
+
+
+def holds(last: datetime | None, now: datetime | None = None) -> bool:
+    """True if a scheduled job that last ran at `last` should not hit willhaben right now."""
     cfg = config()
     st = state(cfg, now)
     if not st or not st.active:
         return False
     if cfg.mode == "pause":
         return True
-    last = agent.last_run_at
     if last is None:
         return False
     if last.tzinfo is None:
