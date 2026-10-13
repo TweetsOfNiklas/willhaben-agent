@@ -217,8 +217,9 @@ def _platform_name(pid: str | None) -> str:
 
 # platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
 from app.services.search_agents import agent_platforms as _agent_platforms  # noqa: E402
+from app.services.search_agents import agent_searches as _agent_searches, keyword_sites as _keyword_sites  # noqa: E402
 
-templates.env.globals.update(agent_sites=_agent_platforms)
+templates.env.globals.update(agent_sites=_agent_platforms, agent_searches=_agent_searches, keyword_sites=_keyword_sites)
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled)
 
@@ -544,20 +545,22 @@ async def agents_toggle(agent_id: int):
 async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = Form(...),
                       notify_on: str | None = Form(None), drops_on: str | None = Form(None),
                       screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
-                      screen_hide: list[str] = Form([]), drop_query: list[int] = Form([])):
-    s = get_settings()
+                      screen_hide: list[str] = Form([]), drop_query: list[int] = Form([]),
+                      sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: str = Form(""),
+                      add_price_from: str = Form(""), add_price_to: str = Form("")):
+    from app.services import search_agents
+
     with session() as db:
         a = db.get(SearchAgent, agent_id)
-        if a.queries and drop_query:    # an agent from a product search: remove single searches
-            keep = [q for i, q in enumerate(a.queries) if i not in set(drop_query)]
-            if not keep:
-                return back(f"/agents?error={quote(t('Keep at least one search, or delete the agent.'), safe='')}")
-            a.queries = keep            # a new list: the JSON column does not see changes in place
-            first = keep[0]             # the main search follows the first one left, maybe on another site
-            a.platform, a.spec = first.get("platform") or a.platform, first.get("spec")
-            a.source_url, a.webapi_url = first["source_url"], first["webapi_url"] or first["source_url"]
+        if drop_query or add_keyword.strip() or sites_shown:     # the drawer's searches and sites
+            try:
+                if search_agents.edit_searches(a, drop_query, sites if sites_shown else None, add_keyword,
+                                               _num_or_none(add_price_from), _num_or_none(add_price_to)):
+                    a.baseline_done = False      # new searches start quietly: what they find now counts as seen
+            except ValueError as e:
+                return back(f"/agents?error={quote(str(e), safe='')}")
         a.name = name.strip() or a.name
-        a.interval_s = max(interval_min * 60, s.min_agent_interval_s)
+        a.interval_s = search_agents.agent_interval(a, interval_min * 60)
         a.notify, a.notify_price_drops = bool(notify_on), bool(drops_on)
         db.add(a)
         db.commit()

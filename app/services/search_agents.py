@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 from datetime import timedelta
 from typing import Any
 
@@ -99,6 +100,94 @@ def agent_spec(agent: SearchAgent) -> SearchSpec:
     if agent.spec:
         return SearchSpec.from_json(agent.spec)
     return SearchSpec(platform=agent.platform or "willhaben", url=agent.source_url, api=agent.webapi_url)
+
+
+def agent_searches(agent: SearchAgent) -> list[dict[str, Any]]:
+    """The agent's searches as `queries` entries: its list, or its one search (a plain agent)."""
+    if agent.queries:
+        return [dict(q) for q in agent.queries if isinstance(q, dict)]
+    return [_query_of(agent_spec(agent))]
+
+
+def set_searches(agent: SearchAgent, searches: list[dict[str, Any]]) -> None:
+    """Store an agent's searches; the first is the main one (its site and the "on <site>" link). A plain agent keeps
+    a single search without `queries`; an agent from a product search keeps its list."""
+    first = searches[0]
+    agent.platform, agent.spec = first.get("platform") or agent.platform, first.get("spec")
+    agent.source_url, agent.webapi_url = first["source_url"], first.get("webapi_url") or first["source_url"]
+    agent.queries = list(searches) if len(searches) > 1 or agent.search_id else None   # new list: JSON sees no edits
+
+
+def keyword_sites(agent: SearchAgent | None = None) -> list[platforms.Platform]:
+    """Sites a search term can be sent to (switched on, keyword search), plus those the agent watches already."""
+    mine = agent_platforms(agent) if agent else []
+    out = []
+    for p in platforms.all(enabled_only=False):
+        if p.can("keyword_search") and (platforms.enabled(p.id) or p.id in mine):
+            out.append(p)
+    return out
+
+
+def _keyword_site(pid: str) -> platforms.Platform:
+    try:
+        p = platforms.get(pid)
+    except platforms.UnknownPlatform as e:
+        raise ValueError(t("Unknown platform: {id}", id=pid)) from e
+    if not platforms.enabled(p.id):
+        raise ValueError(t("{name} is switched off in Settings → Platforms", name=p.name))
+    if not p.can("keyword_search"):
+        raise ValueError(t("{name} has no keyword search.", name=p.name))
+    return p
+
+
+def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str] | None = None, add: str = "",
+                  price_from: float | None = None, price_to: float | None = None) -> bool:
+    """Change an agent's searches in one go: remove some (indices into agent_searches), watch `sites` (None = as now;
+    a newly chosen site gets every search term, a dropped one loses its searches) and add the term `add` on each of
+    its sites. Raises ValueError and changes nothing on a mistake. True when searches were added: their first check
+    should count what they find as seen, not push it."""
+    drop = set(drop)
+    kept = [q for i, q in enumerate(agent_searches(agent)) if i not in drop]
+    if not kept:
+        raise ValueError(t("Keep at least one search, or delete the agent."))
+
+    def site(q: dict[str, Any]) -> str:
+        return str(q.get("platform") or agent.platform or "willhaben")
+
+    current = list(dict.fromkeys(site(q) for q in kept))
+    wanted = current if sites is None else list(dict.fromkeys(s.strip().lower() for s in sites if s.strip()))
+    if not wanted:
+        raise ValueError(t("Choose at least one site."))
+    add = " ".join((add or "").split())
+    terms = list(dict.fromkeys((q["keyword"], q.get("price_from"), q.get("price_to")) for q in kept if q.get("keyword")))
+    new_term = [(add, price_from, price_to)] if add else []
+    searches = [q for q in kept if site(q) in wanted]
+    have = {(site(q), q.get("keyword"), q.get("price_from"), q.get("price_to")) for q in searches}
+    added = False
+    for pid in wanted:
+        todo = list(dict.fromkeys(terms + new_term)) if pid not in current else new_term
+        if pid not in current and not todo:
+            raise ValueError(t("The searches have no search term to use on {name}.", name=_keyword_site(pid).name))
+        p = _keyword_site(pid) if todo else None
+        for kw, pf, pt in todo:
+            spec = p.keyword_search(kw, pf, pt)
+            if (pid, spec.keyword, pf, pt) not in have:
+                have.add((pid, spec.keyword, pf, pt))
+                searches.append(_query_of(spec))
+                added = True
+    set_searches(agent, searches)
+    return added
+
+
+def agent_interval(agent: SearchAgent, interval_s: int) -> int:
+    """`interval_s` raised to the floors: the settings' minimum and the slowest site the agent watches."""
+    floors = [get_settings().min_agent_interval_s]
+    for pid in agent_platforms(agent):
+        try:
+            floors.append(platforms.get(pid).min_interval_s)
+        except platforms.UnknownPlatform:
+            continue
+    return max(interval_s, *floors)
 
 
 def _query_spec(q: dict[str, Any], platform: str = "willhaben") -> SearchSpec:

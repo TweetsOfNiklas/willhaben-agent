@@ -13,8 +13,9 @@ It runs on your own server, from your home internet connection, and you control 
 
 - **Search agents**: build a search with willhaben's own filters, or paste a search link or type a search term for
   another supported site (kleinanzeigen.de, Shpock, Vinted, Preisjäger, eBay; see "Supported platforms"); one agent can
-  watch several sites at once (the same search term and price range on each), and get notified about new listings and
-  price drops, usually much faster than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
+  watch several sites at once (the same search term and price range on each) and several search terms (add them and
+  tick the sites in the agent's settings), and get notified about new listings and price drops, usually much faster
+  than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
   predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
   only hits that pass reach your phone, the others go to their own "Filtered out" list instead of New. Agents check

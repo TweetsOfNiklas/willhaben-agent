@@ -11,5 +11,10 @@
  "Searches from product search #{id}": "Suchen aus Produktsuche #{id}",
  "Searches": "Suchen",
  "from {price}": "ab {price}",
- "Keep at least one search, or delete the agent.": "Mindestens eine Suche muss bleiben – sonst den Agenten löschen."
+ "Keep at least one search, or delete the agent.": "Mindestens eine Suche muss bleiben – sonst den Agenten löschen.",
+ "up to {price}": "bis {price}",
+ "Add a search term": "Suchbegriff hinzufügen",
+ "A newly ticked site gets every search term. New searches start quietly: what they find on their first check counts as seen.": "Eine neu angehakte Seite bekommt jeden Suchbegriff. Neue Suchen starten leise: was sie bei der ersten Prüfung finden, gilt als gesehen.",
+ "Choose at least one site.": "Wähle mindestens eine Seite.",
+ "The searches have no search term to use on {name}.": "Die Suchen haben keinen Suchbegriff, der sich auf {name} verwenden lässt."
 }
