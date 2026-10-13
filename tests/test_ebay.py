@@ -185,6 +185,22 @@ async def test_agent_end_to_end(platform, client):
     assert first.published_at.hour == 21                                     # stored as UTC like every site's times
 
 
+
+async def test_an_agent_saved_from_a_sorted_link_still_asks_for_the_newest(platform, client):
+    """Agents saved before parse_search_url dropped _sop keep a sorted spec; their checks still ask for _sop=10."""
+    from dataclasses import replace
+
+    from app.platforms import SearchSpec
+
+    a = create_agent("https://www.ebay.at/sch/i.html?_nkw=iphone+13&LH_PrefLoc=1&LH_BIN=1")
+    with session() as db:
+        row = db.get(type(a), a.id)
+        row.spec = replace(SearchSpec.from_json(row.spec), sort="price_asc").to_json()   # as stored before the fix
+        db.add(row)
+        db.commit()
+    await run_agent(a.id)
+    assert parse_qs(urlsplit(client._transport.calls[-1][0]).query)["_sop"] == ["10"]
+
 # ------------------------------------------------------------------ the item page
 ITEM, SHOP = "920036165580", "168768204140"
 ITEM_PAGE = (FIXTURES / "ebay_item.html").read_text(encoding="utf-8")
@@ -255,6 +271,9 @@ def test_number_codes_stay_out_of_the_description():
     assert "0045496420253" not in s.description and "EAN" not in s.description and "Marke: Lenovo" in s.description
     assert "Herstellernummer: Lenovo ThinkPad x1 Carbon Gen 8" in s.description          # a code in words stays
     assert not [f for f in scam.for_viewer(s) if "phone" in f["code"]]                  # no "+45" phone number
+    oem = ebay.parse_item_page(SHOP_PAGE.replace(">Herstellernummer<", ">OE/OEM Referenznummer(n)<")
+                                 .replace(">Lenovo ThinkPad x1 Carbon Gen 8<", ">0986494123<"), SHOP)
+    assert "0986494123" not in oem.description                                             # 10 digits read as a phone
 
 
 def test_viewer_shows_the_item(platform):

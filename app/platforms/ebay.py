@@ -208,7 +208,8 @@ _ITEM_LOCATION = re.compile(r'"itemLocation":\{"_type":"LabelsValues".{0,300}?"v
                             r'"textSpans":\[\{"_type":"TextSpan","text":"([^"]+)"', re.S)
 _DESC_FRAME = re.compile(r'<iframe\b[^>]*\bid="?desc_ifr"?[^>]*\bsrc="?([^"\s>]+)', re.I)
 _PHOTO_ID = re.compile(r"i\.ebayimg\.com/(?:thumbs/)?images/g/([^/\s\"']+)/s-l\d+")
-_CODE_LABEL = re.compile(r"(?:EAN|GTIN|UPC|ISBN|MPN|Herstellernummer)\b", re.I)
+_CODE_LABEL = re.compile(r"EAN|GTIN|UPC|ISBN|MPN|nummer|Nr\b", re.I)   # Herstellernummer, OE/OEM-Referenznummer,
+                                                                     # Vergleichsnummer, Art.-Nr.
 _NUMBER_CODE = re.compile(r"[\d ,;/-]{7,}[\dX]", re.I)      # 4006381333931, 978-3-16-148410-0, 3-16-148410-X, lists
 _HIDDEN = {"clipped", "hide", "ux-bubble-help"}             # screen-reader copies, folded text, tooltips
 _SKIP = {"script", "style", "noscript", "svg", "template", "button"}
@@ -326,7 +327,7 @@ def _specifics(root: _Node) -> list[tuple[str, str]]:
         value = _text(col.find("div", "ux-labels-values__values-content"))
         if not label or not value or label.rstrip(":") == "Artikelzustand":
             continue
-        if _CODE_LABEL.match(label) and _NUMBER_CODE.fullmatch(value):
+        if _CODE_LABEL.search(label) and _NUMBER_CODE.fullmatch(value):
             continue
         out.append((label.rstrip(":"), value))
     return out

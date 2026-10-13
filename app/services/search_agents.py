@@ -321,6 +321,12 @@ def agent_interval(agent: SearchAgent, interval_s: int) -> int:
     return max(interval_s, *floors)
 
 
+def _newest_first(spec: SearchSpec) -> SearchSpec:
+    """Agents diff on newness: an eBay search saved from a sorted link (before parse_search_url dropped its _sop)
+    still asks for the newest ads first."""
+    return replace(spec, sort="newest") if spec.platform == "ebay" and spec.sort not in (None, "newest") else spec
+
+
 def _query_spec(q: dict[str, Any], platform: str = "willhaben") -> SearchSpec:
     if q.get("spec"):
         return SearchSpec.from_json(q["spec"])
@@ -503,7 +509,8 @@ async def _run_agent(agent_id: int) -> RunResult:
             res.error = t("Agent not found")
             return res
         name, queries, plan = agent.name, agent.queries, agent.plan
-        specs = [(_query_spec(q, agent.platform), q) for q in queries] if queries else [(agent_spec(agent), None)]
+        specs = [(_newest_first(_query_spec(q, agent.platform)), q) for q in queries] if queries else [
+            (_newest_first(agent_spec(agent)), None)]
         # as the check starts: a Save while it runs changes the next check, not this one
         baseline, before = not agent.baseline_done, [_unquiet(q) for q in agent_searches(agent)]
 
