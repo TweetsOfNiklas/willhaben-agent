@@ -1,6 +1,6 @@
 {# Settings → Home Assistant (handoff design). Connect = sign-in to HA (it creates the token); push target = notify service. #}
 {% import "_ui.html" as ui %}
-{% if web is defined and not web.reachable %}<p class="mb-3 text-[12.5px] text-muted">{{ _("Notification links open this dashboard only with a web address that your phone can reach – until then they open willhaben.") }} <a class="link link-primary no-underline" href="/settings/web">{{ _("Web address") }}</a></p>{% endif %}
+{% if web is defined and not web.reachable %}<p class="mb-3 text-[12.5px] text-muted">{{ _("Notification links open this dashboard only with a web address that your phone can reach – until then they open the ad on its site.") }} <a class="link link-primary no-underline" href="/settings/web">{{ _("Web address") }}</a></p>{% endif %}
 {% set connected = ha.ok %}
 <form method="post" action="/settings/ha" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">

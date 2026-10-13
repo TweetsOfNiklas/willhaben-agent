@@ -389,6 +389,8 @@ async def agents_new(request: Request):
             p = platforms.for_url(url)
         except InvalidSearchUrl as e:
             error, url = str(e), ""
+        if p is not None and p.id not in picked and len(picked) <= 1:
+            picked = {p.id}                 # the link's site replaces the default tick (willhaben), it is no addition
     if p is None:
         pid = (qp.get("platform") or next((c.id for c in choices if c.id in picked), "")).strip().lower()
         try:
@@ -410,6 +412,9 @@ async def agents_new(request: Request):
                                           for k, v in qp.items() if k.startswith("r_") and k[2:].isidentifier()}
         if "keyword" in qp:
             changes["keyword"] = keyword or None
+        for qk, wk in (("price_from", "PRICE_FROM"), ("price_to", "PRICE_TO")):   # typed for another site first
+            if qp.get(qk) and f"r_{wk}" not in qp and not url_param(base, wk):
+                changes[wk] = re.sub(r"[^0-9]", "", qp.get(qk) or "") or None
         if changes:
             base = with_params(base, changes)
         url = base
@@ -626,7 +631,7 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
         if platform:
             counts_q = counts_q.where(Hit.platform == platform)
         state_counts = dict(db.exec(counts_q).all())
-        used = sorted({a.platform for a in agents.values()})
+        used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
     state_counts["all"] = sum(state_counts.values())
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
                   platform=platform, platform_ids=used if len(used) > 1 else [])
@@ -635,10 +640,14 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
 async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str, hit: int | None) -> HTMLResponse:
     """The ad viewer's content: the ad from its site (or, for sites without ad details, what the hit knows)."""
     h = None
-    if hit:
-        with session() as db:
+    with session() as db:
+        if hit:
             h = db.get(Hit, hit)
-            if h and h.state == "new":   # opened = seen
+        else:                            # push, inbox and timeline links name the ad only: its newest hit, if any
+            h = db.exec(select(Hit).where(Hit.platform == platform.id, Hit.ad_id == ad_id)
+                        .order_by(col(Hit.id).desc())).first()
+        if h:
+            if h.state == "new":         # opened = seen
                 h.state = "seen"
                 db.add(h)
                 db.commit()

@@ -114,6 +114,32 @@ def _stats(agent_id: int, exclude: set[int]) -> dict[str, Any] | None:
     return price_stats([p for p in prices if p])
 
 
+def _site_name(pid: str | None) -> str:
+    from app import platforms
+
+    try:
+        return platforms.get(pid or "willhaben").name
+    except platforms.UnknownPlatform:
+        return pid or "willhaben"
+
+
+def _system(sites: list[str]) -> str:
+    """The system prompt for the sites of this batch: one site with its country, several named together (a
+    multi-site agent's hits are not all from its main site)."""
+    from app import platforms
+
+    known = []
+    for pid in sites:
+        try:
+            known.append(platforms.get(pid))
+        except platforms.UnknownPlatform:
+            continue
+    if not known:
+        return screen_system()                    # an unknown platform: willhaben's wording
+    countries = {p.home_country for p in known}
+    return screen_system(", ".join(p.host for p in known), countries.pop() if len(countries) == 1 else "")
+
+
 async def _download(url: str | None, folder: Path, name: str, platform: str | None = None) -> Path | None:
     return await ad_images.download(url, folder, name, transport=_transport, platform=platform)   # _transport: tests
 
@@ -129,6 +155,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
     timeline.update_context(hit_ids=[h.id for h in hits])
     stats = _stats(agent_id, {h.id for h in hits})
     lang = LANGS.get(background_lang(), "Deutsch")
+    sites = list(dict.fromkeys(h.platform or "willhaben" for h in hits))
     with tempfile.TemporaryDirectory(prefix="wh-screen-") as tmp:
         images: list[Path] = []
         items = []
@@ -138,18 +165,14 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                 images.append(img)
             items.append({"nr": nr, "title": h.heading, "price": h.price_display or (f"{h.price:g} €" if h.price else None),
                           "location": h.location, "private": h.is_private, "description": h.body,
+                          **({"site": _site_name(h.platform)} if len(sites) > 1 else {}),
                           "scam_flags": [f.get("label") for f in h.scam_flags or [] if f.get("severity") in ("warn", "high")],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...
                           "photo": f"foto{len(images)}{img.suffix}" if img else None})
         prompt = screen_prompt(agent_name=agent.name, brief=agent.screen_brief or "", hits=items, stats=stats,
                                language=lang)
         try:
-            from app import platforms
-            try:
-                site = platforms.get(agent.platform)
-                system = screen_system(site.host, site.home_country)
-            except Exception:  # noqa: BLE001 - an unknown platform: willhaben's wording
-                system = screen_system()
+            system = _system(sites)
             result = await get_backend("screen").complete(system=system, prompt=prompt, schema=SCREEN_SCHEMA,
                                                           images=images)
         except LLMError as e:

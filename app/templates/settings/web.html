@@ -5,8 +5,8 @@
     <input name="public_url" type="url" value="{{ web.stored }}" placeholder="{{ web.env }}" autocomplete="off" spellcheck="false" class="input w-full min-w-0 bg-base-200">
     <small class="text-[12.5px] text-muted">{{ _("Links in Telegram and Home Assistant notifications open this address, e.g. https://willhaben.example.com. Empty: PUBLIC_URL from .env ({url}).", url=web.env) }}</small></label>
   <p class="text-[13px] {{ 'text-success' if web.https else 'text-warning' }}">
-    {% if not web.reachable %}{{ _("{url} only works on this computer – a phone cannot open it, so notifications link to willhaben.", url=web.url) }}
-    {% elif not web.https %}{{ _("Links open {url}. Telegram buttons need an https:// address; until then they open willhaben.", url=web.url) }}
+    {% if not web.reachable %}{{ _("{url} only works on this computer – a phone cannot open it, so notifications open the ad on its site (willhaben, eBay, …).", url=web.url) }}
+    {% elif not web.https %}{{ _("Links open {url}. Telegram buttons need an https:// address; until then they open the ad on its site.", url=web.url) }}
     {% else %}{{ _("Links in notifications open {url}.", url=web.url) }}{% endif %}</p>
   <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
 </form>

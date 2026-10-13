@@ -434,7 +434,7 @@ def resolve_ids(fields: dict[str, Any]) -> dict[str, Any]:
                 out.setdefault("ad_id", sh.ad_id)
             if (hid := out.get("hit_id")) and str(hid).isdigit() and (h := db.get(Hit, int(hid))):
                 out.setdefault("agent_id", h.agent_id)
-                out.setdefault("ad_id", h.ad_id)
+                out.setdefault("ad_id", ad_ref_for(h.platform, h.ad_id))
             if (pid := out.get("purchase_id")) and str(pid).isdigit() and (pu := db.get(Purchase, int(pid))):
                 out.setdefault("ad_id", pu.ad_id)
                 out.setdefault("conversation_id", pu.conversation_id)

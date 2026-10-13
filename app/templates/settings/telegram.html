@@ -1,6 +1,6 @@
 {# Settings → Telegram (handoff design). Pairing keeps the 4-digit code per request (anyone can write to the bot). #}
 {% import "_ui.html" as ui %}
-{% if web is defined and not web.https %}<p class="mb-3 text-[12.5px] text-muted">{{ _("Telegram buttons open this dashboard only with an https:// web address that your phone can reach – until then they open willhaben.") }} <a class="link link-primary no-underline" href="/settings/web">{{ _("Web address") }}</a></p>{% endif %}
+{% if web is defined and not web.https %}<p class="mb-3 text-[12.5px] text-muted">{{ _("Telegram buttons open this dashboard only with an https:// web address that your phone can reach – until then they open the ad on its site.") }} <a class="link link-primary no-underline" href="/settings/web">{{ _("Web address") }}</a></p>{% endif %}
 <form method="post" action="/settings/telegram/token" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex items-center gap-2.5"><span class="size-2 shrink-0 rounded-full {{ 'bg-success' if tg.linked else 'bg-warning' if tg.configured else 'bg-off' }}"></span>
     <div class="min-w-0"><div class="font-semibold">{% if tg.linked %}{{ _("Linked") }} · {{ tg.chat_name }}{% elif tg.configured %}{{ _("Waiting for /start") }} · @{{ tg.username }}{% else %}{{ _("Not set up") }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Optional — pushes also work via Home Assistant.") }}{% if tg.source == 'env' %} {{ _("(token from .env)") }}{% endif %}</div></div></div>

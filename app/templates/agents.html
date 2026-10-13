@@ -21,7 +21,7 @@
       {% set has_pics = thumbs.get(a.id, [])|selectattr('image_url')|list|length > 0 %}
       <div class="grid shrink-0 grid-cols-4 gap-px bg-base-300 sm:h-24 {{ 'h-16' if has_pics else 'h-9' }}">
         {% for h in thumbs.get(a.id, []) %}
-        <a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ h.ad_id }}" data-hit="{{ h.id }}" title="{{ h.heading }}" class="block min-w-0">{{ ui.thumb(h.image_url, 'h-full w-full', 'rounded-none') }}</a>
+        <a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" title="{{ h.heading }}" class="block min-w-0">{{ ui.thumb(h.image_url, 'h-full w-full', 'rounded-none') }}</a>
         {% else %}
         <a class="col-span-full grid place-items-center bg-hover text-[13px] text-muted no-underline hover:underline" href="/hits?agent_id={{ a.id }}&state=all">{{ _("No hits yet") }}</a>
         {% endfor %}
