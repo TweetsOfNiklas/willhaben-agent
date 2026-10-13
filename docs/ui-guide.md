@@ -14,7 +14,7 @@ swapping fragments from the server.
 | `scripts/build-css.sh` | Builds it with Tailwind's standalone binary and daisyUI's plugin files (pinned, checksummed, cached in `build/`) |
 | `app/static/vendor/` | htmx and Alpine.js, served locally |
 | `app/templates/base.html` | Shell: rail, meters, popovers (account, usage, Claude, inbox), command palette, phone tab bar, Alpine components |
-| `app/templates/_ui.html` | Macros: icons, pills, thumbnails, switches, segmented control, chips, empty state, bars, rings, page heading, messages |
+| `app/templates/_ui.html` | Macros: icons, pills, price ranges, thumbnails, switches, segmented control, chips, empty state, bars, rings, page heading, messages |
 
 After changing classes in a template run `scripts/build-css.sh` (Tailwind only emits classes it finds in
 `app/templates`). Class names must appear literally in a template: never build them from pieces

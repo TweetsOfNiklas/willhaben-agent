@@ -114,11 +114,15 @@ def test_planned_searches_name_each_chosen_site(client):
         db.commit()
         db.refresh(row)
     frag = client.get(f"/deals/search/{row.id}").text
-    table = frag[frag.index("<tbody>"):frag.index("</tbody>")]
-    assert table.count("<tr>") == 4 and table.count("<td>Fake</td>") == 2 and table.count("<td>eBay</td>") == 2
+    table = frag[frag.index("<tbody"):frag.index("</tbody>")]
+    # each term once, below it a row with a link per site the run will use; nothing found yet: no result column
+    assert table.count("<tr") == 4 and table.count(">Fake<svg") == 2 and table.count(">eBay<svg") == 2
+    assert table.count(">gravel<") == 1 and ">Found<" not in frag and "each on 2 sites" in frag
     assert "willhaben" not in table and "https://www.ebay.at/sch/i.html?_nkw=gravel" in table
     set_setting("platform_ebay_enabled", "0")              # switched off before the run: the run skips eBay, so do the rows
     frag = client.get(f"/deals/search/{row.id}").text
-    table = frag[frag.index("<tbody>"):frag.index("</tbody>")]
-    assert table.count("<tr>") == 2 and table.count("<td>Fake</td>") == 2 and "ebay" not in table.lower()
-    assert "https://fake.example/s/gravel" in table
+    table = frag[frag.index("<tbody"):frag.index("</tbody>")]
+    # one site left: no site links, the term itself links to its search there
+    assert table.count("<tr") == 2 and "rounded-full" not in table and "ebay" not in table.lower()
+    assert 'href="https://fake.example/s/gravel"' in table and table.count('title="Search on Fake"') == 2
+    assert "each on" not in frag

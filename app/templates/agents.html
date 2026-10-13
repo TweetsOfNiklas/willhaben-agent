@@ -1,11 +1,7 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block content %}
-{# the settings drawer's Searches block: two page-local macros (like agent_new.html's fchip) #}
-{# a price range as the drawer shows it: "€ 100 – € 300", "from € 100", "up to € 300"; nothing without one #}
-{% macro price_range(pf, pt) -%}
-{%- if pf or pt %}<small class="shrink-0 text-[12.5px] text-muted tabular-nums">{% if pf and pt %}{{ pf|eur }} – {{ pt|eur }}{% elif pf %}{{ _("from {price}", price=pf|eur) }}{% else %}{{ _("up to {price}", price=pt|eur) }}{% endif %}</small>{% endif -%}
-{%- endmacro %}
+{# the settings drawer's Searches block: a page-local macro (like agent_new.html's fchip) #}
 {# × at the end of a search row (li.group/row): a hidden checkbox Save posts (drop_term: a search term on every site;
    drop_query: one search without a term). Ticked, CSS strikes the row through and × turns into undo; a second click
    keeps the search. The last search cannot go: its box is disabled (server: only one search; Alpine: left() <= 1),
@@ -111,7 +107,7 @@
                 <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 group-has-[:checked]/row:line-through group-has-[:checked]/row:opacity-50" :class="!sites.includes({{ f.platform|tojson|forceescape }}) && 'line-through opacity-50'">
                   {{ ui.icon('filter', 13, 2, 'text-muted') }}
                   <a href="{{ f.url }}" target="_blank" rel="noopener" title="{{ _('Search on {platform}', platform=platform_name(f.platform)) }}" class="max-w-full min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ f.label }}</a>
-                  {{ price_range(f.price_from, f.price_to) }}
+                  {{ ui.price_range(f.price_from, f.price_to) }}
                   {{ ui.pill(_("only {site}", site=platform_name(f.platform)), '', false, 'shrink-0') }}
                 </span>
                 {{ drop_toggle('drop_query', f.index, f.k, f.label, _('Remove'), last) }}
@@ -122,7 +118,7 @@
               <li class="group/row flex items-center gap-2 py-1 pr-1.5 pl-3 transition-colors" :class="flashed === '{{ term.k }}' && 'bg-brand-soft'">
                 <span class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 group-has-[:checked]/row:line-through group-has-[:checked]/row:opacity-50">
                   <a href="{{ term.url }}" target="_blank" rel="noopener" title="{{ (term.why ~ ' · ') if term.why }}{{ _('Search on {platform}', platform=platform_name(term.sites[0])) }}" class="max-w-full min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ term.keyword }}</a>
-                  {{ price_range(term.price_from, term.price_to) }}
+                  {{ ui.price_range(term.price_from, term.price_to) }}
                   {% if term.missing %}<small class="text-[12px] text-warning" x-show="!drop.{{ term.k }} && missing('{{ term.k }}')">{{ _("not on {sites} yet – Save adds it", sites=term.missing_names|join(', ')) }}</small>{% endif %}
                 </span>
                 {{ drop_toggle('drop_term', term.key, term.k, term.keyword, remove_term, last) }}

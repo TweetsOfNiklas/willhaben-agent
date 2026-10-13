@@ -1,5 +1,26 @@
 {# One Claude product search (ps). Polls itself while running — same hx attributes and ids. #}
 {% import "_ui.html" as ui %}
+{# the "Generated searches" table: a count as 1.234; one run of a term on one site as a compact link to that search
+   with its result (ads found, +new candidates, an error, skipped; before it ran the site and, on desktop, ↗), the
+   details in its title; found/kept of a term (its total, or its one site's) or why there are none #}
+{% macro count(n) -%}{{ '{:,}'.format(n).replace(',', '.') }}{%- endmacro %}
+{% macro site_run(s, settings) -%}
+{%- set url = plan_query_url(s, settings) %}{% set name = platform_name(s.platform) %}
+{%- set what = s.error or (_("Not run: the site paused the search before or its hourly request limit was used up") if s.skipped else (_("{n} ads, {k} new candidates", n=count(s.found), k=s.kept) if s.found is number else '')) %}
+<{{ 'a' if url else 'span' }}{% if url %} href="{{ url }}" target="_blank" rel="noopener"{% endif %} title="{{ _('Search on {platform}', platform=name) }}{{ '\n' ~ what if what }}" class="inline-flex items-center gap-1 rounded-full border bg-base-100 px-2 py-px text-[12px] leading-5 whitespace-nowrap no-underline hover:border-primary {{ 'border-error/50 text-error' if s.error else ('border-dashed border-base-300 text-muted' if s.skipped else 'border-base-300 text-base-content') }}">{{ name }}
+  {%- if s.error %}{{ ui.icon('alert', 12) }}
+  {%- elif s.skipped %}<small class="text-[11px]">{{ _("skipped") }}</small>
+  {%- elif s.found is number %}<small class="text-[11px] text-muted tabular-nums">{{ count(s.found) }}</small>{% if s.kept %}<small class="text-[11px] font-semibold text-primary tabular-nums">+{{ s.kept }}</small>{% endif %}
+  {%- elif url %}{{ ui.icon('external', 11, 2, 'hidden text-muted sm:block') }}
+  {%- endif %}</{{ 'a' if url else 'span' }}>
+{%- endmacro %}
+{% macro found(r) -%}
+{%- if r.found %}<span class="text-base-content">{{ _("{n} ads", n=count(r.found)) }}</span><br><span class="{{ 'font-semibold text-primary' if r.kept else 'text-muted' }}">{{ _("{n} new", n=r.kept) }}</span>
+{%- elif r.found is number %}{{ _("nothing found") }}
+{%- elif r.error %}<span class="text-error">{{ _("error") }}</span>
+{%- elif r.skipped %}<span title="{{ _('Not run: the site paused the search before or its hourly request limit was used up') }}">{{ _("skipped") }}</span>
+{%- else %}–{% endif -%}
+{%- endmacro %}
 {% set live = ps_is_running(ps) %}{% set plan = ps.plan or {} %}{% set st = ps.settings or {} %}
 <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="ps-box" data-search="{{ ps.id }}"{% if live %} hx-get="/deals/search/{{ ps.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <header class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-base-300 px-4 py-3 font-semibold"><span>{{ _("Search #{id}", id=ps.id) }} <span class="text-[12.5px] font-normal text-muted">· {{ (ps.started_at or ps.created_at)|ago }} · {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}{% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}{% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}</span></span>
@@ -58,11 +79,25 @@
       {% elif ps.results %}<p id="ps-more" class="text-[12.5px] text-muted">{{ _("No more offers in this search.") }}</p>{% endif %}
       </div>
     {% endif %}
-    {% if plan.queries %}<details data-keep="queries" class="text-[13px] text-muted"><summary class="cursor-pointer">{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
-      {% set multi_site = (st.platforms or [])|length > 1 %}<table class="table table-sm mt-2"><thead class="text-[11.5px] tracking-wide uppercase"><tr><th>{{ _("Search term") }}</th>{% if multi_site %}<th>{{ _("Site") }}</th>{% endif %}<th>{{ _("Why") }}</th><th>{{ _("Found") }}</th></tr></thead><tbody>
-      {# before the run: each planned term once per site the run will use, linked as run_queries will send it #}
-      {% set rows = ps.queries or ps_planned(plan, ps.settings) %}
-      {% for q in rows %}<tr><td>{% set q_url = plan_query_url(q, ps.settings) %}{% if q_url %}<a class="link link-primary" href="{{ q_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% else %}{{ q.keyword }}{% endif %}{% if q.price_from or q.price_to %}<br><small class="text-muted">{{ q.price_from|eur if q.price_from else '' }}–{{ q.price_to|eur if q.price_to else '' }}</small>{% endif %}</td>{% if multi_site %}<td>{{ platform_name(q.platform) }}</td>{% endif %}<td>{{ q.why }}{% if q.category_hint %}<br><span class="text-muted">{{ q.category_hint }}</span>{% endif %}</td><td>{% if q.error %}{{ q.error }}{% elif q.skipped %}{{ _("skipped") }}{% elif q.found is defined and q.found is not none %}{{ _("{n} ads, {k} new candidates", n=q.found, k=q.kept) }}{% else %}–{% endif %}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
+    {# each term once: price range, why and category, the total on the right; on several sites a second row below with
+       its runs as links with their results and a failed run's error (a line of its own: a column beside the term
+       would wrap the chips or squeeze the term). Before the run the planned rows (each term once per site the run
+       will use, linked as run_queries will send it), without results or header. One site: the term itself is the
+       link. #}
+    {% if plan.queries %}{% set terms = ps_by_term(ps.queries or ps_planned(plan, ps.settings)) %}
+    {%- set n_sites = terms[0].sites|length if terms else 0 %}{% set multi_site = n_sites > 1 %}{% set ran = (ps.queries or [])|length > 0 %}
+    <details data-keep="queries" class="text-[13px] text-muted"><summary class="cursor-pointer">{{ _("Generated searches ({n})", n=plan.queries|length) }}{% if multi_site %} · {{ _("each on {n} sites", n=n_sites) }}{% endif %}</summary>
+      <table class="table table-sm mt-2">{% if ran %}<thead class="text-[11.5px] tracking-wide uppercase max-sm:hidden"><tr class="*:first:pl-0 *:last:pr-0"><th>{{ _("Search term") }}</th><th class="text-right">{{ _("Found") }}</th></tr></thead>{% endif %}<tbody>
+      {% for term in terms %}{% set one = term.sites[0] %}
+      <tr class="*:align-top *:first:pl-0 *:last:pr-0 {{ '*:border-b-0 *:pb-1.5' if multi_site }}">
+        <td><div class="flex flex-wrap items-baseline gap-x-1.5">{% set url = '' if multi_site else plan_query_url(one, ps.settings) %}{% if url %}<a href="{{ url }}" target="_blank" rel="noopener" title="{{ _('Search on {platform}', platform=platform_name(one.platform)) }}" class="font-medium break-words text-base-content no-underline hover:underline">{{ term.keyword }}{{ ui.icon('external', 11, 2, 'ml-1 inline align-baseline text-muted') }}</a>{% else %}<span class="font-medium break-words text-base-content">{{ term.keyword }}</span>{% endif %}{{ ui.price_range(term.price_from, term.price_to) }}</div>
+          {% if term.why or term.category_hint %}<div class="mt-0.5 text-[12px] leading-snug text-muted">{{ term.why }}{% if term.category_hint %} <span class="whitespace-nowrap">{{ ui.icon('tag', 11, 2, 'mr-0.5 inline align-[-1px]') }}{{ term.category_hint }}</span>{% endif %}</div>{% endif %}
+          {% if not multi_site and one.error %}<div class="mt-0.5 text-[12px] text-error">{{ one.error }}</div>{% endif %}</td>
+        {% if ran %}<td class="text-right text-[12px] leading-snug whitespace-nowrap tabular-nums">{{ found(term) }}</td>{% endif %}
+      </tr>
+      {% if multi_site %}<tr><td colspan="{{ 2 if ran else 1 }}" class="px-0 pt-0"><div class="flex flex-wrap gap-1">{% for s in term.sites %}{{ site_run(s, ps.settings) }}{% endfor %}</div>
+        {% for s in term.sites if s.error %}{% set name = platform_name(s.platform) %}<div class="mt-1 text-[12px] leading-snug text-error">{{ name ~ ': ' if name not in s.error }}{{ s.error }}</div>{% endfor %}</td></tr>{% endif %}
+      {% endfor %}</tbody></table></details>{% endif %}
     {% if ps.status in ('done', 'more') and plan.queries %}
       {% for a in ps_agents %}<small><a class="link link-primary" href="/agents">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% if ps_agents|length > 1 or ps_agent_sites %} ({{ platform_name(a.platform) }}){% endif %}</small>{% endfor %}
       {# the form only while the box does not refresh itself: a refresh would throw away what was typed #}

@@ -60,6 +60,11 @@
   {%- if dot %}<span class="size-1.5 rounded-full bg-current"></span>{% endif %}{{ text }}</span>
 {%- endmacro %}
 
+{# a price range: "€ 100 – € 300", "from € 100", "up to € 300"; nothing without one #}
+{% macro price_range(pf, pt) -%}
+{%- if pf or pt %}<small class="shrink-0 text-[12.5px] text-muted tabular-nums">{% if pf and pt %}{{ pf|eur }} – {{ pt|eur }}{% elif pf %}{{ _("from {price}", price=pf|eur) }}{% else %}{{ _("up to {price}", price=pt|eur) }}{% endif %}</small>{% endif -%}
+{%- endmacro %}
+
 {# uppercase role tag (Verkaufen / Einkauf) #}
 {% macro tag(text, buy=false) -%}
 <span class="inline-block rounded px-1.5 text-[10.5px] leading-4 font-bold tracking-wide uppercase {{ 'bg-warn-soft text-warning' if buy else 'bg-brand-soft text-primary' }}">{{ text }}</span>

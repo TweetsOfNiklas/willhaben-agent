@@ -290,6 +290,32 @@ def planned(plan: dict[str, Any] | None, settings: dict[str, Any] | None) -> lis
     return [{**q, "platform": p.id} for q in (plan or {}).get("queries") or [] for p in sites]
 
 
+_TERM_FIELDS = ("keyword", "price_from", "price_to", "why", "category_hint", "category_path")
+
+
+def by_term(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """The searches table: each search term once (its plan fields) with `sites` = its rows in run order (per_query
+    entries or planned() rows: one per site, query-major), found/kept = the sums over the sites that answered (None:
+    none did, or not run yet) and, when none answered, error/skipped = whether one failed / all were skipped (a
+    per_query entry is found, failed or skipped). A site that comes round again starts the next term, even with the
+    same keyword."""
+    terms: list[dict[str, Any]] = []
+    for q in rows or []:
+        term = terms[-1] if terms else None
+        if (term is None or term["keyword"] != q.get("keyword")
+                or any(s.get("platform") == q.get("platform") for s in term["sites"])):
+            term = {**{k: q.get(k) for k in _TERM_FIELDS}, "sites": []}
+            terms.append(term)
+        term["sites"].append(q)
+    for term in terms:
+        ran = [s for s in term["sites"] if s.get("found") is not None]
+        term["found"] = sum(s["found"] for s in ran) if ran else None
+        term["kept"] = sum(s.get("kept") or 0 for s in ran) if ran else None
+        term["error"] = not ran and any(s.get("error") for s in term["sites"])
+        term["skipped"] = not ran and not term["error"] and any(s.get("skipped") for s in term["sites"])
+    return terms
+
+
 async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
                       on_progress: Callable[[int, int, int], None] | None = None) -> dict[str, Any]:
     """Run each of the plan's queries on every site of the search, one after another.

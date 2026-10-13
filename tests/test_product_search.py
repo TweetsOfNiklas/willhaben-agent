@@ -826,6 +826,89 @@ async def test_a_block_stops_only_that_site(wh, fake_site):
     assert "Hourly request limit of Fake almost used up: only 1 of 3" in found["warning"]
 
 
+async def test_searches_group_by_term(wh, fake_site):
+    """The searches table's rows: each term once in plan order with its sites in run order, found/kept summed over the
+    sites that answered (a blocked or skipped site adds nothing), error/skipped when none answered; before the run the
+    same terms without results."""
+    from app.platforms import Blocked
+
+    plan = ps.normalize_plan(PLAN, 3)
+    blocked = Blocked("Fake: pause")
+    blocked.sent = True
+    fake_site.pages = [blocked]
+    settings = ps.make_settings(sites=["willhaben", "fake"])
+    found = await ps.run_queries(plan, settings)
+    terms = ps.by_term(found["per_query"])
+    wh_rows = [q for q in found["per_query"] if q["platform"] == "willhaben"]
+    assert [t["keyword"] for t in terms] == [q["keyword"] for q in plan["queries"]]
+    assert all([s["platform"] for s in t["sites"]] == ["willhaben", "fake"] for t in terms)
+    assert [(t["found"], t["kept"]) for t in terms] == [(q["found"], q["kept"]) for q in wh_rows]
+    assert terms[0]["sites"][1]["error"] == "Fake: pause" and terms[2]["sites"][1]["skipped"]
+    assert terms[0]["why"] == "direkt" and "platform" not in terms[0] and "url" not in terms[0]
+    assert not any(t["error"] or t["skipped"] for t in terms)       # willhaben answered each
+    before = ps.by_term(ps.planned(plan, settings))
+    assert [(t["keyword"], len(t["sites"]), t["found"], t["kept"]) for t in before] == [
+        (q["keyword"], 2, None, None) for q in plan["queries"]]
+    # a site that comes round again starts the next term, even with the same keyword
+    again = ps.by_term([{"keyword": "a", "platform": "x", "found": 2, "kept": 1}, {"keyword": "a", "platform": "x"},
+                        {"keyword": "b", "platform": "x", "found": 0}])
+    assert [(t["keyword"], t["found"], t["kept"]) for t in again] == [("a", 2, 1), ("a", None, None), ("b", 0, 0)]
+    # no site answered: one failed = the term failed, all skipped = skipped
+    none = ps.by_term([{"keyword": "a", "platform": "x", "found": None, "error": "boom"},
+                       {"keyword": "a", "platform": "y", "found": None, "skipped": True},
+                       {"keyword": "b", "platform": "x", "found": None, "skipped": True},
+                       {"keyword": "b", "platform": "y", "found": None, "skipped": True}])
+    assert [(t["found"], t["error"], t["skipped"]) for t in none] == [(None, True, False), (None, False, True)]
+    assert ps.by_term(None) == []
+
+
+def test_searches_table_lists_each_term_once(app_client, fake_site):
+    """Each term one row with its total (none found: "nothing found"); on several sites a row below with a link per
+    site and its result and a site's error once; on one site no site links, the term itself links to its search;
+    a term no site answered says error / skipped."""
+    plan = ps.normalize_plan(PLAN, 3)
+    settings = ps.make_settings(sites=["willhaben", "fake"])
+    rows = [{**q, "found": None, "kept": 0, "error": None, "skipped": False} for q in ps.planned(plan, settings)]
+    rows[0].update(found=1234, kept=5)
+    rows[1].update(found=7, kept=2)                     # Geschirrspüler: willhaben, Fake
+    rows[2].update(found=0)
+    rows[3].update(error="Network error: timeout")      # Spülmaschine
+    rows[4].update(found=3, kept=1)
+    rows[5].update(skipped=True)                        # Geschirspüler
+
+    def table(settings, rows):
+        with dbmod.session() as db:
+            row = dbmod.ProductSearch(description="Spüler", status="done", plan=plan, settings=settings, queries=rows,
+                                      results=[])
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+        frag = app_client.get(f"/deals/search/{row.id}").text
+        return frag[frag.index('data-keep="queries"'):frag.index("</table>")]
+
+    tbl = table(settings, rows)
+    assert "Generated searches (3) · each on 2 sites" in tbl and ">Found<" in tbl and tbl.count("<tr") == 7
+    assert tbl.count('colspan="2"') == 3                # a site row below each term
+    assert all(tbl.count(f">{q['keyword']}<") == 1 for q in plan["queries"])
+    assert tbl.count('href="https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?') == 3
+    assert 'href="https://fake.example/s/Geschirrspüler"' in tbl and tbl.count('title="Search on Fake') == 3
+    assert ">1.234</small>" in tbl and ">+5<" in tbl and ">1.241 ads<" in tbl and ">7 new<" in tbl   # site, then total
+    assert ">0 ads<" not in tbl and tbl.count("nothing found") == 1                 # Spülmaschine: 0 + an error
+    assert "Fake: Network error: timeout</div>" in tbl and tbl.count("skipped</small>") == 1
+    assert 'title="Search on Fake\nNot run: the site paused the search before or its hourly' in tbl
+    tbl = table(ps.make_settings(sites=["willhaben"]), rows[::2])
+    assert "each on" not in tbl and "colspan" not in tbl and tbl.count("<tr") == 4
+    assert tbl.count('title="Search on willhaben"') == 3 and ">Geschirrspüler<svg" in tbl     # the term links, with ↗
+    assert ">1.234 ads<" in tbl and ">5 new<" in tbl and ">willhaben<small" not in tbl and "nothing found" in tbl
+    rows = [{**r, "found": None, "kept": 0} for r in rows[:4]] + rows[4:]
+    rows[0].update(error="Network error: timeout")      # Geschirrspüler: failed on willhaben, skipped on Fake
+    rows[1].update(skipped=True)
+    rows[2].update(skipped=True)                        # Spülmaschine: skipped on both
+    rows[3].update(error=None, skipped=True)
+    totals = [r[r.rindex("<td"):] for r in table(settings, rows).split("<tr")[2::2]]   # each term row's last cell
+    assert ">error<" in totals[0] and ">skipped<" in totals[1] and ">3 ads<" in totals[2]
+
+
 def test_default_sites_follow_the_settings(fake_site):
     from app.db import set_setting
 
