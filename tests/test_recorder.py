@@ -1,4 +1,5 @@
 """Every willhaben request is stored with its answer: keys, redaction, caps, both clients, the timeline, pruning."""
+import asyncio
 import json
 import re
 from datetime import timedelta
@@ -201,6 +202,28 @@ def test_detail_shows_request_and_answer_as_text(client):
     assert client.get(f"/timeline/wh/{rec.id}/nope").status_code == 404
     assert len(re.findall(r'id="tl-\d+"', client.get("/timeline?kind=wh").text)) == 1
     assert not re.findall(r'id="tl-\d+"', client.get("/timeline").text)    # the overview leaves plain requests out
+
+
+def test_download_entry_with_steps_and_whole_answers(client):
+    from app.services import timeline
+
+    async def go():
+        async with timeline.run("job", "Activate „Rad“", name="myads-activate"):
+            recorder.record_http("account", "myads", "POST", ORIGIN + "/webapi/iad/bap/save", req_body={"title": "Rad"},
+                                 status=500, resp_headers={"content-type": "text/html", "cf-ray": "abc"},
+                                 resp_body="<html>" + "x" * 210_000 + "</html>")
+            await recorder.drain()
+    asyncio.run(go())
+    run = timeline.query(timeline.Filters(kind="runs"))[0][0]
+    assert f'href="/timeline/{run.id}/download"' in client.get(f"/timeline/{run.id}").text
+    r = client.get(f"/timeline/{run.id}/download")
+    assert r.headers["content-disposition"].startswith(f'attachment; filename="logbuch-{run.id}-')
+    data = r.json()
+    assert data["title"] == "Activate „Rad“" and len(data["steps"]) == 1
+    rec = data["steps"][0]["recording"]
+    assert rec["status"] == 500 and rec["resp_headers"]["cf-ray"] == "abc"
+    assert rec["response"].endswith("</html>") and not rec["response_cut"]     # whole, not the view's beginning
+    assert client.get("/timeline/999999/download").status_code == 404
 
 
 def test_settings_show_recordings_and_delete_all(client):

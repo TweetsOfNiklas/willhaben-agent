@@ -180,5 +180,6 @@
  "Offline replay: this willhaben request was never recorded (no browser)": "Offline-Replay: diese willhaben-Anfrage wurde nie aufgezeichnet (kein Browser)",
  "{thing}: all entries": "{thing}: alle Einträge",
  "willhaben requests are recorded from now on.": "willhaben-Zugriffe werden ab jetzt aufgezeichnet.",
- "willhaben requests are no longer recorded.": "willhaben-Zugriffe werden nicht mehr aufgezeichnet."
+ "willhaben requests are no longer recorded.": "willhaben-Zugriffe werden nicht mehr aufgezeichnet.",
+ "The whole entry with its steps, texts and willhaben answers as one file. It can contain chats and names.": "Der ganze Eintrag mit Schritten, Texten und willhaben-Antworten als eine Datei. Sie kann Chats und Namen enthalten."
 }

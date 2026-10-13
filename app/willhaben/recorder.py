@@ -325,8 +325,8 @@ def _text(blob: bytes | None, limit: int | None = VIEW_MAX) -> tuple[str | None,
     return text, False
 
 
-def view_for_event(event_id: int | None) -> dict[str, Any] | None:
-    """The recording of a "wh" timeline entry, decoded for the detail view."""
+def view_for_event(event_id: int | None, limit: int | None = VIEW_MAX) -> dict[str, Any] | None:
+    """The recording of a "wh" timeline entry, decoded for the detail view (limit=None: the whole bodies)."""
     from sqlmodel import select
 
     from app.db import WhRecording, session
@@ -337,8 +337,8 @@ def view_for_event(event_id: int | None) -> dict[str, Any] | None:
         r = db.exec(select(WhRecording).where(WhRecording.event_id == event_id)).first()
     if r is None:
         return None
-    req, req_cut = _text(r.req_body)
-    resp, resp_cut = _text(r.resp_body)
+    req, req_cut = _text(r.req_body, limit)
+    resp, resp_cut = _text(r.resp_body, limit)
     return {"id": r.id, "channel": r.channel, "kind": r.kind, "method": r.method, "url": r.url, "final_url": r.final_url,
             "status": r.status, "ws_status": r.ws_status, "outcome": r.outcome, "cached": r.cached, "error": r.error,
             "content_type": r.content_type, "key": r.canonical_key, "pruned": r.pruned,

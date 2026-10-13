@@ -250,6 +250,34 @@ async def timeline_text(event_id: int, name: str):
     return PlainTextResponse(blobs[name], headers={"Content-Disposition": f'inline; filename="timeline-{event_id}-{name}.txt"'})
 
 
+def _full(e) -> dict[str, Any]:
+    """One entry with its long texts and, for a willhaben request, the whole request and answer."""
+    d = _json(e, timeline.get(e.id)[1])
+    if e.kind == "wh":
+        d["recording"] = recorder.view_for_event(e.id, limit=None)
+    return d
+
+
+@router.get("/timeline/{event_id:int}/download")
+async def timeline_download(event_id: int):
+    """One entry as a JSON file to keep or pass on: texts, willhaben bodies and headers uncut, a run with its steps."""
+    from fastapi.responses import Response
+
+    ev, _blobs = timeline.get(event_id)
+    if ev is None:
+        raise HTTPException(404)
+
+    def build() -> bytes:
+        d = _full(ev)
+        if ev.kind in timeline.RUN_KINDS:
+            d["steps"] = [_full(s) for s in timeline.steps(ev.id)]
+        return json.dumps(d, ensure_ascii=False, indent=2, default=str).encode()
+
+    data = await asyncio.to_thread(build)
+    name = f"logbuch-{event_id}-{ev.ts:%Y%m%d-%H%M%S}.json"
+    return Response(data, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @router.get("/timeline/wh/{recording_id:int}/{side}")
 async def timeline_wh_body(recording_id: int, side: str):
     """A whole stored willhaben request or response body (the detail view shows the beginning)."""
