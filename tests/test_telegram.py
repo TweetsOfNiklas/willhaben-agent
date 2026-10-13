@@ -23,7 +23,8 @@ def tg(monkeypatch):
         if method == "getMe":
             return httpx.Response(200, json={"ok": True, "result": {"id": 1, "username": "wh_test_bot"}})
         if method in ("sendMessage", "sendPhoto"):
-            return httpx.Response(200, json={"ok": True, "result": {"message_id": next(ids), "chat": {"id": body["chat_id"]}}})
+            body["_id"] = next(ids)          # the id Telegram gave this message (see _sent_ids)
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": body["_id"], "chat": {"id": body["chat_id"]}}})
         return httpx.Response(200, json={"ok": True, "result": True})
 
     monkeypatch.setattr(telegram, "_transport", httpx.MockTransport(handler))
@@ -36,8 +37,16 @@ def _buttons(body):
     return {b["text"]: b.get("callback_data") or b.get("url") for row in body["reply_markup"]["inline_keyboard"] for b in row}
 
 
-def _press(data, chat=CHAT, msg_id=7):
-    return {"callback_query": {"id": "cq", "data": data, "message": {"message_id": msg_id, "chat": {"id": chat}}}}
+def _press(data, chat=CHAT, msg_id=7, markup=None):
+    msg = {"message_id": msg_id, "chat": {"id": chat}}
+    if markup:
+        msg["reply_markup"] = markup
+    return {"callback_query": {"id": "cq", "data": data, "message": msg}}
+
+
+def _sent_ids(tg):
+    """message ids the mock handed out, in order, one per sendMessage/sendPhoto."""
+    return [b["_id"] for m, b in tg if m in ("sendMessage", "sendPhoto")]
 
 
 def _text(text, chat=CHAT, reply_to=None):
@@ -98,7 +107,10 @@ async def test_draft_buttons_use_the_ha_action_path(tg, monkeypatch):
     await _linked(tg)
     with session() as db:
         db.add(Conversation(id="c1", ad_id="5", ad_title="Rad", partner_name="Max"))
-        db.add(Draft(id=11, conversation_id="c1", text="Ja, noch da."))
+        db.add(Draft(id=11, conversation_id="c1", text="Ja, noch da.", alternatives=[
+            {"label": "💶 Preis halten", "instruction": "Bleib beim Preis."},
+            {"label": "🤝 Annehmen", "instruction": "Nimm das Angebot an."},
+            {"label": "❌ Absagen", "instruction": "Sag freundlich ab."}]))
         db.add(Draft(id=12, conversation_id="c1", text="[Uhrzeit] passt"))
         db.commit()
     sent = []
@@ -116,12 +128,16 @@ async def test_draft_buttons_use_the_ha_action_path(tg, monkeypatch):
     await telegram.send("auto_reply_pending", "Antwort freigeben? Max", "…", tag=ha_actions.tag_for(11),
                         data={"conversation_id": "c1", "draft_id": 11}, actions=ha_actions.draft_actions(11, True))
     b = _buttons(tg[-1][1])
-    assert list(b) == ["✅ Send", "↩️ Direct answer", "✍️ Revise with Claude", "🗑 Discard"]
+    assert list(b) == ["✅ Send", "↩️ Direct answer", "✍️ Revise with Claude", "🗑 Discard",
+                       "💶 Preis halten", "🤝 Annehmen", "❌ Absagen"]               # Claude's alternatives, 2 per row
+    assert [len(r) for r in tg[-1][1]["reply_markup"]["inline_keyboard"]] == [2, 2, 2, 1]
+    offer_id = _sent_ids(tg)[-1]
 
-    # "Direct answer": ForceReply prompt, the reply text is sent through ha_actions.handle
-    await telegram.handle_update(_press(b["↩️ Direct answer"]))
+    # "Direct answer": ForceReply prompt quoting the offer, the reply text is sent through ha_actions.handle
+    await telegram.handle_update(_press(b["↩️ Direct answer"], msg_id=offer_id))
     prompt = tg[-1]
     assert prompt[0] == "sendMessage" and prompt[1]["reply_markup"]["force_reply"] is True
+    assert prompt[1]["reply_parameters"]["message_id"] == offer_id
     await telegram.handle_update(_text("Ja, Abholung heute ab 18 Uhr.", reply_to=next(iter(telegram._pending))))
     assert sent == [(11, "Ja, Abholung heute ab 18 Uhr.")]
 
@@ -129,9 +145,11 @@ async def test_draft_buttons_use_the_ha_action_path(tg, monkeypatch):
     await telegram.handle_update(_press(b["✅ Send"]))
     assert sent == [(11, "Ja, Abholung heute ab 18 Uhr.")] and "Already done." in tg[-2][1]["text"]
 
-    await telegram.send("auto_reply_pending", "x", "y", actions=ha_actions.draft_actions(12, False))
+    await telegram.send("auto_reply_pending", "x", "y", data={"conversation_id": "c1", "draft_id": 12},
+                        actions=ha_actions.draft_actions(12, False))
     b12 = _buttons(tg[-1][1])
     assert "✅ Send" not in b12                                         # placeholders: no plain send
+    assert list(b12) == ["↩️ Direct answer", "✍️ Revise with Claude", "🗑 Discard"]   # no alternatives: none shown
     await telegram.handle_update(_press(b12["🗑 Discard"]))
     with session() as db:
         assert db.get(Draft, 12).status == "discarded"
@@ -276,3 +294,196 @@ async def test_bot_token_never_logged(tg, caplog):
     await telegram.save_token("8774:SECRET-token")
     await telegram.api("getMe")
     assert "SECRET-token" not in caplog.text
+
+
+async def test_alternative_button_revises_in_place(tg, monkeypatch):
+    await _linked(tg)
+    with session() as db:
+        db.add(Conversation(id="c1", ad_id="5", ad_title="Rad", partner_name="Max"))
+        db.add(Draft(id=11, conversation_id="c1", text="Ich könnte auf 18 € runter.", alternatives=[
+            {"label": "💶 Preis halten", "instruction": "Bleib beim Preis, geh nicht runter."},
+            {"label": "🤝 18 € annehmen", "instruction": "Sag 18 € zu."}]))
+        db.commit()
+    revised = []
+
+    async def fake_revise(draft_id, instruction):
+        revised.append((draft_id, instruction))
+        from app.services import chats
+        with session() as db:
+            conv = db.get(Conversation, "c1")
+            new = Draft(conversation_id="c1", text="Der Preis ist fix, 20 €.")
+            db.add(new)
+            db.commit()
+            db.refresh(new)
+        await chats.offer_draft(conv, new, "revised", replaces=ha_actions.tag_for(draft_id))
+        return new
+
+    monkeypatch.setattr("app.services.chats.revise_and_offer", fake_revise)
+    await telegram.send("auto_reply_pending", "Antwort freigeben? Max", "„Ich könnte auf 18 € runter.“",
+                        tag=ha_actions.tag_for(11), data={"conversation_id": "c1", "draft_id": 11},
+                        actions=ha_actions.draft_actions(11, True))
+    offer_id = _sent_ids(tg)[-1]
+    b = _buttons(tg[-1][1])
+    n = len(tg)
+    await telegram.handle_update(_press(b["💶 Preis halten"], msg_id=offer_id))
+    assert revised == [(11, "Bleib beim Preis, geh nicht runter.")]
+    edits = [c for c in tg[n:] if c[0] == "editMessageText"]
+    # 1. progress line into the same message (buttons gone), 2. the new draft replaces it, still the same message
+    assert "Claude is revising: 💶 Preis halten" in edits[0][1]["text"]
+    assert edits[0][1]["reply_markup"] == {"inline_keyboard": []}
+    assert edits[-1][1]["message_id"] == offer_id and "Der Preis ist fix" in edits[-1][1]["text"]
+    assert "✅ Send" in _buttons(edits[-1][1])
+    assert not [c for c in tg[n:] if c[0] == "sendMessage"]            # nothing new in the chat
+    with session() as db:
+        new_id = db.exec(__import__("sqlmodel").select(Draft).where(Draft.text.startswith("Der Preis"))).one().id
+    assert telegram._message_for(ha_actions.tag_for(new_id)).message_id == offer_id
+    assert telegram._message_for(ha_actions.tag_for(11)) is None
+
+
+async def test_swipe_reply_answers_the_chat(tg, monkeypatch):
+    await _linked(tg)
+    with session() as db:
+        db.add(Conversation(id="c2", ad_id="9", ad_title="Stuhl", partner_name="Eva"))
+        db.add(Conversation(id="c3", ad_id="9", ad_title="Stuhl", partner_name="Tom"))
+        db.add(Draft(id=31, conversation_id="c3", text="Ja, noch da."))
+        db.commit()
+    sent = []
+
+    async def fake_send(draft_id, text):
+        sent.append((draft_id, text))
+        with session() as db:
+            d = db.get(Draft, draft_id)
+            d.status, d.text = "sent", text
+            db.add(d)
+            db.commit()
+        return d
+
+    monkeypatch.setattr("app.services.chats.send_draft", fake_send)
+    await telegram.send("message", "Nachricht von Eva", "Stuhl: noch da?", tag="wh-msg-c2",
+                        data={"conversation_id": "c2", "ad_id": "9"})
+    eva_id = _sent_ids(tg)[-1]
+    await telegram.send("auto_reply_pending", "Antwort freigeben? Tom", "…", tag=ha_actions.tag_for(31),
+                        data={"conversation_id": "c3", "draft_id": 31}, actions=ha_actions.draft_actions(31, True))
+    tom_id = _sent_ids(tg)[-1]
+
+    # reply (swipe) to Eva's notification, no button: a new message in that chat, result edited into the notification
+    await telegram.handle_update(_text("Ja, heute abholbar.", reply_to=eva_id))
+    with session() as db:
+        d = db.exec(__import__("sqlmodel").select(Draft).where(Draft.model == "telegram")).one()
+    assert sent == [(d.id, "Ja, heute abholbar.")] and d.conversation_id == "c2"
+    edit = tg[-1]
+    assert edit[0] == "editMessageText" and edit[1]["message_id"] == eva_id
+    assert "Nachricht von Eva" in edit[1]["text"] and "<b>Sent:</b> Ja, heute abholbar." in edit[1]["text"]
+
+    # reply to a held-back draft: the typed text is sent as that draft (ha_actions path)
+    await telegram.handle_update(_text("Nein, leider weg.", reply_to=tom_id))
+    assert sent[-1] == (31, "Nein, leider weg.")
+
+    # a reply to some unrelated message is not an answer: help text
+    await telegram.handle_update(_text("Hallo?", reply_to=5))
+    assert "/drafts" in tg[-1][1]["text"]
+
+
+async def test_several_open_prompts_need_an_explicit_reply(tg, monkeypatch):
+    await _linked(tg)
+    with session() as db:
+        db.add(Conversation(id="c2", ad_id="9", ad_title="Stuhl", partner_name="Eva"))
+        db.add(Conversation(id="c3", ad_id="9", ad_title="Tisch", partner_name="Tom"))
+        db.commit()
+    sent = []
+
+    async def fake_send(draft_id, text):
+        sent.append(text)
+
+    monkeypatch.setattr("app.services.chats.send_draft", fake_send)
+    for cid in ("c2", "c3"):
+        await telegram.send("message", f"Nachricht {cid}", "…", tag=f"wh-msg-{cid}", data={"conversation_id": cid})
+        await telegram.handle_update(_press(_buttons(tg[-1][1])["↩️ Reply"], msg_id=_sent_ids(tg)[-1]))
+    assert len(telegram._pending) == 2
+    await telegram.handle_update(_text("Ja"))                            # which one? we do not guess
+    assert sent == [] and "Several questions are open" in tg[-1][1]["text"] and len(telegram._pending) == 2
+    await telegram.handle_update(_text("Ja", reply_to=max(telegram._pending)))
+    assert sent == ["Ja"] and len(telegram._pending) == 1
+    await telegram.handle_update(_text("Nein"))                          # one left: plain text is enough
+    assert sent == ["Ja", "Nein"] and not telegram._pending
+
+
+async def test_auto_off_flips_the_button_in_place(tg):
+    await _linked(tg)
+    with session() as db:
+        db.add(Conversation(id="c2", ad_id="9", ad_title="Stuhl", partner_name="Eva"))
+        db.add(MyAd(ad_id="9", heading="Stuhl", auto_reply=True))
+        db.commit()
+    await telegram.send("auto_reply", "Automatisch geantwortet: Eva", "…",
+                        data={"conversation_id": "c2", "ad_id": "9", "draft_id": "conv:c2"})
+    markup = tg[-1][1]["reply_markup"]
+    b = _buttons(tg[-1][1])
+    n = len(tg)
+    await telegram.handle_update(_press(b["⏸ Auto answers off for this ad"], markup=markup))
+    with session() as db:
+        assert db.get(MyAd, "9").auto_reply is False
+    swaps = [c for c in tg[n:] if c[0] == "editMessageReplyMarkup"]
+    assert len(swaps) == 1 and not [c for c in tg[n:] if c[0] == "sendMessage"]
+    new = _buttons(swaps[0][1])
+    assert set(new) == {"👍", "👎 Bad answer", "▶️ Switch on again"}      # feedback stays, the switch flipped
+    await telegram.handle_update(_press(new["▶️ Switch on again"], markup=swaps[0][1]["reply_markup"]))
+    with session() as db:
+        assert db.get(MyAd, "9").auto_reply is True
+    assert "⏸ Auto answers off for this ad" in _buttons(tg[-1][1])
+
+
+async def test_status_line_and_retag(tg):
+    await _linked(tg)
+    await telegram.send("message", "Nachricht von Eva", "Stuhl: noch da?", tag="wh-msg-c2",
+                        data={"conversation_id": "c2"})
+    mid = _sent_ids(tg)[-1]
+    await telegram.progress("wh-msg-c2", "Claude is writing a draft …")
+    m, body = tg[-1]
+    assert m == "editMessageText" and body["message_id"] == mid and body["reply_markup"] == {"inline_keyboard": []}
+    assert body["text"] == "<b>Nachricht von Eva</b>\nStuhl: noch da?\n\n<i>Claude is writing a draft …</i>"
+    assert telegram.retag("wh-msg-c2", "wh-draft-7") and telegram._message_for("wh-msg-c2") is None
+    assert telegram._message_for("wh-draft-7").message_id == mid
+    await telegram.send("auto_reply_pending", "Antwort freigeben?", "…", tag="wh-draft-7")
+    assert tg[-1][0] == "editMessageText" and tg[-1][1]["message_id"] == mid
+    assert telegram._message_for("wh-draft-7").text.startswith("<b>Antwort freigeben?</b>")
+    await telegram.progress("wh-nothing", "x")                             # unknown tag: nothing happens
+    assert tg[-1][0] == "editMessageText"
+    assert not telegram.retag("wh-nothing", "wh-x")
+
+
+async def test_hit_starts_a_purchase_order(tg, monkeypatch):
+    from app.services import purchase
+
+    await _linked(tg)
+    with session() as db:
+        db.add(Hit(agent_id=1, ad_id="77", heading="KTM Rad", url="https://www.willhaben.at/iad/x-77", price=120.0,
+                   image_url="https://img/x.jpg"))
+        db.commit()
+    await telegram.send("hit", "Rad: 120 €", "KTM", url="https://www.willhaben.at/iad/x-77", data={"ad_id": "77"})
+    assert "🛒 Start purchase order" not in _buttons(tg[-1][1])        # purchases off: no button
+
+    started = []
+
+    async def no_begin(pid):
+        started.append(pid)
+
+    monkeypatch.setattr(purchase, "_begin", no_begin)
+    set_setting("purchase_enabled", "1")
+    set_setting(purchase.SETTING_PREFER_PAYLIVERY, "1")
+    await telegram.send("hit", "Rad: 120 €", "KTM", url="https://www.willhaben.at/iad/x-77", data={"ad_id": "77"})
+    markup = tg[-1][1]["reply_markup"]
+    b = _buttons(tg[-1][1])
+    await telegram.handle_update(_press(b["🛒 Start purchase order"], markup=markup))
+    await __import__("asyncio").gather(*purchase._TASKS)               # the background start (replaced above)
+    row = purchase.recent()[0]
+    assert row.ad_id == "77" and row.mode == "paylivery" and row.ad_title == "KTM Rad" and row.asking_price == 120.0
+    assert row.max_price is None and started == [row.id]
+    toast = next(c for c in reversed(tg) if c[0] == "answerCallbackQuery")
+    assert toast[1]["text"] == f"🛒 Purchase order #{row.id} started"
+    swapped = _buttons(tg[-1][1])
+    assert tg[-1][0] == "editMessageReplyMarkup" and f"🛒 Purchase order #{row.id}" in swapped
+    assert "⭐ Keep" in swapped and "🛒 Start purchase order" not in swapped
+    # a second tap: the refusal (open order exists) is the toast, nothing else happens
+    await telegram.handle_update(_press(b["🛒 Start purchase order"], markup=markup))
+    assert tg[-1][0] == "answerCallbackQuery" and "already an open purchase" in tg[-1][1]["text"]
+    set_setting("purchase_enabled", "0")

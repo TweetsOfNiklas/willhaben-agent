@@ -178,6 +178,36 @@ async def test_manual_send_marks_sending_verified(env):
     assert get_setting("send_verified") == "1" and account.sent == [("c1", "Ja, ist noch da.")]
 
 
+async def test_draft_keeps_claudes_alternatives_cleaned(env):
+    from app.llm.prompts import AUTO_REPLY_SCHEMA, PURCHASE_SCHEMA, REPLY_SCHEMA
+
+    for schema in (REPLY_SCHEMA, AUTO_REPLY_SCHEMA, PURCHASE_SCHEMA):
+        assert "alternatives" in schema["required"] and "maxItems" not in schema["properties"]["alternatives"]
+    backend, account, notes = env
+    assert (await chats.draft_reply("c1")).alternatives is None      # backends without the key: no buttons
+    backend.data = {"alternatives": [
+        {"label": "  💶 Preis halten ", "instruction": " Bleib beim Preis. "},
+        {"label": "", "instruction": "ohne Beschriftung"},
+        {"label": "ohne Anweisung", "instruction": "  "},
+        "kaputt",
+        {"label": "🤝 18 € | fix", "instruction": "Sag 18 € zu | ohne Versand."},
+        {"label": "x" * 50, "instruction": "y" * 300},
+        {"label": "❌ Absagen", "instruction": "Sag freundlich ab."},
+    ]}
+    d = await chats.draft_reply("c1")
+    assert d.alternatives == [{"label": "💶 Preis halten", "instruction": "Bleib beim Preis."},
+                              {"label": "🤝 18 € / fix", "instruction": "Sag 18 € zu | ohne Versand."},
+                              {"label": "x" * 30, "instruction": "y" * 200}]
+    with session() as db:
+        assert db.get(Draft, d.id).alternatives == d.alternatives
+    backend.data = {"alternatives": [{"label": "", "instruction": ""}]}
+    assert (await chats.draft_reply("c1")).alternatives is None
+    # a revision is a new draft with its own alternatives
+    backend.data = {"alternatives": [{"label": "🏠 Nur Abholung", "instruction": "Kein Versand."}]}
+    new = await chats.revise_and_offer(d.id, "freundlicher")
+    assert new.alternatives == [{"label": "🏠 Nur Abholung", "instruction": "Kein Versand."}]
+
+
 def test_settings_and_myads_forms():
     from fastapi.testclient import TestClient
 
@@ -356,6 +386,64 @@ async def test_no_raw_message_push_when_auto_reply_on(env, monkeypatch):
     monkeypatch.setattr(_Acct, "conversations", newer)
     await chats.sync()
     assert [n[0] for n in notes] == ["message"]
+
+
+async def test_auto_draft_turns_the_message_push_into_the_offer(env, monkeypatch):
+    backend, account, notes = env
+    from app.services import telegram
+    from app.willhaben.account import ConversationSummary
+
+    class _Sess:
+        started, logged_in = True, True
+
+    class _Acct:
+        async def conversations(self, limit=50):
+            return [ConversationSummary(id="c1", ad_id="111", ad_title="Logitech S315i", partner_name="Anna",
+                                        unread_count=2, last_text="Und Versand?", last_at=utcnow(), raw={},
+                                        role="seller")]
+
+    async def no_msgs(cid):
+        return "full"
+
+    progress, retags, cleared = [], [], []
+
+    async def fake_progress(tag, line):
+        progress.append((tag, line))
+
+    async def fake_clear(tag):
+        cleared.append(tag)
+
+    monkeypatch.setattr(chats, "get_session", lambda: _Sess())
+    monkeypatch.setattr(chats, "_account", lambda: _Acct())
+    monkeypatch.setattr(chats, "sync_messages", no_msgs)
+    monkeypatch.setattr(telegram, "progress", fake_progress)
+    monkeypatch.setattr(telegram, "retag", lambda old, new: retags.append((old, new)) or True)
+    monkeypatch.setattr("app.services.notify.clear_push", fake_clear)
+    with session() as db:                       # auto reply off: the raw message is pushed, then drafted
+        ad = db.get(MyAd, "111")
+        ad.auto_reply = False
+        db.add(ad)
+        db.commit()
+    set_setting("notify_messages", "1")
+    set_setting("auto_draft", "1")
+    await chats.sync()
+    assert [n[0] for n in notes] == ["message", "auto_reply_pending"]
+    assert notes[0][3]["tag"] == "wh-msg-c1" and progress == [("wh-msg-c1", "✍️ Claude is writing a draft …")]
+    with session() as db:
+        d = db.exec(select(Draft).where(Draft.status == "draft")).one()
+    assert notes[1][3]["tag"] == f"wh-draft-{d.id}" and "drafted automatically" in notes[1][2]
+    assert retags == [("wh-msg-c1", f"wh-draft-{d.id}")] and cleared == ["wh-msg-c1"]
+    assert not account.sent                                               # never sent automatically
+
+    notes.clear()                                                         # no message push: silent draft as before
+    set_setting("notify_messages", "0")
+    with session() as db:
+        c = db.get(Conversation, "c1")
+        c.last_message_at = None
+        db.add(c)
+        db.commit()
+    await chats.sync()
+    assert notes == [] and len(backend.calls) == 2
 
 
 def test_sent_message_not_duplicated_by_history():

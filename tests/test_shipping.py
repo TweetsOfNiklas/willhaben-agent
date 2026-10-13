@@ -119,7 +119,7 @@ async def test_ship_push_button_opens_form(chat, monkeypatch):
         return "5 fields filled"
 
     async def fake_notify(kind, title, message, **kw):
-        notes.append((kind, title, kw.get("url")))
+        notes.append((kind, title, kw.get("url"), kw.get("tag")))
 
     async def fake_clear(tag):
         pass
@@ -132,6 +132,7 @@ async def test_ship_push_button_opens_form(chat, monkeypatch):
     assert await ha_actions.handle({"action": act.replace(act[-12:], "0" * 12)}) is None   # bad signature
     assert await ha_actions.handle({"action": act}) == "label form"
     assert started == [s.id] and notes[-1][2].endswith("/session")
+    assert notes[-1][3] == f"wh-ship-{s.id}"                           # same push as "address received"
     shipping.update(s.id, status="labelled")
     assert await ha_actions.handle({"action": act}) is None          # only drafts
 

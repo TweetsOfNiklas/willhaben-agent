@@ -24,7 +24,9 @@ class FakeBackend:
         self.calls.append({"system": system, "prompt": prompt, "schema": schema, "images": images or []})
         if "reply" in schema["properties"]:
             data = {"reply": "Hallo, ja, das Rad ist noch da. 180 € wäre ok.", "intent": "price_negotiation",
-                    "needs_info": ["Abholzeit"], "suggested_price": 180, "note": ""}
+                    "needs_info": ["Abholzeit"], "suggested_price": 180, "note": "",
+                    "alternatives": [{"label": "🤝 150 € annehmen", "instruction": "Nimm die 150 € an."},
+                                     {"label": "💶 Preis halten", "instruction": "Bleib bei 200 €."}]}
         else:
             data = {"title": "KTM Kinderrad 20 Zoll blau", "description": "Gut erhalten.", "category_hint": "Sport",
                     "condition": "gebraucht", "attributes": [{"name": "Marke", "value": "KTM"}],
@@ -76,6 +78,33 @@ def test_pages_render(client):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "willhaben Agent" in r.text
+
+
+def test_chat_page_offers_claudes_alternatives(client):
+    """The draft's alternatives are buttons under it; one click revises in the background like a redraft."""
+    _conversation()
+    client.post("/chats/c1/draft", data={"hint": ""})
+    wait_jobs()
+    page = client.get("/chats/c1").text
+    assert "🤝 150 € annehmen" in page and "💶 Preis halten" in page and 'value="Nimm die 150 € an."' in page
+    with dbmod.session() as db:
+        old = db.exec(select(dbmod.Draft)).one()
+
+    r = client.post(f"/drafts/{old.id}/revise", data={"instruction": "Nimm die 150 € an."}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/chats/c1"
+    wait_jobs()
+    prompt = client.fake.calls[-1]["prompt"]
+    assert "Mein bisheriger Entwurf war: „Hallo, ja, das Rad ist noch da. 180 € wäre ok.“" in prompt
+    assert "Überarbeite ihn so: Nimm die 150 € an." in prompt
+    with dbmod.session() as db:
+        drafts = db.exec(select(dbmod.Draft).order_by(dbmod.Draft.id)).all()
+    assert [d.status for d in drafts] == ["discarded", "draft"]
+    assert "revised as asked" in drafts[1].auto_reason and drafts[1].alternatives[0]["label"] == "🤝 150 € annehmen"
+    assert client.post(f"/drafts/{old.id}/revise", data={"instruction": "x"}).status_code == 200   # old draft: no-op
+    wait_jobs()
+    with dbmod.session() as db:
+        assert db.exec(select(dbmod.Draft)).all().__len__() == 2
+    assert client.post("/drafts/999/revise", data={"instruction": "x"}).status_code == 404
 
 
 def test_chat_draft_send_flow(client):

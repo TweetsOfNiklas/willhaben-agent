@@ -122,6 +122,7 @@ class Draft(SQLModel, table=True):
     feedback: str | None = None       # up | down, from Telegram buttons
     feedback_note: str | None = None  # what was wrong (goes into later automatic answers)
     meetup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # appointment this answer fixes
+    alternatives: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # Claude's other decisions: label, instruction
     purchase: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # buyer side: Claude's purchase_state
 
 
@@ -312,6 +313,7 @@ class TelegramMessage(SQLModel, table=True):
     chat_id: int
     message_id: int
     photo: bool = False
+    text: str | None = None          # last text we put there, so a status line can be appended by an edit
 
 
 class Setting(SQLModel, table=True):

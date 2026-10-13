@@ -267,11 +267,12 @@ def config() -> dict[str, Any]:
         "in_drafts": get_setting("gcal_in_drafts") != "0",
         "in_auto": get_setting("gcal_in_auto") == "1",
         "buffer": min(max(int(get_setting("gcal_buffer") or 0), 0), BUFFER_MAX),
+        "auto_add": get_setting("gcal_auto_add") == "1",
     }
 
 
 def save_config(calendars: list[str], target: str, days: int, window_start: str, window_end: str,
-                duration: int, in_drafts: bool, in_auto: bool, buffer: int) -> None:
+                duration: int, in_drafts: bool, in_auto: bool, buffer: int, auto_add: bool = False) -> None:
     for v in (window_start, window_end):
         datetime.strptime(v, "%H:%M")
     set_setting("gcal_calendars", ",".join(c.strip() for c in calendars if c.strip()) or "primary")
@@ -283,6 +284,7 @@ def save_config(calendars: list[str], target: str, days: int, window_start: str,
     set_setting("gcal_in_drafts", "1" if in_drafts else "0")
     set_setting("gcal_in_auto", "1" if in_auto else "0")
     set_setting("gcal_buffer", str(min(max(0, buffer), BUFFER_MAX)))
+    set_setting("gcal_auto_add", "1" if auto_add else "0")
     _cache.clear()
 
 
@@ -395,6 +397,11 @@ async def add_event(*, summary: str, start: datetime, minutes: int, location: st
     ev = await _api("POST", f"/calendars/{_q(config()['target'])}/events", json={k: v for k, v in body.items() if v})
     _cache.clear()
     return {"id": ev.get("id"), "link": ev.get("htmlLink")}
+
+
+async def delete_event(event_id: str) -> None:
+    await _api("DELETE", f"/calendars/{_q(config()['target'])}/events/{_q(event_id)}")
+    _cache.clear()
 
 
 def _q(cal_id: str) -> str:

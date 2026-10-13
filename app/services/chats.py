@@ -110,16 +110,23 @@ async def sync(force: bool = False) -> dict[str, Any]:
             log.warning("shipping check failed for %s: %s", row.id, e)
         if _auto_mode(row) is not None:
             continue   # auto reply on: process_pending_auto pushes "answered" or "approve?" instead of the raw message
+        auto_draft = get_setting("auto_draft") == "1"
+        tag = message_tag(row.id)
         if notify_on:
             await notify("message", t("Message from {name}", name=row.partner_name or t("unknown")),
                          f"{row.ad_title or ''}: {(row.last_message_text or '')[:140]}",
                          url="https://www.willhaben.at/iad/myprofile/chat",
-                         data={"conversation_id": row.id, "ad_id": row.ad_id})
-        if get_setting("auto_draft") == "1":
+                         data={"conversation_id": row.id, "ad_id": row.ad_id}, tag=tag)
+            if auto_draft:
+                await telegram.progress(tag, "✍️ " + t("Claude is writing a draft …"))
+        if auto_draft:
             try:
-                await draft_reply(row.id)
+                d = await draft_reply(row.id)
             except (LLMError, WillhabenError) as e:
                 log.warning("auto draft failed for %s: %s", row.id, e)
+                continue
+            if notify_on:    # the notification turns into the draft offer: one message, one tap to send
+                await offer_draft(row, d, t("drafted automatically"), replaces=tag)
     last_sync_at[0] = utcnow()
     answered = await process_pending_auto()
     return {"conversations": len(convs), "changed": len(changed), "incoming": len(incoming), "auto": answered}
@@ -290,9 +297,30 @@ def drafts_of(conversation_id: str) -> list[Draft]:
 
 
 def _style_examples(limit: int = 3) -> list[str]:
+    """Recent sent answers as style examples; the ones rated 👍 in Telegram come first."""
     with session() as db:
-        rows = db.exec(select(Draft).where(Draft.status == "sent").order_by(Draft.sent_at.desc()).limit(limit))
+        rows = db.exec(select(Draft).where(Draft.status == "sent")
+                       .order_by((Draft.feedback == "up").desc(), Draft.sent_at.desc()).limit(limit))
         return [r.text for r in rows]
+
+
+MAX_ALTERNATIVES = 3
+
+
+def clean_alternatives(raw: Any) -> list[dict[str, str]] | None:
+    """Claude's other decisions for the situation (one-tap buttons under a held-back answer), None when there are none."""
+    out: list[dict[str, str]] = []
+    for a in raw if isinstance(raw, list) else []:
+        if not isinstance(a, dict):
+            continue
+        # "|" separates the parts of a Telegram button ref (draft_id|label|instruction)
+        label = " ".join(str(a.get("label") or "").replace("|", "/").split())[:30].strip()
+        instruction = str(a.get("instruction") or "").strip()[:200].strip()
+        if label and instruction:
+            out.append({"label": label, "instruction": instruction})
+        if len(out) == MAX_ALTERNATIVES:
+            break
+    return out or None
 
 
 @timeline.scoped(conversation_id="conversation_id")
@@ -345,6 +373,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
     draft = Draft(conversation_id=conversation_id, text=d.get("reply", "").strip(), intent=d.get("intent"),
                   needs_info=(d.get("needs_info") or []) + ([f"Hinweis: {note}"] if note else []),
                   suggested_price=d.get("suggested_price"), model=result.model, meetup=meetups.clean(d.get("meetup")),
+                  alternatives=clean_alternatives(d.get("alternatives")),
                   auto=True if auto else None,
                   auto_reason=(("✓ " if d.get("auto_send") else "✗ ") + (d.get("auto_reason") or "").strip()) if auto else None,
                   purchase=purchase.clean_state(d.get("purchase_state")) if buyer_auto else None)
@@ -829,8 +858,14 @@ async def _send_auto(conv: Conversation, d: Draft, conversation_id: str, title: 
     await notify("auto_reply", t("Answered automatically: {name}", name=conv.partner_name or "").strip(),
                  (t("“{text}” → ", text=q[:120]) if q else "") + f"{d.text[:160]}\n{title}",
                  url="https://www.willhaben.at/iad/myprofile/chat",
-                 data={"conversation_id": conversation_id, "ad_id": conv.ad_id, "draft_id": d.id})
+                 data={"conversation_id": conversation_id, "ad_id": conv.ad_id, "draft_id": d.id},
+                 tag=f"wh-draft-{d.id}")     # = ha_actions.tag_for (not imported here: circular)
     return d
+
+
+def message_tag(conversation_id: str) -> str:
+    """Tag of the "new message" push for a chat (a later draft offer takes the same Telegram message over)."""
+    return f"wh-msg-{conversation_id}"
 
 
 def _last_incoming(conversation_id: str) -> str | None:
@@ -838,11 +873,19 @@ def _last_incoming(conversation_id: str) -> str | None:
     return msgs[-1].text if msgs else None
 
 
-async def offer_draft(conv: Conversation, d: Draft, reason: str) -> None:
-    """Push the draft to the phone with buttons: send, direct answer, let Claude revise, discard."""
+async def offer_draft(conv: Conversation, d: Draft, reason: str, replaces: str | None = None) -> None:
+    """Push the draft to the phone with buttons: send, direct answer, let Claude revise, discard.
+
+    `replaces`: tag of the push this offer supersedes (the chat message, or the draft it revises). In Telegram
+    that message is edited in place; the Home Assistant push with the old tag is cleared.
+    """
     from app.config import get_settings
     from app.services import ha_actions
+    from app.services.notify import clear_push
 
+    if replaces and replaces != ha_actions.tag_for(d.id):
+        telegram.retag(replaces, ha_actions.tag_for(d.id))
+        await clear_push(replaces)
     can_send = not ("[" in d.text and "]" in d.text) and d.intent != "scam_suspect" and bool(d.text.strip())
     q = _last_incoming(conv.id)
     await notify("auto_reply_pending", t("Approve answer? {name}", name=conv.partner_name or "").strip(),
@@ -853,8 +896,9 @@ async def offer_draft(conv: Conversation, d: Draft, reason: str) -> None:
                  actions=ha_actions.draft_actions(d.id, can_send), tag=ha_actions.tag_for(d.id))
 
 
-async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
-    """"Revise with Claude" from the push: new draft from the instruction, old one dropped, new push."""
+async def revise(draft_id: int, instruction: str) -> Draft | None:
+    """New draft from an instruction about the old one (Telegram alternative / button on the chat page); the old
+    draft is dropped. None when it is not an open draft any more."""
     with session() as db:
         old = db.get(Draft, draft_id)
         conv = db.get(Conversation, old.conversation_id) if old else None
@@ -871,8 +915,46 @@ async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
         db.add(row)
         db.commit()
         db.refresh(row)
-    await offer_draft(conv, row, t("revised: {instruction}", instruction=instruction[:80]))
     return row
+
+
+async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
+    """"Revise with Claude" from the push: new draft from the instruction, old one dropped, same push updated."""
+    from app.services import ha_actions
+
+    row = await revise(draft_id, instruction)
+    if row is None:
+        return None
+    with session() as db:
+        conv = db.get(Conversation, row.conversation_id)
+    await offer_draft(conv, row, t("revised: {instruction}", instruction=instruction.strip()[:80]),
+                      replaces=ha_actions.tag_for(draft_id))
+    return row
+
+
+def enqueue_revise(draft_id: int, instruction: str) -> bool:
+    """One of Claude's alternatives tapped on the chat page: revise in the background (lane claude), the composer
+    shows "Claude is writing…" and the new draft appears by itself. False: no open draft / already drafting."""
+    with session() as db:
+        d = db.get(Draft, draft_id)
+        c = db.get(Conversation, d.conversation_id) if d else None
+    if d is None or c is None or d.status != "draft" or c.drafting:
+        return False
+    conversation_id = c.id
+    _set_drafting(conversation_id, True)
+
+    async def run(job: jobs.Job) -> str:
+        try:
+            await revise(draft_id, instruction)
+        except Exception as e:               # the reason shows in the chat, next to the draft
+            _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
+            raise
+        _set_drafting(conversation_id, False)
+        return t("Draft ready")
+
+    jobs.submit("chat-draft", t("Claude revises the answer to {name}", name=c.partner_name or t("unknown")), run,
+                lane="claude", current=f"drafting:{conversation_id}")
+    return True
 
 
 def mark_sent(draft_id: int, text: str | None = None) -> Draft:

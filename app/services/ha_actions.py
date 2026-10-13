@@ -8,6 +8,7 @@ websocket subscription to that event (long-lived token from ha_auth) and acts on
   WH_REVISE_<draft>_<sig>    "Revise with Claude": typed text is an instruction, a corrected draft comes as new push
   WH_DISCARD_<draft>_<sig>   drop the draft
   WH_CAL_<draft>_<sig>       add the appointment the (sent) answer agreed to Google Calendar
+  WH_UNCAL_<draft>_<sig>     take it out again (undo for appointments added automatically)
   WH_SHIP_<shipment>_<sig>   open the carrier's label form and fill it (the user pays in the remote view)
   WH_PAID_<shipment>_<sig>   the buyer has paid (marked by hand) -> ask for the go, or buy by the automatic rules
   WH_BUY_<shipment>_<sig>    approve: buy the label (printed when automatic printing is on)
@@ -35,7 +36,7 @@ log = logging.getLogger(__name__)
 EVENT = "mobile_app_notification_action"
 # Websocket listener state, read by the connection watchdog (app/services/health.py).
 listener: dict[str, Any] = {"running": False, "connected": False, "error": None}
-_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|SHIP|PAID|BUY|DECL|CANCEL)_(\d+)_([0-9a-f]{12})")
+_ACTION_RE = re.compile(r"WH_(SEND|REPLY|REVISE|DISCARD|CAL|UNCAL|SHIP|PAID|BUY|DECL|CANCEL)_(\d+)_([0-9a-f]{12})")
 SHIPMENT_VERBS = ("PAID", "BUY", "DECL", "CANCEL")
 
 
@@ -119,6 +120,10 @@ def meetup_actions(draft_id: int) -> list[dict[str, Any]]:
     return [{"action": action_id("CAL", draft_id), "title": t("Add to calendar")}]
 
 
+def meetup_undo_actions(draft_id: int) -> list[dict[str, Any]]:
+    return [{"action": action_id("UNCAL", draft_id), "title": t("Remove from calendar"), "destructive": True}]
+
+
 def parse_action(action: str) -> tuple[str, int] | None:
     m = _ACTION_RE.fullmatch(action or "")
     if not m:
@@ -165,6 +170,8 @@ async def _handle(event_data: dict[str, Any]) -> str | None:
         return await _shipment_action(verb, draft_id)
     if verb == "CAL":
         return await _add_meetup(draft_id)
+    if verb == "UNCAL":
+        return await _remove_meetup(draft_id)
     with session() as db:
         d = db.get(Draft, draft_id)
     if d is None or d.status != "draft":
@@ -204,7 +211,7 @@ async def _start_label(shipment_id: int) -> str | None:
         await notify("shipping", t("Label form failed"), str(e)[:200],
                      url=f"{get_settings().public_url.rstrip('/')}/chats/{s.conversation_id}#shipping")
         return f"error: {e}"
-    await notify("shipping", t("Label form is ready – check and pay"), msg[:200], url=url)
+    await notify("shipping", t("Label form is ready – check and pay"), msg[:200], url=url, tag=ship_tag(shipment_id))
     return "label form"
 
 
@@ -250,8 +257,26 @@ async def _add_meetup(draft_id: int) -> str | None:
         return f"error: {e}"
     if m is None:
         return None            # already added (second tap) or nothing to add
-    await notify("meetup", t("In your calendar"), f"{meetups.format_when(m)} · {m['summary']}", url=m.get("event_link"))
+    await notify("meetup", t("In your calendar"), f"{meetups.format_when(m)} · {m['summary']}", url=m.get("event_link"),
+                 tag=meetup_tag(draft_id))
     return "calendar"
+
+
+async def _remove_meetup(draft_id: int) -> str | None:
+    from app.services import gcal, meetups
+    from app.services.notify import clear_push, notify
+
+    await clear_push(meetup_tag(draft_id))
+    try:
+        m = await meetups.remove_from_draft(draft_id)
+    except gcal.CalendarError as e:
+        await notify("meetup", t("Calendar entry failed"), str(e)[:200])
+        return f"error: {e}"
+    if m is None:
+        return None            # not in the calendar (second tap)
+    await notify("meetup", t("Removed from calendar"), f"{meetups.format_when(m)} · {m['summary']}",
+                 data={"draft_id": draft_id}, actions=meetup_actions(draft_id), tag=meetup_tag(draft_id))
+    return "calendar removed"
 
 
 async def listen_forever() -> None:

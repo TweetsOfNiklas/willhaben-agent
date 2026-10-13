@@ -657,6 +657,17 @@ async def draft_send(draft_id: int, text: str = Form(...)):
     return back(f"/chats/{d.conversation_id}#draft-{draft_id}")
 
 
+@app.post("/drafts/{draft_id}/revise")
+async def draft_revise(draft_id: int, instruction: str = Form("")):
+    """One of Claude's alternative decisions (buttons under the draft): revised in the background like a redraft."""
+    with session() as db:
+        d = db.get(Draft, draft_id)
+    if d is None:
+        raise HTTPException(404)
+    chats.enqueue_revise(draft_id, instruction)
+    return back(f"/chats/{d.conversation_id}")
+
+
 @app.post("/drafts/{draft_id}/mark-sent")
 async def draft_mark_sent(draft_id: int, text: str = Form("")):
     d = chats.mark_sent(draft_id, text or None)
@@ -1829,7 +1840,8 @@ async def gcal_save(request: Request):
         gcal.save_config([str(c) for c in f.getlist("calendar")], str(f.get("target") or "primary"),
                          int(f.get("days") or 7), str(f.get("window_start") or "09:00"),
                          str(f.get("window_end") or "20:00"), int(f.get("duration") or 30),
-                         bool(f.get("in_drafts")), bool(f.get("in_auto")), int(f.get("buffer") or 0))
+                         bool(f.get("in_drafts")), bool(f.get("in_auto")), int(f.get("buffer") or 0),
+                         bool(f.get("auto_add")))
     except ValueError:
         return _gcal_back(t("Invalid value"))
     return _gcal_back(t("Changes saved"))

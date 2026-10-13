@@ -29,6 +29,11 @@ So arbeitest du:
   du sagst zu, oder er bestätigt einen Vorschlag von mir), dann start = "YYYY-MM-DDTHH:MM" (Ortszeit Wien, aus
   Wochentag/„morgen“ und dem heutigen Datum berechnet), sonst start = "". Bloße Vorschläge ohne Zusage zählen nicht.
   location = Treffpunkt/Adresse, falls genannt, sonst "". minutes = geschätzte Dauer, sonst 30.
+- alternatives: Neben deinem Vorschlag bis zu drei andere sinnvolle Entscheidungen, die die Person in genau dieser
+  Lage treffen könnte (z. B. Preis annehmen, Gegenangebot über einen konkreten Betrag, beim Preis bleiben, absagen,
+  Versand anbieten, nur Abholung), je als kurzer Button-Text (label) und Anweisung, wie die Antwort dafür
+  umzuschreiben ist (instruction). Leer lassen, wenn es keine echte Alternative gibt (einfache Sachfrage u. Ä.)
+  oder bei intent = "scam_suspect".
 """
 
 MEETUP_SCHEMA: dict[str, Any] = {
@@ -54,8 +59,23 @@ REPLY_SCHEMA: dict[str, Any] = {
         "suggested_price": {"type": ["number", "null"]},
         "note": {"type": "string", "description": "Kurzer Hinweis an die Person, leer wenn nichts"},
         "meetup": MEETUP_SCHEMA,
+        "alternatives": {
+            "type": "array",   # no maxItems: structured outputs reject array length constraints; chats.clean_alternatives caps at 3
+            "description": "Höchstens drei andere sinnvolle Entscheidungen für genau diese Lage, leer wenn es keine gibt",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string",
+                              "description": "Kurzer Button-Text, max. ca. 25 Zeichen, darf mit einem Emoji beginnen"},
+                    "instruction": {"type": "string",
+                                    "description": "Wie die Antwort für diese Entscheidung umgeschrieben werden soll"},
+                },
+                "required": ["label", "instruction"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["reply", "intent", "needs_info", "suggested_price", "note", "meetup"],
+    "required": ["reply", "intent", "needs_info", "suggested_price", "note", "meetup", "alternatives"],
     "additionalProperties": False,
 }
 

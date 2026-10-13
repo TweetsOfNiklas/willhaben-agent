@@ -35,6 +35,8 @@ def google(monkeypatch, tmp_path):
                 {"start": "2026-10-10T08:00:00Z", "end": "2026-10-10T10:00:00Z"}]}}})
         if request.url.path.endswith("/events"):
             return httpx.Response(200, json={"id": "ev1", "htmlLink": "https://calendar.google.com/ev1"})
+        if request.method == "DELETE" and "/events/" in request.url.path:
+            return httpx.Response(204)
         return httpx.Response(404)
 
     monkeypatch.setattr(gcal, "_transport", httpx.MockTransport(handler))
@@ -226,6 +228,52 @@ async def test_meetup_draft_send_push_and_calendar(google, monkeypatch):
     meetups.remember("c9", {"start": start, "minutes": 20, "location": "Wien 15"})
     with session() as db:
         assert db.get(Conversation, "c9").meetup["event_id"] == "ev1"
+
+
+async def test_auto_add_with_undo(google, monkeypatch):
+    from app.services import ha_actions
+    from app.services import notify as notify_mod
+
+    notes, cleared = [], []
+
+    async def fake_notify(kind, title, message, **kw):
+        notes.append((kind, title, message, kw))
+        return True
+
+    async def fake_clear(tag):
+        cleared.append(tag)
+
+    monkeypatch.setattr(notify_mod, "notify", fake_notify)
+    monkeypatch.setattr(notify_mod, "clear_push", fake_clear)
+    await _connect()
+    gcal.save_config(["primary"], "primary", 7, "09:00", "20:00", 30, True, False, 0, auto_add=True)
+    assert gcal.config()["auto_add"] is True
+    start = (datetime.now(TZ) + timedelta(days=2)).strftime("%Y-%m-%dT18:00")
+    with session() as db:
+        db.add(Conversation(id="c7", ad_id="7", ad_title="Lampe", partner_name="Ida"))
+        d = Draft(conversation_id="c7", text="Passt, 18 Uhr.", meetup={"start": start, "minutes": 30, "location": "Wien 7"})
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+
+    await meetups.on_sent(d)                      # no question: entry made, push reports it with undo
+    kind, title, _, kw = notes[-1]
+    assert (kind, title) == ("meetup", "In your calendar") and kw["tag"] == f"wh-meetup-{d.id}"
+    assert kw["actions"][0]["title"] == "Remove from calendar" and kw["url"] == "https://calendar.google.com/ev1"
+    assert sum(1 for c in google if c[0] == "POST" and c[1].endswith("/events")) == 1
+    with session() as db:
+        assert db.get(Conversation, "c7").meetup["event_id"] == "ev1"
+
+    assert await ha_actions.handle({"action": kw["actions"][0]["action"]}) == "calendar removed"
+    assert [c for c in google if c[0] == "DELETE"][0][1].endswith("/events/ev1")
+    kind, title, _, kw2 = notes[-1]
+    assert title == "Removed from calendar" and kw2["actions"][0]["title"] == "Add to calendar"
+    assert kw2["tag"] == f"wh-meetup-{d.id}" and cleared == [f"wh-meetup-{d.id}"]
+    with session() as db:
+        m = db.get(Conversation, "c7").meetup
+    assert m["event_id"] is None and m["start"] == start                 # appointment kept, calendar entry gone
+    assert await ha_actions.handle({"action": kw["actions"][0]["action"]}) is None    # undo twice: nothing
+    assert await ha_actions.handle({"action": kw2["actions"][0]["action"]}) == "calendar"    # and back in
 
 
 async def test_no_calendar_no_offer(monkeypatch):
