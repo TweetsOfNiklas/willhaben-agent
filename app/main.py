@@ -671,6 +671,20 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
                   platform=platform, platform_ids=used if len(used) > 1 else [])
 
 
+def _keep_condition(platform_id: str, ad_id: str, d: platforms.AdDetail, h: Hit) -> None:
+    """The condition the ad page states goes to every hit of the ad (Shpock states it only there, and the price
+    zones depend on it); a page without one shows what the list said."""
+    if d.item_condition and (d.item_condition, d.item_condition_label) != (h.item_condition, h.item_condition_label):
+        with session() as db:
+            for x in db.exec(select(Hit).where(Hit.platform == platform_id, Hit.ad_id == ad_id)):
+                x.item_condition, x.item_condition_label = d.item_condition, d.item_condition_label
+                db.add(x)
+            db.commit()
+        h.item_condition, h.item_condition_label = d.item_condition, d.item_condition_label
+    elif d.item_condition is None and h.item_condition:
+        d.item_condition, d.item_condition_label = h.item_condition, h.item_condition_label
+
+
 async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str, hit: int | None) -> HTMLResponse:
     """The ad viewer's content: the ad from its site (or, for sites without ad details, what the hit knows)."""
     h = None
@@ -709,6 +723,8 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
                 error = str(e)
             else:                       # the site failed: show what the list showed, and why
                 reduced, detail_error = True, str(e)
+    if d is not None and h is not None and not reduced:
+        _keep_condition(platform.id, ad_id, d, h)
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,

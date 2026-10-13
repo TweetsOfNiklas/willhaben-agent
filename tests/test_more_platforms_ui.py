@@ -91,6 +91,48 @@ def test_viewer_for_a_shpock_ad_and_a_deal(client):
     assert 'data-ad="preisjaeger:369807"' in page
 
 
+def test_the_ad_page_condition_goes_to_every_hit_of_the_ad(client):
+    """Shpock states the condition only on the ad page: opening it stores it on each hit of that ad (two agents);
+    a Preisjäger deal shows its inferred "new" as a shop deal."""
+    from sqlmodel import select
+
+    from app.main import _keep_condition
+    from app.platforms import AdDetail
+
+    for pid in ("shpock", "preisjaeger"):
+        set_setting(f"platform_{pid}_enabled", "1")
+    ids = []
+    with session() as db:
+        for name in ("A", "B"):
+            a = SearchAgent(name=name, platform="shpock", source_url="https://www.shpock.com/de-at/results?q=iphone",
+                            webapi_url="x")
+            db.add(a)
+            db.commit()
+            db.refresh(a)
+            h = Hit(agent_id=a.id, platform="shpock", ad_id="asu6-t2hxq7bDRFz", heading="iPhone 15 Pro", price=450.0,
+                    url="https://www.shpock.com/de-at/i/asu6-t2hxq7bDRFz")
+            db.add(h)
+            db.commit()
+            ids.append(h.id)
+        db.add(Hit(agent_id=a.id, platform="preisjaeger", ad_id="369807", heading="EKE Case 2.0", price=19.92,
+                   url="https://www.preisjaeger.at/deals/eke-case-369807", item_condition="new"))
+        db.commit()
+        deal = db.exec(select(Hit).where(Hit.ad_id == "369807")).one()
+    frag = client.get(f"/hits/ad/shpock/asu6-t2hxq7bDRFz?hit={ids[0]}").text
+    assert 'title="Condition according to the ad"' in frag and ">Gut</span>" in frag
+    with session() as db:
+        assert [(db.get(Hit, i).item_condition, db.get(Hit, i).item_condition_label) for i in ids] == [("used", "Gut")] * 2
+    assert " · Gut · published" in client.get("/hits?state=all").text           # the hit card's details line
+    frag = client.get(f"/hits/ad/preisjaeger/369807?hit={deal.id}").text
+    assert ">New (shop deal)</span>" in frag and "Condition assumed (Preisjäger lists shop deals)" in frag
+    # an ad page without a condition shows what the hit knows
+    d = AdDetail(ad_id="1", heading="x", description=None, price=1.0, price_display=None, status="active",
+                 published_at=None, first_published_at=None, end_date=None, url="u", platform="shpock")
+    with session() as db:
+        _keep_condition("shpock", "asu6-t2hxq7bDRFz", d, db.get(Hit, ids[1]))
+    assert (d.item_condition, d.item_condition_label) == ("used", "Gut")
+
+
 def test_new_agent_shows_every_site(client):
     page = client.get("/agents/new").text
     sites = page[page.index('id="agent-sites"'):page.index('id="agent-sites"') + 4000]
@@ -109,6 +151,7 @@ def test_direct_search_on_the_ticked_sites(client):
     page = client.get("/deals?q=iphone&sites=shpock&sites=preisjaeger").text
     assert "{ mode: 'direct' }" in page and "8 ads found for „iphone“" in page
     assert "Shpock 4 · Preisjäger 4" in page and 'data-ad="shpock:asu6-t2hxq7bDRFz"' in page
+    assert page.count(">New (shop deal)</span>") == 4                  # deals are shop offers; Shpock lists say nothing
     assert 'href="/deals/ad/preisjaeger/369807?q=iphone"' in page and 'href="/deals/ad/shpock/asu6-t2hxq7bDRFz?q=iphone"' in page
     form = page[page.index('id="ps-direct"'):]
     assert 'name="sites" value="shpock" class="checkbox checkbox-sm" checked' in form

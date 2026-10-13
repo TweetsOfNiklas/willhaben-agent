@@ -40,7 +40,10 @@ def test_old_rows_become_willhabens():
     with dbmod.session() as db:
         a = db.get(SearchAgent, 1)
         assert a.platform == "willhaben" and a.spec is None and a.webapi_url.startswith("https://www.willhaben.at/webapi")
-        assert db.get(Hit, 1).platform == "willhaben"
+        old_hit = db.get(Hit, 1)
+        assert old_hit.platform == "willhaben" and (old_hit.item_condition, old_hit.item_condition_label) == (None, None)
+        old_hit.item_condition, old_hit.item_condition_label = "used", "Gebraucht"     # the new columns exist
+        db.add(old_hit)
         rows = list(db.exec(select(AccessCount)))
         assert [(r.minute, r.platform, r.channel, r.count) for r in rows] == [(29000000, "willhaben", "anonymous", 7)]
         assert db.get(WhRecording, 1).platform is None
@@ -51,3 +54,4 @@ def test_old_rows_become_willhabens():
     dbmod.init_db()                                                   # a second start changes nothing
     with dbmod.session() as db:
         assert len(list(db.exec(select(AccessCount)))) == 2
+        assert db.get(Hit, 1).item_condition_label == "Gebraucht"

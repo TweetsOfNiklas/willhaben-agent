@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from app.i18n import t
+from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -89,7 +90,7 @@ def parse_listing(th: dict[str, Any]) -> Listing:
                    changed_at=None, end_date=from_epoch((th.get("endDate") or {}).get("timestamp")),
                    url=f"{WEB}/deals/{slug}-{tid}" if slug else f"{WEB}/share-deal/{tid}",
                    image_url=image_url(th.get("mainImage")), is_private=None, is_bumped=None, status="active",
-                   platform="preisjaeger")
+                   platform="preisjaeger", item_condition=condition.preisjaeger(th.get("title"))[0])   # inferred: no label
 
 
 def parse_search(page: str, price_from: float | None = None, price_to: float | None = None) -> SearchPage:

@@ -22,6 +22,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.i18n import t
+from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -84,6 +85,7 @@ def parse_listing(item: dict[str, Any], host: str = HOST) -> Listing:
     user = p.get("user") or {}
     shown = discounted if discounted is not None and price is not None and discounted < price else price
     url = p.get("url") or f"/items/{p.get('id')}"
+    item_condition, item_condition_label = condition.vinted_listing(box)
     return Listing(ad_id=str(p.get("id") or item.get("id") or ""), heading=one_line(p.get("title")) or "",
                    body=" · ".join(x for x in lines if x) or None, price=shown,
                    price_display=euro(shown) if shown is not None else None,
@@ -92,7 +94,8 @@ def parse_listing(item: dict[str, Any], host: str = HOST) -> Listing:
                    url=url if url.startswith("http") else f"https://{host}{url}",
                    image_url=p.get("thumbnailUrl") or (photos[0] if photos else None),
                    is_private=(not user.get("isBusiness")) if "isBusiness" in user else None, is_bumped=None,
-                   status="active", platform="vinted")
+                   status="active", platform="vinted", item_condition=item_condition,
+                   item_condition_label=item_condition_label)
 
 
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:
@@ -150,11 +153,13 @@ def parse_item(text: str, ad_id: str, host: str = HOST, now: datetime | None = N
     price = to_float(m.group(1)) if m else None
     business = seller.get("business", offer.get("business"))
     uploaded = parse_age((attrs.get("upload_date") or {}).get("value"), now)
+    item_condition, item_condition_label = condition.vinted_item(attrs)
     return AdDetail(ad_id=ad_id, heading=one_line(title) or "", description=description or None, price=price,
                     price_display=euro(price) if price is not None else None, status="active", published_at=uploaded,
                     first_published_at=uploaded, end_date=None, url=f"https://{host}/items/{ad_id}", images=photos,
                     seller_name=one_line(seller.get("name")),
-                    is_private=(not business) if isinstance(business, bool) else None, platform="vinted")
+                    is_private=(not business) if isinstance(business, bool) else None, platform="vinted",
+                    item_condition=item_condition, item_condition_label=item_condition_label)
 
 
 # ------------------------------------------------------------------ the client

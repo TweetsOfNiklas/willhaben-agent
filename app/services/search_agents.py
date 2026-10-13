@@ -465,6 +465,8 @@ def _apply(hit: Hit, ad: Listing) -> None:
     hit.url = ad.url
     hit.image_url = ad.image_url
     hit.is_private = ad.is_private
+    if ad.item_condition:           # a list without one keeps what the ad page told (Shpock states it only there)
+        hit.item_condition, hit.item_condition_label = ad.item_condition, ad.item_condition_label
     hit.last_seen_at = utcnow()
 
 

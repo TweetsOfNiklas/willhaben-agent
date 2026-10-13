@@ -81,6 +81,9 @@ class Hit(SQLModel, table=True):
     scam_flags: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # app/services/scam.py
     # the matching Geizhals product {name, url, price_from} for an agent's Geizhals rule; {} = none found, None = not asked
     geizhals: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # the condition the site states (app/platforms/condition.py): from the list, or from the ad page once opened (Shpock)
+    item_condition: str | None = None
+    item_condition_label: str | None = None
 
 
 class Conversation(SQLModel, table=True):

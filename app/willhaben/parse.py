@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.i18n import t
+from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl  # noqa: F401 - re-exported: the app's search-URL error lives here too
 from app.platforms.text import clean_text, parse_iso  # noqa: F401 - clean_text is imported from here by other modules
 from app.platforms.types import (  # noqa: F401 - the neutral shapes; AdSummary is the old name of Listing
@@ -77,6 +78,7 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         image = f"https://cache.willhaben.at/mmo/{_first(a, 'MMO')}"
     price_raw = _first(a, "PRICE/AMOUNT") or _first(a, "PRICE")
     private = _first(a, "ISPRIVATE")
+    item_condition, item_condition_label = condition.willhaben_list(_first(a, "categorytreeattributeids"))
     return AdSummary(
         ad_id=ad_id,
         heading=_first(a, "HEADING") or ad.get("description") or "",
@@ -97,6 +99,8 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         status=((ad.get("advertStatus") or {}).get("id")) or "unknown",
         category_ids=[c for c in (_first(a, "categorytreeids") or "").split(";") if c],
         platform="willhaben",
+        item_condition=item_condition,
+        item_condition_label=item_condition_label,
         **_coordinates(_first(a, "COORDINATES")),
     )
 
@@ -187,6 +191,7 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
     # postalName can be a part of the town ("Bergerviertel"), municipality is the town itself ("Sankt Gallen")
     town = " ".join(x for x in [addr.get("postCode"), addr.get("municipality") or addr.get("postalName")] if x)
     place = ", ".join(x for x in [town, addr.get("country") or ("Österreich" if town else None)] if x)
+    item_condition, item_condition_label = condition.willhaben_detail(ad)
     return AdDetail(
         ad_id=str(ad.get("id")),
         heading=ad.get("description") or "",
@@ -213,6 +218,8 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
         buy_now=bool(((ad.get("p2ppOptions") or {}).get("buyNowInformationDto") or {}).get("isBuyNowAd")),
         shipping_price=_shipping_price(ad.get("p2ppOptions")),
         place=place or None,
+        item_condition=item_condition,
+        item_condition_label=item_condition_label,
     )
 
 

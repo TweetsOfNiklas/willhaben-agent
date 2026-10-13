@@ -423,7 +423,8 @@ def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dic
             "published_at": ad.published_at.isoformat() if ad.published_at else None,
             "text": _one_line(ad.body)[:TEXT_CHARS], "query": (plan.get("queries") or [{}])[qi].get("keyword"),
             "position": pos, "median": st["median"] if st else None, "min": st["min"] if st else None,
-            "p25": st["p25"] if st else None, "comparables": st["count"] if st else 0,
+            "p25": st["p25"] if st else None, "comparables": st["count"] if st else 0, "stats": st,
+            "item_condition": ad.item_condition, "item_condition_label": ad.item_condition_label,
             "scam_flags": scam.flags(item, scam.median_context(comp), home_country=scam.home_country_of(ad.platform))}
 
 

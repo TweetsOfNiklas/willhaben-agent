@@ -45,6 +45,8 @@ class Listing:
     platform: str = DEFAULT_PLATFORM
     lat: float | None = None            # the ad's place where the site sends coordinates (willhaben, Kleinanzeigen)
     lon: float | None = None
+    item_condition: str | None = None   # new | like_new | refurbished | used | defect (app/platforms/condition.py)
+    item_condition_label: str | None = None   # the site's words for it; None with a value: inferred (Preisjäger)
 
     @property
     def ref(self) -> str:
@@ -68,6 +70,8 @@ class Listing:
             "url": self.url,
             "image_url": self.image_url,
             "is_private": self.is_private,
+            "item_condition": self.item_condition,
+            "item_condition_label": self.item_condition_label,
         }
 
 
@@ -106,6 +110,8 @@ class AdDetail:
     place: str | None = None           # pickup place for a map search: "postcode municipality, country" (advertAddressDetails)
     is_vb: bool | None = None          # kleinanzeigen: price is negotiable ("VB")
     platform: str = DEFAULT_PLATFORM
+    item_condition: str | None = None  # as on Listing (app/platforms/condition.py)
+    item_condition_label: str | None = None
 
     @property
     def ref(self) -> str:
@@ -122,7 +128,9 @@ class AdDetail:
         return cls(ad_id=h.ad_id, heading=h.heading, description=h.body, price=h.price, price_display=h.price_display,
                    status="active", published_at=h.published_at, first_published_at=h.published_at, end_date=h.end_date,
                    url=h.url, images=[h.image_url] if h.image_url else [], location=h.location,
-                   is_private=h.is_private, platform=getattr(h, "platform", None) or DEFAULT_PLATFORM)
+                   is_private=h.is_private, platform=getattr(h, "platform", None) or DEFAULT_PLATFORM,
+                   item_condition=getattr(h, "item_condition", None),
+                   item_condition_label=getattr(h, "item_condition_label", None))
 
     @classmethod
     def from_result(cls, r: dict[str, Any]) -> AdDetail:
@@ -136,7 +144,8 @@ class AdDetail:
                    price=r.get("price"), price_display=r.get("price_display"), status="active", published_at=published,
                    first_published_at=published, end_date=None, url=r.get("url") or "",
                    images=[r["image_url"]] if r.get("image_url") else [], location=r.get("location"),
-                   is_private=r.get("is_private"), platform=r.get("platform") or DEFAULT_PLATFORM)
+                   is_private=r.get("is_private"), platform=r.get("platform") or DEFAULT_PLATFORM,
+                   item_condition=r.get("item_condition"), item_condition_label=r.get("item_condition_label"))
 
     def as_context(self) -> dict[str, Any]:
         return {
@@ -158,6 +167,8 @@ class AdDetail:
             "paylivery": self.paylivery_enabled,
             "buy_now": self.buy_now,
             "shipping_price": self.shipping_price,
+            "item_condition": self.item_condition,
+            "item_condition_label": self.item_condition_label,
         }
 
 

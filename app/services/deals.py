@@ -487,7 +487,8 @@ def _ad_summary(ad: AdDetail) -> dict[str, Any]:
     return {"ad_id": ad.ad_id, "ref": ad.ref, "platform": ad.platform, "title": ad.heading, "price": ad.price,
             "price_display": ad.price_display,
             "location": ad.location, "url": ad.url, "image": ad.images[0] if ad.images else None,
-            "is_private": ad.is_private, "category": " › ".join(ad.category_path)}
+            "is_private": ad.is_private, "category": " › ".join(ad.category_path),
+            "item_condition": ad.item_condition, "item_condition_label": ad.item_condition_label}
 
 
 # ------------------------------------------------------------------ analysis

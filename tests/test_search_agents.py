@@ -106,6 +106,28 @@ async def test_baseline_then_new_and_price_drop(responses, ha):
         assert len(db.exec(select(dbmod.Hit)).all()) == 4
 
 
+async def test_hits_keep_the_condition(responses):
+    """The list's condition goes to the hit; a list without one keeps what is stored (Shpock: from the ad page)."""
+    queue, _ = responses
+    base = load("search_fahrrad_rows3.json")
+    agent = create_agent(URL)
+    queue.append(base)
+    await run_agent(agent.id)
+    with dbmod.session() as db:
+        stored = {h.ad_id: (h.item_condition, h.item_condition_label) for h in db.exec(select(dbmod.Hit))}
+    ids = [a["id"] for a in base["advertSummaryList"]["advertSummary"]]
+    assert [stored[i] for i in ids] == [("used", "Gebraucht"), ("like_new", "Neuwertig"), ("new", "Neu")]
+    second = copy.deepcopy(base)
+    first, other = second["advertSummaryList"]["advertSummary"][:2]
+    first["attributes"]["attribute"] = [a for a in first["attributes"]["attribute"] if a["name"] != "categorytreeattributeids"]
+    _set_attr(other, "categorytreeattributeids", "[21;24, 2535;2536]")
+    queue.append(second)
+    await run_agent(agent.id)
+    with dbmod.session() as db:
+        stored = {h.ad_id: (h.item_condition, h.item_condition_label) for h in db.exec(select(dbmod.Hit))}
+    assert stored[ids[0]] == ("used", "Gebraucht") and stored[ids[1]] == ("defect", "Defekt")
+
+
 async def test_blocked_sets_error_and_backoff(responses):
     queue, _ = responses
     agent = create_agent(URL)

@@ -60,6 +60,12 @@
   {%- if dot %}<span class="size-1.5 rounded-full bg-current"></span>{% endif %}{{ text }}</span>
 {%- endmacro %}
 
+{# the item condition the site states (condition.shown): new stands out, defect is red; nothing when unknown. A value
+   without the site's words was inferred (Preisjäger deals are shop offers), the tooltip says so. #}
+{% macro condition_pill(value, label, platform, cls='') -%}
+{%- set text = condition_text(value, label, platform) %}{% if text %}{{ pill(text|truncate(24, true, '…'), condition_tone(value), false, cls, _('Condition according to the ad') if label else _('Condition assumed (Preisjäger lists shop deals)')) }}{% endif -%}
+{%- endmacro %}
+
 {# a price range: "€ 100 – € 300", "from € 100", "up to € 300"; nothing without one #}
 {% macro price_range(pf, pt) -%}
 {%- if pf or pt %}<small class="shrink-0 text-[12.5px] text-muted tabular-nums">{% if pf and pt %}{{ pf|eur }} – {{ pt|eur }}{% elif pf %}{{ _("from {price}", price=pf|eur) }}{% else %}{{ _("up to {price}", price=pt|eur) }}{% endif %}</small>{% endif -%}

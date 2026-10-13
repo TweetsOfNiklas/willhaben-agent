@@ -2,7 +2,8 @@
 
 The website sits behind bot protection that rejects plain HTTP clients at the TLS layer; the app's API
 (api.kleinanzeigen.de) answers a browser-impersonating client (curl_cffi, app/platforms/httpclient.py) with clean
-JSON: price with its type (fixed, negotiable "VB", free), private or commercial poster, pictures, posting time.
+JSON: price with its type (fixed, negotiable "VB", free), private or commercial poster, pictures, posting time and,
+in categories that have one, the condition (app/platforms/condition.py).
 It needs the app's HTTP Basic credentials: distribution values baked into the Android app and published in
 open-source clients, not personal secrets, but they can rotate. KLEINANZEIGEN_API_AUTH="user:pw" (or the setting
 in Settings → Platforms) overrides the bundled default; a 401/403 says so in the agent's error.
@@ -24,6 +25,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from app.config import get_settings
 from app.i18n import t
+from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl, NotTheExit, Platform, PlatformError
 from app.platforms.httpclient import FetchResponse, HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -109,6 +111,7 @@ def _common(ad: dict[str, Any]) -> dict[str, Any]:
     url = next((ln.get("href") for ln in _links(ad.get("link")) if ln.get("rel") == "self-public-website"), None)
     ad_id = str(_val(ad.get("id")) or "")
     category = ad.get("category") or {}
+    item_condition, item_condition_label = condition.kleinanzeigen(ad)
     return {"ad_id": ad_id, "heading": _text(ad.get("title")) or "", "price": price, "price_display": display, "vb": vb,
             "location": " ".join(x for x in (postcode, city) if x) or None, "postcode": postcode,
             "published_at": parse_iso(_val(ad.get("start-date-time"))),
@@ -117,7 +120,8 @@ def _common(ad: dict[str, Any]) -> dict[str, Any]:
             "category_id": str(_val(category.get("id"))) if _val(category.get("id")) not in (None, "") else None,
             "category_name": _text(category.get("localized-name")) or _text(category.get("localized_name")),
             "description": clean_text(_text(ad.get("description"))),
-            "lat": to_float(_val(addr.get("latitude"))), "lon": to_float(_val(addr.get("longitude")))}
+            "lat": to_float(_val(addr.get("latitude"))), "lon": to_float(_val(addr.get("longitude"))),
+            "item_condition": item_condition, "item_condition_label": item_condition_label}
 
 
 def parse_listing(ad: dict[str, Any]) -> Listing:
@@ -128,7 +132,8 @@ def parse_listing(ad: dict[str, Any]) -> Listing:
                    state=None, published_at=c["published_at"], changed_at=None, end_date=None, url=c["url"],
                    image_url=c["images"][0] if c["images"] else None, is_private=c["is_private"], is_bumped=None,
                    status="active", category_ids=[c["category_id"]] if c["category_id"] else [], platform="kleinanzeigen",
-                   lat=c["lat"], lon=c["lon"])
+                   lat=c["lat"], lon=c["lon"], item_condition=c["item_condition"],
+                   item_condition_label=c["item_condition_label"])
 
 
 def parse_ads(data: dict[str, Any]) -> SearchPage:
@@ -152,7 +157,8 @@ def parse_ad(data: dict[str, Any]) -> AdDetail | None:
                     first_published_at=c["published_at"], end_date=None, url=c["url"], images=c["images"],
                     location=c["location"], seller_name=seller, is_private=c["is_private"],
                     category_path=[c["category_name"]] if c["category_name"] else [], category_id=c["category_id"],
-                    is_vb=c["vb"], platform="kleinanzeigen")
+                    is_vb=c["vb"], platform="kleinanzeigen", item_condition=c["item_condition"],
+                    item_condition_label=c["item_condition_label"])
 
 
 def parse_locations(data: dict[str, Any]) -> list[tuple[int, str]]:

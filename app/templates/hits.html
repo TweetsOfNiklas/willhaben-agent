@@ -48,7 +48,7 @@
       {% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
-      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
+      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}{% set hc = condition_text(h.item_condition, h.item_condition_label, h.platform) %}{% if hc %} · {% if h.item_condition == 'defect' %}<span class="text-error">{{ hc }}</span>{% else %}{{ hc }}{% endif %}{% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
     </div>
     {# three equal columns; icon above the label so each label fits its column #}
     <div class="grid grid-cols-3 gap-1.5 border-t border-base-300 p-2.5 max-sm:col-span-2 max-sm:mt-2.5 max-sm:border-t-0 max-sm:p-0">

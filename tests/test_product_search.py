@@ -273,6 +273,11 @@ def test_card_carries_min_and_p25_of_the_comparables():
     assert c["min"] == 100.0 and c["p25"] == st["p25"] and c["median"] == 140.0
     empty = ps.card(0, _summary("2000000098", "Bosch", 999), {"queries": [{"keyword": "k"}]}, [])
     assert empty["min"] is None and empty["p25"] is None and empty["median"] is None
+    assert c["stats"] == st and empty["stats"] is None and c["item_condition"] is None
+    ad = _summary("2000000097", "Bosch", 999)
+    ad.item_condition, ad.item_condition_label = "like_new", "Neuwertig"
+    c = ps.card(0, ad, {"queries": [{"keyword": "k"}]}, prices)
+    assert (c["item_condition"], c["item_condition_label"]) == ("like_new", "Neuwertig")
 
 
 def test_seller_text_cannot_break_out_of_its_candidate_line():

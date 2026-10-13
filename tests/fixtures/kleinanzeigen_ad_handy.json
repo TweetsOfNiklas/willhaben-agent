@@ -1,0 +1,177 @@
+{
+ "{http://www.ebayclassifiedsgroup.com/schema/ad/v1}ad": {
+  "value": {
+   "id": "3540363264",
+   "title": {
+    "value": "iPhone 17 pro - 256GB"
+   },
+   "description": {
+    "value": "Ich verkaufe mein iPhone 17 Pro in der wunderschönen Farbe Cosmic Orange.<br /><br />Die besondere Farbe ist ein echter Blickfang!<br /><br />Modell: iPhone 17 …"
+   },
+   "price": {
+    "currency-iso-code": {
+     "value": {
+      "value": "EUR",
+      "localized-label": "€"
+     }
+    },
+    "amount": {
+     "value": 980.0
+    },
+    "range-amount": {},
+    "price-type": {
+     "value": "PLEASE_CONTACT"
+    }
+   },
+   "poster-type": {
+    "value": "PRIVATE"
+   },
+   "start-date-time": {
+    "value": "2026-10-14T01:19:02.000+0200"
+   },
+   "ad-address": {
+    "state": {
+     "value": "Winterlingen"
+    },
+    "zip-code": {
+     "value": "72474"
+    },
+    "latitude": {
+     "value": "48.2"
+    },
+    "longitude": {
+     "value": "9.1"
+    }
+   },
+   "category": {
+    "id-name": {
+     "value": "Handy_Telekom"
+    },
+    "localized-name": {
+     "value": "Smartphones"
+    },
+    "id": "173"
+   },
+   "link": [
+    {
+     "href": "https://api.kleinanzeigen.de/api/ads/3540363264",
+     "rel": "self"
+    },
+    {
+     "href": "https://www.kleinanzeigen.de/s-anzeige/iphone-17-pro-256gb/3540363264-173-8653",
+     "rel": "self-public-website"
+    }
+   ],
+   "pictures": {
+    "picture": [
+     {
+      "link": [
+       {
+        "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/25/25ab5c58-8de8-43a5-8e93-6d9de3ce2a3c?rule=$_2.JPG",
+        "rel": "teaser"
+       },
+       {
+        "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/25/25ab5c58-8de8-43a5-8e93-6d9de3ce2a3c?rule=$_57.JPG",
+        "rel": "XXL"
+       }
+      ]
+     }
+    ]
+   },
+   "attributes": {
+    "attribute": [
+     {
+      "name": "handy_telekom.art",
+      "localized-label": "Marke",
+      "value": [
+       {
+        "value": "apple",
+        "localized-label": "Apple"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.versand",
+      "localized-label": "Versand",
+      "value": [
+       {
+        "value": "nein",
+        "localized-label": "Nur Abholung"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.model",
+      "localized-label": "Modell",
+      "value": [
+       {
+        "value": "iphone_17_pro",
+        "localized-label": "iPhone 17 Pro"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.color",
+      "localized-label": "Farbe",
+      "value": [
+       {
+        "value": "orange",
+        "localized-label": "Orange"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.storage",
+      "localized-label": "Speicher (GB)",
+      "value": [
+       {
+        "value": "256gb",
+        "localized-label": "256 GB"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.condition",
+      "localized-label": "Zustand",
+      "value": [
+       {
+        "value": "new",
+        "localized-label": "Neu"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.operating_system",
+      "localized-label": "Betriebssystem",
+      "value": [
+       {
+        "value": "ios",
+        "localized-label": "iOS"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.battery_condition",
+      "localized-label": "Akkuzustand",
+      "value": [
+       {
+        "value": "new_battery",
+        "localized-label": "Neu (100%)"
+       }
+      ]
+     },
+     {
+      "name": "handy_telekom.screen_size",
+      "localized-label": "Displaygröße (Zoll)",
+      "value": [
+       {
+        "value": "6_to_6_4",
+        "localized-label": "6,0 – 6,4\""
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

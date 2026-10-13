@@ -1,0 +1,910 @@
+{
+ "{http://www.ebayclassifiedsgroup.com/schema/ad/v1}ads": {
+  "value": {
+   "paging": {
+    "numFound": "93424",
+    "exactNumFound": "true"
+   },
+   "ad": [
+    {
+     "id": "3540364312",
+     "title": {
+      "value": "iPhone 18 pro Max 512gb"
+     },
+     "description": {
+      "value": "Das Handy zum Verkauf hat Gebrauch spuren aber nicht so die Mann auf erste Blick nicht mehr kann"
+     },
+     "price": {
+      "currency-iso-code": {
+       "value": {
+        "value": "EUR",
+        "localized-label": "€"
+       }
+      },
+      "amount": {
+       "value": 1450
+      },
+      "range-amount": {},
+      "price-type": {
+       "value": "SPECIFIED_AMOUNT"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-14T01:32:27.000+0200"
+     },
+     "ad-address": {
+      "state": {
+       "value": "Hagen"
+      },
+      "zip-code": {
+       "value": "58135"
+      },
+      "latitude": {
+       "value": "51.3"
+      },
+      "longitude": {
+       "value": "7.4"
+      }
+     },
+     "category": {
+      "id-name": {
+       "value": "Handy_Telekom"
+      },
+      "localized-name": {
+       "value": "Smartphones"
+      },
+      "id": "173"
+     },
+     "link": [
+      {
+       "href": "https://api.kleinanzeigen.de/api/ads/3540364312",
+       "rel": "self"
+      },
+      {
+       "href": "https://www.kleinanzeigen.de/s-anzeige/iphone-18-pro-max-512gb/3540364312-173-2017",
+       "rel": "self-public-website"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/fc/fcaca386-1ec0-4049-821d-f085a185f9a7?rule=$_2.AUTO",
+          "rel": "teaser"
+         },
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/fc/fcaca386-1ec0-4049-821d-f085a185f9a7?rule=$_57.AUTO",
+          "rel": "XXL"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "handy_telekom.art",
+        "localized-label": "Marke",
+        "value": [
+         {
+          "value": "apple",
+          "localized-label": "Apple"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.model",
+        "localized-label": "Modell",
+        "value": [
+         {
+          "value": "iphone_18_pro_max",
+          "localized-label": "iPhone 18 Pro Max"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.color",
+        "localized-label": "Farbe",
+        "value": [
+         {
+          "value": "sonstige",
+          "localized-label": "Andere Farben"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.storage",
+        "localized-label": "Speicher (GB)",
+        "value": [
+         {
+          "value": "512gb",
+          "localized-label": "512 GB"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.condition",
+        "localized-label": "Zustand",
+        "value": [
+         {
+          "value": "new",
+          "localized-label": "Neu"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.operating_system",
+        "localized-label": "Betriebssystem",
+        "value": [
+         {
+          "value": "ios",
+          "localized-label": "iOS"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.battery_condition",
+        "localized-label": "Akkuzustand",
+        "value": [
+         {
+          "value": "new_battery",
+          "localized-label": "Neu (100%)"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.screen_size",
+        "localized-label": "Displaygröße (Zoll)",
+        "value": [
+         {
+          "value": "5_to_5_9",
+          "localized-label": "5,0 – 5,9\""
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.ram",
+        "localized-label": "Arbeitsspeicher (RAM)",
+        "value": [
+         {
+          "value": "18gb",
+          "localized-label": "18 GB"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.sim_card_slots",
+        "localized-label": "SIM-Karten-Steckplätze",
+        "value": [
+         {
+          "value": "single_sim",
+          "localized-label": "Single SIM"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "3540364236",
+     "title": {
+      "value": "Iphone 12 pro max 256 GB"
+     },
+     "description": {
+      "value": "Beste Preis, Zustand. Everything Perfekt. ovp + lade + huelle dabei"
+     },
+     "price": {
+      "currency-iso-code": {
+       "value": {
+        "value": "EUR",
+        "localized-label": "€"
+       }
+      },
+      "amount": {
+       "value": 250
+      },
+      "range-amount": {},
+      "price-type": {
+       "value": "SPECIFIED_AMOUNT"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-14T01:31:10.000+0200"
+     },
+     "ad-address": {
+      "state": {
+       "value": "Jena"
+      },
+      "zip-code": {
+       "value": "07743"
+      },
+      "latitude": {
+       "value": "51.0"
+      },
+      "longitude": {
+       "value": "11.6"
+      }
+     },
+     "category": {
+      "id-name": {
+       "value": "Handy_Telekom"
+      },
+      "localized-name": {
+       "value": "Smartphones"
+      },
+      "id": "173"
+     },
+     "link": [
+      {
+       "href": "https://api.kleinanzeigen.de/api/ads/3540364236",
+       "rel": "self"
+      },
+      {
+       "href": "https://www.kleinanzeigen.de/s-anzeige/iphone-12-pro-max-256-gb/3540364236-173-3772",
+       "rel": "self-public-website"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/58/586fd506-1449-468e-b381-bc2f010ff6f7?rule=$_2.AUTO",
+          "rel": "teaser"
+         },
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/58/586fd506-1449-468e-b381-bc2f010ff6f7?rule=$_57.AUTO",
+          "rel": "XXL"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "handy_telekom.art",
+        "localized-label": "Marke",
+        "value": [
+         {
+          "value": "apple",
+          "localized-label": "Apple"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.model",
+        "localized-label": "Modell",
+        "value": [
+         {
+          "value": "iphone_12_pro_max",
+          "localized-label": "iPhone 12 Pro Max"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.color",
+        "localized-label": "Farbe",
+        "value": [
+         {
+          "value": "blau",
+          "localized-label": "Blau"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.storage",
+        "localized-label": "Speicher (GB)",
+        "value": [
+         {
+          "value": "256gb",
+          "localized-label": "256 GB"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.condition",
+        "localized-label": "Zustand",
+        "value": [
+         {
+          "value": "like_new",
+          "localized-label": "Sehr Gut"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.ram",
+        "localized-label": "Arbeitsspeicher (RAM)",
+        "value": [
+         {
+          "value": "6gb",
+          "localized-label": "6 GB"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "3540364215",
+     "title": {
+      "value": "Apple iPhone 11 128GB Schwarz"
+     },
+     "description": {
+      "value": "Verkaufe mein Apple iPhone 11 mit 128 GB Speicher in Schwarz.<br /><br />Das Handy befindet sich in einem guten gebrauchten Zustand und funktioniert …"
+     },
+     "price": {
+      "currency-iso-code": {
+       "value": {
+        "value": "EUR",
+        "localized-label": "€"
+       }
+      },
+      "amount": {
+       "value": 140
+      },
+      "range-amount": {},
+      "price-type": {
+       "value": "PLEASE_CONTACT"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-14T01:30:53.000+0200"
+     },
+     "ad-address": {
+      "state": {
+       "value": "Eichstetten am Kaiserstuhl"
+      },
+      "zip-code": {
+       "value": "79356"
+      },
+      "latitude": {
+       "value": "48.1"
+      },
+      "longitude": {
+       "value": "7.7"
+      }
+     },
+     "category": {
+      "id-name": {
+       "value": "Handy_Telekom"
+      },
+      "localized-name": {
+       "value": "Smartphones"
+      },
+      "id": "173"
+     },
+     "link": [
+      {
+       "href": "https://api.kleinanzeigen.de/api/ads/3540364215",
+       "rel": "self"
+      },
+      {
+       "href": "https://www.kleinanzeigen.de/s-anzeige/apple-iphone-11-128gb-schwarz/3540364215-173-8910",
+       "rel": "self-public-website"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2d/2d4ee54c-4fff-4f0f-8a16-2e45b9873720?rule=$_2.AUTO",
+          "rel": "teaser"
+         },
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/2d/2d4ee54c-4fff-4f0f-8a16-2e45b9873720?rule=$_57.AUTO",
+          "rel": "XXL"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "handy_telekom.art",
+        "localized-label": "Marke",
+        "value": [
+         {
+          "value": "apple",
+          "localized-label": "Apple"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.model",
+        "localized-label": "Modell",
+        "value": [
+         {
+          "value": "iphone_11",
+          "localized-label": "iPhone 11"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.color",
+        "localized-label": "Farbe",
+        "value": [
+         {
+          "value": "schwarz",
+          "localized-label": "Schwarz"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.storage",
+        "localized-label": "Speicher (GB)",
+        "value": [
+         {
+          "value": "128gb",
+          "localized-label": "128 GB"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.condition",
+        "localized-label": "Zustand",
+        "value": [
+         {
+          "value": "ok",
+          "localized-label": "Gut"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.operating_system",
+        "localized-label": "Betriebssystem",
+        "value": [
+         {
+          "value": "ios",
+          "localized-label": "iOS"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "3540364003",
+     "title": {
+      "value": "iPhone 13, 256 GB, Midnight Blue"
+     },
+     "description": {
+      "value": "Ich verkaufe mein iPhone 13 in der Farbe Midnight Blue mit 256 GB Speicherplatz. Das Gerät ist technisch bis auf den Ladeanschluss voll funktionsfähig.<br …"
+     },
+     "price": {
+      "currency-iso-code": {
+       "value": {
+        "value": "EUR",
+        "localized-label": "€"
+       }
+      },
+      "amount": {
+       "value": 149
+      },
+      "range-amount": {},
+      "price-type": {
+       "value": "PLEASE_CONTACT"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-14T01:27:39.000+0200"
+     },
+     "ad-address": {
+      "state": {
+       "value": "Otterberg"
+      },
+      "zip-code": {
+       "value": "67697"
+      },
+      "latitude": {
+       "value": "49.5"
+      },
+      "longitude": {
+       "value": "7.8"
+      }
+     },
+     "category": {
+      "id-name": {
+       "value": "Handy_Telekom"
+      },
+      "localized-name": {
+       "value": "Smartphones"
+      },
+      "id": "173"
+     },
+     "link": [
+      {
+       "href": "https://api.kleinanzeigen.de/api/ads/3540364003",
+       "rel": "self"
+      },
+      {
+       "href": "https://www.kleinanzeigen.de/s-anzeige/iphone-13-256-gb-midnight-blue/3540364003-173-5478",
+       "rel": "self-public-website"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/73/73a811ab-1d37-4b20-abcc-3b45bb0778d1?rule=$_2.AUTO",
+          "rel": "teaser"
+         },
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/73/73a811ab-1d37-4b20-abcc-3b45bb0778d1?rule=$_57.AUTO",
+          "rel": "XXL"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "handy_telekom.art",
+        "localized-label": "Marke",
+        "value": [
+         {
+          "value": "apple",
+          "localized-label": "Apple"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.model",
+        "localized-label": "Modell",
+        "value": [
+         {
+          "value": "iphone_13",
+          "localized-label": "iPhone 13"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.color",
+        "localized-label": "Farbe",
+        "value": [
+         {
+          "value": "blau",
+          "localized-label": "Blau"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.storage",
+        "localized-label": "Speicher (GB)",
+        "value": [
+         {
+          "value": "256gb",
+          "localized-label": "256 GB"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.condition",
+        "localized-label": "Zustand",
+        "value": [
+         {
+          "value": "alright",
+          "localized-label": "In Ordnung"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.operating_system",
+        "localized-label": "Betriebssystem",
+        "value": [
+         {
+          "value": "ios",
+          "localized-label": "iOS"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.battery_condition",
+        "localized-label": "Akkuzustand",
+        "value": [
+         {
+          "value": "ok_battery",
+          "localized-label": "Gut (85 – 94%)"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.ram",
+        "localized-label": "Arbeitsspeicher (RAM)",
+        "value": [
+         {
+          "value": "6gb",
+          "localized-label": "6 GB"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "3540363712",
+     "title": {
+      "value": "Iphone 14 pro max  Defekt"
+     },
+     "description": {
+      "value": "Verkaufe ein IPhone 14 Pro Max mit 512 GB. Bei dem IPhone ist der Akku defekt. ID ist auch entfernt wurde. Bei Fragen oder Interesse bitte melden"
+     },
+     "price": {
+      "currency-iso-code": {
+       "value": {
+        "value": "EUR",
+        "localized-label": "€"
+       }
+      },
+      "amount": {
+       "value": 220
+      },
+      "range-amount": {},
+      "price-type": {
+       "value": "PLEASE_CONTACT"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-14T01:23:59.000+0200"
+     },
+     "ad-address": {
+      "state": {
+       "value": "Roßwein"
+      },
+      "zip-code": {
+       "value": "04741"
+      },
+      "latitude": {
+       "value": "51.1"
+      },
+      "longitude": {
+       "value": "13.2"
+      }
+     },
+     "category": {
+      "id-name": {
+       "value": "Handy_Telekom"
+      },
+      "localized-name": {
+       "value": "Smartphones"
+      },
+      "id": "173"
+     },
+     "link": [
+      {
+       "href": "https://api.kleinanzeigen.de/api/ads/3540363712",
+       "rel": "self"
+      },
+      {
+       "href": "https://www.kleinanzeigen.de/s-anzeige/iphone-14-pro-max-defekt/3540363712-173-4018",
+       "rel": "self-public-website"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/82/82348be8-b91a-4827-8f91-10e5828dcd17?rule=$_2.AUTO",
+          "rel": "teaser"
+         },
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/82/82348be8-b91a-4827-8f91-10e5828dcd17?rule=$_57.AUTO",
+          "rel": "XXL"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "handy_telekom.art",
+        "localized-label": "Marke",
+        "value": [
+         {
+          "value": "apple",
+          "localized-label": "Apple"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.model",
+        "localized-label": "Modell",
+        "value": [
+         {
+          "value": "iphone_14_pro_max",
+          "localized-label": "iPhone 14 Pro Max"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.color",
+        "localized-label": "Farbe",
+        "value": [
+         {
+          "value": "weiß",
+          "localized-label": "Weiß"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.storage",
+        "localized-label": "Speicher (GB)",
+        "value": [
+         {
+          "value": "512gb",
+          "localized-label": "512 GB"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.condition",
+        "localized-label": "Zustand",
+        "value": [
+         {
+          "value": "defect",
+          "localized-label": "Defekt"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.operating_system",
+        "localized-label": "Betriebssystem",
+        "value": [
+         {
+          "value": "ios",
+          "localized-label": "iOS"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.battery_condition",
+        "localized-label": "Akkuzustand",
+        "value": [
+         {
+          "value": "defect_battery",
+          "localized-label": "Defekt"
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.screen_size",
+        "localized-label": "Displaygröße (Zoll)",
+        "value": [
+         {
+          "value": "6_5_to_6_9",
+          "localized-label": "6,5 – 6,9\""
+         }
+        ]
+       },
+       {
+        "name": "handy_telekom.sim_card_slots",
+        "localized-label": "SIM-Karten-Steckplätze",
+        "value": [
+         {
+          "value": "dual_sim",
+          "localized-label": "Dual SIM"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "3540362854",
+     "title": {
+      "value": "iPhone 15 Pro Max"
+     },
+     "description": {
+      "value": "iPhone 15 Pro Max – 256 GB – Top-Zustand<br /><br />Ich verkaufe mein iPhone 15 Pro Max mit 256 GB Speicherplatz aufgrund einer Neuanschaffung.<br /><br />Das …"
+     },
+     "price": {
+      "currency-iso-code": {
+       "value": {
+        "value": "EUR",
+        "localized-label": "€"
+       }
+      },
+      "amount": {
+       "value": 590
+      },
+      "range-amount": {},
+      "price-type": {
+       "value": "PLEASE_CONTACT"
+      }
+     },
+     "poster-type": {
+      "value": "PRIVATE"
+     },
+     "start-date-time": {
+      "value": "2026-10-14T01:14:00.000+0200"
+     },
+     "ad-address": {
+      "state": {
+       "value": "Esslingen"
+      },
+      "zip-code": {
+       "value": "73732"
+      },
+      "latitude": {
+       "value": "48.8"
+      },
+      "longitude": {
+       "value": "9.3"
+      }
+     },
+     "category": {
+      "id-name": {
+       "value": "Handy_Telekom"
+      },
+      "localized-name": {
+       "value": "Smartphones"
+      },
+      "id": "173"
+     },
+     "link": [
+      {
+       "href": "https://api.kleinanzeigen.de/api/ads/3540362854",
+       "rel": "self"
+      },
+      {
+       "href": "https://www.kleinanzeigen.de/s-anzeige/iphone-15-pro-max/3540362854-173-8382",
+       "rel": "self-public-website"
+      }
+     ],
+     "pictures": {
+      "picture": [
+       {
+        "link": [
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/1b/1bef0d26-dce1-40f1-95ec-7ff480776e9a?rule=$_2.AUTO",
+          "rel": "teaser"
+         },
+         {
+          "href": "https://img.kleinanzeigen.de/api/v1/prod-ads/images/1b/1bef0d26-dce1-40f1-95ec-7ff480776e9a?rule=$_57.AUTO",
+          "rel": "XXL"
+         }
+        ]
+       }
+      ]
+     },
+     "attributes": {
+      "attribute": [
+       {
+        "name": "handy_telekom.art",
+        "localized-label": "Marke",
+        "value": [
+         {
+          "value": "apple",
+          "localized-label": "Apple"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

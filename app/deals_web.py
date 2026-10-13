@@ -20,7 +20,7 @@ from sqlmodel import select
 from app import platforms, scheduler
 from app.db import Hit, SearchAgent, session
 from app.i18n import t
-from app.platforms import AdDetail, InvalidSearchUrl, PlatformError, UnknownPlatform
+from app.platforms import AdDetail, InvalidSearchUrl, PlatformError, UnknownPlatform, condition
 from app.services import deals, jobs, product_search, screening, search_agents
 from app.willhaben.parse import url_param
 from app.willhaben.public import WillhabenError
@@ -31,7 +31,8 @@ log = logging.getLogger(__name__)
 
 def install(app: FastAPI, templates: Jinja2Templates) -> None:
     templates.env.globals.update(deal_level_label=deals.level_label, deal_explain=deals.explain,
-                                 plan_query_url=plan_query_url)
+                                 plan_query_url=plan_query_url, condition_text=condition.shown,
+                                 condition_tone=condition.tone)
     app.include_router(router)
 
 
@@ -105,6 +106,8 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
         return None, t("No details for this ad; open it on {platform}.", platform=p.name)
     if d is None:
         return None, t("This ad is no longer online (sold, expired or deleted).")
+    if d.item_condition is None and hit is not None and hit.item_condition:    # a page without one: what the list said
+        d.item_condition, d.item_condition_label = hit.item_condition, hit.item_condition_label
     return await deals.analyze(d, query=q, use_claude=use_claude, find_geizhals=find_geizhals, fallback_query=fallback,
                                category_url=cat), None
 

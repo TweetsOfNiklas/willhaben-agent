@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from app.i18n import t
+from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -135,13 +136,15 @@ def parse_item_page(html: str, ad_id: str) -> AdDetail | None:
     status = "sold" if item.get("isSold") else ("expired" if item.get("isExpired") else "active")
     posted = from_epoch(item.get("startDate"), ms=True)
     locality = one_line(item.get("locality"))
+    item_condition, item_condition_label = condition.shpock(item.get("extraProperties"))   # the list's isNew: not read
     return AdDetail(ad_id=ad_id, heading=one_line(item.get("title")) or "", description=description or None,
                     price=price, price_display=display, status=status, published_at=posted, first_published_at=posted,
                     end_date=from_epoch(item.get("expirationDate"), ms=True),
                     url=item.get("canonicalURL") or f"{WEB}{item.get('path') or f'/{LOCALE}/i/{ad_id}'}",
                     images=images, location=locality, place=f"{locality}, Österreich" if locality else None,
                     seller_name=one_line(seller.get("name")) if isinstance(seller, dict) else None,
-                    is_private=is_private, platform="shpock")
+                    is_private=is_private, platform="shpock", item_condition=item_condition,
+                    item_condition_label=item_condition_label)
 
 
 # ------------------------------------------------------------------ the client

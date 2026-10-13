@@ -17,7 +17,7 @@
     {{ ui.thumb(d.images[0] if d.images else '', 'row-span-4 aspect-[4/3] w-full self-start', 'rounded-lg') }}
     <div class="leading-snug font-semibold break-words">{{ d.heading }}</div>
     <div class="text-xl font-bold tracking-tight">{{ d.price_display or (d.price|eur) }}</div>
-    <div class="flex flex-wrap gap-1.5">{% if d.paylivery_enabled %}{{ ui.pill('PayLivery', 'ok', false) }}{% endif %}{% if d.buy_now %}{{ ui.pill(_("Buy now"), 'brand', false) }}{% endif %}{% if d.is_private == false %}{{ ui.pill(_("dealer"), '', false) }}{% elif d.is_private %}{{ ui.pill(_("private"), '', false) }}{% endif %}</div>
+    <div class="flex flex-wrap gap-1.5">{% if d.paylivery_enabled %}{{ ui.pill('PayLivery', 'ok', false) }}{% endif %}{% if d.buy_now %}{{ ui.pill(_("Buy now"), 'brand', false) }}{% endif %}{% if d.is_private == false %}{{ ui.pill(_("dealer"), '', false) }}{% elif d.is_private %}{{ ui.pill(_("private"), '', false) }}{% endif %}{{ ui.condition_pill(d.item_condition, d.item_condition_label, d.platform) }}</div>
     <div class="text-[13px] text-muted">{{ d.location or '' }}{% if seller %} · {{ seller }}{% endif %}</div>
     {% if d.description %}<details class="col-span-2 text-[13px] text-muted"><summary class="cursor-pointer">{{ _("Description") }}</summary><p class="mt-1.5 break-words text-base-content">{{ d.description[:280] }}{% if d.description|length > 280 %} …{% endif %}</p></details>{% endif %}
     <div class="col-span-2 mt-auto flex flex-wrap gap-2 pt-1"><a href="{{ d.url }}" data-ad="{{ ad_id }}" class="btn btn-xs">{{ _("Viewer") }}</a><a href="{{ d.url }}" target="_blank" rel="noopener" class="btn btn-xs">willhaben ↗</a></div>

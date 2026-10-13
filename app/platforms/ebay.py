@@ -34,6 +34,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from app.i18n import t
+from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import FetchResponse, HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -160,12 +161,13 @@ def parse_card(card: str, now: datetime | None = None) -> Listing | None:
     if current:
         display = euro(price) if len(set(current)) == 1 else f"{euro(min(current))} – {euro(max(current))}"
     is_private = next((_SELLER_TYPES[x] for x in subtitle if x in _SELLER_TYPES), None)
-    condition = [x for x in subtitle if x and x not in _SELLER_TYPES]
+    condition_texts = [x for x in subtitle if x and x not in _SELLER_TYPES]
+    item_condition, item_condition_label = condition.ebay(next(iter(condition_texts), None))
     abroad = next((x[4:] for x in other if x.startswith("aus ")), None)
     when = next((d for x in other if (d := listed_at(x, now))), None)
     rating_at = next((i for i, x in enumerate(other) if _RATING.match(x)), None)
     seller = other[rating_at - 1] if rating_at else None
-    facts = [*condition,
+    facts = [*condition_texts,
              next((x for x in other if x in ("oder Preisvorschlag", "Preisvorschlag")), None),
              next((x for x in other if _SHIPPING.search(x) and "Rückversand" not in x), None),
              t("Seller {name}, {rating}", name=seller, rating=other[rating_at]) if seller and rating_at else None]
@@ -174,7 +176,8 @@ def parse_card(card: str, now: datetime | None = None) -> Listing | None:
                    price_display=display, old_price=before if before and price is not None and before > price else None,
                    location=abroad, postcode=None, state=None, published_at=when, changed_at=None, end_date=None,
                    url=f"{WEB}/itm/{ad_id}", image_url=re.sub(r"/s-l\d+\.", "/s-l500.", image) if image else None,
-                   is_private=is_private, is_bumped=None, status="active", platform="ebay")
+                   is_private=is_private, is_bumped=None, status="active", platform="ebay",
+                   item_condition=item_condition, item_condition_label=item_condition_label)
 
 
 def _has_results(page: str) -> bool:
@@ -366,14 +369,16 @@ def parse_item_page(page: str, ad_id: str, description: str | None = None, now: 
     if price is None and (amounts := _amounts(_text(root.find("div", "x-price-primary")) or "")):
         price = amounts[0]
     condition_box = root.find("div", "x-item-condition-text")
-    condition = _text(condition_box.find("span", "ux-textspans")) if condition_box else None
+    condition_text = _text(condition_box.find("span", "ux-textspans")) if condition_box else None
     note = (_text(root.find("div", "x-item-condition-desc")) or "").strip("“”\" ") or None
+    schema = (offers.get("itemCondition") or "").rsplit("/", 1)[-1] if isinstance(offers, dict) else None
+    item_condition, item_condition_label = condition.ebay(condition_text, schema)
     about = root.find("div", "x-sellercard-atf__about-seller")
     kinds = [_text(i.find("span", "ux-textspans")) for i in about.find_all("div", "x-sellercard-atf__about-seller-item")] \
         if about else []
     seller_type = next((k for k in kinds if k in _SELLER_TYPES), None)
     rows = _rows(root)
-    facts = [f"{t('Condition')}: {condition}" if condition else None, note,
+    facts = [f"{t('Condition')}: {condition_text}" if condition_text else None, note,
              " ".join(rows["shipping"]) if rows.get("shipping") else None,
              t("Pickup possible") if "localPickup" in rows else None]
     specifics = " · ".join(f"{k}: {v}" for k, v in _specifics(root))
@@ -389,7 +394,8 @@ def parse_item_page(page: str, ad_id: str, description: str | None = None, now: 
                     end_date=None, url=f"{WEB}/itm/{ad_id}", images=_photos(product, root), location=place, place=place,
                     seller_name=_text(root.find("div", "x-sellercard-atf__about-seller-item--seller-name")),
                     is_private=_SELLER_TYPES.get(seller_type) if seller_type else None,
-                    category_path=[p for p in path if p], platform="ebay")
+                    category_path=[p for p in path if p], platform="ebay", item_condition=item_condition,
+                    item_condition_label=item_condition_label)
 
 
 # ------------------------------------------------------------------ the client
