@@ -288,6 +288,7 @@ async def _direct_search(q: str, sites: list[platforms.Platform]) -> tuple[list[
         ads, counts[p.id] = ans
         per_site.append([a for a in ads if not deals._wanted(a.get("title"))])
     merged = [a for row in itertools.zip_longest(*per_site) for a in row if a is not None]
+    deals.remember_shown(merged)        # the viewer shows them for sites without ad details
     return merged, errors, counts
 
 

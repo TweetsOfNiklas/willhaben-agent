@@ -29,7 +29,8 @@
       <a href="{{ '/deals/ad/' ~ d.ad_id if wh else '/deals/ad/' ~ platform.id ~ '/' ~ d.ad_id ~ ('?hit=' ~ h.id if h else '') }}" class="btn">{{ _("Check price closely") }}</a>
     </div>
     <div hx-get="{{ '/hits/ad/' ~ d.ad_id if wh else '/hits/ad/' ~ platform.id ~ '/' ~ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML"><small class="text-muted"><span class="loading loading-spinner loading-xs align-middle"></span> {{ _("Checking the price …") }}</small></div>
-    {% if reduced %}<small class="text-[12.5px] text-muted">{{ _("{platform} shows no details here: the description is the listing's teaser, the price check compares with willhaben ads.", platform=platform.name) }}</small>{% endif %}
+    {% if detail_error %}<small class="text-[12.5px] text-muted">{{ _("{platform} could not be reached ({error}); this is what the list showed.", platform=platform.name, error=detail_error) }}</small>
+    {% elif reduced %}<small class="text-[12.5px] text-muted">{{ _("{platform} shows no details here: the description is the listing's teaser, the price check compares with willhaben ads.", platform=platform.name) }}</small>{% endif %}
     {% if h and h.screen_relevant is not none %}
     <div class="flex flex-col gap-1.5 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-2.5">
       <div class="flex flex-wrap items-center gap-2"><strong class="text-primary">{{ _("Claude's assessment") }}</strong>{% for lbl in screen_labels(h) %}{{ ui.pill(lbl, 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else ('brand' if h.screen_relevant else '')), false) }}{% endfor %}{% if h.screen_at %}<small class="text-muted">· {{ h.screen_at|ago }}</small>{% endif %}</div>

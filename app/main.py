@@ -640,18 +640,33 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
                 db.add(h)
                 db.commit()
                 db.refresh(h)
-    error = d = None
+    error = d = detail_error = None
     reduced = not platform.can("detail")
+
+    def known() -> platforms.AdDetail | None:
+        """What the hit or the list that showed the ad knows (product search, direct search)."""
+        from app.services import deals
+
+        if h is not None:
+            return platforms.AdDetail.from_hit(h)
+        r = deals.shown_result(platform.id, ad_id)
+        return platforms.AdDetail.from_result(r) if r else None
+
     if reduced:
-        d = platforms.AdDetail.from_hit(h) if h is not None else None
+        d = known()
     else:
         try:
             d = await platform.detail(ad_id, url=h.url if h else None)
         except PlatformError as e:
-            error = str(e)
+            d = known()
+            if d is None:
+                error = str(e)
+            else:                       # the site failed: show what the list showed, and why
+                reduced, detail_error = True, str(e)
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,
+                                                                   "detail_error": detail_error,
                                                                    "ref": platform.ref(ad_id)})
 
 

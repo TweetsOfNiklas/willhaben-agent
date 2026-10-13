@@ -23,7 +23,7 @@ from urllib.parse import quote_plus
 
 from sqlmodel import col, select
 
-from app.db import DealCheck, session, utcnow
+from app.db import DealCheck, ProductSearch, session, utcnow
 from app.i18n import LANGS, lang, t
 from app.llm.base import LLMError, get_backend
 from app.services import geizhals
@@ -397,6 +397,32 @@ async def category_choices(query: str, category_url: str | None = None) -> dict[
             "values": sorted(({"label": v.label, "url": v.url, "hits": v.hits} for v in nav.values),
                              key=lambda v: -(v["hits"] or 0)),           # where the term really occurs first
             "selected": [{"label": v.label, "reset_url": v.url} for v in nav.selected]}
+
+
+_shown: dict[tuple[str, str], dict[str, Any]] = {}     # (platform, ad id) -> the result as a list showed it
+SHOWN_MAX = 600
+
+
+def remember_shown(results: list[dict[str, Any]]) -> None:
+    """Results a list just showed (direct search): the ad viewer finds them again for sites without ad details."""
+    for r in results:
+        if r.get("ad_id"):
+            _shown.pop((r.get("platform") or "willhaben", str(r["ad_id"])), None)
+            _shown[(r.get("platform") or "willhaben", str(r["ad_id"]))] = r
+    while len(_shown) > SHOWN_MAX:
+        _shown.pop(next(iter(_shown)))
+
+
+def shown_result(platform: str, ad_id: str) -> dict[str, Any] | None:
+    """A result shown lately: the direct search's (in memory) or a product search's (stored, also after a restart)."""
+    if (r := _shown.get((platform, ad_id))) is not None:
+        return r
+    with session() as db:
+        for ps in db.exec(select(ProductSearch).order_by(col(ProductSearch.id).desc()).limit(30)):
+            for r in (ps.results or []) + (ps.cards or []):
+                if str(r.get("ad_id")) == ad_id and (r.get("platform") or "willhaben") == platform:
+                    return r
+    return None
 
 
 async def geizhals_match(query: str | None) -> dict[str, Any] | None:

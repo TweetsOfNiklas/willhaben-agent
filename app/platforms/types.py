@@ -119,6 +119,20 @@ class AdDetail:
                    url=h.url, images=[h.image_url] if h.image_url else [], location=h.location,
                    is_private=h.is_private, platform=getattr(h, "platform", None) or DEFAULT_PLATFORM)
 
+    @classmethod
+    def from_result(cls, r: dict[str, Any]) -> AdDetail:
+        """What a search result showed (direct search, product search: Listing.as_dict plus product-search keys),
+        for sites without an ad-detail call or when the site cannot be reached."""
+        from app.platforms.text import parse_iso
+
+        published = r.get("published_at")
+        published = parse_iso(published) if isinstance(published, str) else published
+        return cls(ad_id=str(r.get("ad_id") or ""), heading=r.get("title") or "", description=r.get("text") or r.get("body"),
+                   price=r.get("price"), price_display=r.get("price_display"), status="active", published_at=published,
+                   first_published_at=published, end_date=None, url=r.get("url") or "",
+                   images=[r["image_url"]] if r.get("image_url") else [], location=r.get("location"),
+                   is_private=r.get("is_private"), platform=r.get("platform") or DEFAULT_PLATFORM)
+
     def as_context(self) -> dict[str, Any]:
         return {
             "ad_id": self.ad_id,
