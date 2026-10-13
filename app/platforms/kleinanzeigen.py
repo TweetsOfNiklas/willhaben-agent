@@ -116,7 +116,8 @@ def _common(ad: dict[str, Any]) -> dict[str, Any]:
             "is_private": None if not poster else poster == "PRIVATE",
             "category_id": str(_val(category.get("id"))) if _val(category.get("id")) not in (None, "") else None,
             "category_name": _text(category.get("localized-name")) or _text(category.get("localized_name")),
-            "description": clean_text(_text(ad.get("description")))}
+            "description": clean_text(_text(ad.get("description"))),
+            "lat": to_float(_val(addr.get("latitude"))), "lon": to_float(_val(addr.get("longitude")))}
 
 
 def parse_listing(ad: dict[str, Any]) -> Listing:
@@ -126,7 +127,8 @@ def parse_listing(ad: dict[str, Any]) -> Listing:
                    price_display=c["price_display"], old_price=None, location=c["location"], postcode=c["postcode"],
                    state=None, published_at=c["published_at"], changed_at=None, end_date=None, url=c["url"],
                    image_url=c["images"][0] if c["images"] else None, is_private=c["is_private"], is_bumped=None,
-                   status="active", category_ids=[c["category_id"]] if c["category_id"] else [], platform="kleinanzeigen")
+                   status="active", category_ids=[c["category_id"]] if c["category_id"] else [], platform="kleinanzeigen",
+                   lat=c["lat"], lon=c["lon"])
 
 
 def parse_ads(data: dict[str, Any]) -> SearchPage:

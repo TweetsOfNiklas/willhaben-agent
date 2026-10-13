@@ -97,7 +97,17 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         status=((ad.get("advertStatus") or {}).get("id")) or "unknown",
         category_ids=[c for c in (_first(a, "categorytreeids") or "").split(";") if c],
         platform="willhaben",
+        **_coordinates(_first(a, "COORDINATES")),
     )
+
+
+def _coordinates(raw: str | None) -> dict[str, float]:
+    """COORDINATES "48.2,16.37" -> {lat, lon}; nothing for junk or an empty value."""
+    try:
+        lat, lon = (float(x) for x in (raw or "").split(","))
+    except ValueError:
+        return {}
+    return {"lat": lat, "lon": lon} if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat or lon) else {}
 
 
 def parse_search(data: dict[str, Any]) -> SearchPage:

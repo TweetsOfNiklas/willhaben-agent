@@ -52,7 +52,7 @@ from app.llm.prompts import (
     search_plan_prompt,
     search_rank_prompt,
 )
-from app.services import ad_images, deals, scam
+from app.services import ad_images, deals, geo, scam
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError
 from app.services import timeline
@@ -379,7 +379,8 @@ def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dic
     item = {"heading": ad.heading, "body": ad.body, "price": ad.price, "is_private": ad.is_private}
     return {"ad_id": ad.ad_id, "platform": ad.platform, "ref": ad.ref, "title": ad.heading, "price": ad.price,
             "price_display": ad.price_display,
-            "location": ad.location, "url": ad.url, "image_url": ad.image_url, "is_private": ad.is_private,
+            "location": ad.location, "postcode": ad.postcode, "lat": ad.lat, "lon": ad.lon,   # distance from home
+            "url": ad.url, "image_url": ad.image_url, "is_private": ad.is_private,
             "published_at": ad.published_at.isoformat() if ad.published_at else None,
             "text": _one_line(ad.body)[:TEXT_CHARS], "query": (plan.get("queries") or [{}])[qi].get("keyword"),
             "position": pos, "median": st["median"] if st else None, "min": st["min"] if st else None,
@@ -685,5 +686,6 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                 results, msg = await check_photos(description, plan, results, answers=pairs)
                 if msg:
                     warning = f"{warning} {msg}" if warning else msg
+    await geo.locate(results)           # coordinates from postcodes, home geocoded once: the list can sort by distance
     _update(search_id, status="done", results=results, note=note or None, warning=warning, finished_at=utcnow(),
             cards=None)

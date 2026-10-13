@@ -43,6 +43,8 @@ class Listing:
     status: str = "active"
     category_ids: list[str] = field(default_factory=list)   # willhaben: category tree root -> leaf
     platform: str = DEFAULT_PLATFORM
+    lat: float | None = None            # the ad's place where the site sends coordinates (willhaben, Kleinanzeigen)
+    lon: float | None = None
 
     @property
     def ref(self) -> str:
@@ -59,6 +61,9 @@ class Listing:
             "price_display": self.price_display,
             "old_price": self.old_price,
             "location": self.location,
+            "postcode": self.postcode,
+            "lat": self.lat,
+            "lon": self.lon,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "url": self.url,
             "image_url": self.image_url,

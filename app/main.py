@@ -222,6 +222,9 @@ from app.services.search_agents import geizhals_below_pct as _geizhals_below_pct
 
 templates.env.globals.update(agent_sites=_agent_platforms, agent_searches=_agent_searches, keyword_sites=_keyword_sites,
                              geizhals_below_pct=_geizhals_below_pct)
+from app.services import geo as _geo  # noqa: E402
+
+templates.env.globals.update(home_point=_geo.home_cached, result_km=_geo.distance_km)   # distance from home to ads
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled)
 
