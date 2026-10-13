@@ -126,6 +126,24 @@ def test_start_with_the_switch_on_goes_to_the_order_page(client, monkeypatch):  
     assert calls["ad_id"] == "2000000001" and calls["mode"] == "pickup" and calls["max_price"] == 220.5
     assert calls["pickup_window"] == "Sa vormittag" and calls["search_id"] == 3 and calls["price"] == 250.0
     assert calls["url"] == RESULT["url"] and calls["image_url"] == "https://cache.willhaben.at/x.jpg"
+    assert calls["wish_price"] is None                                    # empty: the discount below the asking price
+
+
+def test_start_passes_the_wish_price_and_refuses_one_above_the_maximum(client, monkeypatch):  # noqa: F811
+    _switch_on()
+    calls = {}
+    monkeypatch.setattr(svc, "start", lambda ad_id, mode, max_price=None, **kw: calls.update(kw) or 8)
+    r = client.post("/purchases", data={"ad_id": "2000000001", "mode": "pickup", "max_price": "220",
+                                        "wish_price": "199,50"}, follow_redirects=False)
+    assert r.headers["location"] == "/purchases/8" and calls["wish_price"] == 199.5
+    monkeypatch.undo()
+    _switch_on()
+    r = client.post("/purchases", data={"ad_id": "2000000001", "mode": "pickup", "max_price": "220",
+                                        "wish_price": "230", "back": "/deals"}, follow_redirects=False)
+    assert "The wish price is above your maximum." in client.get(r.headers["location"]).text
+    r = client.post("/purchases", data={"ad_id": "2000000001", "mode": "pickup", "wish_price": "viel",
+                                        "back": "/deals"}, follow_redirects=False)
+    assert "Enter the wish price in euros." in client.get(r.headers["location"]).text
 
 
 def test_start_refuses_a_bad_maximum_price_with_a_notice(client, monkeypatch):  # noqa: F811
@@ -345,6 +363,7 @@ def test_dialog_prefill_is_the_asking_price_plus_the_shipping_of_the_mode(client
     assert 'data-ship-text="Shipping € 7,90 · Buyer protection from 4,5 %"' in frag and 'value="256.00"' not in frag and 'value="269.15"' not in frag
     assert 'name="ad_id" value="2000000001"' in frag and 'name="search_id" value="3"' in frag
     assert 'name="query" value="geschirr"' in frag and 'name="max_default" value="1"' in frag
+    assert 'name="wish_price" min="1" step="0.01" value="225.00"' in frag and 'data-discount="10"' in frag   # 10 % below 250
 
 
 def test_preference_preselects_paylivery_and_the_maximum_with_its_shipping(client, monkeypatch):  # noqa: F811
@@ -354,6 +373,7 @@ def test_preference_preselects_paylivery_and_the_maximum_with_its_shipping(clien
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert _preselected(frag) == ["paylivery"]
     assert 'name="max_price" min="1" step="0.01" value="269.15"' in frag      # 250 + 7.90 + buyer protection 11.25
+    assert 'name="wish_price" min="1" step="0.01" value="243.03"' in frag     # 225 + 7.90 + buyer protection 10.13
 
     _use(monkeypatch, _ad(shipping=None))                         # no shipping named: the estimate (€ 6) counts
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
@@ -533,10 +553,10 @@ def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # 
     # no hidden attribute in the markup: all three panels show without JavaScript (the script hides two of them)
     assert re.findall(r'<section class="bd-step" data-step="(\d)"[^>]*>', frag) == ["1", "2", "3"]
     assert re.findall(r'class="bd-chip[^"]*" data-n="(\d)"', frag) == ["1", "2", "3"]
-    assert re.findall(r'<span class="bd-n[^"]*">\d</span>([^<]+)</button>', frag) == ["How to buy", "Maximum", "Start"]
+    assert re.findall(r'<span class="bd-n[^"]*">\d</span>([^<]+)</button>', frag) == ["How to buy", "Price", "Start"]
     assert frag.count('class="btn btn-primary bd-next ') == 2 and frag.count('class="btn bd-back ') == 2
     assert 'onkeydown="wbBuy.enter(event)"' in frag and 'data-empty="–"' in frag
-    assert frag.count(">Change</button>") == 3 and 'data-s="timerow"' in frag
+    assert frag.count(">Change</button>") == 4 and 'data-s="timerow"' in frag and 'data-s="wish"' in frag
     for key in ["mode", "ship", "time", "max"]:
         assert f'data-s="{key}"' in frag
     assert 'data-s="max"' in frag and ">Ad<" not in frag             # the ad is on the left, not a summary row again
@@ -703,15 +723,16 @@ function form(o) {
                        setPointerCapture(id) { this.captured.push(id); }, getBoundingClientRect: () => ({ left: 100, width: 400 }) });
   const gauges = o.fair === false ? [] : [gauge];
   const sugg = (o.chips || []).map(v => node({ dataset: { v: String(v), tpl: 'Cheap · {x}' } }));
-  const sm = { mode: node(), ship: node(), time: node(), max: node(), timerow: node({ hidden: true }) };
+  const sm = { mode: node(), ship: node(), time: node(), max: node(), wish: node(), timerow: node({ hidden: true }) };
   const summary = node({ dataset: { empty: '–', noprice: 'no price in the ad', feeTpl: 'Buyer protection {amount}' },
                          querySelector: s => { const m = s.match(/^\[data-s=(\w+)\]$/); return m ? sm[m[1]] : null; } });
   const fair = o.fair === false ? undefined : JSON.stringify(FAIR);
   // real forms always carry the PayLivery fee rule (data-fee); o.fee === false leaves it out (no rule: no fee at all)
   const fee = o.fee === false ? undefined : JSON.stringify({ pct: 4.5, min: 0.99, max: 49.99 });
-  const f = node({ dataset: { ask: String(o.ask), ship: JSON.stringify(o.ship), step: o.step, fair: o.fair === false ? undefined : fair, fee },
+  const f = node({ dataset: { ask: String(o.ask), ship: JSON.stringify(o.ship), step: o.step, fair: o.fair === false ? undefined : fair, fee, discount: '10' },
     elements: { max_price: { value: o.max === undefined ? '' : o.max },
                 max_default: { value: o.maxDefault === undefined ? '1' : o.maxDefault },
+                wish_price: { value: o.wish || '' },
                 pickup_window: { value: o.time || '' }, back: { value: '' } },
     scrolled: false, scrollIntoView() { this.scrolled = true; },
     closest: sel => (o.dialog && sel === 'dialog' ? { querySelector: () => ({ scrollTop: 99 }) } : null) });
@@ -730,10 +751,12 @@ const results = {};
 // 1. opening: step 1 only, no mode yet, Next disabled
 let f = form({ ...base, chips: [200, 150] }); wbBuy.init(f);
 results.init = { js: f.classList.contains('bd-js'), shown: shown(f), chips: f.chips.map(c => [c.disabled, c.classList.contains('bd-on')]), next1: f.nexts[0].disabled };
+results.wishInit = f.elements.wish_price.value;                 // no mode yet: 10 % below 250
 // 2. choose PayLivery (untouched maximum follows the mode), Next enabled, Next goes to step 2
 f.elements.max_price.value = '250.00';
 f.radios.paylivery.checked = true; wbBuy.mode(f);
-results.mode = { max: f.elements.max_price.value, next1: f.nexts[0].disabled, sumMode: f.sm.mode.textContent, sumShip: f.sm.ship.textContent,
+results.wishInit = results.wishInit || null;
+results.mode = { wish: f.elements.wish_price.value, sumWish: f.sm.wish.textContent, max: f.elements.max_price.value, next1: f.nexts[0].disabled, sumMode: f.sm.mode.textContent, sumShip: f.sm.ship.textContent,
                  maxDefault: f.elements.max_default.value, sumMax: f.sm.max.textContent };
 wbBuy.next(f);
 results.step2 = { step: String(f.dataset.step), shown: shown(f), chipDone: f.chips[0].classList.contains('bd-done'), chipOn: f.chips[1].classList.contains('bd-on'), next2: f.nexts[1].disabled };
@@ -871,6 +894,15 @@ cheapItem.dataset.fair = JSON.stringify({ ...FAIR, scale: [[2, 0], [4, 0.25], [5
 wbBuy.drag(cheapItem, 0.4);                                        // item 4.6 (cents below € 10)
 results.cheapDrag = cheapItem.elements.max_price.value;
 results.noScaleDrag = wbBuy.drag(k, 0.5);                           // no data-fair: nothing happens
+// the wish price: a typed value stays when the mode changes, above the maximum it blocks Next
+const w = form({ ...base, checked: 'paylivery', max: '269.15', step: '2' }); wbBuy.init(w);
+const wishSuggested = w.elements.wish_price.value;
+w.elements.wish_price.value = '280'; wbBuy.wishInput(w);
+const wishOver = { next2: w.nexts[1].disabled, valid: wbBuy.valid(w, 2) };
+w.elements.wish_price.value = '240'; wbBuy.wishInput(w);
+w.radios.direct.checked = true; w.radios.paylivery.checked = false; wbBuy.mode(w);
+results.wish = { suggested: wishSuggested, over: wishOver, typedKept: w.elements.wish_price.value, next2: w.nexts[1].disabled,
+                 sum: w.sm.wish.textContent };
 console.log(JSON.stringify(results));
 """
 
@@ -893,6 +925,10 @@ def test_buy_steps_script_in_node():  # noqa: F811
     # PayLivery: the default maximum is the asking price 250 + shipping 7.90 + buyer protection 11.25 = 269.15
     assert r["mode"]["max"] == "269.15" and r["mode"]["next1"] is False and r["mode"]["maxDefault"] == "1"
     assert r["mode"]["sumMax"] == "€ 269,15"
+    # wish price: 10 % below 250 = 225; with PayLivery plus 7.90 shipping and the fee of 225 (10.13) = 243.03
+    assert r["wishInit"] == "225.00" and r["mode"]["wish"] == "243.03" and r["mode"]["sumWish"] == "€ 243,03"
+    assert r["wish"] == {"suggested": "243.03", "over": {"next2": True, "valid": False}, "typedKept": "240",
+                         "next2": False, "sum": "€ 240"}
     assert r["mode"]["sumMode"] == "paylivery" and r["mode"]["sumShip"] == "Shipping € 7.90 · Buyer protection € 11,25"
     assert r["step2"] == {"step": "2", "shown": [False, True, False], "chipDone": True, "chipOn": True, "next2": False}
     # the default is the ad's own price: 0 %, expensive (0.75); the ring is shown (around the needle), not hidden; the chips

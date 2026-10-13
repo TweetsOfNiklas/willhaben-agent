@@ -114,6 +114,16 @@ def _max_price(raw: str | None) -> float | None:
     return v
 
 
+def _wish_price(raw: str | None) -> float | None:
+    """Empty is the suggestion (discount below the asking price); anything else must be a positive amount."""
+    if not (raw or "").strip():
+        return None
+    v = _float(raw)
+    if v is None or v <= 0:
+        raise PurchaseError(t("Enter the wish price in euros."))
+    return v
+
+
 # ------------------------------------------------------------------ Jinja globals
 def enabled() -> bool:
     return get_setting(purchase.SETTING_ENABLED) == "1"
@@ -189,6 +199,7 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
     """Everything _buy_dialog.html shows. Nothing is fetched while purchases are switched off."""
     ctx: dict[str, Any] = {"ad_id": ad_id, "search_id": search_id, "query": query or "", "on": enabled(), "d": None,
                            "res": None, "fair": None, "wh_error": None, "gone": False, "ship": {}, "pre": None, "prefill": None,
+                           "wish_prefill": None, "discount": _discount_value(),
                            "fee": purchase.fee_rule(), "fee_of": purchase.paylivery_fee}
     if not ctx["on"]:
         return ctx
@@ -208,7 +219,14 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
     ask = d.price if d.price and d.price > 0 else None
     res = await _market(d)
     extra = purchase.paylivery_fee(ask) if pre == "paylivery" else 0.0
-    ctx.update(d=d, res=res, fair=_fair(d, res), ship=ship, pre=pre,
+    # the suggested wish price: the discount below the asking price (whole euros) plus shipping and fee of the mode
+    # (mirrors wbBuy.wishBase; the agent offers exactly what the field says)
+    wish = None
+    if ask:
+        item = ask * (1 - ctx["discount"] / 100)
+        item = float(math.floor(item)) if item >= 1 else round(item, 2)
+        wish = round(item + (ship[pre] if pre else 0.0) + (purchase.paylivery_fee(item) if pre == "paylivery" else 0.0), 2)
+    ctx.update(d=d, res=res, fair=_fair(d, res), ship=ship, pre=pre, wish_prefill=wish,
                prefill=round(ask + ship[pre] + extra, 2) if (ask and pre) else ask)
     return ctx
 
@@ -236,7 +254,7 @@ async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price:
                          pickup_window: str = Form(""), search_id: str = Form(""), query: str = Form(""),
                          title: str = Form(""), url: str = Form(""), image_url: str = Form(""),
                          price: str = Form(""), back: str = Form(""), max_default: str = Form(""),
-                         questions: str = Form("")):
+                         questions: str = Form(""), wish_price: str = Form("")):
     dest = _safe_back(back, "/purchases")
     try:
         ad = ad_id.strip()
@@ -247,7 +265,7 @@ async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price:
             search_id=_int(search_id), query=query.strip()[:200] or None,
             title=title.strip()[:200] or None, url=_https(url, "https://www.willhaben.at/"),
             image_url=_https(image_url, "https://"), price=_float(price), pickup_window=pickup_window,
-            questions=questions)
+            questions=questions, wish_price=_wish_price(wish_price))
     except PurchaseError as e:
         return _go(dest, str(e))
     return _go(f"/purchases/{pid}")

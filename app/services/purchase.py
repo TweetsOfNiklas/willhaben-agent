@@ -32,7 +32,7 @@ from app.db import Conversation, Draft, Message, Purchase, get_setting, session,
 from app.i18n import t
 from app.llm.base import get_backend
 from app.llm.prompts import PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, purchase_opener_prompt, purchase_rules
-from app.services import deals, meetups, paylivery, shipping
+from app.services import deals, meetups, paylivery, shipping, topic
 from app.services.notify import notify
 from app.willhaben.account import OpenerUnconfirmed, SendFailed
 from app.willhaben.public import WillhabenError, get_public
@@ -51,7 +51,8 @@ OPEN = (*ACTIVE, "paused")          # one open purchase per ad; the chat card sh
 TERMINAL = ("done", "failed", "cancelled")
 AFTER_AGREEMENT = ("agreed", "meetup", "pay_now", "paid", "shipped", "done")  # own address allowed (direct only)
 PER_CONVERSATION_PER_DAY = 6        # own limit (a negotiation needs more than the 3 of a seller chat)
-DEFAULT_DISCOUNT_PCT = 10           # target = 10 % below min(asking price, median)
+DEFAULT_DISCOUNT_PCT = 10           # suggested wish price (and the target without one): 10 % below the asking price
+WISH_SLACK = 0.01                   # an opening offer may be 1 % (at least 1 €) below the wish price: Claude rounds
 # Shipping in euro while nothing better is known (no PayLivery price of the ad, no price named by the seller)
 SHIPPING_ESTIMATE = {"paylivery": 6.0, "direct": 6.0, "pickup": 0.0}   # € when the ad names no price (Post M is 7.90)
 # willhaben buyer protection fee ("Käuferschutzgebühr") of PayLivery: paid by the BUYER, the seller pays nothing. Source: help
@@ -88,6 +89,8 @@ _NUMBER = r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+\.\d{1,2}|\d+"
 _AMOUNT = re.compile(rf"(?:€|\bEUR\b)\s*({_NUMBER})|(?<![\w.,])({_NUMBER})\s*(?:€|\bEUR\b)", re.I)
 _IBAN_TEXT = re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,8}\b", re.I)
 _CARD_TEXT = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}\d(?!\d)")
+# Words of the agent's instructions or AI self-talk (topic.INTERNAL) plus the purchase's own: never to the seller
+_INTERNAL_TEXT = re.compile(rf"\b(?:höchstpreis\w*|obergrenze\w*|regelblock\w*|{topic.INTERNAL})", re.I)
 
 
 def _to_float(num: str) -> float:
@@ -172,6 +175,7 @@ def text_problems(text: str | None, *, max_price: float | None, address_ok: bool
         why.append(t("Card or account number in our own message"))
     if not address_ok and _address_hits(text or ""):
         why.append(t("Own address or contact details in a message before they are allowed"))
+    why += topic.internal_problem(text, _INTERNAL_TEXT)
     return why
 
 
@@ -269,15 +273,18 @@ def _item_for_cents(avail: int) -> int:
     return c
 
 
-def item_ceiling(row: Purchase) -> float | None:
-    """The most the item may cost: the maximum minus the shipping that applies and, with PayLivery, the buyer protection
-    fee of the item price (item + fee(item) <= maximum - shipping). Never below 1 euro."""
-    if not row.max_price:
-        return None
+def item_for_total(row: Purchase, total: float) -> float:
+    """The item price a total incl. shipping (and, with PayLivery, the buyer protection fee) leaves: total minus the
+    shipping that applies and the fee of the item price (item + fee(item) <= total - shipping). Never below 1 euro."""
     ship = shipping_of(row)[0]
     if row.mode == "paylivery":
-        return max(1.0, _item_for_cents(_cents(row.max_price) - _cents(ship)) / 100)
-    return max(1.0, round(row.max_price - ship, 2))
+        return max(1.0, _item_for_cents(_cents(total) - _cents(ship)) / 100)
+    return max(1.0, round(total - ship, 2))
+
+
+def item_ceiling(row: Purchase) -> float | None:
+    """The most the item may cost: the item price the maximum leaves (item_for_total)."""
+    return item_for_total(row, row.max_price) if row.max_price else None
 
 
 def pct_below(asking: float | None, value: float | None) -> int | None:
@@ -339,13 +346,19 @@ def _price_line(row: Purchase) -> str:
 
 
 def target_price(row: Purchase) -> float | None:
-    """Opening target: discount below the cheaper of asking price and comparable median, never above the item ceiling
-    (the maximum minus shipping and, with PayLivery, the buyer protection fee)."""
-    refs = [x for x in (row.asking_price, row.median_price) if x]
-    if not refs:
+    """The first offer for the item: the item price of the user's wish price (incl. shipping and fee, as the maximum),
+    without one the discount below the asking price. Never above the asking price or the item ceiling. Comparable ads
+    play no part: a keyword search finds accessories or other products often enough."""
+    if row.wish_price:
+        target = item_for_total(row, row.wish_price)
+        target = float(math.floor(target)) if target >= 10 else target     # a chat names whole euros: 568, not 568.42
+    elif row.asking_price:
+        target = row.asking_price * (1 - _discount() / 100)
+        target = float(math.floor(target)) if target >= 1 else round(target, 2)
+    else:
         return None
-    target = min(refs) * (1 - _discount() / 100)
-    target = float(math.floor(target)) if target >= 1 else round(target, 2)
+    if row.asking_price:
+        target = min(target, row.asking_price)
     ceiling = item_ceiling(row)
     if ceiling:
         target = min(target, ceiling)
@@ -548,9 +561,11 @@ def _spawn(coro: Coroutine[Any, Any, Any]) -> None:
 def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: int | None = None,
           query: str | None = None, title: str | None = None, url: str | None = None,
           image_url: str | None = None, price: float | None = None, pickup_window: str | None = None,
-          questions: str | list[str] | None = None) -> int:
+          questions: str | list[str] | None = None, wish_price: float | None = None) -> int:
     """Store a purchase order and start it in the background. Raises PurchaseError on a refusal.
 
+    `wish_price`: the price the user wants to pay, on the basis of the maximum (incl. shipping and fee). The agent
+    offers it first and may go up to the maximum; None = the discount below the asking price.
     `questions`: the user's questions for the seller (text, one per line, or a list). The agent asks them in the chat
     and the answers go to the user with the agreement push (notify_agreement)."""
     if get_setting(SETTING_ENABLED) != "1":
@@ -562,6 +577,10 @@ def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: i
         raise PurchaseError(t("Unknown purchase mode."))
     if max_price is not None and max_price <= 0:
         raise PurchaseError(t("Enter the maximum price in euros."))
+    if wish_price is not None and wish_price <= 0:
+        raise PurchaseError(t("Enter the wish price in euros."))
+    if wish_price is not None and max_price is not None and wish_price > max_price + 0.005:
+        raise PurchaseError(t("The wish price is above your maximum."))
     if mode == "direct" and not shipping.sender_complete():
         raise PurchaseError(t("Fill in your own shipping address first (Settings → Shipping)."))
     with session() as db:
@@ -570,6 +589,7 @@ def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: i
             raise PurchaseError(t("There is already an open purchase for this ad (#{id}).", id=dup.id))
         row = Purchase(ad_id=ad_id, ad_title=title, ad_url=url, image_url=image_url, asking_price=price,
                        max_price=max_price, mode=mode, status="new",   # None: asking price + shipping, set in _begin
+                       wish_price=wish_price,
                        search_id=search_id, query=query,
                        pickup_window=((pickup_window or "").strip()[:200] or None) if mode == "pickup" else None,
                        questions=[{"question": q, "answer": ""} for q in clean_questions(questions)] or None,
@@ -645,20 +665,32 @@ async def _begin_inner(pid: int) -> None:
                                   info and _line(r, info)))
     target = target_price(row)
     cost, src = shipping_of(row)
-    prompt = purchase_opener_prompt(ad_context=detail.as_context(), target=target, max_price=row.max_price,
-                                    mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
-                                    seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
-                                    item_ceiling=item_ceiling(row), market=row.market,
-                                    fee=fee_rule() if row.mode == "paylivery" else None,
-                                    questions=[q["question"] for q in row.questions or []])
-    out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
-    data = out.data or {}
-    text = str(data.get("message") or "").strip()
-    if not text:
-        return await _fail(pid, t("Claude wrote no opening message."))
-    problems = text_problems(text, max_price=row.max_price, address_ok=False)
-    if problems:
-        return await _fail(pid, t("The opening message was refused: {why}", why="; ".join(problems)))
+    refused: tuple[str, list[str]] | None = None
+    for _attempt in range(2):      # a refused opener gets one retry with the reason, then the order fails
+        prompt = purchase_opener_prompt(ad_context=detail.as_context(), target=target, max_price=row.max_price,
+                                        mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
+                                        seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
+                                        item_ceiling=item_ceiling(row),
+                                        fee=fee_rule() if row.mode == "paylivery" else None,
+                                        questions=[q["question"] for q in row.questions or []],
+                                        asking=detail.price, refused=refused)
+        out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
+                                                 schema=PURCHASE_OPENER_SCHEMA)
+        text = str((out.data or {}).get("message") or "").strip()
+        if not text:
+            return await _fail(pid, t("Claude wrote no opening message."))
+        problems = text_problems(text, max_price=row.max_price, address_ok=False)
+        offer = _num((out.data or {}).get("opening_offer"))   # direct: incl. shipping, so never below the item target
+        if offer and target and offer < target - max(1.0, target * WISH_SLACK):
+            problems.append(t("Opening offer {amount} is below your wish price {wish}", amount=_money(offer),
+                              wish=_money(target)))
+        if not problems:
+            break
+        log.info("purchase %s: opening message refused (%s): %s", pid, "; ".join(problems), text)
+        refused = (text, problems)
+    else:
+        return await _fail(pid, t("The opening message was refused: {why}. Claude's text: {text}",
+                                  why="; ".join(problems), text=text[:300]))
     from app.services import chats  # lazy: chats imports this module
 
     # stored before the POST: after a restart in between, recover() looks for the chat instead of writing again
@@ -764,11 +796,11 @@ def rules_block(p: Purchase, conv: Conversation | None = None, availability: str
     if conv is not None:
         seller = conv.partner_name or (conv.ad_context or {}).get("seller_name")
     cost, src = shipping_of(p)
-    return purchase_rules(asking=p.asking_price, median=p.median_price, target=target_price(p), max_price=p.max_price,
+    return purchase_rules(asking=p.asking_price, target=target_price(p), max_price=p.max_price,
                           mode=p.mode, sender_address=sender, stage=p.status,
                           user_rules=get_setting(SETTING_RULES) or DEFAULT_RULES, note=p.note,
                           pickup_window=p.pickup_window, availability=availability, seller_name=seller,
-                          shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p), market=p.market,
+                          shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p),
                           fee=fee_rule() if p.mode == "paylivery" else None, questions=p.questions)
 
 
@@ -779,6 +811,7 @@ def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
     if ps.get("stage") == "needs_user":
         why.append(t("Claude needs your decision: {reason}", reason=ps.get("reason") or "-"))
     why += text_problems(d.text, max_price=p.max_price, address_ok=p.mode == "direct" and p.status in AFTER_AGREEMENT)
+    why += topic.too_long(d.text)                     # the instruction words are in text_problems already
     if p.max_price:
         # PayLivery: the offer is the item price, the buyer pays shipping and buyer protection on willhaben (the ceiling
         # is the maximum minus both)
@@ -981,7 +1014,7 @@ def card_for(row: Purchase, log_limit: int | None = 8) -> dict[str, Any]:
     return {
         "id": row.id, "ad_title": row.ad_title, "status": row.status, "status_label": status_label(row.status),
         "mode": row.mode, "mode_label": mode_label(row.mode), "asking": row.asking_price, "median": row.median_price,
-        "target": target_price(row), "max_price": row.max_price, "agreed": row.agreed_price,
+        "target": target_price(row), "wish_price": row.wish_price, "max_price": row.max_price, "agreed": row.agreed_price,
         "payment": ({**payment, "iban_group": group_iban(payment.get("iban"))} if payment else None),
         "pickup": row.pickup, "pickup_window": row.pickup_window, "note": row.note,
         "questions": [dict(q) for q in row.questions or []],

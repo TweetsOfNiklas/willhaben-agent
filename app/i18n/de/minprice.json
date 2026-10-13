@@ -4,5 +4,7 @@
  "Automatic answers never agree to less. Leave empty: price talks stay with you.": "Automatische Antworten sagen nie weniger zu. Leer lassen: Preisverhandlungen bleiben bei dir.",
  "Minimum price must be a number, e.g. 25 or 25,50": "Untergrenze muss eine Zahl sein, z. B. 25 oder 25,50",
  "Suggested price {price} is below the minimum {min}": "Vorgeschlagener Preis {price} liegt unter der Untergrenze {min}",
- "Answer names {amount}, below the minimum {min}": "Antwort nennt {amount}, unter der Untergrenze {min}"
+ "Answer names {amount}, below the minimum {min}": "Antwort nennt {amount}, unter der Untergrenze {min}",
+ "No minimum price set: {amount} is below the asking price {asking}": "Kein Mindestpreis gesetzt: {amount} liegt unter dem Angebotspreis {asking}",
+ "No minimum price and no asking price known – price talks wait for you": "Kein Mindestpreis und kein Angebotspreis bekannt – Preisgespräche warten auf dich"
 }

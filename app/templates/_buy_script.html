@@ -41,6 +41,19 @@
         return c / 100;
       },
       base: function (f) { var a = +f.dataset.ask; return a > 0 ? this.costs(f, a).total : 0; },
+      // the suggested wish price: the discount of the settings below the asking price (whole euros, as purchase.target_price
+      // without a wish) plus shipping and fee of the mode; 0 without an asking price
+      wishBase: function (f) { var a = +f.dataset.ask, d = +(f.dataset.discount || 0);
+        if (!(a > 0)) return 0; var c = a * (1 - d / 100); c = c >= 1 ? Math.floor(c) : Math.round(c * 100) / 100;
+        return this.costs(f, c).total; },
+      wish: function (f) { return parseFloat(f.elements.wish_price.value); },
+      // the wish price must not be above the maximum (an empty wish is the suggestion of the server)
+      wishOk: function (f) { var w = this.wish(f), m = this.val(f) || this.base(f); return !(w > 0) || !(m > 0) || w <= m + 0.005; },
+      // the untouched suggestion follows the mode and never lies above the maximum; a typed value stays
+      wishFollow: function (f) { if (f.dataset.wishTouched) return;
+        var w = this.wishBase(f), m = this.val(f); if (w > 0 && m > 0 && m < w) w = m;
+        f.elements.wish_price.value = w ? w.toFixed(2) : ''; },
+      wishInput: function (f) { f.dataset.wishTouched = '1'; this.refresh(f); },
       eur: function (v) { var whole = Math.abs(v - Math.round(v)) < 0.005;
         return '€ ' + v.toLocaleString('de-AT', {minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2}); },
       val: function (f) { return parseFloat(f.elements.max_price.value); },
@@ -117,13 +130,17 @@
         s('timerow').hidden = !(m && m.value === 'pickup');
         // the default while the field is empty, or - the ad has no price - "no price in the ad"
         s('max').textContent = v > 0 ? self.eur(v) : b > 0 ? self.eur(b) : (x.dataset.noprice || '');
+        var w = self.wish(f);
+        s('wish').textContent = w > 0 ? self.eur(w) : x.dataset.empty;
       },
       cur: function (f) { return +(f.dataset.step || 1); },
       // step 1: a mode is chosen; step 2: the maximum may be empty (= default), else at least 1 (€) and what the browser accepts
       // (cents only; a half-typed "12,5" counts as bad input, not as empty); step 3 has nothing to check
       valid: function (f, n) {
         if (n === 1) return !!f.querySelector('input[name=mode]:checked');
-        if (n === 2) { var el = f.elements.max_price; return (!el.value || this.val(f) >= 1) && (!el.checkValidity || el.checkValidity()); }
+        if (n === 2) { var el = f.elements.max_price, wl = f.elements.wish_price;
+          return (!el.value || this.val(f) >= 1) && (!el.checkValidity || el.checkValidity())
+            && (!wl.value || this.wish(f) >= 1) && (!wl.checkValidity || wl.checkValidity()) && this.wishOk(f); }
         return true;
       },
       // the step chips (done = ticked, current, upcoming = disabled) and the Next buttons
@@ -138,14 +155,17 @@
         });
         f.querySelectorAll('.bd-next').forEach(function (b) { b.disabled = !self.valid(f, n); });
       },
-      refresh: function (f) { this.lines(f); this.sum(f); this.nav(f); },
+      refresh: function (f) {
+        this.wishFollow(f);
+        var over = f.querySelector('.bd-wish-over'); if (over) over.hidden = this.wishOk(f);
+        this.lines(f); this.sum(f); this.nav(f); },
       show: function (f) {
         var n = this.cur(f);
         f.querySelectorAll('.bd-step').forEach(function (s) { s.hidden = +s.dataset.step !== n; });
         this.refresh(f);
       },
       // once per fresh form: JavaScript on, step 1 shown
-      init: function (f) { f.classList.add('bd-js'); if (!f.dataset.step) f.dataset.step = '1'; this.bind(f); this.show(f); },
+      init: function (f) { f.classList.add('bd-js'); if (!f.dataset.step) f.dataset.step = '1'; this.bind(f); this.wishFollow(f); this.show(f); },
       // pointer (mouse, pen, finger) on the bar moves the ring: down, move while pressed, up; once per gauge
       bind: function (f) {
         var self = this;
@@ -209,7 +229,8 @@
         this.refresh(f);
       },
       // the untouched default follows the mode; a changed value stays
-      mode: function (f) { if (f.elements.max_default.value === '1') { var b = this.base(f); f.elements.max_price.value = b ? b.toFixed(2) : ''; } this.refresh(f); },
+      mode: function (f) { if (f.elements.max_default.value === '1') { var b = this.base(f); f.elements.max_price.value = b ? b.toFixed(2) : ''; }
+        this.wishFollow(f); this.refresh(f); },
       input: function (f) { var el = f.elements.max_price, v = this.val(f), b = this.base(f);
         f.elements.max_default.value = !el.value || (b > 0 && Math.abs(v - b) < 0.005) ? '1' : ''; this.refresh(f); },
       blur: function (f) { this.refill(f); },
