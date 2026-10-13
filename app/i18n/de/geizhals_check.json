@@ -1,0 +1,6 @@
+{
+ "Check the Geizhals product": "Geizhals-Produkt prüfen",
+ "Claude checks the product found on Geizhals for every new hit (model and variant) and looks for the right one when it is wrong or missing – for the new price in the push and the “below the Geizhals price” rule. Two more Claude calls per check with new hits.": "Claude prüft bei jedem neuen Treffer das auf Geizhals gefundene Produkt (Modell und Variante) und sucht das richtige, wenn es falsch ist oder fehlt – für den Neupreis in der Push-Nachricht und die Regel „unter dem Geizhals-Preis“. Zwei Claude-Aufrufe mehr pro Prüfung mit neuen Treffern.",
+ "checks the Geizhals product": "prüft das Geizhals-Produkt",
+ "checked by Claude": "von Claude geprüft"
+}

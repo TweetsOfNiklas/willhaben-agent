@@ -576,7 +576,7 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
                       screen_hide: list[str] = Form([]), drop_query: list[int] = Form([]), drop_term: list[str] = Form([]),
                       sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: list[str] = Form([]),
                       add_price_from: list[str] = Form([]), add_price_to: list[str] = Form([]),
-                      gh_on: str | None = Form(None), gh_pct: str = Form("")):
+                      gh_on: str | None = Form(None), gh_pct: str = Form(""), gh_check: str | None = Form(None)):
     from app.services import search_agents
 
     # the drawer's searches: terms to add (each added row and the add row send keyword, from and to, so the three
@@ -600,16 +600,20 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         db.add(a)
         db.commit()
         db.refresh(a)
-    a = _set_screening(agent_id, bool(screen_on), screen_brief, screen_min, screen_hide)
+    a = _set_screening(agent_id, bool(screen_on), screen_brief, screen_min, screen_hide, gh_check=bool(gh_check))
     scheduler.schedule_agent(a, run_soon=False)
     return back("/agents")
 
 
-def _set_screening(agent_id: int, on: bool, brief: str, minimum: str, hide: list[str] | None = None) -> SearchAgent:
-    """Claude screening of new hits (see app/services/screening.py)."""
+def _set_screening(agent_id: int, on: bool, brief: str, minimum: str, hide: list[str] | None = None,
+                   gh_check: bool | None = None) -> SearchAgent:
+    """Claude screening of new hits (see app/services/screening.py); `gh_check`: Claude also checks the Geizhals
+    product (app/services/geizhals_check.py, only with the screening on); None = unchanged."""
     with session() as db:
         a = db.get(SearchAgent, agent_id)
         a.screen = on
+        if gh_check is not None:
+            a.geizhals_check = gh_check and on
         a.screen_brief = brief.replace("\r\n", "\n").strip() or None
         a.screen_min = minimum if minimum in screening.MIN_RANK else "match"
         if hide is not None:

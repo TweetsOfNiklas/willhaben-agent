@@ -55,7 +55,7 @@
           {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=site_names|join(', ')) }}{% endif %}
           {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}{% if a.geizhals_pct %} · {{ _("{pct} % below Geizhals", pct=a.geizhals_pct) }}{% endif %}
         </div>
-        {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
+        {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}{% if a.geizhals_check %} · {{ _("checks the Geizhals product") }}{% endif %}</div>{% endif %}
         {% if a.last_error %}<div class="text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
       </div>
       {# actions: a 2 × 2 grid, so no button wraps alone onto a second row #}
@@ -166,7 +166,7 @@
             <p x-show="sites.length && !left()" x-cloak class="mt-1.5 text-[12px] text-error">{{ _("Keep at least one search, or delete the agent.") }}</p>
             <p x-show="dirty()" x-cloak class="mt-1.5 text-[12px] text-primary">{{ _("Changes apply when you save.") }}</p>
           </div>
-          <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}</div>
+          <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a), gh_check=a.geizhals_check %}{% include "_screen_fields.html" %}{% endwith %}</div>
           <footer class="mt-auto flex flex-wrap items-center gap-2 border-t border-base-300 pt-3.5">
             <button class="btn btn-primary">{{ _("Save") }}</button>
             <button type="button" class="btn btn-ghost" @click="$refs.dlg.close()">{{ _("Cancel") }}</button>

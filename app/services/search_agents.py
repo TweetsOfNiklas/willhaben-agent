@@ -607,8 +607,13 @@ async def _run_agent(agent_id: int) -> RunResult:
         db.refresh(agent)
 
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
-    if agent.geizhals_pct and to_notify:
+    gh_check = bool(agent.screen and agent.geizhals_check)
+    if (agent.geizhals_pct or gh_check) and to_notify:
         await _geizhals_prices(to_notify)
+    if gh_check and to_notify:          # Claude checks the products before the rule and the screening use their prices
+        from app.services import geizhals_check
+
+        await geizhals_check.check(agent, to_notify)
     to_screen = [h for h in to_notify if geizhals_passes(agent, h)]   # held back anyway: no Claude call
     # one call judges MAX_PER_CALL hits: first those the rule held back before (filtered, no verdict yet), which get
     # back into New only judged
