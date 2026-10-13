@@ -74,7 +74,13 @@
           {% if a.queries %}
           <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">
             {{ ui.eyebrow(_("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches"), 'mb-1.5') }}
-            {% for q in a.queries %}<div class="text-[13px]"><a class="link link-primary no-underline" href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="text-muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</div>{% endfor %}
+            {# a ticked box removes that search on Save; the last one stays (delete the agent instead) #}
+            {% for q in a.queries %}
+            <div x-data="{ drop: false }" class="flex items-center justify-between gap-3 py-0.5 text-[13px]">
+              <span class="min-w-0" :class="drop && 'line-through opacity-50'"><a class="link link-primary no-underline" href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword }}</a>{% if q.price_from %} <small class="text-muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}</span>
+              {% if a.queries|length > 1 %}<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12.5px] text-muted"><input type="checkbox" name="drop_query" value="{{ loop.index0 }}" x-model="drop" class="checkbox checkbox-primary checkbox-sm">{{ _("remove") }}</label>{% endif %}
+            </div>
+            {% endfor %}
           </div>
           {% endif %}
           <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}</div>

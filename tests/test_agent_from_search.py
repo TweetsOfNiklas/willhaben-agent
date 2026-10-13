@@ -258,6 +258,28 @@ def test_create_from_the_product_search_page(app_client):
     assert a.name == "Spüler" and a.interval_s == 1200 and not a.screen and len(a.queries) == 3
 
 
+def test_edit_removes_single_searches(app_client):
+    a = create_agent_from_search(_search_row(), screen=False)
+    form = {"name": a.name, "interval_min": "15"}
+    page = app_client.get("/agents").text
+    assert 'name="drop_query" value="0"' in page and 'name="drop_query" value="2"' in page
+
+    # removing every search is refused: nothing changes
+    r = app_client.post(f"/agents/{a.id}/edit", data={**form, "name": "x", "drop_query": ["0", "1", "2"]},
+                        follow_redirects=False)
+    assert r.status_code == 303 and "error=" in r.headers["location"]
+    b = _agent(a.id)
+    assert b.name == a.name and len(b.queries) == 3
+
+    # removing the first one moves the agent's link to the next
+    r = app_client.post(f"/agents/{a.id}/edit", data={**form, "drop_query": ["0", "2"]}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/agents"
+    b = _agent(a.id)
+    assert [q["keyword"] for q in b.queries] == ["Spülmaschine"]
+    assert b.source_url == b.queries[0]["source_url"] and b.webapi_url == b.queries[0]["webapi_url"]
+    assert 'name="drop_query"' not in app_client.get("/agents").text   # the last search has no remove box
+
+
 def test_create_route_errors(app_client):
     assert app_client.post("/deals/search/9999/agent", data={}, follow_redirects=False).status_code == 404
     sid = _search_row(plan=None, status="error")
