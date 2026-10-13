@@ -218,8 +218,10 @@ def _platform_name(pid: str | None) -> str:
 # platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
 from app.services.search_agents import agent_platforms as _agent_platforms  # noqa: E402
 from app.services.search_agents import agent_searches as _agent_searches, keyword_sites as _keyword_sites  # noqa: E402
+from app.services.search_agents import geizhals_below_pct as _geizhals_below_pct  # noqa: E402
 
-templates.env.globals.update(agent_sites=_agent_platforms, agent_searches=_agent_searches, keyword_sites=_keyword_sites)
+templates.env.globals.update(agent_sites=_agent_platforms, agent_searches=_agent_searches, keyword_sites=_keyword_sites,
+                             geizhals_below_pct=_geizhals_below_pct)
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled)
 
@@ -547,7 +549,8 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
                       screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
                       screen_hide: list[str] = Form([]), drop_query: list[int] = Form([]),
                       sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: str = Form(""),
-                      add_price_from: str = Form(""), add_price_to: str = Form("")):
+                      add_price_from: str = Form(""), add_price_to: str = Form(""), gh_on: str | None = Form(None),
+                      gh_pct: str = Form("")):
     from app.services import search_agents
 
     with session() as db:
@@ -562,6 +565,8 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         a.name = name.strip() or a.name
         a.interval_s = search_agents.agent_interval(a, interval_min * 60)
         a.notify, a.notify_price_drops = bool(notify_on), bool(drops_on)
+        pct = _num_or_none(gh_pct)
+        a.geizhals_pct = min(max(int(pct if pct is not None else 30), 1), 95) if gh_on else None
         db.add(a)
         db.commit()
         db.refresh(a)

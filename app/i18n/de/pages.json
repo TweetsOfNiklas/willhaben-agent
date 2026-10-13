@@ -88,7 +88,7 @@
  "Seen": "Gesehen",
  "Ignored": "Ignoriert",
  "Filtered out": "Aussortiert",
- "Hits Claude's screening held back: no push, kept here in case you want a look.": "Treffer, die Claudes Prüfung zurückgehalten hat: kein Push, aber hier zum Nachsehen.",
+ "Hits Claude's screening or the agent's Geizhals rule held back: no push, kept here in case you want a look.": "Treffer, die Claudes Prüfung oder die Geizhals-Regel des Agenten zurückgehalten hat: kein Push, hier aufgehoben, falls du sie dir ansehen willst.",
  "All": "Alle",
  "Mark all as seen": "Alle als gesehen markieren",
  "Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens willhaben.": "Treffer anklicken öffnet die Anzeige hier; ← / → blättert, Strg-Klick öffnet willhaben.",

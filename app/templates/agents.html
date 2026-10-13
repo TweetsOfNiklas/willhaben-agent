@@ -38,7 +38,7 @@
           {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
           {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|unique|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
           {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=site_names|join(', ')) }}{% endif %}
-          {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}
+          {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}{% if a.geizhals_pct %} · {{ _("{pct} % below Geizhals", pct=a.geizhals_pct) }}{% endif %}
         </div>
         {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</div>{% endif %}
         {% if a.last_error %}<div class="text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
@@ -73,6 +73,11 @@
           <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}" class="input w-full bg-base-200"></label>
           <div class="border-t border-base-300 py-2.5">{{ ui.switch_row(_("Notify"), _("Push to phone / Telegram for new hits"), a.notify, 'name="notify_on"') }}</div>
           <div class="border-t border-base-300 py-2.5">{{ ui.switch_row(_("Report price drops"), _("Also when an already seen ad gets cheaper"), a.notify_price_drops, 'name="drops_on"') }}</div>
+          {# Geizhals rule: the switch shows the percentage; unticked, the agent pushes regardless of Geizhals #}
+          <div class="border-t border-base-300 py-2.5" x-data="{ gh: {{ 'true' if a.geizhals_pct else 'false' }} }">
+            {{ ui.switch_row(_("Below the Geizhals price"), _("Only push ads at least this much cheaper than the lowest new price on Geizhals. Ads Geizhals does not know are pushed as usual; the others are filtered out."), a.geizhals_pct, 'name="gh_on" x-model="gh"') }}
+            <label x-show="gh" x-cloak class="mt-2 flex items-center gap-2 text-[13px]"><input type="number" name="gh_pct" min="1" max="95" step="1" value="{{ a.geizhals_pct or 30 }}" class="input input-sm w-20 bg-base-200" aria-label="{{ _('% below the Geizhals new price') }}"><span>{{ _("% below the Geizhals new price") }}</span></label>
+          </div>
           {% set searches = agent_searches(a) %}{% set choices = keyword_sites(a) %}
           <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">
             {{ ui.eyebrow(_("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches"), 'mb-1.5') }}

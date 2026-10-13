@@ -40,6 +40,7 @@ class SearchAgent(SQLModel, table=True):
     screen_brief: str | None = None     # what exactly the owner is looking for (for the screening)
     screen_min: str | None = None       # match | fair | good: lowest result that still pushes
     screen_hide: str | None = None      # comma list of screening issues that keep a hit from pushing; None = defaults, "-" = none
+    geizhals_pct: int | None = None     # push only ads at least this many % below the Geizhals new price; None = off
     # created from a product search: several keyword searches per check (source_url/webapi_url mirror the first)
     # [{keyword, webapi_url, source_url, price_from, price_to, category_path, why}]
     queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
@@ -76,6 +77,8 @@ class Hit(SQLModel, table=True):
     screen_issues: list[str] | None = Field(default=None, sa_column=Column(JSON))  # predefined reasons (screening.ISSUES)
     screen_at: datetime | None = None
     scam_flags: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # app/services/scam.py
+    # the matching Geizhals product {name, url, price_from} for an agent's Geizhals rule; {} = none found, None = not asked
+    geizhals: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
 
 
 class Conversation(SQLModel, table=True):

@@ -444,8 +444,12 @@ async def _run_agent(agent_id: int) -> RunResult:
         db.refresh(agent)
 
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
-    if agent.screen and to_notify:      # Claude: right item? good deal? (a new price is a new deal)
-        await screening.screen(agent_id, to_notify)
+    if agent.geizhals_pct and to_notify:
+        await _geizhals_prices(to_notify)
+    to_screen = [h for h in to_notify if geizhals_passes(agent, h)]   # held back anyway: no Claude call
+    if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
+        await screening.screen(agent_id, to_screen)
+    if (agent.screen or agent.geizhals_pct) and to_notify:
         _file_screened(agent, res.new, res.price_drops)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
@@ -455,14 +459,15 @@ async def _run_agent(agent_id: int) -> RunResult:
         return f"{_site(pid).name} · {name}" if multi else name
 
     if notify_new and res.new:
-        good = [h.id for h in res.new if screening.passes(agent, h)]
+        good = [h.id for h in res.new if passes(agent, h)]
         pushed = set(good[:MAX_PUSH_PER_RUN])
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
                 await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}".strip(" :"),
                              _hit_text(h), url=h.url, image=h.image_url, push=h.id in pushed,
                              data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
-                                   "price": h.price, "location": h.location, **_screen_data(h), **_scam_data(h)})
+                                   "price": h.price, "location": h.location, **_screen_data(h), **_scam_data(h),
+                                   **_geizhals_data(h)})
         if len(good) > MAX_PUSH_PER_RUN:
             sites = list(dict.fromkeys(h.platform for h in res.new))
             await notify("hit", label(sites[0]) if len(sites) == 1 else name,
@@ -472,9 +477,10 @@ async def _run_agent(agent_id: int) -> RunResult:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
                          f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}" + _scam_line(h)
-                         + _screen_line(h), url=h.url, image=h.image_url, push=screening.passes(agent, h),
+                         + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url, push=passes(agent, h),
                          data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
-                               "price": h.price, "old_price": h.old_price, **_screen_data(h), **_scam_data(h)})
+                               "price": h.price, "old_price": h.old_price, **_screen_data(h), **_scam_data(h),
+                               **_geizhals_data(h)})
     return res
 
 
@@ -486,11 +492,44 @@ def _site(pid: str | None) -> platforms.Platform:
         return platforms.get("willhaben")
 
 
+def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
+    """The agent's Geizhals rule: the price is at least `geizhals_pct` % below the Geizhals new price. Without the rule,
+    a known product (not found, Geizhals unreachable) or a price there is nothing to compare: the hit passes."""
+    new_price = (hit.geizhals or {}).get("price_from")
+    if not agent.geizhals_pct or not new_price or hit.price is None:
+        return True
+    return hit.price <= new_price * (1 - agent.geizhals_pct / 100)
+
+
+def passes(agent: SearchAgent, hit: Hit) -> bool:
+    """Should this hit push: the screening lets it through and it keeps the Geizhals rule."""
+    return screening.passes(agent, hit) and geizhals_passes(agent, hit)
+
+
+async def _geizhals_prices(hits: list[Hit]) -> None:
+    """The Geizhals product of every hit not asked yet (the price check's lookup, cached 6 h per product name)."""
+    from app.services import deals
+
+    todo = [h for h in hits if h.geizhals is None]
+    for h in todo:
+        gh = await deals.geizhals_match(deals.geizhals_query(h.heading))
+        h.geizhals = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}
+    if not todo:
+        return
+    with session() as db:
+        for h in todo:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.geizhals = h.geizhals
+                db.add(row)
+        db.commit()
+
+
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit]) -> None:
-    """A new hit the screening holds back gets no push, so it goes to "filtered" instead of "new"; a filtered hit
-    that passes after a price drop is pushed and becomes new again."""
-    moves = [(h, "new", "filtered") for h in new if not screening.passes(agent, h)]
-    moves += [(h, "filtered", "new") for h in drops if screening.passes(agent, h)]
+    """A new hit the screening or the Geizhals rule holds back gets no push, so it goes to "filtered" instead of
+    "new"; a filtered hit that passes after a price drop is pushed and becomes new again."""
+    moves = [(h, "new", "filtered") for h in new if not passes(agent, h)]
+    moves += [(h, "filtered", "new") for h in drops if passes(agent, h)]
     if not moves:
         return
     with session() as db:
@@ -522,7 +561,31 @@ def _screen_line(h: Hit) -> str:
 
 
 def _hit_text(h: Hit) -> str:
-    return f"{h.heading} ({h.location or '?'})" + _scam_line(h) + _screen_line(h)
+    return f"{h.heading} ({h.location or '?'})" + _scam_line(h) + _geizhals_line(h) + _screen_line(h)
+
+
+def geizhals_below_pct(h: Hit) -> int | None:
+    """How many % the hit is below its Geizhals new price (negative: above); None without both prices."""
+    new_price = (h.geizhals or {}).get("price_from")
+    if not new_price or h.price is None:
+        return None
+    return round((1 - h.price / new_price) * 100)
+
+
+def _geizhals_line(h: Hit) -> str:
+    pct = geizhals_below_pct(h)
+    if pct is None:
+        return ""
+    price = f"{h.geizhals['price_from']:g} €"
+    if pct < 0:
+        return "\n" + t("Geizhals: new from {price}, {pct} % more", price=price, pct=-pct)
+    return "\n" + t("Geizhals: new from {price}, {pct} % less", price=price, pct=pct)
+
+
+def _geizhals_data(h: Hit) -> dict:
+    """The Geizhals comparison in the HA event."""
+    pct = geizhals_below_pct(h)
+    return {} if pct is None else {"geizhals_price": h.geizhals["price_from"], "geizhals_below_pct": pct}
 
 
 def _screen_data(h: Hit) -> dict:

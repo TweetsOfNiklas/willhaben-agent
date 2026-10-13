@@ -17,7 +17,8 @@ It runs on your own server, from your home internet connection, and you control 
   tick the sites in the agent's settings), and get notified about new listings and price drops, usually much faster
   than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
   Optionally Claude screens every new hit against a description of what you're looking for (right item? good deal?
-  predefined reasons such as "accessory only" or "wrong variant"), and a rule-based scam check flags suspicious offers;
+  predefined reasons such as "accessory only" or "wrong variant"), a rule-based scam check flags suspicious offers,
+  and an agent can push only ads at least a chosen percentage below the lowest new price on Geizhals;
   only hits that pass reach your phone, the others go to their own "Filtered out" list instead of New. Agents check
   at irregular, human-like intervals and slow down at night.
   A search agent can also be created from a finished product search: it then runs all of that search's keyword
