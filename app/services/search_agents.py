@@ -8,6 +8,7 @@ URLs or JSON; the adapters do.
 """
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -146,43 +147,146 @@ def _keyword_site(pid: str) -> platforms.Platform:
     return p
 
 
+def _fillable(pid: str) -> bool:
+    """A site that takes every search term of its agent: known, switched on, with a keyword search."""
+    try:
+        return platforms.enabled(pid) and platforms.get(pid).can("keyword_search")
+    except platforms.UnknownPlatform:
+        return False
+
+
+def _term(q: dict[str, Any]) -> tuple[str, Any, Any] | None:
+    """A search's term: its keyword (spaces normalised) with its price range, the same on every site. None for a
+    search without a term (a pasted filter link), which belongs to its one site."""
+    kw = " ".join(str(q.get("keyword") or "").split())
+    return (kw, q.get("price_from"), q.get("price_to")) if kw else None
+
+
+def term_key(term: tuple[str, Any, Any]) -> str:
+    """A term as the settings drawer sends it back to remove it (drop_term): JSON [keyword, price_from, price_to]."""
+    return json.dumps(list(term), ensure_ascii=False)
+
+
+def parse_term_key(raw: str) -> tuple[str, float | None, float | None] | None:
+    """term_key() read back; None for anything else (a stale or hand-made value is ignored, not an error)."""
+    try:
+        kw, pf, pt = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(kw, str) or any(v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)))
+                                      for v in (pf, pt)):
+        return None
+    kw = " ".join(kw.split())
+    return (kw, pf, pt) if kw else None
+
+
 def edit_searches(agent: SearchAgent, drop: Iterable[int] = (), sites: list[str] | None = None, add: str = "",
-                  price_from: float | None = None, price_to: float | None = None) -> bool:
-    """Change an agent's searches in one go: remove some (indices into agent_searches), watch `sites` (None = as now;
-    a newly chosen site gets every search term, a dropped one loses its searches) and add the term `add` on each of
-    its sites. Raises ValueError and changes nothing on a mistake. True when searches were added: their first check
-    should count what they find as seen, not push it."""
-    drop = set(drop)
-    kept = [q for i, q in enumerate(agent_searches(agent)) if i not in drop]
-    if not kept:
-        raise ValueError(t("Keep at least one search, or delete the agent."))
+                  price_from: float | None = None, price_to: float | None = None, *,
+                  drop_terms: Iterable[tuple[str, Any, Any]] = (),
+                  add_terms: Iterable[tuple[str, float | None, float | None]] = ()) -> bool:
+    """Change an agent's searches in one go. A search term (keyword + price range) runs on every site the agent
+    watches: `drop_terms` removes terms on every site; `add` (with `price_from`/`price_to`) and `add_terms` add terms;
+    every chosen site that is switched on ends up with every term (also rows from before this rule that lack one),
+    a watched site that is switched off or gone keeps what it has. `drop` removes single searches by index into
+    agent_searches (the drawer sends it for searches without a term: a pasted filter link, one site each). `sites`:
+    the sites to watch (None = as now); a site no longer chosen loses its searches. Raises ValueError and changes
+    nothing on a mistake. True when searches were added: their first check should count what they find as seen."""
 
     def site(q: dict[str, Any]) -> str:
         return str(q.get("platform") or agent.platform or "willhaben")
 
-    current = list(dict.fromkeys(site(q) for q in kept))
-    wanted = current if sites is None else list(dict.fromkeys(s.strip().lower() for s in sites if s.strip()))
+    every = agent_searches(agent)
+    drop, gone = set(drop), {x for x in drop_terms if x}
+    kept = [q for i, q in enumerate(every) if i not in drop and _term(q) not in gone]
+    if sites is None:      # as now: the sites that keep a search; all of them when none does (a new term replaces it)
+        wanted = list(dict.fromkeys(site(q) for q in kept or every))
+    else:
+        wanted = list(dict.fromkeys(s.strip().lower() for s in sites if s.strip()))
     if not wanted:
         raise ValueError(t("Choose at least one site."))
-    add = " ".join((add or "").split())
-    terms = list(dict.fromkeys((q["keyword"], q.get("price_from"), q.get("price_to")) for q in kept if q.get("keyword")))
-    new_term = [(add, price_from, price_to)] if add else []
+    new = [(" ".join((kw or "").split()), pf, pt) for kw, pf, pt in [(add, price_from, price_to), *add_terms]]
+    terms = list(dict.fromkeys([x for x in map(_term, kept) if x] + [x for x in new if x[0]]))
     searches = [q for q in kept if site(q) in wanted]
-    have = {(site(q), q.get("keyword"), q.get("price_from"), q.get("price_to")) for q in searches}
+    have = {(site(q), _term(q)) for q in searches}
+    watched = {site(q) for q in every}
     added = False
     for pid in wanted:
-        todo = list(dict.fromkeys(terms + new_term)) if pid not in current else new_term
-        if pid not in current and not todo:
-            raise ValueError(t("The searches have no search term to use on {name}.", name=_keyword_site(pid).name))
-        p = _keyword_site(pid) if todo else None
-        for kw, pf, pt in todo:
-            spec = p.keyword_search(kw, pf, pt)
-            if (pid, spec.keyword, pf, pt) not in have:
-                have.add((pid, spec.keyword, pf, pt))
-                searches.append(_query_of(spec))
+        if not _fillable(pid):
+            if pid not in watched:
+                _keyword_site(pid)      # a newly chosen site must take the terms: raises why it cannot
+            continue                    # a watched site switched off (or gone) keeps what it has
+        p = platforms.get(pid)
+        for term in terms:
+            if (pid, term) in have:
+                continue
+            q = _query_of(p.keyword_search(*term))
+            if (pid, _term(q)) not in have:     # the site may word the term the way a search it has does
+                searches.append(q)
                 added = True
+            have |= {(pid, term), (pid, _term(q))}
+    if not searches:     # checked after adding: the only term can be swapped in one Save
+        raise ValueError(t("Keep at least one search, or delete the agent."))
+    for pid in wanted:
+        if not any(site(q) == pid for q in searches):     # nothing to search there: say why
+            raise ValueError(t("The searches have no search term to use on {name}.", name=_keyword_site(pid).name))
     set_searches(agent, searches)
     return added
+
+
+def _site_name(pid: str) -> str:
+    try:
+        return platforms.get(pid).name
+    except platforms.UnknownPlatform:
+        return pid
+
+
+def agent_search_items(agent: SearchAgent) -> dict[str, Any]:
+    """An agent's searches as its settings drawer shows them.
+    terms: each search term once (keyword + price range; it runs on every site the agent watches): `k` (its key in the
+      page's Alpine component), `key` (sent back as drop_term), the sites it runs on, a link to its search on the
+      first of them, the product search's `why`, and `missing`/`missing_names`: ticked sites that are switched on and
+      lack it (rows from before this rule), which the next Save fills in.
+    filters: the searches without a term (a pasted filter link, one site each): `index` into agent_searches (sent back
+      as drop_query), `label` in words from the site's describe() ("Search link" when it has nothing better), its
+      site, prices and link.
+    per_check: searches per check after Save as shown; choices: the site chips (keyword_sites); js: for agentSearches."""
+    searches = agent_searches(agent)
+    watched = agent_platforms(agent)
+    sites = keyword_sites(agent)
+    choices = [p.id for p in sites]
+    ticked = [pid for pid in watched if pid in choices] if len(choices) > 1 else watched
+    fill = [pid for pid in dict.fromkeys(watched + choices) if _fillable(pid)]
+    terms: dict[tuple[str, Any, Any], dict[str, Any]] = {}
+    filters: list[dict[str, Any]] = []
+    for i, q in enumerate(searches):
+        pid = str(q.get("platform") or agent.platform or "willhaben")
+        term = _term(q)
+        if term:
+            row = terms.setdefault(term, {"k": f"t{len(terms)}", "key": term_key(term), "keyword": term[0],
+                                          "price_from": term[1], "price_to": term[2], "sites": [],
+                                          "url": q.get("source_url") or "", "why": ""})
+            if pid not in row["sites"]:
+                row["sites"].append(pid)
+            row["why"] = row["why"] or str(q.get("why") or "")
+            continue
+        try:
+            label = platforms.get(pid).describe(_query_spec(q, pid))
+        except Exception:  # noqa: BLE001 - a site that no longer exists, or a stored search it cannot read
+            label = ""
+        if not label or label == t("search"):
+            label = t("Search link")
+        filters.append({"k": f"f{i}", "index": i, "platform": pid, "label": label, "url": q.get("source_url") or "",
+                        "price_from": q.get("price_from"), "price_to": q.get("price_to")})
+    rows = list(terms.values())
+    for row in rows:
+        row["missing"] = [pid for pid in ticked if pid in fill and pid not in row["sites"]]
+        row["missing_names"] = [_site_name(pid) for pid in row["missing"]]
+    per_check = sum((len(rows) if pid in fill else sum(pid in r["sites"] for r in rows))
+                    + sum(f["platform"] == pid for f in filters) for pid in ticked)
+    return {"terms": rows, "filters": filters, "per_check": per_check, "choices": sites,
+            "js": {"terms": {r["k"]: {"t": [r["keyword"], r["price_from"], r["price_to"]], "sites": r["sites"],
+                                      "missing": r["missing"]} for r in rows},
+                   "filters": {f["k"]: f["platform"] for f in filters}, "sites": ticked, "fill": fill}}
 
 
 def agent_interval(agent: SearchAgent, interval_s: int) -> int:

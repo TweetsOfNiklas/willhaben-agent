@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block content %}
+{# the settings drawer's Searches block: two page-local macros (like agent_new.html's fchip) #}
+{# a price range as the drawer shows it: "€ 100 – € 300", "from € 100", "up to € 300"; nothing without one #}
+{% macro price_range(pf, pt) -%}
+{%- if pf or pt %}<small class="shrink-0 text-[12.5px] text-muted tabular-nums">{% if pf and pt %}{{ pf|eur }} – {{ pt|eur }}{% elif pf %}{{ _("from {price}", price=pf|eur) }}{% else %}{{ _("up to {price}", price=pt|eur) }}{% endif %}</small>{% endif -%}
+{%- endmacro %}
+{# × at the end of a search row (li.group/row): a hidden checkbox Save posts (drop_term: a search term on every site;
+   drop_query: one search without a term). Ticked, CSS strikes the row through and × turns into undo; a second click
+   keeps the search. The last search cannot go: its box is disabled (server: only one search; Alpine: left() <= 1),
+   and a disabled box is invisible. k: the row's key in agentSearches.drop. #}
+{% macro drop_toggle(name, value, k, what, title, last) -%}
+<label class="inline-grid size-7 shrink-0 cursor-pointer place-items-center rounded-field text-muted hover:bg-bad-soft hover:text-error has-[:checked]:text-primary has-[:checked]:hover:bg-brand-soft has-[:checked]:hover:text-primary has-[:disabled]:invisible has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary" title="{{ title }}" :title="drop.{{ k }} ? T.keep : {{ title|tojson|forceescape }}">
+  <input type="checkbox" name="{{ name }}" value="{{ value }}" class="sr-only" x-model="drop.{{ k }}" :disabled="!drop.{{ k }} && left() <= 1"{% if last %} disabled{% endif %} aria-label="{{ title }}: {{ what }}">
+  <span class="grid group-has-[:checked]/row:hidden">{{ ui.icon('x', 14) }}</span><span class="hidden group-has-[:checked]/row:grid">{{ ui.icon('undo', 14) }}</span>
+</label>
+{%- endmacro %}
 {% call ui.head(_("Search agents"), _("Watch searches on {sites} and report new ads and price drops. Checks run at irregular, human-like intervals and slow down at night.", sites=platforms_all()|map(attribute='name')|join(', '))) %}
   <a href="/agents/new" class="btn btn-primary">+ {{ _("New search agent") }}</a>
 {% endcall %}
@@ -78,29 +93,78 @@
             {{ ui.switch_row(_("Below the Geizhals price"), _("Only push ads at least this much cheaper than the lowest new price on Geizhals. Ads Geizhals does not know are pushed as usual; the others are filtered out."), a.geizhals_pct, 'name="gh_on" x-model="gh"') }}
             <label x-show="gh" x-cloak class="mt-2 flex items-center gap-2 text-[13px]"><input type="number" name="gh_pct" min="1" max="95" step="1" value="{{ a.geizhals_pct or 30 }}" class="input input-sm w-20 bg-base-200" aria-label="{{ _('% below the Geizhals new price') }}"><span>{{ _("% below the Geizhals new price") }}</span></label>
           </div>
-          {% set searches = agent_searches(a) %}{% set choices = keyword_sites(a) %}
-          <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">
-            {{ ui.eyebrow(_("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches"), 'mb-1.5') }}
-            {# a ticked box removes that search on Save; the last one stays (delete the agent instead) #}
-            {% for q in searches %}
-            <div x-data="{ drop: false }" class="flex items-center justify-between gap-3 py-0.5 text-[13px]">
-              <span class="min-w-0" :class="drop && 'line-through opacity-50'"><a class="link link-primary no-underline" href="{{ q.source_url }}" target="_blank" rel="noopener">{{ q.keyword or _("search") }}</a>{% if site_names|length > 1 %} <small class="text-muted">· {{ platform_name(q.platform) }}</small>{% endif %}{% if q.price_from %} <small class="text-muted">{{ _("from {price}", price=q.price_from|eur) }}</small>{% endif %}{% if q.price_to %} <small class="text-muted">{{ _("up to {price}", price=q.price_to|eur) }}</small>{% endif %}</span>
-              {% if searches|length > 1 %}<label class="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12.5px] text-muted"><input type="checkbox" name="drop_query" value="{{ loop.index0 }}" x-model="drop" class="checkbox checkbox-primary checkbox-sm">{{ _("remove") }}</label>{% endif %}
+          {# Searches: each search term once (it runs on every ticked site; × removes it everywhere), the searches without
+             a term (a pasted filter link, one site each), terms added before Save, then the sites. Save applies it all
+             with plain form fields; Alpine (agentSearches, end of page) previews: the count, added rows, warnings. #}
+          {% set srch = agent_search_items(a) %}{% set choices = srch.choices %}
+          {% set last = srch.terms|length + srch.filters|length == 1 %}
+          {% set remove_term = _("Remove from every site") if choices|length > 1 else _("Remove") %}
+          <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3" x-data="agentSearches({{ srch.js|tojson|forceescape }})">
+            <div class="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              {{ ui.eyebrow(_("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches")) }}
+              <small class="text-[12px] text-muted tabular-nums" x-text="perCheck()">{{ _("1 search per check") if srch.per_check == 1 else _("{n} searches per check", n=srch.per_check) }}</small>
             </div>
-            {% endfor %}
-            {# one more search term, sent to every site the agent watches #}
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <input name="add_keyword" placeholder="{{ _('Add a search term') }}" aria-label="{{ _('Add a search term') }}" class="input input-sm min-w-0 flex-1 basis-40 bg-base-100">
-              <input name="add_price_from" inputmode="numeric" placeholder="{{ _('from') }} €" aria-label="{{ _('from') }} €" class="input input-sm w-20 bg-base-100">
-              <input name="add_price_to" inputmode="numeric" placeholder="{{ _('to') }} €" aria-label="{{ _('to') }} €" class="input input-sm w-20 bg-base-100">
-            </div>
+            <ul class="divide-y divide-base-300 overflow-hidden rounded-field border border-base-300 bg-base-100" aria-label="{{ _('Searches') }}">
+              {# searches without a term: one site each, named in words (never just "search") #}
+              {% for f in srch.filters %}
+              <li class="group/row flex items-center gap-2 py-1 pr-1.5 pl-3">
+                <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 group-has-[:checked]/row:line-through group-has-[:checked]/row:opacity-50" :class="!sites.includes({{ f.platform|tojson|forceescape }}) && 'line-through opacity-50'">
+                  {{ ui.icon('filter', 13, 2, 'text-muted') }}
+                  <a href="{{ f.url }}" target="_blank" rel="noopener" title="{{ _('Search on {platform}', platform=platform_name(f.platform)) }}" class="max-w-full min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ f.label }}</a>
+                  {{ price_range(f.price_from, f.price_to) }}
+                  {{ ui.pill(_("only {site}", site=platform_name(f.platform)), '', false, 'shrink-0') }}
+                </span>
+                {{ drop_toggle('drop_query', f.index, f.k, f.label, _('Remove'), last) }}
+              </li>
+              {% endfor %}
+              {# search terms: each once with its price range; it runs on every ticked site #}
+              {% for term in srch.terms %}
+              <li class="group/row flex items-center gap-2 py-1 pr-1.5 pl-3 transition-colors" :class="flashed === '{{ term.k }}' && 'bg-brand-soft'">
+                <span class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 group-has-[:checked]/row:line-through group-has-[:checked]/row:opacity-50">
+                  <a href="{{ term.url }}" target="_blank" rel="noopener" title="{{ (term.why ~ ' · ') if term.why }}{{ _('Search on {platform}', platform=platform_name(term.sites[0])) }}" class="max-w-full min-w-0 truncate font-medium text-base-content no-underline hover:underline">{{ term.keyword }}</a>
+                  {{ price_range(term.price_from, term.price_to) }}
+                  {% if term.missing %}<small class="text-[12px] text-warning" x-show="!drop.{{ term.k }} && missing('{{ term.k }}')">{{ _("not on {sites} yet – Save adds it", sites=term.missing_names|join(', ')) }}</small>{% endif %}
+                </span>
+                {{ drop_toggle('drop_term', term.key, term.k, term.keyword, remove_term, last) }}
+              </li>
+              {% endfor %}
+              {# terms added before Save: each row sends its own add_keyword / add_price_from / add_price_to #}
+              <template x-for="n in adds" :key="n.id">
+                <li class="flex items-center gap-2 py-1 pr-1.5 pl-3 transition-colors" :class="flashed === n.id && 'bg-brand-soft'">
+                  <span class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5">
+                    <span class="max-w-full min-w-0 truncate font-medium" x-text="n.kw"></span>
+                    <small class="shrink-0 text-[12.5px] text-muted tabular-nums" x-show="range(n)" x-text="range(n)"></small>
+                  </span>
+                  {{ ui.pill(_("new"), 'brand', false, 'shrink-0') }}
+                  <input type="hidden" name="add_keyword" :value="n.kw"><input type="hidden" name="add_price_from" :value="n.pf ?? ''"><input type="hidden" name="add_price_to" :value="n.pt ?? ''">
+                  <button type="button" class="inline-grid size-7 shrink-0 place-items-center rounded-field text-muted hover:bg-bad-soft hover:text-error focus-visible:outline-2 focus-visible:outline-primary disabled:invisible" :disabled="left() <= 1" @click="adds = adds.filter(x => x.id !== n.id)" :title="T.remove" :aria-label="T.remove + ': ' + n.kw">{{ ui.icon('x', 14) }}</button>
+                </li>
+              </template>
+              {# one more term: Enter or + lists it above (several before Save); typed but not added, Save still sends it.
+                 Phone: the term on its own line, the prices and + below #}
+              <li class="flex flex-wrap items-center gap-1.5 py-2 pr-1.5 pl-3">
+                <input name="add_keyword" x-ref="kw" x-model="kw" @keydown.enter="enter($event)" autocomplete="off" placeholder="{{ _('Add a search term') }}" aria-label="{{ _('Add a search term') }}" class="input input-sm min-w-0 flex-1 basis-36 bg-base-200">
+                <span class="flex items-center gap-1.5">
+                  <input name="add_price_from" x-model="pf" @keydown.enter="enter($event)" inputmode="numeric" placeholder="{{ _('from') }} €" aria-label="{{ _('from') }} €" class="input input-sm w-18 bg-base-200">
+                  <input name="add_price_to" x-model="pt" @keydown.enter="enter($event)" inputmode="numeric" placeholder="{{ _('to') }} €" aria-label="{{ _('to') }} €" class="input input-sm w-18 bg-base-200">
+                  <button type="button" x-cloak class="btn btn-sm btn-square" :disabled="!kw.trim()" @click="add()" title="{{ _('Add a search term') }}" aria-label="{{ _('Add a search term') }}">{{ ui.icon('plus', 16) }}</button>
+                </span>
+              </li>
+            </ul>
             {% if choices|length > 1 %}
+            {# the sites, chosen once for every term: a ticked site gets every term, an unticked one loses its searches #}
             <input type="hidden" name="sites_shown" value="1">
-            <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px]"><span class="text-[12.5px] text-muted">{{ _("Sites:") }}</span>
-              {% for pc in choices %}<label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" name="sites" value="{{ pc.id }}" class="checkbox checkbox-sm"{% if pc.id in site_ids %} checked{% endif %}>{{ pc.name }}</label>{% endfor %}
+            <div class="mt-3 flex flex-wrap items-center gap-1.5">
+              <span class="mr-0.5 text-[12.5px] text-muted">{{ _("Sites:") }}</span>
+              {% for pc in choices %}{% set off = pc.id not in srch.js.fill %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"{% if off %} title="{{ _('{name} is switched off in Settings → Platforms', name=pc.name) }}"{% endif %}><input type="checkbox" name="sites" value="{{ pc.id }}" class="checkbox checkbox-primary checkbox-xs"{% if pc.id in srch.js.sites %} checked{% endif %} x-model="sites">{{ pc.name }}{% if off %}<small class="text-[11px] opacity-65">{{ _("off") }}</small>{% endif %}</label>{% endfor %}
             </div>
-            <small class="mt-1.5 block text-[12px] leading-snug text-muted">{{ _("A newly ticked site gets every search term. New searches start quietly: what they find on their first check counts as seen.") }}</small>
+            <p x-show="!sites.length" x-cloak class="mt-1.5 text-[12px] text-error">{{ _("Choose at least one site.") }}</p>
+            <p x-show="sites.length && left() && needsTerm()" x-cloak class="mt-1.5 text-[12px] text-warning">{{ _("The other sites need a search term: type one above.") }}</p>
+            {% for pc in choices if pc.id not in srch.js.fill %}<p x-show="sites.includes({{ pc.id|tojson|forceescape }}) && !perSite({{ pc.id|tojson|forceescape }})" x-cloak class="mt-1.5 text-[12px] text-warning">{{ _("{name} is switched off in Settings → Platforms", name=pc.name) }}</p>{% endfor %}
+            <small class="mt-2 block text-[12px] leading-snug text-muted">{{ _("Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.") }}</small>
             {% endif %}
+            <p x-show="sites.length && !left()" x-cloak class="mt-1.5 text-[12px] text-error">{{ _("Keep at least one search, or delete the agent.") }}</p>
+            <p x-show="dirty()" x-cloak class="mt-1.5 text-[12px] text-primary">{{ _("Changes apply when you save.") }}</p>
           </div>
           <div class="rounded-box border border-base-300 bg-base-200 px-3.5 py-3">{% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a) %}{% include "_screen_fields.html" %}{% endwith %}</div>
           <footer class="mt-auto flex flex-wrap items-center gap-2 border-t border-base-300 pt-3.5">
@@ -120,4 +184,84 @@
   <a href="/agents/new" class="btn btn-primary mt-1.5">{{ _("Create your first search agent") }}</a>
 {% endcall %}
 {% endif %}
+<script>
+// The Searches block of each agent's settings drawer. Save posts plain form fields (drop_term, drop_query, add_*,
+// sites); this only shows what Save will do: the count, rows added before Save, the guard for the last search.
+// o = search_agents.agent_search_items(agent).js: terms {k: {t: [keyword, from, to], sites, missing}},
+// filters {k: site} (searches without a term), sites (ticked now), fill (sites that take every term: switched on)
+document.addEventListener('alpine:init', () => Alpine.data('agentSearches', (o) => ({
+  T: {one: {{ _("1 search per check")|tojson }}, n: {{ _("{n} searches per check")|tojson }},
+      from: {{ _("from {price}")|tojson }}, upto: {{ _("up to {price}")|tojson }},
+      remove: {{ _("Remove")|tojson }}, keep: {{ _("Keep after all")|tojson }}},
+  sites: [...o.sites], adds: [], kw: '', pf: '', pt: '', seq: 0, flashed: '', timer: null,
+  drop: Object.fromEntries([...Object.keys(o.terms), ...Object.keys(o.filters)].map(k => [k, false])),
+  kept() { return Object.keys(o.terms).filter(k => !this.drop[k]); },
+  // saved terms that stay, rows added before Save and the term still typed (Save sends it too; one it has already
+  // adds nothing)
+  terms() {
+    const t = this.typed(), k = this.known(t);
+    return this.kept().length + this.adds.length + (t[0] && !(k.saved && !this.drop[k.saved]) && !k.pending ? 1 : 0);
+  },
+  // the add row as Save sends it: [keyword, from, to]
+  typed() { return [this.kw.trim().replace(/\s+/g, ' '), this.num(this.pf), this.num(this.pt)]; },
+  // the saved term (its key) and the row added before Save that equal t
+  known(t) {
+    const same = (x) => x[0] === t[0] && x[1] === t[1] && x[2] === t[2];
+    return {saved: Object.keys(o.terms).find(k => same(o.terms[k].t)), pending: this.adds.find(n => same([n.kw, n.pf, n.pt]))};
+  },
+  filtersOn(s) { return Object.keys(o.filters).filter(k => o.filters[k] === s && !this.drop[k]).length; },
+  // a ticked site that is switched on gets every term; a switched-off one keeps the terms it has
+  perSite(s) {
+    const terms = o.fill.includes(s) ? this.terms() : this.kept().filter(k => o.terms[k].sites.includes(s)).length;
+    return terms + this.filtersOn(s);
+  },
+  perCheck() {
+    const n = this.sites.reduce((sum, s) => sum + this.perSite(s), 0);
+    return n === 1 ? this.T.one : this.T.n.replace('{n}', n);
+  },
+  // what Save keeps (not counted per site): the last one cannot be removed
+  left() { return (this.sites.length ? this.terms() : 0) + this.sites.reduce((sum, s) => sum + this.filtersOn(s), 0); },
+  // a ticked site that would search nothing (a switched-off one has its own warning)
+  needsTerm() { return this.sites.some(s => o.fill.includes(s) && !this.perSite(s)); },
+  missing(k) { return o.terms[k].missing.some(s => this.sites.includes(s)); },
+  dirty() {
+    return this.adds.length > 0 || !!this.kw.trim() || Object.values(this.drop).some(Boolean)
+      || this.sites.length !== o.sites.length || this.sites.some(s => !o.sites.includes(s));
+  },
+  // a price as the server reads it (main.py _num_or_none): "1500", "1.500,50", "1500.50"; null when none
+  num(v) {
+    v = String(v ?? '').replace(/[€\s]/g, '');
+    if (v.includes(',') && v.includes('.')) v = v.lastIndexOf(',') > v.lastIndexOf('.') ? v.replace(/\./g, '').replace(',', '.') : v.replace(/,/g, '');
+    else v = v.replace(/,/g, '.');
+    const n = v === '' ? NaN : Number(v);
+    return Number.isFinite(n) ? n : null;
+  },
+  eur(n) { return '€ ' + n.toLocaleString('de-DE', {minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2}); },
+  range(n) {
+    if (n.pf && n.pt) return this.eur(n.pf) + ' – ' + this.eur(n.pt);
+    if (n.pf) return this.T.from.replace('{price}', this.eur(n.pf));
+    return n.pt ? this.T.upto.replace('{price}', this.eur(n.pt)) : '';
+  },
+  // Enter in the add fields lists the term instead of saving the drawer (nothing typed: Enter saves as usual)
+  enter(e) {
+    if (this.kw.trim()) { e.preventDefault(); this.add(); }
+    else if (this.pf.trim() || this.pt.trim()) { e.preventDefault(); this.$refs.kw.focus(); }
+  },
+  add() {
+    const [kw, pf, pt] = this.typed();
+    if (!kw) return this.$refs.kw.focus();
+    const {saved, pending} = this.known([kw, pf, pt]);
+    if (saved) { this.drop[saved] = false; this.flash(saved); }      // there already (marked: kept after all)
+    else if (pending) this.flash(pending.id);
+    else this.adds.push({id: 'n' + (++this.seq), kw, pf, pt});
+    this.kw = this.pf = this.pt = '';
+    this.$refs.kw.focus();
+  },
+  flash(k) {
+    this.flashed = k;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => { this.flashed = ''; }, 1200);
+  },
+})));
+</script>
 {% endblock %}

@@ -6,6 +6,7 @@ import logging
 import re
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
+from itertools import zip_longest
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlsplit
 from typing import Any
@@ -217,10 +218,10 @@ def _platform_name(pid: str | None) -> str:
 
 # platforms (app/platforms): refs in links, names on cards, whether more than one site is watched
 from app.services.search_agents import agent_platforms as _agent_platforms  # noqa: E402
-from app.services.search_agents import agent_searches as _agent_searches, keyword_sites as _keyword_sites  # noqa: E402
+from app.services.search_agents import agent_search_items as _agent_search_items  # noqa: E402
 from app.services.search_agents import geizhals_below_pct as _geizhals_below_pct  # noqa: E402
 
-templates.env.globals.update(agent_sites=_agent_platforms, agent_searches=_agent_searches, keyword_sites=_keyword_sites,
+templates.env.globals.update(agent_sites=_agent_platforms, agent_search_items=_agent_search_items,
                              geizhals_below_pct=_geizhals_below_pct)
 from app.services import geo as _geo  # noqa: E402
 
@@ -555,18 +556,23 @@ async def agents_toggle(agent_id: int):
 async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = Form(...),
                       notify_on: str | None = Form(None), drops_on: str | None = Form(None),
                       screen_on: str | None = Form(None), screen_brief: str = Form(""), screen_min: str = Form("match"),
-                      screen_hide: list[str] = Form([]), drop_query: list[int] = Form([]),
-                      sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: str = Form(""),
-                      add_price_from: str = Form(""), add_price_to: str = Form(""), gh_on: str | None = Form(None),
-                      gh_pct: str = Form("")):
+                      screen_hide: list[str] = Form([]), drop_query: list[int] = Form([]), drop_term: list[str] = Form([]),
+                      sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: list[str] = Form([]),
+                      add_price_from: list[str] = Form([]), add_price_to: list[str] = Form([]),
+                      gh_on: str | None = Form(None), gh_pct: str = Form("")):
     from app.services import search_agents
 
+    # the drawer's searches: terms to add (each added row and the add row send keyword, from and to, so the three
+    # lists line up), terms to remove on every site (drop_term), searches without a term to remove (drop_query)
+    adds = [(kw, _num_or_none(pf), _num_or_none(pt))
+            for kw, pf, pt in zip_longest(add_keyword, add_price_from, add_price_to, fillvalue="") if kw.strip()]
+    gone = [x for x in map(search_agents.parse_term_key, drop_term) if x]
     with session() as db:
         a = db.get(SearchAgent, agent_id)
-        if drop_query or add_keyword.strip() or sites_shown:     # the drawer's searches and sites
+        if drop_query or gone or adds or sites_shown:     # the drawer's searches and sites
             try:
-                if search_agents.edit_searches(a, drop_query, sites if sites_shown else None, add_keyword,
-                                               _num_or_none(add_price_from), _num_or_none(add_price_to)):
+                if search_agents.edit_searches(a, drop_query, sites if sites_shown else None,
+                                               drop_terms=gone, add_terms=adds):
                     a.baseline_done = False      # new searches start quietly: what they find now counts as seen
             except ValueError as e:
                 return back(f"/agents?error={quote(str(e), safe='')}")

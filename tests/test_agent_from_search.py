@@ -262,7 +262,7 @@ def test_edit_removes_single_searches(app_client):
     a = create_agent_from_search(_search_row(), screen=False)
     form = {"name": a.name, "interval_min": "15"}
     page = app_client.get("/agents").text
-    assert 'name="drop_query" value="0"' in page and 'name="drop_query" value="2"' in page
+    assert page.count('name="drop_term"') == 3 and 'name="drop_query"' not in page   # one row per term
 
     # removing every search is refused: nothing changes
     r = app_client.post(f"/agents/{a.id}/edit", data={**form, "name": "x", "drop_query": ["0", "1", "2"]},
@@ -277,7 +277,9 @@ def test_edit_removes_single_searches(app_client):
     b = _agent(a.id)
     assert [q["keyword"] for q in b.queries] == ["Spülmaschine"]
     assert b.source_url == b.queries[0]["source_url"] and b.webapi_url == b.queries[0]["webapi_url"]
-    assert 'name="drop_query"' not in app_client.get("/agents").text   # the last search has no remove box
+    page = app_client.get("/agents").text
+    assert 'name="drop_query"' not in page and page.count('name="drop_term"') == 1
+    assert ' disabled aria-label="Remove: Spülmaschine"' in page                # the last search cannot be removed
 
 
 def test_create_route_errors(app_client):

@@ -14,7 +14,6 @@
  "Keep at least one search, or delete the agent.": "Mindestens eine Suche muss bleiben – sonst den Agenten löschen.",
  "up to {price}": "bis {price}",
  "Add a search term": "Suchbegriff hinzufügen",
- "A newly ticked site gets every search term. New searches start quietly: what they find on their first check counts as seen.": "Eine neu angehakte Seite bekommt jeden Suchbegriff. Neue Suchen starten leise: was sie bei der ersten Prüfung finden, gilt als gesehen.",
  "Choose at least one site.": "Wähle mindestens eine Seite.",
  "The searches have no search term to use on {name}.": "Die Suchen haben keinen Suchbegriff, der sich auf {name} verwenden lässt.",
  "Below the Geizhals price": "Unter dem Geizhals-Preis",
@@ -25,5 +24,14 @@
  "{pct} % less": "{pct} % billiger",
  "{pct} % more": "{pct} % teurer",
  "Geizhals: new from {price}, {pct} % less": "Geizhals: neu ab {price}, {pct} % billiger",
- "Geizhals: new from {price}, {pct} % more": "Geizhals: neu ab {price}, {pct} % teurer"
+ "Geizhals: new from {price}, {pct} % more": "Geizhals: neu ab {price}, {pct} % teurer",
+ "1 search per check": "1 Suche pro Prüfung",
+ "Search link": "Suchlink",
+ "only {site}": "nur {site}",
+ "not on {sites} yet – Save adds it": "fehlt noch auf {sites} – Speichern ergänzt ihn",
+ "Remove from every site": "Auf allen Seiten entfernen",
+ "Keep after all": "Doch behalten",
+ "new": "neu",
+ "Changes apply when you save.": "Änderungen gelten erst nach dem Speichern.",
+ "Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.": "Jeder Suchbegriff läuft auf jeder angehakten Seite. Neue Suchen starten leise: was sie bei der ersten Prüfung finden, gilt als gesehen."
 }
