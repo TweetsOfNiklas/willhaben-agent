@@ -87,10 +87,13 @@ def fresh_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     dbmod.set_engine(engine)
     dbmod.init_db()
-    from app.platforms import vpn
-    from app.services import jobs
-    from app.willhaben import recorder
+    from app.platforms import ebay, kleinanzeigen, preisjaeger, shpock, vinted, vpn
+    from app.services import geizhals, jobs
+    from app.willhaben import public, recorder
     vpn.reset()                 # VPN tunnels and their (fake) processes are per test
+    for mod in (public, ebay, kleinanzeigen, preisjaeger, shpock, vinted, geizhals):
+        if mod._limiter is not None:     # module-wide: one test's block (429 -> pause) must not pause the next test
+            mod._limiter.reset()
     jobs.reset()                # background jobs are per event loop
     recorder.sync_writes = True  # one in-memory connection: willhaben recordings are written right away
     yield

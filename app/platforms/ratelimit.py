@@ -70,6 +70,13 @@ class RateLimiter:
     def reward(self) -> None:
         self._strikes = 0
 
+    def reset(self) -> None:
+        """Forget the pause, the pacing and the hour's requests (tests: each one starts like a fresh site)."""
+        self._lock = asyncio.Lock()
+        self._last = self._cooldown_until = 0.0
+        self._strikes = 0
+        self._recent.clear()
+
     @property
     def cooling_down_s(self) -> float:
         return max(0.0, self._cooldown_until - time.monotonic())

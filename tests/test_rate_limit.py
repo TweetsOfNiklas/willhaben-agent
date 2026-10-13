@@ -23,3 +23,15 @@ async def test_cooldown_fails_fast():
         async with lim:
             pass
     assert lim.cooling_down_s > 50
+
+
+async def test_reset_forgets_the_pause_and_the_hour():
+    lim = RateLimiter(0, per_hour=5)
+    async with lim:
+        pass
+    lim.penalize()
+    assert lim.cooling_down_s > 0 and lim.last_hour == 1
+    lim.reset()                                   # tests: a block in one test must not pause the next
+    assert lim.cooling_down_s == 0 and lim.last_hour == 0 and lim._strikes == 0
+    async with lim:                               # usable right away
+        pass
