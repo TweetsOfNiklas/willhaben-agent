@@ -21,7 +21,7 @@ from app import platforms, scheduler
 from app.db import Hit, SearchAgent, session
 from app.i18n import t
 from app.platforms import AdDetail, InvalidSearchUrl, PlatformError, UnknownPlatform
-from app.services import deals, product_search, search_agents
+from app.services import deals, jobs, product_search, screening, search_agents
 from app.willhaben.parse import url_param
 from app.willhaben.public import WillhabenError
 
@@ -88,14 +88,14 @@ def _known(p: platforms.Platform, ad_id: str, hit: Hit | None) -> AdDetail | Non
 
 
 async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str | None = None,
-                    use_claude: bool = False, cat: str | None = None,
-                    hit: Hit | None = None) -> tuple[dict[str, Any] | None, str | None]:
+                    use_claude: bool = False, cat: str | None = None, hit: Hit | None = None,
+                    find_geizhals: bool = False) -> tuple[dict[str, Any] | None, str | None]:
     """(result, error). A fresh cached result costs no request; otherwise ad detail (cached) + analysis. Sites
     without an ad-detail call, and a site that fails, use what the hit or the list that showed the ad knows (as the
     ad viewer does); the comparables are willhaben listings either way."""
     p = _platform(platform_id)
     res = deals.cached(p.ref(ad_id), q, cat)
-    if res is not None and not use_claude:
+    if res is not None and not (use_claude or find_geizhals):
         return res, None
     if p.can("detail"):
         try:
@@ -107,7 +107,8 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
         return None, t("No details for this ad; open it on {platform}.", platform=p.name)
     if d is None:
         return None, t("This ad is no longer online (sold, expired or deleted).")
-    return await deals.analyze(d, query=q, use_claude=use_claude, fallback_query=fallback, category_url=cat), None
+    return await deals.analyze(d, query=q, use_claude=use_claude, find_geizhals=find_geizhals, fallback_query=fallback,
+                               category_url=cat), None
 
 
 # Route order matters: Starlette takes the first path that matches, so the 3-segment legacy routes
@@ -146,13 +147,57 @@ async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str 
 @router.post("/deals/ad/{platform}/{ad_id}/claude", response_class=HTMLResponse)
 async def deal_claude_platform(request: Request, platform: str, ad_id: str, q: str = Form(""), hit: str = Form(""),
                                cat: str = Form("")):
-    """Claude's verdict – only ever on this explicit click; cached with the analysis."""
+    """Claude's verdict – only ever on this explicit click; cached with the analysis. Shown among the background
+    jobs while Claude thinks (quietly: this page shows the answer)."""
     h, fallback = _hit(int(hit) if hit.isdigit() else None)
-    res, error = await _analysis(platform, ad_id, q or None, fallback, use_claude=True, cat=_cat(cat, platform), hit=h)
+    async with jobs.track("deal-claude", t("Claude rates the price: „{title}“", title=_title(platform, ad_id, q, cat, h)),
+                          link=_page(platform, ad_id), quiet=True) as job:
+        res, error = await _analysis(platform, ad_id, q or None, fallback, use_claude=True, cat=_cat(cat, platform),
+                                     hit=h)
+        cl = (res or {}).get("claude") or {}
+        if error or cl.get("error"):
+            job.status, job.result = "failed", error or cl["error"]
+        else:
+            job.result = screening.deal_label(cl.get("deal")) if cl.get("deal") else ""
     if res is not None:
         deals.remember(res)
     return _templates().TemplateResponse(request, "_deal_claude.html", {"res": res, "error": error, "q": q,
                                                                         "hit": hit})
+
+
+@router.post("/deals/ad/{platform}/{ad_id}/geizhals", response_class=HTMLResponse)
+async def deal_geizhals_platform(request: Request, platform: str, ad_id: str, q: str = Form(""), hit: str = Form(""),
+                                 cat: str = Form(""), compact: str = Form("")):
+    """Claude looks for the product on Geizhals – only on this explicit click, when the automatic lookup found none.
+    Answers with the whole price section: a new price can place the ad on the bar. A hit the viewer was opened from
+    gets the product too (the hit list shows the comparison)."""
+    h, fallback = _hit(int(hit) if hit.isdigit() else None)
+    async with jobs.track("geizhals-claude", t("Claude searches Geizhals: „{title}“", title=_title(platform, ad_id, q, cat, h)),
+                          link=_page(platform, ad_id), quiet=True) as job:
+        res, error = await _analysis(platform, ad_id, q or None, fallback, cat=_cat(cat, platform), hit=h,
+                                     find_geizhals=True)
+        r = res or {}
+        if error or r.get("geizhals_error"):
+            job.status, job.result = "failed", error or r["geizhals_error"]
+        else:
+            job.result = (r.get("geizhals") or {}).get("name") or r.get("geizhals_none") or ""
+    if res is not None:
+        deals.remember(res)
+        if h is not None and (res.get("geizhals") or {}).get("by") == "claude":
+            search_agents.remember_geizhals(h.id, res["geizhals"])
+    return _templates().TemplateResponse(request, "_deal.html", {"res": res, "error": error, "compact": bool(compact),
+                                                                 "h": h})
+
+
+def _title(platform: str, ad_id: str, q: str, cat: str, h: Hit | None) -> str:
+    """The ad's title for a job label, without a request: the hit's, or the one of the analysis on screen."""
+    res = deals.cached(_platform(platform).ref(ad_id), q or None, _cat(cat, platform))
+    title = (h.heading if h else None) or ((res or {}).get("ad") or {}).get("title") or ad_id
+    return title if len(title) <= 60 else title[:59] + "…"
+
+
+def _page(platform: str, ad_id: str) -> str:
+    return f"/deals/ad/{ad_id}" if platform == "willhaben" else f"/deals/ad/{platform}/{ad_id}"
 
 
 def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = False) -> dict[str, Any]:

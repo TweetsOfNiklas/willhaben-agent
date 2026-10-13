@@ -97,5 +97,17 @@
  "Saving the photos…": "Fotos werden gespeichert…",
  "Saving…": "Wird gespeichert…",
  "Claude is writing…": "Claude schreibt…",
- "Queued: Claude writes": "Eingereiht: Claude schreibt"
+ "Queued: Claude writes": "Eingereiht: Claude schreibt",
+ "Claude rates the price: „{title}“": "Claude bewertet den Preis: „{title}“",
+ "Claude searches Geizhals: „{title}“": "Claude sucht auf Geizhals: „{title}“",
+ "{n} drafts written": "{n} Entwürfe geschrieben",
+ "{n} articles found – check the groups": "{n} Artikel erkannt – prüfe die Gruppen",
+ "Claude sorts {n} photos": "Claude sortiert {n} Fotos",
+ "Claude writes {n} drafts": "Claude schreibt {n} Entwürfe",
+ "Product search: „{text}“": "Produktsuche: „{text}“",
+ "Claude plans the searches": "Claude plant die Suchen",
+ "Searching the sites": "Suche auf den Seiten",
+ "Claude ranks the offers": "Claude bewertet die Angebote",
+ "Claude checks the photos": "Claude prüft die Fotos",
+ "Claude has questions – answer them to go on": "Claude hat Rückfragen – beantworte sie, dann geht es weiter"
 }

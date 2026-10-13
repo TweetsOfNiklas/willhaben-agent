@@ -625,3 +625,124 @@ async def test_category_choices_and_chosen_category(monkeypatch):
     monkeypatch.setattr(deals, "search_category", search_category)
     out = await deals.comparables("iphone", AD_ID, 150, category_id="5013241", title="Handy", category_url=cat)
     assert got == [cat] and out["scope"] == "chosen" and out["count"] == 5   # no leaf filter on a chosen category
+
+
+# ------------------------------------------------------------------ Claude looks for the product on Geizhals
+class ScriptedClaude:
+    """Answers the Geizhals search: first the queries, then the pick (or an error)."""
+    model = "fake-haiku"
+
+    def __init__(self, *answers):
+        self.answers, self.calls = list(answers), []
+
+    async def complete(self, *, system, prompt, schema, images=None):
+        self.calls.append({"system": system, "prompt": prompt, "schema": schema})
+        a = self.answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return LLMResult(data=a, model=self.model)
+
+
+@pytest.fixture
+def no_auto_gh(monkeypatch):
+    """The automatic lookup finds nothing; Geizhals' search pages (gh fixture) still answer Claude's searches."""
+    async def nothing(q):
+        return None
+    monkeypatch.setattr(deals.geizhals, "lookup", nothing)
+
+
+QUERIES = {"product": "Bosch GSR 18V-55 solo", "queries": ["Bosch GSR 18V-55 solo", "Bosch GSR 18V-55"]}
+
+
+async def test_claude_finds_the_geizhals_product(wh, gh, no_auto_gh, monkeypatch):
+    _, state = wh
+    state["search"] = _search_json([100, 120])                  # few comparables: the new price places the ad
+    fake = ScriptedClaude(QUERIES, {"pick": 1, "reason": "Genau dieses Modell, ohne Akku."})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.analyze(_ad(70))
+    assert res["geizhals"] is None and res["position"]["pos"] is None and fake.calls == []   # never automatic
+
+    res = await deals.analyze(_ad(70), find_geizhals=True)
+    assert len(fake.calls) == 2 and "Bosch GSR 18V-55 Akkuschrauber" in fake.calls[0]["prompt"]
+    assert "1. Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo · ab 1139 €" in fake.calls[1]["prompt"]
+    assert "2. Bosch GSR 18V-55 Set · ab 199.9 €" in fake.calls[1]["prompt"]
+    assert gh == ["https://geizhals.at/?fs=Bosch+GSR+18V-55+solo&hloc=at",      # one request per search, no page
+                  "https://geizhals.at/?fs=Bosch+GSR+18V-55&hloc=at"]
+    assert res["geizhals"] == {"name": "Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo",
+                               "url": "https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html",
+                               "price_from": 1139.0, "by": "claude", "reason": "Genau dieses Modell, ohne Akku."}
+    assert res["position"]["basis"] == "geizhals"
+
+    again = await deals.analyze(_ad(70), find_geizhals=True)     # found already: no further Claude call
+    assert len(fake.calls) == 2 and again["geizhals"]["by"] == "claude"
+    deals.remember(again)
+    deals.clear_cache()
+    with dbmod.session() as db:                                 # the analysis gets old and is recomputed …
+        row = db.get(dbmod.DealCheck, AD_ID)
+        row.result = {**row.result, "checked_at": (dbmod.utcnow() - timedelta(hours=2)).isoformat()}
+        db.add(row)
+        db.commit()
+    later = await deals.analyze(_ad(70))
+    assert later["geizhals"]["by"] == "claude" and len(fake.calls) == 2         # … and keeps Claude's product
+
+
+async def test_claude_finds_nothing_or_fails(wh, gh, no_auto_gh, monkeypatch):
+    fake = ScriptedClaude(LLMError("rate limited"))
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.analyze(_ad(100), find_geizhals=True)
+    assert res["geizhals_error"] == "rate limited" and res["geizhals"] is None
+    assert "geizhals_error" not in deals.cached(AD_ID)          # a failure is not kept: the next click tries again
+
+    fake.answers = [QUERIES, {"pick": 0, "reason": "Nur Sets mit Akku gefunden."}]
+    res = await deals.analyze(_ad(100), find_geizhals=True)
+    assert res["geizhals"] is None and res["geizhals_none"] == "Nur Sets mit Akku gefunden."
+    await deals.analyze(_ad(100), find_geizhals=True)          # Claude's "none" is kept with the analysis
+    assert len(fake.calls) == 3
+
+    fake.answers = [{"product": "", "queries": []}]
+    res = await deals.analyze(_ad(100, ad_id="1000000005", heading="Alter Holzschrank Eiche"), find_geizhals=True)
+    assert "no specific product" in res["geizhals_none"] and len(fake.calls) == 4 and len(gh) == 2
+
+
+async def test_claude_geizhals_search_blocked(wh, no_auto_gh, monkeypatch):
+    monkeypatch.setattr(geizhals, "_transport", httpx.MockTransport(lambda r: httpx.Response(429)))
+    monkeypatch.setattr(geizhals, "_limiter", geizhals.RateLimiter(0))
+    fake = ScriptedClaude(QUERIES)
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.analyze(_ad(100), find_geizhals=True)
+    assert "429" in res["geizhals_error"] and len(fake.calls) == 1          # no pick without results
+
+
+def test_viewer_offers_claude_and_updates_the_hit(app_client, no_auto_gh, monkeypatch):
+    from app.services import screening
+
+    async def no_photo(*a, **k):
+        return None
+    monkeypatch.setattr(screening, "_download", no_photo)
+    fake = ScriptedClaude(QUERIES, {"pick": 1, "reason": "Passt."})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    with dbmod.session() as db:
+        a = dbmod.SearchAgent(name="Bohrer", source_url="https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=bosch",
+                              webapi_url="x")
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        h = dbmod.Hit(agent_id=a.id, ad_id=AD_ID, heading="Bosch GSR 18V-55", url="u", geizhals={})
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    frag = app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text
+    assert "No matching product found on Geizhals." in frag and "Let Claude search Geizhals" in frag
+    assert f'hx-post="/deals/ad/willhaben/{AD_ID}/geizhals"' in frag and 'hx-target="closest section"' in frag
+    assert fake.calls == []
+
+    section = app_client.post(f"/deals/ad/willhaben/{AD_ID}/geizhals", data={"hit": str(h.id), "compact": "1"}).text
+    assert section.lstrip().startswith("<section") and "New from € 1.139 on Geizhals" in section
+    assert "found by Claude" in section and "Let Claude search Geizhals" not in section
+    from app.services import jobs
+    shown = jobs.snapshot()["recent"][0]                         # shown in the jobs indicator while Claude searched
+    assert shown["label"] == "Claude searches Geizhals: „Bosch GSR 18V-55“" and shown["quiet"] is True
+    assert shown["result"] == "Bosch Professional GSR 18V-55 Akku-Bohrschrauber solo"
+    with dbmod.session() as db:
+        assert db.get(dbmod.Hit, h.id).geizhals["price_from"] == 1139.0
+        assert db.get(dbmod.DealCheck, AD_ID).result["geizhals"]["by"] == "claude"

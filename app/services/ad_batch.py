@@ -25,11 +25,32 @@ CREATE_PARALLEL = 2          # drafts written at the same time (each is 1-2 Clau
 _tasks: set[asyncio.Task] = set()
 
 
-def spawn(coro: Coroutine[Any, Any, Any]) -> None:
-    """Run a slow job in the background; the page polls the batch status."""
+def spawn(coro: Coroutine[Any, Any, Any], *, batch_id: int | None = None, label: str | None = None) -> None:
+    """Run a slow job in the background; the page polls the batch status. With a label (and the batch) it also shows
+    among the background jobs, with a notice when it is done."""
+    if label and batch_id is not None:
+        coro = _tracked(coro, batch_id, label)
     task = asyncio.get_running_loop().create_task(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
+
+
+async def _tracked(coro: Coroutine[Any, Any, Any], batch_id: int, label: str) -> None:
+    from app.services import jobs
+
+    async with jobs.track("ad-batch", label, link=f"/new-ad/batch/{batch_id}") as job:
+        before = {g["id"] for g in (get(batch_id) or AdBatch()).groups if g.get("draft_id")}
+        await coro
+        b = get(batch_id)
+        if b is None:
+            return
+        if b.status == "error":
+            job.status, job.result = "failed", b.error or ""
+            return
+        made = [g for g in b.groups if g.get("draft_id") and g["id"] not in before]
+        job.problems = sum(1 for g in b.groups if g.get("error") and g["id"] not in before)
+        job.result = (t("{n} drafts written", n=len(made)) if made or job.problems
+                      else t("{n} articles found – check the groups", n=len(b.groups)))
 
 
 def get(batch_id: int) -> AdBatch | None:

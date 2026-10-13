@@ -33,14 +33,14 @@
 {% macro is_current(href) -%}
   {{- 'page' if path == href or (href != '/' and path.startswith(href + '/')) or (href == '/new-ad' and path.startswith('/ad-')) else '' -}}
 {%- endmacro %}
-{% macro item(href, icon, label, count=0) -%}
+{% macro item(href, icon, label, count=0, key=none) -%}
   <a href="{{ href }}" title="{{ label }}" {% if is_current(href) %}aria-current="page"{% endif %}
      class="relative flex h-11 w-full shrink-0 items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-base-content no-underline hover:bg-hover aria-[current=page]:bg-brand-soft aria-[current=page]:font-semibold aria-[current=page]:text-primary">
     {{ ui.icon(icon) }}<span class="hidden min-w-0 flex-1 truncate rail-x:block">{{ label }}</span>
-    {% if count %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static rail-x:min-w-[18px] rail-x:text-[11px] rail-x:leading-[18px]" data-count="{{ count }}">{{ count }}</span>{% endif %}
+    {% if count or key %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static rail-x:min-w-[18px] rail-x:text-[11px] rail-x:leading-[18px]"{% if key %} data-nav-count="{{ key }}"{% endif %}{% if count %} data-count="{{ count }}"{% else %} hidden{% endif %}>{{ count or '' }}</span>{% endif %}
   </a>
 {%- endmacro %}
-{% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
+{% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}{% set sites = site_usage() %}
 {% set pct = ([100, (used * 100 / budget)|round|int]|min) if budget else 0 %}
 {% set tone = 'full' if (budget and (pct >= 90 or lim.cooling_down_s)) else ('warn' if pct >= 60 else 'ok') %}
 {% set ring_tone = {'full': 'bad', 'warn': 'warn'}.get(tone, 'ok') %}
@@ -59,15 +59,16 @@
   </a>
   {{ item('/', 'home', _("Home")) }}
   {{ item('/agents', 'detective', _("Search agents")) }}
-  {{ item('/hits', 'target', _("Hits"), counts.get('hits', 0)) }}
+  {{ item('/hits', 'target', _("Hits"), counts.get('hits', 0), 'hits') }}
   {{ item('/deals', 'search', _("Product search")) }}
-  {{ item('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)) }}
-  {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0)) }}
+  {{ item('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0), 'purchases') }}
+  {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0), 'chats') }}
   {{ item('/myads', 'tag', _("My ads")) }}
   {{ item('/new-ad', 'plus', _("New ad")) }}
   <div class="min-h-4 flex-1"></div>
 
-  {# meters (expanded rail) / ring gauges (collapsed rail): Claude tokens and willhaben requests #}
+  {# meters (expanded rail) / ring gauges (collapsed rail): Claude tokens, willhaben requests and the other switched-on
+     sites' requests (main._site_usage; collapsed: in the willhaben ring's tooltip and the popover) #}
   <div class="mx-1.5 mb-1.5 hidden shrink-0 flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-200 px-2.5 pt-2.5 pb-2 rail-x:flex">
     {% if cu %}
     <a href="/settings/claude" data-pop="claude" title="{{ _('Claude tokens this month') }}" @click="pop($event, 'claude')"
@@ -84,6 +85,14 @@
       <span class="font-semibold text-base-content tabular-nums">{{ used }}{% if budget %}<span class="font-normal text-muted"> / {{ budget }}</span>{% endif %}</span>
       {% if budget %}{{ ui.bar(100 if lim.cooling_down_s else pct, tone, 'col-span-3 h-1') }}{% endif %}
     </a>
+    {% for s in sites %}
+    <a href="{{ s.href }}" title="{% if s.cooling_min %}{{ _('{site} pause: {n} min left', site=s.name, n=s.cooling_min) }}{% elif s.budget %}{{ _('{used} / {budget} {site} requests in the last hour', used=s.used, budget=s.budget, site=s.name) }}{% else %}{{ _('{used} {site} requests in the last hour', used=s.used, site=s.name) }}{% endif %}"
+       class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content" data-site-usage="{{ s.id }}">
+      {{ ui.icon('globe', 12) }}<span class="truncate">{{ s.name }} / h</span>
+      <span class="font-semibold text-base-content tabular-nums">{{ s.used }}{% if s.budget %}<span class="font-normal text-muted"> / {{ s.budget }}</span>{% endif %}</span>
+      {% if s.budget %}{{ ui.bar(s.pct, s.tone, 'col-span-3 h-1') }}{% endif %}
+    </a>
+    {% endfor %}
   </div>
   {% if cu %}
   <a href="/settings/claude" @click="pop($event, 'claude')" class="relative grid h-10 shrink-0 place-items-center text-muted rail-x:hidden"
@@ -92,7 +101,7 @@
   </a>
   {% endif %}
   <a href="/stats/willhaben" @click="pop($event, 'usage')" class="relative grid h-11 shrink-0 place-items-center text-muted rail-x:hidden"
-     title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}">
+     title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}{% for s in sites %} · {{ s.name }} {{ s.used }}{% if s.budget %} / {{ s.budget }}{% endif %}{% endfor %}">
     {{ ui.ring(pct / 100, ring_tone) }}<span class="absolute inset-0 grid place-items-center text-[9px] font-bold text-base-content">{{ used }}</span>
   </a>
 
@@ -115,7 +124,7 @@
     <button type="button" @click="toggle('inbox')" title="{{ _('Inbox') }}"
             class="relative flex h-10 w-full items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-muted hover:bg-hover hover:text-base-content">
       {{ ui.icon('bell', 18) }}<span class="hidden flex-1 text-left rail-x:inline">{{ _("Inbox") }}</span>
-      {% if inbox_unread is defined and inbox_unread %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static" data-count="{{ inbox_unread }}">{{ inbox_unread }}</span>{% endif %}
+      {% set unread = inbox_unread if inbox_unread is defined else 0 %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static" data-nav-count="inbox"{% if unread %} data-count="{{ unread }}"{% else %} hidden{% endif %}>{{ unread or '' }}</span>
     </button>
     <button type="button" id="account-toggle" @click="toggle('account')" aria-haspopup="menu" :aria-expanded="layer === 'account'"
             class="flex h-11 w-full items-center gap-2.5 rounded-[10px] px-1.5 text-left whitespace-nowrap hover:bg-hover">
@@ -193,7 +202,7 @@
   </div>
 </div>
 
-{# ---- willhaben usage: last hour per channel, last 6 h, hourly budget ---- #}
+{# ---- willhaben usage: last hour per channel, last 6 h, hourly budget; then the other sites' last hour ---- #}
 {% set wp = wh_popup() %}
 <div id="usage-pop" x-cloak x-show="layer === 'usage'" class="fixed inset-0 z-[90]" @click.self="close()">
   <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5">
@@ -210,6 +219,19 @@
       <div class="flex justify-between text-xs text-muted"><span>{{ _("Last 6 hours") }}</span><span>{{ _("per 15 min") }}</span></div>
       <div class="flex h-10 items-end gap-0.5 border-b border-base-300">{% for b in wp.bars %}<span title="{{ b.title }}" class="flex flex-1 flex-col-reverse overflow-hidden rounded-t-xs" style="height:{{ [b.h, 2 if b.total else 0]|max }}%">{% for c, share in b.parts %}{% if share %}<span style="height:{{ share }}%;background:{{ (wp.channels|selectattr('key', 'equalto', c)|first).color }}"></span>{% endif %}{% endfor %}</span>{% endfor %}</div>
     </div>
+    {% if sites %}
+    <div class="flex flex-col gap-1.5 border-t border-base-300 pt-3">
+      <div class="flex justify-between text-xs text-muted"><span>{{ _("Other sites") }}</span><span>{{ _("in the last hour") }}</span></div>
+      {% for s in sites %}
+      <a href="{{ s.href }}" class="grid grid-cols-[1fr_auto] items-center gap-x-2.5 gap-y-1 text-[12.5px] text-base-content no-underline hover:text-primary">
+        <span class="truncate">{{ s.name }}{% if s.cooling_min %} <span class="text-error">· {{ _("pause: {n} min left", n=s.cooling_min) }}</span>{% elif s.blocked %} <span class="text-warning">· {{ _("{n} blocked", n=s.blocked) }}</span>{% endif %}</span>
+        <span class="tabular-nums">{{ s.used }}{% if s.budget %}<span class="text-muted"> / {{ s.budget }}</span>{% endif %}</span>
+        {% if s.budget %}{{ ui.bar(s.pct, s.tone, 'col-span-2 h-1') }}{% endif %}
+      </a>
+      {% endfor %}
+      <div class="flex justify-end gap-3 text-[12.5px]"><a class="link link-primary no-underline" href="/settings/{{ sites[0].id }}">{{ _("Budgets per site") }}</a><a class="link link-primary no-underline" href="/stats/requests?platform=all">{{ _("All sites") }} →</a></div>
+    </div>
+    {% endif %}
     <form method="post" action="/settings/willhaben" class="flex flex-col gap-1.5 border-t border-base-300 pt-3" x-data="{ v: {{ budget|int }} }">
       <input type="hidden" name="next" :value="location.pathname + location.search">
       <div class="flex items-center justify-between gap-2.5"><span class="text-[13px] font-medium">{{ _("Hourly budget") }}</span><a class="link link-primary text-[12.5px] no-underline" href="/stats/willhaben">{{ _("Full statistics") }} →</a></div>
@@ -240,30 +262,10 @@
 </div>
 {% endif %}
 
-{# ---- inbox (inbox_items = [{kind, title, text, time, link, unread}], link = main.event_link) ---- #}
-{% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
-                'auto_reply_pending': ('bot', 'bg-ok-soft text-success'), 'auto_reply': ('bot', 'bg-ok-soft text-success'), 'pay': ('cart', 'bg-warn-soft text-warning'),
-                'ad_expiring': ('tag', 'bg-warn-soft text-warning'), 'ad_expired': ('tag', 'bg-bad-soft text-error'), 'health': ('bell', 'bg-bad-soft text-error')} %}
+{# ---- inbox: _inbox.html (swapped in place when new events come, see the jobs store) ---- #}
 <div id="inbox-pop" x-cloak x-show="layer === 'inbox'" class="fixed inset-0 z-[90]" @click.self="close()">
   <div class="{{ layer_box }} flex max-h-[calc(100dvh-100px)] w-[400px] max-w-[calc(100vw-100px)] flex-col overflow-hidden">
-    <div class="flex items-center gap-2 border-b border-base-300 px-3.5 py-3">
-      <span class="font-semibold">{{ _("Inbox") }}</span>
-      <small class="text-muted">{% if inbox_unread is defined and inbox_unread %}{{ _("{n} unread", n=inbox_unread) }}{% else %}{{ _("all read") }}{% endif %}</small>
-      <span class="flex-1"></span>
-      {% if inbox_items is defined and inbox_items %}<form method="post" action="/inbox/read-all"><button class="btn btn-ghost btn-xs text-primary">{{ _("Mark all read") }}</button></form>{% endif %}
-      <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
-    </div>
-    <div class="overflow-auto">
-      {% for n in inbox_items if inbox_items is defined %}{% set k = kinds.get(n.kind, ('bell', 'bg-hover text-muted')) %}
-      {% set l = n.link or {'href': '/'} %}
-      <a href="{{ l.href }}"{% if l.ad %} data-ad="{{ l.ad }}" @click="close()"{% endif %}{% if l.external %} target="_blank" rel="noopener"{% endif %} class="grid grid-cols-[28px_1fr_auto] items-start gap-2.5 border-b border-base-300 px-3.5 py-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if n.unread else '' }}">
-        <span class="grid size-7 place-items-center rounded-lg {{ k[1] }}">{{ ui.icon(k[0], 14) }}</span>
-        <span class="min-w-0"><span class="block {{ 'font-semibold' if n.unread else 'font-medium' }}">{{ n.title }}</span><span class="block text-[12.5px] text-muted">{{ n.text }}</span></span>
-        <span class="flex flex-col items-end gap-1.5"><small class="whitespace-nowrap text-muted">{{ n.time }}</small>{% if n.unread %}<span class="size-2 rounded-full bg-primary"></span>{% endif %}</span>
-      </a>
-      {% else %}<p class="px-3.5 py-4.5 text-center text-muted">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }} <a class="link link-primary no-underline" href="/#activity">{{ _("Activity") }}</a></p>{% endfor %}
-    </div>
-    <div class="border-t border-base-300 px-3.5 py-2 text-xs text-muted">{{ _("Pushes go to Home Assistant") }} · <a class="link link-primary no-underline" href="/settings/ha">{{ _("Notification settings") }}</a></div>
+    {% include "_inbox.html" %}
   </div>
 </div>
 
@@ -285,7 +287,8 @@
             <span x-show="j.status === 'done' && !j.problems" class="text-success">{{ ui.icon('check', 14) }}</span>
             <span x-show="j.status === 'done' && j.problems" class="text-warning">{{ ui.icon('alert', 14) }}</span>
             <span x-show="j.status === 'failed'" class="text-error">{{ ui.icon('x', 14) }}</span>
-            <span class="min-w-0 flex-1 truncate font-medium" x-text="j.label"></span>
+            <a x-show="j.link" :href="j.link" class="min-w-0 flex-1 truncate font-medium text-base-content no-underline hover:underline" x-text="j.label"></a>
+            <span x-show="!j.link" class="min-w-0 flex-1 truncate font-medium" x-text="j.label"></span>
           </div>
           <div class="text-[12.5px] text-muted" x-text="$store.jobs.line(j)"></div>
           <div x-show="j.status === 'running' && j.total" class="h-1 overflow-hidden rounded-sm bg-base-300">
@@ -347,12 +350,24 @@
   </button>
 </div>
 
+{# ---- notices: inbox events and finished background jobs since the page was opened (jobs store) ---- #}
+<div x-data x-show="$store.jobs.notices.length" x-cloak aria-live="polite" class="toast toast-end toast-top z-[95]">
+  <template x-for="n in $store.jobs.notices" :key="n.key">
+    <div role="status" class="alert flex max-w-sm items-start gap-2 border-base-300 bg-base-100 py-2.5 text-sm shadow-lg" :class="n.bad && 'border-l-4 border-l-error'">
+      <a :href="n.href || '#'" :data-ad="n.ad || null" :target="n.external ? '_blank' : null" :rel="n.external ? 'noopener' : null"
+         @click="!n.href && $event.preventDefault(); $store.jobs.dismiss(n.key)" class="min-w-0 flex-1 text-base-content no-underline">
+        <span class="block font-semibold" x-text="n.title"></span><span class="line-clamp-2 block text-[12.5px] text-muted" x-text="n.text"></span></a>
+      <button type="button" class="btn btn-ghost btn-xs btn-square" @click="$store.jobs.dismiss(n.key)" aria-label="{{ _('Close') }}">{{ ui.icon('x', 14) }}</button>
+    </div>
+  </template>
+</div>
+
 {# ---- phone tab bar ---- #}
 <nav aria-label="{{ _('Navigation') }}" class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-base-300 bg-base-100 px-1 pt-1.5 pb-[calc(6px+env(safe-area-inset-bottom))] md:hidden">
-  {% for href, icon, label, count in [('/', 'home', _("Home"), 0), ('/hits', 'target', _("Hits"), counts.get('hits', 0)), ('/chats', 'chat', _("Chats"), counts.get('chats', 0)), ('/myads', 'tag', _("My ads"), 0)] %}
+  {% for href, icon, label, count, key in [('/', 'home', _("Home"), 0, none), ('/hits', 'target', _("Hits"), counts.get('hits', 0), 'hits'), ('/chats', 'chat', _("Chats"), counts.get('chats', 0), 'chats'), ('/myads', 'tag', _("My ads"), 0, none)] %}
   <a href="{{ href }}" {% if is_current(href) %}aria-current="page"{% endif %}
      class="relative flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted no-underline aria-[current=page]:font-semibold aria-[current=page]:text-primary">
-    {{ ui.icon(icon) }}<span class="text-center leading-tight">{{ label }}</span>{% if count %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ count }}</span>{% endif %}</a>
+    {{ ui.icon(icon) }}<span class="text-center leading-tight">{{ label }}</span>{% if count or key %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content"{% if key %} data-nav-count="{{ key }}"{% endif %}{% if not count %} hidden{% endif %}>{{ count or '' }}</span>{% endif %}</a>
   {% endfor %}
   {% set more = namespace(count=0, current=false) %}
   {% for href, icon, label, count in more_pages %}{% set more.count = more.count + count %}{% if is_current(href) %}{% set more.current = true %}{% endif %}{% endfor %}
@@ -373,17 +388,21 @@
 {% include "_buy_panel.html" %}
 {% include "_remote_overlay.html" %}
 {% endif %}
-<script type="application/json" id="bg-jobs-data">{{ bg_jobs()|tojson }}</script>
+<script type="application/json" id="bg-jobs-data">{{ dict(bg_jobs(), last_event=live_cursor())|tojson }}</script>
 <script>
 document.addEventListener('alpine:init', () => {
-  // Background jobs (GET /jobs). Polls only while something runs or the page shows elements waiting for a job.
+  // Background jobs (GET /jobs): every 3 s while something runs or the page shows elements waiting for a job, else
+  // every 20 s while the tab is visible (not in the remote-view frame). Each answer also brings the sidebar badges and
+  // the inbox events since the last one: they come as notices (top right), like jobs that finished meanwhile – not the
+  // quiet ones whose page shows the result itself, nor the one whose page is open.
   // No page reloads: an element waiting for a job carries data-pending-key ("ad:123", "draft:5", "addraft:7") and,
   // inside, ui.pending() (spinner while its job works on it, clock while queued). Once its key is no longer pending
   // the element is replaced by its fresh copy (same id) from data-refresh="url" or, by default, from this page fetched
   // in the background; gone from the fresh copy = removed (a deleted ad). data-refresh-on-lane="ads": refreshed
   // whenever a job of that lane finished. data-refresh-also="id …": more elements taken along.
   Alpine.store('jobs', {
-    active: [], recent: [], seen: null, timer: null,
+    active: [], recent: [], seen: null, timer: null, cursor: null, notices: [], IDLE: 20000,
+    live: !document.body.hasAttribute('data-embed'),
     T: {running: {{ _("{n} running")|tojson }}, queued: {{ _("{n} queued")|tojson }}, idle: {{ _("Background")|tojson }},
         waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }}},
     init() {
@@ -391,6 +410,7 @@ document.addEventListener('alpine:init', () => {
       if (document.querySelector('[data-pending-key]')) this.poll();       // markers on the page: their state now
       // anything sent through htmx may have queued a job (or finished one already): ask once
       document.addEventListener('htmx:afterRequest', e => { if ((e.detail.requestConfig || {}).verb !== 'get') this.poll(); });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && this.live) this.poll(); });
     },
     get visible() { return this.active.length > 0 || this.recent.length > 0; },
     get problems() { return this.recent.some(j => j.status === 'failed' || j.problems); },
@@ -408,8 +428,25 @@ document.addEventListener('alpine:init', () => {
     },
     poll() {
       clearTimeout(this.timer);
-      fetch('/jobs', {headers: {accept: 'application/json'}}).then(r => r.ok ? r.json() : null)
-        .then(d => d && this.apply(d)).catch(() => { this.timer = setTimeout(() => this.poll(), 10000); });
+      if (document.hidden && !document.querySelector('[data-pending-key]')) return;   // goes on when shown again
+      const url = '/jobs' + (this.live && this.cursor !== null ? '?since=' + this.cursor : '');
+      fetch(url, {headers: {accept: 'application/json'}}).then(r => r.ok ? r.json() : null)
+        .then(d => d ? this.apply(d) : this.later(this.IDLE)).catch(() => this.later(10000));
+    },
+    later(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.poll(), ms); },
+    notice(n) {
+      if (this.notices.some(x => x.key === n.key)) return;
+      this.notices = [n, ...this.notices].slice(0, 4);
+      setTimeout(() => this.dismiss(n.key), n.bad ? 15000 : 10000);
+    },
+    dismiss(key) { this.notices = this.notices.filter(x => x.key !== key); },
+    badges(counts) {
+      document.querySelectorAll('[data-nav-count]').forEach(el => {
+        const n = counts[el.dataset.navCount];
+        if (n === undefined) return;
+        el.textContent = n || ''; el.hidden = !n;
+        if (n) el.dataset.count = n; else delete el.dataset.count;
+      });
     },
     apply(data) {
       this.active = data.active || []; this.recent = data.recent || [];
@@ -417,6 +454,18 @@ document.addEventListener('alpine:init', () => {
       if (this.seen === null) this.seen = new Set(this.recent.map(j => j.id));     // known at load: no refresh
       const fresh = this.recent.filter(j => !this.seen.has(j.id));                 // finished since: even a quick one
       fresh.forEach(j => this.seen.add(j.id));
+      const here = location.pathname + location.search;
+      if (this.live) fresh.filter(j => !j.quiet && !(j.link && j.link.split('#')[0] === here)).forEach(j =>
+        this.notice({key: 'j' + j.id, title: j.label, text: j.result || this.T[j.status] || '', href: j.link,
+                     bad: j.status === 'failed' || !!j.problems}));
+      if (this.live && data.counts) this.badges(data.counts);
+      if (this.live && data.events && data.events.length) {
+        data.events.forEach(e => { const l = e.link || {};
+          this.notice({key: 'e' + e.id, title: e.title, text: e.text, href: l.href, ad: l.ad, external: l.external}); });
+        const box = document.getElementById('inbox-box');
+        if (box) refreshInPlace([box]);
+      }
+      if (data.last_event !== undefined) this.cursor = data.last_event;
       document.querySelectorAll('[data-refresh-on-lane]').forEach(el => {
         if (fresh.some(j => j.lane === el.dataset.refreshOnLane)) todo.add(el);
       });
@@ -426,7 +475,8 @@ document.addEventListener('alpine:init', () => {
       if (todo.size) refreshInPlace([...todo]);
       clearTimeout(this.timer);
       if (this.active.length || (data.pending && data.pending.length && document.querySelector('[data-pending-key]')))
-        this.timer = setTimeout(() => this.poll(), 3000);
+        this.later(3000);
+      else if (this.live) this.later(this.IDLE);
     },
   });
 

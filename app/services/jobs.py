@@ -1,7 +1,9 @@
 """Background jobs on the user's behalf (ad actions, publishing, chat messages), one after another per lane.
 
 The page that starts a job returns at once; the header shows what is running right now, what is queued and the
-last results (GET /jobs). Lanes: "ads" (own ads: update, delete, publish, ...), "chat" (messages, sync) and "claude"
+last results (GET /jobs). Work that is not queued here shows up too: track() wraps a Claude call a page waits for
+(price verdict, Geizhals search) or a task of its own (ad batch), and add_source() lists work that keeps its state
+elsewhere (the product search, from its DB row). Lanes: "ads" (own ads: update, delete, publish, ...), "chat" (messages, sync) and "claude"
 (answers and revisions Claude writes). Within a lane
 jobs run strictly in order (an update must not overlap a delete run); the lanes run side by side, so a chat answer
 never waits behind twenty deletes. The pacing towards willhaben stays the shared limiter's: requests of both lanes
@@ -14,7 +16,8 @@ import asyncio
 import itertools
 import logging
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -41,6 +44,8 @@ class Job:
     total: int = 0
     result: str = ""
     problems: int = 0          # items that did not work out (job itself finished)
+    link: str | None = None    # the page with the result (the finished-job notice opens it)
+    quiet: bool = False        # no notice when it finishes: the page that started it shows the result itself
     created_at: datetime = field(default_factory=utcnow)
     finished_at: datetime | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
@@ -54,7 +59,7 @@ class Job:
     def view(self) -> dict[str, Any]:
         return {"id": self.id, "label": self.label, "lane": self.lane, "status": self.status, "step": self.step, "current": self.current,
                 "done": self.done, "total": self.total, "result": self.result, "problems": self.problems,
-                "finished_at": self.finished_at.isoformat() if self.finished_at else None}
+                "link": self.link, "quiet": self.quiet, "finished_at": self.finished_at.isoformat() if self.finished_at else None}
 
 
 LANES = ("ads", "chat", "claude")   # claude: drafts and revisions (no willhaben account request, can take a minute)
@@ -65,11 +70,43 @@ _active: list[Job] = []                                  # running first, then q
 _finished: deque[Job] = deque(maxlen=KEEP_FINISHED)      # newest first
 
 
+_sources: list[Callable[[], dict[str, list[dict[str, Any]]]]] = []
+
+
 def reset() -> None:
     """Forget everything (tests: every test has its own event loop)."""
     _locks.clear()
     _active.clear()
     _finished.clear()
+
+
+def add_source(fn: Callable[[], dict[str, list[dict[str, Any]]]]) -> None:
+    """Work that keeps its own state (the product search): `fn()` returns {"active": [view], "recent": [view]} in
+    the shape of Job.view(), with string ids ("ps-12") so they never clash with job numbers."""
+    if fn not in _sources:
+        _sources.append(fn)
+
+
+@asynccontextmanager
+async def track(kind: str, label: str, *, lane: str = "claude", link: str | None = None, quiet: bool = False,
+                current: str | None = None) -> AsyncIterator[Job]:
+    """Show work that runs right here in the header like a job: running while the block runs, then among the
+    finished ones. Not queued: it starts at once and holds no lane. The block may set job.result, or job.status =
+    "failed" for a failure it handled itself; an exception marks it failed and goes on."""
+    job = Job(next(_ids), kind, label, lane=lane, status="running", current=current, link=link, quiet=quiet)
+    _active.append(job)
+    try:
+        yield job
+        if job.status == "running":
+            job.status = "done"
+    except BaseException as e:
+        job.status, job.result = "failed", str(e) or type(e).__name__
+        raise
+    finally:
+        job.finished_at, job.step, job.current = utcnow(), "", None
+        if job in _active:
+            _active.remove(job)
+        _finished.appendleft(job)
 
 
 def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *, lane: str = "ads", total: int = 0,
@@ -129,4 +166,14 @@ def busy(kind_prefix: str = "") -> bool:
 def snapshot() -> dict[str, Any]:
     now = utcnow()
     recent = [j for j in _finished if j.finished_at and (now - j.finished_at).total_seconds() < SHOW_FINISHED_S]
-    return {"active": [j.view() for j in _active], "recent": [j.view() for j in recent]}
+    active, done = [j.view() for j in _active], [j.view() for j in recent]
+    for fn in _sources:
+        try:
+            more = fn()
+        except Exception as e:  # noqa: BLE001 - a broken source must not take the header down
+            log.warning("job source %r failed: %s", getattr(fn, "__name__", fn), e)
+            continue
+        active += more.get("active") or []
+        done += more.get("recent") or []
+    done.sort(key=lambda v: v.get("finished_at") or "", reverse=True)
+    return {"active": active, "recent": done[:KEEP_FINISHED]}

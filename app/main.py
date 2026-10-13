@@ -195,7 +195,8 @@ templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carrie
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
                              wh_budget=requests_per_hour, wh_popup=access_stats.popup,
-                             bg_jobs=jobs.snapshot, bg_working=jobs.working)   # background jobs (header, spinners)
+                             bg_jobs=jobs.snapshot, bg_working=jobs.working,   # background jobs (header, spinners)
+                             live_cursor=lambda: _live_cursor())                 # the newest event (notices start there)
 
 
 def _asset_version() -> str:
@@ -207,6 +208,17 @@ def _asset_version() -> str:
 
 
 templates.env.globals.update(asset_version=_asset_version)
+
+
+def _site_usage() -> list[dict[str, Any]]:
+    """The other sites' last hour for the sidebar meter and its popover (access_stats.site_usage): every switched-on
+    site, and a switched-off one that still has requests in the hour."""
+    return [{**u, "used": u["n"], "pct": 100 if u["cooling_down_s"] else u["pct"],
+             "cooling_min": int(-(-u["cooling_down_s"] // 60)), "href": f"/stats/requests?platform={u['id']}"}
+            for u in access_stats.site_usage() if u["id"] != "willhaben" and (u["enabled"] or u["n"])]
+
+
+templates.env.globals.update(site_usage=_site_usage)
 
 
 def _platform_name(pid: str | None) -> str:
@@ -1119,18 +1131,76 @@ async def myads_delete(request: Request, ad_id: str):
     return _queued(request, my_ads.enqueue("delete", [ad_id]))
 
 
+LIVE_EVENTS = 5      # notices one poll brings at most (a page that slept long gets the newest ones)
+PS_STEPS = {"planning": "Claude plans the searches", "searching": "Searching the sites",
+            "ranking": "Claude ranks the offers", "photos": "Claude checks the photos"}
+
+
+def _product_search_jobs() -> dict[str, list[dict[str, Any]]]:
+    """The Claude product search among the background jobs. It runs as its own task (product_search.py), so its
+    state comes from its row: running, waiting for answers, or finished within the last minutes. The id carries the
+    status, so a search that waited for answers and then finished brings a second notice."""
+    from app.services import product_search
+
+    run = product_search.running()
+    now = utcnow()
+    active, recent = [], []
+    for row in product_search.recent(3):
+        text = row.description if len(row.description) <= 50 else row.description[:49] + "…"
+        view = {"id": f"ps-{row.id}", "kind": "product-search", "label": t("Product search: „{text}“", text=text),
+                "lane": "claude", "status": "running", "step": "", "current": None, "done": 0, "total": 0, "result": "",
+                "problems": 0, "link": f"/deals?search={row.id}#ps-result", "quiet": False, "finished_at": None}
+        if run is not None and row.id == run.id:
+            prog = (row.progress or {}) if row.status == "searching" else {}
+            active.append({**view, "step": t(PS_STEPS.get(row.status, "Searching the sites")),
+                           "done": int(prog.get("done") or 0), "total": int(prog.get("total") or 0)})
+            continue
+        at = row.finished_at or (row.started_at if row.status == "asking" else None)
+        at = at.replace(tzinfo=timezone.utc) if at and at.tzinfo is None else at
+        if at is None or (now - at).total_seconds() >= jobs.SHOW_FINISHED_S or row.status not in ("done", "asking", "error"):
+            continue
+        result = {"done": t("{n} offers", n=len(row.results or [])), "error": row.error or "",
+                  "asking": t("Claude has questions – answer them to go on")}[row.status]
+        recent.append({**view, "id": f"ps-{row.id}-{row.status}", "status": "failed" if row.status == "error" else "done",
+                       "result": result, "finished_at": at.isoformat()})
+    return {"active": active, "recent": recent}
+
+
+jobs.add_source(_product_search_jobs)
+
+
+def _live_cursor() -> int:
+    with session() as db:
+        return db.exec(select(func.max(EventLog.id))).one() or 0
+
+
+def _live_event(e: EventLog) -> dict[str, Any]:
+    return {"id": e.id, "kind": "pay" if e.kind == "paylivery" else e.kind,
+            "title": t(INBOX_KINDS.get(e.kind, "Notification")), "text": e.message, "link": event_link(e)}
+
+
 @app.get("/jobs")
-async def jobs_status():
+async def jobs_status(since: int | None = None):
     """Background jobs for the jobs indicator, plus every element still waiting for one (spinners on the page):
     keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published),
-    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer)."""
+    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer).
+    Every open page also asks now and then for what happened meanwhile: the sidebar badges ("counts") and the inbox
+    events after `since` (its last known event id), shown as notices – not the ones sent without a push. Without
+    `since` only "last_event", the page's starting point."""
+    from app.services.notify import QUIET_EVENTS
+
     with session() as db:
         pending = [f"ad:{i}" for i in db.exec(select(MyAd.ad_id).where(col(MyAd.pending_action).is_not(None)))]
         pending += [f"draft:{i}" for i in db.exec(select(Draft.id).where(Draft.status == "sending"))]
         pending += [f"addraft:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.publishing == True))]  # noqa: E712
         pending += [f"refining:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.refining == True))]  # noqa: E712
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
-    return {**jobs.snapshot(), "pending": pending}
+        last = _live_cursor()
+        new = [] if since is None or since >= last else list(db.exec(
+            select(EventLog).where(EventLog.id > since).order_by(col(EventLog.id).desc()).limit(LIVE_EVENTS)))
+    quiet = set(QUIET_EVENTS)
+    return {**jobs.snapshot(), "pending": pending, "counts": _nav_counts(), "last_event": last,
+            "events": [_live_event(e) for e in reversed(new) if e.id not in quiet]}
 
 
 # ------------------------------------------------------------------ sold / reserved workflow (app/services/sold.py)
@@ -1359,7 +1429,7 @@ async def ad_batch_create(notes: str = Form(""), photos: list[UploadFile] = File
     if not ad_batch.get(b.id).image_paths:
         ad_batch.delete(b.id)
         return back("/new-ad?msg=" + quote(t("No usable photos in the batch"), safe=""))
-    ad_batch.spawn(ad_batch.sort(b.id))
+    ad_batch.spawn(ad_batch.sort(b.id), batch_id=b.id, label=t("Claude sorts {n} photos", n=len(ad_batch.get(b.id).image_paths)))
     msg = f"?msg={quote(t('{n} photos skipped (format, size or more than {max})', n=skipped, max=ad_batch.MAX_BATCH_IMAGES), safe='')}" \
         if skipped else ""
     return back(f"/new-ad/batch/{b.id}{msg}")
@@ -1396,12 +1466,14 @@ async def ad_batch_save(request: Request, batch_id: int):
     ad_batch.apply_review(batch_id, order, fields)
     action = form.get("action")
     if action == "resort":
-        ad_batch.spawn(ad_batch.sort(batch_id, str(form.get("hint") or "")))
+        ad_batch.spawn(ad_batch.sort(batch_id, str(form.get("hint") or "")), batch_id=batch_id,
+                       label=t("Claude sorts {n} photos", n=len(ad_batch.get(batch_id).image_paths)))
         return back(f"/new-ad/batch/{batch_id}")
     if action == "create":
         if not ad_batch.pending(ad_batch.get(batch_id)):
             return back(f"/new-ad/batch/{batch_id}?msg=" + quote(t("No group selected"), safe=""))
-        ad_batch.spawn(ad_batch.create_drafts(batch_id))
+        ad_batch.spawn(ad_batch.create_drafts(batch_id), batch_id=batch_id,
+                       label=t("Claude writes {n} drafts", n=len(ad_batch.pending(ad_batch.get(batch_id)))))
         return back(f"/new-ad/batch/{batch_id}")
     return back(f"/new-ad/batch/{batch_id}?msg={quote(t('Changes saved'), safe='')}")
 
@@ -1713,6 +1785,13 @@ async def _contributors() -> list[dict[str, Any]] | None:
 async def credits_page(request: Request):
     people = await _contributors()
     return render(request, "credits.html", **({"contributors": people} if people is not None else {}))
+
+
+@app.get("/inbox/items", response_class=HTMLResponse)
+async def inbox_items(request: Request):
+    """The inbox popover's content alone: an open page swaps it in when new events come (base.html, jobs store)."""
+    return templates.TemplateResponse(request, "_inbox.html", {"inbox_items": _inbox_items(),
+                                                               "inbox_unread": _nav_counts()["inbox"]})
 
 
 @app.post("/inbox/read-all")

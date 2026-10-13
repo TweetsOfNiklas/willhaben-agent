@@ -34,5 +34,13 @@
  "The badges compare each ad with the other results of this search.": "Die Markierungen vergleichen jede Anzeige mit den anderen Ergebnissen dieser Suche.",
  "Recently checked": "Zuletzt geprüft",
  "This link is not a willhaben ad.": "Dieser Link ist keine willhaben-Anzeige.",
- "Variant not confirmed – check that this is the right model": "Variante nicht bestätigt – bitte prüfen, ob das Modell stimmt"
+ "Variant not confirmed – check that this is the right model": "Variante nicht bestätigt – bitte prüfen, ob das Modell stimmt",
+ "found by Claude": "von Claude gefunden",
+ "Claude found no matching product on Geizhals: {reason}": "Claude hat auf Geizhals kein passendes Produkt gefunden: {reason}",
+ "No matching product found on Geizhals.": "Kein passendes Produkt auf Geizhals gefunden.",
+ "Let Claude search Geizhals": "Claude auf Geizhals suchen lassen",
+ "Claude sees no specific product with a new price in this ad.": "Claude erkennt in dieser Anzeige kein bestimmtes Produkt mit Neupreis.",
+ "Geizhals finds nothing for {queries}.": "Geizhals findet nichts für {queries}.",
+ "None of the Geizhals results is this product.": "Keines der Geizhals-Ergebnisse ist dieses Produkt.",
+ "Claude found „{name}“ on Geizhals, but it has no current price there.": "Claude hat „{name}“ auf Geizhals gefunden, dort gibt es aber keinen aktuellen Preis."
 }

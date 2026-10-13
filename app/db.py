@@ -528,13 +528,17 @@ def apply_public_url() -> str:
 
 
 def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | None = None,
-              conversation_id: str | None = None) -> None:
+              conversation_id: str | None = None) -> int | None:
+    """Store a notification for the inbox and the timeline; returns its id."""
     with session() as db:
-        db.add(EventLog(kind=kind, message=message, url=url, ad_id=ad_id, conversation_id=conversation_id))
+        e = EventLog(kind=kind, message=message, url=url, ad_id=ad_id, conversation_id=conversation_id)
+        db.add(e)
         db.commit()
+        event_id = e.id
     from app.services import timeline    # the notification also shows up in the timeline
 
     timeline.record("notify", message, name=kind, url=url, ad_id=ad_id, conversation_id=conversation_id)
+    return event_id
 
 
 DEFAULT_SETTINGS: dict[str, str] = {

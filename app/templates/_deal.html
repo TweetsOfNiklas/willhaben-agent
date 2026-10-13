@@ -26,7 +26,16 @@
     {% if fl.kind %} {{ _("{n} accessories/parts or other variants left out.", n=fl.kind) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
     {% if p.pos is not none %} {% if p.basis == 'comparables' %}{{ _("Cheapest to most expensive comparable ad; marks at 25 %, median and 75 %.") }}{% else %}{{ _("Few comparable ads: estimated from the new price (used items usually sell for 40–70 %).") }}{% endif %}{% endif %}
     {% if compact %} <a class="link link-primary no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
-  {% if gh %}<a href="{{ gh.url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=(ad.price * 100 / gh.price_from)|round|int) }}</span>{% endif %}</a>{% endif %}
+  {% if gh %}<a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=(ad.price * 100 / gh.price_from)|round|int) }}</span>{% endif %}{% if gh.by == 'claude' %} <span class="text-muted">· {{ _("found by Claude") }}</span>{% endif %}</a>
+  {% elif res.geizhals_none %}<p class="text-[12.5px] text-muted">{{ _("Claude found no matching product on Geizhals: {reason}", reason=res.geizhals_none) }}</p>
+  {% else %}{# Claude looks for it on Geizhals – only on this click; the answer redraws this section #}
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted"><span>{{ _("No matching product found on Geizhals.") }}</span>
+    <button type="button" class="btn btn-xs disabled:opacity-60" hx-post="/deals/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}/geizhals"
+            hx-vals='{"q": {{ (res.asked_query or '')|tojson }}, "hit": {{ (h.id if h else '')|string|tojson }}, "cat": {{ (res.category_url or '')|tojson }}, "compact": {{ ('1' if compact else '')|tojson }}}'
+            hx-target="closest section" hx-swap="outerHTML" hx-disabled-elt="this">
+      <span class="loading loading-spinner loading-xs hidden busy:inline-block"></span> {{ _("Let Claude search Geizhals") }}</button>
+    {% if res.geizhals_error %}<span>{{ _("Claude failed: {error}", error=res.geizhals_error) }}</span>{% endif %}</div>
+  {% endif %}
   {% if not (compact and h and h.screen_relevant is not none) %}{% with q=res.asked_query or '', hit=(h.id if h else '') %}{% include "_deal_claude.html" %}{% endwith %}{% endif %}
   {% if c.closest %}
   <details {% if not compact %}open{% endif %} class="group text-[13px]"><summary class="flex cursor-pointer list-none items-center gap-1.5 font-semibold hover:text-primary [&::-webkit-details-marker]:hidden"><span class="text-muted transition-transform group-open:rotate-90">{{ ui.icon('chevron-right', 14) }}</span>{{ _("Comparable ads ({n})", n=c.closest|length) }}<small class="ml-auto font-normal text-muted">{{ _("closest by price") }}</small></summary>

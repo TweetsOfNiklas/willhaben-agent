@@ -629,6 +629,18 @@ async def _geizhals_prices(hits: list[Hit]) -> None:
         db.commit()
 
 
+def remember_geizhals(hit_id: int, gh: dict[str, Any]) -> None:
+    """The product Claude found on Geizhals for a hit (price check in the viewer). The agent's rule has run already;
+    an automatic match the hit has is kept."""
+    with session() as db:
+        row = db.get(Hit, hit_id)
+        if row is None or row.geizhals:
+            return
+        row.geizhals = {k: gh.get(k) for k in ("name", "url", "price_from", "by")}
+        db.add(row)
+        db.commit()
+
+
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit]) -> None:
     """A new hit the screening or the Geizhals rule holds back gets no push, so it goes to "filtered" instead of
     "new"; a filtered hit that passes after a price drop is pushed and becomes new again."""

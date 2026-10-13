@@ -1,0 +1,8 @@
+{
+ "{site} pause: {n} min left": "{site}-Pause noch {n} min",
+ "{used} / {budget} {site} requests in the last hour": "{used} / {budget} {site}-Anfragen in der letzten Stunde",
+ "{used} {site} requests in the last hour": "{used} {site}-Anfragen in der letzten Stunde",
+ "Other sites": "Andere Seiten",
+ "pause: {n} min left": "Pause noch {n} min",
+ "Budgets per site": "Budgets je Seite"
+}
