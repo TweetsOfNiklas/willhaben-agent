@@ -195,12 +195,16 @@ ZIP, optionally encrypted with a passphrase, and restores such a file after a pr
 contains your logins: keep it private. With the timeline or the willhaben recording switched on, the database also
 holds Claude prompts and willhaben answers (chat texts, addresses).
 
-**willhaben requests:** the meter in the sidebar opens a summary (last hour per channel, the last 6 hours, the hourly
-budget, which you can change right there) and links to `/stats/willhaben`, a chart of every request the app
-sent to willhaben in the last 1 h / 6 h / 24 h / 7 days (anonymous searches vs. the logged-in account vs. live chat,
-blocked answers highlighted). Only counts per minute are stored (no addresses, ids or texts), for 8 days. Home
-Assistant can read the same numbers from `GET /api/stats/willhaben?range=24h`. The meter leaves out failed live-chat reconnects, which
-the rate limit does not pace; on the account channel a 403 ("blocked") is often just an expired login.
+**Requests to the sites:** the willhaben meter in the sidebar opens a summary (last hour per channel, the last 6 hours, the
+hourly budget, which you can change right there) and links to `/stats/willhaben`. `/stats/requests` charts every request
+the app sent in the last 1 h / 6 h / 24 h / 7 days: all sites together (bars by type, a row per site with its last hour
+against its own budget, blocked answers, cache hits and a trend line) or one site (bars by type: search, ad detail,
+other, on willhaben also chats & messages and my ads & account; willhaben also by channel: anonymous vs. logged-in
+account vs. live chat), blocked answers highlighted. Only counts per minute are stored (no addresses, ids or texts), for
+8 days. Home Assistant can read the same numbers from `GET /api/stats/requests?platform=all|willhaben|kleinanzeigen|…&range=24h`
+(`&by=type|channel`); `GET /api/stats/willhaben?range=24h` keeps its shape. The meter leaves out failed live-chat
+reconnects, which the rate limit does not pace; on the account channel a 403 ("blocked") is often just an expired login,
+and on eBay a new visitor's first 403s are its bot protection warming up.
 
 That's it. Setting a dashboard password is strongly recommended, because the app can send messages in your name
 (`DASHBOARD_PASSWORD` in `.env`).

@@ -39,6 +39,7 @@ daisyUI's theme slots carry the design tokens; light and dark follow the system 
 | `--bad` / `--bad-soft` | `text-error` / `bg-bad-soft` |
 | `--off` | `text-off`, `bg-off` |
 | channel colours | `bg-ch-anonymous`, `bg-ch-account`, `bg-ch-chat` |
+| request types (statistics) | `bg-type-search`, `bg-type-detail`, `bg-type-messages`, `bg-type-account`, `bg-type-other` (`fill-type-*` in SVG; light/dark steps in `--wh-type-*`) |
 | price levels | `ui.deal_lvl(level, text)` (`bg-lvl-bargain` …) |
 | radii 8 / 10 / 12 px | `rounded-field` / `rounded-[10px]` / `rounded-box` |
 

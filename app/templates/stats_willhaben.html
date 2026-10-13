@@ -1,15 +1,28 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
-{% block title %}{{ _("{platform} requests", platform=platform_name(data.platform)) }} · willhaben Agent{% endblock %}
+{# Request statistics (app/stats_web.py): data = access_stats.series(), chart = access_stats.chart(data). data.platform: a site id
+   or 'all' (every site: one row per site, its last hour against its own budget and its trend over the range); data.stack: what
+   the bars stack by (type | channel), data.stacks: the choices of this view, the first is the default. #}
+{% block title %}{{ _("Requests to the sites") if data.platform == 'all' else _("{platform} requests", platform=platform_name(data.platform)) }} · willhaben Agent{% endblock %}
 {% block content %}
-{# channel colours: chart fills and legend swatches (the theme colours bg-ch-* / fill-ch-*) #}
-{% set fill_ch = {'anonymous': 'fill-ch-anonymous', 'account': 'fill-ch-account', 'chat': 'fill-ch-chat'} %}
-{% set bg_ch = {'anonymous': 'bg-ch-anonymous', 'account': 'bg-ch-account', 'chat': 'bg-ch-chat'} %}
+{% set every = data.platform == 'all' %}
+{% set pname = platform_name(data.platform) %}
+{% set heading = _("Requests to the sites") if every else _("{platform} requests", platform=pname) %}
+{# colours: whole class names, Tailwind only emits what it finds literally (docs/ui-guide.md) #}
+{% set fills = {'channel': {'anonymous': 'fill-ch-anonymous', 'account': 'fill-ch-account', 'chat': 'fill-ch-chat'},
+                'type': {'search': 'fill-type-search', 'detail': 'fill-type-detail', 'messages': 'fill-type-messages', 'account': 'fill-type-account', 'other': 'fill-type-other'}} %}
+{% set bgs = {'channel': {'anonymous': 'bg-ch-anonymous', 'account': 'bg-ch-account', 'chat': 'bg-ch-chat'},
+              'type': {'search': 'bg-type-search', 'detail': 'bg-type-detail', 'messages': 'bg-type-messages', 'account': 'bg-type-account', 'other': 'bg-type-other'}} %}
+{% set fill_of = fills[data.stack] %}{% set bg_of = bgs[data.stack] %}
+{% set stack_totals = data.by_type if data.stack == 'type' else data.by_channel %}
+{% set non_default = data.stack != data.stacks[0] %}
+{% set seg_items = [] %}{% for s in data.stacks %}{% set _x = seg_items.append(('/stats/requests?platform=' ~ data.platform ~ '&range=' ~ data.range ~ ('' if loop.first else '&by=' ~ s), {'type': _("By type"), 'channel': _("By channel")}[s], none, s == data.stack)) %}{% endfor %}
 <div class="mb-5 flex flex-wrap items-start justify-between gap-6">
-  <div class="min-w-0"><a href="/settings/{{ data.platform }}" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("{platform} settings", platform=platform_name(data.platform)) }}</a><h1 class="mt-1.5">{{ _("{platform} requests", platform=platform_name(data.platform)) }}</h1></div>
+  <div class="min-w-0">{% if not every %}<a href="/settings/{{ data.platform }}" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("{platform} settings", platform=pname) }}</a>{% endif %}<h1 class="{{ '' if every else 'mt-1.5' }}">{{ heading }}</h1></div>
   <div class="flex flex-wrap items-center gap-2">
-  {% if platform_choices|length > 1 %}<select aria-label="{{ _('Platform') }}" onchange="location.href='/stats/requests?platform='+this.value+'&range={{ data.range }}'" class="select select-sm w-auto bg-base-100">{% for pc in platform_choices %}<option value="{{ pc.id }}" {% if pc.id == data.platform %}selected{% endif %}>{{ pc.name }}</option>{% endfor %}</select>{% endif %}
-  <nav class="inline-flex flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px]" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/requests?platform={{ data.platform }}&range={{ r }}" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1 no-underline {{ 'bg-brand-soft font-semibold text-primary' if r == data.range else 'hover:bg-hover' }}"{% if r == data.range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
+  <select aria-label="{{ _('Platform') }}" onchange="location.href='/stats/requests?platform='+this.value+'&range={{ data.range }}'" class="select select-sm w-auto bg-base-100"><option value="all" {% if every %}selected{% endif %}>{{ _("All sites") }}</option>{% for pc in platform_choices %}<option value="{{ pc.id }}" {% if pc.id == data.platform %}selected{% endif %}>{{ pc.name }}{% if not platform_enabled(pc.id) %} ({{ _("off") }}){% endif %}</option>{% endfor %}</select>
+  {% if seg_items|length > 1 %}{{ ui.seg(seg_items) }}{% endif %}
+  <nav class="inline-flex flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px]" aria-label="{{ _('Time range') }}">{% for r in data.ranges %}<a href="/stats/requests?platform={{ data.platform }}&range={{ r }}{% if non_default %}&by={{ data.stack }}{% endif %}" class="inline-flex items-center gap-1.5 rounded-md px-3 py-1 no-underline {{ 'bg-brand-soft font-semibold text-primary' if r == data.range else 'hover:bg-hover' }}"{% if r == data.range %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</nav>
   </div>
 </div>
 <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
@@ -20,39 +33,64 @@
   <div class="rounded-box border border-base-300 bg-base-100 px-4 py-3.5"><div class="text-[26px] leading-none font-semibold tracking-tight tabular-nums">{{ data.cached }}</div><div class="mt-1 text-muted">{{ _("from cache (no access)") }}</div></div>
 </div>
 {% if not data.total and not data.cached %}
-{% set pname = platform_name(data.platform) %}{% call ui.empty(_("No {platform} requests logged in this range yet.", platform=pname), _("Every request to {platform} is logged per minute from the first one on.", platform=pname)) %}{% endcall %}
+{% if every %}{% call ui.empty(_("No requests to any site logged in this range yet."), _("Every request to a site is logged per minute from the first one on.")) %}{% endcall %}
+{% else %}{% call ui.empty(_("No {platform} requests logged in this range yet.", platform=pname), _("Every request to {platform} is logged per minute from the first one on.", platform=pname)) %}{% endcall %}{% endif %}
 {% else %}
 <section class="mb-4 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" class="block h-auto w-full overflow-visible" aria-label="{{ _('Stacked bar chart of willhaben requests per {m} min', m=(data.bucket_s // 60)) }}">
+  <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" class="block h-auto w-full overflow-visible" aria-label="{{ _('{title} per {m} min, stacked by {what}', title=heading, m=(data.bucket_s // 60), what={'type': _('type'), 'channel': _('channel')}[data.stack]) }}">
     {% for tk in chart.yticks %}<line class="stroke-base-300" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ tk.y }}" y2="{{ tk.y }}"/><text class="fill-muted text-[20px] md:text-[13px] lg:text-[9.5px] xl:text-[8px]" x="{{ chart.x0 - 6 }}" y="{{ tk.y + 4 }}" text-anchor="end">{{ tk.label }}</text>{% endfor %}
-    {% for b in chart.bars %}<g class="group"><title>{{ b.title }}</title><rect class="fill-transparent group-hover:fill-base-300 group-hover:opacity-45" x="{{ b.x }}" y="{{ b.hit_y }}" width="{{ b.w }}" height="{{ b.hit_h }}"/>{% for s in b.segs %}<rect class="{{ fill_ch.get(s.channel, '') }}" x="{{ b.x }}" y="{{ s.y }}" width="{{ b.w }}" height="{{ s.h }}" rx="1"/>{% endfor %}{% if b.blocked %}<rect class="fill-error" x="{{ b.x }}" y="{{ chart.base_y + 2 }}" width="{{ b.w }}" height="3"/>{% endif %}</g>{% endfor %}
+    {% for b in chart.bars %}<g class="group"><title>{{ b.title }}</title><rect class="fill-transparent group-hover:fill-base-300 group-hover:opacity-45" x="{{ b.x }}" y="{{ b.hit_y }}" width="{{ b.w }}" height="{{ b.hit_h }}"/>{% for s in b.segs %}<rect class="{{ fill_of.get(s.key, 'fill-type-other') }}" x="{{ b.x }}" y="{{ s.y }}" width="{{ b.w }}" height="{{ s.h }}" rx="1"/>{% endfor %}{% if b.blocked %}<rect class="fill-error" x="{{ b.x }}" y="{{ chart.base_y + 2 }}" width="{{ b.w }}" height="3"/>{% endif %}</g>{% endfor %}
     {% if chart.budget_y is not none %}<line class="stroke-base-content opacity-50" stroke-width="1.5" stroke-dasharray="5 4" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.budget_y }}" y2="{{ chart.budget_y }}"><title>{{ _("Budget pace: {n} per bar = {h} per hour", n=chart.budget, h=data.budget) }}</title></line>{% endif %}
     <line class="stroke-muted" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ chart.base_y }}" y2="{{ chart.base_y }}"/>
     {% for xl in chart.xlabels %}<text class="fill-muted text-[20px] md:text-[13px] lg:text-[9.5px] xl:text-[8px]{{ ' max-md:hidden' if loop.index0 is odd else '' }}" x="{{ chart.x0 if loop.first else xl.x }}" y="{{ chart.h - 6 }}" text-anchor="{{ 'start' if loop.first else 'middle' }}">{{ xl.label }}</text>{% endfor %}
   </svg>
   <div class="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px] text-muted">
-    {% for ch in data.channels %}<span class="flex items-center gap-1.5"><span class="size-2.5 rounded-[3px] {{ bg_ch.get(ch, '') }}"></span>{{ channel_label(ch) }}</span>{% endfor %}
+    {% for k in data.stack_keys %}<span class="flex items-center gap-1.5" data-legend="{{ k }}"><span class="size-2.5 rounded-[3px] {{ bg_of.get(k, 'bg-type-other') }}"></span><span class="text-base-content">{{ stack_label(data.stack, k) }}</span><span class="tabular-nums">{{ stack_totals.get(k, 0) }}</span></span>{% endfor %}
     {% if chart.budget_y is not none %}<span class="flex items-center gap-1.5"><span class="w-3.5 border-t-[1.5px] border-dashed border-base-content opacity-50"></span>{{ _("budget pace ({n} per bar)", n=chart.budget) }}</span>{% endif %}
     {% if data.blocked %}<span class="flex items-center gap-1.5"><span class="h-[3px] w-2.5 bg-error"></span>{{ _("blocked (403/429)") }}</span>{% endif %}
     <span class="ml-auto">{{ _("One bar = {m} min, local time. Hover a bar for details.", m=(data.bucket_s // 60)) }}</span>
   </div>
 </section>
 {% endif %}
-<div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-  {% for title, col, rows in [(_("Channel"), _("Requests"), data.by_channel.items()|list), (_("Kind"), _("Requests"), data.by_kind.items()|list), (_("Outcome"), _("Count"), data.by_outcome.items()|list)] %}
+{% if every %}
+{# every site: its last hour against its own budget, its requests by type in the range, and its trend #}
+<section id="by-site" class="mb-4 overflow-hidden rounded-box border border-base-300 bg-base-100">
+  <header class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-base-300 px-4 py-2.5">{{ ui.eyebrow(_("Sites")) }}<span class="text-[12.5px] text-muted">{{ _("Last hour against each site's own hourly budget; the other columns cover the chosen range.") }}</span></header>
+  <div class="overflow-x-auto"><table class="table table-sm tabular-nums">
+   <thead><tr class="text-[11.5px] tracking-wide text-muted uppercase"><th>{{ _("Site") }}</th><th class="min-w-[120px]">{{ _("Last hour") }}</th><th>{{ _("Trend") }}</th>{% for ty in data.type_cols %}<th class="text-right align-bottom whitespace-normal"><span class="inline-flex items-baseline gap-1.5"><span class="size-2 shrink-0 rounded-[2px] {{ bgs.type[ty] }}"></span>{{ type_label(ty) }}</span></th>{% endfor %}<th class="text-right align-bottom">{{ _("Total") }}</th><th class="text-right align-bottom">{{ _("blocked") }}</th><th class="text-right align-bottom whitespace-normal">{{ _("from cache") }}</th></tr></thead>
+   <tbody>{% for s in data.sites %}
+    <tr data-site="{{ s.id }}" class="{{ '' if s.enabled else 'text-muted' }}">
+     <td class="whitespace-nowrap">{% if s.known %}<a class="font-medium text-base-content no-underline hover:underline" href="/stats/requests?platform={{ s.id }}&range={{ data.range }}">{{ site_label(s.id) }}</a>{% if not s.enabled %} {{ ui.pill(_("off"), '', false) }}{% endif %}{% else %}{{ site_label(s.id) }}{% endif %}</td>
+     <td><span class="flex items-baseline justify-between gap-2"><span><span class="font-semibold">{{ s.last_hour }}</span>{% if s.budget %}<span class="text-muted"> / {{ s.budget }}</span>{% endif %}</span>{% if s.cooling_down_s %}{{ ui.pill(_("paused"), 'warn', true, '', _("paused for {s} s after a block", s=s.cooling_down_s|round|int)) }}{% endif %}</span>{% if s.budget %}{{ ui.bar(100 if s.cooling_down_s else s.pct, s.tone, 'mt-1 h-1') }}{% endif %}</td>
+     <td>{% set sp = chart.sparks.get(s.id) %}{% if sp %}<svg aria-hidden="true" class="block h-6 w-[120px]" viewBox="0 0 {{ sp.w }} {{ sp.h }}">{% for b in sp.bars %}<g><title>{{ b.title }}</title><rect class="fill-primary" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"/>{% if b.bh %}<rect class="fill-error" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.bh }}"/>{% endif %}</g>{% endfor %}{% if sp.budget_y is not none %}<line class="stroke-base-content opacity-40" vector-effect="non-scaling-stroke" stroke-dasharray="2 2" x1="0" x2="{{ sp.w }}" y1="{{ sp.budget_y }}" y2="{{ sp.budget_y }}"/>{% endif %}</svg>{% else %}<span class="text-muted">–</span>{% endif %}</td>
+     {% for ty in data.type_cols %}<td class="text-right {{ '' if s.by_type[ty] else 'text-muted' }}">{{ s.by_type[ty] }}</td>{% endfor %}
+     <td class="text-right font-semibold">{{ s.total }}</td><td class="text-right {{ 'font-semibold text-error' if s.blocked else 'text-muted' }}">{{ s.blocked }}</td><td class="text-right text-muted">{{ s.cached }}</td>
+    </tr>{% endfor %}</tbody>
+   <tfoot><tr class="text-base-content"><th>{{ _("Total") }}</th><th>{{ data.last_hour }}</th><th></th>{% for ty in data.type_cols %}<th class="text-right">{{ data.by_type[ty] }}</th>{% endfor %}<th class="text-right">{{ data.total }}</th><th class="text-right">{{ data.blocked }}</th><th class="text-right">{{ data.cached }}</th></tr></tfoot>
+  </table></div>
+</section>
+{% else %}
+{# one site: its requests by type (willhaben's finer kinds as a line under their type) #}
+<section id="by-type" class="mb-4 overflow-hidden rounded-box border border-base-300 bg-base-100"><div class="overflow-x-auto"><table class="table table-sm tabular-nums">
+ <thead><tr class="text-[11.5px] tracking-wide text-muted uppercase"><th>{{ _("Type") }}</th><th class="text-right">{{ _("Requests") }}</th><th class="text-right">{{ _("blocked") }}</th><th class="text-right">{{ _("errors") }}</th><th class="text-right">{{ _("from cache") }}</th></tr></thead>
+ <tbody>{% for ty, o in data.type_outcomes.items() %}<tr data-type="{{ ty }}"><td><span class="flex items-center gap-1.5 whitespace-nowrap">{% if data.stack == 'type' %}<span class="size-2 shrink-0 rounded-[2px] {{ bgs.type[ty] }}"></span>{% endif %}{{ type_label(ty) }}</span>{% if data.type_kinds.get(ty) %}<span class="block text-[11.5px] text-muted">{% for k, n in data.type_kinds[ty].items() %}{{ kind_label(k) }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}</td><td class="text-right font-semibold">{{ o.requests }}</td><td class="text-right {{ 'font-semibold text-error' if o.blocked else 'text-muted' }}">{{ o.blocked }}</td><td class="text-right {{ '' if o.errors else 'text-muted' }}">{{ o.errors }}</td><td class="text-right text-muted">{{ o.cached }}</td></tr>{% else %}<tr><td colspan="5" class="text-muted">–</td></tr>{% endfor %}</tbody></table></div></section>
+{% endif %}
+{% set cards = ([(_("Channel"), _("Requests"), data.by_channel.items()|list)] if data.platform == 'willhaben' else []) + [(_("Outcome"), _("Count"), data.by_outcome.items()|list)] %}
+<div class="grid gap-3 {{ 'grid-cols-[repeat(auto-fit,minmax(220px,1fr))]' if cards|length > 1 else 'grid-cols-[repeat(auto-fill,minmax(260px,1fr))]' }}">
+  {% for title, col, rows in cards %}
   <section class="overflow-hidden rounded-box border border-base-300 bg-base-100">
     <header class="flex justify-between px-3 py-2 text-[11.5px] tracking-wide text-muted uppercase"><span>{{ title }}</span><span>{{ col }}</span></header>
     {% for k, n in rows %}
     {% set blocked_row = title == _("Outcome") and k == 'blocked' and n %}
-    <div class="flex items-center justify-between gap-1.5 border-t border-base-300 px-3 py-1.5 text-[13px] tabular-nums {{ 'font-semibold text-error' if blocked_row else '' }}"{% if blocked_row %} data-outcome="blocked"{% endif %}><span class="flex min-w-0 items-center gap-1.5">{% if title == _("Channel") %}<span class="size-2 rounded-[2px] {{ bg_ch.get(k, '') }}"></span>{% endif %}{{ channel_label(k) if title == _("Channel") else kind_label(k) if title == _("Kind") else outcome_label(k) }}</span><span>{{ n }}</span></div>
+    <div class="flex items-center justify-between gap-1.5 border-t border-base-300 px-3 py-1.5 text-[13px] tabular-nums {{ 'font-semibold text-error' if blocked_row else '' }}"{% if blocked_row %} data-outcome="blocked"{% endif %}><span class="flex min-w-0 items-center gap-1.5">{% if title == _("Channel") %}<span class="size-2 rounded-[2px] {{ bgs.channel.get(k, '') }}"></span>{% endif %}{{ channel_label(k) if title == _("Channel") else outcome_label(k) }}</span><span>{{ n }}</span></div>
     {% else %}<div class="border-t border-base-300 px-3 py-2 text-muted">–</div>{% endfor %}
   </section>
   {% endfor %}
 </div>
 {% if data.total or data.cached %}
 <details class="mt-4"><summary class="cursor-pointer text-muted">{{ _("Table view") }}</summary>
-  <div class="mt-2 overflow-x-auto"><table class="table table-sm tabular-nums"><thead><tr><th>{{ _("Time") }}</th>{% for ch in data.channels %}<th>{{ channel_label(ch) }}</th>{% endfor %}<th>{{ _("Total") }}</th><th>{{ _("blocked (403/429)") }}</th><th>{{ _("from cache (no access)") }}</th></tr></thead>
-  <tbody>{% for b in data.buckets|reverse if b.total or b.cached %}<tr><td>{{ b.label }}–{{ b.end_label }}</td>{% for ch in data.channels %}<td>{{ b[ch] }}</td>{% endfor %}<td>{{ b.total }}</td><td>{{ b.blocked }}</td><td>{{ b.cached }}</td></tr>{% endfor %}</tbody></table></div></details>
+  <div class="mt-2 overflow-x-auto"><table class="table table-sm tabular-nums"><thead><tr><th>{{ _("Time") }}</th>{% for k in data.stack_keys %}<th>{{ stack_label(data.stack, k) }}</th>{% endfor %}<th>{{ _("Total") }}</th><th>{{ _("blocked (403/429)") }}</th><th>{{ _("from cache (no access)") }}</th></tr></thead>
+  <tbody>{% for b in data.buckets|reverse if b.total or b.cached %}{% set src = b.by_type if data.stack == 'type' else b %}<tr><td>{{ b.label }}–{{ b.end_label }}</td>{% for k in data.stack_keys %}<td>{{ src.get(k, 0) }}</td>{% endfor %}<td>{{ b.total }}</td><td>{{ b.blocked }}</td><td>{{ b.cached }}</td></tr>{% endfor %}</tbody></table></div></details>
 {% endif %}
-<p class="mt-4 text-[12.5px] text-muted">{% if data.platform == 'willhaben' %}{{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }} {% else %}{{ _("Every request the search agents, the ad viewer and the product search send to this site, anonymously.") }} {% endif %}{{ _("Answers served from the app's short cache are listed separately and are not requests to the site. Counts are kept for 8 days; times are local.") }} <a class="link link-primary" href="/api/stats/requests?platform={{ data.platform }}&range={{ data.range }}">JSON</a></p>
+<p class="mt-4 text-[12.5px] text-muted">{% if every %}{{ _("Every request the app sends to the second-hand sites; for willhaben also those of the logged-in browser and the live chat. Budgets apply per site, so this chart has no budget line: the table compares each site's last hour with its budget, and the dashed line in each trend is that site's budget pace.") }} {% elif data.platform == 'willhaben' %}{{ _("Search agents, hit screening, the price check and the ad viewer use the anonymous channel (no willhaben login); the account channel is the logged-in browser (chats, my ads, publishing, page loads); live chat counts chat WebSocket calls and each (re)connect of the live socket, not every frame.") }} {% else %}{{ _("Every request the search agents, the ad viewer and the product search send to this site, anonymously.") }} {% endif %}{{ _("Types: search = result pages (on willhaben also the search filters), ad detail = the page of one ad, other = photos from the site's servers, place lookups and the like; chats & messages and my ads & account exist only on willhaben.") }} {% if data.platform == 'ebay' or (every and data.sites|selectattr('id', 'equalto', 'ebay')|list) %}{{ _("On eBay a new visitor's first refusals (403), while the bot protection sets its cookies, count as blocked too.") }} {% endif %}{{ _("Answers served from the app's short cache are listed separately and are not requests to the site. Counts are kept for 8 days; times are local.") }} <a class="link link-primary" href="/api/stats/requests?platform={{ data.platform }}&range={{ data.range }}{% if non_default %}&by={{ data.stack }}{% endif %}">JSON</a></p>
 {% endblock %}

@@ -40,9 +40,9 @@ def _counts():
     return out
 
 
-def _put(minute, channel="anonymous", kind="search", outcome="ok", count=1):
+def _put(minute, channel="anonymous", kind="search", outcome="ok", count=1, platform="willhaben"):
     with dbmod.session() as db:
-        db.add(AccessCount(minute=minute, channel=channel, kind=kind, outcome=outcome, count=count))
+        db.add(AccessCount(minute=minute, platform=platform, channel=channel, kind=kind, outcome=outcome, count=count))
         db.commit()
 
 
@@ -400,8 +400,9 @@ def test_chart_geometry():
     d = access_stats.series("1h", now=NOW)
     ch = access_stats.chart(d)
     last = ch["bars"][-1]
-    assert [s["channel"] for s in last["segs"]] == ["anonymous", "account"]
+    assert [s["key"] for s in last["segs"]] == ["anonymous", "account"]
     assert last["segs"][1]["y"] < last["segs"][0]["y"]                  # stacked upwards
+    assert last["segs"][1]["y"] + last["segs"][1]["h"] == pytest.approx(last["segs"][0]["y"] - access_stats.SEG_GAP, abs=0.02)
     assert ch["budget_y"] is not None and ch["yticks"][0]["label"] == "0"
     assert all(not b["segs"] for b in ch["bars"][:-1])
 
@@ -480,3 +481,138 @@ def test_api_shape(client):
     assert set(d["buckets"][0]) == {"start", "total", "blocked", "cached", "anonymous", "account", "chat"}
     assert d["total"] == 1 and d["by_channel"]["anonymous"] == 1 and d["by_kind"] == {"search": 1}
     assert {"budget", "budget_per_bucket", "last_hour", "peak", "by_outcome", "blocked", "cached"} <= set(d)
+
+
+# ------------------------------------------------------------------ per site and per type
+def test_every_kind_has_a_type():
+    assert set(access_stats.TYPE_OF) == set(access_log.KINDS) and set(access_stats.TYPE_OF.values()) == set(access_stats.TYPES)
+    assert [access_stats.TYPE_OF[k] for k in ("filters", "send", "chat", "navigation")] == ["search", "messages", "messages", "account"]
+
+
+def test_other_site_stacks_by_type():
+    _put(NOW_MIN, count=3, platform="ebay")
+    _put(NOW_MIN, kind="detail", count=2, platform="ebay")
+    _put(NOW_MIN, kind="detail", outcome="blocked", platform="ebay")
+    _put(NOW_MIN, kind="other", outcome="cached", count=4, platform="ebay")
+    d = access_stats.series("1h", now=NOW, platform="ebay", by="channel")               # channels are willhaben's only
+    assert d["stack"] == "type" and d["stacks"] == ["type"] and d["stack_keys"] == ["search", "detail"]
+    assert d["by_type"] == {"search": 3, "detail": 3, "messages": 0, "account": 0, "other": 0}
+    assert d["type_outcomes"]["detail"]["requests"] == 3 and d["type_outcomes"]["detail"]["blocked"] == 1
+    assert d["type_outcomes"]["other"]["cached"] == 4 and d["type_outcomes"]["other"]["requests"] == 0
+    assert d["type_kinds"] == {} and d["budget"] == 40
+    assert d["buckets"][-1]["by_type"]["detail"] == 3 and d["buckets"][-1]["blocked_by"] == {"detail": 1}
+    bar = access_stats.chart(d)["bars"][-1]
+    assert [s["key"] for s in bar["segs"]] == ["search", "detail"]
+    assert "6 eBay requests" in bar["title"] and "1 blocked (ad detail 1)" in bar["title"]
+
+
+def test_willhaben_stacks_by_channel_or_type():
+    _put(NOW_MIN, count=2)
+    _put(NOW_MIN, "anonymous", "filters")
+    _put(NOW_MIN, "account", "myads")
+    _put(NOW_MIN, "chat", "send")
+    d = access_stats.series("1h", now=NOW)
+    assert d["stack"] == "channel" and d["stacks"] == ["channel", "type"] and d["stack_keys"] == ["anonymous", "account", "chat"]
+    ty = access_stats.series("1h", now=NOW, by="type")
+    assert ty["stack_keys"] == ["search", "messages", "account"]
+    assert ty["by_type"] == {"search": 3, "detail": 0, "messages": 1, "account": 1, "other": 0}
+    assert ty["type_kinds"] == {"search": {"search": 2, "filters": 1}, "messages": {"send": 1}, "account": {"myads": 1}}
+    assert [s["key"] for s in access_stats.chart(ty)["bars"][-1]["segs"]] == ["search", "messages", "account"]
+
+
+def test_all_sites_series():
+    _put(NOW_MIN, count=5)
+    _put(NOW_MIN, outcome="blocked", count=2, platform="kleinanzeigen")
+    _put(NOW_MIN, kind="detail", platform="kleinanzeigen")
+    _put(NOW_MIN, outcome="cached", count=3, platform="kleinanzeigen")
+    _put(NOW_MIN, platform="other")                                                         # a name the registry does not know
+    d = access_stats.series("1h", now=NOW, platform=access_stats.ALL, by="channel")
+    assert d["stack"] == "type" and d["stacks"] == ["type"] and d["stack_keys"] == ["search", "detail"]
+    assert (d["total"], d["blocked"], d["cached"], d["last_hour"]) == (9, 2, 3, 9)
+    assert d["budget"] is None and d["budget_per_bucket"] is None and d["type_cols"] == ["search", "detail"]
+    assert d["buckets"][-1]["by_site"] == {"willhaben": 5, "kleinanzeigen": 3, "other": 1}
+    rows = {r["id"]: r for r in d["sites"]}
+    assert list(rows) == ["willhaben", "kleinanzeigen", "other"]                              # off and silent: left out
+    ka = rows["kleinanzeigen"]
+    assert (ka["total"], ka["blocked"], ka["cached"], ka["by_type"]["detail"], ka["budget"], ka["enabled"], ka["known"]) == \
+        (3, 2, 3, 1, 120, False, True)
+    assert rows["willhaben"]["last_hour"] == 5 and rows["other"]["known"] is False
+    assert d["spark_bucket_s"] == 300 and len(ka["spark"]) == 12 and (ka["spark"][-1]["total"], ka["spark"][-1]["blocked"]) == (3, 2)
+    ch = access_stats.chart(d)
+    assert [s["key"] for s in ch["bars"][-1]["segs"]] == ["search", "detail"]
+    assert "willhaben 5, Kleinanzeigen 3, other 1" in ch["bars"][-1]["title"]
+    sp = ch["sparks"]["kleinanzeigen"]
+    assert sp["budget_y"] is not None and sp["bars"][-1]["bh"] > 0 and ch["sparks"].get("shpock") is None
+
+
+def test_hour_by_platform_leaves_out_cache_and_unpaced():
+    access_log.record("anonymous", "search")
+    access_log.record("chat", "chat", "error")                                              # unpaced reconnect
+    access_log.record("anonymous", "search", "blocked", platform="ebay")
+    access_log.record("anonymous", "detail", "cached", platform="ebay")
+    want = {"willhaben": {"n": 1, "blocked": 0}, "ebay": {"n": 1, "blocked": 1}}
+    assert access_stats.hour_by_platform() == want
+    access_log.flush()
+    assert access_stats.hour_by_platform() == want
+
+
+def test_site_usage_tone(monkeypatch):
+    import time
+
+    from app import platforms
+    for _ in range(38):
+        access_log.record("anonymous", "search", platform="ebay")                          # 38 of 40 = 95 %
+    u = {x["id"]: x for x in access_stats.site_usage()}
+    assert (u["ebay"]["n"], u["ebay"]["pct"], u["ebay"]["tone"]) == (38, 95, "full") and u["vinted"]["tone"] == "ok"
+    monkeypatch.setattr(platforms.get("vinted").limiter, "_cooldown_until", time.monotonic() + 120)
+    assert {x["id"]: x for x in access_stats.site_usage()}["vinted"]["tone"] == "full"
+
+
+def test_all_sites_page(client):
+    access_log.record("anonymous", "search")
+    access_log.record("anonymous", "search", "blocked", platform="kleinanzeigen")
+    page = client.get("/stats/requests?platform=all&range=1h").text
+    assert "<title>Requests to the sites" in page and 'value="all" selected' in page
+    assert 'data-site="willhaben"' in page and 'data-site="kleinanzeigen"' in page
+    assert 'href="/stats/requests?platform=kleinanzeigen&range=1h"' in page and "fill-type-search" in page
+    assert '<svg aria-hidden="true"' in page and 'data-outcome="blocked"' in page and 'id="by-type"' not in page
+
+
+def test_all_sites_empty_state(client):
+    page = client.get("/stats/requests?platform=all&range=1h").text
+    assert "No requests to any site logged" in page and 'data-site="willhaben"' in page and "<svg viewBox" not in page
+
+
+def test_willhaben_type_view(client):
+    access_log.record("anonymous", "detail")
+    page = client.get("/stats/requests?platform=willhaben&range=1h&by=type").text
+    assert "fill-type-detail" in page and 'data-type="detail"' in page and 'data-legend="detail"' in page
+    assert 'href="/stats/requests?platform=willhaben&range=6h&by=type"' in page            # the range keeps the stacking
+    assert 'platform=willhaben&amp;range=1h"' in page                                      # "By channel" (ui.seg escapes &)
+    plain = client.get("/stats/requests?platform=willhaben&range=1h").text
+    assert "fill-ch-anonymous" in plain and 'href="/stats/requests?platform=willhaben&range=6h"' in plain
+    assert 'platform=willhaben&amp;range=1h&amp;by=type"' in plain
+    ebay = client.get("/stats/requests?platform=ebay&range=1h&by=channel").text
+    assert "By channel" not in ebay and "eBay requests" in ebay
+
+
+def test_default_view_and_api(client):
+    from app.db import set_setting
+
+    assert 'value="willhaben" selected' in client.get("/stats/requests").text              # only willhaben on
+    set_setting("platform_ebay_enabled", "1")
+    assert 'value="all" selected' in client.get("/stats/requests").text
+    access_log.record("anonymous", "search", platform="kleinanzeigen")
+    d = client.get("/api/stats/requests?platform=all&range=1h").json()
+    assert d["platform"] == "all" and d["stack"] == "type" and [s["id"] for s in d["sites"]] == ["willhaben", "kleinanzeigen", "ebay"]
+    assert d["by_site"] == {"willhaben": 0, "kleinanzeigen": 1, "ebay": 0} and len(d["sites"][0]["spark"]) == 12
+    assert set(d["sites"][0]["spark"][0]) == {"start", "total", "blocked"} and "sparks" not in d
+    assert client.get("/api/stats/requests?platform=willhaben&by=type").json()["stack"] == "type"
+    assert "by_type" not in client.get("/api/stats/willhaben?range=1h").json()["buckets"][0]
+
+
+def test_css_has_the_type_colours():                                                     # catches a forgotten scripts/build-css.sh
+    from pathlib import Path
+    css = (Path(access_stats.__file__).resolve().parents[1] / "static" / "app.css").read_text(encoding="utf-8")
+    for ty in access_stats.TYPES:
+        assert f".fill-type-{ty}" in css and f".bg-type-{ty}" in css, ty
