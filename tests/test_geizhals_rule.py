@@ -1,11 +1,13 @@
 """A search agent's Geizhals rule: push only ads at least X % below the lowest new price on Geizhals."""
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from app import platforms
 from app.db import Hit, SearchAgent, session
-from app.services import deals, geizhals, search_agents
+from app.services import deals, geizhals, screening, search_agents
 from app.services.search_agents import create_agent, geizhals_below_pct, geizhals_passes, run_agent
 from tests.fake_platform import FakePlatform, listing
 
@@ -25,7 +27,7 @@ def world(monkeypatch):
     """Geizhals knows iPhones only; every lookup and every notification is recorded."""
     lookups, sent = [], []
 
-    async def match(query):
+    async def match(query, **kw):
         lookups.append(query)
         return dict(GH) if query and "iphone" in query.lower() else None
 
@@ -118,7 +120,9 @@ def test_exactly_x_percent_below_passes():
     a.geizhals_pct = 30
     held = Hit(agent_id=1, ad_id="1", heading="iPhone", url="x", price=352.0, geizhals=dict(GH))   # 29.6 % below
     assert not geizhals_passes(a, held) and geizhals_below_pct(held) == 29
-    assert geizhals_below_pct(Hit(agent_id=1, ad_id="1", heading="x", url="x", price=601.0, geizhals=dict(GH))) == -20
+    for price, pct in ((503.0, -1), (500.01, -1), (500.0, 0), (600.0, -20), (601.0, -21)):   # dearer: never "0 % less"
+        h = Hit(agent_id=1, ad_id="1", heading="x", url="x", price=price, geizhals=dict(GH))
+        assert geizhals_below_pct(h) == pct
 
 
 async def test_a_held_back_hit_returns_only_screened(fake, world, monkeypatch):
@@ -146,6 +150,34 @@ async def test_a_held_back_hit_returns_only_screened(fake, world, monkeypatch):
     await run_agent(a.id)
     assert _hits(a.id)["1"].state == "new" and screened == ["2", "1"]
 
+
+
+async def test_a_held_back_hit_claude_was_not_sent_stays_filtered(fake, world, monkeypatch):
+    """Claude sees MAX_PER_CALL hits per run, held-back hits first: one that did not fit stays filtered and gets no
+    push, though its drop is under the line now (it has no verdict, and Claude was not asked)."""
+    lookups, sent = world
+    screened = []
+
+    async def screen(agent_id, hits):
+        screened.extend(h.ad_id for h in hits[:screening.MAX_PER_CALL])
+
+    monkeypatch.setattr(search_agents.screening, "screen", screen)
+    monkeypatch.setattr(search_agents.screening, "MAX_PER_CALL", 1)
+    a = create_agent("https://fake.example/s/iphone")
+    fake.pages = [[]]
+    await run_agent(a.id)
+    _set(a.id, geizhals_pct=30, screen=True)
+    fake.pages = [[listing("1", "iPhone 13 128GB defekt", 400.0), listing("2", "iPhone 13 128GB", 420.0)]]
+    await run_agent(a.id)
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "filtered", "2": "filtered"} and screened == []
+    sent.clear()
+    fake.pages = [[listing("1", "iPhone 13 128GB defekt", 300.0), listing("2", "iPhone 13 128GB", 310.0),
+                   listing("3", "Handyhülle", 10.0)]]
+    await run_agent(a.id)                                                     # both under the line now
+    assert screened == ["1"]                                                  # before the new hit
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "new"}
+    assert {(m["kind"], m["ad"]): m["push"] for m in sent} == {("price_drop", "1"): True, ("price_drop", "2"): False,
+                                                               ("hit", "3"): True}
 
 async def test_a_failed_lookup_is_asked_again(fake, monkeypatch):
     """Geizhals blocked or down: the hit passes as usual and is looked up again later, not kept as "no product"."""
@@ -184,6 +216,40 @@ async def test_a_failed_lookup_is_asked_again(fake, monkeypatch):
     finally:
         deals.clear_cache()
 
+
+
+async def test_a_lookup_that_fails_while_another_finds_it(fake, monkeypatch):
+    """Two agents ask for one product at once: this lookup fails (429), the other one finds it. The failed one leaves
+    its hit not asked (a later run takes the cached product), not "no product" for good."""
+    other_found = asyncio.Event()
+    calls = []
+
+    async def lookup(query):
+        calls.append(query)
+        if len(calls) == 1:
+            await other_found.wait()
+            raise geizhals.GeizhalsError("HTTP 429")
+        other_found.set()
+        return {"query": query, "verified": True, "candidates": [], "match": dict(GH)}
+
+    monkeypatch.setattr(deals.geizhals, "lookup", lookup)
+    deals.clear_cache()
+    try:
+        a = create_agent("https://fake.example/s/iphone")
+        with session() as db:
+            pair = [Hit(agent_id=a.id, platform="fake", ad_id=i, heading="iPhone 13 128GB",
+                        url=f"https://fake.example/ad/{i}", price=400.0) for i in ("1", "2")]
+            db.add_all(pair)
+            db.commit()
+            for h in pair:
+                db.refresh(h)
+        await asyncio.gather(search_agents._geizhals_prices([pair[0]]), search_agents._geizhals_prices([pair[1]]))
+        hits = _hits(a.id)
+        assert len(calls) == 2 and hits["1"].geizhals is None and hits["2"].geizhals == GH
+        await search_agents._geizhals_prices([hits["1"]])                     # the next run: from the cache
+        assert _hits(a.id)["1"].geizhals == GH and len(calls) == 2
+    finally:
+        deals.clear_cache()
 
 def test_settings_drawer_and_pages(fake):
     from app.main import app

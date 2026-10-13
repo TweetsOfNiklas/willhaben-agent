@@ -570,10 +570,15 @@ async def _run_agent(agent_id: int) -> RunResult:
     if agent.geizhals_pct and to_notify:
         await _geizhals_prices(to_notify)
     to_screen = [h for h in to_notify if geizhals_passes(agent, h)]   # held back anyway: no Claude call
+    # one call judges MAX_PER_CALL hits: first those the rule held back before (filtered, no verdict yet), which get
+    # back into New only judged
+    to_screen.sort(key=lambda h: not (h.state == "filtered" and h.screen_relevant is None))
+    to_screen = to_screen[:screening.MAX_PER_CALL]
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         await screening.screen(agent_id, to_screen)
+    asked = {h.id for h in to_screen}
     if (agent.screen or agent.geizhals_pct) and to_notify:
-        _file_screened(agent, res.new, res.price_drops, {h.id for h in to_screen})
+        _file_screened(agent, res.new, res.price_drops, asked)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
     multi = platforms.multi()
@@ -600,7 +605,8 @@ async def _run_agent(agent_id: int) -> RunResult:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
                          f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}" + _scam_line(h)
-                         + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url, push=passes(agent, h),
+                         + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url,
+                         push=passes(agent, h) and not (h.state == "filtered" and _unjudged(agent, h, asked)),
                          data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
                                "price": h.price, "old_price": h.old_price, **_screen_data(h), **_scam_data(h),
                                **_geizhals_data(h)})
@@ -640,15 +646,15 @@ def passes(agent: SearchAgent, hit: Hit) -> bool:
 async def _geizhals_prices(hits: list[Hit]) -> None:
     """The Geizhals product of every hit not asked yet (the price check's lookup, cached 6 h per product name). When
     Geizhals fails (blocked, down) the hit stays not asked: it passes now and a later run asks again."""
-    from app.services import deals
+    from app.services import deals, geizhals
 
     answered = []
     for h in hits:
         if h.geizhals is not None:
             continue
-        query = deals.geizhals_query(h.heading)
-        gh = await deals.geizhals_match(query)
-        if gh is None and deals.geizhals_failed(query):
+        try:
+            gh = await deals.geizhals_match(deals.geizhals_query(h.heading), raise_errors=True)
+        except geizhals.GeizhalsError:
             continue
         h.geizhals = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}
         answered.append(h)
@@ -675,14 +681,19 @@ def remember_geizhals(hit_id: int, gh: dict[str, Any]) -> None:
         db.commit()
 
 
-def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], screened: set[int]) -> None:
+def _unjudged(agent: SearchAgent, h: Hit, asked: set[int]) -> bool:
+    """With screening on: Claude has no verdict on the hit and was not sent it in this run (`asked`; a failed call lets
+    it pass, as it does the push). A hit the Geizhals rule held back has none, and neither has a drop that is not
+    reported or did not fit into the call."""
+    return bool(agent.screen) and h.screen_relevant is None and h.id not in asked
+
+
+def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:
     """A new hit the screening or the Geizhals rule holds back gets no push, so it goes to "filtered" instead of
-    "new"; a filtered hit that passes after a price drop is pushed and becomes new again. With screening on only a hit
-    Claude has judged or was asked about in this run (`screened`; a failed call lets it pass, as it does the push): one
-    the Geizhals rule held back has no verdict, and a drop that is not reported is not screened."""
+    "new"; a filtered hit that passes after a price drop is pushed and becomes new again, with screening on only once
+    Claude has judged it or was sent it in this run."""
     moves = [(h, "new", "filtered") for h in new if not passes(agent, h)]
-    moves += [(h, "filtered", "new") for h in drops if passes(agent, h)
-              and (not agent.screen or h.screen_relevant is not None or h.id in screened)]
+    moves += [(h, "filtered", "new") for h in drops if passes(agent, h) and not _unjudged(agent, h, asked)]
     if not moves:
         return
     with session() as db:
@@ -718,14 +729,14 @@ def _hit_text(h: Hit) -> str:
 
 
 def geizhals_below_pct(h: Hit) -> int | None:
-    """How many % the hit is below its Geizhals new price (negative: above); None without both prices. Whole % towards
-    zero, so it shows the rule's X % exactly when the hit keeps the rule (29.6 % below is 29, not 30)."""
+    """How many % the hit is below its Geizhals new price (negative: above); None without both prices. Whole % rounded
+    down, so it shows the rule's X % exactly when the hit keeps the rule (29.6 % below is 29, not 30) and an ad dearer
+    than new is at least 1 % more, never 0 % less."""
     cents = _geizhals_cents(h)
     if cents is None:
         return None
     price, new_price = cents
-    pct = abs(new_price - price) * 100 // new_price
-    return pct if price <= new_price else -pct
+    return (new_price - price) * 100 // new_price
 
 
 def _geizhals_line(h: Hit) -> str:

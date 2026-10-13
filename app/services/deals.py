@@ -446,8 +446,10 @@ def shown_result(platform: str, ad_id: str) -> dict[str, Any] | None:
     return None
 
 
-async def geizhals_match(query: str | None) -> dict[str, Any] | None:
-    """{name, url, price_from} of the matching Geizhals product, or None (also on errors; cached 6 h)."""
+async def geizhals_match(query: str | None, raise_errors: bool = False) -> dict[str, Any] | None:
+    """{name, url, price_from} of the matching Geizhals product, or None (cached 6 h). When Geizhals fails (blocked,
+    down; remembered 15 min) also None, or with `raise_errors` GeizhalsError: a caller that keeps the answer must
+    not take that for "no such product", and only this call can tell (another one may have found it meanwhile)."""
     if not query:
         return None
     key = query.lower()
@@ -455,12 +457,16 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
     if hit:
         return hit[1]
     if _cached(_geizhals_fail, key, GEIZHALS_FAIL_TTL_S):
+        if raise_errors:
+            raise geizhals.GeizhalsError("failed less than 15 min ago")
         return None
     try:
         found = await geizhals.lookup(query)
     except geizhals.GeizhalsError as e:
         log.info("geizhals lookup failed for %r: %s", query, e)
         _put(_geizhals_fail, key, None, GEIZHALS_FAIL_TTL_S)   # short negative cache: retried after 15 min
+        if raise_errors:
+            raise
         return None
     m = (found or {}).get("match") or {}
     best = None                    # an unverified guess (Geizhals' first hit, maybe another variant) is no price
@@ -469,15 +475,6 @@ async def geizhals_match(query: str | None) -> dict[str, Any] | None:
         best = {"name": m["name"], "url": m["url"], "price_from": m["price_from"]}
     _put(_geizhals, key, best, GEIZHALS_TTL_S)
     return best
-
-
-def geizhals_failed(query: str | None) -> bool:
-    """geizhals_match's None for this query means Geizhals failed (blocked, down) in the last 15 min, not that it
-    knows no such product: a caller that keeps the answer asks again later."""
-    key = (query or "").lower()
-    if not query or _cached(_geizhals, key, GEIZHALS_TTL_S):
-        return False
-    return bool(_cached(_geizhals_fail, key, GEIZHALS_FAIL_TTL_S))
 
 
 def _ad_summary(ad: AdDetail) -> dict[str, Any]:
