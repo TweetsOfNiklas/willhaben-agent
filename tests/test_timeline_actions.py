@@ -147,6 +147,7 @@ async def test_scheduled_chat_sync_is_a_run(monkeypatch):
         timeline.record("wh", "GET conversations")
 
     monkeypatch.setattr(chats, "sync", fake_sync)
+    monkeypatch.setattr(scheduler.quiet_hours, "holds", lambda *a, **k: False)   # at night it would hold the sync
     with timeline.context(actor="user", ad_id="leftover"):      # a context the scheduler must not inherit
         await scheduler._chat_sync()
     run, step = _all()
