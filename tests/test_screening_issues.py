@@ -73,6 +73,38 @@ async def test_screen_stores_reasons_and_dealer_from_willhaben(monkeypatch):
     assert "issues" in Fake.schema["properties"]["results"]["items"]["required"]
 
 
+async def test_each_hit_of_a_batch_from_several_sites_names_its_site(monkeypatch):
+    """A multi-site agent's batch: every hit line says its site (country, distance, price level); one site: none."""
+    from app.llm.base import LLMResult
+
+    prompts = []
+
+    class Fake:
+        async def complete(self, *, system, prompt, schema, images=None):
+            prompts.append(prompt)
+            return LLMResult(data={"results": []}, model="fake")
+
+    monkeypatch.setattr(screening, "get_backend", lambda *a: Fake())
+    agent = create_agent(URL)
+    with dbmod.session() as db:
+        a = db.get(dbmod.SearchAgent, agent.id)
+        a.screen = True
+        db.add(a)
+        hits = [dbmod.Hit(agent_id=agent.id, ad_id="1000000001", heading="Rad Wien", url="u", location="1010 Wien"),
+                dbmod.Hit(agent_id=agent.id, ad_id="2000000002", heading="Rad Berlin", url="u", location="10115 Berlin",
+                          platform="kleinanzeigen")]
+        for h in hits:
+            db.add(h)
+        db.commit()
+        for h in hits:
+            db.refresh(h)
+    await screening.screen(agent.id, hits)
+    assert "[1] Rad Wien · Preis: keiner · 1010 Wien · Portal: willhaben ·" in prompts[-1]
+    assert "[2] Rad Berlin · Preis: keiner · 10115 Berlin · Portal: Kleinanzeigen ·" in prompts[-1]
+    await screening.screen(agent.id, hits[:1])
+    assert "[1] Rad Wien · Preis: keiner · 1010 Wien · Anbieter unbekannt" in prompts[-1] and "Portal:" not in prompts[-1]
+
+
 def test_agent_form_saves_hidden_reasons(client):  # noqa: F811
     agent = create_agent(URL)
     page = client.get("/agents").text

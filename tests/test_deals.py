@@ -713,6 +713,25 @@ async def test_claude_geizhals_search_blocked(wh, no_auto_gh, monkeypatch):
     assert "429" in res["geizhals_error"] and len(fake.calls) == 1          # no pick without results
 
 
+async def test_the_ad_photo_counts_for_the_ads_own_site(monkeypatch):
+    """Kleinanzeigen and eBay share i.ebayimg.com: an eBay ad's photo for Claude is an eBay download (statistics,
+    eBay's VPN), not Kleinanzeigen's, both in the price check and in the Geizhals search."""
+    from app.services import screening
+    from app.willhaben import access_log
+
+    sites = []
+    monkeypatch.setattr(access_log, "record", lambda *a, platform="willhaben", **k: sites.append(platform))
+    monkeypatch.setattr(screening, "_transport", httpx.MockTransport(
+        lambda r: httpx.Response(200, content=b"\xff\xd8jpeg", headers={"content-type": "image/jpeg"})))
+    fake = ScriptedClaude({"deal": "good", "reason": "Günstig."}, {"product": "", "queries": []})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    ad = _ad()
+    ad.platform, ad.images = "ebay", ["https://i.ebayimg.com/images/g/qvYAAeSwmhhqy9Wh/s-l1600.jpg"]
+    assert (await deals.ask_claude(ad, {}))["deal"] == "good"
+    assert "none" in await deals.claude_geizhals(ad)
+    assert all("Foto: ./foto1.jpg" in c["prompt"] for c in fake.calls) and sites == ["ebay", "ebay"]
+
+
 def test_viewer_offers_claude_and_updates_the_hit(app_client, no_auto_gh, monkeypatch):
     from app.services import screening
 

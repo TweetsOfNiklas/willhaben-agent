@@ -428,7 +428,8 @@ SCREEN_SCHEMA: dict[str, Any] = {
 
 def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], stats: dict[str, Any] | None,
                   language: str) -> str:
-    """hits: [{nr, title, price, location, private, description, photo}] where photo is a file name or None."""
+    """hits: [{nr, title, price, location, private, description, photo, site}] where photo is a file name or None and
+    site the hit's site name, only in a batch from several sites (each hit's country, distance and price level)."""
     lines = [f"Suchagent: {agent_name}", "", "Was die Person genau sucht:", brief.strip() or "(keine Beschreibung – nach dem Namen des Suchagenten urteilen)"]
     if stats:
         lines += ["", f"Vergleichspreise bisheriger Treffer dieses Suchagenten ({stats['count']} Anzeigen): "
@@ -437,7 +438,8 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
     lines += ["", "Treffer:"]
     for h in hits:
         lines.append(f"[{h['nr']}] {h['title']} · Preis: {h['price'] or 'keiner'} · {h['location'] or '?'}"
-                     f" · {'privat' if h['private'] else 'Händler' if h['private'] is False else 'Anbieter unbekannt'}"
+                     + (f" · Portal: {h['site']}" if h.get("site") else "")
+                     + f" · {'privat' if h['private'] else 'Händler' if h['private'] is False else 'Anbieter unbekannt'}"
                      + (f" · Foto: ./{h['photo']}" if h.get("photo") else ""))
         if h.get("description"):
             lines.append(f"    {h['description'][:400]}")

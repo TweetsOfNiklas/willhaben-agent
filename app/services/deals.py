@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
+from sqlalchemy import String, cast, or_
 from sqlmodel import col, select
 
 from app.db import DealCheck, ProductSearch, session, utcnow
@@ -435,11 +436,16 @@ def remember_shown(results: list[dict[str, Any]]) -> None:
 
 
 def shown_result(platform: str, ad_id: str) -> dict[str, Any] | None:
-    """A result shown lately: the direct search's (in memory) or a product search's (stored, also after a restart)."""
+    """A result shown lately: the direct search's (in memory) or a product search's (stored, also after a restart).
+    Every stored search counts, however old (a timeline link or the purchases page opens any), the latest run first
+    as in recent(): a re-run keeps its old id. SQL keeps only the rows whose lists mention the id at all."""
     if (r := _shown.get((platform, ad_id))) is not None:
         return r
+    mentions = or_(*(cast(c, String).contains(ad_id, autoescape=True)
+                     for c in (ProductSearch.results, ProductSearch.cards)))
     with session() as db:
-        for ps in db.exec(select(ProductSearch).order_by(col(ProductSearch.id).desc()).limit(30)):
+        for ps in db.exec(select(ProductSearch).where(mentions).order_by(col(ProductSearch.started_at).desc(),
+                                                                          col(ProductSearch.id).desc())):
             for r in (ps.results or []) + (ps.cards or []):
                 if str(r.get("ad_id")) == ad_id and (r.get("platform") or "willhaben") == platform:
                     return r
@@ -685,7 +691,7 @@ async def ask_claude(ad: AdDetail, res: dict[str, Any]) -> dict[str, Any]:
 
     language = LANGS.get(lang(), "Deutsch")
     with tempfile.TemporaryDirectory(prefix="wh-deal-") as tmp:
-        img = await _download(ad.images[0] if ad.images else None, Path(tmp), "ad")
+        img = await _download(ad.images[0] if ad.images else None, Path(tmp), "ad", ad.platform)
         prompt = deal_prompt(ad, res, language, f"foto1{img.suffix}" if img else None)
         try:
             out = await get_backend("screen").complete(system=DEAL_SYSTEM, prompt=prompt, schema=DEAL_SCHEMA,
@@ -774,7 +780,7 @@ async def claude_geizhals(ad: AdDetail) -> dict[str, Any]:
     language = LANGS.get(lang(), "Deutsch")
     backend = get_backend("screen")
     with tempfile.TemporaryDirectory(prefix="wh-gh-") as tmp:
-        img = await _download(ad.images[0] if ad.images else None, Path(tmp), "ad")
+        img = await _download(ad.images[0] if ad.images else None, Path(tmp), "ad", ad.platform)
         lines = _gh_ad_lines(ad) + ([f"Foto: ./foto1{img.suffix}"] if img else [])
         try:
             prompt = "\n".join(lines + ["", "Aufgabe: Nenne das Produkt und die Geizhals-Suchen."])
