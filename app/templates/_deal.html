@@ -39,6 +39,10 @@
     {%- else %}
     {{ _("Among the comparable ads the middle half ({low}–{high}) counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.", low=st.p25|eur, high=st.p75|eur)|nb }}{% if cond_line %} {{ cond_line }}{% endif %}
     {%- endif %}</p>
+  {% elif c.error_kind == 'vpn' %}{# only the VPN held the searches (a server search for that site runs): no failure #}
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted"><span>{{ _("Comparable ads can't be fetched right now: the VPN is looking for a server for {site}.", site=platform_name(c.error_site)) }}</span>
+    {% if compact %}<button type="button" class="btn btn-xs disabled:opacity-60" hx-get="/hits/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}/deal{{ ('?hit=' ~ h.id) if h else '' }}" hx-target="closest section" hx-swap="outerHTML" hx-disabled-elt="this">{{ _("Try again") }}</button>
+    {% else %}<a href="/deals/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}" class="btn btn-xs">{{ _("Try again") }}</a>{% endif %}</div>
   {% else %}<p class="text-[12.5px] text-muted">{{ deal_explain(res) }}</p>{% endif %}
   <p class="text-[12.5px] text-muted">
     {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
