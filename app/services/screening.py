@@ -27,6 +27,7 @@ from app.services import timeline
 log = logging.getLogger(__name__)
 
 MAX_PER_CALL = 10
+MAX_PER_RUN = 3 * MAX_PER_CALL     # hits one agent check sends to Claude at most, in calls of MAX_PER_CALL
 DEAL_RANK = {"great": 3, "good": 2, "fair": 1, "unknown": 1, "overpriced": 0}
 # agent threshold -> lowest deal that still notifies ("unknown" passes "fair" but not "good")
 MIN_RANK = {"match": 0, "fair": 1, "good": 2}
@@ -206,3 +207,16 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         h.screen_relevant, h.screen_deal, h.screen_reason = fresh.screen_relevant, fresh.screen_deal, fresh.screen_reason
         h.screen_issues = fresh.screen_issues
     return judged
+
+
+async def screen_all(agent_id: int, hits: list[Hit]) -> set[int]:
+    """Screen up to MAX_PER_RUN hits, MAX_PER_CALL per Claude call. Returns the ids Claude was sent: a call that judged
+    none (failed) counts, its hits fail open, but ends the round; the hits after it are not sent."""
+    asked: set[int] = set()
+    hits = hits[:MAX_PER_RUN]
+    for i in range(0, len(hits), MAX_PER_CALL):
+        part = hits[i:i + MAX_PER_CALL]
+        asked |= {h.id for h in part}
+        if not await screen(agent_id, part):
+            break
+    return asked

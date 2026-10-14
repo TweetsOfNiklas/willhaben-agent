@@ -124,6 +124,48 @@ async def test_screening_fails_open(responses, ha, images, monkeypatch):  # noqa
     assert {_hit("999000111").state, _hit("999000112").state} == {"new"}
 
 
+async def test_every_new_hit_is_screened_in_several_calls(responses, ha, images, monkeypatch):  # noqa: F811
+    queue, _ = responses
+    set_setting("ha_notify_service", "mobile_app_phone")
+    set_setting("push_channel", "ha")
+    agent = await _agent_with_two_new(queue)
+    monkeypatch.setattr(screening, "MAX_PER_CALL", 1)
+    fake = FakeScreen([{"nr": 1, "relevant": True, "deal": "good", "reason": "Passt"}])
+    monkeypatch.setattr(screening, "get_backend", lambda *a: fake)
+    await run_agent(agent.id)
+    assert len(fake.calls) == 2 and len(_pushes(ha)) == 2
+    assert {_hit("999000111").screen_relevant, _hit("999000112").screen_relevant} == {True}
+
+
+async def test_a_hit_beyond_the_screening_limit_gets_no_push(responses, ha, images, monkeypatch):  # noqa: F811
+    queue, _ = responses
+    set_setting("ha_notify_service", "mobile_app_phone")
+    set_setting("push_channel", "ha")
+    agent = await _agent_with_two_new(queue)
+    monkeypatch.setattr(screening, "MAX_PER_CALL", 1)
+    monkeypatch.setattr(screening, "MAX_PER_RUN", 1)
+    fake = FakeScreen([{"nr": 1, "relevant": True, "deal": "good", "reason": "Passt"}])
+    monkeypatch.setattr(screening, "get_backend", lambda *a: fake)
+    await run_agent(agent.id)
+    assert len(fake.calls) == 1 and len(_pushes(ha)) == 1          # before: the other one was pushed unjudged
+    unjudged = next(h for h in (_hit("999000111"), _hit("999000112")) if h.screen_relevant is None)
+    assert unjudged.state == "filtered"
+    assert len([b for p, b in ha if p == "/api/events/willhaben_hit"]) == 2      # HA still sees both
+
+
+async def test_a_failed_call_ends_the_round_its_hits_fail_open(responses, ha, images, monkeypatch):  # noqa: F811
+    queue, _ = responses
+    set_setting("ha_notify_service", "mobile_app_phone")
+    set_setting("push_channel", "ha")
+    agent = await _agent_with_two_new(queue)
+    monkeypatch.setattr(screening, "MAX_PER_CALL", 1)
+    fake = FakeScreen(fail=True)
+    monkeypatch.setattr(screening, "get_backend", lambda *a: fake)
+    await run_agent(agent.id)
+    assert len(fake.calls) == 1 and len(_pushes(ha)) == 1
+    assert sorted([_hit("999000111").state, _hit("999000112").state]) == ["filtered", "new"]
+
+
 def test_refile_screened_moves_held_back_new_hits_once(client):  # noqa: F811
     agent = create_agent(URL)
     with dbmod.session() as db:

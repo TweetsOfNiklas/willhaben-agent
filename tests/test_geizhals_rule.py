@@ -153,16 +153,19 @@ async def test_a_held_back_hit_returns_only_screened(fake, world, monkeypatch):
 
 
 async def test_a_held_back_hit_claude_was_not_sent_stays_filtered(fake, world, monkeypatch):
-    """Claude sees MAX_PER_CALL hits per run, held-back hits first: one that did not fit stays filtered and gets no
-    push, though its drop is under the line now (it has no verdict, and Claude was not asked)."""
+    """Claude sees MAX_PER_RUN hits per check, held-back hits first: one that did not fit stays filtered and gets no
+    push, though its drop is under the line now (it has no verdict, and Claude was not asked); a new hit that did not
+    fit goes to filtered too instead of being pushed unjudged."""
     lookups, sent = world
     screened = []
 
     async def screen(agent_id, hits):
         screened.extend(h.ad_id for h in hits[:screening.MAX_PER_CALL])
+        return len(hits)
 
     monkeypatch.setattr(search_agents.screening, "screen", screen)
     monkeypatch.setattr(search_agents.screening, "MAX_PER_CALL", 1)
+    monkeypatch.setattr(search_agents.screening, "MAX_PER_RUN", 1)
     a = create_agent("https://fake.example/s/iphone")
     fake.pages = [[]]
     await run_agent(a.id)
@@ -175,9 +178,9 @@ async def test_a_held_back_hit_claude_was_not_sent_stays_filtered(fake, world, m
                    listing("3", "Handyhülle", 10.0)]]
     await run_agent(a.id)                                                     # both under the line now
     assert screened == ["1"]                                                  # before the new hit
-    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "new"}
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "filtered"}
     assert {(m["kind"], m["ad"]): m["push"] for m in sent} == {("price_drop", "1"): True, ("price_drop", "2"): False,
-                                                               ("hit", "3"): True}
+                                                               ("hit", "3"): False}
 
 async def test_a_failed_lookup_is_asked_again(fake, monkeypatch):
     """Geizhals blocked or down: the hit passes as usual and is looked up again later, not kept as "no product"."""

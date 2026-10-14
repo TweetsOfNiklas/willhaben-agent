@@ -623,15 +623,15 @@ async def _run_agent(agent_id: int) -> RunResult:
 
         await geizhals_check.check(agent, to_notify)
     to_screen = [h for h in to_notify if geizhals_passes(agent, h)]   # held back anyway: no Claude call
-    # one call judges MAX_PER_CALL hits: first those the rule held back before (filtered, no verdict yet), which get
-    # back into New only judged
+    # first those the rule held back before (filtered, no verdict yet), which get back into New only judged. A check
+    # sends at most screening.MAX_PER_RUN; a hit beyond that stays unjudged and gets no push (10-14 they were pushed
+    # unjudged: 30 off-topic Vinted ads in a day)
     to_screen.sort(key=lambda h: not (h.state == "filtered" and h.screen_relevant is None))
-    to_screen = to_screen[:screening.MAX_PER_CALL]
+    asked: set[int] = set()
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
-        await screening.screen(agent_id, to_screen)
-    asked = {h.id for h in to_screen}
+        asked = await screening.screen_all(agent_id, to_screen)
     if (agent.screen or agent.geizhals_pct) and to_notify:
-        _file_screened(agent, res.new, res.price_drops, asked)
+        _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
     multi = platforms.multi()
@@ -640,7 +640,7 @@ async def _run_agent(agent_id: int) -> RunResult:
         return f"{_site(pid).name} · {name}" if multi else name
 
     if notify_new and res.new:
-        good = [h.id for h in res.new if passes(agent, h)]
+        good = [h.id for h in res.new if passes(agent, h) and not _unjudged(agent, h, asked)]
         pushed = set(good[:MAX_PUSH_PER_RUN])
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
@@ -659,7 +659,7 @@ async def _run_agent(agent_id: int) -> RunResult:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
                          f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}" + _scam_line(h)
                          + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url,
-                         push=passes(agent, h) and not (h.state == "filtered" and _unjudged(agent, h, asked)),
+                         push=passes(agent, h) and not _unjudged(agent, h, asked),
                          data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
                                "price": h.price, "old_price": h.old_price, **_screen_data(h), **_scam_data(h),
                                **_geizhals_data(h)})
@@ -742,10 +742,10 @@ def _unjudged(agent: SearchAgent, h: Hit, asked: set[int]) -> bool:
 
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:
-    """A new hit the screening or the Geizhals rule holds back gets no push, so it goes to "filtered" instead of
-    "new"; a filtered hit that passes after a price drop is pushed and becomes new again, with screening on only once
-    Claude has judged it or was sent it in this run."""
-    moves = [(h, "new", "filtered") for h in new if not passes(agent, h)]
+    """A new hit the screening or the Geizhals rule holds back, or one Claude was not sent (more than a check screens),
+    gets no push, so it goes to "filtered" instead of "new"; a filtered hit that passes after a price drop is pushed
+    and becomes new again, with screening on only once Claude has judged it or was sent it in this run."""
+    moves = [(h, "new", "filtered") for h in new if not passes(agent, h) or _unjudged(agent, h, asked)]
     moves += [(h, "filtered", "new") for h in drops if passes(agent, h) and not _unjudged(agent, h, asked)]
     if not moves:
         return
