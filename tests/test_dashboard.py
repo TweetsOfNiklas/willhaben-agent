@@ -344,6 +344,21 @@ def test_remote_overlay_compact_header(client, monkeypatch):
     assert 'class="embed-status' not in full and 'id="remote"' in full
 
 
+def test_settings_fold_the_browser_window_until_asked(client, monkeypatch):
+    """Settings → willhaben shows the live view only on "Show browser window" (a closed one fetches no frames); the
+    actions that need it come back with it open. /session itself always shows it."""
+    from app.willhaben.session import get_session
+
+    sess = get_session()
+    status = {**sess.status(), "started": True, "logged_in": False}
+    monkeypatch.setattr(sess, "status", lambda: status)
+    page = client.get("/settings/willhaben").text
+    assert '<details class="group">' in page and "Show browser window" in page and 'id="remote"' in page
+    assert 'name="next" value="/settings/willhaben?browser=1"' in page            # the login page comes back open
+    assert '<details class="group" open>' in client.get("/settings/willhaben", params={"browser": 1}).text
+    assert '<details class="group"' not in client.get("/session").text
+
+
 def test_agent_create_form_is_not_a_squeezing_grid(client):
     page = client.get("/agents/new", params={"keyword": "fahrrad"}).text
     form = page.split('action="/agents"')[1].split("</form>")[0]

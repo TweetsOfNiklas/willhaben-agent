@@ -2,7 +2,7 @@
    is changed here) and whether the product search uses willhaben. The other sites: settings/platform.html. #}
 {% import "_ui.html" as ui %}
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  {% with session_next = '/settings/willhaben' %}{% include "_session_panel.html" %}{% endwith %}
+  {% with session_next = '/settings/willhaben', remote_folded = true %}{% include "_session_panel.html" %}{% endwith %}
 </section>
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   {% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}

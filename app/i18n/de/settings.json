@@ -183,5 +183,7 @@
  "noVNC in a new tab": "noVNC in neuem Tab",
  "Show expired ads in My ads for (days)": "Abgelaufene Anzeigen in „Meine Anzeigen“ zeigen (Tage)",
  "Ads that ran out longer ago are listed with the inactive ones. 0 = always show.": "Länger abgelaufene Anzeigen stehen bei den inaktiven. 0 = immer zeigen.",
- "Haiku price for prompts up to 100K tokens": "Haiku-Preis für Prompts bis 100K Token"
+ "Haiku price for prompts up to 100K tokens": "Haiku-Preis für Prompts bis 100K Token",
+ "Show browser window": "Browserfenster anzeigen",
+ "Hide browser window": "Browserfenster ausblenden"
 }
