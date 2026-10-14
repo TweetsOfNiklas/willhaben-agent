@@ -99,7 +99,10 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await task
     scheduler.shutdown()
-    await vpn_check.shutdown()                    # a running VPN test, before its clients and exits close
+    try:
+        await vpn_check.shutdown()                # a running VPN test, before its clients and exits close
+    except Exception as e:  # noqa: BLE001 - the cleanup below must run
+        log.warning("VPN test at shutdown: %s", e)
     try:
         await get_session().stop()
         await get_public().aclose()
@@ -1951,8 +1954,12 @@ templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → T
 
 
 def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
-    """The test panel alone (htmx): it asks for itself every 2 s while a test runs; `note`: why none started."""
-    return templates.TemplateResponse(request, "settings/_vpn_test.html", {"vpn_note": note})
+    """The test panel alone (htmx); `note`: why none started. While a test runs its site list asks for itself every
+    2 s; the first time after the end the whole panel replaces the panel (new header and buttons)."""
+    r = templates.TemplateResponse(request, "settings/_vpn_test.html", {"vpn_note": note})
+    if request.headers.get("hx-target") == "vpn-test-rows" and not vpn_check.running():
+        r.headers.update({"HX-Retarget": "#vpn-test", "HX-Reswap": "outerHTML", "HX-Reselect": "#vpn-test"})
+    return r
 
 
 @app.post("/settings/vpn/upload")
@@ -1966,8 +1973,10 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
         mode, n, skipped = vpn.import_upload(file.filename, data)
     except ValueError as e:
         return _vpn_back(str(e))
-    await vpn_check.source_changed("uploaded")     # a running test stops before its exits do
-    await vpn.source_changed()
+    try:
+        await vpn_check.source_changed("uploaded")  # a running test stops before its exits do
+    finally:
+        await vpn.source_changed()
     if get_setting("platform_willhaben_vpn") == "":
         vpn.set_enabled("willhaben", True)
     msg = (t("{n} configs uploaded; the sites with the VPN on go through them one after another", n=n)
@@ -1987,8 +1996,10 @@ async def settings_vpn_forget():
 @app.post("/settings/vpn/clear")
 async def settings_vpn_clear():
     vpn.remove_source()
-    await vpn_check.source_changed("removed")
-    await vpn.source_changed()
+    try:
+        await vpn_check.source_changed("removed")
+    finally:
+        await vpn.source_changed()
     return _vpn_back(t("WireGuard configs removed; sites with the VPN on pause until you upload new ones"))
 
 

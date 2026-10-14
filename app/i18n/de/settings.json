@@ -167,7 +167,7 @@
  "Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in": "Zeichnet alle willhaben-API-Aufrufe des Browserfensters auf (Cookies und CSRF-Token werden entfernt, Antworten mit Chat-Inhalten bleiben lokal unter",
  "This captures the endpoints still missing for sending, My ads, reactivating and posting an ad.": "Damit werden die noch fehlenden Endpunkte für Senden, Meine Anzeigen, Reaktivieren und Anzeige aufgeben erfasst.",
  "recording": "läuft",
- "{n} requests": "{n} Requests",
+ "{n} requests": "{n} Anfragen",
  "Stop recording": "Aufzeichnung beenden",
  "open a conversation": "Konversation öffnen",
  "send a test message": "Testnachricht senden",

@@ -70,6 +70,19 @@ class RateLimiter:
     def reward(self) -> None:
         self._strikes = 0
 
+    def refund(self) -> None:
+        """The request just let through was not sent after all (the VPN test's exit moved): it costs no budget."""
+        if self._recent:
+            self._recent.pop()
+
+    def free_in(self, k: int) -> float:
+        """Seconds until the hour's `k` oldest requests have left it (0 for k <= 0)."""
+        now = time.monotonic()
+        self._budget_wait(now)
+        if k <= 0 or not self._recent:
+            return 0.0
+        return max(0.0, self._recent[min(k, len(self._recent)) - 1] + 3600 - now)
+
     def reset(self) -> None:
         """Forget the pause, the pacing and the hour's requests (tests: each one starts like a fresh site)."""
         self._lock = asyncio.Lock()

@@ -88,7 +88,8 @@ class Trial:
     """One try of the VPN test (app/services/vpn_check.py): requests of the task that set it go out through `route`
     alone, never through another exit and never directly; what they met is noted here."""
     route: Route
-    sent: int = 0                 # requests that went out through it (eBay's warm-up: up to 3)
+    limit: int = 1                # requests it may send (eBay's warm-up: 3); one more refuses the exit
+    sent: int = 0                 # requests that went out through it
     status: int | None = None     # the last answer's status
     ctype: str = ""               # the last answer's content type: a JSON 200 the parser rejects is the site's error
     challenge: bool = False       # the last answer was Cloudflare's challenge
@@ -318,6 +319,9 @@ class HttpPlatformClient:
     async def _send_once(self, full: str, kind: str, headers: dict[str, str] | None, proxy: str | None) -> FetchResponse:
         """One request through the limiter on the route `proxy` (None: direct), counted and recorded."""
         async with self.limiter:
+            if (trl := _trial.get()) is not None and not self._pinned(trl):
+                self.limiter.refund()               # waited for the limiter, sent nothing
+                raise ExitMoved(t("{name}: the VPN exit changed during the test", name=self.name))
             transport = await self._use(proxy)
             if time.monotonic() - self._jar_since > self.session_s:
                 self.new_anonymous_session()
@@ -338,6 +342,12 @@ class HttpPlatformClient:
                              resp_headers=r.headers, resp_body=r.content, final_url=r.url,
                              duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
         return r
+
+    def _pinned(self, tr: Trial) -> bool:
+        """The VPN test's exit is still the tunnel's route (checked again once the limiter let the request through: a
+        live request may have left the exit meanwhile)."""
+        tunnel = self._tunnel()
+        return tunnel is not None and tunnel.current() == tr.route
 
     def _drop_transport(self) -> None:
         """Forget the transport at once (a cancelled request may have left it half-used); it closes in the background
@@ -379,9 +389,19 @@ class HttpPlatformClient:
     async def _send_trial(self, tunnel: Tunnel, tr: Trial, full: str, kind: str,
                           headers: dict[str, str] | None) -> FetchResponse:
         """The VPN test's request: through tr.route once. ExitMoved when the tunnel left that route meanwhile (nothing
-        sent, nothing probed); a refused or unreachable exit is marked as for any request and ends the try."""
+        sent, nothing probed); a refused or unreachable exit is marked as for any request and ends the try. A try that
+        already sent tr.limit requests without an answer the site accepted (eBay: warm-up 403s, however often its
+        client starts a new visitor) refuses the exit instead of asking again."""
         if tunnel.current() != tr.route:
             raise ExitMoved(t("{name}: the VPN exit changed during the test", name=self.name))
+        if tr.sent >= tr.limit:
+            tr.refused = "rate" if tr.status == 429 else "blocked"
+            tr.detail = f"HTTP {tr.status}" if tr.status else ""
+            await tunnel.failed(tr.route, tr.refused, detail=tr.detail)
+            self.new_anonymous_session()
+            blocked = Blocked(t("{name} refused the VPN exit (HTTP {status})", name=self.name, status=tr.status))
+            blocked.sent = True
+            raise blocked
         try:
             r = await self._send_once(full, kind, headers, tr.route.proxy)
         except TransportError as e:

@@ -112,6 +112,10 @@ class FakeSite(Platform):
         return ad_id
 
 
+class FakeSite2(FakeSite):
+    id, name, api_host = "fake2", "Fake 2", "api.fake2.example"
+
+
 @pytest.fixture
 def site(fake):
     def make(answers, per_hour=0):
@@ -161,7 +165,7 @@ async def test_goes_from_exit_to_exit_until_the_site_answers_and_keeps_it(site, 
     assert len(fake.probes) == probes and st.client.proxy == tn.route.proxy
 
     job = jobs.snapshot()["recent"][0]
-    assert (job["label"], job["lane"], job["result"]) == ("VPN test", "vpn", "1 of 1 sites work through the VPN")
+    assert (job["label"], job["lane"], job["result"]) == ("VPN test", "vpn", "Fake: Works")   # one site: no "1 of 1"
     vpn_check._run = None                                       # as after a restart: read back from the setting
     assert vpn_check.view()["rows"][0]["verdict"] == "ok"
 
@@ -234,7 +238,9 @@ async def test_requests_stay_within_the_budget_cap(site):
     st = site({N(i): [(403, b"", HTML)] for i in range(1, 6)}, per_hour=8)
     s = await _test()
     assert s.verdict == "budget" and s.requests == 2 and st.built == [N(1), N(2)]   # min(max(1, 8 // 4), 8 // 2)
-    assert "2 requests" in vpn_check.view()["rows"][0]["message"]
+    assert s.params["why"] == "quarter" and s.params["left"] == 3
+    assert vpn_check.view()["rows"][0]["message"] == ("Stopped after 2 requests: one test uses at most a quarter of "
+                                                      "the 8 requests Fake allows per hour. 3 exits not tried yet.")
 
     st = site({}, per_hour=8)
     st.limiter._recent.extend([time.monotonic()] * 7)           # the agents used most of the hour
@@ -248,7 +254,7 @@ async def test_ten_exits_then_test_more_goes_on(site):
     s = await _test()
     assert s.verdict == "more" and s.tried == 10 and s.params["left"] == 5
     row = vpn_check.view()["rows"][0]
-    assert (row["action"], row["action_label"]) == ("more", "Test 5 more")
+    assert (row["action"]["kind"], row["action"]["label"]) == ("more", "Test 5 more")
     assert row["hint"] and "dedicated IP" in row["hint"]        # all refused with 403
     tn = vpn.tunnel_for("fake")
     assert tn.route is None and not tn.failing
@@ -265,7 +271,8 @@ async def test_no_exit_left_fails_closed_and_forget_tests_again(site, fake):
     assert s.verdict == "none" and s.params == {"n": 6, "k": 0}
     tn = vpn.tunnel_for("fake")
     assert tn.failing and vpn.health()[0] == "problem" and len(fake.probes) == 6
-    assert vpn_check.view()["rows"][0]["action"] == "forget"
+    assert vpn_check.view()["rows"][0]["action"] == {"kind": "forget", "label": "Forget its blocks and test again"}
+    assert vpn_check.view()["rows"][0]["message"] == "No exit works: all 6 tried."
 
     fake.unreachable.clear()
     st.factory.transports[N(1)].answers.append(PAGE)
@@ -284,6 +291,41 @@ async def test_a_profile_is_asked_again_despite_its_mark(site):
     assert "does not answer through the profile (blocked by the site)" in vpn_check.view()["rows"][0]["message"]
     s = await _test()
     assert s.verdict == "ok" and s.params["exit"] == "home" and vpn.marks("fake") == {}
+
+
+async def test_a_try_never_sends_through_an_exit_a_live_request_just_left(site):
+    _collection(N(1), N(2))
+    g = asyncio.Event()
+    st = site({N(1): [g, (403, b"", HTML)], N(2): [PAGE, PAGE]})
+    live = asyncio.create_task(st.search(st.keyword_search("x")))     # a search agent's request holds the limiter
+    await _until(lambda: st.factory.transports.get(N(1)) and st.factory.transports[N(1)].calls == 1)
+    assert vpn_check.start() is None
+    await _until(lambda: st.limiter._lock._waiters)                     # the test's try waits for the limiter on N1
+    g.set()                                                             # the live request is refused and leaves N1
+    await live
+    await vpn_check._run.task
+    s = vpn_check._run.sites[0]
+    assert st.factory.transports[N(1)].calls == 1                       # the test's request never went out through N1
+    assert s.verdict == "ok" and s.params["exit"] == N(2) and _reasons() == {N(1): "blocked"}
+    assert st.limiter.last_hour == 3                                    # the try that sent nothing costs no budget
+
+
+async def test_an_exit_whose_wireproxy_keeps_stopping_ends_the_site(site, fake, monkeypatch):
+    probe = fake.probe
+
+    async def dies_after_the_probe(port, host):
+        ok = await probe(port, host)
+        for proc in vpn._procs.values():
+            if proc.port == port:
+                proc.handle.terminate()
+        return ok
+
+    monkeypatch.setattr(fake, "probe", dies_after_the_probe)
+    _collection(N(1), N(2))
+    st = site({})
+    s = await _test()
+    assert s.verdict == "error" and "3 times in a row" in s.params["error"]
+    assert fake.starts == [N(1)] * 3 and s.requests == 0 and st.built == [] and vpn.marks("fake") == {}
 
 
 # ------------------------------------------------------------------ one at a time, stop, live traffic, cancel
@@ -407,15 +449,17 @@ async def test_shutdown_mid_test_shows_interrupted(site):
     await vpn_check.shutdown()
     assert not vpn_check.running() and json.loads(get_setting("vpn_test"))["status"] == "interrupted"
     vpn_check._run = None
-    row = vpn_check.view()["rows"][0]
-    assert row["verdict"] == "interrupted" and row["message"] == "Interrupted by a restart of the app"
+    v = vpn_check.view()
+    row = v["rows"][0]
+    assert row["verdict"] == "interrupted" and row["label"] == "Stopped" and row["message"] == ""   # the header says it
+    assert v["summary"] == "Interrupted by a restart of the app"
 
     stored = json.loads(get_setting("vpn_test"))                # a hard kill: stored while it ran
     stored["status"], stored["sites"][0]["status"] = "running", "testing"
     set_setting("vpn_test", json.dumps(stored))
     v = vpn_check.view()
     assert v["summary"] == "Interrupted by a restart of the app" and v["rows"][0]["verdict"] == "interrupted"
-    assert v["rows"][0]["action"] == "test" and not v["live"]
+    assert v["rows"][0]["action"]["kind"] == "test" and not v["live"]
 
 
 async def test_cancelled_before_it_began(site):
@@ -425,6 +469,67 @@ async def test_cancelled_before_it_began(site):
     await vpn_check.cancel("removed")                           # the task had not run yet
     assert vpn_check._run.status == "stopped" and vpn_check._run.sites[0].params == {"reason": "removed"}
     assert json.loads(get_setting("vpn_test"))["status"] == "stopped"
+
+
+async def test_one_site_again_keeps_the_other_sites_results(site, fake):
+    _collection(N(1), N(2))
+    g = asyncio.Event()
+    site({N(1): [g, PAGE, (403, b"", HTML)], N(2): [PAGE]})
+    platforms.set_platform("fake2", FakeSite2(fake, {N(1): [(503, b"{}", JSON)]}))
+    vpn.set_enabled("fake2", True)
+    assert vpn_check.start() is None
+    await _until(lambda: vpn_check._run.sites[1].status == "done")
+    assert vpn_check.view()["progress"] == "1 of 2 sites done"
+    g.set()
+    await vpn_check._run.task
+    v = vpn_check.view()
+    assert [r["pid"] for r in v["rows"]] == ["fake", "fake2"] and v["summary"] == "1 of 2 sites work through the VPN"
+    kept = vpn_check._run.sites[1]
+
+    assert vpn_check.start("fake") is None                              # "Test now" on one row
+    v = vpn_check.view()
+    assert v["live"] and v["progress"] == "Testing Fake" and [r["status"] for r in v["rows"]] == ["waiting", "done"]
+    await vpn_check._run.task
+    assert vpn_check._run.sites[1] is kept and vpn_check._run.only == "fake"
+    job = jobs.snapshot()["recent"][0]
+    assert job["result"] == "Fake: Works" and job["total"] == 1
+    vpn_check._run = None                                               # after a restart: from the setting
+    v = vpn_check.view()
+    assert [(r["pid"], r["verdict"]) for r in v["rows"]] == [("fake", "ok"), ("fake2", "site_error")]
+    assert v["summary"] == "1 of 2 sites work through the VPN"
+    assert v["rows"][0]["ago"] is None and v["rows"][1]["ago"] is not None    # the kept row says when it was tested
+
+
+async def test_a_result_cleared_while_its_test_still_runs_stays_gone(site):
+    _collection(N(1))
+    g = asyncio.Event()
+    st = site({N(1): [g, PAGE]})
+    assert vpn_check.start() is None
+    await _until(lambda: st.factory.transports.get(N(1)) and st.factory.transports[N(1)].calls == 1)
+    task = vpn_check._run.task
+    vpn_check.clear()                                                   # as when cancel() gave up waiting for it
+    assert vpn_check.start() == "A VPN test is running"
+    g.set()
+    await task
+    assert vpn_check._run is None and get_setting("vpn_test") == "" and not vpn_check.view()["run"]
+
+
+async def test_removing_configs_stops_the_exits_even_when_the_test_fails_to_stop(monkeypatch):
+    from app.main import settings_vpn_clear
+
+    stopped = []
+
+    async def broken(reason):
+        raise RuntimeError("database is locked")
+
+    async def exits_stop():
+        stopped.append(True)
+
+    monkeypatch.setattr(vpn_check, "cancel", broken)
+    monkeypatch.setattr(vpn, "source_changed", exits_stop)
+    with pytest.raises(RuntimeError):
+        await settings_vpn_clear()
+    assert stopped == [True]
 
 
 async def test_preconditions(site, fake, monkeypatch):
@@ -463,8 +568,12 @@ async def test_kleinanzeigen_credentials_are_not_the_exits_fault(fake, request):
     request.addfinalizer(lambda: kleinanzeigen.set_client(None))
     vpn.set_enabled("kleinanzeigen", True)
     s = await _test("kleinanzeigen")
-    assert s.verdict == "site_error" and "app credentials" in s.params["error"]
+    assert s.verdict == "site_error" and "app credentials" in s.params["error"] and s.params["fix"] == "settings"
     assert vpn.marks("kleinanzeigen") == {} and built == [N(1)]
+    assert s.attempts[0].detail == "HTTP 403"                  # the row's message has the long error, once
+    row = vpn_check.view()["rows"][0]
+    assert row["action"] == {"kind": "settings", "label": "Open Kleinanzeigen settings",
+                             "href": "/settings/kleinanzeigen"}
 
 
 def _ebay(fake, request, monkeypatch, answers):
@@ -502,7 +611,7 @@ async def test_ebay_cannot_run_away_through_blocked_exits(fake, request, monkeyp
     _collection(*(N(i) for i in range(1, 7)))
     _, built = _ebay(fake, request, monkeypatch, {N(i): [(403, b"", HTML)] * 3 for i in range(1, 7)})
     s = await _test("ebay")
-    assert s.verdict == "budget" and s.requests == 9 <= vpn_check._cap(ebay.ebay_limiter(), 3) == 10
+    assert s.verdict == "budget" and s.requests == 9 <= vpn_check._cap(ebay.ebay_limiter(), 3)[0] == 10
     assert _reasons("ebay") == {N(1): "blocked", N(2): "blocked", N(3): "blocked"} and built == [N(1), N(2), N(3)]
     assert ebay.ebay_limiter().last_hour == 9 and ebay.ebay_limiter().cooling_down_s == 0
 
@@ -520,7 +629,123 @@ async def test_ebay_stop_waits_for_the_warm_up_on_one_exit(fake, request, monkey
     assert s.verdict == "stopped" and s.requests == 3 and N(2) not in built and _reasons("ebay") == {N(1): "blocked"}
 
 
+async def test_ebay_sends_at_most_three_requests_per_exit_whatever_its_visitor_does(fake, request, monkeypatch):
+    from tests.conftest import FIXTURES
+
+    _collection(N(1), N(2))
+    g = asyncio.Event()
+    page = (FIXTURES / "ebay_search.html").read_bytes()
+    c, built = _ebay(fake, request, monkeypatch, {N(1): [(403, b"", HTML), g] + [(403, b"", HTML)] * 3,
+                                                  N(2): [(200, page, HTML)]})
+    assert vpn_check.start("ebay") is None
+    await _until(lambda: c._factory.transports.get(N(1)) and c._factory.transports[N(1)].calls == 2)
+    c.new_anonymous_session()                   # a live request's refused answer started a new visitor meanwhile
+    g.set()
+    await vpn_check._run.task
+    s = vpn_check._run.sites[0]
+    assert c._factory.transports[N(1)].calls == 3 and _reasons("ebay") == {N(1): "blocked"}
+    assert [(a.exit, a.verdict, a.requests) for a in s.attempts] == [(N(1), "blocked", 3), (N(2), "ok", 1)]
+
+
 # ------------------------------------------------------------------ the settings page
+def _row(verdict, tried=0, **params):
+    """The panel's row for a finished test of the fake site with this verdict."""
+    now = time.time()
+    s = vpn_check.SiteRun("fake", "Fake", status="done", verdict=verdict, params=params, started=now - 5,
+                          finished=now, attempts=[vpn_check.Attempt(N(i), "blocked", "HTTP 403", 1, 2.5)
+                                                  for i in range(1, tried + 1)], requests=tried)
+    vpn_check._run = vpn_check.Run([s], status="done", finished=now)
+    return vpn_check.view()["rows"][0]
+
+
+async def test_next_steps_only_where_they_help(site):
+    _collection(N(1), N(2))
+    st = site({}, per_hour=40)
+    r = _row("ok", 1, exit=N(1))
+    assert r["action"] is None and r["counters"] == "1 tried · 1 request · 5 s"
+    r = _row("no_budget", used=36, per_hour=40)
+    assert (r["label"], r["tone"], r["counters"]) == ("Not tested", "", "")      # not "Paused", no "0 tried"
+    now = time.monotonic()
+    st.limiter._recent.extend([now - 3000] + [now] * 35)               # 36 of 40: one has to leave the hour first
+    r = _row("no_budget", used=36, per_hour=40)
+    assert r["action"] is None and r["note"] == "A test is possible again in about 10 min."
+    st.limiter._recent.clear()
+    assert _row("no_budget", used=36, per_hour=40)["action"]["kind"] == "test"
+
+    st.vpn_test_requests = 3                                            # eBay: 3 per exit, 10 of 40 per test
+    r = _row("budget", 3, n=9, used=9, per_hour=40, left=15, why="quarter")
+    assert r["action"]["label"] == "Test 3 more" and r["label"] == "No exit found yet"
+    assert r["message"] == ("Stopped after 9 requests: one test uses at most a quarter of the 40 requests Fake allows "
+                            "per hour. 15 exits not tried yet.")
+    assert _row("budget", n=4, used=30, per_hour=40, left=1, why="left")["message"] == (
+        "Stopped after 4 requests: one test uses at most half of what is left of the hour's 40 requests (30 used). "
+        "1 exit not tried yet.")
+    assert _row("budget", n=1, used=36, per_hour=40, left=0, why="full")["message"] == (
+        "Stopped after 1 request: Fake has used 36 of its 40 requests this hour; the rest stays for the search agents.")
+    st.vpn_test_requests = 1
+
+    r = _row("paused", error="Fake pause after a block, 300 s left")
+    assert (r["label"], r["message"]) == ("Not tested", "Not tested: Fake pause after a block, 300 s left")
+    st.limiter.penalize()
+    st.limiter._cooldown_until = time.monotonic() + 600
+    assert _row("paused", error="x")["note"] == "A test is possible again in about 10 min."
+    st.limiter.reset()
+    r = _row("stopped", 2, reason="you")
+    assert (r["label"], r["message"], r["action"]["kind"]) == ("Stopped", "", "test")   # the header says who stopped
+    assert _row("site_error", 1, exit=N(1), error="HTTP 503", fix="")["action"]["kind"] == "test"
+    r = _row("none", 6, n=6, k=18)
+    assert r["message"] == "No exit works: 6 tried, 18 skipped because they failed recently."
+    assert "never" not in r["message"] and r["action"]["label"] == "Forget its blocks and test again"
+
+
+async def test_no_row_buttons_while_no_test_can_start(site, fake):
+    from app.main import templates
+
+    _collection(N(1))
+    site({})
+    _row("stopped", 1, reason="you")
+    assert 'name="site"' in templates.get_template("settings/_vpn_test.html").render(vpn_note=None)
+    fake.installed = False
+    html = templates.get_template("settings/_vpn_test.html").render(vpn_note="wireproxy is not installed")
+    assert html.count("wireproxy is not installed") == 1 and 'name="site"' not in html and " disabled>" in html
+
+
+async def test_the_panel_in_german(site):
+    from app.i18n import set_request_lang
+
+    _collection(N(1))
+    site({})
+    set_request_lang("de")
+    try:
+        r = _row("ok", 1, exit=N(1))
+        assert r["counters"] == "1 probiert · 1 Anfrage · 5 s" and r["attempts"][0]["cost"] == ["1 Anfrage", "2,5 s"]
+        assert vpn_check.view()["summary"] == "Fake: Funktioniert"
+        assert _row("more", 10, n=10, left=4)["message"] == ("Kein funktionierender Ausgang unter den 10 probierten; "
+                                                            "ein Test probiert höchstens 10. 4 Ausgänge noch offen.")
+    finally:
+        set_request_lang("en")
+
+
+async def test_the_live_panel_keeps_its_header_while_polling(site):
+    from app.main import templates
+
+    _collection(N(1))
+    g = asyncio.Event()
+    st = site({N(1): [g, PAGE]})
+    assert vpn_check.start() is None
+    await _until(lambda: st.factory.transports.get(N(1)) and st.factory.transports[N(1)].calls == 1)
+    html = templates.get_template("settings/_vpn_test.html").render(vpn_note=None)
+    rows = html.index('id="vpn-test-rows"')
+    assert html.index("Stop") < rows and html.index('aria-live="polite"') < rows      # outside what the poll swaps
+    assert 'id="vpn-test-progress" aria-live="polite">Testing Fake<' in html
+    assert 'hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML"' in html
+    assert html.count("hx-trigger") == 1 and "exit 1" in html and "0 tried" not in html
+    g.set()
+    await vpn_check._run.task
+    html = templates.get_template("settings/_vpn_test.html").render(vpn_note=None)
+    assert "hx-trigger" not in html and "vpn-test-progress" not in html
+
+
 def _wait_test(timeout=5.0):
     """TestClient: the test runs in the app's loop thread; wait until it ended (also before its job showed up)."""
     from tests.conftest import wait_jobs
@@ -542,7 +767,8 @@ def test_settings_page_button_and_panel(fake):
         with TestClient(app) as c:
             page = c.get("/settings/vpn").text
             assert 'id="vpn-test"' in page and "Test the sites" in page and "every 2s" not in page
-            assert 'id="vpn-sites" data-refresh-on-lane="vpn"' in page and "Not tested yet." in page
+            assert 'id="vpn-sites" data-refresh-on-lane="vpn"' in page and "every try is a real search" in page
+            assert 'id="vpn-test-rows"' not in page                      # no rows before the first test
 
             r = c.post("/settings/vpn/test", headers={"HX-Request": "true"})
             assert r.status_code == 200 and "<html" not in r.text and 'id="vpn-test"' in r.text
@@ -550,6 +776,9 @@ def test_settings_page_button_and_panel(fake):
             panel = c.get("/settings/vpn/test").text
             assert f"Works through {N(1)}" in panel and "Exits tried (1)" in panel and "every 2s" not in panel
             assert "Test again" in panel and f"Exit now: {N(1)}" in c.get("/settings/vpn").text
+            poll = c.get("/settings/vpn/test", headers={"HX-Request": "true", "HX-Target": "vpn-test-rows"})
+            assert (poll.headers["HX-Retarget"], poll.headers["HX-Reselect"]) == ("#vpn-test", "#vpn-test")
+            assert "HX-Retarget" not in c.get("/settings/vpn/test", headers={"HX-Request": "true"}).headers
             set_setting("ui_lang", "de")
             assert f"Funktioniert über {N(1)}" in c.get("/settings/vpn/test").text
             set_setting("ui_lang", "en")

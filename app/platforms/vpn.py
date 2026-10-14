@@ -613,7 +613,7 @@ class Tunnel:
 def reason_label(reason: str) -> str:
     return {"blocked": t("blocked by the site"), "rate": t("rate-limited by the site"),
             "unreachable": t("not reachable"), "broken": t("does not start"),
-            "botcheck": t("answered with a bot check")}.get(reason, reason)
+            "botcheck": t("bot check")}.get(reason, reason)
 
 
 def tunnel_for(pid: str) -> Tunnel | None:

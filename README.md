@@ -398,12 +398,13 @@ Kleinanzeigen stays off until you switch it on.
 connection tile on Home turns red. They never fall back to your home connection. "Forget blocks" gives every exit a
 new chance.
 
-**Test:** "Test the sites" on the VPN page sends each site with the VPN on one search for "fahrrad" through its exit,
-with the site's own client and checks. When the site refuses the exit (403/429), answers with a bot check or does not
-answer, the next exit is tried, one at a time, until one works; that exit stays in use. Failed exits are skipped for
-that site as usual (a bot check for an hour). Every try is a real search and counts towards the site's hourly budget:
-per site at most 10 exits, 5 minutes, a quarter of its hourly budget and half of what is left of the hour; "Test 10
-more" goes on. Search agents keep running meanwhile. The test never sends anything from your own connection.
+**Test:** "Test the sites" under "VPN test" on the VPN page sends each site with the VPN on one search for "fahrrad"
+through its exit, with the site's own client and checks. When the site refuses the exit (403/429), answers with a bot
+check or does not answer, the next exit is tried, one at a time, until one works; that exit stays in use. Failed exits
+are skipped for that site as usual (a bot check for an hour). Every try is a real search and counts towards the site's
+hourly budget: per site at most 10 exits, 5 minutes, a quarter of its hourly budget and half of what is left of the
+hour; "Test 10 more" goes on, for that site only (the other sites keep their last result). Search agents keep running
+meanwhile. The test never sends anything from your own connection.
 
 How it works: each config in use runs as one [wireproxy](https://github.com/windtf/wireproxy) process (userspace
 WireGuard, part of the image: no root, no tun device, no `NET_ADMIN`). It offers an HTTP proxy on `127.0.0.1` that

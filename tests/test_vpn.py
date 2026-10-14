@@ -381,7 +381,7 @@ async def test_a_cancelled_start_leaves_no_wireproxy(monkeypatch, tmp_path):
 
 
 def test_botcheck_mark_forget_one_site_and_unmark():
-    assert vpn.MARK_TTL_S["botcheck"] == 3600 and vpn.reason_label("botcheck") == "answered with a bot check"
+    assert vpn.MARK_TTL_S["botcheck"] == 3600 and vpn.reason_label("botcheck") == "bot check"
     vpn.mark("willhaben", N1, "botcheck")
     vpn.mark("willhaben", N2, "blocked")
     vpn.mark("kleinanzeigen", N1, "blocked")
