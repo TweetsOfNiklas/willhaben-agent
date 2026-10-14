@@ -610,6 +610,7 @@ async def test_ebay_cannot_run_away_through_blocked_exits(fake, request, monkeyp
 
     _collection(*(N(i) for i in range(1, 7)))
     _, built = _ebay(fake, request, monkeypatch, {N(i): [(403, b"", HTML)] * 3 for i in range(1, 7)})
+    monkeypatch.setattr(ebay.ebay_limiter(), "per_hour", 40)                          # a budget of its own
     s = await _test("ebay")
     assert s.verdict == "budget" and s.requests == 9 <= vpn_check._cap(ebay.ebay_limiter(), 3)[0] == 10
     assert _reasons("ebay") == {N(1): "blocked", N(2): "blocked", N(3): "blocked"} and built == [N(1), N(2), N(3)]

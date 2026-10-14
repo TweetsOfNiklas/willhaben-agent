@@ -473,6 +473,7 @@ def init_db() -> None:
     _rebuild_access_counts(engine)
     SQLModel.metadata.create_all(engine)
     _add_missing_columns(engine)
+    _follow_willhaben_budget()
 
 
 def _add_missing_columns(engine) -> None:
@@ -636,11 +637,33 @@ def requests_per_hour() -> int:
 
 
 def platform_per_hour(platform: str) -> int:
-    """The hourly request budget of a platform (Settings → Platforms, else PLATFORM_<ID>_PER_HOUR; willhaben: its own)."""
-    if platform == "willhaben":
-        return requests_per_hour()
+    """The hourly request budget of a platform: its own (platform_own_per_hour), else willhaben's, so every site has
+    the same budget until one is set apart."""
+    own = None if platform == "willhaben" else platform_own_per_hour(platform)
+    return requests_per_hour() if own is None else own
+
+
+def platform_own_per_hour(platform: str) -> int | None:
+    """A site's own hourly budget (Settings → Platforms, else PLATFORM_<ID>_PER_HOUR); None: it follows willhaben's."""
     raw = get_setting(f"platform_{platform}_per_hour")
-    return int(raw) if raw.isdigit() else int(getattr(get_settings(), f"platform_{platform}_per_hour", 0) or 0)
+    if raw.isdigit():
+        return int(raw)
+    own = getattr(get_settings(), f"platform_{platform}_per_hour", None)
+    return None if own is None else int(own)
+
+
+# the hourly budgets the sites had before they followed willhaben's: the settings form stored them on every Save
+_OLD_SITE_BUDGETS = {"kleinanzeigen": "120", "shpock": "90", "vinted": "40", "preisjaeger": "60", "ebay": "40"}
+
+
+def _follow_willhaben_budget() -> None:
+    """Once: a stored site budget that is its old default goes, so the site follows willhaben's like a new one."""
+    if get_setting("site_budgets_follow_wh"):
+        return
+    for pid, old in _OLD_SITE_BUDGETS.items():
+        if get_setting(f"platform_{pid}_per_hour") == old:
+            set_setting(f"platform_{pid}_per_hour", "")
+    set_setting("site_budgets_follow_wh", "1")
 
 
 def platform_min_gap_s(platform: str) -> float:

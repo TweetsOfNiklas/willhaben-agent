@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from app import db as dbmod
-from app.db import AccessCount
+from app.db import AccessCount, set_setting
 from app.services import access_stats
 from app.willhaben import access_log
 from app.willhaben import public as public_mod
@@ -499,7 +499,7 @@ def test_other_site_stacks_by_type():
     assert d["by_type"] == {"search": 3, "detail": 3, "messages": 0, "account": 0, "other": 0}
     assert d["type_outcomes"]["detail"]["requests"] == 3 and d["type_outcomes"]["detail"]["blocked"] == 1
     assert d["type_outcomes"]["other"]["cached"] == 4 and d["type_outcomes"]["other"]["requests"] == 0
-    assert d["type_kinds"] == {} and d["budget"] == 40
+    assert d["type_kinds"] == {} and d["budget"] == 240                                # willhaben's: none of its own
     assert d["buckets"][-1]["by_type"]["detail"] == 3 and d["buckets"][-1]["blocked_by"] == {"detail": 1}
     bar = access_stats.chart(d)["bars"][-1]
     assert [s["key"] for s in bar["segs"]] == ["search", "detail"]
@@ -535,7 +535,7 @@ def test_all_sites_series():
     assert list(rows) == ["willhaben", "kleinanzeigen", "other"]                              # off and silent: left out
     ka = rows["kleinanzeigen"]
     assert (ka["total"], ka["blocked"], ka["cached"], ka["by_type"]["detail"], ka["budget"], ka["enabled"], ka["known"]) == \
-        (3, 2, 3, 1, 120, False, True)
+        (3, 2, 3, 1, 240, False, True)
     assert rows["willhaben"]["last_hour"] == 5 and rows["other"]["known"] is False
     assert d["spark_bucket_s"] == 300 and len(ka["spark"]) == 12 and (ka["spark"][-1]["total"], ka["spark"][-1]["blocked"]) == (3, 2)
     ch = access_stats.chart(d)
@@ -560,6 +560,7 @@ def test_site_usage_tone(monkeypatch):
     import time
 
     from app import platforms
+    set_setting("platform_ebay_per_hour", "40")                                         # a budget of its own
     for _ in range(38):
         access_log.record("anonymous", "search", platform="ebay")                          # 38 of 40 = 95 %
     u = {x["id"]: x for x in access_stats.site_usage()}

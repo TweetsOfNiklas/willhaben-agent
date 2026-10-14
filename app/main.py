@@ -1892,9 +1892,13 @@ async def settings_willhaben(requests_per_hour_: int = Form(0, alias="requests_p
     """The hourly willhaben request budget (REQUESTS_PER_HOUR from .env until changed here; 0 = none) and, from the
     settings page (has_product_search), whether the product search uses willhaben. `next`: the page of the usage
     popover the slider was moved on (that form has the budget only)."""
+    from app.db import platform_per_hour
+
     n = min(max(0, requests_per_hour_), 2000)
     set_setting("requests_per_hour", str(n))
     willhaben_limiter().per_hour = n
+    for p in _site_sections().values():          # the sites without a budget of their own follow it
+        p.limiter.per_hour = platform_per_hour(p.id)
     if has_product_search:
         set_setting("platform_willhaben_product_search", "1" if product_search else "0")
     target = next if next.startswith("/") and not next.startswith("//") else "/settings/willhaben"
@@ -1933,12 +1937,13 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
 
 
 def _platform_row(p: Any) -> dict[str, Any]:
-    """Context of settings/platform.html: the site's switch, pacing, status and (kleinanzeigen) app credentials."""
-    from app.db import platform_min_gap_s, platform_per_hour
+    """Context of settings/platform.html: the site's switch, pacing, status and (kleinanzeigen) app credentials.
+    per_hour: the site's own budget, None while it follows willhaben's (wh_per_hour)."""
+    from app.db import platform_min_gap_s, platform_own_per_hour
 
     st = p.status()
     return {"p": p, "enabled": platforms.enabled(p.id), "status": st,
-            "per_hour": platform_per_hour(p.id), "min_gap_s": platform_min_gap_s(p.id),
+            "per_hour": platform_own_per_hour(p.id), "wh_per_hour": requests_per_hour(), "min_gap_s": platform_min_gap_s(p.id),
             "product_search": get_setting(f"platform_{p.id}_product_search") != "0",
             "last_hour": access_stats.last_hour(platform=p.id),
             "auth": get_setting(f"{p.id}_api_auth") if p.id == "kleinanzeigen" else None,

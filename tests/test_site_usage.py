@@ -57,3 +57,45 @@ def test_the_phone_menu_shows_the_meters():
     assert "willhaben / h" in menu and 'data-site-usage="kleinanzeigen"' in menu and "md:hidden" in menu
     assert "pop($event, 'usage')" in menu                                  # a tap opens the usage popover
 
+
+def test_site_budgets_follow_willhabens_until_set_apart():
+    from app.db import platform_per_hour
+
+    assert platform_per_hour("vinted") == platform_per_hour("ebay") == platform_per_hour("willhaben") == 240
+    set_setting("requests_per_hour", "300")
+    assert platform_per_hour("kleinanzeigen") == 300
+    set_setting("platform_ebay_per_hour", "50")
+    assert platform_per_hour("ebay") == 50 and platform_per_hour("vinted") == 300
+
+
+def test_an_old_default_the_form_saved_follows_willhaben_after_the_update():
+    from app.db import _follow_willhaben_budget, get_setting
+
+    set_setting("site_budgets_follow_wh", "")
+    set_setting("platform_vinted_per_hour", "40")          # the old default, stored by a Save
+    set_setting("platform_shpock_per_hour", "75")          # chosen
+    _follow_willhaben_budget()
+    assert get_setting("platform_vinted_per_hour") == "" and get_setting("platform_shpock_per_hour") == "75"
+    set_setting("platform_vinted_per_hour", "40")          # chosen after the update: stays
+    _follow_willhaben_budget()
+    assert get_setting("platform_vinted_per_hour") == "40"
+
+
+def test_the_budget_field_is_empty_while_the_site_follows_willhaben():
+    from app.main import app
+    from app.platforms import kleinanzeigen as ka
+    from app.willhaben.public import willhaben_limiter
+
+    before = willhaben_limiter().per_hour, ka.kleinanzeigen_limiter().per_hour
+    try:
+        with TestClient(app) as c:
+            page = c.get("/settings/kleinanzeigen").text
+            assert 'name="budget" value="" placeholder="as willhaben: 240"' in page
+            c.post("/settings/willhaben", data={"requests_per_hour": "300"}, follow_redirects=False)
+            assert ka.kleinanzeigen_limiter().per_hour == 300                  # follows the new willhaben budget
+            c.post("/settings/platform/kleinanzeigen", data={"enabled": "on", "budget": "90"}, follow_redirects=False)
+            c.post("/settings/willhaben", data={"requests_per_hour": "200"}, follow_redirects=False)
+            assert ka.kleinanzeigen_limiter().per_hour == 90                   # its own budget stays
+            assert 'name="budget" value="90" placeholder="as willhaben: 200"' in c.get("/settings/kleinanzeigen").text
+    finally:
+        willhaben_limiter().per_hour, ka.kleinanzeigen_limiter().per_hour = before

@@ -1,5 +1,6 @@
 {# Settings → Platforms → <site>: one site other than willhaben (app/platforms). `site` from main._platform_row():
-   {p, enabled, status, per_hour, min_gap_s, product_search, last_hour, auth, auth_default}. willhaben has its own
+   {p, enabled, status, per_hour (None: as willhaben's, wh_per_hour), min_gap_s, product_search, last_hour, auth,
+   auth_default}. willhaben has its own
    page (settings/willhaben.html: login, request budget, product search). #}
 {% import "_ui.html" as ui %}
 {% set p = site.p %}
@@ -12,7 +13,7 @@
   {% if p.about() %}<p class="text-[12.5px] text-muted">{{ p.about() }}</p>{% endif %}
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
     <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minimum gap between requests (s)") }}</span><input name="gap" value="{{ site.min_gap_s }}" inputmode="decimal" class="input w-full min-w-0 bg-base-200"></label>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none)") }}</span><input name="budget" value="{{ site.per_hour }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
+    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none, empty = as willhaben)") }}</span><input name="budget" value="{{ site.per_hour if site.per_hour is not none else '' }}" placeholder="{{ _('as willhaben: {n}', n=site.wh_per_hour) }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
   </div>
   {% if p.id == 'kleinanzeigen' %}
   <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("App credentials (user:password) – only when the bundled ones stop working") }}</span><input name="auth" value="{{ site.auth or '' }}" placeholder="{{ _('bundled default in use') if site.auth_default else '' }}" autocomplete="off" class="input w-full min-w-0 bg-base-200"></label>

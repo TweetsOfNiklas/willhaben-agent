@@ -39,16 +39,17 @@ class Settings(BaseSettings):
     # --- platforms (app/platforms): which search-agent adapters exist besides willhaben; switching them on for
     # the user happens in Settings → Platforms
     platforms_enabled: str = "willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay"
+    # hourly budgets: None = willhaben's (requests_per_hour, as set in Settings → willhaben), so all sites get the same
     platform_kleinanzeigen_min_gap_s: float = 3.0
-    platform_kleinanzeigen_per_hour: int = 120
+    platform_kleinanzeigen_per_hour: int | None = None
     platform_shpock_min_gap_s: float = 4.0
-    platform_shpock_per_hour: int = 90
+    platform_shpock_per_hour: int | None = None
     platform_vinted_min_gap_s: float = 8.0          # DataDome watches the website; every search is a whole page
-    platform_vinted_per_hour: int = 40
+    platform_vinted_per_hour: int | None = None
     platform_preisjaeger_min_gap_s: float = 4.0
-    platform_preisjaeger_per_hour: int = 60
+    platform_preisjaeger_per_hour: int | None = None
     platform_ebay_min_gap_s: float = 8.0            # Akamai watches the website; every search is a whole page
-    platform_ebay_per_hour: int = 40
+    platform_ebay_per_hour: int | None = None
     kleinanzeigen_api_auth: str = ""            # "user:pw" of the kleinanzeigen app API; empty = the bundled default
     # --- VPN for the anonymous requests (app/platforms/vpn.py): WireGuard configs are uploaded in Settings → VPN
     wireproxy_bin: str = "wireproxy"             # userspace WireGuard with a local proxy; part of the image
