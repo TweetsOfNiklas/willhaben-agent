@@ -1151,6 +1151,10 @@ async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, An
     row = for_conversation(conv.id)
     if row is None:
         return
+    if state.get("corrected_from"):              # a recheck lowered the stage
+        row = _paylivery_corrected(row, stage)
+        if state.get("seen"):                    # handled when the chat had it before: nothing to catch up
+            return
     if stage == "offer_accepted":
         amount = state.get("offer") or row.agreed_price or row.asking_price
         if row.status in ("contacting", "negotiating", "agreed", "meetup"):
@@ -1163,7 +1167,7 @@ async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, An
         if row.status == "agreed":
             _change(row.id, lambda r: _move(r, "negotiating", t("The seller declined the PayLivery offer"),
                                             note=t("The seller declined our offer – negotiate further.")))
-    elif stage == "paid":
+    elif stage in ("paid", "released"):            # released: the seller accepted the paid purchase
         if row.status in ("agreed", "pay_now"):
             _change(row.id, lambda r: _move(r, "paid", t("Paid with PayLivery")))
     elif stage == "shipped":
@@ -1178,6 +1182,16 @@ async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, An
     elif stage in ("cancelled", "problem"):
         if row.status in OPEN and row.status != "paused":
             await pause(row.id, t("PayLivery: {stage}", stage=stage), push=True)
+
+
+def _paylivery_corrected(row: Purchase, stage: str) -> Purchase:
+    """A recheck lowered the chat's PayLivery stage that older notice rules had misread (paylivery.recheck). An open
+    order the misread moved to shipped goes back to paid while the parcel is not out. A finished order is not reopened
+    (the hooks only see open orders)."""
+    if row.status == "shipped" and stage in ("paid", "released", "label_ready"):
+        text = t("PayLivery stage corrected: {stage}", stage=paylivery.stage_label(stage))
+        return _change(row.id, lambda r: _move(r, "paid", text)) or row
+    return row
 
 
 async def on_paylivery_action(conv: Conversation, action: str, ok: bool, text: str) -> None:

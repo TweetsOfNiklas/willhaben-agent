@@ -450,6 +450,38 @@ async def test_on_paylivery_stage_transitions(fx):
     assert row(pid).status == "done"
 
 
+async def test_released_purchase_counts_as_paid(fx):
+    """A buy-now purchase can reach "released" (seller accepted, paid) without a "paid" notice before it."""
+    pid = await open_order(fx)
+    with session() as db:
+        conv = db.get(Conversation, "conv-buy-1")
+    set_row(pid, status="pay_now", agreed_price=240.0)
+    await purchase.on_paylivery_stage(conv, "released", {})
+    assert row(pid).status == "paid"
+    await purchase.on_paylivery_stage(conv, "shipped", {})
+    assert row(pid).status == "shipped"
+
+
+async def test_a_corrected_paylivery_stage_moves_the_order_back(fx):
+    """paylivery.recheck lowered a stage that older notice rules misread ("... sobald dein Artikel unterwegs ist" as
+    shipped): the order follows back to paid; a stage seen before repeats nothing."""
+    pid = await open_order(fx)
+    with session() as db:
+        conv = db.get(Conversation, "conv-buy-1")
+    set_row(pid, status="shipped", agreed_price=240.0)
+    await purchase.on_paylivery_stage(conv, "released", {"corrected_from": "shipped", "seen": False})
+    assert row(pid).status == "paid"
+    assert row(pid).log[-1]["text"] == "PayLivery stage corrected: Released for shipping"
+    assert row(pid).log[-1]["from"] == "shipped"
+    notes = len(fx.notes)
+    await purchase.on_paylivery_stage(conv, "delivered", {"corrected_from": "received", "seen": True})
+    assert row(pid).status == "paid" and len(fx.notes) == notes     # no second "Confirm receipt?" push
+    set_row(pid, status="agreed")
+    await purchase.on_paylivery_stage(conv, "offer_accepted", {"offer": 240, "corrected_from": "delivered",
+                                                               "seen": True})
+    assert row(pid).status == "agreed" and len(fx.notes) == notes
+
+
 async def test_offer_declined_negotiates_again(fx):
     pid = await open_order(fx)
     set_row(pid, status="agreed")

@@ -67,6 +67,10 @@ async def lifespan(app: FastAPI):
     chats.recover_sending()
     deals_web.product_search.recover()
     purchase_svc.recover()
+    try:
+        paylivery_routes.paylivery.recheck_all()   # chats on a stage that older notice rules misread
+    except Exception as e:  # noqa: BLE001 - the chat sync rechecks them too
+        log.warning("PayLivery recheck failed: %s", e)
     vpn.secure()                                   # WireGuard configs owner-only (also after a backup restore)
     if s.browser_enabled or s.wh_replay:            # WH_REPLAY without a browser: the login comes from recordings
         sess = get_session()

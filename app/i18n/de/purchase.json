@@ -58,6 +58,7 @@
   "The seller declined the PayLivery offer": "Der Verkäufer hat das PayLivery-Angebot abgelehnt",
   "The seller declined our offer – negotiate further.": "Der Verkäufer hat unser Angebot abgelehnt – weiter verhandeln.",
   "Paid with PayLivery": "Mit PayLivery bezahlt",
+  "PayLivery stage corrected: {stage}": "PayLivery-Status korrigiert: {stage}",
   "Shipped": "Verschickt",
   "Confirm receipt?": "Erhalt bestätigen?",
   "The parcel was delivered – confirm the receipt in the chat.": "Das Paket wurde zugestellt – bestätige den Erhalt im Chat.",

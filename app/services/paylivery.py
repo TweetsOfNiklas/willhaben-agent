@@ -28,11 +28,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
+from sqlalchemy import or_
 from sqlmodel import col, select
 
 from app.config import get_settings
 from app.db import Conversation, Message, Shipment, get_setting, session, set_setting, utcnow
-from app.i18n import t
+from app.i18n import catalog, t
 from app.services import shipping
 from app.willhaben import recorder
 from app.willhaben import session as willhaben_session
@@ -58,10 +59,14 @@ CHAT_URL = "https://www.willhaben.at/iad/myprofile/chat"
 ROLES = ("seller", "buyer")
 STATUSES = ("continue", "done", "need_human", "abort")
 
-# most advanced first within a role; offers may restart until payment, problems and cancellations always apply
-RANK = {"offer_received": 1, "offer_sent": 1, "offer_declined": 2, "offer_accepted": 2, "paid": 3,
-        "label_ready": 4, "shipped": 5, "delivered": 6, "received": 7, "paid_out": 8}
+# most advanced first within a role; offers may restart until payment, problems and cancellations always apply.
+# released: the paid purchase is accepted and waits for the parcel ("Der Kauf wurde freigegeben ... zum Versand bereit")
+RANK = {"offer_received": 1, "offer_sent": 1, "offer_declined": 2, "offer_accepted": 2, "paid": 3, "released": 4,
+        "label_ready": 5, "shipped": 6, "delivered": 7, "received": 8, "paid_out": 9}
 OFFER_STAGES = ("offer_received", "offer_sent", "offer_accepted", "offer_declined")
+FACT_KEYS = ("amount", "offer", "deadline", "tracking", "label_url")
+LINK_FACTS = ("tracking", "label_url")   # taken from every notice, also one that sets no stage
+RULES = 2   # version of the notice rules; a state from older rules is rechecked once (recheck)
 
 ACTION_ROLE: dict[str, str | None] = {   # None: either role
     "accept": "seller", "decline": "seller", "label": "seller", "mark_shipped": "seller",
@@ -73,44 +78,118 @@ ACTION_STAGE = {"accept": "offer_accepted", "decline": "offer_declined", "offer"
                 "receipt": "received", "problem": "problem", "mark_shipped": "shipped"}
 SELLER_ACTIONS: dict[str | None, list[str]] = {
     None: [], "offer_received": ["accept", "decline"], "offer_accepted": [], "offer_declined": [],
-    "paid": ["label", "mark_shipped"], "label_ready": ["label", "mark_shipped"], "shipped": [],
-    "delivered": [], "received": [], "paid_out": [], "problem": [], "cancelled": [],
+    "paid": ["label", "mark_shipped"], "released": ["label", "mark_shipped"], "label_ready": ["label", "mark_shipped"],
+    "shipped": [], "delivered": [], "received": [], "paid_out": [], "problem": [], "cancelled": [],
 }
 BUYER_ACTIONS: dict[str | None, list[str]] = {
     None: ["offer", "buy"], "offer_sent": [], "offer_received": [], "offer_declined": ["offer", "buy"],
-    "offer_accepted": ["buy"], "paid": ["problem"], "label_ready": ["problem"], "shipped": ["problem"],
-    "delivered": ["receipt", "problem"], "received": [], "paid_out": [], "problem": [], "cancelled": [],
+    "offer_accepted": ["buy"], "paid": ["problem"], "released": ["problem"], "label_ready": ["problem"],
+    "shipped": ["problem"], "delivered": ["receipt", "problem"], "received": [], "paid_out": [], "problem": [],
+    "cancelled": [],
 }
 
 # ------------------------------------------------------------------ text patterns
-_NEGATION = re.compile(r"(?:\bnicht|\bkein\w*|\bnoch\s+nicht|\bun)\s*$", re.I)
-_PAID = re.compile(r"bezahlt|zahlung\s+(?:erhalten|eingegangen|gutgeschrieben|best[äa]tigt)|kauf\s+abgeschlossen"
-                   r"|zahlungseingang", re.I)
+# Negation: a "nicht"/"kein" earlier in the same part of a clause ("hat den Artikel nicht rechtzeitig versendet") or
+# "un" right before the match ("unbezahlt"). Parts end at commas, colons, line breaks and und/oder/aber.
+_NEG_WORD = re.compile(r"\b(?:nicht|kein\w*|nie|niemals)\b", re.I)
+_NEG_UN = re.compile(r"\bun\s*$", re.I)
+_PART_END = re.compile(r",\s|[;:!?\n]|\b(?:und|oder|aber|sowie|sondern)\b", re.I)
+# a gap inside one part of a clause: no comma, line break or negation in between
+_GAP = r"(?:(?!,\s|\n|\bnicht\b|\bnoch\b)[^!?;:])"
+_PAID = re.compile(r"zahlung\s+(?:ist\s+|wurde\s+|war\s+)?"
+                   r"(?:erhalten|eingegangen|gutgeschrieben|best[äa]tigt|erfolgreich)"
+                   r"|kauf\s+abgeschlossen|zahlungseingang", re.I)
+_BEZAHLT = re.compile(r"\bbezahlt\b", re.I)    # with an auxiliary or as a title; not "Der Käufer bezahlt online"
+_PERFECT = re.compile(r"\b(?:hat|hast|haben|habt|wurde|wurden|ist|sind|war|waren)\b", re.I)
 _NUM = r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+\.\d{2}|\d+"
 _AMOUNT = re.compile(rf"(?:€|\bEUR\b)\s*({_NUM})|(?<![\w.,])({_NUM})\s*(?:€|\bEUR\b)", re.I)
 _AMOUNT_KEY = re.compile(r"amount|betrag|price|preis|summe", re.I)
 _URL = re.compile(r"https?://[^\s\"'<>()]+", re.I)
 _LABEL_URL = re.compile(r"label|paketschein|etikett|qr|\.pdf", re.I)
 _LABEL_WORD = re.compile(r"etikett|paketschein|versandlabel", re.I)
+_LABEL_GAP = r"(?:(?!\bnicht\b|\bnoch\b)[^.!?\n])"    # "Paketschein, den ..., steht bereit"; not "noch nicht bereit"
 _LABEL_READY = re.compile(
-    r"(?:etikett|paketschein|versandlabel|versandschein)\w*[^.!?\n]{0,60}?"
-    r"(?:bereit|verf[üu]gbar|erstellt|steht|liegt|zum\s+(?:download|herunterladen|drucken))"
-    r"|(?:bereit|verf[üu]gbar)[^.!?\n]{0,30}?(?:etikett|paketschein|versandlabel|versandschein)", re.I)
+    rf"(?:etikett|paketschein|versandlabel|versandschein)\w*{_LABEL_GAP}{{0,60}}?"
+    r"(?:bereit|verf[üu]gbar|erstellt|steht|liegt|ist\s+da\b|zum\s+(?:download|herunterladen|drucken))"
+    rf"|(?:bereit|verf[üu]gbar){_LABEL_GAP}{{0,30}}?(?:etikett|paketschein|versandlabel|versandschein)", re.I)
 _PROBLEM = re.compile(r"problem\s+(?:wurde\s+)?gemeldet|reklamation|streitfall|reklamiert", re.I)
-_CANCELLED = re.compile(r"storniert|abgebrochen|storno\b|zur[üu]ckgezogen", re.I)
-_PAID_OUT = re.compile(r"ausgezahlt|auszahlung|[üu]berwiesen|payout", re.I)
-_RECEIVED = re.compile(r"erhalt\s+best[äa]tigt|best[äa]tigt\w*\s+(?:den\s+)?(?:erhalt|empfang)"
+_CANCELLED = re.compile(r"storniert|abgebrochen|storno\b|zur[üu]ckgezogen|(?:zur[üu]ck|r[üu]ck)erstattet", re.I)
+# "überwiesen" alone: "zurücküberwiesen" is a refund; a payout held back is no payout
+_PAID_OUT = re.compile(rf"ausgezahlt|\b(?:[üu]|ue)berwiesen\b|payout|verkaufserl[öo]s\w*{_GAP}{{0,40}}?freigegeben"
+                       rf"|auszahlung(?!{_GAP}*?"
+                       r"(?:zur[üu]ckgehalten|einbehalten|gestoppt|angehalten|ausgesetzt|blockiert))", re.I)
+_RECEIVED = re.compile(rf"erhalt\s+best[äa]tigt|best[äa]tigt\w*\s+(?:den\s+)?(?:erhalt|empfang)"
+                       rf"|\berhalt\b{_GAP}{{0,40}}?\bbest[äa]tigt\b|best[äa]tigt,\s+dass\b[^\n]{{0,40}}?\berhalten\b"
                        r"|ware\s+(?:ist\s+)?(?:erhalten|angekommen)", re.I)
-_DELIVERED = re.compile(r"zugestellt|geliefert|zustellung\s+(?:erfolgt|abgeschlossen)|ausgeliefert", re.I)
-_SHIPPED = re.compile(r"verschickt|versendet|versandt|abgeschickt|unterwegs|in\s+zustellung|abgeholt\s+(?:von|durch)",
-                      re.I)
-_OFFER_NOUN = re.compile(r"\b(?:preis)?vorschl[aä]g\w*|\bangebot\b|\bkaufanfrage", re.I)
-_OFFER_WORD = re.compile(r"vorschl[aä]g\w*|\bangebot\b|\bkauf\w*|gekauft", re.I)
+_DELIVERED = re.compile(r"zugestellt|geliefert|ausgeliefert|zustellung\s+(?:ist\s+|wurde\s+)?(?:erfolgt|abgeschlossen)"
+                        rf"|\b(?:paket|artikel|sendung|bestellung)\w*{_GAP}{{0,40}}?\bangekommen", re.I)
+_SHIPPED = re.compile(r"verschickt|versendet|versandt|abgeschickt|unterwegs|in\s+zustellung|abgeholt\s+(?:von|durch)"
+                      r"|(?:post|paketshop|filiale|paketstation|abgabestelle)\w*\s+(?:abgegeben|[üu]bernommen)"
+                      rf"|\b(?:paket|artikel|sendung)\w*{_GAP}{{0,30}}?\bauf\s+dem\s+weg\b", re.I)
+_IN_DELIVERY = re.compile(r"\bwird\s+(?:\w+\s+){0,2}?(?:heute|gerade|jetzt)\s+zugestellt", re.I)   # out for delivery
+# The seller accepted the paid purchase, the parcel is next: "Der Kauf wurde freigegeben und ist nun zum Versand
+# bereit". The noun only (Kauf, Verkauf, Bestellung): "Kaufbetrag ... freigegeben" is a refund, "Verkaufserlös" a
+# payout.
+_PURCHASE = r"\b(?:(?:ver)?kaufs?|bestellung)\b"
+_RELEASED = re.compile(rf"{_PURCHASE}{_GAP}{{0,40}}?\bfreigegeben\b"
+                       rf"|\b(?:ist|sind|wurde|wurden)\b{_GAP}{{0,40}}?"
+                       r"(?:zum\s+versand\s+(?:bereit|freigegeben)|versandbereit|bereit\s+f[üu]r\s+den\s+versand)",
+                       re.I)
+_PURCHASE_ACCEPTED = re.compile(rf"{_PURCHASE}{_GAP}{{0,40}}?\b(?:akzeptiert|angenommen)\b", re.I)    # released
+_PURCHASE_DECLINED = re.compile(rf"{_PURCHASE}{_GAP}{{0,40}}?(?:\babgelehnt\b|\bnicht\s+(?:akzeptiert|angenommen)\b)",
+                                re.I)                                                                # cancelled
+# buyer: bought (and paid), the seller has not accepted yet: "Der Verkäufer hat jetzt 24 Stunden Zeit, deinen Kauf
+# zu akzeptieren"
+_BOUGHT_WAIT = re.compile(r"\bzeit\b[^\n]{0,12}?\bdeinen\s+kauf\s+zu\s+(?:akzeptieren|best[äa]tigen|annehmen)\b", re.I)
+_OFFER_NOUN = re.compile(r"\b(?:preis)?vorschl[aä]g\w*|\bangebot\b|\b(?:kauf)?anfrage", re.I)
+_OFFER_WORD = re.compile(r"vorschl[aä]g\w*|\bangebot\b|\b(?:kauf)?anfrage|\bkauf\w*|gekauft", re.I)
 _ACCEPT = re.compile(r"angenommen|akzeptiert|zugesagt|einverstanden", re.I)
 _DECLINE = re.compile(r"abgelehnt|abgesagt|abgewiesen|nicht\s+angenommen", re.I)
 _SOLD = re.compile(r"sofort\s+gekauft|gekauft|sofortkauf", re.I)
+_SOLD_MINE = re.compile(rf"\bdein\w*\s+(?:artikel|anzeige)\b{_GAP}{{0,30}}?\bverkauft\b", re.I)   # seller: sale agreed
+_TO_YOU = re.compile(r"\b(?:hat|haben)\s+dir\b", re.I)          # "Max hat dir einen Preisvorschlag gemacht": received
 _SENT_DIR = re.compile(r"gesendet|abgeschickt|abgegeben|gemacht|gestellt|versendet", re.I)
 _RECV_DIR = re.compile(r"erhalten|bekommen|eingegangen|\bneu(?:er|es|e)?\b", re.I)
+
+# Notices also explain, announce, instruct and ask ("Wird sie angenommen, ... wird dir zugestellt", "Wir informieren
+# dich, sobald dein Artikel unterwegs ist"). event_text() keeps only what is reported as done; the patterns see nothing
+# else. Sentences end at . ! ? ; and colons; a dot after a number, a single letter or an abbreviation ("bis 16.10.
+# versendet", "z. B.") ends one only when a new sentence clearly starts after it.
+_SENTENCE_END = re.compile(r"([.!?;:])\s+")
+_NO_END = re.compile(r"(?:\d|\b\w|\b(?:bzw|ca|nr|inkl|exkl|zzgl|evtl|ggf|usw|vgl|etc|bspw|mind|max|min|tel|str))$",
+                     re.I)
+_OPENS = re.compile(r"(?:Der|Die|Das|Dein|Deine|Du|Wir|Bitte|Dann|Sonst|Leider|Wenn|Sobald|Falls|Sofern|Nachdem|Bevor|"
+                    r"Ist|Sind|Hast|Hat|Wird|Wurde|Wurden|Kannst|Solltest|Sollte)\b")
+# a sentence glued to a title without a dot: "Artikel zugestellt Ist alles in Ordnung?", "PayLivery Wird dein ..."
+_GLUED = re.compile(r"(?<=[a-zäöüß0-9])\s+(?=(?:Ist|Sind|Bist|Hast|Hat|Wird|Wirst|Wurde|Wurden|Kannst|Kann|Musst|Muss|"
+                    r"Sollte|Solltest|Möchtest|Wenn|Sobald|Falls|Sofern|Nachdem|Bevor|Bitte|Dann|Wir)\b)")
+_ASIDE = re.compile(r"\s*\(([^()]*)\)")                           # "Bezahlt (bitte bis 15.10. versenden)"
+_CLAUSE_SPLIT = re.compile(r",\s+|\s+[-–—]\s+")
+_PIECE_SPLIT = re.compile(r"\s+(?:und|oder|aber|sowie|sondern|and|or|but)\s+", re.I)
+# conditions and their kin; "bis" only as a conjunction ("bis du ...", not "bis 15.10." or "bis zur Klärung")
+_SUBORDINATE = (r"sobald|wenn|falls|sofern|bevor|nachdem|ob|damit|bis\s+(?=(?:du|der|die|das|dein\w*|er|sie|es|wir|ihr|"
+                r"man|ein\w*|alle\w*)\b)|once|if|when|unless|until|as\s+soon\s+as")
+_COND_START = re.compile(rf"\W*(?:(?:erst|nur|auch|selbst|sogar)\s+)?(?:{_SUBORDINATE})\b", re.I)
+_SUBORDINATOR = re.compile(rf"\b(?:{_SUBORDINATE})\b", re.I)
+# an inverted condition opens with the verb: "Wird sie angenommen, ...", "Hat der Käufer bezahlt, ...",
+# "Versendet der Verkäufer nicht rechtzeitig, ..."
+_VERB_FIRST = re.compile(r"\W*(?:(?:wird|werden|wirst|wurde|wurden|ist|sind|bist|war|waren|hat|hast|haben|hatte|"
+                         r"hattest|sollte\w*|kann|kannst|muss|musst|darf|darfst|möchtest)\b"
+                         r"|(?!(?:paket|erhalt|betrag|einkauf|verkauf)\b)[a-zäöüß]+(?:t|st|en|te)\s+"
+                         r"(?:der|die|das|dein\w*|du|er|sie|es|wir|ihr|man|ein\w*|kein\w*|jemand)\b)", re.I)
+_PAST = re.compile(r"\b(?:wurde|wurden|worden|war|waren)\b", re.I)
+_REPORTED = re.compile(r"\b(?:wurde|wurden|worden|war|waren|hat|hast|haben|habe|habt)\b", re.I)   # past main clause
+_WISH = (r"würde\w*|will|kann|kannst|können|könnt|muss|musst|müssen|müsst|soll|sollst|sollen|sollt|sollte\w*|darf|"
+         r"darfst|dürfen|möchte\w*|bitte|please|voraussichtlich|bald|demnächst|sonst|andernfalls|ansonsten|otherwise")
+_NOT_DONE = re.compile(rf"\b(?:wird|werden|wirst|werdet|{_WISH})\b", re.I)   # a future, a wish or a request
+_NOT_DECIDED = re.compile(rf"\b(?:{_WISH})\b", re.I)                         # "Der Kauf wird storniert" is decided
+_LATER = re.compile(r"\bnach\s+(?:dem|der|den|des|erhalt\w*|best[äa]tigung|zustellung|ablauf|eingang|zahlungseingang|"
+                    r"annahme|abschluss|freigabe)\b|\bdanach\b|\banschlie(?:ß|ss)end\b", re.I)
+_STATS = re.compile(r"\b(?:tausende|hunderte|million(?:en)?|milliarden?)\b", re.I)    # advert numbers, no event
+_IMPERATIVE = re.compile(r"\W*(?:sende|schicke?|kaufe|mache?|bestätige|lade|drucke|klebe|verpacke|gib|versende|"
+                         r"verschicke|prüfe|melde|akzeptiere|bezahle|zahle|nutze|erhalte|hole?|frag|beachte|"
+                         r"kontaktiere|antworte|wähle|klicke|tippe|öffne|bringe?|warte|lies|vergiss|denke?)\b"
+                         r"(?!\s+du\b)", re.I)
 _DEADLINE_DATE = re.compile(r"bis\s+(?:zum\s+|sp[äa]testens\s+(?:am\s+)?)?(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})?(?!\d)", re.I)
 _DEADLINE_IN = re.compile(r"innerhalb\s+(?:von\s+)?(\d{1,3})\s*(tage?n?|werktage?n?|stunden?)", re.I)
 _TRACKING = re.compile(r"(?:sendungsnummer|paketnummer|tracking(?:[- ]?(?:nummer|code|id))?)\s*[:#]?\s*"
@@ -144,16 +223,90 @@ class PayLiveryError(RuntimeError):
 
 
 # ------------------------------------------------------------------ small helpers
-def _hits(rx: re.Pattern, text: str) -> bool:
-    """The pattern matches and is not negated ("nicht bezahlt", "unbezahlt")."""
-    for m in rx.finditer(text or ""):
-        if not _NEGATION.search(text[max(0, m.start() - 16):m.start()]):
-            return True
+def _hits(rx: re.Pattern, text: str, need: re.Pattern | None = None) -> bool:
+    """The pattern matches and is not negated: no "nicht"/"kein" before it in the same part of a clause ("nicht
+    bezahlt", "nicht rechtzeitig versendet") and no "un" right before it ("unbezahlt"). need: a word that part must
+    have before the match, unless the match opens it ("Du hast bezahlt", "Bezahlt", not "Der Käufer bezahlt online")."""
+    text = text or ""
+    for m in rx.finditer(text):
+        before = text[:m.start()]
+        part = before[max((e.end() for e in _PART_END.finditer(before)), default=0):]
+        if _NEG_WORD.search(part) or _NEG_UN.search(part):
+            continue
+        if need is not None and part.strip() and not need.search(part):
+            continue
+        return True
     return False
 
 
+def _segments(text: str) -> list[str]:
+    """A notice cut into sentences, colon parts, bracketed asides and glued-on titles, each to be read on its own."""
+    asides: list[str] = []
+
+    def aside(m: re.Match) -> str:
+        asides.append(m.group(1))
+        return " "
+
+    out: list[str] = []
+    for line in re.split(r"\s*\n\s*", "\n".join([_ASIDE.sub(aside, text or ""), *asides])):
+        start = 0
+        for m in _SENTENCE_END.finditer(line):
+            if m.group(1) == "." and _NO_END.search(line[:m.start()]) and not _OPENS.match(line, m.end()):
+                continue                                  # "bis 16.10. versendet", "z. B. beschädigt"
+            out += _GLUED.split(line[start:m.end()])
+            start = m.end()
+        out += _GLUED.split(line[start:])
+    return [s.strip() for s in out if s.strip()]
+
+
+def event_text(text: str, decisions: bool = False) -> str:
+    """The parts of a notice that report something done, one line per sentence. Dropped: questions; conditions
+    (sobald/wenn/falls/nachdem/bis/ob ..., or an opening verb: "Wird sie angenommen, ...", "Hat der Käufer bezahlt,
+    ...") with the main clause they govern, unless that one reports the past ("Der Kauf wurde storniert, nachdem
+    ...", "Der Käufer hat ein Problem gemeldet, bevor ..."); and parts with a future, wish or request word (wird,
+    kann, muss, bitte, voraussichtlich, sonst ...), an imperative ("Verpacke den Artikel ..."), a later time ("nach
+    dem Erhalt") or advert numbers ("tausende Artikel"). Reports stay: "wurde zugestellt", "ist unterwegs", "dass der
+    Artikel unterwegs ist".
+
+    decisions: keep "wird"/"werden" too. willhaben announces its own decisions in the present ("Der Kauf wird
+    storniert", "Die Auszahlung wird veranlasst"); they are read for problem, cancelled and paid out only."""
+    veto = _NOT_DECIDED if decisions else _NOT_DONE
+    lines: list[str] = []
+    for seg in _segments(text):
+        if seg.endswith("?"):
+            continue
+        clauses = [c.strip() for c in _CLAUSE_SPLIT.split(seg.rstrip(".!;:")) if c.strip()]
+        cond = [bool(_COND_START.match(c)) or (i == 0 and len(clauses) > 1 and bool(_VERB_FIRST.match(c)))
+                for i, c in enumerate(clauses)]
+        parts: list[list[str]] = []
+        for i, clause in enumerate(clauses):
+            sub = None if cond[i] else _SUBORDINATOR.search(clause)
+            pieces = [] if cond[i] else [p.strip() for p in _PIECE_SPLIT.split(clause[:sub.start()] if sub else clause)
+                                         if p.strip()]
+            if sub and pieces and not _REPORTED.search(pieces[-1]):
+                pieces.pop()                              # "Wir informieren dich sobald ..."
+            parts.append(pieces)
+        for i in (i for i, c in enumerate(cond) if c):
+            if all(cond[:i]):                             # leading: "Sobald ..., steht ..." governs the next clause
+                j = next((k for k in range(i + 1, len(clauses)) if not cond[k]), None)
+                if j is not None and not any(_REPORTED.search(p) for p in parts[j]):
+                    parts[j] = []
+            elif not cond[i - 1] and parts[i - 1] and not _REPORTED.search(parts[i - 1][-1]):
+                parts[i - 1].pop()                        # trailing: "Die Auszahlung erfolgt, sobald ..."
+        kept = [" und ".join(ok) for pieces in parts
+                if (ok := [p for p in pieces if not (veto.search(p) or _IMPERATIVE.match(p) or _STATS.search(p)
+                                                     or (_LATER.search(p) and not _PAST.search(p)))])]
+        if kept:
+            lines.append(", ".join(kept))
+    return "\n".join(lines)
+
+
+def _paid(text: str) -> bool:
+    return _hits(_PAID, text) or _hits(_BEZAHLT, text, need=_PERFECT)
+
+
 def is_paid(text: str) -> bool:
-    return _hits(_PAID, text)
+    return _paid(event_text(text))
 
 
 def _to_float(num: str) -> float:
@@ -236,34 +389,46 @@ def _full_text(text: str | None, params: Any) -> str:
 
 
 def detect_stage(text: str, role: str | None) -> str | None:
-    """The stage a notice announces, most advanced first. None when the text says nothing about the process."""
-    if _hits(_PROBLEM, text):
+    """The stage a notice reports, most advanced first. None when the text says nothing done about the process
+    (explanations, conditions, announcements and instructions are no events: event_text). A fetchable label link is
+    a fact in any mood ("Hier kannst du dein Versandetikett herunterladen: https://...")."""
+    full = text or ""
+    done = event_text(full)
+    decided = event_text(full, decisions=True)
+    offer = _hits(_OFFER_NOUN, done)              # a Preisvorschlag/Anfrage: its own accept and decline stages
+    if _hits(_PROBLEM, decided):
         return "problem"
-    if _hits(_CANCELLED, text):
+    if _hits(_CANCELLED, decided) or (not offer and _hits(_PURCHASE_DECLINED, decided)):
         return "cancelled"
-    if _hits(_PAID_OUT, text):
+    if _hits(_PAID_OUT, decided):
         return "paid_out"
-    if _hits(_RECEIVED, text):
+    if _hits(_RECEIVED, done):
         return "received"
-    if _hits(_DELIVERED, text):
+    if _hits(_DELIVERED, done):
         return "delivered"
-    if _hits(_SHIPPED, text):
+    if _hits(_SHIPPED, done) or _hits(_IN_DELIVERY, decided):
         return "shipped"
-    if _LABEL_READY.search(text) or (_LABEL_WORD.search(text) and label_urls(text, [])):
+    if _LABEL_READY.search(done) or (_LABEL_WORD.search(full) and label_urls(full, [])):
         return "label_ready"
-    if is_paid(text):
+    if _hits(_RELEASED, done) or (not offer and _hits(_PURCHASE_ACCEPTED, done)):
+        return "released"
+    if _paid(done) or (role == "buyer" and _hits(_BOUGHT_WAIT, done)):
         return "paid"
-    offer_word = _hits(_OFFER_WORD, text)
-    if offer_word and _hits(_DECLINE, text):
+    offer_word = _hits(_OFFER_WORD, done)
+    if offer_word and _hits(_DECLINE, done):
         return "offer_declined"
-    if offer_word and _hits(_ACCEPT, text):
+    if offer_word and _hits(_ACCEPT, done):
         return "offer_accepted"
-    if _hits(_SOLD, text):                      # buy-now purchase: the seller has an agreed sale, the buyer has paid
+    if _hits(_SOLD, done):                        # buy-now purchase: the seller has an agreed sale, the buyer has paid
         return "offer_accepted" if role == "seller" else "paid"
-    if _hits(_OFFER_NOUN, text):
-        if _hits(_SENT_DIR, text):
+    if role == "seller" and _hits(_SOLD_MINE, done):
+        return "offer_accepted"
+    if offer:
+        if _hits(_TO_YOU, done):
+            return "offer_received"
+        if _hits(_SENT_DIR, done):
             return "offer_sent"
-        if _hits(_RECV_DIR, text):
+        if _hits(_RECV_DIR, done):
             return "offer_received"
         return "offer_sent" if role == "buyer" else "offer_received"   # no direction word: the role decides
     return None
@@ -339,23 +504,30 @@ def _conv(conversation_id: str) -> Conversation | None:
         return db.get(Conversation, conversation_id)
 
 
-def _stored_notices(conversation_id: str) -> list[Message]:
-    """The chat's stored notices, newest first (detached rows)."""
+def _stored_notices(conversation_id: str, limit: int | None = NOTICE_LIMIT, legacy: bool = False) -> list[Message]:
+    """The chat's stored notices, newest first (detached rows); limit None: all of them. `legacy` adds rows stored
+    before notices got their kind (direction "unknown", kind None): only for the recheck, which replays just the
+    rows already applied as notices (an "unknown" row can also be the other person's message from the list)."""
+    notice = col(Message.kind).is_not(None)
+    if legacy:
+        notice = or_(notice, Message.direction == "unknown")
     with session() as db:
-        return list(db.exec(select(Message).where(Message.conversation_id == conversation_id,
-                                                  col(Message.kind).is_not(None))
-                            .order_by(col(Message.created_at).desc()).limit(NOTICE_LIMIT)).all())
+        return list(db.exec(select(Message).where(Message.conversation_id == conversation_id, notice)
+                            .order_by(col(Message.created_at).desc()).limit(limit)).all())
 
 
 # ------------------------------------------------------------------ state of a chat
 def _update_state(conversation_id: str, change: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any] | None:
-    """Replace the chat's PayLivery state with change(copy). A copy, so the JSON column notices the new object."""
+    """Replace the chat's PayLivery state with change(copy). A copy, so the JSON column notices the new object.
+    A state started now is written under the current notice rules and needs no recheck."""
     with session() as db:
         row = db.get(Conversation, conversation_id)
         if row is None:
             return None
         old = row.paylivery or {}
         new = change(copy.deepcopy(old))
+        if not old and new:
+            new.setdefault("rules", RULES)
         if new != old:                       # unchanged notices (already applied) cost no write
             row.paylivery = new
             db.add(row)
@@ -363,13 +535,16 @@ def _update_state(conversation_id: str, change: Callable[[dict[str, Any]], dict[
         return new
 
 
-def _add_history(st: dict[str, Any], at: str, stage: str | None, text: str) -> dict[str, Any]:
-    hist = [*(st.get("history") or []), {"at": at, "stage": stage, "text": text[:300]}]
-    st["history"] = hist[-HISTORY_CAP:]
+def _add_history(st: dict[str, Any], at: str, stage: str | None, text: str, **tags: Any) -> dict[str, Any]:
+    """One history entry. tags say where it came from, for recheck: notice=<ext_id>, or action=<name>, ok=<bool>,
+    amount=<euros> for an own action."""
+    entry = {"at": at, "stage": stage, "text": text[:300], **{k: v for k, v in tags.items() if v is not None}}
+    st["history"] = [*(st.get("history") or []), entry][-HISTORY_CAP:]
     return st
 
 
-def _set_stage(st: dict[str, Any], stage: str, at: str, text: str, facts: dict[str, Any]) -> dict[str, Any]:
+def _set_stage(st: dict[str, Any], stage: str, at: str, text: str, facts: dict[str, Any],
+               **tags: Any) -> dict[str, Any]:
     st["stage"] = stage
     st["updated_at"] = utcnow().isoformat()
     if facts.get("amount") is not None:
@@ -377,7 +552,22 @@ def _set_stage(st: dict[str, Any], stage: str, at: str, text: str, facts: dict[s
     for key in ("deadline", "tracking", "label_url"):
         if facts.get(key):
             st[key] = facts[key]
-    return _add_history(st, at, stage, text)
+    return _add_history(st, at, stage, text, **tags)
+
+
+def _take_notice(st: dict[str, Any], msg: Message, role: str) -> dict[str, Any]:
+    """One notice on a state: its stage, when that advances, with all its facts. Otherwise only its tracking number and
+    label link: those are facts whatever the notice's wording ("Hier kannst du dein Versandetikett herunterladen:
+    ...")."""
+    facts = notice_facts(msg.text or "", msg.params, msg.created_at)
+    stage = detect_stage(_full_text(msg.text, msg.params), role)
+    if stage is not None and _advances(st.get("stage"), stage):
+        return _set_stage(st, stage, _iso(msg.created_at) or utcnow().isoformat(), msg.text or stage_label(stage),
+                          facts, notice=msg.ext_id)
+    for key in LINK_FACTS:
+        if facts.get(key):
+            st[key] = facts[key]
+    return st
 
 
 def apply_notice(conv: Conversation, msg: Message) -> dict[str, Any] | None:
@@ -393,14 +583,9 @@ def apply_notice(conv: Conversation, msg: Message) -> dict[str, Any] | None:
         if msg.ext_id in applied:
             return st
         st["applied"] = (applied + [msg.ext_id])[-APPLIED_CAP:]
-        stage = detect_stage(_full_text(msg.text, msg.params), role)
-        if stage is None or not _advances(st.get("stage"), stage):
-            return st
         before = st.get("stage")
-        at = _iso(msg.created_at) or utcnow().isoformat()
-        st = _set_stage(st, stage, at, msg.text or stage_label(stage),
-                        notice_facts(msg.text or "", msg.params, msg.created_at))
-        if stage != before:
+        st = _take_notice(st, msg, role)
+        if st.get("stage") != before:
             changed.append(st)
         return st
 
@@ -415,8 +600,9 @@ def _record(conversation_id: str, action: str, ok: bool, text: str, amount: floa
 
     def change(st: dict[str, Any]) -> dict[str, Any]:
         if stage:
-            return _set_stage(st, stage, at, f"{action}: {text}", {"amount": amount})
-        return _add_history(st, at, st.get("stage"), f"{action}: {text}")
+            return _set_stage(st, stage, at, f"{action}: {text}", {"amount": amount}, action=action, ok=True,
+                              amount=amount)
+        return _add_history(st, at, st.get("stage"), f"{action}: {text}", action=action, ok=False)
 
     state = _update_state(conversation_id, change)
     if stage and state is not None:
@@ -509,6 +695,153 @@ def _fire_action_hooks(conversation_id: str, action: str, ok: bool, text: str) -
     task.add_done_callback(_hook_tasks.discard)
 
 
+# ------------------------------------------------------------------ recheck under newer notice rules
+# A state written under older rules (no "rules" mark, or a smaller one) can sit on a stage the old patterns misread,
+# e.g. "delivered" from the PayLivery intro ("... wird dir zugestellt"), and a stage never goes back by itself.
+# recheck() replays the chat's applied notices with the current rules between its own actions, once per RULES.
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_MARKED_SHIPPED = "Marked as shipped in this app"
+_ACTION_PREFIX = re.compile(r"(\w+): ")
+
+
+def _when(iso: str | None) -> datetime:
+    try:
+        return _aware(datetime.fromisoformat(iso)) if iso else _EPOCH
+    except ValueError:
+        return _EPOCH
+
+
+def _source(h: dict[str, Any], notices: dict[str, Message]) -> tuple[str, Any, bool]:
+    """Where a history entry came from and whether it moved the stage: ("notice", Message, True), ("action", name,
+    ok) or ("note", None, False). Untagged entries (written before the tags) are matched by the notice's time and
+    text, the "<action>: " prefix of an own action (ok when it carries that action's stage) or the mark-shipped text."""
+    if h.get("notice") is not None:
+        m = notices.get(h["notice"])
+        return ("notice", m, True) if m is not None else ("note", None, False)
+    if h.get("action"):
+        return "action", h["action"], bool(h.get("ok"))
+    for m in notices.values():
+        if _iso(m.created_at) == h.get("at") and (m.text or "")[:300] in (h.get("text"), ""):
+            return "notice", m, True
+    pre = _ACTION_PREFIX.match(h.get("text") or "")
+    if pre and pre.group(1) in BROWSER_ACTIONS:
+        return "action", pre.group(1), h.get("stage") == ACTION_STAGE[pre.group(1)]
+    if h.get("stage") == "shipped" and h.get("text") in (_MARKED_SHIPPED, catalog("de").get(_MARKED_SHIPPED)):
+        return "action", "mark_shipped", True
+    return "note", None, False
+
+
+def _replayable(st: dict[str, Any], notices: dict[str, Message]) -> bool:
+    """Whether the history explains the whole state: every entry that moved the stage is a stored notice or an own
+    action, the last one is the current stage, and nothing was cut off (HISTORY_CAP). Not so for a chat removed here
+    (its notices are gone) or a state without history: those are left as they are."""
+    hist = st.get("history") or []
+    if len(hist) >= HISTORY_CAP:
+        return False
+    prev = None
+    for h in hist:
+        if h.get("stage") != prev and _source(h, notices)[0] == "note":
+            return False
+        prev = h.get("stage")
+    return prev == st.get("stage")
+
+
+def _replay(st: dict[str, Any], notices: list[Message], role: str) -> dict[str, Any]:
+    """The state rebuilt under the current rules: the applied notices again, by time, between the own actions. It
+    starts from the facts the state has (amounts, deadline, tracking, label link): a replay only adds to them. An offer
+    or buy entry from before the tags reuses the amount the state had. Notes (bank wait, failed actions) keep their
+    place in the history."""
+    by_id = {m.ext_id: m for m in notices}
+    events: list[tuple[datetime, int, str, Any]] = [(_when(_iso(m.created_at)), i, "notice", m)
+                                                   for i, m in enumerate(notices)]
+    for i, h in enumerate(st.get("history") or []):
+        src, ref, ok = _source(h, by_id)
+        if src != "notice":                   # notice entries are replayed from the notice rows
+            events.append((_when(h.get("at")), len(notices) + i, src, (ref, ok, h)))
+    events.sort(key=lambda e: (e[0], e[1]))
+    new = {k: v for k, v in st.items() if k not in ("stage", "history", "updated_at")}
+    for _, _, src, item in events:
+        if src == "notice":
+            new = _take_notice(new, item, role)
+            continue
+        name, ok, h = item
+        at, text = h.get("at") or "", h.get("text") or ""
+        tags = {k: v for k, v in h.items() if k not in ("at", "stage", "text")}
+        stage = ACTION_STAGE.get(name) if src == "action" and ok else None
+        if src == "action":
+            tags.update(action=name, ok=ok)
+        if stage:
+            amount = h.get("amount") if "action" in h else (
+                st.get("offer" if stage in OFFER_STAGES else "amount") if name in MONEY_ACTIONS else None)
+            new = _set_stage(new, stage, at, text, {"amount": amount}, **{**tags, "amount": amount})
+        else:
+            new = _add_history(new, at, new.get("stage"), text, **tags)
+    return new
+
+
+def _visible(st: dict[str, Any]) -> tuple:
+    return (st.get("stage"), *(st.get(k) for k in FACT_KEYS))
+
+
+def recheck(conversation_id: str) -> dict[str, Any] | None:
+    """Recheck a chat's state from older notice rules, once per RULES. Returns the new state when its stage or a fact
+    changed, else None; either way the state gets the current rules mark.
+
+    Nothing runs again: no push, no willhaben action. The stage hooks run for a stage the chat never had (so a purchase
+    order catches up) and for a lowered stage; the latter's state carries "corrected_from" (the old stage) and "seen"
+    (the chat had this stage before and its hooks already ran), so an order the misread moved on can follow back. The
+    own actions and notes stay in the history. A state the history does not explain (_replayable) is left as it is."""
+    conv = _conv(conversation_id)
+    old = (conv.paylivery if conv else None) or {}
+    role = (conv.role if conv and conv.role in ROLES else None) or old.get("role")
+    if not old or old.get("rules") == RULES or role not in ROLES:
+        return None
+    applied = set(old.get("applied") or [])
+    notices = [m for m in reversed(_stored_notices(conversation_id, limit=None, legacy=True)) if m.ext_id in applied]
+    by_id = {m.ext_id: m for m in notices}
+    changed: list[dict[str, Any]] = []
+
+    def change(st: dict[str, Any]) -> dict[str, Any]:
+        if st.get("rules") == RULES:              # rechecked meanwhile
+            return st
+        new = _replay(st, notices, role) if _replayable(st, by_id) else st
+        if _visible(new) == _visible(st):
+            st["rules"] = RULES
+            return st
+        new["rules"] = RULES
+        new["updated_at"] = utcnow().isoformat()
+        changed.append(new)
+        return new
+
+    _update_state(conversation_id, change)
+    if not changed:
+        return None
+    state = changed[0]
+    stage = state.get("stage")
+    log.info("PayLivery chat %s rechecked (notice rules %s): %s -> %s", conversation_id, RULES, old.get("stage"), stage)
+    seen = stage in {old.get("stage"), *(h.get("stage") for h in old.get("history") or [])}
+    lowered = stage in RANK and RANK[stage] < RANK.get(old.get("stage") or "", 0)
+    if stage and (not seen or lowered):
+        mark = {"corrected_from": old.get("stage"), "seen": seen} if lowered else {}
+        _fire_stage_hooks(conversation_id, stage, {**state, **mark})
+    return state
+
+
+def recheck_all() -> int:
+    """Startup: recheck every chat whose state is from older notice rules. Returns how many states changed."""
+    with session() as db:
+        rows = db.exec(select(Conversation.id, Conversation.paylivery)).all()
+    n = 0
+    for cid, st in rows:
+        if not isinstance(st, dict) or not st or st.get("rules") == RULES:
+            continue
+        try:
+            n += recheck(cid) is not None
+        except Exception as e:  # noqa: BLE001 - one broken state must not stop the others or the startup
+            log.warning("PayLivery recheck of chat %s failed: %s", cid, e)
+    return n
+
+
 # ------------------------------------------------------------------ notices -> shipments (seller only)
 async def scan(conversation_id: str, fresh: list[ChatMessage] | None = None) -> Shipment | None:
     """Apply the chat's unhandled notices, oldest first. `fresh`: the just-fetched history (carries raw links).
@@ -519,6 +852,12 @@ async def scan(conversation_id: str, fresh: list[ChatMessage] | None = None) -> 
     conv = _conv(conversation_id)
     if conv is None or conv.role not in ROLES:
         return None
+    if conv.paylivery and conv.paylivery.get("rules") != RULES:   # normally done at startup (recheck_all)
+        try:
+            recheck(conversation_id)
+        except Exception as e:  # noqa: BLE001 - the new notices are applied anyway
+            log.warning("PayLivery recheck of chat %s failed: %s", conversation_id, e)
+        conv = _conv(conversation_id) or conv
     seen = set(_seen())
     applied = set((conv.paylivery or {}).get("applied") or [])     # stage already taken from these notices
     links = {m.ext_id: m.raw_links for m in fresh or []}
@@ -695,7 +1034,8 @@ async def download_label(conversation_id: str) -> str:
 def mark_shipped(conversation_id: str) -> str:
     """Local action "Mark shipped": the stage in this app only (willhaben is not asked)."""
     _update_state(conversation_id, lambda st: _set_stage(st, "shipped", utcnow().isoformat(),
-                                                         t("Marked as shipped in this app"), {}))
+                                                         t("Marked as shipped in this app"), {},
+                                                         action="mark_shipped", ok=True))
     s = shipping.open_for(conversation_id)
     if s and s.status in ("labelled", "printed"):
         shipping.update(s.id, status="sent")
@@ -710,6 +1050,7 @@ def stage_label(stage: str | None) -> str:
         "offer_accepted": t("Offer accepted"),
         "offer_declined": t("Offer declined"),
         "paid": t("Paid"),
+        "released": t("Released for shipping"),
         "label_ready": t("Label ready"),
         "shipped": t("Shipped"),
         "delivered": t("Delivered"),
@@ -729,6 +1070,7 @@ def next_step(role: str, stage: str | None) -> str:
             "offer_declined": t("Offer declined. Wait for a new offer."),
             "offer_accepted": t("Waiting for the buyer's payment."),
             "paid": t("Paid. Download the label, attach it to the parcel, then mark it shipped."),
+            "released": t("Released: ship it now. Download the label, attach it to the parcel, then mark it shipped."),
             "label_ready": t("Label ready: download it, attach it to the parcel, then mark it shipped."),
             "shipped": t("The parcel is on its way. Waiting for the delivery."),
             "delivered": t("Delivered. The buyer confirms receipt; the payout follows."),
@@ -744,6 +1086,7 @@ def next_step(role: str, stage: str | None) -> str:
         "offer_declined": t("Your offer was declined. Send another or buy now."),
         "offer_accepted": t("The seller accepted. Pay the agreed price now."),
         "paid": t("Paid. Waiting for the parcel."),
+        "released": t("Paid and released. Waiting for the seller to ship it."),
         "label_ready": t("The seller has the label. Waiting for the parcel."),
         "shipped": t("The parcel is on its way."),
         "delivered": t("Delivered? Confirm the receipt, or report a problem."),

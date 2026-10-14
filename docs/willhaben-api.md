@@ -226,9 +226,12 @@ checkout. The buy dialog carries the rule as `data-fee` and mirrors the maths in
 Not live-verified: the amounts shown at the real checkout (compare them once with `costs_of()`).
 
 Hooks: `paylivery.on_stage(fn)` registers `fn(conv, stage, state)` (async). It runs as a background task after every
-PayLivery stage change of a chat, from a notice (`_apply_and_push`) or from an own successful browser action
-(`_record`). Failing hooks are logged and do not affect the sync. Sync callers without a running event loop do not
-fire hooks.
+PayLivery stage change of a chat, from a notice (`_apply_and_push`), from an own successful browser action
+(`_record`) or from a recheck (`recheck`) that reaches a stage the chat never had or lowers the stage. A lowered stage
+comes with `state["corrected_from"]` (the misread stage) and `state["seen"]` (the chat had this stage before, its hooks
+already ran): `purchase.on_paylivery_stage` then moves an open order the misread put on "shipped" back to "paid" and,
+for a seen stage, does nothing else. Finished orders are not reopened. Failing hooks are logged and do not affect the
+sync. Sync callers without a running event loop do not fire hooks.
 
 **To record on the first live use** (Session → API recording, label `purchase-opener`): start one purchase order on a
 test ad you can leave. The capture must contain the `POST iad-messaging/sendrequest/chat` and its answer (`sent`,
@@ -317,30 +320,54 @@ every `http(s)` string inside the message object as `raw_links` and keeps the st
 "unknown"; the chat page shows them as a centred notice line.
 
 **State per chat** (`Conversation.paylivery`, app/services/paylivery.py): `role` (seller | buyer), `stage`, `amount`,
-`offer`, `deadline` (ISO), `tracking`, `label_url`, `updated_at`, `history` (newest 30: `at`, `stage`, `text`) and
-`applied` (ids of the notices already applied, newest 200; a notice is applied once, so a retried notice never adds
-history twice). A stage never goes back once the buyer has paid (`RANK`); "problem" and "cancelled" always apply, and
-offers may be sent again until payment.
+`offer`, `deadline` (ISO), `tracking`, `label_url`, `updated_at`, `history` (newest 30: `at`, `stage`, `text`, plus
+`notice` = the notice id, or `action`/`ok`/`amount` for an own action), `applied` (ids of the notices already applied,
+newest 200; a notice is applied once, so a retried notice never adds history twice) and `rules` (version of the notice
+rules the state was written under, `paylivery.RULES`). A stage never goes back once the buyer has paid (`RANK`);
+"problem" and "cancelled" always apply, and offers may be sent again until payment. A notice's amount and deadline are
+taken with its stage; its tracking number and label link from every notice, also one that sets no stage.
+
+**Recheck** (`paylivery.recheck`, at startup for every chat and before a chat's next scan): a state from older rules
+is replayed from its applied notices with the current rules, by time, between its own actions (their history entries,
+amounts and notes stay). The replay starts from the facts the state has (amount, offer, deadline, tracking, label link)
+and only adds to them. Only a changed stage or fact is written. No push and no willhaben action runs again; the stage
+hooks run for a stage the chat never had (a purchase order catches up) and for a lowered stage (see Hooks). A state the
+history does not fully explain is only marked: an entry that moved the stage matches no stored notice and no own action
+(e.g. a chat removed here, whose messages are deleted), the history is at its cap of 30, or the last entry is not the
+current stage. RULES 2 fixes chats stuck on "delivered" from the PayLivery intro.
 
 **Stage patterns** (`detect_stage`, most advanced first; matched on the text plus every string of `parameters`;
-a match preceded by "nicht", "kein…" or "un" is ignored):
+a match is ignored after "nicht"/"kein…" earlier in the same part of a clause ("nicht rechtzeitig versendet") or "un"
+right before it). Only reported events count (`event_text`). The notice is cut into sentences, colon parts ("Zahlung
+eingegangen: Bitte versende …"), bracketed asides and titles glued on without a dot ("Artikel zugestellt Ist alles in
+Ordnung?"); a dot after a date or abbreviation ("bis 16.10. versendet", "z. B.") ends no sentence. Then dropped are:
+questions; conditions ("sobald/wenn/falls/sofern/nachdem/bevor/ob/damit", "bis" as a conjunction, or an opening verb:
+"Wird sie angenommen, …", "Hat der Käufer bezahlt, …") together with the main clause they govern, unless it reports
+the past with "wurde/war/hat" ("Der Kauf wurde storniert, nachdem …"); and parts with "wird/werden", a modal ("kann",
+"muss", "soll" …), "bitte", "voraussichtlich/bald", "sonst", an imperative ("Verpacke …"), a later time ("nach dem
+Erhalt") or advert numbers ("tausende"). So the intro "… der Artikel wird dir zugestellt" and "Wir informieren dich,
+sobald dein Artikel unterwegs ist" set nothing, while "wurde zugestellt", "ist unterwegs" and "dass der Artikel
+unterwegs ist" do. problem, cancelled and paid_out also keep "wird/werden": willhaben states its own decisions in the
+present ("Der Kauf wird storniert", "Die Auszahlung wird veranlasst"). A label-like willhaben link with a label word
+counts in any wording ("Hier kannst du dein Versandetikett herunterladen: https://…").
 
 | stage | matches (examples, unverified) |
 |---|---|
 | problem | "Problem gemeldet", "Reklamation", "Streitfall" |
-| cancelled | "storniert", "abgebrochen", "zurückgezogen" |
-| paid_out | "ausgezahlt", "Auszahlung", "überwiesen" |
-| received | "Erhalt bestätigt", "Ware erhalten/angekommen" |
-| delivered | "zugestellt", "geliefert", "ausgeliefert" |
-| shipped | "verschickt", "versendet", "unterwegs", "abgeholt von" |
-| label_ready | "Etikett/Paketschein/Versandlabel … bereit/verfügbar/steht", or a label-like link with those words |
-| paid | "bezahlt", "Zahlung eingegangen/erhalten", "Kauf abgeschlossen" |
-| offer_declined | "Preisvorschlag … abgelehnt/abgesagt", "nicht angenommen" |
-| offer_accepted | "Preisvorschlag … angenommen/akzeptiert"; seller: "gekauft" (buy-now sale agreed) |
-| offer_sent / offer_received | "Preisvorschlag", "Vorschlag", "Angebot" (not "Angebote"); the words "gesendet" / "erhalten" decide, otherwise the role does (buyer: sent, seller: received) |
+| cancelled | "storniert", "abgebrochen", "zurückgezogen", "zurückerstattet"; a Kauf (not an offer) "abgelehnt" / "nicht akzeptiert" |
+| paid_out | "ausgezahlt", "Auszahlung" (not "zurückgehalten"), "überwiesen" (not "zurücküberwiesen"), "Verkaufserlös … freigegeben" |
+| received | "Erhalt (des Artikels) bestätigt", "Ware erhalten/angekommen" |
+| delivered | "zugestellt", "geliefert", "ausgeliefert", "Zustellung (ist) erfolgt", "Paket … angekommen" |
+| shipped | "verschickt", "versendet", "unterwegs", "abgeholt von", "bei der Post abgegeben", "Paket … auf dem Weg", "wird heute/gerade zugestellt" |
+| label_ready | "Etikett/Paketschein/Versandlabel … bereit/verfügbar/steht/ist da" (not "noch nicht"), or a label-like link with those words |
+| released | "Der Kauf wurde freigegeben und ist nun zum Versand bereit" (seen live in a buyer chat, 11.10.), "Kauf/Bestellung … freigegeben", "ist … versandbereit", a Kauf (not an offer) "akzeptiert/angenommen": paid and accepted; buyer waits, seller ships now. The noun only: "Kaufbetrag/Kaufpreis … freigegeben" is a refund |
+| paid | "bezahlt" with "hat/wurde/ist …" or as a title (not "Der Käufer bezahlt online"), "Zahlung (ist) eingegangen/erhalten", "Zahlung war erfolgreich", "Kauf abgeschlossen"; buyer: "… hat jetzt 24 Stunden Zeit, deinen Kauf zu akzeptieren" (seen live, 11.10.: bought, the seller has not accepted yet) |
+| offer_declined | "Preisvorschlag/Anfrage … abgelehnt/abgesagt", "nicht angenommen" |
+| offer_accepted | "Preisvorschlag/Anfrage … angenommen/akzeptiert"; seller: "gekauft", "dein Artikel wurde verkauft" (buy-now sale agreed) |
+| offer_sent / offer_received | "Preisvorschlag", "Vorschlag", "Angebot" (not "Angebote"), "(Kauf)Anfrage"; "hat dir …" means received, then the words "gesendet" / "erhalten" decide, otherwise the role does (buyer: sent, seller: received) |
 
 Generic help text (e.g. "Dank QR-Code kannst du … versenden", "Das Versandetikett lässt sich …", the buy-now promo
-"Fixpreis-Angebote") matches nothing; `tests/test_paylivery_process.py` pins this.
+"Fixpreis-Angebote") matches nothing; `tests/test_paylivery_process.py` and `tests/test_paylivery_events.py` pin this.
 
 Amounts: "€ 12,34", "12,34 €", "EUR 12,34" or a numeric `amount`/`betrag`/`preis`/`summe` parameter (offers store the
 amount as `offer`). Deadlines: "bis 12.10." (year from the notice date, next year if the day has passed) and
