@@ -194,3 +194,43 @@ def test_style_examples_are_only_my_own_words():
     assert _style_examples() == ["morgen 18h beim billa?", "passt, 45 geht aber nicht drunter",
                                  "Gerne, der Artikel ist noch verfügbar."]     # the 👍 draft only fills up at the end
     assert _style_examples(limit=2) == ["morgen 18h beim billa?", "passt, 45 geht aber nicht drunter"]
+
+
+async def test_ad_context_falls_back_to_my_own_ad(monkeypatch):
+    """willhaben blocks the VPN server, so the public ad page is unreachable: for my own ad the asking price and
+    description come from the ad editor over the logged-in session, so Claude never has to guess the price."""
+    from app.db import Conversation, MyAd, session
+    from app.services import chats
+    from app.willhaben import insert
+    from app.willhaben.public import WillhabenError
+
+    class Public:
+        async def get_detail(self, ad_id):
+            raise WillhabenError("willhaben hat den VPN-Server abgewiesen")
+
+    async def get_own_ad(s, ad_id):
+        assert ad_id == "2092972264"
+        return {"heading": "Apple Watch Series 6 44mm", "price": 60, "description": "<p>Top Zustand</p><p>Mit Ladekabel</p>"}
+
+    monkeypatch.setattr(chats, "get_public", lambda: Public())
+    monkeypatch.setattr(chats, "get_session", lambda: object())
+    monkeypatch.setattr(insert, "get_own_ad", get_own_ad)
+    with session() as db:
+        db.add(MyAd(ad_id="2092972264", heading="Apple Watch Series 6 44mm", status="active"))
+        db.add(Conversation(id="c1", ad_id="2092972264", ad_title="Apple Watch Series 6 44mm", role="seller"))
+        db.add(Conversation(id="c2", ad_id="1", ad_title="Fremde Anzeige", role="buyer"))
+        db.commit()
+    conv = await chats.ensure_ad_context("c1")
+    assert conv.ad_context["price"] == "€ 60" and conv.ad_context["description"] == "Top Zustand\n\nMit Ladekabel"
+    assert conv.ad_context["source"] == "own_ad" and "paylivery" not in conv.ad_context   # fetched again next time
+    other = await chats.ensure_ad_context("c2")                                            # not mine: no editor data
+    assert other.ad_context is None
+
+
+def test_reply_prompt_hint_outranks_everything_and_names_unknown_price():
+    from app.llm.prompts import REPLY_SYSTEM
+    p = reply_prompt(role="seller", ad={"title": "Apple Watch"}, partner="Max", messages=[("in", None, "letzter Preis?")],
+                     rules="- max 10 % Rabatt", examples=[], hint="nenn 55 €")
+    assert "Preis: unbekannt" in p and "keinen Betrag" in p
+    assert p.index("Vorgabe der Person für genau diese Antwort") < p.index("Aufgabe:") and "nenn 55 €" in p
+    assert "Vorrang vor allem anderen" in REPLY_SYSTEM and "[Betrag]" in REPLY_SYSTEM and "wie ein Mensch" in REPLY_SYSTEM

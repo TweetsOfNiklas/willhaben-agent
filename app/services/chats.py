@@ -272,7 +272,7 @@ async def ensure_ad_context(conversation_id: str) -> Conversation | None:
         detail = await get_public().get_detail(conv.ad_id)
     except WillhabenError as e:
         log.info("ad context for %s failed: %s", conv.ad_id, e)
-        return conv
+        return await _own_ad_context(conv)
     me = get_session().user or {}
     with session() as db:
         conv = db.get(Conversation, conversation_id)
@@ -284,6 +284,38 @@ async def ensure_ad_context(conversation_id: str) -> Conversation | None:
             mine = {str(v) for v in (me.get("id"), me.get("uuid")) if v}
             if mine:
                 conv.role = "seller" if {detail.seller_login_id, detail.seller_uuid} & mine else "buyer"
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    return conv
+
+
+async def _own_ad_context(conv: Conversation) -> Conversation:
+    """The public ad page is unreachable (VPN server blocked, willhaben down): for my own ad, title, price and
+    description come from the ad editor over the logged-in session instead, so Claude at least knows the asking
+    price. Stored without the PayLivery flags, so the next draft tries the public page again."""
+    from app.willhaben import insert
+    with session() as db:
+        mine = db.get(MyAd, conv.ad_id) is not None
+    if not mine and conv.role != "seller":
+        return conv
+    try:
+        ad = await insert.get_own_ad(get_session(), conv.ad_id)
+    except (NotLoggedIn, SessionUnavailable, insert.InsertError, RuntimeError, ValueError, KeyError) as e:
+        log.info("own-ad context for %s failed too: %s", conv.ad_id, e)
+        return conv
+    try:
+        price = f"€ {float(ad.get('price')):g}"
+    except (TypeError, ValueError):
+        price = None
+    # German on purpose: ad_context is part of the prompt Claude answers from
+    ctx = {"ad_id": conv.ad_id, "title": ad.get("heading") or conv.ad_title, "price": price,
+           "description": insert.description_text(ad.get("description")),
+           "status": "aktiv (eigene Anzeige, Daten aus dem Anzeigen-Editor)", "source": "own_ad"}
+    with session() as db:
+        conv = db.get(Conversation, conv.id)
+        conv.ad_context = ctx
+        conv.role = conv.role or "seller"
         db.add(conv)
         db.commit()
         db.refresh(conv)
@@ -409,8 +441,10 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         availability = await gcal.availability_text() if (cal["in_auto"] if auto else cal["in_drafts"]) else None
         system, schema = (AUTO_REPLY_SYSTEM, AUTO_REPLY_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
         examples = _style_examples()
-    prompt = reply_prompt(role=conv.role, ad=conv.ad_context, partner=conv.partner_name, messages=msgs_t,
+    ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
+    prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
                           rules=rules, examples=examples, hint=hint, availability=availability)
+    log.info("draft for %s: hint=%r, ad price=%s", conversation_id, hint, (ad_ctx or {}).get("price"))
     backend = get_backend("purchase" if buy is not None else "chat")   # chats of a purchase order: Settings → "Purchases"
     async with telegram.typing():                 # "typing…" in Telegram while Claude writes
         result = await backend.complete(system=system, prompt=prompt, schema=schema)

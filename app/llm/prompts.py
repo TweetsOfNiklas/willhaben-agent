@@ -13,6 +13,8 @@ Der Entwurf wird vor dem Senden von der Person gelesen und bei Bedarf geändert.
 So arbeitest du:
 - Schreib die nächste Nachricht der Person an den Gesprächspartner, passend zur letzten Nachricht des Partners.
 - Halte dich an die Regeln der Person. Sie haben Vorrang vor deinem eigenen Stil.
+- Steht unten eine Vorgabe der Person für genau diese Antwort, hat sie Vorrang vor allem anderen: vor den Regeln,
+  dem Verlauf und deiner eigenen Einschätzung. Setz sie genau so um, wie sie dasteht, ohne sie abzuschwächen.
 - Erfinde keine Fakten über den Artikel, Termine, Adressen oder Telefonnummern. Was fehlt, nennst du in needs_info
   und lässt im Text eine Lücke in eckigen Klammern, z. B. [Uhrzeit].
 - Preise nie als Lücke: kein "[Betrag] €", kein "[Preis]". Entweder du nennst eine konkrete Zahl (aus Anzeige,
@@ -119,7 +121,7 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
             "",
             "Anzeige:",
             f"- Titel: {ad.get('title')}",
-            f"- Preis: {ad.get('price')}",
+            f"- Preis: {ad.get('price') or 'unbekannt (nicht abrufbar): keinen Betrag und keinen Rabatt erfinden'}",
             f"- Ort: {ad.get('location')}",
             f"- Kategorie: {ad.get('category')}",
             f"- Status: {ad.get('status')}",
@@ -135,9 +137,10 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
     if examples:
         lines += ["", "Nachrichten, die ich selbst in anderen Chats geschrieben habe (nur als Stilbeispiel, so schreibe ich):"]
         lines += [f"- {e}" for e in examples[:MAX_STYLE_EXAMPLES]]
-    lines += ["", "Aufgabe: Entwirf meine nächste Nachricht an den Gesprächspartner."]
     if hint:
-        lines.append(f"Zusätzliche Vorgabe für diese Antwort: {hint}")
+        lines += ["", "Vorgabe der Person für genau diese Antwort (hat Vorrang vor allem anderen):", hint]
+    lines += ["", "Aufgabe: Entwirf meine nächste Nachricht an den Gesprächspartner."
+              + (" Halte dich dabei an die Vorgabe oben." if hint else "")]
     return "\n".join(lines)
 
 
