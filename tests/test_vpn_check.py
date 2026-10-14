@@ -248,7 +248,7 @@ async def test_no_server_suits_all_the_best_stays_and_the_failing_site_pauses(si
 
 async def test_a_block_between_shuffles_triggers_one_shuffle_not_a_storm(sites, fake):
     _collection(N(1), N(2), N(3))
-    a, b = sites({N(1): [PAGE, NO], N(2): [PAGE, PAGE, NO], N(3): [PAGE]}, {N(1): [PAGE], N(2): [PAGE], N(3): [PAGE]})
+    a, b = sites({N(1): [PAGE, NO], N(2): [PAGE, PAGE], N(3): [PAGE]}, {N(1): [PAGE], N(2): [PAGE, NO], N(3): [PAGE]})
     sh1 = await _shuffle()
     assert sh1.kept == N(1)
     _gap_passed()
@@ -260,12 +260,12 @@ async def test_a_block_between_shuffles_triggers_one_shuffle_not_a_storm(sites, 
         f"Fake: {N(1)} blocked by the site (HTTP\u00a0403)")
 
     with pytest.raises(PlatformError, match="refused the VPN server"):
-        await a.search(a.keyword_search("x"))          # refused again right away: the guard lets it wait
-    assert vpn_check._run is sh2 and not vpn_check.running() and vpn.paused("fake") == ("blocked", "HTTP 403")
+        await b.search(b.keyword_search("x"))          # the other site refused it right away: the guard lets it wait
+    assert vpn_check._run is sh2 and not vpn_check.running() and vpn.paused("fake2") == ("blocked", "HTTP 403")
     pending = vpn.conn_state()["pending"]
-    assert pending[1:] == ["fake", "blocked", "HTTP 403"]
+    assert pending[1:] == ["fake2", "blocked", "HTTP 403"]
     assert pending[0] == pytest.approx(vpn.conn_state()["shuffled"] + vpn_check.AUTO_GAP_S)
-    assert vpn_check.view()["pending"] == "Brought forward: Fake refused the server (blocked by the site)."
+    assert vpn_check.view()["pending"] == "Brought forward: Fake 2 refused the server (blocked by the site)."
     await vpn_check.tick()
     assert vpn_check._run is sh2                       # not its turn yet
     _gap_passed()
@@ -273,8 +273,86 @@ async def test_a_block_between_shuffles_triggers_one_shuffle_not_a_storm(sites, 
     await vpn_check.tick()
     sh3 = vpn_check._run
     await sh3.task
-    assert (sh3.trigger, sh3.by, sh3.kept) == ("auto", "fake", N(3)) and vpn.paused("fake") is None
+    assert (sh3.trigger, sh3.by, sh3.kept) == ("auto", "fake2", N(3)) and vpn.paused("fake2") is None
     assert vpn.conn_state()["pending"] is None and len(vpn.conn_state()["auto"]) == 2
+
+
+async def test_a_site_starts_one_automatic_shuffle_between_two_regular_ones(sites, fake):
+    _collection(N(1), N(2), N(3))
+    a, b = sites({N(1): [PAGE, NO], N(2): [PAGE, PAGE, NO], N(3): [PAGE]}, {N(1): [PAGE], N(2): [PAGE], N(3): [PAGE]})
+    await _shuffle()
+    _gap_passed()
+    await a.search(a.keyword_search("x"))              # refused N1: one automatic shuffle, N2 answers
+    sh2 = vpn_check._run
+    assert (sh2.trigger, sh2.by, sh2.kept) == ("auto", "fake", N(2))
+    _gap_passed()
+    with pytest.raises(PlatformError, match="refused the VPN server"):
+        await a.search(a.keyword_search("x"))          # answers the test, refuses live again: no second one
+    assert vpn_check._run is sh2 and vpn.conn_state().get("pending") is None and vpn.paused("fake")
+    assert _reasons("fake") == {N(1): "blocked", N(2): "blocked"}
+    sh3 = await _shuffle()                             # the next regular one tests it again
+    assert sh3.kept == N(3) and vpn.paused("fake") is None and vpn.conn_state()["triggered"] == {}
+
+
+async def test_a_site_whose_pages_changed_does_not_keep_the_shuffles_going(fake, monkeypatch):
+    monkeypatch.setattr(vpn_check, "MAX_SERVERS", 4)
+
+    class Picky(FakeSite):
+        """Judges its pages like eBay (`valid`): a changed layout looks like a bot check through every server."""
+
+        async def search(self, spec, *, rows=None, cache_s=0):
+            r = await self.client._get(spec.url, kind="search", valid=lambda r: b"results" in r.content)
+            if b"results" not in r.content:
+                raise PlatformError("Fake answered without a result list")
+            return SearchPage(rows_found=0, ads=[])
+
+    _collection(*(N(i) for i in range(1, 5)))
+    s = Picky(fake, {N(i): [BOT] * 3 for i in range(1, 5)})
+    platforms.set_platform(s.id, s)
+    vpn.set_enabled(s.id, True)
+    try:
+        sh = await _shuffle()
+        assert sh.kept == N(3) and vpn.conn_state()["odd"] == ["fake"] and vpn.paused("fake") is None
+        _gap_passed()
+        with pytest.raises(PlatformError, match="without a result list"):
+            await s.search(s.keyword_search("x"))      # the same page live: the site's error, no shuffle
+        assert vpn_check._run is sh and vpn.paused("fake") is None and set(vpn.marks("fake")) == {N(1), N(2)}
+    finally:
+        platforms.reset()
+
+
+async def test_a_restart_during_an_automatic_shuffle_runs_it_again(sites, fake):
+    _collection(N(1), N(2), N(3))
+    g = asyncio.Event()
+    a, b = sites({N(1): [PAGE, NO], N(2): [g, PAGE]}, {N(1): [PAGE], N(2): [PAGE, PAGE]})
+    await _shuffle()
+    _gap_passed()
+    shuffled = vpn.conn_state()["shuffled"]
+    task = asyncio.create_task(a.search(a.keyword_search("x")))    # refused: paused, an automatic shuffle
+    await _until(lambda: a.factory.transports.get(N(2)) and a.factory.transports[N(2)].calls == 1)
+    await vpn_check.shutdown()                                      # the app stops while it tests N2
+    await vpn.shutdown()
+    with pytest.raises(PlatformError):
+        await task
+    st = vpn.conn_state()
+    assert st["shuffled"] == shuffled and vpn.paused("fake")       # not done: the schedule does not move on
+    assert st["pending"][1:] == ["fake", "blocked", "HTTP 403"] and st["pending"][0] <= time.time()
+    vpn.reset()                                                     # the restart
+    vpn_check.reset()
+    await vpn_check.tick()                                          # the first tick runs it again
+    sh = vpn_check._run
+    await sh.task
+    assert (sh.trigger, sh.by, sh.kept) == ("auto", "fake", N(2)) and vpn.paused("fake") is None
+
+
+async def test_the_pick_ignores_the_marks_of_a_site_the_best_server_failed(sites, fake, monkeypatch):
+    monkeypatch.setattr(vpn_check, "MAX_SERVERS", 2)
+    _collection(N(1), N(2), N(3), "de-fra-wg-001")
+    a, b = sites({N(1): [NO], N(2): [NO, NO], N(3): [NO]}, {N(1): [PAGE], N(2): [PAGE, PAGE], N(3): [PAGE]})
+    sh = await _shuffle()
+    assert sh.kept == N(1) and vpn.conn_state()["failing"] == ["fake"] and set(vpn.marks("fake")) == {N(1), N(2)}
+    sh = await _shuffle()                              # Fake refuses everything: its marks do not push the others off
+    assert sh.servers[0].name == N(2)                  # Austria, despite Fake's mark on it
 
 
 def test_automatic_shuffles_keep_a_gap_and_a_cap_per_hour():
@@ -370,6 +448,18 @@ async def test_a_profile_is_tested_and_never_swapped(sites, fake):
     assert jobs.snapshot()["recent"][0]["label"] == "VPN test"
 
 
+async def test_a_server_nobody_could_be_asked_through_stays_untested(sites, fake):
+    _collection(N(1), N(2))
+    a, b = sites({N(1): [NO]}, {N(1): [NO]}, per_hour=(10, 10))
+    a.limiter._recent.extend([time.monotonic()] * 9)
+    b.limiter._recent.extend([time.monotonic()] * 9)
+    sh = await _shuffle()
+    assert sh.kept == N(1) and len(sh.servers) == 1 and a.built == b.built == []
+    v = vpn_check.view()
+    assert v["summary"] == f"{N(1)} stays untested: no site could be asked this time"
+    assert v["servers"][0]["label"] == "not tested" and vpn.conn_state()["paused"] == {}
+
+
 async def test_a_sites_hourly_budget_caps_its_tests(sites, fake):
     _collection(*(N(i) for i in range(1, 6)))
     a, b = sites({N(i): [NO] for i in range(1, 6)}, {N(i): [PAGE] for i in range(1, 6)}, per_hour=(8,))
@@ -446,6 +536,19 @@ async def test_geizhals_refusing_the_server_shuffles_without_pausing_geizhals(si
     assert seen == [N(1), N(1), N(2)]
 
 
+async def test_geizhals_queued_when_its_switch_goes_on_goes_through_the_vpn(fake, monkeypatch):
+    _collection(N(1))
+    vpn.update_conn(server=N(1))
+    seen = gz(monkeypatch, fake, {N(1): [(200, "<html></html>")], "direct": []})
+    vpn.set_enabled(vpn.GEIZHALS, False)
+    async with geizhals._limiter:                  # another lookup holds the limiter ...
+        task = asyncio.create_task(geizhals.search("x"))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        vpn.set_enabled(vpn.GEIZHALS, True)        # ... while the switch goes on
+    assert await task == [] and seen == [N(1)]     # never directly
+
+
 async def test_geizhals_fails_closed_without_a_server(fake, monkeypatch):
     seen = gz(monkeypatch, fake, {})
     monkeypatch.setattr(vpn, "_shuffle", lambda *a: False)
@@ -495,6 +598,20 @@ def _ebay(fake, request, monkeypatch, answers):
     monkeypatch.setattr(ebay.ebay_limiter(), "per_hour", 40)             # pinned, not the default budget
     vpn.set_enabled("ebay", True)
     return c, built
+
+
+async def test_a_timeout_of_ebays_description_keeps_the_server(fake, request, monkeypatch):
+    from tests.conftest import FIXTURES
+
+    _collection(N(1), N(2))
+    page, item = (FIXTURES / "ebay_search.html").read_bytes(), (FIXTURES / "ebay_item.html").read_bytes()
+    c, built = _ebay(fake, request, monkeypatch, {N(1): [(200, page, HTML), (200, item, HTML),
+                                                          TransportError("Operation timed out")]})
+    sh = await _shuffle()
+    _gap_passed()
+    d = await c.item("920036165580")                 # the description (itm.ebaydesc.com) does not answer
+    assert d is not None and c._factory.transports[N(1)].calls == 3        # the ad shows without it
+    assert vpn_check._run is sh and vpn.paused("ebay") is None and vpn.marks("ebay") == {}
 
 
 async def test_ebay_warms_up_on_a_server_and_sends_at_most_three_requests_there(fake, request, monkeypatch):
@@ -656,7 +773,10 @@ def test_settings_page_shuffle_now_interval_and_panel(fake):
 
             r = c.post("/settings/vpn/interval", data={"hours": "3"}, follow_redirects=False)
             assert r.status_code == 303 and vpn_check.interval_h() == 3
-            assert "Enter whole hours" in c.post("/settings/vpn/interval", data={"hours": "x"}).text
+            for bad in ("x", "²", "0", "999", "2.5"):
+                r = c.post("/settings/vpn/interval", data={"hours": bad})
+                assert r.status_code == 200 and "Enter whole hours, 1 to 168" in r.text
+            assert vpn_check.interval_h() == 3                              # nothing clamped silently
             r = c.post("/settings/vpn/shuffle", follow_redirects=False)
             assert r.status_code == 303 and r.headers["location"].startswith("/settings/vpn?msg=Shuffle%20started")
             _wait_shuffle()

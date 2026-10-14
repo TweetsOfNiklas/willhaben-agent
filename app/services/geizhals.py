@@ -119,15 +119,21 @@ async def _get(url: str) -> str:
         return await _get_vpn(tunnel, url, headers)
     if current_trial() is not None:   # the test after a shuffle: never from the home IP, even after the switch went off
         raise GeizhalsError(t("Geizhals: the VPN is off, the test sends nothing directly"))
+    r = None
     try:
         async with _limiter:
-            try:
-                async with _client(None) as c:
-                    r = await c.get(url, headers=headers)
-            except httpx.HTTPError as e:
-                raise GeizhalsError(t("Geizhals unreachable: {error}", error=e)) from e
+            if vpn.enabled(vpn.GEIZHALS):     # switched on while it waited: through the VPN after all
+                _limiter.refund()
+            else:
+                try:
+                    async with _client(None) as c:
+                        r = await c.get(url, headers=headers)
+                except httpx.HTTPError as e:
+                    raise GeizhalsError(t("Geizhals unreachable: {error}", error=e)) from e
     except Blocked as e:              # still pausing after a block: no request at all
         raise GeizhalsError(str(e)) from e
+    if r is None:
+        return await _get(url)
     if r.status_code in (403, 429):   # blocked: pause (60 s, doubling) instead of asking again every 2 s
         _limiter.penalize()
     elif r.status_code == 200:

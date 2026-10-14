@@ -154,5 +154,12 @@
  "{server}: {ok} of {n} sites answer": "{server}: {ok} von {n} Seiten antworten",
  "{name} answered through the VPN server with a bot check": "{name} hat über den VPN-Server mit einer Bot-Prüfung geantwortet",
  "asking": "fragt an",
- "One config, used as it is and tested every few hours. If a site refuses it, that site pauses until a test finds it working again.": "Eine Konfiguration, so wie sie ist, alle paar Stunden getestet. Weist eine Seite sie ab, pausiert diese Seite, bis ein Test sie wieder funktionierend findet."
+ "One config, used as it is and tested every few hours. If a site refuses it, that site pauses until a test finds it working again.": "Eine Konfiguration, so wie sie ist, alle paar Stunden getestet. Weist eine Seite sie ab, pausiert diese Seite, bis ein Test sie wieder funktionierend findet.",
+ "The app is shutting down": "Die App wird beendet",
+ "no answer in time": "keine Antwort in der Zeit",
+ "connection refused": "Verbindung abgelehnt",
+ "connection dropped": "Verbindung abgebrochen",
+ "TLS error": "TLS-Fehler",
+ "{server} stays untested: no site could be asked this time": "{server} bleibt ungetestet: Diesmal konnte keine Seite gefragt werden",
+ "not tested": "nicht getestet"
 }

@@ -454,6 +454,10 @@ class EbayClient(HttpPlatformClient):
             raise _WarmingUp("eBay: warming up")
         super()._check_status(r)
 
+    def _exit_unreachable(self, url: str) -> bool:
+        """A network error of the seller's description keeps the server too: another host, and optional."""
+        return not (urlsplit(url).hostname or "").endswith(DESC_HOST)
+
     def _exit_blocked(self, r: FetchResponse) -> bool:
         """Through the VPN a warm-up 403 keeps the exit: _check_status asks again through it. So does a refused
         description: another host, and optional."""

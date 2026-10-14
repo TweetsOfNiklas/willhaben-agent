@@ -252,6 +252,12 @@ def eu_count(names: list[str]) -> int:
     return sum(country(n) in EU for n in names)
 
 
+def allowed(name: str) -> bool:
+    """A server of the source that may be used: the profile, or an EU server of the collection."""
+    mode, names = source()
+    return name in names and (mode == "profile" or country(name) in EU)
+
+
 # ------------------------------------------------------------------ switches and marks (setting vpn_state)
 def _switch(pid: str) -> str:
     return "geizhals_vpn" if pid == GEIZHALS else f"platform_{pid}_vpn"
@@ -331,10 +337,12 @@ def forget(pid: str | None = None) -> None:
 
 # ------------------------------------------------------------------ the connection's state (setting vpn_conn)
 def conn_state() -> dict[str, Any]:
-    """server (in use or to start again after a restart), since, shuffled (end of the last shuffle), paused
-    {pid: [reason, detail]} (sites that refused the server: their requests fail until it changes), auto (starts of
-    the automatic shuffles of the last hour), pending ([at, pid, reason, detail]: an automatic shuffle waiting for its
-    turn), error (why there is no server)."""
+    """server (in use or to start again after a restart), since, shuffled (end of the last finished shuffle), paused
+    {pid: [reason, detail]} (sites that refused the server: their requests fail until it changes), failing (the sites
+    the server a shuffle kept as the best one fails: their marks do not steer the next pick), odd (sites
+    whose bot-check-like pages are the site's change, not the servers'), auto (starts of the automatic shuffles of
+    the last hour), triggered (sites that started one since the last regular shuffle), pending ([at, pid, reason,
+    detail]: an automatic shuffle waiting for its turn), error (why there is no server)."""
     return _json_setting(CONN_KEY)
 
 
@@ -373,6 +381,10 @@ class Route(NamedTuple):
 
 class Unreachable(Exception):
     """The server started, but the site's host cannot be reached through it."""
+
+    def __init__(self, host: str) -> None:
+        super().__init__(t("no connection to {host}", host=host))
+        self.host = host
 
 
 @dataclass
@@ -505,6 +517,7 @@ class Connection:
         self.route: Route | None = None
         self.gen = 0
         self.busy = False
+        self.closing = False             # the app shuts down: no new process
         self._idle: tuple[Any, asyncio.Event] | None = None
 
     def current(self) -> Route | None:
@@ -543,6 +556,8 @@ class Connection:
         process when it is that server and alive, else the old one stops first (one key, one tunnel). OSError: it
         does not start; Unreachable: it does not reach `host` (stopped again). Cancelled meanwhile: no process left."""
         async with _plock():
+            if self.closing:
+                raise PlatformError(t("The app is shutting down"))
             if self.current() is not None and self.proc.name == name:
                 return self.route
             await self._stop()
@@ -555,7 +570,7 @@ class Connection:
                 raise
             if not reached:
                 await runner.stop(handle)
-                raise Unreachable(t("no connection to {host}", host=host))
+                raise Unreachable(host)
             self.proc, self.gen = _Proc(name, port, handle), self.gen + 1
             self.route = Route(f"http://127.0.0.1:{port}", self.gen, name)
             log.info("VPN: server %s", name)
@@ -592,6 +607,11 @@ class Tunnel:
     def current(self) -> Route | None:
         return conn.current()
 
+    def odd(self) -> bool:
+        """A shuffle found this site answering with bot-check-like pages through several servers: the site changed,
+        not the servers, so its live bot checks refuse no server until the next regular shuffle."""
+        return self.pid in (conn_state().get("odd") or [])
+
     async def ensure(self) -> Route:
         """The route to send through. Waits for a shuffle under way (up to SHUFFLE_WAIT_S); after a restart or a
         crash of wireproxy starts the stored server again; asks for a shuffle when there is none or it does not
@@ -606,7 +626,7 @@ class Tunnel:
             server = conn_state().get("server")
             if not first:
                 break
-            if server and server in source()[1]:
+            if server and allowed(server):
                 try:
                     return await conn.connect(server, self.host)
                 except (OSError, Unreachable) as e:
@@ -641,6 +661,8 @@ class Tunnel:
         page. True when the server was marked."""
         if route is None or conn.busy or route.gen != conn.gen or conn.route is None or paused(self.pid):
             return False
+        if reason == "botcheck" and self.odd():
+            return False
         if reason == "unreachable" and conn.current() is None:
             return False
         mark(self.pid, route.name, reason)
@@ -648,6 +670,22 @@ class Tunnel:
         log.warning("VPN %s: server %s %s (%s), asking for another", self.pid, route.name, reason, detail or "-")
         _shuffle(self.pid, reason, detail)
         return True
+
+
+def describe(detail: str) -> str:
+    """A refusal's detail for the page: common network errors in the viewer's language, "HTTP 403" in one piece."""
+    low = detail.lower()
+    if m := re.fullmatch(r"(?:no connection to|keine Verbindung zu) (\S+)", detail):
+        return t("no connection to {host}", host=m.group(1))
+    if "timed out" in low or "timeout" in low:
+        return t("no answer in time")
+    if "refused" in low:
+        return t("connection refused")
+    if "reset" in low or "closed" in low:
+        return t("connection dropped")
+    if "ssl" in low or "tls" in low or "certificate" in low:
+        return t("TLS error")
+    return detail.replace("HTTP ", "HTTP\u00a0")
 
 
 def reason_label(reason: str) -> str:
@@ -691,10 +729,11 @@ async def source_changed() -> None:
 
 
 async def shutdown() -> None:
-    proc, conn.proc, conn.route = conn.proc, None, None
-    if proc is not None:
+    """Stop the process, after a start under way (it holds the lock); none starts after this."""
+    conn.closing = True
+    async with _plock():
         with suppress(Exception):
-            await runner.stop(proc.handle)
+            await conn._stop()
 
 
 def reset() -> None:
@@ -719,7 +758,7 @@ def status() -> dict[str, Any]:
         p = paused(pid)
         m = marks(pid)
         return {"id": pid, "name": name, "on": enabled(pid),
-                "paused": {"reason": reason_label(p[0]), "detail": p[1]} if p else None,
+                "paused": {"reason": reason_label(p[0]), "detail": describe(p[1])} if p else None,
                 "marks": sorted(((n, reason_label(r), until) for n, (until, r) in m.items()), key=lambda x: x[2],
                                 reverse=True)}
 

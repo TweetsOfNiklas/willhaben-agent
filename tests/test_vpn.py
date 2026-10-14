@@ -325,6 +325,54 @@ async def test_no_server_asks_for_a_shuffle_and_fails_closed_when_none_comes(fak
     assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "unreachable" and fake.alive() == 0
 
 
+async def test_a_stored_server_outside_the_eu_never_starts_again(fake, no_shuffle):
+    _collection("ch-zrh-wg-001", "at-vie-wg-001")
+    _on("willhaben")
+    vpn.update_conn(server="ch-zrh-wg-001")                            # e.g. stored before the EU rule
+    with pytest.raises(PlatformError, match="No working VPN server"):
+        await vpn.tunnel_for("willhaben").ensure()
+    assert fake.starts == [] and no_shuffle == [("willhaben", "none", "")]
+
+
+async def test_shutdown_waits_for_a_start_under_way_and_none_starts_after_it(fake, monkeypatch):
+    _collection("at-vie-wg-001")
+    _on("willhaben")
+    vpn.update_conn(server="at-vie-wg-001")
+    gate, start = asyncio.Event(), fake.start
+
+    async def slow(conf, port):
+        await gate.wait()
+        return await start(conf, port)
+
+    monkeypatch.setattr(fake, "start", slow)
+    task = asyncio.create_task(vpn.tunnel_for("willhaben").ensure())
+    await asyncio.sleep(0.01)
+    stopping = asyncio.create_task(vpn.shutdown())
+    await asyncio.sleep(0.01)
+    gate.set()
+    await stopping
+    await task
+    assert fake.alive() == 0 and vpn.conn.current() is None           # the start finished, then it was stopped
+    with pytest.raises(PlatformError, match="shutting down"):
+        await vpn.conn.connect("at-vie-wg-001", "www.willhaben.at")
+    assert len(fake.starts) == 1
+
+
+def test_details_in_the_viewers_language():
+    from app.i18n import set_request_lang
+
+    set_request_lang("de")
+    try:
+        assert vpn.describe("no connection to www.willhaben.at") == "keine Verbindung zu www.willhaben.at"
+        assert vpn.describe("Failed to perform, curl: (28) Operation timed out after 30001 ms") == \
+            "keine Antwort in der Zeit"
+        assert vpn.describe("proxy connect refused") == "Verbindung abgelehnt"
+        assert vpn.describe("HTTP 403") == "HTTP\u00a0403"
+    finally:
+        set_request_lang("en")
+    assert vpn.describe("keine Verbindung zu www.ebay.at") == "no connection to www.ebay.at"
+
+
 async def test_switched_on_without_configs_or_wireproxy_fails_closed(fake, no_shuffle):
     _on("willhaben")
     tn = vpn.tunnel_for("willhaben")

@@ -222,6 +222,7 @@ class HttpPlatformClient:
         self._factory = transport_factory
         self._tunnel: Callable[[], Tunnel | None] = tunnel or (lambda: None)
         self._proxy: str | None = None
+        self._gen = 0                       # the VPN connection the transport belongs to (Route.gen)
         self._transport: Transport | None = transport_factory(None) if injected else None   # else built on first use
         self._jar_since = time.monotonic()
 
@@ -259,6 +260,11 @@ class HttpPlatformClient:
                                 s=f"{delay:.0f}"))
             blocked.sent = True
             raise blocked
+
+    def _exit_unreachable(self, url: str) -> bool:
+        """Through the VPN: does a network error on this URL say the server does not reach the site? A site
+        overrides this for an optional host (eBay's description)."""
+        return True
 
     def _exit_blocked(self, r: FetchResponse) -> bool:
         """Through the VPN: does this answer refuse the server (then the connection shuffles)? 403 = the site blocks
@@ -302,15 +308,18 @@ class HttpPlatformClient:
         if replay.enabled() and (rec := replay.find("GET", full)):     # WH_REPLAY=1: no request, no waiting
             replay.note(rec, kind)
             return replay.as_fetch_response(rec, full)
-        tunnel = self._tunnel()
+        tunnel, r = self._tunnel(), None
         if tunnel is None:
             if _trial.get() is not None:        # the VPN test: never from the home IP, even after the switch went off
                 raise PlatformError(t("{name}: the VPN is off, the test sends nothing directly", name=self.name))
             try:
                 r = await self._send_once(full, kind, headers, None)
+            except ExitMoved:                   # the VPN was switched on while it waited: through the VPN after all
+                if (tunnel := self._tunnel()) is None:
+                    raise
             except TransportError as e:
                 raise PlatformError(t("Network error: {error}", error=e)) from e
-        else:
+        if r is None:
             r = await self._send_vpn(tunnel, full, kind, headers, valid)
         self._check_status(r)
         if r.status_code == 200 and valid is not None and not valid(r):
@@ -326,11 +335,15 @@ class HttpPlatformClient:
     async def _send_once(self, full: str, kind: str, headers: dict[str, str] | None,
                          route: Route | None) -> FetchResponse:
         """One request through the limiter on `route` (None: direct), counted and recorded. ExitMoved when the
-        connection left `route` while it waited for the limiter (nothing sent)."""
+        connection left `route`, or a direct request's site switched the VPN on, while it waited for the limiter
+        (nothing sent)."""
         async with self.limiter:
-            if route is not None and not self._pinned(route):
+            moved = not self._pinned(route) if route is not None else self._tunnel() is not None
+            if moved:
                 self.limiter.refund()               # waited for the limiter, sent nothing
                 raise ExitMoved(t("{name}: the VPN server changed before the request went out", name=self.name))
+            if route is not None and route.gen != self._gen:   # another connection: never the old one's transport,
+                self._proxy, self._gen = "", route.gen          # even when its port comes back
             transport = await self._use(route.proxy if route is not None else None)
             if time.monotonic() - self._jar_since > self.session_s:
                 self.new_anonymous_session()
@@ -387,12 +400,15 @@ class HttpPlatformClient:
                 last = e
                 continue
             except TransportError as e:
+                if not self._exit_unreachable(full):
+                    raise PlatformError(t("Network error through the VPN: {error}", error=e)) from e
                 await tunnel.failed(route, "unreachable", detail=str(e)[:160])
                 last = PlatformError(t("Network error through the VPN: {error}", error=e))
                 continue
             if self._exit_blocked(r):
                 reason = "rate" if r.status_code == 429 else "blocked"
-            elif is_challenge(r) or (r.status_code == 200 and valid is not None and not valid(r)):
+            elif (is_challenge(r) or (r.status_code == 200 and valid is not None and not valid(r))) \
+                    and not tunnel.odd():       # the last shuffle found the site changed, not the servers
                 reason = "botcheck"
             else:
                 return r

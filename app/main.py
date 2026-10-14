@@ -2015,7 +2015,7 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
         vpn.set_enabled("willhaben", True)
     if not vpn_check.blocker():
         vpn_check.start("new")                     # a server right away (else the first request asks for one)
-    msg =(t("{n} configs uploaded; the sites with the VPN on share one of the EU servers, shuffled now and then",
+    msg = (t("{n} configs uploaded; the sites with the VPN on share one of the EU servers, shuffled now and then",
              n=n) if mode == "collection" else t("Profile uploaded"))
     if skipped:
         msg += "\n" + t("Skipped {n}: {first}", n=len(skipped), first=skipped[0])
@@ -2055,7 +2055,8 @@ async def settings_vpn_site(pid: str, enabled: str = Form(""), next: str = Form(
 @app.post("/settings/vpn/interval")
 async def settings_vpn_interval(hours: str = Form("")):
     """How often the connection shuffles (hours, 1 to 168)."""
-    if not hours.strip().isdigit():
+    hours = hours.strip()
+    if not (hours.isdecimal() and hours.isascii() and 1 <= int(hours) <= 168):   # not "²", not 0 or 999 clamped
         return _vpn_back(t("Enter whole hours, 1 to 168"))
     vpn_check.set_interval(int(hours))
     return _vpn_back(t("Changes saved"))

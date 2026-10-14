@@ -5,8 +5,10 @@ Triggers: the schedule (every `vpn_shuffle_h` hours after the last shuffle, defa
 the time is stored, so a restart keeps the schedule), "Shuffle now" in Settings → VPN, new configs, and a site that
 refuses the server or gets no answer between two shuffles (Tunnel.failed(), or a request that finds no server). The
 automatic ones are guarded against storms: AUTO_GAP_S after the last shuffle and AUTO_PER_HOUR an hour; one that may
-not run yet waits (`pending`) and tick() starts it when its turn comes. One shuffle at a time; requests wait for it
-(vpn.SHUFFLE_WAIT_S) or fail closed.
+not run yet waits (`pending`) and tick() starts it when its turn comes, also after a restart cut it off. A site
+starts at most one automatic shuffle between two regular ones (schedule, "Shuffle now", new configs): refusing again,
+it only pauses until the next regular one, so a site that answers the test but refuses live requests cannot keep the
+shuffles going. One shuffle at a time; requests wait for it (vpn.SHUFFLE_WAIT_S) or fail closed.
 
 Each server (vpn.pick(): random, EU only, nearest first, none that a site with the VPN on refused recently) is started
 and probed, then every site with the VPN on (and Geizhals when its switch is on) sends one request through it, side by
@@ -215,10 +217,14 @@ def trigger(pid: str, reason: str, detail: str = "") -> bool:
     if blocker():
         return False
     st, now = vpn.conn_state(), time.time()
+    if reason != "none" and pid in (st.get("triggered") or {}):
+        log.info("VPN: %s %s again; it pauses until the next regular shuffle", pid, reason)
+        return False
     at = _auto_at(st, now)
     if at > now:
         if not _pending(st):
-            vpn.update_conn(pending=[at, pid, reason, detail])
+            vpn.update_conn(pending=[at, pid, reason, detail],
+                            triggered={**(st.get("triggered") or {}), **({pid: now} if reason != "none" else {})})
             log.info("VPN: %s %s, the next shuffle may start in %.0f s", pid, reason, at - now)
         return False
     return start("auto", by=pid, why=reason, detail=detail) is None
@@ -249,7 +255,8 @@ def start(trigger: str = "manual", *, by: str = "", why: str = "", detail: str =
     tgs = targets()
     st, now = vpn.conn_state(), time.time()
     auto = [x for x in st.get("auto") or [] if now - float(x) < 3600] + ([now] if trigger == "auto" else [])
-    vpn.update_conn(pending=None, auto=auto)
+    triggered = {} if trigger != "auto" else {**(st.get("triggered") or {}), **({by: now} if why != "none" else {})}
+    vpn.update_conn(pending=None, auto=auto, triggered=triggered)
     _run = Shuffle(trigger, [Site(tg.pid, tg.name) for tg in tgs], by=by, why=why, detail=detail,
                    profile=vpn.source()[0] == "profile", before=st.get("server"))
     vpn.conn.begin()
@@ -329,7 +336,10 @@ async def _main(sh: Shuffle, tgs: list[Target]) -> None:
         if sh.status == "running":
             sh.status = "interrupted"
         if not sh.discarded:
-            vpn.update_conn(shuffled=sh.finished)
+            if sh.status in ("done", "failed"):
+                vpn.update_conn(shuffled=sh.finished)
+            elif sh.trigger == "auto":          # cut off (a restart): the first tick runs it again, the site waits
+                vpn.update_conn(pending=[sh.finished, sh.by, sh.why, sh.detail])
             _save(sh)
         vpn.conn.end()
         if sh.discarded and _run is sh:
@@ -339,7 +349,9 @@ async def _main(sh: Shuffle, tgs: list[Target]) -> None:
 async def _servers(sh: Shuffle, tgs: list[Target], job: jobs.Job) -> None:
     """Server after server until every site answers through one (the module docstring)."""
     tried: set[str] = set()
-    skip = [tg.pid for tg in tgs]
+    st = vpn.conn_state()
+    failing = set(st.get("failing") or []) & set(st.get("paused") or {})
+    skip = [tg.pid for tg in tgs if tg.pid not in failing]   # a site that refused the last best one, refuses most
     caps = {tg.pid: _cap(tg.limiter, tg.cost) for tg in tgs}
     sites = {s.pid: s for s in sh.sites}
     streak = {tg.pid: 0 for tg in tgs}
@@ -357,7 +369,8 @@ async def _servers(sh: Shuffle, tgs: list[Target], job: jobs.Job) -> None:
             route = await vpn.conn.connect(name, tgs[0].host)
         except (OSError, vpn.Unreachable) as e:
             srv.problem = "unreachable" if isinstance(e, vpn.Unreachable) else "broken"
-            srv.detail, srv.status, srv.secs = _short(e), "done", round(time.monotonic() - t0, 1)
+            srv.detail = f"no connection to {e.host}" if isinstance(e, vpn.Unreachable) else _short(e)
+            srv.status, srv.secs = "done", round(time.monotonic() - t0, 1)
             log.warning("VPN shuffle: %s %s: %s", name, srv.problem, e)
             for tg in tgs:
                 vpn.mark(tg.pid, name, srv.problem)
@@ -451,10 +464,15 @@ def _verdict(tg: Target, tr: Trial, exc: BaseException | None) -> str:
 
 
 async def _keep(sh: Shuffle, host: str) -> None:
-    """The server that stays: the first every site answers through, else the one most answer through (it starts again
-    when another one ran after it). The sites it fails pause; none usable: no server, requests fail closed."""
+    """The server that stays: the first every site answers through (at least one really answered), else the one
+    most answer through (it starts again when another one ran after it). The sites it fails pause; none usable: no
+    server, requests fail closed. Sites whose bot-check-like pages the test put down to the site are remembered
+    (`odd`, until the next regular shuffle), so their live requests do not shuffle again."""
+    st = vpn.conn_state()
+    odd = {pid for s in sh.servers for pid, a in s.answers.items() if a.verdict == "odd_page"}
+    odd = sorted(odd | (set(st.get("odd") or []) if sh.trigger == "auto" else set()))
     tested = [s for s in sh.servers if s.usable()]
-    full = [s for s in tested if not s.refused()]
+    full = [s for s in tested if not s.refused() and s.answered()]
     ranked = full[:1] or sorted(tested, key=lambda s: -s.answered())      # stable: nearer and earlier first
     for srv in ranked:
         try:
@@ -462,10 +480,9 @@ async def _keep(sh: Shuffle, host: str) -> None:
         except (OSError, vpn.Unreachable) as e:
             log.warning("VPN shuffle: %s does not start again: %s", srv.name, e)
             continue
-        st = vpn.conn_state()
         sh.kept, sh.status = srv.name, "done"
         paused = {pid: [a.verdict, a.detail] for pid, a in srv.answers.items() if a.verdict in REFUSED}
-        vpn.update_conn(server=srv.name, paused=paused, error="",
+        vpn.update_conn(server=srv.name, paused=paused, failing=sorted(paused), odd=odd, error="",
                         since=st.get("since") if st.get("server") == srv.name and st.get("since") else time.time())
         if not vpn.users():
             await vpn.conn.disconnect()          # switched off meanwhile
@@ -473,7 +490,7 @@ async def _keep(sh: Shuffle, host: str) -> None:
     await vpn.conn.disconnect()
     sh.status = "failed"
     sh.reason = "none" if sh.servers else ("profile" if sh.profile else "no_eu")
-    vpn.update_conn(server=None, since=None, paused={}, error=_failed_text(sh))
+    vpn.update_conn(server=None, since=None, paused={}, failing=[], odd=odd, error=_failed_text(sh))
 
 
 # ------------------------------------------------------------------ budgets and pauses
@@ -605,7 +622,7 @@ def _message(s: Site, a: Answer, server: str, live: bool) -> str:
     if v == "ok":
         return ""
     if v in REFUSED:
-        msg = vpn.reason_label(v) + (f" ({_nb(a.detail)})" if a.detail else "")
+        msg = vpn.reason_label(v) + (f" ({vpn.describe(a.detail)})" if a.detail else "")
         msg = msg[:1].upper() + msg[1:]
         return msg if live else msg + ". " + t("Its requests pause until the next shuffle.")
     if v == "site_error":
@@ -637,19 +654,15 @@ def _server_row(sh: Shuffle, srv: Server, names: dict[str, str], live: bool) -> 
     elif srv.problem:
         label, tone = vpn.reason_label(srv.problem), "bad"
     elif not srv.refused():
-        label, tone = t("all answer"), "ok"
+        label, tone = (t("all answer"), "ok") if srv.answered() else (t("not tested"), "")
     else:
         label, tone = t("{ok} of {n} answer", ok=srv.answered(), n=len(srv.answers)), "warn"
-    parts = [srv.detail] if srv.problem and srv.detail else []
+    parts = [vpn.describe(srv.detail)] if srv.problem and srv.detail else []
     parts += [t("{site}: {reason}", site=names.get(pid, pid), reason=vpn.reason_label(a.verdict))
-              + (f" ({_nb(a.detail)})" if a.detail else "") for pid, a in srv.answers.items() if a.verdict in REFUSED]
+              + (f" ({vpn.describe(a.detail)})" if a.detail else "") for pid, a in srv.answers.items()
+              if a.verdict in REFUSED]
     return {"name": srv.name, "label": label, "tone": tone, "kept": srv.name == sh.kept and not live, "parts": parts,
             "secs": t("{n} s", n=_num(srv.secs)) if srv.secs is not None else ""}
-
-
-def _nb(detail: str) -> str:
-    """"HTTP 403" never breaks between its two words."""
-    return detail.replace("HTTP ", "HTTP ")
 
 
 def _paused_sites(sh: Shuffle) -> list[str]:
@@ -676,6 +689,8 @@ def _summary(sh: Shuffle) -> str:
     if srv is None:
         return ""
     total, refused = len(srv.answers), srv.refused()
+    if not srv.answered() and not refused:
+        return t("{server} stays untested: no site could be asked this time", server=srv.name)
     if not refused:
         if total == 1:
             return t("{server}: {site} answers", server=srv.name, site=sh.sites[0].name)
@@ -713,7 +728,7 @@ def _trigger_text(sh: Shuffle, names: dict[str, str]) -> str:
     if sh.why == "none":
         return t("{site} found no server", site=site)
     return t("{site}: {server} {reason}", site=site, server=sh.before or "?", reason=vpn.reason_label(sh.why)) \
-        + (f" ({_nb(sh.detail)})" if sh.detail else "")
+        + (f" ({vpn.describe(sh.detail)})" if sh.detail else "")
 
 
 def _pending_text(p: tuple[float, str, str, str]) -> str:

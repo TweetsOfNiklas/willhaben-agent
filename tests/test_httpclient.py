@@ -138,6 +138,7 @@ class FakeTunnel:
         from app.platforms.vpn import Route
 
         self.Route, self.dead, self.n, self.route, self.failures, self.details = Route, dead, 0, None, [], []
+        self.odd_site = False
 
     async def ensure(self):
         if self.dead:
@@ -158,6 +159,8 @@ class FakeTunnel:
     def current(self):
         return self.route
 
+    def odd(self):
+        return self.odd_site
 
 def _vpn_client(answers_by_exit: dict, tunnel: FakeTunnel, cls=HttpPlatformClient, **kw):
     transports = {proxy: FakeTransport(answers) for proxy, answers in answers_by_exit.items()}
@@ -281,6 +284,69 @@ async def test_a_bot_page_through_the_vpn_refuses_the_server():
     assert len((await c.search_page({"_nkw": "iphone"})).ads) == 5          # eBay's page in place of the results
     assert tunnel.failures == [("http://exit1", "botcheck"), ("http://exit2", "botcheck")]   # and a challenge
     assert c.limiter.cooling_down_s == 0 and c.proxy == "http://exit3"
+
+
+async def test_bot_pages_of_a_site_the_last_shuffle_found_changed_refuse_no_server():
+    tunnel = FakeTunnel()
+    tunnel.odd_site = True
+    c, _, built = _vpn_client({"http://exit1": [(200, b"<html>new layout</html>", {"content-type": "text/html"})]},
+                              tunnel)
+    r = await c._get("https://fake.example/api", valid=lambda r: r.text.startswith("{"))
+    assert r.status_code == 200 and tunnel.failures == [] and built == ["http://exit1"]   # the adapter decides
+
+
+async def test_a_network_error_of_an_optional_host_keeps_the_server():
+    from app.platforms import ebay
+
+    tunnel = FakeTunnel()
+    c = ebay.EbayClient(transport=FakeTransport([]))
+    c.limiter = RateLimiter(0, name="eBay")
+    exits = {f"http://exit{i}": FakeTransport([TransportError("timed out")] * (2 if i == 1 else 1)) for i in (1, 2, 3)}
+    c._factory, c._tunnel, c._transport = exits.__getitem__, (lambda: tunnel), None
+    with pytest.raises(PlatformError, match="Network error through the VPN"):
+        await c._get("https://itm.ebaydesc.com/itmdesc/1")       # the seller's description: optional
+    assert tunnel.failures == [] and len(exits["http://exit1"].calls) == 1
+    with pytest.raises(PlatformError):
+        await c._get("https://www.ebay.at/itm/1")
+    assert tunnel.failures[0] == ("http://exit1", "unreachable")  # the site itself: the server is refused
+
+
+async def test_a_new_connection_gets_a_new_transport_even_on_an_old_port():
+    from app.platforms.vpn import Route
+
+    tunnel = FakeTunnel()
+    c, transports, built = _vpn_client({"http://exit1": [(200, b"{}"), (200, b"{}")]}, tunnel)
+    tunnel.route = Route("http://exit1", 1, "at-vie-wg-001")
+    await c._get("https://fake.example/a")
+    tunnel.route = Route("http://exit1", 2, "at-vie-wg-002")    # another server got the port the old one had
+    await c._get("https://fake.example/b")
+    assert built == ["http://exit1", "http://exit1"]             # new connections and a new visitor
+
+
+async def test_a_direct_request_queued_when_the_vpn_is_switched_on_goes_through_it(monkeypatch):
+    from app.platforms import vpn
+
+    tunnel = FakeTunnel()
+    monkeypatch.setattr(vpn, "tunnel_for", lambda pid: tunnel if vpn.enabled(pid) else None)
+    sent = []
+
+    class T(FakeTransport):
+        def __init__(self, proxy):
+            super().__init__([(200, b"{}")])
+            self.proxy = proxy
+
+        async def send(self, method, url, *, params=None, headers=None):
+            sent.append(self.proxy)
+            return await super().send(method, url, params=params, headers=headers)
+
+    c = HttpPlatformClient("fake", RateLimiter(0, name="Fake"), transport_factory=T)
+    async with c.limiter:                                        # another request holds the limiter ...
+        task = asyncio.create_task(c._get("https://fake.example/a"))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        vpn.set_enabled("fake", True)                            # ... while the user switches the VPN on
+    await task
+    assert sent == ["http://exit1"] and c.limiter.last_hour == 2  # never directly; the wait was refunded
 
 
 async def test_ebay_keeps_the_server_when_the_description_is_refused():
