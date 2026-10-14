@@ -107,6 +107,24 @@ async def test_unfinished_draft_is_finished_under_its_own_id(monkeypatch):
     assert not any("/bap/6/" in p or "/bap/5/" in p for p in paths)
 
 
+async def test_finalize_link_without_path_survives_the_list(monkeypatch):
+    """The page builds "Fertigstellen" from the ad id, so the link needs no relativePath: it must not be dropped."""
+    from app.willhaben.account import parse_my_adverts
+
+    entry = {"id": "1000000001", "description": "Max Muster Rad", "adTypeId": 67, "verticalId": 5,
+             "advertStatus": {"id": "passive", "description": "Passiv"},
+             "advertEditStatusActionsList": {"contextLinkList": {"contextLink": [
+                 {"id": "5", "description": "Fertigstellen"},
+                 {"id": "3", "description": "Löschen", "relativePath": "/bap/1000000001", "serviceName": "myatz"},
+                 {"id": "7", "description": "ohne Pfad"}]}}}
+    nd = {"props": {"pageProps": {"initialUserAdsList": {"verticalList": [{"advertDetails": [entry]}]}}}}
+    own = parse_my_adverts(nd)[0]
+    assert set(own.actions) == {"5", "3"}
+    s = DraftSession()
+    assert await AccountClient(s).reactivate("1000000001", [own]) == "1000000001"
+    assert s.calls[-1][1].endswith("/checkout")
+
+
 async def test_active_ad_is_never_republished(monkeypatch):
     c, s = _client(monkeypatch, _own("active", ["6"]))
     with pytest.raises(EndpointUnknown):

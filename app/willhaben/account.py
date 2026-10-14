@@ -265,7 +265,7 @@ def parse_my_adverts(next_data: dict[str, Any]) -> AdvertList:
                 image_url=(images[0].get("mainImageUrl") or images[0].get("thumbnailImageUrl")) if images else None,
                 actions={str(link.get("id")): link for link in
                          ((ad.get("advertEditStatusActionsList") or {}).get("contextLinkList") or {}).get("contextLink") or []
-                         if link.get("relativePath")},
+                         if link.get("relativePath") or str(link.get("id")) == ACTION_FINALIZE},   # 5 needs no path
                 reasons_query=bool(ad.get("deleteReasonQueryParameter")),
             ))
     return out
