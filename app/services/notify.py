@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import deque
 from typing import Any
 
 import httpx
@@ -81,11 +80,6 @@ def push_channel() -> str:
     return v if v in PUSH_CHANNELS else "ha"
 
 
-# Inbox events sent with push=False (a hit the screening held back …): an open page shows no notice for them. Memory
-# only – after a restart the page starts from the newest event anyway.
-QUIET_EVENTS: deque[int] = deque(maxlen=500)
-
-
 async def notify(kind: str, title: str, message: str, *, url: str | None = None,
                  image: str | None = None, data: dict[str, Any] | None = None,
                  actions: list[dict[str, Any]] | None = None, tag: str | None = None, push: bool = True,
@@ -100,9 +94,7 @@ async def notify(kind: str, title: str, message: str, *, url: str | None = None,
     ids = {k: str(v) for k in ("ad_id", "conversation_id") if (v := d.get(k))}
     if d.get("ref"):
         ids["ad_id"] = str(d["ref"])          # other sites: "<platform>:<id>", so the inbox opens the right viewer
-    event_id = log_event(kind, f"{title}: {message}", url, **ids)
-    if not push and event_id is not None:
-        QUIET_EVENTS.append(event_id)       # no notice on an open page either
+    log_event(kind, f"{title}: {message}", url, quiet=not push, **ids)   # quiet: no inbox entry, no notice on a page
     from app.services import telegram
     from app.services.ha_auth import ha_token, ha_url, notify_service
 

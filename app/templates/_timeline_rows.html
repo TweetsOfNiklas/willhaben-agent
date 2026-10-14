@@ -20,7 +20,8 @@
       </span>
       <span class="flex items-center gap-1.5 pt-0.5">
         {% if e.ok is none %}<span class="loading loading-spinner loading-xs text-primary" title="{{ _('running') }}"></span>
-        {% elif e.ok == false %}{{ ui.pill(_("failed"), 'bad') }}{% endif %}
+        {% elif e.ok == false %}{{ ui.pill(_("failed"), 'bad') }}
+        {% elif e.kind == 'notify' and (e.extra or {}).get('push') == false %}{{ ui.pill(_("no push"), dot=false) }}{% endif %}
         <span class="text-muted transition-transform row-open:rotate-90">{{ ui.icon('chevron-right', 14) }}</span>
       </span>
     </summary>

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from sqlalchemy import JSON, Column, Index, LargeBinary, String, UniqueConstraint
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from app.config import get_settings
 
@@ -375,6 +375,7 @@ class EventLog(SQLModel, table=True):
     url: str | None = None                 # the push's link (often willhaben); the dashboard prefers its own pages
     ad_id: str | None = None
     conversation_id: str | None = None
+    quiet: bool | None = None              # sent without a push (a hit the screening held back): not in the inbox
 
 
 class TimelineEvent(SQLModel, table=True):
@@ -533,16 +534,19 @@ def apply_public_url() -> str:
 
 
 def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | None = None,
-              conversation_id: str | None = None) -> int | None:
-    """Store a notification for the inbox and the timeline; returns its id."""
+              conversation_id: str | None = None, quiet: bool = False) -> int | None:
+    """Store a notification for the inbox and the timeline; returns its id. `quiet`: it went out without a push (the
+    timeline keeps it, marked; the inbox, its badge and Home's activity leave it out)."""
     with session() as db:
-        e = EventLog(kind=kind, message=message, url=url, ad_id=ad_id, conversation_id=conversation_id)
+        e = EventLog(kind=kind, message=message, url=url, ad_id=ad_id, conversation_id=conversation_id,
+                     quiet=quiet or None)
         db.add(e)
         db.commit()
         event_id = e.id
     from app.services import timeline    # the notification also shows up in the timeline
 
-    timeline.record("notify", message, name=kind, url=url, ad_id=ad_id, conversation_id=conversation_id)
+    timeline.record("notify", message, name=kind, url=url, ad_id=ad_id, conversation_id=conversation_id,
+                    extra={"push": False} if quiet else None)
     return event_id
 
 
@@ -666,8 +670,10 @@ def set_setting(key: str, value: str) -> None:
 
 
 def recent_events(limit: int = 30) -> list[EventLog]:
+    """The latest notifications that went out with a push (inbox, Home's activity)."""
     with session() as db:
-        return list(db.exec(select(EventLog).order_by(EventLog.ts.desc()).limit(limit)))
+        return list(db.exec(select(EventLog).where(col(EventLog.quiet).is_not(True))
+                            .order_by(EventLog.ts.desc()).limit(limit)))
 
 
 def iter_all(model) -> Iterator[Any]:

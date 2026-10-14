@@ -126,7 +126,9 @@ def test_notifications_are_mirrored():
     log_event("hit", "Neuer Treffer: Rad", "https://www.willhaben.at/iad/object?adId=123", ad_id="123")
     e = _all()[-1]
     assert e.kind == "notify" and e.name == "hit" and e.ad_id == "123" and e.title == "Neuer Treffer: Rad"
-    assert timeline.links(e) == [{"label": "Open", "href": "/hits?view=123", "ad": None}]
+    assert timeline.links(e) == [{"label": "Open", "href": "/hits?view=123", "ad": None}] and e.extra is None
+    log_event("hit", "Unifi: held back by the screening", ad_id="124", quiet=True)
+    assert _all()[-1].extra == {"push": False}                  # the logbook keeps it, marked "no push"
 
 
 def test_links_and_filter_ids():
@@ -234,6 +236,14 @@ def test_load_more_returns_rows_only(client):
     first = timeline.query(timeline.Filters(limit=2))[0][-1].id
     more = client.get(f"/timeline?limit=2&before={first}", headers={"HX-Request": "true"}).text
     assert "a0" in more and 'id="rail"' not in more
+
+
+def test_a_notification_sent_without_push_is_marked(client):
+    log_event("hit", "Unifi: pushed")
+    log_event("hit", "Unifi: held back", quiet=True)
+    rows = client.get("/timeline").text.split('id="tl-')
+    assert ">no push<" in next(r for r in rows if "Unifi: held back" in r)
+    assert ">no push<" not in next(r for r in rows if "Unifi: pushed" in r)
 
 
 def test_run_detail_lists_steps(client):

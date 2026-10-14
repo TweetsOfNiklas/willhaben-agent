@@ -278,9 +278,10 @@ def _inbox_seen_at() -> datetime:
 
 def _nav_counts() -> dict[str, int]:
     """Badges in the sidebar: new hits, unread messages (hidden chats left out), purchases waiting for your payment,
-    and notifications since the inbox was last opened."""
+    and notifications since the inbox was last opened (those sent without a push left out)."""
     with session() as db:
-        return {"inbox": db.exec(select(func.count()).select_from(EventLog).where(EventLog.ts > _inbox_seen_at())).one(),
+        return {"inbox": db.exec(select(func.count()).select_from(EventLog).where(
+                    EventLog.ts > _inbox_seen_at(), col(EventLog.quiet).is_not(True))).one(),
                 "hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
                 "chats": db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))
                                  .where(col(Conversation.hidden_at).is_(None))).one(),
@@ -1232,8 +1233,6 @@ async def jobs_status(since: int | None = None):
     Every open page also asks now and then for what happened meanwhile: the sidebar badges ("counts") and the inbox
     events after `since` (its last known event id), shown as notices – not the ones sent without a push. Without
     `since` only "last_event", the page's starting point."""
-    from app.services.notify import QUIET_EVENTS
-
     with session() as db:
         pending = [f"ad:{i}" for i in db.exec(select(MyAd.ad_id).where(col(MyAd.pending_action).is_not(None)))]
         pending += [f"draft:{i}" for i in db.exec(select(Draft.id).where(Draft.status == "sending"))]
@@ -1242,10 +1241,10 @@ async def jobs_status(since: int | None = None):
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
-            select(EventLog).where(EventLog.id > since).order_by(col(EventLog.id).desc()).limit(LIVE_EVENTS)))
-    quiet = set(QUIET_EVENTS)
+            select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
+            .order_by(col(EventLog.id).desc()).limit(LIVE_EVENTS)))
     return {**jobs.snapshot(), "pending": pending, "counts": _nav_counts(), "last_event": last,
-            "events": [_live_event(e) for e in reversed(new) if e.id not in quiet]}
+            "events": [_live_event(e) for e in reversed(new)]}
 
 
 # ------------------------------------------------------------------ sold / reserved workflow (app/services/sold.py)

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import func, select
 
-from app.db import EventLog, Hit, ProductSearch, SearchAgent, log_event, session, utcnow
+from app.db import EventLog, Hit, ProductSearch, SearchAgent, log_event, recent_events, session, utcnow
 from app.services import ad_batch, jobs, notify, product_search
 
 
@@ -98,7 +98,6 @@ def test_product_search_in_the_indicator(client, monkeypatch):
 
 
 def test_jobs_bring_badges_and_new_events_but_not_quiet_ones(client):
-    notify.QUIET_EVENTS.clear()          # ids of earlier tests' databases (every test starts at id 1)
     first = client.get("/jobs").json()
     assert first["events"] == [] and "counts" in first
     cursor = first["last_event"]
@@ -117,11 +116,13 @@ def test_jobs_bring_badges_and_new_events_but_not_quiet_ones(client):
     assert [e["text"] for e in data["events"]] == ["Neue Nachricht: Ist das Rad noch da?", "Unifi: USW-24-POE · € 150"]
     assert data["events"][0]["title"] == "New message" and data["events"][0]["link"]["href"].startswith("/chats")
     assert data["events"][1]["link"] == {"href": "/hits?view=1", "ad": "1", "external": False}
-    assert data["counts"]["hits"] == 1 and data["counts"]["inbox"] >= 3
     with session() as db:
         newest = db.exec(select(func.max(EventLog.id))).one()
+        total = db.exec(select(func.count()).select_from(EventLog)).one()
+    assert data["counts"]["hits"] == 1 and data["counts"]["inbox"] == total - 1        # the held-back hit: no badge
     assert data["last_event"] == newest
     assert client.get(f"/jobs?since={newest}").json()["events"] == []      # nothing new since
+    assert "held back by the screening" not in " ".join(e.message for e in recent_events())   # inbox, Home
 
 
 def test_page_carries_the_cursor_badge_keys_and_the_inbox_fragment(client):
