@@ -82,6 +82,31 @@ async def test_passive_ad_deactivated_by_hand_is_activated_in_place(monkeypatch)
     assert s.calls == [("PUT", "/webapi/iad/bap/4/1000000001")]
 
 
+class DraftSession(FakeSession):
+    """The ad itself is the unfinished draft (id 1000000001)."""
+    async def api_json(self, method, path, body=None):
+        if path == "/webapi/iad/bap/1000000001":
+            self.calls.append((method, path))
+            return {"adId": 1000000001, "adUuid": "u1", "heading": "Max Muster Rad", "price": 50, "contextLinkList": LINKS}
+        if path.endswith("/save"):
+            self.calls.append((method, path))
+            assert body["adId"] == 1000000001 and body["heading"] == "Max Muster Rad"
+            return {"adId": 1000000001, "adUuid": "u1"}
+        return await super().api_json(method, path, body)
+
+
+async def test_unfinished_draft_is_finished_under_its_own_id(monkeypatch):
+    """willhaben shows only "Fertigstellen" (link 5) for an insertion that was never completed: no call of its own,
+    the draft is finished like a new ad - before any republish, which would leave yet another copy behind."""
+    own = _own("passive", ["5", "6", "3"])
+    s = DraftSession()
+    c = AccountClient(s)
+    assert await c.reactivate("1000000001", [own]) == "1000000001"
+    paths = [p for _, p in s.calls]
+    assert paths[0] == "/webapi/iad/bap/1000000001" and paths[-1].endswith("/checkout")
+    assert not any("/bap/6/" in p or "/bap/5/" in p for p in paths)
+
+
 async def test_active_ad_is_never_republished(monkeypatch):
     c, s = _client(monkeypatch, _own("active", ["6"]))
     with pytest.raises(EndpointUnknown):
