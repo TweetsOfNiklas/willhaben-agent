@@ -44,3 +44,16 @@ def test_no_other_site_no_extra_rows():
     with TestClient(app) as c:
         page = c.get("/myads").text
     assert "data-site-usage" not in page and "Other sites" not in page
+
+
+def test_the_phone_menu_shows_the_meters():
+    set_setting("platform_kleinanzeigen_enabled", "1")
+    _count("kleinanzeigen", 12)
+    from app.main import app
+
+    with TestClient(app) as c:
+        page = c.get("/myads").text
+    menu = page[page.index('id="account-menu"'):page.index('id="usage-pop"')]      # "More" in the phone tab bar
+    assert "willhaben / h" in menu and 'data-site-usage="kleinanzeigen"' in menu and "md:hidden" in menu
+    assert "pop($event, 'usage')" in menu                                  # a tap opens the usage popover
+

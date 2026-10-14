@@ -48,7 +48,7 @@
 {% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu and cu.limit else 0 %}
 {% set ctone = 'bad' if cpct >= 90 else 'warn' if cpct >= 60 else 'brand' %}
 {% macro tokens(n) -%}{{ ('%.1f M'|format(n / 1e6)) if n >= 1e6 else ('%d k'|format((n / 1e3)|round|int)) }}{%- endmacro %}
-{% set layer_box = "absolute bottom-4 left-[84px] rail-x:left-[244px] max-md:inset-x-3 max-md:bottom-[76px] max-md:w-auto rounded-box border border-base-300 bg-base-100 shadow-[0_12px_32px_rgba(0,0,0,.18)]" %}
+{% set layer_box = "absolute bottom-4 left-[84px] rail-x:left-[244px] max-md:inset-x-3 max-md:bottom-[76px] max-md:w-auto max-md:max-w-none rounded-box border border-base-300 bg-base-100 shadow-[0_12px_32px_rgba(0,0,0,.18)]" %}
 
 <div class="min-h-screen md:grid md:grid-cols-[72px_minmax(0,1fr)] md:transition-[grid-template-columns] md:duration-200 rail-x:md:grid-cols-[232px_minmax(0,1fr)]">
 <aside id="rail" aria-label="{{ _('Navigation') }}"
@@ -67,9 +67,9 @@
   {{ item('/new-ad', 'plus', _("New ad")) }}
   <div class="min-h-4 flex-1"></div>
 
-  {# meters (expanded rail) / ring gauges (collapsed rail): Claude tokens, willhaben requests and the other switched-on
-     sites' requests (main._site_usage; collapsed: in the willhaben ring's tooltip and the popover) #}
-  <div class="mx-1.5 mb-1.5 hidden shrink-0 flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-200 px-2.5 pt-2.5 pb-2 rail-x:flex">
+  {# meters (expanded rail; phone: the "More" menu) / ring gauges (collapsed rail): Claude tokens, willhaben requests and
+     the other switched-on sites' requests (main._site_usage; collapsed: in the willhaben ring's tooltip and the popover) #}
+  {% set meters %}
     {% if cu %}
     <a href="/settings/claude" data-pop="claude" title="{{ _('Claude tokens this month') }}" @click="pop($event, 'claude')"
        class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content">
@@ -93,7 +93,8 @@
       {% if s.budget %}{{ ui.bar(s.pct, s.tone, 'col-span-3 h-1') }}{% endif %}
     </a>
     {% endfor %}
-  </div>
+  {% endset %}
+  <div class="mx-1.5 mb-1.5 hidden shrink-0 flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-200 px-2.5 pt-2.5 pb-2 rail-x:flex">{{ meters }}</div>
   {% if cu %}
   <a href="/settings/claude" @click="pop($event, 'claude')" class="relative grid h-10 shrink-0 place-items-center text-muted rail-x:hidden"
      title="{{ _('Claude usage this month: {used} M of your {limit} M token limit (covered by the subscription)', used='%.1f'|format(cu.used / 1e6), limit=(cu.limit / 1e6)|round|int) }}">
@@ -176,6 +177,8 @@
       <li><a href="{{ href }}" role="menuitem" {% if is_current(href) %}aria-current="page" class="menu-active"{% endif %}>{{ ui.icon(icon, 16) }}<span class="flex-1">{{ label }}</span>{% if count %}<span class="min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content">{{ count }}</span>{% endif %}</a></li>
       {% endfor %}
     </ul>
+    {# phone: the sidebar's meters (requests per site and hour, Claude tokens); a tap opens their popover #}
+    <div class="mb-1 flex flex-col gap-3 border-b border-base-300 px-2.5 pt-1.5 pb-3 md:hidden">{{ meters }}</div>
     <ul class="menu w-full gap-0.5 p-0">
       <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}{{ _("willhaben account") }}</a></li>
       <li><a href="/session" data-remote role="menuitem">{{ ui.icon('monitor', 16) }}<span class="flex-1">{{ _("Browser window") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
