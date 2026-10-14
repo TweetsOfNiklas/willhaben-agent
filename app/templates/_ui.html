@@ -100,7 +100,7 @@
 
 {# segmented control: items = [(href, label, count or none, active)] #}
 {% macro seg(items, cls='') -%}
-<div class="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-field border border-base-300 bg-base-100 p-[3px] [scrollbar-width:none] {{ cls }}">
+<div class="inline-flex max-w-full flex-wrap gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px] {{ cls }}">
   {%- for href, label, count, active in items %}
   <a href="{{ href }}" class="inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1 whitespace-nowrap no-underline {{ 'bg-brand-soft font-semibold text-primary' if active else 'hover:bg-hover' }}"{% if active %} aria-current="page"{% endif %}>{{ label }}{% if count is not none %}<small class="font-normal text-muted">{{ count }}</small>{% endif %}</a>
   {%- endfor %}

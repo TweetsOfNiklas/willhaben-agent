@@ -3,25 +3,25 @@
 {% block content %}
 {{ ui.head(_("Home"), _("Last agent check {ago}", ago=last_check|ago) if last_check is defined else '') }}
 
-{# phone: one scrollable strip of small tiles (no orphan tile); wider: one row #}
-<div class="-mx-4 mb-6 flex gap-2.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] sm:gap-3 sm:overflow-visible sm:px-0">
-  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/hits">
+{# phone: two columns, the last tile (own ads with its "expired" pill) across both; wider: one row #}
+<div class="mb-6 grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] sm:gap-3">
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:px-3 max-sm:py-2.5" href="/hits">
     <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight text-primary tabular-nums">{{ stats.new_hits }}</div>
     <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("new hits") }}</div>
   </a>
-  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/agents">
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:px-3 max-sm:py-2.5" href="/agents">
     <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight tabular-nums">{{ stats.agents }}</div>
     <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("active search agents") }}</div>
   </a>
-  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/chats">
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:px-3 max-sm:py-2.5" href="/chats">
     <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight text-primary tabular-nums">{{ stats.unread }}</div>
     <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("unread messages") }}</div>
   </a>
-  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/chats">
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:px-3 max-sm:py-2.5" href="/chats">
     <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight tabular-nums">{{ stats.open_drafts }}</div>
     <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("open drafts") }}</div>
   </a>
-  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:w-[132px] max-sm:shrink-0 max-sm:px-3 max-sm:py-2.5" href="/myads">
+  <a class="block rounded-box border border-base-300 bg-base-100 px-4 py-3.5 text-base-content no-underline hover:border-primary max-sm:col-span-2 max-sm:px-3 max-sm:py-2.5" href="/myads">
     <div class="text-[26px] leading-none max-sm:text-[22px] font-semibold tracking-tight tabular-nums">{{ stats.myads }}</div>
     <div class="mt-1 text-muted max-sm:text-[13px] max-sm:leading-snug">{{ _("own ads") }}{% if stats.expired %} {{ ui.pill(_("{n} expired", n=stats.expired), 'bad', false, 'align-middle') }}{% endif %}</div>
   </a>
@@ -73,7 +73,8 @@
       {{ ui.thumb(h.image_url, 'h-[38px] w-[52px]', 'rounded-md') }}
       <span class="min-w-0">
         <span class="block truncate font-medium">{{ h.heading }}</span>
-        <span class="block text-[12.5px] text-muted">{{ h.location or '' }} · {{ h.published_at|ago }}</span>
+        {% set meta = [h.location, (h.published_at|ago) if h.published_at else none]|select|list %}
+        {% if meta %}<span class="block text-[12.5px] text-muted">{{ meta|join(' · ') }}</span>{% endif %}
       </span>
       <span class="font-semibold whitespace-nowrap tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
     </a>

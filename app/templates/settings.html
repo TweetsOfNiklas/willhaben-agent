@@ -45,7 +45,7 @@
     {% endfor %}
   </nav>
 
-  <div class="flex min-w-0 max-w-[720px] flex-col gap-4">
+  <div class="flex min-w-0 max-w-[720px] flex-col gap-4 xl:max-w-[880px]">
     <div>{{ ui.eyebrow(ns.group, 'mb-0.5') }}<h2>{{ ns.title }}</h2></div>
     {% if section == 'purchase' %}{% include "_settings_purchase.html" %}
     {% elif section == 'paylivery' %}{% include "_settings_paylivery.html" %}

@@ -47,7 +47,7 @@
         </div>
         <div class="text-[13px] leading-relaxed text-muted">
           {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
-          {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|unique|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
+          {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|select|unique|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
           {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=site_names|join(', ')) }}{% endif %}
           {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}{% if a.geizhals_pct %} · {{ _("{pct} % below Geizhals", pct=a.geizhals_pct) }}{% endif %}
         </div>

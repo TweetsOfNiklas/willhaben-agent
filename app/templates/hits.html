@@ -32,8 +32,8 @@
   <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered') else '' }}" id="hit-{{ h.id }}">
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block">
       {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
-      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-2 border-0 bg-black/55 font-medium whitespace-nowrap text-white">{{ agents[h.agent_id].name }}</span>{% endif %}
-      {% if platform_ids %}<span class="badge badge-sm absolute max-sm:hidden top-2 right-2 border-0 bg-black/55 font-medium whitespace-nowrap text-white">{{ platform_name(h.platform) }}</span>{% endif %}
+      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-2 block max-w-[calc(100%-16px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
+      {% if platform_ids %}<span class="badge badge-sm absolute max-sm:hidden top-2 right-2 block max-w-[38%] truncate border-0 bg-black/55 font-medium leading-5 text-white">{{ platform_name(h.platform) }}</span>{% endif %}
     </a>
     <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-2.5">
       <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
@@ -67,10 +67,10 @@
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
       <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
     </div>
-    {# three equal columns; icon above the label so each label fits its column #}
-    <div class="grid grid-cols-3 gap-1.5 border-t border-base-300 p-2.5 max-sm:col-span-2 max-sm:mt-2.5 max-sm:border-t-0 max-sm:p-0">
+    {# three equal columns, one line each (icon and label): a card is one row shorter than with stacked buttons #}
+    <div class="grid grid-cols-3 gap-1.5 border-t border-base-300 p-2 max-sm:col-span-2 max-sm:mt-2.5 max-sm:border-t-0 max-sm:p-0">
       {% for s, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}
-        <button type="button" class="btn btn-sm h-auto min-h-12 flex-col gap-0.5 px-1 py-1.5 text-[12px] max-sm:min-h-9 max-sm:flex-row max-sm:gap-1.5 max-sm:py-1 leading-tight font-medium busy:opacity-60 {{ 'border-primary bg-brand-soft text-primary' if s == h.state else '' }}" hx-post="/hits/{{ h.id }}/state" hx-vals='{"state":"{{ 'new' if s == h.state else s }}"}' hx-target="#hit-{{ h.id }}" hx-swap="outerHTML">{{ ui.icon(tone[s], 15, 2, 'text-current') }}<span class="whitespace-nowrap">{{ label }}</span></button>
+        <button type="button" class="btn btn-sm h-auto min-h-9 gap-1.5 px-1 py-1 text-[12px] leading-tight font-medium busy:opacity-60 {{ 'border-primary bg-brand-soft text-primary' if s == h.state else '' }}" hx-post="/hits/{{ h.id }}/state" hx-vals='{"state":"{{ 'new' if s == h.state else s }}"}' hx-target="#hit-{{ h.id }}" hx-swap="outerHTML">{{ ui.icon(tone[s], 15, 2, 'text-current') }}<span class="whitespace-nowrap">{{ label }}</span></button>
       {% endfor %}
     </div>
   </article>

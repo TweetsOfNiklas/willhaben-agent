@@ -65,5 +65,6 @@
  "Copies the text and the options into the search form; you check them and start the search.": "Übernimmt Text und Optionen ins Suchformular; du prüfst sie und startest die Suche.",
  "New search": "Neue Suche",
  "New search with this text": "Neue Suche mit diesem Text",
- "A link to an ad (from any switched-on site) checks its price against comparable willhaben ads; a text lists the matching ads of the ticked sites with their price position. No Claude call until you ask for it.": "Ein Link zu einer Anzeige (von jeder eingeschalteten Seite) prüft ihren Preis gegen vergleichbare willhaben-Anzeigen; ein Text listet die passenden Anzeigen der angehakten Seiten mit ihrer Preislage. Claude wird erst gefragt, wenn du es willst."
+ "A link to an ad (from any switched-on site) checks its price against comparable willhaben ads; a text lists the matching ads of the ticked sites with their price position. No Claude call until you ask for it.": "Ein Link zu einer Anzeige (von jeder eingeschalteten Seite) prüft ihren Preis gegen vergleichbare willhaben-Anzeigen; ein Text listet die passenden Anzeigen der angehakten Seiten mit ihrer Preislage. Claude wird erst gefragt, wenn du es willst.",
+ "Search for something else?": "Etwas anderes suchen?"
 }
