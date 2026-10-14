@@ -624,7 +624,7 @@ async def _run_agent(agent_id: int) -> RunResult:
 
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
     gh_check = bool(agent.screen and agent.geizhals_check)
-    if (agent.geizhals_pct or gh_check) and to_notify:
+    if (agent.geizhals_pct or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
     # Claude checks the products before the rule and the screening use their prices (and, with room to spare, older
     # unchecked hits of the agent: no Claude call when there are none)

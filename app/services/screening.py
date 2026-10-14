@@ -16,6 +16,7 @@ import httpx
 from sqlmodel import col, select
 
 from app.db import Hit, SearchAgent, session, utcnow
+from app.platforms import condition
 from app.services import ad_images, scam
 from app.services.ad_images import MAX_IMAGE_BYTES  # noqa: F401  (re-exported)
 from app.i18n import LANGS, background_lang, t
@@ -146,6 +147,19 @@ def _system(sites: list[str]) -> str:
     return screen_system(", ".join(p.host for p in known), countries.pop() if len(countries) == 1 else "")
 
 
+def _new_price(h: Hit) -> dict[str, Any] | None:
+    """The hit's Geizhals product for the prompt: {name, price, pct, level} with the price in % of the lowest new price
+    and the label of the user's zones (German, as the prompt), the one the hit card shows; None without one."""
+    from app.services import deals, price_zones
+
+    gh = h.geizhals or {}
+    if not gh.get("price_from") or not h.price or h.price <= 0 or price_zones._cents(gh["price_from"]) <= 0:
+        return None
+    lvl = deals.hit_level(h)
+    return {"name": gh.get("name") or "?", "price": gh["price_from"], "pct": price_zones.share(h.price, gh["price_from"]),
+            "level": deals.LEVEL_DE.get(lvl or "")}
+
+
 async def _download(url: str | None, folder: Path, name: str, platform: str | None = None) -> Path | None:
     return await ad_images.download(url, folder, name, transport=_transport, platform=platform)   # _transport: tests
 
@@ -171,6 +185,8 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                 images.append(img)
             items.append({"nr": nr, "title": h.heading, "price": h.price_display or (f"{h.price:g} €" if h.price else None),
                           "location": h.location, "private": h.is_private, "description": h.body,
+                          "condition": condition.shown(h.item_condition, h.item_condition_label, h.platform) or None,
+                          "new_price": _new_price(h),
                           **({"site": _site_name(h.platform)} if len(sites) > 1 else {}),
                           "scam_flags": [f.get("label") for f in h.scam_flags or [] if f.get("severity") in ("warn", "high")],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...

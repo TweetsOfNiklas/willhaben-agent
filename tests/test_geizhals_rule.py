@@ -108,6 +108,23 @@ async def test_held_back_hits_cost_no_claude_call(fake, world, monkeypatch):
     assert screened == ["1"]
 
 
+async def test_the_screening_gets_the_new_price_without_a_rule(fake, world, monkeypatch):
+    """Screening alone (no Geizhals rule) looks the hits up too: Claude rates against the new price."""
+    screened = []
+
+    async def screen(agent_id, hits):
+        screened.extend((h.ad_id, (h.geizhals or {}).get("price_from")) for h in hits)
+
+    monkeypatch.setattr(search_agents.screening, "screen", screen)
+    a = create_agent("https://fake.example/s/iphone")
+    fake.pages = [[]]
+    await run_agent(a.id)
+    _set(a.id, screen=True)
+    fake.pages = [[listing("1", "iPhone 13 128GB", 340.0)]]
+    await run_agent(a.id)
+    assert screened == [("1", 500.0)]
+
+
 def test_exactly_x_percent_below_passes():
     """Exactly X % below keeps the rule (700 € · 0.7 is 489.99999… in floats); the % shown never rounds up to X."""
     a = SearchAgent(name="x", source_url="x", webapi_url="x")
@@ -279,10 +296,10 @@ def test_settings_drawer_and_pages(fake):
                        item_condition_label="Defekt"))
             db.commit()
         page = c.get("/hits?state=filtered").text
-        assert "Geizhals new from" in page and GH["url"] in page
+        assert "<dt class=\"text-muted\">Geizhals</dt>" in page and GH["url"] in page    # each rating names its source
         assert 'bg-lvl-expensive">expensive</span>' in page              # 80 % of new: the user's used zones
         # next to a zone badge the share it comes from (a floored "20 % less" next to it read as 80 % or 81 %)
-        assert "Geizhals new from €\xa0500 · 80\xa0% of the new price" in page and "20 % less" not in page
+        assert "80\xa0% of €\xa0500 new" in page and "20 % less" not in page
         assert 'title="By the Geizhals new price alone; the price check of the ad also weighs comparable ads."' in page
-        assert "80\xa0% less" in page                                   # no badge for a defective item: as before
+        assert "new from €\xa0500 · 80\xa0% less" in page              # no badge for a defective item: the saving
         assert '>Defekt</span>' in page and "bg-bad-soft text-error" in page     # its condition as a pill

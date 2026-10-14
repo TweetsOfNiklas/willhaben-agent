@@ -390,6 +390,11 @@ bevor sie eine Benachrichtigung bekommt. Für jeden Treffer entscheidest du:
   great = deutlich unter dem üblichen Gebrauchtpreis, good = günstig, fair = marktüblich,
   overpriced = zu teuer, unknown = nicht einschätzbar (kein Preis, "VB" ohne Zahl, zu wenig Angaben).
   Nutze die mitgelieferten Vergleichspreise dieses Suchagenten und dein Wissen über Neu- und Gebrauchtpreise.
+  Steht bei einem Treffer ein Geizhals-Neupreis, ist das der heutige günstigste Neupreis in Shops: nimm ihn statt
+  deiner Erinnerung an Neupreise (Preise ändern sich, dein Wissen kann veraltet sein). Die dabei genannte Einstufung
+  nach den Preiszonen der Person ist der Maßstab für deal: Schnäppchen → great, günstig → good, fair → fair,
+  teuer oder sehr teuer → overpriced. Weich nur ab, wenn Zustand, fehlendes oder zusätzliches Zubehör, ein Paket oder
+  ein offensichtlich anderes Geizhals-Produkt es rechtfertigen, und sag dann in reason, warum.
 - issues: alle zutreffenden Gründe aus der festen Liste (leer, wenn nichts dagegen spricht):
   wrong_product (anderes Produkt/Modell), accessory_only (nur Zubehör/Ersatzteil), wrong_variant (falsche Größe,
   Variante, Farbe laut Beschreibung), misses_requirement (verfehlt eine ausdrückliche Vorgabe der Beschreibung, siehe
@@ -435,8 +440,10 @@ SCREEN_SCHEMA: dict[str, Any] = {
 
 def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], stats: dict[str, Any] | None,
                   language: str) -> str:
-    """hits: [{nr, title, price, location, private, description, photo, site}] where photo is a file name or None and
-    site the hit's site name, only in a batch from several sites (each hit's country, distance and price level)."""
+    """hits: [{nr, title, price, location, private, description, photo, site, condition, new_price}] where photo is a
+    file name or None, site the hit's site name, only in a batch from several sites (each hit's country, distance and
+    price level), condition the condition the site states and new_price {name, price, pct, level} the Geizhals
+    product with its lowest price, the hit's price in % of it and the label of the person's zones (or None)."""
     lines = [f"Suchagent: {agent_name}", "", "Was die Person genau sucht:", brief.strip() or "(keine Beschreibung – nach dem Namen des Suchagenten urteilen)"]
     if stats:
         lines += ["", f"Vergleichspreise bisheriger Treffer dieses Suchagenten ({stats['count']} Anzeigen): "
@@ -448,6 +455,11 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
                      + (f" · Portal: {h['site']}" if h.get("site") else "")
                      + f" · {'privat' if h['private'] else 'Händler' if h['private'] is False else 'Anbieter unbekannt'}"
                      + (f" · Foto: ./{h['photo']}" if h.get("photo") else ""))
+        if h.get("condition"):
+            lines.append(f"    Zustand laut Anzeige: {h['condition']}")
+        if (np := h.get("new_price")) is not None:
+            lines.append(f"    Neupreis laut Geizhals: ab {np['price']:g} € ({np['name']}); der Preis ist {np['pct']} % davon"
+                         + (f", nach den Preiszonen der Person: {np['level']}" if np.get("level") else ""))
         if h.get("description"):
             lines.append(f"    {h['description'][:400]}")
         if h.get("scam_flags"):   # cheap heuristic hints, if available

@@ -25,6 +25,7 @@
 {% if hits %}
 <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
 {% set pz = price_zone_config() %}{# the zone label of a hit with a Geizhals new price (deals.hit_level), read once #}
+{% set screen_levels = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'} %}{# Claude's verdict in the zones' colours #}
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
@@ -38,17 +39,29 @@
       <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
       <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
         {% if h.old_price and h.price and h.old_price > h.price %}<span class="text-[13px] text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}{{ ui.condition_pill(h.item_condition, h.item_condition_label, h.platform, 'self-center') }}</div>
-      {# with a zone badge the share it comes from (a floored "20 % less" beside it reads as 80 % or 81 %), else the saving #}
-      {% set gh_pct = geizhals_below_pct(h) %}{% if gh_pct is not none %}{% set lvl = hit_level(h, pz) %}{% set share = share_pct(h.price, h.geizhals.price_from) if lvl else none %}
-      {% set gh_diff = (_("{n} % of the new price", n=share) if share else _("below 1 % of the new price")) if lvl else (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)) %}
-      <div class="flex flex-wrap items-center gap-1.5">{% if lvl %}<span title="{{ _('By the Geizhals new price alone; the price check of the ad also weighs comparable ads.') }}">{{ ui.deal_lvl(lvl, deal_level_label(lvl)) }}</span>{% endif %}<a href="{{ h.geizhals.url }}" target="_blank" rel="noopener" class="text-[12.5px] text-muted no-underline hover:underline" title="{{ h.geizhals.name }}">{{ (_("Geizhals new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ gh_diff)|nb }}{% if h.geizhals.checked %} · {{ _("checked by Claude") }}{% endif %}</a></div>{% endif %}
-      {% if h.screen_relevant is not none %}
-      {# verdict above, reason below at full width: cut by lines (ellipsis), the tooltip has the whole text #}
-      <div class="flex flex-col items-start gap-1 text-[12.5px] text-muted" title="{{ h.screen_reason or '' }}">
-        {% set good = h.screen_relevant and h.screen_deal in ('great', 'good') %}
-        {{ ui.pill(screen_labels(h)|first, 'ok' if good else ('brand' if h.screen_relevant else ''), false) }}
-        {% if h.screen_reason %}<span class="line-clamp-3 leading-snug max-sm:line-clamp-2">{{ h.screen_reason }}</span>{% endif %}
-      </div>
+      {# the price ratings, each named by its source in the same colours: the user's zones of the Geizhals new price
+         (with the share it comes from: a floored "20 % less" beside it reads as 80 % or 81 %; without a zone, e.g.
+         defective, the saving), then Claude's screening verdict and its reason, cut by lines (the tooltip has it all) #}
+      {% set gh_pct = geizhals_below_pct(h) %}{% set lvl = hit_level(h, pz) if gh_pct is not none else none %}
+      {% if gh_pct is not none or h.screen_relevant is not none %}
+      <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1.5 text-[12.5px]">
+        {% if gh_pct is not none %}{% set share = share_pct(h.price, h.geizhals.price_from) if lvl else none %}
+        <dt class="text-muted">Geizhals{% if h.geizhals.checked %} <span class="text-success" title="{{ _('checked by Claude') }}" aria-label="{{ _('checked by Claude') }}">{{ ui.icon('check', 12, 2.5, 'inline-block align-[-1px]') }}</span>{% endif %}</dt>
+        <dd class="m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          {%- if lvl %}<span title="{{ _('By the Geizhals new price alone; the price check of the ad also weighs comparable ads.') }}">{{ ui.deal_lvl(lvl, deal_level_label(lvl)) }}</span>{% endif %}
+          <a href="{{ h.geizhals.url }}" target="_blank" rel="noopener" class="min-w-0 text-muted no-underline hover:underline" title="{{ h.geizhals.name }}">
+            {%- if lvl %}{{ (_("{n} % of {price} new", n=share, price=h.geizhals.price_from|eur) if share else _("below 1 % of the new price"))|nb }}
+            {%- else %}{{ (_("new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)))|nb }}{% endif %}</a></dd>
+        {% endif %}
+        {% if h.screen_relevant is not none %}{% set labels = screen_labels(h) %}
+        <dt class="text-muted">Claude</dt>
+        <dd class="m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          {%- if h.screen_relevant and h.screen_deal in screen_levels %}{{ ui.deal_lvl(screen_levels[h.screen_deal], labels|first) }}
+          {%- else %}{{ ui.pill(labels|first, '' if h.screen_relevant else 'bad', false) }}{% endif %}
+          {%- if labels|length > 1 %}<span class="text-muted">{{ labels[1:]|join(' · ') }}</span>{% endif %}</dd>
+        {% endif %}
+      </dl>
+      {% if h.screen_reason %}<p class="m-0 line-clamp-3 text-[12.5px] leading-snug text-muted max-sm:line-clamp-2" title="{{ h.screen_reason }}">{{ h.screen_reason }}</p>{% endif %}
       {% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}

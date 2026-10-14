@@ -231,6 +231,45 @@ def test_agent_form_settings_and_hit_badge(client):  # noqa: F811
     assert a.screen is False and a.screen_min == "match"
 
 
+def test_the_prompt_rates_against_the_geizhals_new_price():
+    """Claude gets the hit's Geizhals product, its share of the new price and the zone label the card shows, so its
+    verdict does not rest on an outdated new price from memory ("neu 60–70 €" for a Pi 5 that costs 118,50 €)."""
+    from app.llm.prompts import SCREEN_SYSTEM, screen_prompt
+
+    gh = {"name": "Raspberry Pi 5 Modell B, 4GB RAM", "url": "https://geizhals.at/x-a1.html", "price_from": 118.5}
+    hit = dbmod.Hit(agent_id=1, ad_id="1", heading="Raspberry PI 5 4 GB Ram", url="u", price=120.0,
+                    item_condition="new", geizhals=gh)
+    np = screening._new_price(hit)
+    assert np == {"name": gh["name"], "price": 118.5, "pct": 101, "level": "teuer"}     # new items: 100–114 %
+    prompt = screen_prompt(agent_name="Pi", brief="", stats=None, language="Deutsch", hits=[
+        {"nr": 1, "title": hit.heading, "price": "120 €", "location": "Wien", "private": True, "description": None,
+         "photo": None, "condition": "Neu", "new_price": np}])
+    assert "Zustand laut Anzeige: Neu" in prompt
+    assert ("Neupreis laut Geizhals: ab 118.5 € (Raspberry Pi 5 Modell B, 4GB RAM); der Preis ist 101 % davon, "
+            "nach den Preiszonen der Person: teuer") in prompt
+    assert "Steht bei einem Treffer ein Geizhals-Neupreis" in SCREEN_SYSTEM and "teuer oder sehr teuer → overpriced" in SCREEN_SYSTEM
+    for g, price in (({}, 120.0), (None, 120.0), (gh, None), (gh, 0.0)):
+        assert screening._new_price(dbmod.Hit(agent_id=1, ad_id="1", heading="x", url="u", price=price, geizhals=g)) is None
+
+
+def test_hit_card_names_the_source_of_each_rating(client):  # noqa: F811
+    """The zone badge and Claude's verdict in the same colours, each after its source, the reason below."""
+    agent = create_agent(URL)
+    gh = {"name": "Raspberry Pi 5 Modell B, 4GB RAM", "url": "https://geizhals.at/x-a1.html", "price_from": 118.5,
+          "checked": True}
+    with dbmod.session() as db:
+        db.add(dbmod.Hit(agent_id=agent.id, ad_id="5", heading="Raspberry PI 5 4 GB Ram", url="https://x", state="new",
+                         price=120.0, item_condition="new", geizhals=gh, screen_relevant=True, screen_deal="fair",
+                         screen_reason="Marktüblich für einen neuen Pi 5."))
+        db.commit()
+    page = client.get(f"/hits?agent_id={agent.id}").text
+    assert '<dt class="text-muted">Geizhals <span class="text-success" title="checked by Claude"' in page
+    assert '<dt class="text-muted">Claude</dt>' in page
+    assert 'bg-lvl-expensive">expensive</span>' in page and "101\xa0% of €\xa0118,50 new" in page
+    assert 'bg-lvl-fair">fair price</span>' in page
+    assert 'title="Marktüblich für einen neuen Pi 5.">Marktüblich für einen neuen Pi 5.</p>' in page
+
+
 def test_push_line_uses_first_sentence_only():
     hit = dbmod.Hit(agent_id=1, ad_id="1", heading="x", url="u", screen_relevant=True, screen_deal="good",
                     screen_reason="Guter Preis für ein gepflegtes Rad. Neu kostet es 900 €, gebraucht meist 500–600 €.")
