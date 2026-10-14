@@ -8,7 +8,7 @@
   </label>
   <p class="text-[12.5px] text-muted">{{ _("Claude checks every new hit before you are notified. Other hits go to Hits → Filtered out and still fire the Home Assistant event, just without a push.") }}</p>
   <div class="flex flex-col gap-2.5" x-show="on" x-cloak>
-    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("What exactly are you looking for?") }}</span><textarea name="screen_brief" rows="3" placeholder="{{ _('e.g. road bike, frame size 56–58, Shimano 105 or better, no e-bikes, no parts') }}" class="textarea w-full bg-base-200">{{ brief or '' }}</textarea></label>
+    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("What exactly are you looking for?") }}</span><textarea name="screen_brief" rows="3" placeholder="{{ _('e.g. road bike, frame size 56–58, Shimano 105 or better, no e-bikes, no parts') }}" class="textarea w-full bg-base-200">{{ brief or '' }}</textarea><small class="text-muted">{{ _("Limits you write here (a maximum price, a must-have feature, the generation) are kept: a hit that misses one is never pushed.") }}</small></label>
     <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Notify for") }}</span><select name="screen_min" class="select w-full bg-base-200">{% for v, lbl in thresholds.items() %}<option value="{{ v }}" {% if (minimum or 'match') == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></label>
     <div class="flex flex-col gap-1.5">
       <span class="text-[12.5px] text-muted">{{ _("Don't notify when the hit is …") }}</span>

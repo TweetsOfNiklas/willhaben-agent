@@ -9,5 +9,7 @@
  "too far away": "zu weit weg",
  "suspected scam": "Betrugsverdacht",
  "Don't notify when the hit is …": "Nicht benachrichtigen, wenn der Treffer …",
- "“Too expensive” and “price unclear” are covered by “Notify for”. “Too far away” needs an area in the description above; “dealer” comes from willhaben itself.": "„Zu teuer“ und „Preis unklar“ regelt „Benachrichtigen bei“. „Zu weit weg“ braucht eine Gegend in der Beschreibung oben; „Händler“ kommt von willhaben selbst."
+ "“Too expensive” and “price unclear” are covered by “Notify for”. “Too far away” needs an area in the description above; “dealer” comes from willhaben itself.": "„Zu teuer“ und „Preis unklar“ regelt „Benachrichtigen bei“. „Zu weit weg“ braucht eine Gegend in der Beschreibung oben; „Händler“ kommt von willhaben selbst.",
+ "misses a requirement": "erfüllt Vorgabe nicht",
+ "Limits you write here (a maximum price, a must-have feature, the generation) are kept: a hit that misses one is never pushed.": "Vorgaben, die du hier nennst (ein Höchstpreis, eine Pflicht-Funktion, die Generation), gelten: Ein Treffer, der eine verfehlt, kommt nie als Push."
 }

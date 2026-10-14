@@ -380,14 +380,20 @@ bevor sie eine Benachrichtigung bekommt. Für jeden Treffer entscheidest du:
 
 - relevant: Ist es wirklich das, was die Person sucht (laut ihrer Beschreibung)? Falsches Produkt, nur Zubehör,
   Ersatzteile, Suche-Anzeigen ("Suche …"), Tausch, defekt obwohl nicht gewünscht, falsche Größe/Variante → false.
-  Im Zweifel, wenn es plausibel passen könnte → true.
+  Verfehlt der Treffer eine Vorgabe, die die Beschreibung ausdrücklich macht – eine Preisgrenze ("nur unter 50 €"),
+  eine Pflicht-Funktion oder -Eigenschaft, Generation, Baujahr oder Alter, einen Mindestrabatt –, ist er nicht
+  relevant → false mit misses_requirement, auch wenn das Produkt sonst passt. Allgemeine Wünsche wie "günstig" sind
+  keine solche Vorgabe (die bewertet deal). Im Zweifel, wenn es plausibel passen könnte → true; fehlt nur die Angabe,
+  ob eine Vorgabe erfüllt ist → true, und nenne in reason, was vor dem Kauf zu fragen ist. Spricht aber mehr dagegen
+  als dafür ("vermutlich nicht", "eher nicht") → false.
 - deal: wie gut der Preis für diesen Artikel in diesem Zustand ist:
   great = deutlich unter dem üblichen Gebrauchtpreis, good = günstig, fair = marktüblich,
   overpriced = zu teuer, unknown = nicht einschätzbar (kein Preis, "VB" ohne Zahl, zu wenig Angaben).
   Nutze die mitgelieferten Vergleichspreise dieses Suchagenten und dein Wissen über Neu- und Gebrauchtpreise.
 - issues: alle zutreffenden Gründe aus der festen Liste (leer, wenn nichts dagegen spricht):
   wrong_product (anderes Produkt/Modell), accessory_only (nur Zubehör/Ersatzteil), wrong_variant (falsche Größe,
-  Variante, Farbe laut Beschreibung), defective (defekt/beschädigt, obwohl nicht gesucht), search_or_swap (Suche- oder
+  Variante, Farbe laut Beschreibung), misses_requirement (verfehlt eine ausdrückliche Vorgabe der Beschreibung, siehe
+  relevant; nenne in reason, welche), defective (defekt/beschädigt, obwohl nicht gesucht), search_or_swap (Suche- oder
   Tauschanzeige), incomplete (wesentliche Teile fehlen), bundle_only (nur im Paket mit anderem), too_far (nur wenn die
   Beschreibung eine Gegend/Entfernung vorgibt und der Ort deutlich außerhalb liegt), scam_suspect (Betrugsanzeichen:
   unrealistisch billig, Vorauskasse/Kurier/WhatsApp-Wechsel, kopierte Fotos), too_expensive (deal = overpriced),
@@ -412,7 +418,8 @@ SCREEN_SCHEMA: dict[str, Any] = {
                     "relevant": {"type": "boolean"},
                     "deal": {"type": "string", "enum": ["great", "good", "fair", "overpriced", "unknown"]},
                     "issues": {"type": "array", "items": {"type": "string", "enum": [
-                        "wrong_product", "accessory_only", "wrong_variant", "defective", "search_or_swap",
+                        "wrong_product", "accessory_only", "wrong_variant", "misses_requirement", "defective",
+                        "search_or_swap",
                         "incomplete", "bundle_only", "too_far", "scam_suspect", "too_expensive", "price_unclear"]}},
                     "reason": {"type": "string"},
                 },

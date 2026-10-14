@@ -30,6 +30,13 @@ def test_passes_by_chosen_reasons():
     pricey = _hit(True, "overpriced", ["too_expensive"])
     assert screening.passes(_agent(screen_hide="too_expensive"), pricey)   # price is left to the threshold
     assert not screening.passes(_agent(screen_min="fair"), pricey)
+    over_limit = _hit(False, "fair", ["misses_requirement"])               # "only below 50€", 60 €
+    assert not screening.passes(_agent(screen_hide="-"), over_limit)       # the description's own limit, always
+    assert not screening.passes(_agent(screen_hide="-"), _hit(True, "good", ["misses_requirement"]))
+    assert "misses_requirement" not in screening.HIDEABLE
+    # "dealer" is the app's, not Claude's reason: a hit Claude calls wrong without a reason stays back
+    assert not screening.passes(_agent(screen_hide="-"), _hit(False, "fair", ["dealer"], private=False))
+    assert screening.passes(_agent(screen_hide="-"), _hit(False, "fair", ["dealer", "defective"], private=False))
 
 
 def test_labels_and_event_data():
@@ -109,6 +116,7 @@ def test_agent_form_saves_hidden_reasons(client):  # noqa: F811
     agent = create_agent(URL)
     page = client.get("/agents").text
     assert 'name="screen_hide" value="accessory_only" checked' in page and 'value="dealer" checked' not in page
+    assert 'value="misses_requirement"' not in page and "a hit that misses one is never pushed" in page
     client.post(f"/agents/{agent.id}/edit", data={"name": "Rad", "interval_min": "5", "screen_on": "on",
                                                   "screen_hide": ["dealer", "defective", "too_expensive"]})
     with dbmod.session() as db:

@@ -45,16 +45,21 @@ def deal_label(deal: str | None) -> str:
 
 
 # Predefined reasons Claude picks from (several per hit). The price ones only label: the deal threshold filters price.
-ISSUES = ["wrong_product", "accessory_only", "wrong_variant", "defective", "search_or_swap", "incomplete",
-          "bundle_only", "dealer", "too_far", "scam_suspect", "too_expensive", "price_unclear"]
+# A hit that misses a limit the description sets (a price cap, a must-have feature, the generation) never pushes: it
+# is the user's own rule, no option to switch off (10-14 Echo Shows over "only below 50€" were pushed as "too expensive").
+ISSUES = ["wrong_product", "accessory_only", "wrong_variant", "misses_requirement", "defective", "search_or_swap",
+          "incomplete", "bundle_only", "dealer", "too_far", "scam_suspect", "too_expensive", "price_unclear"]
 PRICE_ISSUES = {"too_expensive", "price_unclear"}
-HIDEABLE = [i for i in ISSUES if i not in PRICE_ISSUES]
+ALWAYS_HIDE = {"misses_requirement"}
+APP_ISSUES = {"dealer"}            # set by the app from the site's data, not Claude's reason against the hit
+HIDEABLE = [i for i in ISSUES if i not in PRICE_ISSUES and i not in ALWAYS_HIDE]
 DEFAULT_HIDE = ["wrong_product", "accessory_only", "wrong_variant", "search_or_swap", "scam_suspect"]
 
 
 def issue_labels() -> dict[str, str]:
     return {"wrong_product": t("wrong product"), "accessory_only": t("accessory / spare part only"),
-            "wrong_variant": t("wrong size or variant"), "defective": t("defective / damaged"),
+            "wrong_variant": t("wrong size or variant"), "misses_requirement": t("misses a requirement"),
+            "defective": t("defective / damaged"),
             "search_or_swap": t("search or swap ad"), "incomplete": t("incomplete, parts missing"),
             "bundle_only": t("only as a bundle"), "dealer": t("dealer"), "too_far": t("too far away"),
             "scam_suspect": t("suspected scam"), "too_expensive": t("too expensive"),
@@ -84,9 +89,9 @@ def passes(agent: SearchAgent, hit: Hit) -> bool:
     if not agent.screen or hit.screen_relevant is None:
         return True
     issues = set(hit.screen_issues or [])
-    if issues & hide_set(agent):
+    if issues & (hide_set(agent) | ALWAYS_HIDE):
         return False
-    if not hit.screen_relevant and not (issues - PRICE_ISSUES):
+    if not hit.screen_relevant and not (issues - PRICE_ISSUES - APP_ISSUES):
         return False                           # not the item and no reason the user chose to allow
     return DEAL_RANK.get(hit.screen_deal or "unknown", 1) >= MIN_RANK.get(agent.screen_min or "match", 0)
 
