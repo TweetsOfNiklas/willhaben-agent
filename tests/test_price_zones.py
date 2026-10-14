@@ -48,12 +48,23 @@ def test_save_is_all_or_nothing_and_stores_only_changes():
 
 
 def test_cent_boundaries_of_the_users_case():
-    lim = pz.DEFAULTS["used"]
+    lim = (30, 50, 80, 90)                       # the zones the user's case was set up with
     assert [pz.level_for(p, NEW, lim) for p in (60.68, 60.69, 101.14, 101.15, 161.83, 161.84, 182.06, 182.07)] == \
         ["bargain", "cheap", "cheap", "fair", "fair", "expensive", "expensive", "very_expensive"]
     assert pz.share(139, NEW) == 68 and pz.share_exact(139, NEW) == pytest.approx(68.71, abs=0.01)
     assert [pz.price_from(NEW, b) for b in lim] == [60.69, 101.15, 161.84, 182.07]
     assert pz.group("new") == "new" and {pz.group(c) for c in ("like_new", "refurbished", "used", "defect", None)} == {"used"}
+
+
+def test_default_zones_read_as_meant():
+    """Used: 55-74 % is the usual resale price, from 90 % new is barely dearer. New: a private sale without return
+    right is fair a bit below the lowest shop price, at that price it is expensive."""
+    used, new = pz.DEFAULTS["used"], pz.DEFAULTS["new"]
+    assert [pz.level_for(p, 100, used) for p in (34.99, 35, 54.99, 55, 74.99, 75, 89.99, 90)] == \
+        ["bargain", "cheap", "cheap", "fair", "fair", "expensive", "expensive", "very_expensive"]
+    assert [pz.level_for(p, 100, new) for p in (69.99, 70, 84.99, 85, 99.99, 100, 114.99, 115)] == \
+        ["bargain", "cheap", "cheap", "fair", "fair", "expensive", "expensive", "very_expensive"]
+    assert pz.level_for(139, NEW, used) == "fair"                                 # the user's case: 68 %
 
 
 @pytest.mark.parametrize("new_price", [202.30, 199.99, 37.5])
@@ -87,7 +98,9 @@ def test_settings_page_and_navigation(client):
     page = client.get("/settings/prices")
     assert page.status_code == 200 and 'href="/settings/prices"' in page.text and "Price rating" in page.text
     assert 'x-data="priceZones(' in page.text and page.text.count('name="used"') == 4 and page.text.count('name="new"') == 4
-    assert "30–49 %" in page.text and "from 90 %" in page.text and "below 75 %" in page.text   # readback chips
+    assert "35–54 %" in page.text and "from 90 %" in page.text and "below 70 %" in page.text   # readback chips
+    assert 'title="35 / 55 / 75 / 90 %"' in page.text and 'title="70 / 85 / 100 / 115 %"' in page.text
+    assert 'name="reset" value="1"' in page.text and 'formnovalidate :disabled="isDefault()"' in page.text
     from app.deals_web import price_zone_view
     from app.services import deals
     assert price_zone_view()["axis"] == [deals.AXIS_MIN, deals.AXIS_MAX] == [110, pz.HIGH + 10]   # the preview's scale
@@ -111,3 +124,16 @@ def test_settings_save_and_refuse(client):
     assert "Gebrauchtes: jede Grenze muss höher sein als die davor." in client.get(r.headers["location"]).text
     page = client.get("/settings/prices", params={"err": "<script>alert(1)</script>"}).text
     assert "alert(1)" not in page and "jede Grenze" not in page
+
+
+def test_settings_reset_to_defaults(client):
+    """The reset button stores the defaults of both groups, whatever the fields hold (even broken ones)."""
+    pz.save({"used": [20, 40, 70, 85], "new": [60, 80, 95, 110]})
+    set_setting("ui_lang", "de")                                                # the message is translated at the post
+    r = client.post("/settings/prices", data={"used": ["50", "x", "", "85"], "new": ["75"], "reset": "1"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/settings/prices?msg=")
+    assert pz.config() == pz.DEFAULTS and get_setting(pz.KEY) == ""
+    page = client.get(r.headers["location"]).text
+    assert "Standardwerte wiederhergestellt" in page and "Auf Standardwerte zurücksetzen" in page
+    assert "Beide Gruppen auf die Standardwerte zurücksetzen und speichern?" in page

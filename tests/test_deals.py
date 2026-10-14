@@ -21,6 +21,14 @@ AD_ID = "1000000001"
 PRICES = [40, 60, 80, 90, 100, 110, 120, 130, 150, 200]
 
 
+@pytest.fixture(autouse=True)
+def _zones():
+    """The cases here were written against the zones that were the defaults until 2026-10-14: they stay put when the
+    defaults move (test_price_zones checks the defaults)."""
+    from app.services import price_zones
+    price_zones.save({"used": [30, 50, 80, 90], "new": [75, 100, 110, 125]})
+
+
 def _ad(price=100.0, heading="Bosch GSR 18V-55 Akkuschrauber neuwertig OVP", ad_id=AD_ID):
     return AdDetail(ad_id=ad_id, heading=heading, description="Kaum benutzt.", price=price, price_display=None,
                     status="active", published_at=None, first_published_at=None, end_date=None,

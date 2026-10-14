@@ -14,7 +14,7 @@ import pytest
 
 from app import db as dbmod
 from app.db import Purchase, ProductSearch, get_setting, set_setting
-from app.services import deals
+from app.services import deals, price_zones
 from app.services import purchase as svc
 from app.willhaben import public as public_mod
 from app.willhaben.parse import AdDetail
@@ -517,7 +517,8 @@ def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noq
     import html as htmllib
     import json
     js = json.loads(htmllib.unescape(re.search(r"data-fair='([^']*)'", frag).group(1)))
-    assert js["rule"] == {"kind": "share", "new_price": 300.0, "zones": [30, 50, 80, 90], "names": list(deals.LEVEL_NAMES)}
+    assert js["rule"] == {"kind": "share", "new_price": 300.0, "zones": list(price_zones.DEFAULTS["used"]),
+                         "names": list(deals.LEVEL_NAMES)}
     assert js["scale"] == [[0.0, 0.0], [330.0, 1.0]] and js["pos"] == pytest.approx(250 / 330, abs=0.001)
 
 
@@ -1038,15 +1039,13 @@ def test_buy_dialog_rating_is_the_one_of_position():
     import json
     import subprocess
 
-    from app.services import price_zones
-
-    html = (Path(__file__).resolve().parent.parent / "app" / "templates" / "_buy_script.html").read_text(encoding="utf-8")
+    html =(Path(__file__).resolve().parent.parent / "app" / "templates" / "_buy_script.html").read_text(encoding="utf-8")
     script = re.search(r"<script>\s*// Buy dialog.*?</script>", html, re.S).group(0)
     code = ("var window = {};\n" + script.replace("<script>", "").replace("</script>", "")
             + "\nconst wbBuy = window.wbBuy;\n" + PARITY_HARNESS)
     cases, checks = [], []
     for new in (202.30, 199.99, 37.5):
-        for zones in ((30, 50, 80, 90), (75, 100, 110, 125), (85, 86, 87, 88)):
+        for zones in ((30, 50, 80, 90), (75, 100, 110, 125), *price_zones.DEFAULTS.values(), (85, 86, 87, 88)):
             zz = {"used": zones, "new": zones}
             own = deals.position(round(new * 0.68, 2), None, new, None, zz)
             prices = [round(new * k / 200, 2) for k in range(1, 601, 7)]

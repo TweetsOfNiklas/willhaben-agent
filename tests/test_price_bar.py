@@ -5,6 +5,8 @@ from app.services import deals, price_bar
 from app.services import price_zones as pz
 
 USER_CASE = [120, 135, 150, 170]
+# the zones these cases were drawn with (the defaults until 2026-10-14): the geometry stays put when the defaults move
+ZONES = {"used": (30, 50, 80, 90), "new": (75, 100, 110, 125)}
 
 
 def _eur(v):
@@ -33,7 +35,7 @@ def _no_touch(labels, px):
 
 
 def test_users_case_geometry():
-    b = price_bar.layout(deals.position(139, deals.stats(USER_CASE), 202.30), "€ 139")
+    b = price_bar.layout(deals.position(139, deals.stats(USER_CASE), 202.30, zones=ZONES), "€ 139")
     assert [(s["level"], s["from"], s["to"]) for s in b["segments"]] == [
         ("bargain", 0, 27.3), ("cheap", 27.3, 45.5), ("fair", 45.5, 72.7), ("expensive", 72.7, 81.8),
         ("very_expensive", 81.8, 100)]
@@ -48,7 +50,7 @@ def test_users_case_geometry():
 
 def test_new_label_gives_way_to_the_price():
     """Next to the ring "New" moves under the marker, first in the lane (the "100 %" cut there gives way)."""
-    b = price_bar.layout(deals.position(195.02, None, 199.0, "new"), "€ 195,02")
+    b = price_bar.layout(deals.position(195.02, None, 199.0, "new", zones=ZONES), "€ 195,02")
     assert b["ring"] == 70.0 and b["new_at"] == 71.4 and [lb["text"] for lb in b["top"]] == ["€ 195,02"]
     assert b["lane"][0] == {"kind": "new", "x": 71.4, "anchor": "c", "text": "New", "from_px": None}
     assert "100 %" not in [lb["text"] for lb in b["lane"]] and "75 %" in [lb["text"] for lb in b["lane"]]

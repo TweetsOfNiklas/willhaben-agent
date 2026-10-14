@@ -53,8 +53,12 @@ def price_zone_view() -> dict[str, Any]:
 @router.post("/settings/prices")
 async def settings_prices(request: Request):
     """The price zones (Settings → Prices → Price rating): saved only when both groups are valid; a refusal
-    redirects with an error code, never with text from the request."""
+    redirects with an error code, never with text from the request. reset=1 sets both groups back to the defaults,
+    whatever the fields hold."""
     form = await request.form()
+    if form.get("reset"):
+        price_zones.reset()
+        return RedirectResponse(f"/settings/prices?msg={quote(t('Default values restored'), safe='')}", status_code=303)
     try:
         price_zones.save({g: form.getlist(g) for g in price_zones.GROUPS})
     except price_zones.ZoneError as e:

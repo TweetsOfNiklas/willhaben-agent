@@ -16,9 +16,10 @@ from app.i18n import t
 KEY = "price_zones"     # JSON {"used": [4 ints], "new": [4 ints]}, only groups that differ from DEFAULTS; "" = defaults
 NAMES = ("bargain", "cheap", "fair", "expensive", "very_expensive")
 GROUPS = ("used", "new")
-# the "from" limits in % of the new price: from X % on the next label applies. New items: everything below the lowest
-# shop price is at least cheap (that price is usually below the RRP already)
-DEFAULTS: dict[str, tuple[int, int, int, int]] = {"used": (30, 50, 80, 90), "new": (75, 100, 110, 125)}
+# the "from" limits in % of the new price: from X % on the next label applies. Used: 55-74 % is the usual resale price
+# of a used item in good condition; from 90 % on, new costs barely more and comes with warranty and return rights.
+# New: a private sale has no return right, so fair is a bit below the lowest shop price; at that price, order it
+DEFAULTS: dict[str, tuple[int, int, int, int]] = {"used": (35, 55, 75, 90), "new": (70, 85, 100, 115)}
 LOW, HIGH = 1, 300
 
 
@@ -76,6 +77,12 @@ def save(zones: dict[str, Any]) -> dict[str, tuple[int, ...]]:
     custom = {g: list(v) for g, v in parsed.items() if v != DEFAULTS[g]}
     set_setting(KEY, json.dumps(custom) if custom else "")
     return parsed
+
+
+def reset() -> dict[str, tuple[int, ...]]:
+    """Both groups back to the defaults (the page's "Reset to default values")."""
+    set_setting(KEY, "")
+    return dict(DEFAULTS)
 
 
 def _cents(v: float) -> int:

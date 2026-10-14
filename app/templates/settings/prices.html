@@ -9,7 +9,7 @@
   {% for g, title, hint in [('used', _("Used items"), _("Also like new, refurbished and ads whose condition the site does not say.")),
                             ('new', _("New items"), _("Only ads the site marks as new, and shop deals from Preisjäger. Geizhals shows the lowest shop price, which is usually below the RRP."))] %}
     <fieldset class="flex min-w-0 flex-col gap-3 border-t border-base-300 pt-4 first-of-type:border-t-0 first-of-type:pt-0">
-      <div class="flex items-center justify-between gap-2"><span class="font-medium">{{ title }}</span><button type="button" class="btn btn-ghost btn-xs" @click="reset('{{ g }}')">{{ _("Default values") }}</button></div>
+      <div class="flex items-center justify-between gap-2"><span class="font-medium">{{ title }}</span><button type="button" class="btn btn-ghost btn-xs" title="{{ v.defaults[g]|join(' / ') }} %" @click="reset('{{ g }}')">{{ _("Default values") }}</button></div>
       <small class="-mt-2 text-[12.5px] text-muted">{{ hint }}</small>
       {# preview: the zones, the new price at 100 %, the example as a ring (drawn by the script only) #}
       <div class="relative mx-2 pt-6 pb-1" aria-hidden="true" x-cloak>
@@ -37,13 +37,14 @@
     </fieldset>
   {% endfor %}
     <p class="text-[12.5px] text-muted">{{ _("Without a new price the comparable ads decide: the middle half of their prices counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.") }}</p>
-    <div><button class="btn btn-primary" :disabled="!ok('used') || !ok('new')">{{ _("Save") }}</button></div>
+    <div class="flex flex-wrap gap-2"><button class="btn btn-primary" :disabled="!ok('used') || !ok('new')">{{ _("Save") }}</button>
+      <button name="reset" value="1" class="btn btn-ghost" formnovalidate :disabled="isDefault()" data-confirm="{{ _('Set both groups back to the default values and save?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Reset to default values") }}</button></div>
   </form>
 </section>
 <script>
 document.addEventListener('alpine:init', () => Alpine.data('priceZones', (o) => ({
   // the zones of both groups as typed, raw text (written z['new']: new is a keyword)
-  z: {used: [...o.used], 'new': [...o['new']]}, d: o.defaults, names: o.names, labels: o.labels, t: o.t, ax: o.axis,
+  z: {used: [...o.used], 'new': [...o['new']]}, saved: {used: o.used, 'new': o['new']}, d: o.defaults, names: o.names, labels: o.labels, t: o.t, ax: o.axis,
   probe: {used: 68, 'new': 98},
   cls: {bargain: 'bg-lvl-bargain', cheap: 'bg-lvl-cheap', fair: 'bg-lvl-fair', expensive: 'bg-lvl-expensive', very_expensive: 'bg-lvl-very_expensive'},
   // the server's price_zones.parse: the text of four whole numbers 1..300 ("1e2" is not one), strictly ascending
@@ -62,5 +63,8 @@ document.addEventListener('alpine:init', () => Alpine.data('priceZones', (o) => 
     if (i === 0) return this.t.below.replace('{n}', v[0]); if (i === 4) return this.t.from.replace('{n}', v[3]);
     return v[i] - 1 === v[i - 1] ? `${v[i - 1]} %` : `${v[i - 1]}–${v[i] - 1} %`; },
   reset(g) { this.z[g] = [...this.d[g]]; },
+  // "Reset to default values" has nothing to do once the saved and the typed zones of both groups are the defaults
+  same(a, b) { return a.every((x, i) => +x === +b[i]); },
+  isDefault() { return ['used', 'new'].every(g => this.same(this.saved[g], this.d[g]) && this.same(this.z[g], this.d[g])); },
 })));
 </script>
