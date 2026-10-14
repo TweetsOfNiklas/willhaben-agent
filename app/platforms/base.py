@@ -91,6 +91,10 @@ class Platform(ABC):
     def ref(self, ad_id: str) -> str:
         return ad_ref(self.id, ad_id)
 
+    def price_dropped(self, old: float, new: float) -> bool:
+        """Is `new` a price drop from `old` for the agents (not just the same price shown differently)?"""
+        return new < old
+
     @property
     @abstractmethod
     def limiter(self) -> RateLimiter: ...

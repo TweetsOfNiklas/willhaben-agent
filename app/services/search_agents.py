@@ -582,7 +582,7 @@ async def _run_agent(agent_id: int) -> RunResult:
                 continue
             prev_price, prev_published = hit.price, hit.published_at
             _apply(hit, ad)
-            if prev_price is not None and ad.price is not None and ad.price < prev_price:
+            if prev_price is not None and ad.price is not None and _site(ad.platform).price_dropped(prev_price, ad.price):
                 hit.price_dropped_at = utcnow()
                 hit.old_price = prev_price
                 hit.scam_flags = scam.flags(hit, scam_ctx, home_country=_site(hit.platform).home_country) or None   # a new red flag?

@@ -284,3 +284,10 @@ def test_viewer_shows_the_item(platform):
         page = c.get(f"/hits/ad/ebay/{ITEM}").text
     assert "Thalgau, Österreich" in page and "Maxi-Cosi Mura 4" in page and "Verkaufe ein gut erhaltenes" in page
     assert "no longer online" not in page and "shows no details here" not in page
+
+
+def test_a_price_without_the_swiss_vat_is_no_price_drop():
+    p = ebay.EbayPlatform()
+    assert not p.price_dropped(162.15, 150) and not p.price_dropped(43.24, 40)     # 10-14: a Swiss exit, then an EU one
+    assert p.price_dropped(162.15, 140) and not p.price_dropped(150, 162.15)
+    assert platforms.get("willhaben").price_dropped(162.15, 150)                  # other sites: any lower price

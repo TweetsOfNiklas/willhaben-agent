@@ -51,6 +51,7 @@ PAGE_SIZE = "60"
 WARMUP_RETRIES = 2
 VIENNA = ZoneInfo("Europe/Vienna")
 DEFAULT_LOCATION = "1"                  # LH_PrefLoc: 1 = Austria, 3 = EU, 2 = worldwide
+SWISS_VAT = 1.081                       # what eBay adds to prices for a visitor in Switzerland
 SORTS = {"newest": "10", "relevance": "12", "price_asc": "15", "price_desc": "16"}
 _MONTHS = {m: i for i, names in enumerate((("jan",), ("feb",), ("mar", "mär"), ("apr",), ("may", "mai"), ("jun",),
                                            ("jul",), ("aug",), ("sep",), ("oct", "okt"), ("nov",), ("dec", "dez")), 1)
@@ -552,6 +553,11 @@ class EbayPlatform(Platform):
     @property
     def limiter(self) -> RateLimiter:
         return ebay_limiter()
+
+    def price_dropped(self, old: float, new: float) -> bool:
+        """Through a Swiss VPN exit eBay showed prices with Swiss VAT added (10-14: 28 of 85 stored hits at exactly
+        x1.081); the same price from an EU exit is no price drop, only the stored price is put right."""
+        return new < old and round(new * SWISS_VAT, 2) != round(old, 2)
 
     @property
     def client(self) -> EbayClient:
