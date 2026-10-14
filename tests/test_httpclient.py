@@ -131,7 +131,8 @@ async def test_public_client_is_a_platform_client():
 
 # ------------------------------------------------------------------ through the VPN (app/platforms/vpn.py)
 class FakeTunnel:
-    """Hands out routes http://exit1, http://exit2, ...; failed() moves on. `dead`: no exit works (fail closed)."""
+    """Hands out routes http://exit1, http://exit2, ... (each a server of the shared connection); failed() moves on,
+    as a shuffle would. `dead`: no server works (fail closed)."""
 
     def __init__(self, dead=False):
         from app.platforms.vpn import Route
@@ -140,7 +141,7 @@ class FakeTunnel:
 
     async def ensure(self):
         if self.dead:
-            raise PlatformError("No working VPN exit for Fake")
+            raise PlatformError("No working VPN server for Fake right now")
         if self.route is None:
             self.n += 1
             self.route = self.Route(f"http://exit{self.n}", self.n)
@@ -170,7 +171,7 @@ def _vpn_client(answers_by_exit: dict, tunnel: FakeTunnel, cls=HttpPlatformClien
     return c, transports, built
 
 
-async def test_a_refused_exit_moves_on_without_pausing_the_site():
+async def test_a_refused_server_moves_on_without_pausing_the_site():
     tunnel = FakeTunnel()
     c, transports, built = _vpn_client({"http://exit1": [(403, b"cloudflare")], "http://exit2": [(200, b"{}")]}, tunnel)
     before = access_stats.last_hour(platform="fake")
@@ -187,18 +188,18 @@ async def test_three_refusals_give_up_for_this_request():
     c, _, built = _vpn_client({f"http://exit{i}": [(429 if i == 2 else 403, b"")] for i in (1, 2, 3)}, tunnel)
     with pytest.raises(Blocked) as info:
         await c._get("https://fake.example/api")
-    assert info.value.sent and "refused the VPN exit" in str(info.value) and len(built) == 3
+    assert info.value.sent and "refused the VPN server" in str(info.value) and len(built) == 3
     assert [f[1] for f in tunnel.failures] == ["blocked", "rate", "blocked"] and c.limiter.cooling_down_s == 0
 
 
-async def test_no_exit_means_no_request_at_all():
+async def test_no_server_means_no_request_at_all():
     c, _, built = _vpn_client({}, FakeTunnel(dead=True))
-    with pytest.raises(PlatformError, match="No working VPN exit"):
+    with pytest.raises(PlatformError, match="No working VPN server"):
         await c._get("https://fake.example/api")
     assert built == []                            # never a direct transport (factory(None))
 
 
-async def test_an_unreachable_exit_moves_on():
+async def test_an_unreachable_server_moves_on():
     tunnel = FakeTunnel()
     c, _, _ = _vpn_client({"http://exit1": [TransportError("proxy connect refused")], "http://exit2": [(200, b"{}")]}, tunnel)
     assert (await c._get("https://fake.example/api")).status_code == 200
@@ -256,15 +257,33 @@ async def test_ebay_warms_up_on_an_exit_instead_of_leaving_it():
     c = ebay.EbayClient(transport=FakeTransport([]))
     c.limiter = RateLimiter(0, name="eBay")
     c._factory, c._tunnel, c._transport = exits.__getitem__, (lambda: tunnel), None
-    assert len((await c.search_page({"_nkw": "iphone"})).ads) == 5          # the warm-up 403 keeps the exit
+    assert len((await c.search_page({"_nkw": "iphone"})).ads) == 5          # the warm-up 403 keeps the server
     assert tunnel.failures == [] and len(exits["http://exit1"].calls) == 2
     assert len((await c.search_page({"_nkw": "ipad"})).ads) == 5            # exit1 gone: exit2 warms up anew
     assert tunnel.failures == [("http://exit1", "unreachable")] and len(exits["http://exit2"].calls) == 2
-    assert len((await c.search_page({"_nkw": "ipod"})).ads) == 5            # warm: a 403 refuses the exit
+    assert len((await c.search_page({"_nkw": "ipod"})).ads) == 5            # warm: a 403 refuses the server
     assert tunnel.failures[1:] == [("http://exit2", "blocked")] and len(exits["http://exit3"].calls) == 2
 
 
-async def test_ebay_keeps_the_exit_when_the_description_is_refused():
+async def test_a_bot_page_through_the_vpn_refuses_the_server():
+    from app.platforms import ebay
+    from tests.conftest import FIXTURES
+
+    html = {"content-type": "text/html"}
+    page = (FIXTURES / "ebay_search.html").read_bytes()
+    exits = {"http://exit1": FakeTransport([(200, b"<html>Pardon Our Interruption</html>", html)]),
+             "http://exit2": FakeTransport([(503, b"<html>", {**html, "cf-mitigated": "challenge"})]),
+             "http://exit3": FakeTransport([(200, page, html)])}
+    tunnel = FakeTunnel()
+    c = ebay.EbayClient(transport=FakeTransport([]))
+    c.limiter = RateLimiter(0, name="eBay")
+    c._factory, c._tunnel, c._transport = exits.__getitem__, (lambda: tunnel), None
+    assert len((await c.search_page({"_nkw": "iphone"})).ads) == 5          # eBay's page in place of the results
+    assert tunnel.failures == [("http://exit1", "botcheck"), ("http://exit2", "botcheck")]   # and a challenge
+    assert c.limiter.cooling_down_s == 0 and c.proxy == "http://exit3"
+
+
+async def test_ebay_keeps_the_server_when_the_description_is_refused():
     from app.platforms import ebay
     from tests.conftest import FIXTURES
 
@@ -301,15 +320,29 @@ def test_a_proxy_and_a_mock_transport_do_not_mix():
     assert curl.proxy == "http://127.0.0.1:1"
 
 
-# ------------------------------------------------------------------ the VPN test's Trial (app/services/vpn_check.py)
-async def test_a_trial_tries_one_exit_only():
+async def test_a_request_that_waited_for_the_limiter_never_takes_an_old_route():
+    tunnel = FakeTunnel()
+    c, _, built = _vpn_client({"http://exit2": [(200, b"{}")]}, tunnel)
+    await tunnel.ensure()                         # exit1
+    async with c.limiter:                         # another request holds the limiter ...
+        task = asyncio.create_task(c._get("https://fake.example/api"))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        tunnel.route = None                       # ... while the connection changes (a shuffle)
+        await tunnel.ensure()
+    assert (await task).status_code == 200
+    assert built == ["http://exit2"] and tunnel.failures == [] and c.limiter.last_hour == 2   # the wait was refunded
+
+
+# ------------------------------------------------------------------ the shuffle's Trial (app/services/vpn_check.py)
+async def test_a_trial_tries_one_server_only_and_leaves_the_marks_to_the_shuffle():
     tunnel = FakeTunnel()
     c, _, built = _vpn_client({"http://exit1": [(403, b"cloudflare")], "http://exit2": [(200, b"{}")]}, tunnel)
     tr = Trial(await tunnel.ensure())
     with trial(tr), pytest.raises(Blocked) as info:
         await c._get("https://fake.example/api")
     assert info.value.sent and (tr.refused, tr.detail, tr.sent, tr.status) == ("blocked", "HTTP 403", 1, 403)
-    assert built == ["http://exit1"] and tunnel.failures == [("http://exit1", "blocked")]   # not on to exit2
+    assert built == ["http://exit1"] and tunnel.failures == []      # not on to exit2, and no second shuffle
     assert c.limiter.cooling_down_s == 0
 
     tunnel = FakeTunnel()
@@ -317,16 +350,16 @@ async def test_a_trial_tries_one_exit_only():
     tr = Trial(await tunnel.ensure())
     with trial(tr), pytest.raises(PlatformError, match="Network error through the VPN"):
         await c._get("https://fake.example/api")
-    assert (tr.refused, tr.sent) == ("unreachable", 1) and tunnel.failures == [("http://exit1", "unreachable")]
-    assert tunnel.details == ["proxy connect refused"] and built == ["http://exit1"]
+    assert (tr.refused, tr.sent, tr.detail) == ("unreachable", 1, "proxy connect refused")
+    assert tunnel.failures == [] and built == ["http://exit1"]
 
 
-async def test_a_trial_sends_nothing_when_the_exit_moved():
+async def test_a_trial_sends_nothing_when_the_server_moved():
     tunnel = FakeTunnel()
     c, _, built = _vpn_client({"http://exit2": [(200, b"{}")]}, tunnel)
     tr = Trial(await tunnel.ensure())
-    await tunnel.failed(tr.route, "blocked")      # another request found exit1 refused ...
-    await tunnel.ensure()                         # ... and moved on to exit2
+    await tunnel.failed(tr.route, "blocked")      # the connection left exit1 ...
+    await tunnel.ensure()                         # ... for exit2
     with trial(tr), pytest.raises(ExitMoved):
         await c._get("https://fake.example/api")
     assert built == [] and tr.sent == 0
@@ -349,7 +382,7 @@ async def test_a_trial_notes_a_challenge_and_the_content_type():
     with trial(tr):
         r = await c._get("https://fake.example/api")
     assert r.status_code == 503 and tr.challenge and tr.status == 503 and "html" in tr.ctype and not tr.refused
-    assert tunnel.failures == []                  # the test decides about bot checks, not the client
+    assert tunnel.failures == []                  # the shuffle decides about bot checks, not the client
 
 
 async def test_a_cancelled_trial_request_drops_its_transport():

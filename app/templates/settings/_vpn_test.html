@@ -1,77 +1,106 @@
-{# Settings → VPN → VPN test (app/services/vpn_check.py): each site with the VPN on searches through its exit; when the
-   site does not answer properly the next exit is tried until one works, which stays in use.
-   vt = vpn_test(): {live, stopping, blocked, run, progress, summary, finished_at, elapsed, rows: [{pid, name, status
-   (idle|waiting|testing|done), verdict, label, tone, message, hint, counters, kept, ago, attempts: [{exit, label, tone, detail,
-   cost: [requests, seconds]}], action: {kind (test|more|forget|settings), label, href} or None, note}]}. No rows before
-   the first test.
-   While a test runs the site list asks for itself every 2 s and brings the progress and the clock along (hx-select-oob,
-   innerHTML): the header, its live region and the Stop button stay in place. The first poll after the end swaps the
-   whole panel (HX-Retarget, main.py). Live rows have no <details> (a swap would close them) and no buttons. A test that
-   ends while the page is open, also one started in another tab, refreshes this panel and #vpn-sites
-   (data-refresh-on-lane="vpn", base.html). While one site is tested again the other rows (kept) show no exits: they do
-   not change. vpn_note: why a test did not start. #}
+{# Settings → VPN → the connection (app/services/vpn_check.py): the one server every site with the VPN on shares, when
+   it shuffles next, and the last shuffle with the test of every site through the server it kept.
+   vt = vpn_test(): {live, blocked, profile, server, since, connected, error, interval, next_at, next_due, pending, run,
+   progress, elapsed, summary, tone, trigger, finished_at, rows: [{pid, name, label, tone, message, spinner, action:
+   {label, href} or None}], servers: [{name, label, tone, kept, parts, secs}]}.
+   While a shuffle runs, #vpn-test-body asks for itself every 2 s and brings the progress and the clock along
+   (hx-select-oob, innerHTML): the header and its live region stay in place. The first poll after the end swaps the
+   whole panel (HX-Retarget, main.py). Live, the servers are a plain list (a swap would close a <details>). A shuffle
+   that ends while the page is open refreshes this panel and #vpn-sites (data-refresh-on-lane="vpn", base.html).
+   vpn_note: why no shuffle started. #}
 {% import "_ui.html" as ui %}
-{# one exit tried: name, verdict, then detail and cost as one text that wraps as a whole on phones, never inside "15 s" #}
-{% macro attempt(a) -%}
-<li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5"><span class="break-all font-medium tabular-nums">{{ a.exit }}</span>{{ ui.pill(a.label, a.tone, false) }}
-  {%- if a.detail or a.cost %}<span class="min-w-0 break-words tabular-nums">{{ a.detail }}
-  {%- for c in a.cost %}{% if a.detail or not loop.first %} · {% endif %}<span class="whitespace-nowrap">{{ c }}</span>{% endfor %}</span>{% endif %}</li>
-{%- endmacro %}
-{# a row's next step: a test of that site alone, or a link to its settings; on phones full width, as tall as its text #}
-{% macro action(r, a) -%}
-{%- if a.kind == 'settings' %}<a href="{{ a.href }}" class="btn btn-sm max-sm:h-auto max-sm:min-h-8 max-sm:w-full max-sm:py-1.5">{{ a.label }}</a>
-{%- else %}<form method="post" action="/settings/vpn/test" hx-post="/settings/vpn/test" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0">
-  <input type="hidden" name="site" value="{{ r.pid }}">{% if a.kind == 'forget' %}<input type="hidden" name="forget" value="1">{% endif %}
-  <button class="btn btn-sm max-sm:h-auto max-sm:min-h-8 max-sm:w-full max-sm:py-1.5">{{ a.label }}</button></form>{% endif %}
+{# one server tried: name, outcome, then the refusals as text that wraps like a sentence, never inside "15 s" #}
+{% macro server(s) -%}
+<li class="leading-6"><span class="break-all font-medium tabular-nums">{{ s.name }}</span> {{ ui.pill(s.label, s.tone, false) }}
+  {%- if s.kept %} {{ ui.pill(_("in use"), 'brand', false) }}{% endif %}
+  {%- if s.parts or s.secs %} <span class="break-words">{{ s.parts|join(' · ') }}{% if s.secs %}{% if s.parts %} · {% endif %}<span class="whitespace-nowrap tabular-nums">{{ s.secs }}</span>{% endif %}</span>{% endif %}</li>
 {%- endmacro %}
 {% set vt = vpn_test() %}
-<section id="vpn-test" data-refresh-on-lane="vpn" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="vpn-test" data-refresh-on-lane="vpn" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="flex min-w-0 flex-1 basis-[260px] flex-col gap-0.5">
-      <span class="font-medium">{{ _("VPN test") }}</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="font-medium">{{ _("Connection") }}</span>
+        {% if vt.live %}{{ ui.pill(_("Testing") if vt.profile else _("Changing server"), 'brand') }}
+        {% elif vt.connected %}{{ ui.pill(_("Connected"), 'ok') }}
+        {% elif vt.server %}{{ ui.pill(_("Ready"), '') }}
+        {% elif vt.error %}{{ ui.pill(_("No server"), 'bad') }}{% endif %}
+      </div>
       <small class="text-[12.5px] text-muted">
         {%- if vt.live %}<span id="vpn-test-progress" aria-live="polite">{{ vt.progress }}</span> · <span id="vpn-test-clock" class="tabular-nums">{{ _("{n} s", n=vt.elapsed) }}</span>
-        {%- elif vt.run %}{{ vt.summary }} · <span class="whitespace-nowrap">{{ vt.finished_at|ago }}</span>
-        {%- else %}{{ _("For each site with the VPN on, a test search goes through its exit. If the site does not answer, the next exit takes its turn until one works; the site keeps that one.") }}{% endif %}</small>
+        {%- elif vt.profile %}{{ _("All sites with the VPN on use the profile. It is tested every few hours and at once when a site refuses it: every site sends one search through it.") }}
+        {%- else %}{{ _("All sites with the VPN on share one EU server. It changes every few hours, and at once when a site refuses it; then every site sends one search through the new one, until one suits all.") }}{% endif %}</small>
     </div>
-    {% if vt.live %}
-    <form method="post" action="/settings/vpn/test/stop" hx-post="/settings/vpn/test/stop" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
-      <button class="btn btn-sm max-sm:w-full"{% if vt.stopping %} disabled{% endif %}>{{ ui.icon('x', 14) }}{{ _("Stop") }}</button></form>
-    {% else %}
-    <form method="post" action="/settings/vpn/test" hx-post="/settings/vpn/test" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
-      <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.blocked %} disabled{% endif %}>{{ ui.icon('play', 14) }}{{ _("Test again") if vt.run else _("Test the sites") }}</button></form>
+    <form method="post" action="/settings/vpn/shuffle" hx-post="/settings/vpn/shuffle" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
+      <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.live or vt.blocked %} disabled{% endif %}>{{ ui.icon('play' if vt.profile else 'refresh', 14) }}{{ _("Test now") if vt.profile else _("Shuffle now") }}</button></form>
+  </div>
+  {% if vt.blocked %}<small class="text-[12.5px] text-warning">{{ vt.blocked }}</small>{% endif %}
+  {% if vpn_note and vpn_note != vt.blocked %}<div role="status" class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ vpn_note }}</div>{% endif %}
+
+  <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-[13px] max-sm:grid-cols-1 max-sm:gap-y-0">
+    <dt class="text-muted">{{ _("Profile") if vt.profile else _("Server") }}</dt>
+    <dd class="m-0 min-w-0 max-sm:mb-2">
+      {%- if vt.server %}<span class="break-all font-medium tabular-nums">{{ vt.server }}</span>{% if vt.since %} <span class="whitespace-nowrap text-muted">· {{ _("since {time}", time=vt.since|local) }}</span>{% endif %}
+      {%- elif vt.error %}<span class="text-error">{{ vt.error }}</span>
+      {%- else %}<span class="text-muted">{{ _("none yet: the first shuffle picks one") }}</span>{% endif %}</dd>
+    <dt class="text-muted">{{ _("Next test") if vt.profile else _("Next shuffle") }}</dt>
+    <dd class="m-0 min-w-0 max-sm:mb-2">
+      {%- if vt.live %}<span class="text-muted">{{ _("after this one") }}</span>
+      {%- elif vt.blocked %}<span class="text-muted">–</span>
+      {%- elif vt.next_due or not vt.next_at %}<span>{{ _("within a minute") }}</span>
+      {%- else %}<span class="whitespace-nowrap">{{ vt.next_at|ago }}</span> <span class="whitespace-nowrap text-muted">· {{ vt.next_at|local('%H:%M') }}</span>{% endif %}
+      {%- if vt.pending %}<span class="block text-[12.5px] text-muted">{{ vt.pending }}</span>{% endif %}</dd>
+    <dt class="text-muted">{{ _("Every") }}</dt>
+    <dd class="m-0">
+      <form method="post" action="/settings/vpn/interval" class="m-0 flex flex-wrap items-center gap-2">
+        <label class="input input-sm w-[7.5rem] bg-base-100"><input type="number" name="hours" min="1" max="168" step="1" value="{{ vt.interval }}" required aria-label="{{ _('Hours between two shuffles') }}" class="tabular-nums"><span class="text-muted">{{ _("hours") }}</span></label>
+        <button class="btn btn-sm">{{ _("Save") }}</button>
+      </form></dd>
+  </dl>
+
+  {% if vt.run %}
+  <div id="vpn-test-body" class="flex flex-col gap-2 border-t border-base-300 pt-3"
+    {%- if vt.live %} hx-get="/settings/vpn/test" hx-trigger="every 2s" hx-select="#vpn-test-body" hx-swap="outerHTML" hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML"{% endif %}>
+    <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+      {{ ui.eyebrow(_("This test") if vt.live and vt.profile else _("This shuffle") if vt.live else _("Last test") if vt.profile else _("Last shuffle")) }}
+      <small class="text-[12px] text-muted">{{ vt.trigger }}{% if not vt.live and vt.finished_at %} · <span class="whitespace-nowrap">{{ vt.finished_at|ago }}</span>{% endif %}</small>
+    </div>
+    {% if vt.summary %}<span class="break-words text-[13px] font-medium {{ {'bad': 'text-error', 'warn': 'text-warning'}.get(vt.tone, '') }}">{{ vt.summary }}</span>{% endif %}
+    {# sites with nothing to say as chips in one line, the others with their message below #}
+    {% set quiet = vt.rows|rejectattr('message')|list %}
+    {% set loud = vt.rows|selectattr('message')|list %}
+    {% if quiet %}
+    <ul class="m-0 flex list-none flex-wrap gap-x-4 gap-y-1.5 p-0">
+      {% for r in quiet %}<li class="inline-flex items-center gap-1.5"><span class="font-medium">{{ r.name }}</span>
+        {%- if r.spinner %}<span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-label="{{ _('asking') }}"></span>
+        {%- elif r.label %}{{ ui.pill(r.label, r.tone, r.tone != '') }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if loud %}
+    <ul class="m-0 flex list-none flex-col p-0">
+      {% for r in loud %}
+      <li class="flex min-w-0 flex-col gap-1 border-t border-base-300 py-2 {{ '' if quiet else 'first:border-t-0' }}">
+        <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          <span class="font-medium">{{ r.name }}</span>
+          {% if r.spinner %}<span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>
+          {% elif r.label %}{{ ui.pill(r.label, r.tone) }}{% endif %}
+        </div>
+        {% if r.message %}<span class="break-words text-[12.5px] {{ 'text-error' if r.tone == 'bad' else 'text-muted' }}">{{ r.message }}</span>{% endif %}
+        {% if r.action and not vt.live %}<a href="{{ r.action.href }}" class="btn btn-sm self-start max-sm:h-auto max-sm:min-h-8 max-sm:w-full max-sm:py-1.5">{{ r.action.label }}</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if vt.servers and vt.live %}
+    <div class="flex flex-col gap-1 text-[12.5px] text-muted">
+      <span>{{ _("Servers tried") }}</span>
+      <ol class="m-0 flex flex-col pl-4">{% for s in vt.servers %}{{ server(s) }}{% endfor %}</ol>
+    </div>
+    {% elif vt.servers %}
+    <details class="text-[12.5px] text-muted"{% if vt.tone == 'bad' %} open{% endif %}><summary class="cursor-pointer">{{ _("Servers tried ({n})", n=vt.servers|length) }}</summary>
+      <ol class="mt-1 flex flex-col pl-4">{% for s in vt.servers %}{{ server(s) }}{% endfor %}</ol></details>
     {% endif %}
   </div>
-  {% if vt.blocked %}<small class="text-[12.5px] text-warning">{{ vt.blocked }}</small>
-  {% elif not vt.run %}<small class="text-[12.5px] text-muted">{{ _("About 10 s per site, longer when exits fail; every try is a real search.") }}</small>{% endif %}
-  {% if vpn_note and vpn_note != vt.blocked %}<div role="status" class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ vpn_note }}</div>{% endif %}
-  {% if vt.rows %}
-  <ul id="vpn-test-rows" class="m-0 flex list-none flex-col p-0"
-    {%- if vt.live %} hx-get="/settings/vpn/test" hx-trigger="every 2s" hx-select="#vpn-test-rows" hx-swap="outerHTML" hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML"{% endif %}>
-    {% for r in vt.rows %}
-    {% set act = r.action if not vt.live and not vt.blocked else none %}
-    <li class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 py-2.5">
-      <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <span class="font-medium">{{ r.name }}</span>
-        {% if r.status == 'testing' %}<span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>
-        {% elif r.label %}{{ ui.pill(r.label, r.tone) }}{% endif %}
-        {% if r.counters %}<small class="ml-auto shrink-0 text-[12px] text-muted tabular-nums">{{ r.counters }}{% if r.ago %} · <span class="whitespace-nowrap">{{ r.ago|ago }}</span>{% endif %}</small>{% endif %}
-      </div>
-      {% if r.message %}<span class="break-words text-[12.5px] {{ 'text-error' if r.tone == 'bad' else 'text-muted' }}">{{ r.message }}</span>{% endif %}
-      {% if r.hint %}<span class="break-words text-[12.5px] text-muted">{{ r.hint }}</span>{% endif %}
-      {% if r.attempts and vt.live and not r.kept %}
-      <ul class="m-0 flex list-none flex-col gap-0.5 p-0 text-[12.5px] text-muted">
-        {% if r.attempts|length > 3 %}<li>{{ _("… and {n} before", n=r.attempts|length - 3) }}</li>{% endif %}
-        {% for a in r.attempts[-3:] %}{{ attempt(a) }}{% endfor %}
-      </ul>
-      {% elif r.attempts and not vt.live %}
-      <details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("Exits tried ({n})", n=r.attempts|length) }}</summary>
-        <ol class="mt-1 flex flex-col gap-0.5 pl-4">{% for a in r.attempts %}{{ attempt(a) }}{% endfor %}</ol></details>
-      {% endif %}
-      {% if act %}<div>{{ action(r, act) }}</div>{% endif %}
-      {% if r.note and not vt.live %}<span class="text-[12.5px] text-muted">{{ r.note }}</span>{% endif %}
-    </li>
-    {% endfor %}
-  </ul>
   {% endif %}
 </section>

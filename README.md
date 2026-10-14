@@ -387,36 +387,42 @@ the Claude screening, the price check, the product search and the ad viewer, wit
 never uses it, so chats, your ads and publishing keep your own IP. Set it up in **Settings → Platforms → VPN** with one
 of two uploads:
 
-- **Config collection (.zip):** many configs, e.g. Mullvad's "all servers, Linux" download as it comes. Each site starts
-  with servers in its own country, then nearby ones, then the rest. When the site blocks an exit (willhaben's
-  Cloudflare answers 403 for some VPN addresses) or it does not answer, the app moves on to the next config. That
-  config is skipped for that site for a day (blocked) or an hour (rate limit, unreachable).
-- **Dedicated profile (.conf):** one config, used as it is.
+- **Config collection (.zip):** many configs, e.g. Mullvad's "all servers, Linux" download as it comes. The app uses
+  one server at a time and only servers in EU countries, Austria first, then Germany and the neighbours, then the rest
+  of the EU. Never one outside the EU: through a Swiss server eBay.at shows every price with Swiss VAT (+8.1 %), and
+  the price checks would see drops that are none.
+- **Dedicated profile (.conf):** one config, used as it is (also outside the EU: your choice).
 
-Each site has its own switch, on its settings page and on the VPN page. The first upload switches it on for willhaben;
-Kleinanzeigen stays off until you switch it on.
+Each site has its own switch, on its settings page and on the VPN page; Geizhals (product and new-price lookups) has
+one on the VPN page, off by default. The first upload switches it on for willhaben; the others stay off until you
+switch them on.
 
-**Fail closed:** when a site's switch is on and no exit works, its anonymous requests pause with an error, and the
-connection tile on Home turns red. They never fall back to your home connection. "Forget blocks" gives every exit a
-new chance.
+**One connection, shuffled:** every site with its switch on sends through the same server. Every 6 hours (Settings →
+VPN, "Every … hours"), on "Shuffle now", after an upload, and at once when a site refuses the server (403/429, a bot
+check) or it does not answer, the app picks another random server and tests it: every site with the VPN on, and
+Geizhals when its switch is on, sends one search through it with its own client and checks. When all answer, the
+server stays. Otherwise the server is skipped for the refusing sites (a day when blocked, an hour for a rate limit,
+no answer or a bot check) and the next random one is tried, up to 10; when none suits all, the one most sites answer
+through stays and the others pause until the next shuffle. A dedicated profile is only tested, never swapped. Every
+test request counts towards the site's hourly budget: per shuffle at most a quarter of it and half of what is left of
+the hour; a site that cannot afford it stays untested and keeps using the server. Automatic shuffles start at least 5
+minutes after the last one and at most 3 an hour; requests wait up to a minute for a shuffle under way. The time of
+the last shuffle is stored, so a restart keeps the schedule.
 
-**Test:** "Test the sites" under "VPN test" on the VPN page sends each site with the VPN on one search for "fahrrad"
-through its exit, with the site's own client and checks. When the site refuses the exit (403/429), answers with a bot
-check or does not answer, the next exit is tried, one at a time, until one works; that exit stays in use. Failed exits
-are skipped for that site as usual (a bot check for an hour). Every try is a real search and counts towards the site's
-hourly budget: per site at most 10 exits, 5 minutes, a quarter of its hourly budget and half of what is left of the
-hour; "Test 10 more" goes on, for that site only (the other sites keep their last result). Search agents keep running
-meanwhile. The test never sends anything from your own connection.
+**Fail closed:** when a site's switch is on and there is no working server, while the server changes, or while the
+site is paused on the current server, its anonymous requests fail with an error and the connection tile on Home
+turns red. They never fall back to your home connection. "Forget blocks" gives every server a new chance and ends
+every pause.
 
-How it works: each config in use runs as one [wireproxy](https://github.com/windtf/wireproxy) process (userspace
+How it works: the server in use runs as one [wireproxy](https://github.com/windtf/wireproxy) process (userspace
 WireGuard, part of the image: no root, no tun device, no `NET_ADMIN`). It offers an HTTP proxy on `127.0.0.1` that
-only the anonymous clients are given. Host names are resolved inside the tunnel. Before an exit is used, a `CONNECT`
-to the site checks that it gets through, without sending an HTTP request to it. A blocked exit does not trigger
-willhaben's back-off, because that limiter also paces the logged-in session on your home IP.
+only the anonymous clients are given. Host names are resolved inside the tunnel. Before a server is tested, a
+`CONNECT` to a site checks that it gets through, without sending an HTTP request to it. A refused server does not
+trigger willhaben's (or Geizhals') back-off, because those limiters are about your home IP.
 
 Configs live in `DATA_DIR/wireguard` (readable only by the app) and are part of backups. All configs of one Mullvad
-download share one key, so sites that need the same server share its tunnel. Give the app its **own Mullvad device**:
-if the same key is also connected from another device to the same server, both connections drop.
+download share one key, which is why only one process runs at a time. Give the app its **own Mullvad device**: if the
+same key is also connected from another device to the same server, both connections drop.
 
 ## Risks
 

@@ -9,11 +9,11 @@ The wire is behind `Transport`: `HttpxTransport` (willhaben) or `CurlTransport` 
 the TLS fingerprint; curl_cffi impersonates a browser). Tests hand in a fake transport or an httpx MockTransport.
 Adapters never import the logged-in willhaben session (tests/test_anonymous_public.py).
 
-With the site's VPN switch on (app/platforms/vpn.py) every request goes through the tunnel's local proxy; a refused
-or unreachable exit is left for the next one (up to VPN_ATTEMPTS per request), and with no working exit the request
-fails instead of going out directly. An injected transport means no VPN (tests, unless they pass `tunnel`).
-The VPN test (app/services/vpn_check.py) sends its searches under a `Trial`: through one exit only, never another,
-never directly.
+With the site's VPN switch on (app/platforms/vpn.py) every request goes through the shared connection's local proxy;
+a refused or unreachable server is reported (the site pauses, a shuffle starts) and the request asks again once there
+is a route for it (up to VPN_ATTEMPTS); with none it fails instead of going out directly. An injected transport means
+no VPN (tests, unless they pass `tunnel`). The test after a shuffle (app/services/vpn_check.py) sends its searches
+under a `Trial`: through the server under test only, never another, never directly.
 """
 from __future__ import annotations
 
@@ -80,20 +80,22 @@ def is_challenge(r: FetchResponse) -> bool:
 
 
 class ExitMoved(PlatformError):
-    """During a VPN test's try the tunnel left its exit (another request found it refused); nothing was sent."""
+    """The connection changed (a shuffle, wireproxy stopped) while the request waited for the limiter; nothing was
+    sent."""
 
 
 @dataclass
 class Trial:
-    """One try of the VPN test (app/services/vpn_check.py): requests of the task that set it go out through `route`
-    alone, never through another exit and never directly; what they met is noted here."""
+    """One site's try in the test after a shuffle (app/services/vpn_check.py): requests of the task that set it go
+    out through `route` alone, never through another server and never directly; what they met is noted here (the
+    shuffle marks a refused server, not the client)."""
     route: Route
-    limit: int = 1                # requests it may send (eBay's warm-up: 3); one more refuses the exit
+    limit: int = 1                # requests it may send (eBay's warm-up: 3); one more refuses the server
     sent: int = 0                 # requests that went out through it
     status: int | None = None     # the last answer's status
     ctype: str = ""               # the last answer's content type: a JSON 200 the parser rejects is the site's error
     challenge: bool = False       # the last answer was Cloudflare's challenge
-    refused: str | None = None    # blocked | rate | unreachable: marked like any request's refusal
+    refused: str | None = None    # blocked | rate | unreachable
     detail: str = ""              # "HTTP 403", the network error
 
 
@@ -109,6 +111,11 @@ def trial(tr: Trial) -> Iterator[Trial]:
         yield tr
     finally:
         _trial.reset(token)
+
+
+def current_trial() -> Trial | None:
+    """The Trial of this task, if any (for a client that does not build on HttpPlatformClient: Geizhals)."""
+    return _trial.get()
 
 
 class Transport(Protocol):
@@ -254,9 +261,9 @@ class HttpPlatformClient:
             raise blocked
 
     def _exit_blocked(self, r: FetchResponse) -> bool:
-        """Through the VPN: does this answer refuse the exit (then the next one is tried)? 403 = the site blocks the
-        exit's IP (willhaben: Cloudflare), 429 = others on the shared exit used up its rate. A site overrides this
-        when one of these codes means something else there."""
+        """Through the VPN: does this answer refuse the server (then the connection shuffles)? 403 = the site blocks
+        the server's IP (willhaben: Cloudflare), 429 = others on the shared server used up its rate. A site overrides
+        this when one of these codes means something else there."""
         return r.status_code in (403, 429)
 
     async def _use(self, proxy: str | None) -> Transport:
@@ -304,7 +311,7 @@ class HttpPlatformClient:
             except TransportError as e:
                 raise PlatformError(t("Network error: {error}", error=e)) from e
         else:
-            r = await self._send_vpn(tunnel, full, kind, headers)
+            r = await self._send_vpn(tunnel, full, kind, headers, valid)
         self._check_status(r)
         if r.status_code == 200 and valid is not None and not valid(r):
             return r                            # no answer to keep, and no sign that the site lets us in again
@@ -316,13 +323,15 @@ class HttpPlatformClient:
             self._cache[key] = (now, r)
         return r
 
-    async def _send_once(self, full: str, kind: str, headers: dict[str, str] | None, proxy: str | None) -> FetchResponse:
-        """One request through the limiter on the route `proxy` (None: direct), counted and recorded."""
+    async def _send_once(self, full: str, kind: str, headers: dict[str, str] | None,
+                         route: Route | None) -> FetchResponse:
+        """One request through the limiter on `route` (None: direct), counted and recorded. ExitMoved when the
+        connection left `route` while it waited for the limiter (nothing sent)."""
         async with self.limiter:
-            if (trl := _trial.get()) is not None and not self._pinned(trl):
+            if route is not None and not self._pinned(route):
                 self.limiter.refund()               # waited for the limiter, sent nothing
-                raise ExitMoved(t("{name}: the VPN exit changed during the test", name=self.name))
-            transport = await self._use(proxy)
+                raise ExitMoved(t("{name}: the VPN server changed before the request went out", name=self.name))
+            transport = await self._use(route.proxy if route is not None else None)
             if time.monotonic() - self._jar_since > self.session_s:
                 self.new_anonymous_session()
             with access_log.track(self.channel, kind, platform=self.platform) as tr:
@@ -343,11 +352,11 @@ class HttpPlatformClient:
                              duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
         return r
 
-    def _pinned(self, tr: Trial) -> bool:
-        """The VPN test's exit is still the tunnel's route (checked again once the limiter let the request through: a
-        live request may have left the exit meanwhile)."""
+    def _pinned(self, route: Route) -> bool:
+        """`route` is still the connection's (checked once the limiter let the request through: a shuffle may have
+        started meanwhile, or wireproxy stopped)."""
         tunnel = self._tunnel()
-        return tunnel is not None and tunnel.current() == tr.route
+        return tunnel is not None and tunnel.current() == route
 
     def _drop_transport(self) -> None:
         """Forget the transport at once (a cancelled request may have left it half-used); it closes in the background
@@ -359,62 +368,69 @@ class HttpPlatformClient:
             _closing.add(task)
             task.add_done_callback(_closing.discard)
 
-    async def _send_vpn(self, tunnel: Tunnel, full: str, kind: str, headers: dict[str, str] | None) -> FetchResponse:
-        """Through the site's VPN: a refused or unreachable exit is left for the next one, at most VPN_ATTEMPTS times.
-        No limiter.penalize() for a refused exit: willhaben's limiter is shared with the logged-in session on the home
-        IP, which the refusal says nothing about. No working exit: PlatformError, never a direct request. Under a
-        Trial (the VPN test) one try through its exit only (_send_trial)."""
+    async def _send_vpn(self, tunnel: Tunnel, full: str, kind: str, headers: dict[str, str] | None,
+                        valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
+        """Through the VPN's shared connection: a refused server (403/429, a bot check: Cloudflare's challenge or a
+        200 `valid` rejects) or one that does not answer is reported (Tunnel.failed(): the site pauses, a shuffle
+        starts) and the request asks again once ensure() has a route for it, at most VPN_ATTEMPTS times. No
+        limiter.penalize() for a refused server: willhaben's limiter is shared with the logged-in session on the home
+        IP, which the refusal says nothing about. No route: PlatformError, never a direct request. Under a Trial (the
+        test after a shuffle) one try through its server only (_send_trial)."""
         if (tr := _trial.get()) is not None:
             return await self._send_trial(tunnel, tr, full, kind, headers)
         last: PlatformError | None = None
         for _ in range(VPN_ATTEMPTS):
-            route = await tunnel.ensure()                 # PlatformError when no exit works (fail closed)
+            route = await tunnel.ensure()                 # PlatformError when there is no route (fail closed)
             try:
-                r = await self._send_once(full, kind, headers, route.proxy)
+                r = await self._send_once(full, kind, headers, route)
+            except ExitMoved as e:                        # a shuffle began while it waited: ensure() waits for it
+                last = e
+                continue
             except TransportError as e:
                 await tunnel.failed(route, "unreachable", detail=str(e)[:160])
                 last = PlatformError(t("Network error through the VPN: {error}", error=e))
                 continue
             if self._exit_blocked(r):
-                await tunnel.failed(route, "rate" if r.status_code == 429 else "blocked",
-                                    detail=f"HTTP {r.status_code}")
-                self.new_anonymous_session()
-                last = Blocked(t("{name} refused the VPN exit (HTTP {status})", name=self.name, status=r.status_code))
-                last.sent = True
-                continue
-            return r
+                reason = "rate" if r.status_code == 429 else "blocked"
+            elif is_challenge(r) or (r.status_code == 200 and valid is not None and not valid(r)):
+                reason = "botcheck"
+            else:
+                return r
+            await tunnel.failed(route, reason, detail=f"HTTP {r.status_code}")
+            self.new_anonymous_session()
+            last = Blocked(t("{name} refused the VPN server (HTTP {status})", name=self.name, status=r.status_code)
+                           if reason != "botcheck" else
+                           t("{name} answered through the VPN server with a bot check", name=self.name))
+            last.sent = True
         assert last is not None
         raise last
 
     async def _send_trial(self, tunnel: Tunnel, tr: Trial, full: str, kind: str,
                           headers: dict[str, str] | None) -> FetchResponse:
-        """The VPN test's request: through tr.route once. ExitMoved when the tunnel left that route meanwhile (nothing
-        sent, nothing probed); a refused or unreachable exit is marked as for any request and ends the try. A try that
-        already sent tr.limit requests without an answer the site accepted (eBay: warm-up 403s, however often its
-        client starts a new visitor) refuses the exit instead of asking again."""
+        """The test's request: through tr.route once. ExitMoved when the connection left that route (nothing sent);
+        a refused or unreachable server ends the try, noted in `tr` (the shuffle marks it). A try that already sent
+        tr.limit requests without an answer the site accepted (eBay: warm-up 403s, however often its client starts a
+        new visitor) refuses the server instead of asking again."""
         if tunnel.current() != tr.route:
-            raise ExitMoved(t("{name}: the VPN exit changed during the test", name=self.name))
+            raise ExitMoved(t("{name}: the VPN server changed before the request went out", name=self.name))
         if tr.sent >= tr.limit:
             tr.refused = "rate" if tr.status == 429 else "blocked"
             tr.detail = f"HTTP {tr.status}" if tr.status else ""
-            await tunnel.failed(tr.route, tr.refused, detail=tr.detail)
             self.new_anonymous_session()
-            blocked = Blocked(t("{name} refused the VPN exit (HTTP {status})", name=self.name, status=tr.status))
+            blocked = Blocked(t("{name} refused the VPN server (HTTP {status})", name=self.name, status=tr.status))
             blocked.sent = True
             raise blocked
         try:
-            r = await self._send_once(full, kind, headers, tr.route.proxy)
+            r = await self._send_once(full, kind, headers, tr.route)
         except TransportError as e:
             tr.sent, tr.refused, tr.detail = tr.sent + 1, "unreachable", str(e)[:160]
-            await tunnel.failed(tr.route, "unreachable", detail=tr.detail)
             raise PlatformError(t("Network error through the VPN: {error}", error=e)) from e
         tr.sent, tr.status = tr.sent + 1, r.status_code
         tr.ctype, tr.challenge = r.header("content-type").lower(), is_challenge(r)
         if self._exit_blocked(r):
             tr.refused, tr.detail = ("rate" if r.status_code == 429 else "blocked"), f"HTTP {r.status_code}"
-            await tunnel.failed(tr.route, tr.refused, detail=tr.detail)
             self.new_anonymous_session()
-            blocked = Blocked(t("{name} refused the VPN exit (HTTP {status})", name=self.name, status=r.status_code))
+            blocked = Blocked(t("{name} refused the VPN server (HTTP {status})", name=self.name, status=r.status_code))
             blocked.sent = True
             raise blocked
         return r

@@ -1,9 +1,11 @@
-"""VPN exits for the anonymous requests (app/platforms/vpn.py): uploads, order, marks, tunnels, fail closed, settings."""
+"""The VPN connection for the anonymous requests (app/platforms/vpn.py): uploads, the EU-only pick, marks, the one
+shared process, fail closed, health, settings. Fake wireproxy (FakeRunner) only: no tunnel, no site request."""
 import asyncio
 import base64
 import io
 import os
 import stat
+import time
 import zipfile
 
 import httpx
@@ -52,16 +54,22 @@ class FakeProc:
 
 
 class FakeRunner:
-    """wireproxy without wireproxy: `unreachable` configs fail the probe, `broken` ones do not start."""
+    """wireproxy without wireproxy: `unreachable` configs fail the probe, `broken` ones do not start. `most` is the
+    largest number of processes that ran at the same time."""
 
     def __init__(self):
         self.starts, self.stopped, self.probes = [], [], []
         self.unreachable, self.broken = set(), set()
         self.ports: dict[int, str] = {}
+        self.procs: list[FakeProc] = []
         self.installed = True
+        self.most = 0
 
     def binary(self):
         return "/usr/local/bin/wireproxy" if self.installed else None
+
+    def alive(self):
+        return sum(p.returncode is None for p in self.procs)
 
     async def start(self, conf, port):
         assert conf.is_file() and conf.suffix == ".conf"
@@ -70,7 +78,10 @@ class FakeRunner:
         self.starts.append(conf.stem)
         self.ports[port] = conf.stem
         await asyncio.sleep(0)
-        return FakeProc()
+        proc = FakeProc()
+        self.procs.append(proc)
+        self.most = max(self.most, self.alive())
+        return proc
 
     async def probe(self, port, host):
         self.probes.append((self.ports[port], host))
@@ -94,7 +105,16 @@ def no_source():
 def fake(monkeypatch):
     r = FakeRunner()
     monkeypatch.setattr(vpn, "runner", r)
+    monkeypatch.setattr(vpn, "_choice", lambda names: sorted(names)[0])     # the "random" pick: the first by name
     yield r
+
+
+@pytest.fixture
+def no_shuffle(monkeypatch):
+    """Shuffles asked for by vpn.py are recorded, not run (tests/test_vpn_check.py runs them)."""
+    asked = []
+    monkeypatch.setattr(vpn, "_shuffle", lambda pid, reason, detail: asked.append((pid, reason, detail)) or False)
+    return asked
 
 
 def _on(*pids: str) -> None:
@@ -160,13 +180,33 @@ def test_check_wants_a_complete_wireguard_config():
     assert vpn.check("just text") is not None
 
 
-# ------------------------------------------------------------------ order and marks
-def test_order_starts_near_the_site():
-    names = ["us-nyc-wg-301", "de-fra-wg-001", "at-vie-wg-002", "at-vie-wg-001", "al-tia-wg-001", "custom", "ch-zrh-wg-001"]
-    assert vpn.ordered(names, "AT") == ["at-vie-wg-001", "at-vie-wg-002", "de-fra-wg-001", "ch-zrh-wg-001",
-                                        "al-tia-wg-001", "custom", "us-nyc-wg-301"]
-    assert vpn.ordered(names, "DE")[:3] == ["de-fra-wg-001", "at-vie-wg-001", "at-vie-wg-002"]
-    assert vpn.ordered(names, "")[0] == "at-vie-wg-001"       # unknown home: the near list, not the unnamed ones
+# ------------------------------------------------------------------ the pick: EU only, home first, marks
+def test_the_pick_never_leaves_the_eu_and_starts_at_home():
+    _collection("ch-zrh-wg-001", "gb-lon-wg-001", "al-tia-wg-001", "us-nyc-wg-301", "no-osl-wg-001", "rs-beg-wg-101",
+                "custom", "nl-ams-wg-001", "de-fra-wg-001", "at-vie-wg-001", "at-vie-wg-002", "es-mad-wg-101")
+    outside = {"ch-zrh-wg-001", "gb-lon-wg-001", "al-tia-wg-001", "us-nyc-wg-301", "no-osl-wg-001", "rs-beg-wg-101",
+               "custom"}
+    picks = {vpn.pick() for _ in range(200)}                  # the real random choice
+    assert picks == {"at-vie-wg-001", "at-vie-wg-002"}         # home first
+    assert vpn.pick({"at-vie-wg-001", "at-vie-wg-002"}) == "de-fra-wg-001"       # then DE and the neighbours
+    assert vpn.pick({"at-vie-wg-001", "at-vie-wg-002", "de-fra-wg-001"}) == "nl-ams-wg-001"
+    assert vpn.pick({"at-vie-wg-001", "at-vie-wg-002", "de-fra-wg-001", "nl-ams-wg-001"}) == "es-mad-wg-101"
+    eu = {"at-vie-wg-001", "at-vie-wg-002", "de-fra-wg-001", "nl-ams-wg-001", "es-mad-wg-101"}
+    assert vpn.pick(eu) is None                                # never one outside the EU, not even as a fallback
+    assert not picks & outside and vpn.eu_count(vpn.source()[1]) == 5
+
+    vpn.mark("willhaben", "at-vie-wg-001", "blocked")
+    vpn.mark("ebay", "at-vie-wg-002", "rate")
+    assert vpn.pick(skip_for=["willhaben", "ebay"]) == "de-fra-wg-001"           # marked for any site that is on
+    assert vpn.pick(skip_for=["willhaben"]) == "at-vie-wg-002"
+    for n in eu:
+        vpn.mark("willhaben", n, "blocked")
+    assert vpn.pick(skip_for=["willhaben"]) in {"at-vie-wg-001", "at-vie-wg-002"}   # all marked: marks ignored
+
+
+def test_a_profile_is_picked_as_it_is():
+    vpn.import_upload("ch-zrh-wg-001.conf", _conf().encode())   # the user's choice: used even outside the EU
+    assert vpn.pick() == "ch-zrh-wg-001" and vpn.pick({"ch-zrh-wg-001"}) is None
 
 
 def test_marks_expire_and_are_kept_per_site(monkeypatch):
@@ -180,111 +220,112 @@ def test_marks_expire_and_are_kept_per_site(monkeypatch):
     now += 23 * 3600
     assert vpn.marks("willhaben") == {}
     vpn.mark("willhaben", "x", "blocked")
+    vpn.mark("kleinanzeigen", "x", "botcheck")
+    vpn.pause("willhaben", "blocked", "HTTP 403")
+    vpn.pause("kleinanzeigen", "rate", "HTTP 429")
+    vpn.forget("willhaben")
+    assert vpn.marks("willhaben") == {} and vpn.paused("willhaben") is None
+    assert vpn.marks("kleinanzeigen") and vpn.paused("kleinanzeigen") == ("rate", "HTTP 429")
     vpn.forget()
-    assert vpn.marks("willhaben") == {}
+    assert vpn.marks("kleinanzeigen") == {} and vpn.paused("kleinanzeigen") is None
 
 
-# ------------------------------------------------------------------ tunnels
-async def test_switch_off_means_no_tunnel(fake):
+# ------------------------------------------------------------------ the one connection
+async def test_switch_off_means_no_tunnel_and_geizhals_has_its_own(fake):
     _collection("at-vie-wg-001")
-    assert vpn.tunnel_for("willhaben") is None
-    _on("willhaben")
+    assert vpn.tunnel_for("willhaben") is None and vpn.tunnel_for(vpn.GEIZHALS) is None
+    _on("willhaben", vpn.GEIZHALS)
     tn = vpn.tunnel_for("willhaben")
     assert tn is not None and tn.host == "www.willhaben.at" and tn is vpn.tunnel_for("willhaben")
+    gz = vpn.tunnel_for(vpn.GEIZHALS)
+    assert (gz.host, gz.label) == ("geizhals.at", "Geizhals")
+    assert vpn.users() == [("willhaben", "willhaben"), ("geizhals", "Geizhals")]
 
 
-async def test_a_blocked_exit_moves_on_to_the_next(fake):
-    _collection("de-fra-wg-001", "at-vie-wg-001", "at-vie-wg-002")
-    _on("willhaben")
-    tn = vpn.tunnel_for("willhaben")
-    r1 = await tn.ensure()
-    assert tn.config == "at-vie-wg-001" and r1.proxy.startswith("http://127.0.0.1:")
-    assert fake.probes == [("at-vie-wg-001", "www.willhaben.at")]
-    assert await tn.ensure() is r1 and len(fake.starts) == 1          # alive: the same route, no new process
-    await tn.failed(r1, "blocked")
-    assert "at-vie-wg-001" in vpn.marks("willhaben") and len(fake.stopped) == 1
-    r2 = await tn.ensure()
-    assert tn.config == "at-vie-wg-002" and r2.gen == r1.gen + 1
-    await tn.failed(r1, "blocked")                           # late failure of the old route: changes nothing
-    assert tn.route is r2 and "at-vie-wg-002" not in vpn.marks("willhaben")
-    assert vpn._load()["willhaben"]["current"] == "at-vie-wg-002"
+async def test_every_site_shares_one_process(fake, no_shuffle):
+    _collection("at-vie-wg-001", "at-vie-wg-002")
+    _on("willhaben", "kleinanzeigen", vpn.GEIZHALS)
+    vpn.update_conn(server="at-vie-wg-001", since=time.time() - 60)       # as a shuffle leaves it
+    a, b, c = await asyncio.gather(vpn.tunnel_for("willhaben").ensure(), vpn.tunnel_for("kleinanzeigen").ensure(),
+                                   vpn.tunnel_for(vpn.GEIZHALS).ensure())
+    assert a == b == c and a.name == "at-vie-wg-001" and fake.starts == ["at-vie-wg-001"] and no_shuffle == []
+    assert fake.probes == [("at-vie-wg-001", "www.willhaben.at")]          # started once, for the first that asked
+
+    r = await vpn.conn.connect("at-vie-wg-002", "www.willhaben.at")       # another server replaces the process
+    assert fake.most == 1 and len(fake.stopped) == 1 and r.gen == a.gen + 1
+    assert vpn.tunnel_for("kleinanzeigen").current() == r
+    await vpn.site_off("kleinanzeigen")
+    assert vpn.conn.current() == r                                      # still used by the others
+    for pid in ("willhaben", "kleinanzeigen", vpn.GEIZHALS):
+        vpn.set_enabled(pid, False)
+    await vpn.site_off("willhaben")
+    assert vpn.conn.current() is None and len(fake.stopped) == 2        # nobody uses it: stopped
 
 
-async def test_sites_spread_over_the_collection_and_share_a_profile(fake):
-    _collection("at-vie-wg-001", "de-fra-wg-001")
-    _on("willhaben", "kleinanzeigen")
-    wh, ka = vpn.tunnel_for("willhaben"), vpn.tunnel_for("kleinanzeigen")
-    await wh.ensure()
-    await ka.ensure()
-    assert (wh.config, ka.config) == ("at-vie-wg-001", "de-fra-wg-001")
-    assert ka.host == "api.kleinanzeigen.de"
-    await vpn.source_changed()
-    assert len(fake.stopped) == 2 and vpn._procs == {}
-    vpn.import_upload("mine.conf", _conf().encode())
-    r1, r2 = await wh.ensure(), await ka.ensure()
-    assert r1.proxy == r2.proxy and fake.starts[-1:] == ["mine"] and fake.starts.count("mine") == 1   # one process
-    await wh.stop()
-    assert not fake.stopped[2:]                              # kleinanzeigen still uses it
-    await ka.stop()
-    assert len(fake.stopped) == 3
-
-
-async def test_concurrent_requests_start_one_process(fake):
-    _collection("at-vie-wg-001")
-    _on("willhaben")
-    tn = vpn.tunnel_for("willhaben")
-    a, b = await asyncio.gather(tn.ensure(), tn.ensure())
-    assert a is b and fake.starts == ["at-vie-wg-001"]
-
-
-async def test_a_crashed_process_restarts_the_same_exit(fake):
+async def test_a_crashed_process_or_a_restart_starts_the_same_server_again(fake, no_shuffle):
     _collection("at-vie-wg-001", "at-vie-wg-002")
     _on("willhaben")
+    vpn.update_conn(server="at-vie-wg-001", since=1.0)
     tn = vpn.tunnel_for("willhaben")
     r1 = await tn.ensure()
-    vpn._procs["at-vie-wg-001"].handle.returncode = 1        # wireproxy died
-    await tn.failed(r1, "unreachable")                       # the request saw a connection error
-    assert vpn.marks("willhaben") == {}                      # not the exit's fault
+    vpn.conn.proc.handle.returncode = 1                      # wireproxy died
+    assert await tn.failed(r1, "unreachable") is False       # not the server's fault: no mark, no shuffle
+    assert vpn.marks("willhaben") == {} and no_shuffle == []
     await tn.ensure()
-    assert tn.config == "at-vie-wg-001" and fake.starts == ["at-vie-wg-001", "at-vie-wg-001"]
+    vpn.reset()                                              # a restart: the stored server comes back
+    await vpn.tunnel_for("willhaben").ensure()
+    assert fake.starts == ["at-vie-wg-001"] * 3 and no_shuffle == [] and vpn.conn_state()["since"] == 1.0
 
 
-async def test_no_exit_fails_closed_and_waits_before_probing_again(fake, monkeypatch):
-    names = [f"at-vie-wg-00{i}" for i in range(1, 7)]
-    _collection(*names)
-    fake.unreachable = set(names)
-    fake.broken = {"at-vie-wg-006"}
+async def test_a_refusal_marks_pauses_and_asks_for_a_shuffle(fake, no_shuffle):
+    _collection("at-vie-wg-001", "at-vie-wg-002")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(server="at-vie-wg-001")
+    wh, ka = vpn.tunnel_for("willhaben"), vpn.tunnel_for("kleinanzeigen")
+    r = await wh.ensure()
+    assert await wh.failed(r, "blocked", "HTTP 403") is True
+    assert no_shuffle == [("willhaben", "blocked", "HTTP 403")]
+    assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "blocked" and vpn.paused("willhaben") == ("blocked", "HTTP 403")
+    assert await wh.failed(r, "blocked", "HTTP 403") is False          # paused already: never a second shuffle
+    assert len(no_shuffle) == 1
+    with pytest.raises(PlatformError, match="refused the VPN server at-vie-wg-001"):
+        await wh.ensure()                                              # fail closed while paused
+    assert await ka.ensure() == r                                      # the others go on with it
+    old = vpn.Route(r.proxy, r.gen - 1, r.name)
+    assert await ka.failed(old, "blocked") is False                    # a route of an earlier connection
+
+
+async def test_requests_wait_for_a_shuffle_or_fail_closed(fake, monkeypatch):
+    _collection("at-vie-wg-001")
     _on("willhaben")
-    tn = vpn.tunnel_for("willhaben")
-    with pytest.raises(PlatformError, match="tries more"):
-        await tn.ensure()
-    assert len(fake.probes) == vpn.MAX_PROBES and not tn.failing      # more left for the next request
-    with pytest.raises(PlatformError, match="all 6 configs"):
-        await tn.ensure()
-    assert len(fake.probes) == 5 and tn.failing                      # 006 does not even start
-    assert vpn.health() == ("problem", "No working exit for willhaben")
-    with pytest.raises(PlatformError):
-        await tn.ensure()
-    assert len(fake.probes) == 5                                      # exhausted: no probing for EXHAUSTED_S
-    fake.unreachable.clear()
-    vpn.forget()
-    await tn.ensure()
-    assert tn.config == "at-vie-wg-001" and vpn.health()[0] == "ok"
+    vpn.update_conn(server="at-vie-wg-001")
+    monkeypatch.setattr(vpn, "SHUFFLE_WAIT_S", 0.05)
+    vpn.conn.begin()
+    with pytest.raises(PlatformError, match="changing its server"):
+        await vpn.tunnel_for("willhaben").ensure()
+    assert fake.starts == []                                           # nothing started, nothing sent
+    task = asyncio.create_task(vpn.tunnel_for("willhaben").ensure())
+    await asyncio.sleep(0.01)
+    vpn.conn.end()
+    assert (await task).name == "at-vie-wg-001"
 
 
-async def test_a_blocked_profile_pauses_until_forgotten(fake):
-    vpn.import_upload("home.conf", _conf().encode())
+async def test_no_server_asks_for_a_shuffle_and_fails_closed_when_none_comes(fake, no_shuffle):
+    _collection("at-vie-wg-001")
     _on("willhaben")
-    tn = vpn.tunnel_for("willhaben")
-    r = await tn.ensure()
-    await tn.failed(r, "blocked")
-    with pytest.raises(PlatformError, match="profile"):
-        await tn.ensure()
-    vpn.forget()
-    assert (await tn.ensure()).gen == r.gen + 1
+    with pytest.raises(PlatformError, match="No working VPN server for willhaben"):
+        await vpn.tunnel_for("willhaben").ensure()
+    assert no_shuffle == [("willhaben", "none", "")] and fake.starts == []
+
+    vpn.update_conn(server="at-vie-wg-001")
+    fake.unreachable = {"at-vie-wg-001"}                               # the stored server no longer answers
+    with pytest.raises(PlatformError, match="not reachable"):
+        await vpn.tunnel_for("willhaben").ensure()
+    assert no_shuffle[-1][:2] == ("willhaben", "unreachable") and vpn.conn_state()["server"] is None
+    assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "unreachable" and fake.alive() == 0
 
 
-async def test_switched_on_without_configs_or_wireproxy_fails_closed(fake):
+async def test_switched_on_without_configs_or_wireproxy_fails_closed(fake, no_shuffle):
     _on("willhaben")
     tn = vpn.tunnel_for("willhaben")
     with pytest.raises(PlatformError, match="no WireGuard config"):
@@ -294,68 +335,44 @@ async def test_switched_on_without_configs_or_wireproxy_fails_closed(fake):
     fake.installed = False
     with pytest.raises(PlatformError, match="wireproxy"):
         await tn.ensure()
-    assert fake.starts == []
+    assert fake.starts == [] and no_shuffle == []
 
 
-def test_health_is_off_without_switches():
+async def test_health(fake, no_shuffle):
     assert vpn.health()[0] == "off"
-
-
-# ------------------------------------------------------------------ for the VPN test (app/services/vpn_check.py)
-N1, N2, N3 = "at-vie-wg-001", "at-vie-wg-002", "at-vie-wg-003"
-
-
-async def test_listeners_hear_every_exit(fake):
-    _collection(N1, N2, N3)
-    fake.unreachable, fake.broken = {N1}, {N2}
+    _collection("at-vie-wg-001")
     _on("willhaben")
-    tn = vpn.tunnel_for("willhaben")
-    heard = []
-
-    def broken_hook(*_):
-        raise RuntimeError("a display hook")
-
-    with tn.listen(lambda *a: heard.append(a)), tn.listen(broken_hook):     # a failing listener breaks nothing
-        r = await tn.ensure()
-        assert heard == [(N1, "trying", ""), (N1, "unreachable", "no connection to www.willhaben.at"),
-                         (N2, "trying", ""), (N2, "broken", "wireproxy stopped: bad config"),
-                         (N3, "trying", ""), (N3, "using", "")]
-        assert await tn.failed(r, "botcheck", detail="x") is True
-        assert heard[-1] == (N3, "botcheck", "x") and vpn.marks("willhaben")[N3][1] == "botcheck"
-        assert await tn.failed(r, "botcheck", detail="x") is False          # the same, now old route
-    assert tn._listeners == [] and len(heard) == 7
-
-
-async def test_ensure_probes_as_many_as_asked(fake):
-    _collection(N1, N2)
-    fake.unreachable = {N1}
-    _on("willhaben")
-    tn = vpn.tunnel_for("willhaben")
-    with pytest.raises(PlatformError, match="1 tried"):
-        await tn.ensure(probes=1)
-    assert len(fake.probes) == 1 and not tn.failing
-    r = await tn.ensure(probes=1)
-    assert r.name == tn.config == N2 and tn.current() == r
-    vpn._procs[N2].handle.returncode = 1                       # wireproxy died
-    assert tn.current() is None
+    assert vpn.health() == ("unknown", "Not used yet")
+    vpn.update_conn(server="at-vie-wg-001")
+    assert vpn.health() == ("ok", "at-vie-wg-001, starts with the next request")
+    await vpn.tunnel_for("willhaben").ensure()
+    assert vpn.health() == ("ok", "at-vie-wg-001")
+    vpn.pause("willhaben", "blocked", "HTTP 403")
+    assert vpn.health() == ("problem", "willhaben paused: refused at-vie-wg-001")
+    vpn.unpause()
+    vpn.conn.begin()
+    assert vpn.health()[0] == "unknown"                                # a shuffle: the watchdog waits
+    vpn.conn.end()
+    vpn.update_conn(server=None, error="No server works")
+    await vpn.conn.disconnect()
+    assert vpn.health() == ("problem", "No server works")
 
 
-async def test_a_cancelled_probe_leaves_no_process(monkeypatch):
+async def test_a_cancelled_connect_leaves_no_process(monkeypatch):
     class Hanging(FakeRunner):
         async def probe(self, port, host):
             await asyncio.Event().wait()
 
     r = Hanging()
     monkeypatch.setattr(vpn, "runner", r)
-    _collection(N1)
-    _on("willhaben")
-    task = asyncio.create_task(vpn.tunnel_for("willhaben").ensure())
-    while not vpn._procs:
+    _collection("at-vie-wg-001")
+    task = asyncio.create_task(vpn.conn.connect("at-vie-wg-001", "www.willhaben.at"))
+    while not r.procs:
         await asyncio.sleep(0)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert vpn._procs == {} and len(r.stopped) == 1
+    assert vpn.conn.current() is None and r.alive() == 0 and len(r.stopped) == 1
 
 
 async def test_a_cancelled_start_leaves_no_wireproxy(monkeypatch, tmp_path):
@@ -380,23 +397,11 @@ async def test_a_cancelled_start_leaves_no_wireproxy(monkeypatch, tmp_path):
     assert proc.returncode == 0                               # terminated, not left without owner
 
 
-def test_botcheck_mark_forget_one_site_and_unmark():
-    assert vpn.MARK_TTL_S["botcheck"] == 3600 and vpn.reason_label("botcheck") == "bot check"
-    vpn.mark("willhaben", N1, "botcheck")
-    vpn.mark("willhaben", N2, "blocked")
-    vpn.mark("kleinanzeigen", N1, "blocked")
-    vpn.unmark("willhaben", N1)
-    vpn.unmark("willhaben", "nope")
-    assert set(vpn.marks("willhaben")) == {N2}
-    vpn.forget("willhaben")
-    assert vpn.marks("willhaben") == {} and set(vpn.marks("kleinanzeigen")) == {N1}
-
-
 # ------------------------------------------------------------------ photos
-async def test_photos_of_a_site_on_the_vpn_never_go_direct(fake, tmp_path):
+async def test_photos_of_a_site_on_the_vpn_never_go_direct(fake, no_shuffle, tmp_path):
     from app.services import ad_images
 
-    _on("willhaben")                                          # no configs uploaded: no exit
+    _on("willhaben")                                          # no configs uploaded: no server
     calls = []
     mock = httpx.MockTransport(lambda req: calls.append(req) or httpx.Response(200, content=b"x",
                                                                                headers={"content-type": "image/jpeg"}))
@@ -408,31 +413,39 @@ async def test_photos_of_a_site_on_the_vpn_never_go_direct(fake, tmp_path):
 
 
 # ------------------------------------------------------------------ settings
-def test_settings_upload_switch_and_remove(fake):
+def test_settings_upload_switches_and_remove(fake, monkeypatch):
     from app.main import app
+    from app.services import vpn_check
 
+    started = []
+    monkeypatch.setattr(vpn_check, "start", lambda trigger="manual", **kw: started.append(trigger))   # no site asked
     with TestClient(app) as c:
         page = c.get("/settings/vpn").text
-        assert "Nothing uploaded" in page and 'href="/settings/vpn"' in page
-        zip_ = _zip({f"mullvad_wireguard_linux_all_all/{n}.conf": _conf() for n in ("at-vie-wg-001", "de-fra-wg-001")})
+        assert "Nothing uploaded" in page and 'href="/settings/vpn"' in page and "Geizhals through the VPN" in page
+        zip_ = _zip({f"mullvad_wireguard_linux_all_all/{n}.conf": _conf()
+                     for n in ("at-vie-wg-001", "de-fra-wg-001", "ch-zrh-wg-001")})
         r = c.post("/settings/vpn/upload", files={"file": ("mullvad_wireguard_linux_all_all.zip", zip_, "application/zip")},
                    follow_redirects=False)
-        assert r.status_code == 303 and r.headers["location"].startswith("/settings/vpn?msg=2%20configs")
+        assert r.status_code == 303 and r.headers["location"].startswith("/settings/vpn?msg=3%20configs")
         assert vpn.enabled("willhaben") and not vpn.enabled("kleinanzeigen")     # the first upload: willhaben on
+        assert started == ["new"]                                                 # and a shuffle right away
         page = c.get("/settings/vpn").text
-        assert "Config collection · 2 configs" in page and "AT 1" in page and PRIVATE not in page
-        assert "Starts with the next request" in page
+        assert "Config collection · 3 configs" in page and "AT 1" in page and PRIVATE not in page
+        assert "the 2 servers in EU countries only" in page and 'id="vpn-test"' in page
         assert "Anonymous requests through the VPN" in c.get("/settings/willhaben").text
 
         r = c.post("/settings/vpn/site/kleinanzeigen", data={"enabled": "1", "next": "/settings/kleinanzeigen"},
                    follow_redirects=False)
         assert r.headers["location"].startswith("/settings/kleinanzeigen?msg=") and vpn.enabled("kleinanzeigen")
+        c.post("/settings/vpn/site/geizhals", data={"enabled": "1"})
+        assert vpn.enabled(vpn.GEIZHALS)
+        vpn.pause(vpn.GEIZHALS, "blocked", "HTTP 403")
+        c.post("/settings/vpn/site/geizhals", data={})
+        assert not vpn.enabled(vpn.GEIZHALS) and vpn.paused(vpn.GEIZHALS) is None
         c.post("/settings/vpn/site/willhaben", data={"next": "//evil.example"})
         assert not vpn.enabled("willhaben")
-        c.post("/settings/vpn/site/willhaben", data={"enabled": "1"})
         assert c.post("/settings/vpn/site/nope", data={"enabled": "1"}).status_code == 404
 
-        vpn.set_enabled("willhaben", False)                    # switched off by hand: a new upload keeps it off
         r = c.post("/settings/vpn/upload", files={"file": ("Home.conf", _conf().encode(), "application/octet-stream")})
         assert "Dedicated profile · home" in r.text and PRIVATE not in r.text and not vpn.enabled("willhaben")
         r = c.post("/settings/vpn/upload", files={"file": ("x.txt", b"hello", "text/plain")})

@@ -12,7 +12,7 @@ from sqlmodel import select
 from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
-from app.services import chats, health, human_pace, my_ads, quiet_hours, timeline
+from app.services import chats, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
 from app.services.search_agents import is_checking, run_agent
 from app.willhaben import access_log
 from app.willhaben.session import get_session
@@ -138,6 +138,9 @@ def start() -> None:
     scheduler.add_job(timeline.prune_job, IntervalTrigger(hours=1, jitter=120), id="timeline-prune",
                       replace_existing=True, max_instances=1, coalesce=True,   # only when switched on in Settings
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=10))
+    scheduler.add_job(vpn_check.tick, IntervalTrigger(minutes=1), id="vpn-shuffle",   # the VPN's schedule, stored
+                      replace_existing=True, max_instances=1, coalesce=True,
+                      next_run_time=datetime.now().astimezone() + timedelta(seconds=90))
     scheduler.start()
     # Stagger the first agent runs so a restart does not burst requests.
     for i, a in enumerate(x for x in agents if x.enabled):

@@ -4,6 +4,8 @@ Plain HTML pages (no API): search results are `galleryview__item` cards, an arti
 (`...-a<id>.html`) lists its properties as `<dl class="specs-grid">` with dt/dd pairs and the
 lowest offer as `lowPrice: <n>`. Requests are few (a search or up to three, then one product page, which a mere
 price lookup skips) and 3 s apart (bursts of searches got 403 at 2 s); a 403/429 pauses Geizhals like any other site.
+With its switch in Settings → VPN on, the requests go through the VPN's shared connection (app/platforms/vpn.py),
+fail closed; there a 403/429, a bot check or no answer refuses the server (a shuffle) instead of pausing Geizhals.
 
 Matching (checked against real searches, 2026-10-13): the first search result is often another variant ("iPhone 16"
 → "16 Pro Max", "UniFi Switch 24" → "Switch Pro 24"), so a result counts only when every number of the query is in
@@ -25,6 +27,9 @@ import httpx
 
 from app.config import get_settings
 from app.i18n import t
+from app.platforms import vpn
+from app.platforms.base import PlatformError
+from app.platforms.httpclient import current_trial
 from app.willhaben.public import Blocked, RateLimiter
 
 log = logging.getLogger(__name__)
@@ -110,10 +115,14 @@ def parse_product(page: str, url: str) -> Product:
 
 async def _get(url: str) -> str:
     headers = {"user-agent": get_settings().user_agent, "accept": "text/html", "accept-language": "de-AT,de;q=0.9"}
+    if (tunnel := vpn.tunnel_for(vpn.GEIZHALS)) is not None:
+        return await _get_vpn(tunnel, url, headers)
+    if current_trial() is not None:   # the test after a shuffle: never from the home IP, even after the switch went off
+        raise GeizhalsError(t("Geizhals: the VPN is off, the test sends nothing directly"))
     try:
         async with _limiter:
             try:
-                async with httpx.AsyncClient(timeout=15, follow_redirects=True, transport=_transport) as c:
+                async with _client(None) as c:
                     r = await c.get(url, headers=headers)
             except httpx.HTTPError as e:
                 raise GeizhalsError(t("Geizhals unreachable: {error}", error=e)) from e
@@ -122,6 +131,63 @@ async def _get(url: str) -> str:
     if r.status_code in (403, 429):   # blocked: pause (60 s, doubling) instead of asking again every 2 s
         _limiter.penalize()
     elif r.status_code == 200:
+        _limiter.reward()
+    if r.status_code != 200:
+        raise GeizhalsError(t("Geizhals answered HTTP {status}", status=r.status_code))
+    return r.text
+
+
+def _client(proxy: str | None) -> httpx.AsyncClient:
+    """One request's client: direct, or through the VPN's local proxy (never the environment's proxy settings)."""
+    if proxy is None:
+        return httpx.AsyncClient(timeout=15, follow_redirects=True, transport=_transport)
+    if _transport is not None:        # httpx would send through the proxy and quietly skip the mock
+        raise GeizhalsError("a mock transport and a proxy at the same time")
+    return httpx.AsyncClient(timeout=15, follow_redirects=True, proxy=proxy, trust_env=False)
+
+
+async def _get_vpn(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str:
+    """Through the VPN's shared connection; no route: GeizhalsError, never a direct request. A 403/429, Cloudflare's
+    challenge or no answer refuses the server (Tunnel.failed(): Geizhals pauses on it, a shuffle starts) and does not
+    penalize the limiter, whose pause is for blocks of the home IP. Under a Trial (the test after a shuffle) through
+    its server only, and what it met is noted there."""
+    tr = current_trial()
+    try:
+        route = tr.route if tr is not None else await tunnel.ensure()
+    except PlatformError as e:
+        raise GeizhalsError(str(e)) from e
+    error: httpx.HTTPError | None = None
+    try:
+        async with _limiter:
+            if tunnel.current() != route:     # the connection changed while it waited: nothing goes out
+                _limiter.refund()
+                raise GeizhalsError(t("Geizhals: the VPN server changed before the request went out"))
+            try:
+                async with _client(route.proxy) as c:
+                    r = await c.get(url, headers=headers)
+            except httpx.HTTPError as e:
+                error = e
+    except Blocked as e:              # still pausing after a block: no request at all
+        raise GeizhalsError(str(e)) from e
+    if error is not None:
+        detail = str(error)[:160] or type(error).__name__
+        if tr is not None:
+            tr.sent, tr.refused, tr.detail = tr.sent + 1, "unreachable", detail
+        else:
+            await tunnel.failed(route, "unreachable", detail)
+        raise GeizhalsError(t("Geizhals unreachable through the VPN: {error}", error=detail)) from error
+    challenge = r.headers.get("cf-mitigated", "").lower() == "challenge"
+    if tr is not None:
+        tr.sent, tr.status = tr.sent + 1, r.status_code
+        tr.ctype, tr.challenge = r.headers.get("content-type", "").lower(), challenge
+    if r.status_code in (403, 429) or challenge:
+        reason = "rate" if r.status_code == 429 else "blocked" if r.status_code == 403 else "botcheck"
+        if tr is not None:
+            tr.refused, tr.detail = reason, f"HTTP {r.status_code}"
+        else:
+            await tunnel.failed(route, reason, f"HTTP {r.status_code}")
+        raise GeizhalsError(t("Geizhals refused the VPN server (HTTP {status})", status=r.status_code))
+    if r.status_code == 200:
         _limiter.reward()
     if r.status_code != 200:
         raise GeizhalsError(t("Geizhals answered HTTP {status}", status=r.status_code))

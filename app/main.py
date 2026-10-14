@@ -1984,21 +1984,21 @@ def _vpn_back(msg: str, next_url: str = "") -> RedirectResponse:
 
 from app.services import vpn_check  # noqa: E402
 
-templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → Test the sites (settings/_vpn_test.html)
+templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → the connection (settings/_vpn_test.html)
 
 
 def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
-    """The test panel alone (htmx); `note`: why none started. While a test runs its site list asks for itself every
-    2 s; the first time after the end the whole panel replaces the panel (new header and buttons)."""
+    """The connection panel alone (htmx); `note`: why no shuffle started. While a shuffle runs its body asks for
+    itself every 2 s; the first time after the end the whole panel replaces the panel (new header and buttons)."""
     r = templates.TemplateResponse(request, "settings/_vpn_test.html", {"vpn_note": note})
-    if request.headers.get("hx-target") == "vpn-test-rows" and not vpn_check.running():
+    if request.headers.get("hx-target") == "vpn-test-body" and not vpn_check.running():
         r.headers.update({"HX-Retarget": "#vpn-test", "HX-Reswap": "outerHTML", "HX-Reselect": "#vpn-test"})
     return r
 
 
 @app.post("/settings/vpn/upload")
 async def settings_vpn_upload(file: UploadFile | None = File(None)):
-    """A .zip of WireGuard configs (the app works through them) or one .conf (a dedicated profile); replaces the old
+    """A .zip of WireGuard configs (the app shuffles among them) or one .conf (a dedicated profile); replaces the old
     source. The first upload switches the VPN on for willhaben (a later removal then pauses it, never goes direct)."""
     if file is None or not file.filename:
         return _vpn_back(t("Choose a file first"))
@@ -2008,13 +2008,15 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
     except ValueError as e:
         return _vpn_back(str(e))
     try:
-        await vpn_check.source_changed("uploaded")  # a running test stops before its exits do
+        await vpn_check.source_changed("uploaded")  # a running shuffle stops before its server does
     finally:
         await vpn.source_changed()
     if get_setting("platform_willhaben_vpn") == "":
         vpn.set_enabled("willhaben", True)
-    msg = (t("{n} configs uploaded; the sites with the VPN on go through them one after another", n=n)
-           if mode == "collection" else t("Profile uploaded"))
+    if not vpn_check.blocker():
+        vpn_check.start("new")                     # a server right away (else the first request asks for one)
+    msg =(t("{n} configs uploaded; the sites with the VPN on share one of the EU servers, shuffled now and then",
+             n=n) if mode == "collection" else t("Profile uploaded"))
     if skipped:
         msg += "\n" + t("Skipped {n}: {first}", n=len(skipped), first=skipped[0])
     return _vpn_back(msg)
@@ -2022,9 +2024,8 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
 
 @app.post("/settings/vpn/forget")
 async def settings_vpn_forget():
-    vpn_check.stop("forgotten")                    # it would ask again the exits it already saw fail
     vpn.forget()
-    return _vpn_back(t("Blocks forgotten; every exit gets a new chance"))
+    return _vpn_back(t("Blocks forgotten; every server gets a new chance and no site pauses"))
 
 
 @app.post("/settings/vpn/clear")
@@ -2039,44 +2040,38 @@ async def settings_vpn_clear():
 
 @app.post("/settings/vpn/site/{pid}")
 async def settings_vpn_site(pid: str, enabled: str = Form(""), next: str = Form("")):
-    """One site's VPN switch (Settings → VPN or the site's own page via `next`)."""
-    try:
-        p = platforms.get(pid)
-    except platforms.UnknownPlatform:
-        raise HTTPException(404) from None
-    vpn.set_enabled(p.id, bool(enabled))
+    """One site's VPN switch, or Geizhals' (Settings → VPN or the site's own page via `next`)."""
+    if pid != vpn.GEIZHALS:
+        try:
+            pid = platforms.get(pid).id
+        except platforms.UnknownPlatform:
+            raise HTTPException(404) from None
+    vpn.set_enabled(pid, bool(enabled))
     if not enabled:
-        await vpn.stop_site(p.id)
+        await vpn.site_off(pid)
     return _vpn_back(t("Changes saved"), next)
+
+
+@app.post("/settings/vpn/interval")
+async def settings_vpn_interval(hours: str = Form("")):
+    """How often the connection shuffles (hours, 1 to 168)."""
+    if not hours.strip().isdigit():
+        return _vpn_back(t("Enter whole hours, 1 to 168"))
+    vpn_check.set_interval(int(hours))
+    return _vpn_back(t("Changes saved"))
 
 
 @app.get("/settings/vpn/test", response_class=HTMLResponse)
 async def settings_vpn_test_panel(request: Request):
-    """The test panel (settings/_vpn_test.html); polled every 2 s while a test runs."""
+    """The connection panel (settings/_vpn_test.html); its body is polled every 2 s while a shuffle runs."""
     return _vpn_test_panel(request)
 
 
-@app.post("/settings/vpn/test")
-async def settings_vpn_test(request: Request, site: str = Form(""), forget: str = Form("")):
-    """Test every site with the VPN on, or `site` only ("Test now", "Test 10 more"); `forget` drops that site's
-    blocks first (app/services/vpn_check.py). Runs in the background; one test at a time."""
-    only = site.strip().lower() or None
-    if only:
-        try:
-            platforms.get(only)
-        except platforms.UnknownPlatform:
-            raise HTTPException(404) from None
-    why = vpn_check.start(only, forget=bool(forget))
-    return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("VPN test started"))
-
-
-@app.post("/settings/vpn/test/stop")
-async def settings_vpn_test_stop(request: Request):
-    """Stop after the exit each site is trying."""
-    vpn_check.stop()
-    if _hx(request):
-        return _vpn_test_panel(request)
-    return _vpn_back(t("The VPN test stops after the exit each site is trying"))
+@app.post("/settings/vpn/shuffle")
+async def settings_vpn_shuffle(request: Request):
+    """"Shuffle now" (a profile: "Test now"): another server and the test of every site, in the background."""
+    why = vpn_check.start("manual")
+    return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("Shuffle started"))
 
 
 def _timeline_section() -> dict[str, Any]:

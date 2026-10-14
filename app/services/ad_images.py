@@ -36,7 +36,7 @@ async def download(url: str | None, folder: Path, name: str,
                    transport: httpx.AsyncBaseTransport | None = None, platform: str | None = None) -> Path | None:
     """Save the image at `url` as folder/name.<ext>; None unless https, an image and at most MAX_IMAGE_BYTES.
     Downloads from a platform's CDN count as anonymous accesses of that platform (access_log); `platform` is the
-    ad's site. With the site's VPN on, the photo comes through its tunnel too; with no working exit there is no photo
+    ad's site. With the site's VPN on, the photo comes through the VPN too; with no working server there is no photo
     (never a direct download)."""
     if not (url or "").startswith("https://"):
         return None
@@ -48,7 +48,7 @@ async def download(url: str | None, folder: Path, name: str,
         try:
             proxy = (await tunnel.ensure()).proxy
         except PlatformError as e:
-            log.info("ad image not downloaded, no VPN exit: %s", e)
+            log.info("ad image not downloaded, no VPN server: %s", e)
             return None
     started = time.monotonic()
     try:

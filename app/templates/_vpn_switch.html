@@ -6,12 +6,14 @@
 <section class="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <form method="post" action="/settings/vpn/site/{{ vs.id }}" class="m-0">
     <input type="hidden" name="next" value="/settings/{{ vs.id }}">
-    {{ ui.switch_row(_("Anonymous requests through the VPN"), _("Search agents, screening, price checks and the ad viewer use a WireGuard exit. Your login never does."), vs.on, 'name="enabled" value="1" onchange="this.form.submit()"') }}
+    {{ ui.switch_row(_("Anonymous requests through the VPN"), _("Search agents, screening, price checks and the ad viewer use the shared WireGuard connection. Your login never does."), vs.on, 'name="enabled" value="1" onchange="this.form.submit()"') }}
   </form>
-  <span class="text-[12.5px] {{ 'text-error' if vs.on and (vs.failing or not vpn.mode) else 'text-muted' }}">
+  <span class="text-[12.5px] {{ 'text-error' if vs.on and (vs.paused or not vpn.mode or (vpn.error and not vpn.server)) else 'text-muted' }}">
     {%- if vs.on and not vpn.mode %}{{ _("No WireGuard config uploaded yet, so these requests pause.") }}
-    {%- elif vs.on and vs.exit %}{{ _("Exit now: {name}", name=vs.exit) }}
-    {%- elif vs.on and vs.error %}{{ vs.error }}
+    {%- elif vs.on and vs.paused %}{{ _("Paused: refused {server} ({reason}). Its requests wait for the next shuffle.", server=vpn.server or '?', reason=vs.paused.reason ~ (', ' ~ vs.paused.detail if vs.paused.detail else '')) }}
+    {%- elif vs.on and vpn.shuffling %}{{ _("The VPN is changing its server right now.") }}
+    {%- elif vs.on and vpn.server %}{{ _("Server now: {name}", name=vpn.server) }}
+    {%- elif vs.on and vpn.error %}{{ vpn.error }}
     {%- elif vs.on %}{{ _("Starts with the next request") }}
     {%- else %}{{ _("Off: these requests use your own connection.") }}{% endif %}
     · <a class="link link-primary" href="/settings/vpn">{{ _("VPN settings") }}</a>
