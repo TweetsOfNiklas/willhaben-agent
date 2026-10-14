@@ -122,7 +122,13 @@ def test_queries():
     assert q("4x Ubiquiti UniFi AP AC Pro (UAP-AC-PRO)") == "Ubiquiti UniFi Pro UAP-AC-PRO"   # count left out
     assert q("UniFi XG Switch US-16-XG 16-Port 10G") == "UniFi XG Switch US-16-XG"
     assert q("Ubiquiti Unifi Gateway UXG-Lite") == "Ubiquiti Unifi Gateway UXG-Lite"
-    assert q("KNX SMART HOME") is None and q("Unifi USG Security Gateway") is None
+    assert q("KNX SMART HOME") is None and q("Profi Werkzeugkoffer Set") is None   # no model, no brand: too generic
+    assert q("Unifi USG Security Gateway") == "Unifi USG Security Gateway"           # a brand's product by its name
+    assert q("Ubiquiti UniFi Cloud Gateway Max + Samsung 980 SSD 500 GB") == "Ubiquiti UniFi Cloud Gateway Max"
+    assert q("2 × Ubiquiti UniFi AP AC Pro WLAN Access Points") == "Ubiquiti UniFi AP AC Pro"   # extras, counts out
+    assert q("Lot 2 bidons cyclisme Polti") is None and q("Ubiquiti UniFi U6+  NEU versiegelt") == "Ubiquiti UniFi U6+"
+    assert q("Raspberry PI4, Joy-it, Aluminiumgehäuse, Schwarz") == "Raspberry PI4 Aluminiumgehäuse"   # a case for it
+    assert q("iPhone 13 128GB Display kaputt") == "iPhone 13 128GB"                  # a broken phone's part: no case
 
 
 def test_search_queries():
@@ -189,3 +195,30 @@ async def test_a_block_pauses_geizhals(monkeypatch):
     with pytest.raises(geizhals.GeizhalsError, match="Geizhals pause"):           # no request while it pauses
         await geizhals.lookup("iPhone 15 Pro")
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("name, query, ok", [
+    # words are words: "Lot" is not in "Merlotglas", "de" not a word worth counting ("Eau de Parfum")
+    ("Riedel The O Wine Tumbler Cabernet/Merlotglas, 2 Stück", "Lot 2", False),
+    ("Charlotte Meentzen 4 Men Eau de Parfum, 50ml", "lot de 4", False),
+    # glued and abbreviated models, the Plus, ordinals, port counts, a brand Geizhals leaves out, a split brand
+    ("Raspberry Pi 4 Modell B, 4GB RAM", "Rapsberry Pi4 4gb", True),
+    ("Amazon Echo Show 8 3. Generation schwarz", "Amazon Echo Show8 3", True),
+    ("Amazon Echo Show 8 3. Generation schwarz", "Amazon Echo Show 8 3rd", True),
+    ("Ubiquiti UniFi 6 Mesh", "Ubiquiti UniFi U6 Mesh", True),
+    ("Ubiquiti UniFi 6+", "Ubiquiti UniFi U6+", True),
+    ("Ubiquiti UniFi 6+", "Ubiquiti UniFi U6 Plus", True),
+    ("Ubiquiti UniFi 6+", "Ubiquiti UniFi U6 Mesh", False),
+    ("Ubiquiti UniFi 6 Mesh", "Ubiquiti UniFi U6+", False),
+    ("Ubiquiti UniFi 7 Pro XG", "UniFi U7 Pro", False),
+    ("Ubiquiti UniFi Pro Max Rackmount Gigabit Smart Switch, 24x RJ-45, 2x SFP+, 400W PoE++", "Ubiquiti UniFi Pro Max 24",
+     True),
+    ("Ubiquiti UNAS 2 schwarz, 4GB RAM, 1x RJ-45 2.5GBase-T", "UniFi UNAS 2", True),
+    ("Esylux RC 230i silber, Bewegungsmelder", "ESY LUX RC 230i", True),
+    ("Raspberry Pi 4 Modell B, 4GB RAM", "Raspberry PI4 Aluminiumgehäuse", False),     # the board is no case
+    # no number or code to go by: every word but a brand ("UDM" found the 1654 € "Dream Machine Beast")
+    ("Ubiquiti UniFi Dream Machine Beast Rackmount 10G Router", "Ubiquiti UniFi Dream Machine UDM", False),
+    ("Ubiquiti Cloud Gateway Max 2.5G Smart Router, 5x RJ-45, ohne SSD", "Ubiquiti UniFi Cloud Gateway Max", True),
+])
+def test_matching_words_models_and_brands(name, query, ok):
+    assert geizhals.matches(name, query) is ok

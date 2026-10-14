@@ -56,7 +56,7 @@ FILTERS = 5                  # version of the comparable filters (4: title simil
                              # model query, the ad's own site, a comma ends the item); older results are recomputed
 # Brands sellers often leave out ("U6 Mesh", "iPhone 13", "Echo Show 8"): in an AND search they lose those ads
 # (willhaben 10/2026: "Ubiquiti UniFi U6 Mesh" 0 ads, "U6 Mesh" 13; "UniFi U7 Pro" 1, "U7 Pro" 89)
-BRANDS = frozenset({"ubiquiti", "unifi", "apple", "amazon", "samsung", "sony", "google", "microsoft"})
+BRANDS = geizhals.BRANDS
 NO_MARKET = {"preisjaeger"}  # sites without a used market of their own: their ads compare on willhaben only
 _DEVICE_WORDS = {"point", "access", "accesspoint", "wlan", "wifi", "router", "repeater"}   # "Access Point U6 Lite"
 CLOSEST = 10
@@ -201,6 +201,7 @@ def _model_token(toks: list[str], i: int) -> bool:
 
 _WATTS_RE = re.compile(r"\d+w", re.I)
 _COUNT_RE = re.compile(r"\d+(x|er|stk|stück)", re.I)     # "4x Ubiquiti …", "3er Set": how many, not which
+_LOT_COUNT_RE = re.compile(r"\blots?\s+(?:de\s+|of\s+)?\d+\b|(?<![\w.,])\d+\s*[x×](?=\s)", re.I)
 
 
 def geizhals_query(title: str | None, category_path: list[str] | None = None) -> str | None:
@@ -209,14 +210,19 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     "MacBook Air M1 8GB 256GB"); of a long lead-in the first two words, its variant words and the word before the
     model ("Ubiquiti UniFi USW Pro PoE 48" -> "Ubiquiti UniFi Pro PoE 48"). Capacities, wattages and order codes
     further on are added ("4GB", "500W", "USW-24-POE": they make the variant), max 7 words. "4 GB" is one word;
-    counts ("4x", "16-Port") are left out."""
+    counts ("4x", "16-Port", "Lot 2", "2 ×") are left out, and so is what comes along ("+ Samsung 980 SSD 500 GB",
+    ", Netzteil"; an order code there still counts). A title without a model names a brand's product by its first
+    words ("Ubiquiti UniFi Cloud Gateway Max"); without a brand of BRANDS it is too generic: None."""
     if any(g in c.lower() for c in category_path or [] for g in _GENERIC_CATEGORIES):
         return None
-    toks = [w for w in tokens(geizhals.glue_units(title or "")) if not _COUNT_RE.fullmatch(w)]
+    t = _Title(_LOT_COUNT_RE.sub(" ", title or ""))           # "Lot 2 …", "lot de 4 …", "2 × …": how many, not which
+    head = " ".join(t.raw[:min(t.extras_at, t.list_at)])     # not what comes along: "+ Samsung SSD 500 GB", ", Netzteil"
+    plus = set(re.findall(r"(?<![\w+])([^\W\d_]*\d+)\+(?![\w+])", head))      # "U6+", "S23+": another model
+    toks = [w + "+" if w in plus else w for w in tokens(geizhals.glue_units(head)) if not _COUNT_RE.fullmatch(w)]
     is_model = [_model_token(toks, i) or geizhals.is_code(toks[i]) for i in range(len(toks))]
     first = next((i for i, m in enumerate(is_model) if m), -1)
-    if first < 0:
-        return None
+    if first < 0:            # no model number: a brand's product by its name ("Ubiquiti UniFi Cloud Gateway Max")
+        return " ".join(toks[:5]) if len(toks) >= 2 and any(_fold(w) in BRANDS for w in toks) else None
     lead = toks[:first]
     if len(lead) > 4:
         lead = lead[:2] + [w for w in lead[2:-1] if w.lower() in geizhals.VARIANT_WORDS] + lead[-1:]
@@ -224,8 +230,12 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     while end < len(toks) and end - first <= 3 and (is_model[end] or toks[end].lower() in geizhals.VARIANT_WORDS):
         end += 1
     core = lead + toks[first:end]
-    extra = [w for w in toks[end:] if geizhals.is_code(w) or geizhals.CAPACITY_RE.fullmatch(w) or _WATTS_RE.fullmatch(w)]
-    picked = list(dict.fromkeys(core + extra))[:7]
+    codes = [w for w in tokens(geizhals.glue_units(title or "")) if geizhals.is_code(w)]   # a code after a list too
+    extra = [w for w in toks[end:] if geizhals.CAPACITY_RE.fullmatch(w) or _WATTS_RE.fullmatch(w)] \
+        + [w for w in codes if w not in toks[:end]]
+    kinds = TitleMatch(title).acc                 # an accessory ad's kind ("PI4, Joy-it, Aluminiumgehäuse"), not a
+    acc = [w for w in toks if _accessory(_fold(w)) in kinds and w not in core][:1]    # broken item's part ("Display")
+    picked = list(dict.fromkeys(core + acc + extra))[:7]
     return " ".join(picked) if len(picked) >= 2 else None
 
 
@@ -636,11 +646,14 @@ class _Title:
         start = next((i for i, w in enumerate(self.low) if len(w) >= 2 and w not in _FILLER_F | _EXTRAS),
                      len(self.low))
         self.extras_at = next((i for i in range(start, len(self.low)) if self.low[i] in _EXTRAS), len(self.low))
-        # a list after a number names what comes along ("Pi 5 8GB, SD-Karte, Netzteil, Gehäuse"): no accessory words
-        # from there on; the model may still follow ("PoE Switch, 24x RJ-45, USW-24-POE")
+        # a list after a number that names two accessories or more is what comes along ("Pi 5 8GB, SD-Karte,
+        # Netzteil, Gehäuse"): no accessory words from there on; the model may still follow ("Switch, 24x RJ-45,
+        # USW-24-POE")
         self.list_at = next((i for i in range(start, len(self.low)) if self.low[i] == ","
                              and not self.text[self.ends[i]:self.ends[i] + 1].isdigit()     # not "5,0Ah"
                              and any(re.search(r"\d", w) for w in self.low[start:i])), len(self.low))
+        if sum(_accessory(w) is not None for w in self.low[self.list_at:]) < 2:   # "PI4, Joy-it, Aluminiumgehäuse":
+            self.list_at = len(self.low)                                         # a case, not a Pi with extras
         self.for_at = next((i for i in range(start, len(self.low)) if self.low[i] in _FOR), None)
         self.head_end = min(self.extras_at, len(self.low) if self.for_at is None else self.for_at)
         self.seq: list[tuple[str, str, int]] = []          # (word, original spelling, raw index)

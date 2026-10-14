@@ -220,7 +220,10 @@ _WATT_RE = re.compile(r"(\d)\s*w\b", re.I)
 _SLUG_RE = re.compile(r"https://geizhals\.at/(.+?)(?:-a\d+)?\.html")
 # words that make another product of the same line: "iPhone 16" is not the "16 Pro Max", "Switch 8" not "Enterprise 8"
 VARIANT_WORDS = {"max", "plus", "mini", "ultra", "lite", "pro", "se", "air", "fe", "neo", "enterprise", "flex", "xg",
-                 "compute"}
+                 "compute", "mesh", "lr"}
+# brands and lines a seller or Geizhals may leave out ("UniFi UNAS 2" is "Ubiquiti UNAS 2"; "U6 Mesh" sells without
+# "Ubiquiti UniFi"): a match need not have them, and the price check's comparable search drops them
+BRANDS = frozenset({"ubiquiti", "unifi", "apple", "amazon", "samsung", "sony", "google", "microsoft"})
 # a result with one of these the query lacks is something else: an accessory, a multi-pack or a bundle
 OTHER_THING_WORDS = {"kit", "halterung", "mount", "hülle", "case", "cover", "adapter", "kabel", "netzteil", "upgrade",
                      "ersatzteil", "ersatzteile", "zubehör", "pack", "bundle", "bundles"}
@@ -272,12 +275,35 @@ def _similar(w: str, words: set[str]) -> bool:
     return len(w) >= 5 and any(abs(len(x) - len(w)) <= 2 and SequenceMatcher(None, w, x).ratio() >= 0.85 for x in words)
 
 
+_ORDINAL_RE = re.compile(r"(\d{1,2})(?:st|nd|rd|th|ª|º)")                          # "3rd", "5ª": the generation number
+_GLUED_RE = re.compile(r"([a-zäöü]+)(\d+)(\+?)")                                   # "Pi4", "Show8", "U6", "U6+"
+
+
+def _model_found(w: str, n: str, parts: list[str]) -> bool:
+    """A query word with a digit in the (normalised) name: as a whole word ("13" is not "113" or "230cm"), a bare
+    number from 5 on also as a port count ("24" in "24x RJ-45"), glued or abbreviated to its line: "Pi4" is "Pi 4",
+    "Show8" "Show 8", "U6" "UniFi 6" – and "U6+" only "UniFi 6+", "U6" not."""
+    if _has_word(n, w) or w.isdigit() and int(w) >= 5 and _has_word(n, w + "x"):
+        return True
+    m = _GLUED_RE.fullmatch(w)
+    if not m:
+        return False
+    letters, digits, plus = m.groups()
+    for p, nxt in zip(parts, parts[1:], strict=False):
+        if nxt == digits and (p == letters or len(letters) <= 2 and p.startswith(letters)):
+            return bool(plus) == bool(re.search(rf"(?<!\w){re.escape(p)}\s*{digits}\+", n))
+    return False
+
+
 def matches(name: str, query: str, url: str = "") -> bool:
     """Is this product really the one asked for (the variant too)? Every word with a digit – also a bare "4" as in
-    "Pi 4", and capacities like "4GB" – appears in the name as a whole word ("13" is not "113" or "230cm", "4" not
-    "400" or "4GB"); an order code in the name or the product link; most other words appear (hyphens and small typos
-    forgiven); and query and name have the same variant words (Pro, Max, Lite …), the name no pack or accessory word
-    the query lacks. "4 GB" equals "4GB", "150 W" "150W"; a capacity only in the name is fine."""
+    "Pi 4", and capacities like "4GB" – appears in the name (_model_found: a whole word, "13" is not "113" or "230cm",
+    "4" not "400" or "4GB"; glued or abbreviated, "Pi4", "U6" for "UniFi 6"; "3rd" as "3"); an order code in the name
+    or the product link; most other words of three letters or more appear as words (hyphens, compounds and small typos
+    forgiven; "Lot" is not in "Merlotglas"; a brand of BRANDS the name lacks does not count), all of them when the
+    query has no number or code ("Ubiquiti UniFi Cloud Gateway Max"); and query and name have
+    the same variant words (Pro, Max, Lite …), the name no pack or accessory word the query lacks. "4 GB" equals "4GB",
+    "150 W" "150W"; a capacity only in the name is fine."""
     n = _norm(name)
     slug = _SLUG_RE.match(url or "")
     flat = _flat(name)
@@ -285,18 +311,27 @@ def matches(name: str, query: str, url: str = "") -> bool:
     if not raw:
         return False
     codes = [w for w in raw if is_code(w)]
-    toks = [_norm(w) for w in raw if not is_code(w)]
-    model = [w for w in toks if re.search(r"\d", w)]
-    words = [w for w in toks if not re.search(r"\d", w) and len(w) >= 2]
+    toks = [_ORDINAL_RE.sub(r"\1", _norm(w)) if _ORDINAL_RE.fullmatch(_norm(w)) else _norm(w) for w in raw if not is_code(w)]
+    words = [w for w in toks if not re.search(r"\d", w) and len(w) >= 3]     # not "de", "of": they are in any name
+    model = [w + "+" if "plus" in words and _GLUED_RE.fullmatch(w + "+") else w     # "U6 Plus" is the "U6+"
+             for w in toks if re.search(r"\d", w)]
     where = (_parts(name), _parts(slug.group(1) if slug else ""))
-    if not all(any(_has_run(_parts(c), w) for w in where) for c in codes) or not all(_has_word(n, w) for w in model):
+    if not all(any(_has_run(_parts(c), w) for w in where) for c in codes) \
+            or not all(_model_found(w, n, where[0]) for w in model):
         return False
-    asked = {x for w in toks + codes for x in _parts(w)}
-    name_words = set(re.findall(r"[a-z0-9äöüß]+", n))
+    asked = {x for w in toks + codes for x in _parts(w)} | {m.group(1) for w in model if (m := _GLUED_RE.fullmatch(w))}
+    name_words = set(re.findall(r"[a-z0-9äöüß]+", n)) | ({"plus"} if re.search(r"\d\+(?![\w+])", n) else set())
+    asked |= {"plus"} if any(w.endswith("+") for w in model) else set()       # "U6+" asks for the "UniFi 6+"
     if (name_words & (VARIANT_WORDS | OTHER_THING_WORDS)) - asked or {w for w in words if w in VARIANT_WORDS} - name_words:
         return False
-    found = sum(w in n or (_flat(w) and _flat(w) in flat) or _similar(w, name_words) for w in words)   # "i-phone"
-    return not words or found / len(words) >= 0.6
+
+    def found(w: str) -> bool:      # a whole word, part of a compound ("UniFi" in "UniFiSwitch", "i-phone"), a typo
+        return w in name_words or len(_flat(w)) >= 4 and _flat(w) in flat or _similar(w, name_words)
+
+    joined = {x for a, b in zip(words, words[1:], strict=False) if found(a + b) for x in (a, b)}   # "ESY LUX": "Esylux"
+    counted = [w for w in words if w not in BRANDS or found(w)]       # a brand Geizhals leaves out does not count
+    need = 0.6 if model or codes else 1.0       # no number or code to go by: every word ("Dream Machine UDM" is no
+    return not counted or sum(w in joined or found(w) for w in counted) / len(counted) >= need    # "… Beast")
 
 
 def best_hit(hits: list[Hit], query: str) -> Hit | None:
