@@ -355,7 +355,7 @@ async def test_comparables_exclude_ad_itself_and_wanted_ads(wh, monkeypatch):
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
     res = await deals.analyze(_ad(100))
     comp = res["comparables"]
-    assert calls["search"] == 1 and comp["query"] == "Bosch GSR 18V-55"
+    assert calls["search"] == 1 and comp["query"] == "GSR 18V-55"            # the model as sellers write it
     assert comp["count"] == len(PRICES)                     # without the ad itself and the "Suche" ad
     assert AD_ID not in {a["ad_id"] for a in comp["closest"]} and len(comp["closest"]) == 10
     assert [a["price"] for a in comp["closest"]] == sorted(a["price"] for a in comp["closest"])
@@ -1099,7 +1099,12 @@ def unifi(monkeypatch):
     """The willhaben searches of three reported Kleinanzeigen UniFi checks (fixture), Geizhals off."""
     async def search_ads(q):
         return copy.deepcopy(UNIFI.get(q) or {"rows_found": 0, "ads": []})
+    orig = deals._search
+
+    async def search(site, q):                       # their own site (Kleinanzeigen) finds nothing here
+        return await orig(site, q) if site == "willhaben" else {"rows_found": 0, "ads": []}
     monkeypatch.setattr(deals, "search_ads", search_ads)
+    monkeypatch.setattr(deals, "_search", search)
     monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
 
 
@@ -1112,7 +1117,8 @@ async def test_unifi_u7_pro_is_compared_with_the_u7_pro(unifi):
     """The reported check: a U7 Pro "mit Halterung" (title only); willhaben has one U7 Pro – too few for a level."""
     res = await deals.analyze(_hit("UniFi U7 Pro WiFi 7 Access Point mit Halterung", 139.0))
     comp = res["comparables"]
-    assert res["query"] == "UniFi U7 Pro" and [a["title"] for a in comp["closest"]] == ["UniFi U7pro"]
+    assert res["query"] == "U7 Pro" and [a["title"] for a in comp["closest"]] == ["UniFi U7pro"]   # then "UniFi U7 Pro"
+    assert [s["query"] for s in comp["searches"]] == ["U7 Pro", "U7 Pro", "UniFi U7 Pro", "UniFi U7 Pro"]
     assert comp["count"] == 1 and res["position"] == {"pos": None, "reason": "few_data"}
 
 
@@ -1447,7 +1453,7 @@ async def test_comparables_in_another_condition_are_left_out(monkeypatch):
     _fake_search(monkeypatch, ads[2:])               # 3 used + 1 unknown left: too few, not topped up with new ones
     out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, title="iPhone 15 Pro")
     assert out["count"] == 4 and out["filtered"]["condition"] == 3
-    new = [_cond(n, p, "new") for n, p in enumerate([900, 920, 940, 960])] + [_cond(9, 950, None)]
+    new = [_cond(30 + n, p, "new") for n, p in enumerate([900, 920, 940, 960])] + [_cond(39, 950, None)]
     _fake_search(monkeypatch, new + ads[:5])
     out = await deals.comparables("iPhone 15 Pro", AD_ID, 950, title="iPhone 15 Pro", condition="new")
     assert out["count"] == 5 and out["filtered"]["condition"] == 5 and out["stats"]["min"] == 900
@@ -1457,7 +1463,7 @@ async def test_results_of_filter_version_2_are_recomputed(wh, monkeypatch):
     async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
-    assert deals.FILTERS == 4
+    assert deals.FILTERS == 5
     res = await deals.analyze(_ad(100))
     deals.remember({**res, "comparables": {**res["comparables"], "filters": 2}})
     deals.clear_cache()
@@ -1572,3 +1578,128 @@ def test_price_section_by_comparables_reads_the_stats_median():
     assert small == "5 % unter dem Median · 10 vergleichbare Anzeigen"
     assert "Unter den Vergleichsanzeigen gilt die mittlere Hälfte (€\xa082,50–\u2060€\xa0127,50) als fair" in html
     assert ">€ 83<" in html and ">€ 105<" in html and ">€ 128<" in html            # the marks below the bar
+
+
+# ------------------------------------------------------------------ the model query, the ad's own site
+@pytest.mark.parametrize("title, queries", [
+    # brands sellers leave out: an AND search loses their ads (willhaben: "Ubiquiti UniFi U6 Mesh" 0, "U6 Mesh" 13)
+    ("Ubiquiti UniFi USW Pro Max 24 PoE Switch mit Rechnung", ["USW Pro Max 24", "Ubiquiti UniFi USW"]),
+    ("Ubiquiti UniFi U6 Mesh WiFi 6 Access Point neuwertig", ["U6 Mesh", "Ubiquiti UniFi U6 Mesh"]),
+    ("UniFi Access Point U6 Lite", ["U6 Lite", "UniFi Access Point"]),
+    ("Amazon Echo Show 8 (3. Generation)", ["Echo Show 8", "Amazon Echo Show"]),
+    ("Apple Watch Series 6 44mm", ["Watch Series 6", "Apple Watch Series"]),
+    ("Apple iPhone 13 128GB Mitternacht", ["iPhone 13 128GB", "Apple iPhone 13"]),
+    ("Ubiquiti UniFi USW Pro PoE 48 Port Switch", ["USW Pro PoE 48", "Ubiquiti UniFi USW"]),
+    # an order code alone; the extras stay out; never wider than the title's own words
+    ("Ubiquiti UniFi AC Pro UAP-AC-PRO WLAN Access Point", ["UAP-AC-PRO", "Ubiquiti UniFi AC"]),
+    ("Raspberry Pi 5 8GB, 64GB SD-XC MicroSD Karte, Netzteil, Gehäuse", ["Raspberry Pi 5 8GB", "Raspberry Pi 5"]),
+    ("Ubiquiti UniFi Cloud Gateway Max + Samsung 980 SSD 500 GB", ["Cloud Gateway Max", "Ubiquiti UniFi Cloud"]),
+    ("Dyson V11 Absolute Akkusauger", ["Dyson V11 Absolute"]),
+    ("Bosch GSR 18V-55 Akkuschrauber", ["GSR 18V-55", "Bosch GSR 18V-55"]),
+    ("IKEA Kallax Regal 4x4 weiss", ["IKEA Kallax Regal"]),            # no model, no brand: as before
+    ("Bürostuhl ergonomisch schwarz", ["Bürostuhl ergonomisch schwarz"]),
+])
+def test_search_queries_the_model_first(title, queries):
+    assert deals.search_queries(title) == queries
+
+
+def _ads(n0, title, prices, platform="willhaben"):
+    return [{**_summ(n0 + n, title, p), "platform": platform} for n, p in enumerate(prices)]
+
+
+async def test_comparables_broaden_only_while_too_few_and_pool_the_ads(monkeypatch):
+    found = {"iPhone 13 128GB": _ads(0, "iPhone 13 128GB", [250, 260, 270]),
+             "Apple iPhone 13": _ads(1, "Apple iPhone 13 128GB", [255, 280, 300])}   # 01, 02 are found twice
+    asked = []
+
+    async def search(site, q):
+        asked.append((site, q))
+        return {"rows_found": len(found.get(q, [])), "ads": copy.deepcopy(found.get(q, []))}
+    monkeypatch.setattr(deals, "_search", search)
+    out = await deals.comparables("iPhone 13 128GB", None, 260, title="Apple iPhone 13 128GB", more=["Apple iPhone 13"])
+    assert asked == [("willhaben", "iPhone 13 128GB"), ("willhaben", "Apple iPhone 13")]       # 3 < 5: the wide one
+    assert out["count"] == 4 and out["query"] == "iPhone 13 128GB"                      # 4 different ads
+    assert [s["query"] for s in out["searches"]] == ["iPhone 13 128GB", "Apple iPhone 13"]
+    found["iPhone 13 128GB"] = _ads(10, "iPhone 13 128GB", [250, 260, 270, 280, 290])
+    asked.clear()
+    deals.clear_cache()
+    out = await deals.comparables("iPhone 13 128GB", None, 260, title="Apple iPhone 13 128GB", more=["Apple iPhone 13"],
+                                  condition="new")                 # the plan follows the title, not the condition
+    assert asked == [("willhaben", "iPhone 13 128GB")] and out["count"] == 5
+
+
+async def test_an_ad_of_another_site_compares_on_its_site_too(monkeypatch):
+    """A Kleinanzeigen ad: Kleinanzeigen first, then willhaben, pooled; the ad itself is left out by its site."""
+    found = {("kleinanzeigen", "Raspberry Pi 5 8GB"): _ads(0, "Raspberry Pi 5 8GB", [149, 170, 185, 190], "kleinanzeigen"),
+             ("willhaben", "Raspberry Pi 5 8GB"): _ads(0, "Raspberry pi 5 8GB", [175, 159])}   # same ids, other site
+    asked = []
+
+    async def search(site, q):
+        asked.append((site, q))
+        return {"rows_found": 9, "ads": copy.deepcopy(found.get((site, q), []))}
+    monkeypatch.setattr(deals, "_search", search)
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    ad = AdDetail.from_result({"ad_id": "2000000000", "title": "Raspberry Pi 5 8GB, 64GB SD-Karte, Netzteil, Gehäuse",
+                               "price": 149.0, "platform": "kleinanzeigen"})
+    res = await deals.analyze(ad)
+    comp = res["comparables"]
+    assert asked == [("kleinanzeigen", "Raspberry Pi 5 8GB"), ("willhaben", "Raspberry Pi 5 8GB")]
+    assert comp["count"] == 5 and sorted(a["price"] for a in comp["closest"]) == [159, 170, 175, 185, 190]   # not 149
+    assert deals.comparable_sites("willhaben") == ["willhaben"] == deals.comparable_sites("preisjaeger")
+
+
+async def test_a_vpn_wait_is_named_as_such(monkeypatch):
+    from app.platforms import vpn
+
+    async def waiting(site, q):
+        raise vpn.VpnWait("willhaben hat den VPN-Server abgewiesen; die Anfragen pausieren")
+    monkeypatch.setattr(deals, "_search", waiting)
+    out = await deals.comparables("Raspberry Pi 5", None, 100, title="Raspberry Pi 5", more=["Raspberry Pi"])
+    assert out["error"].startswith("willhaben hat") and out["error_kind"] == "vpn" and out["error_site"] == "willhaben"
+
+    async def broken(site, q):
+        raise deals.WillhabenError("HTTP 500")
+    monkeypatch.setattr(deals, "_search", broken)
+    out = await deals.comparables("Raspberry Pi 5", None, 100, title="Raspberry Pi 5")
+    assert out["error"] == "HTTP 500" and "error_kind" not in out
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    # a list after a number names what comes along: the ad is a Pi with extras, not a case
+    ("Gehäuse für Raspberry Pi 5", "Raspberry Pi 5 8GB, 64GB SD-Karte, Netzteil, Gehäuse", False),
+    ("Raspberry Pi 5 8GB", "Raspberry Pi 5 8GB, 64GB SD-Karte, Netzteil, Gehäuse", True),
+    ("Ubiquiti UniFiSwitch 24 Gigabit Managed PoE Switch, 24x RJ-45, 2x SFP USW-24-POE", "Ubiquiti UniFi Switch USW-24-POE",
+     True),                                                          # the model may still follow the list
+    ("Makita BL1850B 18V 5,0Ah Akku", "Makita Akku 18V 5Ah", True),  # a decimal comma is no list
+    # another generation is another product, when both name one
+    ("Alexa Echo Show 8 - 2. Generation", "Amazon Echo Show 8 (3. Generation)", False),
+    ("Amazon Echo Show 8 - 4th Generation", "Amazon Echo Show 8 (3. Generation)", False),
+    ("Echo Show 8 Gen. 3", "Amazon Echo Show 8 (3. Generation)", True),
+    ("Echo show 8", "Amazon Echo Show 8 (3. Generation)", True),
+])
+def test_bundle_lists_and_generations(other, ad, ok):
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+
+def test_swap_ads_anywhere_in_the_title():
+    assert deals._wanted("Prusa MK3s+ 3D Drucker Tausche auch gegen Raspberry Pi5 8GB")
+    assert deals._wanted("Suche Raspberry Pi 5") and not deals._wanted("Raspberry Pi 5 8GB, Tausch möglich")
+
+
+async def test_a_hits_own_geizhals_product_is_used(monkeypatch):
+    """The hit card showed "54 % von € 528,41 neu" (the agent's lookup and Claude's check) while the price section
+    looked again by the title, found nothing and offered "Claude auf Geizhals suchen lassen"."""
+    async def search(site, q):
+        return {"rows_found": 0, "ads": []}
+    monkeypatch.setattr(deals, "_search", search)
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    ad = AdDetail.from_result({"ad_id": "3540000999", "title": "Ubiquiti UniFi Dream Machine (UDM SE)", "price": 290.0,
+                               "platform": "kleinanzeigen"})
+    known = {"name": "Ubiquiti UniFi Dream Machine SE", "url": "https://geizhals.at/udm-se-a1.html", "price_from": 528.41,
+             "checked": True}
+    res = await deals.analyze(ad)
+    assert res["geizhals"] is None
+    res = await deals.analyze(ad, known_geizhals=known)              # the cached result without one is redone
+    assert res["geizhals"]["price_from"] == 528.41 and res["position"]["basis"] == "geizhals"
+    assert res["position"]["pct"] == 54
+    assert (await deals.analyze(ad, known_geizhals={"name": "x"}))["geizhals"]["price_from"] == 528.41   # kept

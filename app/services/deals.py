@@ -1,9 +1,10 @@
 """Price check (Produktsuche tab, ad viewer): is a willhaben ad cheap or expensive?
 
 Three sources, all cached so reopening an ad costs nothing within the cache time:
-- comparables: ONE willhaben keyword search (rows 50, relevance) for a short query derived from the ad title,
-  only the ads whose title is the same item (TitleMatch: model, variant, size, no accessories), the ad itself and
-  "Suche …" ads left out, price percentiles p10..p90 (cached 1 h per query)
+- comparables: keyword searches (rows 50, relevance) on willhaben and on the ad's own site when that is another one,
+  first for the model as sellers write it ("USW Pro Max 24"), then, when that leaves too few, for the title's first
+  words; only the ads whose title is the same item (TitleMatch: model, variant, size, no accessories), the ad itself
+  and "Suche …" ads left out, price percentiles p10..p90 (cached 1 h per site and query)
 - Geizhals: lowest new price of the best matching product, only for product-like titles (cached 6 h per query)
 - Claude (only on an explicit click): deal verdict + short reason, model purpose "screen"; and, when the automatic
   Geizhals lookup found nothing, a search there: Claude names up to three Geizhals searches, the app runs them,
@@ -34,6 +35,8 @@ from sqlmodel import col, select
 from app.db import DealCheck, ProductSearch, session, utcnow
 from app.i18n import LANGS, lang, t
 from app.llm.base import LLMError, get_backend
+from app.platforms import vpn
+from app.platforms.base import PlatformError
 from app.platforms.condition import GERMAN
 from app.services import geizhals, price_zones
 from app.willhaben.parse import AdDetail, InvalidSearchUrl, to_webapi_url
@@ -49,8 +52,13 @@ RESULT_TTL_S = 3600
 GEIZHALS_FAIL_TTL_S = 900    # Geizhals blocking/down: don't retry on every open
 MIN_COMPARABLES = 5          # fewer: no comparables scale (their rule, the cross-check and the mismatch need it)
 QUERY_WORDS = 3              # willhaben keyword search is AND: short queries find enough comparables
-FILTERS = 4                  # version of the comparable filters (4: title similarity, condition, zone rating);
-                             # older results are recomputed
+FILTERS = 5                  # version of the comparable filters (4: title similarity, condition, zone rating; 5: the
+                             # model query, the ad's own site, a comma ends the item); older results are recomputed
+# Brands sellers often leave out ("U6 Mesh", "iPhone 13", "Echo Show 8"): in an AND search they lose those ads
+# (willhaben 10/2026: "Ubiquiti UniFi U6 Mesh" 0 ads, "U6 Mesh" 13; "UniFi U7 Pro" 1, "U7 Pro" 89)
+BRANDS = frozenset({"ubiquiti", "unifi", "apple", "amazon", "samsung", "sony", "google", "microsoft"})
+NO_MARKET = {"preisjaeger"}  # sites without a used market of their own: their ads compare on willhaben only
+_DEVICE_WORDS = {"point", "access", "accesspoint", "wlan", "wifi", "router", "repeater"}   # "Access Point U6 Lite"
 CLOSEST = 10
 RECENT = 10
 GH_FIND_SEARCHES = 3         # Geizhals searches Claude may name (one request each; Geizhals blocks quickly)
@@ -140,6 +148,43 @@ def query_from_title(title: str | None, words: int = QUERY_WORDS) -> str:
     if len(toks) > words and _fold(toks[words]) in VARIANT_WORDS and TitleMatch._model_index(q) == words - 1:
         q.append(toks[words])
     return " ".join(q)
+
+
+def model_query(title: str | None) -> str:
+    """The item as sellers write it, from the title before its extras ("+ SSD", ", Netzteil"): the model (see
+    TitleMatch._model_index) with the variant words around it and the title's first capacity, after up to two words of
+    its line when the model is a bare number ("Echo Show 8", "Raspberry Pi 5 8GB", "USW Pro Max 24", "Watch Series
+    6") or one when it is a short code ("GSR 18V-55"); an order code alone ("USW-24-POE"). No brand words (BRANDS):
+    "Ubiquiti UniFi U6 Mesh" -> "U6 Mesh". Without a model the title's first words without brands ("Cloud Gateway
+    Max"); "" when that is the same as query_from_title()."""
+    t = _Title(title)
+    toks = t.head_tokens(t.extras_at)
+    first = TitleMatch._model_index(toks)
+    if first is None:
+        rest = [w for w in toks if _fold(w) not in BRANDS]
+        q = query_from_title(" ".join(rest)) if len(rest) < len(toks) else ""
+        return "" if _norm_q(q) == _norm_q(query_from_title(title)) else q
+    model = _fold(toks[first])
+    flat = re.sub(r"[^a-z0-9]", "", model)
+    room = 2 if _is_number(model) else 0 if geizhals.strong_code(toks[first]) or len(flat) > 5 else 1
+    lo = first
+    while room and lo:          # variant words on the way are free: "USW Pro PoE 48", "Watch Series 6"
+        w = _fold(toks[lo - 1])
+        if w in BRANDS or (w in _DEVICE_WORDS and not _is_number(model)):
+            break
+        lo, room = lo - 1, room - (w not in VARIANT_WORDS | _BEFORE_NUMBER)
+    hi = first + 1
+    broad = {_fold(w) for w in query_from_title(title).split()}     # never wider than it: "Dyson V11 Absolute"
+    while hi < len(toks) and (_fold(toks[hi]) in VARIANT_WORDS or _fold(toks[hi]) in broad):
+        hi += 1
+    q = toks[lo:hi]
+    size = next((w for w in toks if geizhals.CAPACITY_RE.fullmatch(w)), None)
+    return " ".join(q + ([size] if size and size not in q else []))
+
+
+def search_queries(title: str | None) -> list[str]:
+    """The comparable searches for a title, the narrow one first: model_query(), then query_from_title()."""
+    return list(dict.fromkeys(q for q in (model_query(title), query_from_title(title)) if q))
 
 
 def _model_token(toks: list[str], i: int) -> bool:
@@ -401,7 +446,9 @@ def explain(res: dict[str, Any]) -> str:
 
 # ------------------------------------------------------------------ sources
 def _wanted(title: str | None) -> bool:
-    return bool(re.match(r"\s*(suche|tausche?)\b", title or "", re.I))
+    """A search or swap ad: "Suche …", "Tausche …", "Prusa MK3s – tausche auch gegen Raspberry Pi 5"."""
+    return bool(re.match(r"\s*(suche|tausche?)\b", title or "", re.I)
+                or re.search(r"\btausche?\b.{0,40}\bgegen\b", title or "", re.I))
 
 
 # ------------------------------------------------------------------ comparable ads: title similarity
@@ -576,8 +623,8 @@ def _model_parts(model: str) -> tuple[str, str] | None:
 
 class _Title:
     """A title split for matching: its words (folded, lower case) in order with the index of their raw token, and
-    where its extras ("mit …", "+ …") and a "für …" begin – after the first word that names something, so "Neu mit
-    OVP: iPhone 13" still names the iPhone."""
+    where its extras ("mit …", "+ …"), a list after a number (list_at) and a "für …" begin – after the first word that
+    names something, so "Neu mit OVP: iPhone 13" still names the iPhone."""
 
     def __init__(self, title: str | None, known: set[str] = frozenset(), letters: set[str] = frozenset(),
                  abbr: str = "") -> None:
@@ -589,6 +636,11 @@ class _Title:
         start = next((i for i, w in enumerate(self.low) if len(w) >= 2 and w not in _FILLER_F | _EXTRAS),
                      len(self.low))
         self.extras_at = next((i for i in range(start, len(self.low)) if self.low[i] in _EXTRAS), len(self.low))
+        # a list after a number names what comes along ("Pi 5 8GB, SD-Karte, Netzteil, Gehäuse"): no accessory words
+        # from there on; the model may still follow ("PoE Switch, 24x RJ-45, USW-24-POE")
+        self.list_at = next((i for i in range(start, len(self.low)) if self.low[i] == ","
+                             and not self.text[self.ends[i]:self.ends[i] + 1].isdigit()     # not "5,0Ah"
+                             and any(re.search(r"\d", w) for w in self.low[start:i])), len(self.low))
         self.for_at = next((i for i in range(start, len(self.low)) if self.low[i] in _FOR), None)
         self.head_end = min(self.extras_at, len(self.low) if self.for_at is None else self.for_at)
         self.seq: list[tuple[str, str, int]] = []          # (word, original spelling, raw index)
@@ -639,7 +691,7 @@ class _Title:
         or "Akku: 89 %", "Batterie 90 Prozent" (its health); none of the parts when the ad itself is broken."""
         out = set()
         low = self.low
-        for i in range(self.head_end):
+        for i in range(min(self.head_end, self.list_at)):
             a = _accessory(low[i])
             if a is None or (broken and a in _PARTS):
                 continue
@@ -725,6 +777,7 @@ class TitleMatch:
             title = re.sub(r"\s+\S*$", "", title[:REFERENCE_MAX]) or title[:REFERENCE_MAX]   # without a cut word
         self.title = title
         self.sizes, self.measures = _capacities(title), _measures(title)     # once, not for every ad
+        self.generation = _generation(title)
         probe = _Title(title)
         self.known = {w for w in probe.words if re.fullmatch(r"[a-z]{2,}", w)}
         self.letters = {w for w in probe.words if re.fullmatch(r"[a-z]", w)}
@@ -911,8 +964,8 @@ class TitleMatch:
         model (willhaben also finds ads by their description: a "Cloud Key" for "UniFi U6"), with the model only in
         its extras ("Gaming PC + PS5") or with the model and nothing else of the name ("Tekken 5" for "PlayStation
         5") stays below 0.7.
-        0 when the variant words (Pro, Mini, Lite, Digital, OLED …, see _Title.variants) or the sizes (RAM/storage,
-        "4x4", "20 Zoll") differ, either way; minus PENALTY (0.5) each for an accessory word heading the title
+        0 when the variant words (Pro, Mini, Lite, Digital, OLED …, see _Title.variants), the sizes (RAM/storage,
+        "4x4", "20 Zoll") or the generations both name ("3. Generation", "Gen2") differ, either way; minus PENALTY (0.5) each for an accessory word heading the title
         ("Hülle", "Wandhalterung", "Controller", not after "mit", "+", "inkl": extras of the item), another condition
         (defective or parts for a working item, working for a defective one), a lot, "nur OVP", "… für <the model>",
         another line before the model ("GSB 18V-55" for "GSR 18V-55") and other models of the line ("V7 V8 V10 V11",
@@ -927,7 +980,9 @@ class TitleMatch:
         # "Levis 511 Slim", "Casio Uhr Digital" and "Casio Digital Uhr")
         vdiff = {w for w in (o.variants() - loose) ^ (self.variant_set - loose)
                  if not (w in _GENERAL_VARIANTS and w in o.words and w in self.t.words)}
+        gen = _generation(other)                 # "Echo Show 8 (2. Generation)" for a 3rd one: another product
         differs = bool(vdiff) or not (sizes <= self.sizes or self.sizes <= sizes) \
+            or bool(gen and self.generation and gen != self.generation) \
             or not _measures_agree(_measures(other), self.measures)
         at = self._model_at(o) if self.model else []
         score = 0.0 if differs else (self.model_weight if at else 0.0) + (1 - self.model_weight) * self._cover(o, at)
@@ -1001,6 +1056,18 @@ def _capacities(title: str | None) -> set[str]:
     return out
 
 
+_GEN_AFTER_RE = re.compile(r"\bgen(?:eration)?\.?\s*-?\s*(\d{1,2})(?![\w.,])", re.I)        # "Gen. 3", "Gen2"
+_GEN_BEFORE_RE = re.compile(r"(?<![\w.,])(\d{1,2})\s*(?:\.|st|nd|rd|th|te|ª|º|a)?\s*-?\s*"     # "3. Generation"
+                            r"gen(?:eration|erazione|eración|ération)?\b", re.I)
+
+
+def _generation(title: str | None) -> str | None:
+    """The generation a title names: "3. Generation", "3rd gen", "5ª Gen", "Gen. 3", "Gen2" (that form first: in
+    "Echo Show 8 Gen. 3" the 8 is the model); None without one."""
+    m = _GEN_AFTER_RE.search(title or "") or _GEN_BEFORE_RE.search(title or "")
+    return m.group(1).lstrip("0") or "0" if m else None
+
+
 def _same_size(other_title: str | None, ad_title: str | None) -> bool:
     """False for another RAM/storage variant: a "Pi 4 8GB" is no comparable for a "Pi 4 4GB". A title without a
     size, or one that names all of the ad's sizes ("4 GB + 32GB SD-Karte"), still counts."""
@@ -1053,27 +1120,35 @@ def _condition_kept(other: str | None, mine: str | None) -> bool:
     return other == "new" if price_zones.group(mine) == "new" else other not in ("new", "defect")
 
 
-async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None, *, title: str | None = None,
-                      category_url: str | None = None, condition: str | None = None) -> dict[str, Any]:
-    """Comparable ads: the keyword search (or a category the user picked) narrowed to the ads whose title is this
-    item (TitleMatch: same model and variant, no accessories, same condition, RAM/storage sizes too) and whose stated
-    condition prices alike (_condition_kept), without extreme prices. Too few left means too few: they are not
-    topped up with the rest. `filtered` says how many were dropped and why (TitleMatch.check: model, kind,
-    condition; the stated condition counts as condition too; then outliers). The ad's own willhaben category is not
-    used: the same item sits in several leaves (Bosch drills in four), a leaf holds accessories and other models too,
-    and ads of other sites have none."""
-    out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
-                           "scope": "chosen" if category_url else None, "filtered": {}, "filters": FILTERS}
-    if not query and not category_url:
-        return out
-    try:
-        data = await (search_category(category_url) if category_url else search_ads(query))
-    except (WillhabenError, InvalidSearchUrl) as e:
-        log.info("comparable search failed for %r: %s", category_url or query, e)
-        out["error"] = str(e)
-        return out
-    ads = [a for a in data["ads"] if str(a["ad_id"]) != str(exclude_ad_id or "") and a.get("price")
-           and a["price"] > 0 and not _wanted(a.get("title"))]
+def comparable_sites(platform: str | None) -> list[str]:
+    """Where an ad's comparables are searched: willhaben, and the ad's own site when that is another one with a used
+    market (a Kleinanzeigen ad among Kleinanzeigen ads too: the same item is often listed there only)."""
+    own = platform or "willhaben"
+    return ["willhaben"] if own == "willhaben" or own in NO_MARKET else [own, "willhaben"]
+
+
+async def _search(site: str, query: str) -> dict[str, Any]:
+    """One comparable search: willhaben's own call (search_ads), any other site's keyword search by relevance (its
+    adapter, limiter and VPN switch), cached 1 h."""
+    if site == "willhaben":
+        return await search_ads(query)
+    from app import platforms
+
+    key = f"{site}\x00" + re.sub(r"\s+", " ", query.strip().lower())
+    hit = _cached(_comparables, key, COMPARABLES_TTL_S)
+    if hit:
+        return hit[1]
+    p = platforms.get(site)
+    page = await p.search(p.keyword_search(query.strip(), sort="relevance"), rows=SEARCH_ROWS)
+    data = {"rows_found": page.rows_found, "ads": [{"platform": site, **a.as_dict()} for a in page.ads]}
+    _put(_comparables, key, data, COMPARABLES_TTL_S)
+    return data
+
+
+def _same_item(ads: list[dict[str, Any]], title: str | None, condition: str | None
+               ) -> tuple[list[dict[str, Any]], dict[str, int], int]:
+    """The ads whose title is this item (TitleMatch) and whose stated condition prices alike, how many were dropped
+    and why, and how many the title alone kept."""
     dropped = {"model": 0, "kind": 0, "condition": 0}
     if title:
         match, kept = TitleMatch(title), []
@@ -1086,14 +1161,66 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
         ads = kept
     kept = [a for a in ads if _condition_kept(a.get("item_condition"), condition)]
     dropped["condition"] += len(ads) - len(kept)
-    ads = kept
+    return kept, dropped, len(ads)
+
+
+async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None, *, title: str | None = None,
+                      category_url: str | None = None, condition: str | None = None, more: list[str] | tuple = (),
+                      platform: str | None = None) -> dict[str, Any]:
+    """Comparable ads: keyword searches (or a category the user picked) narrowed to the ads whose title is this item
+    (TitleMatch: same model and variant, no accessories, same condition, RAM/storage sizes too) and whose stated
+    condition prices alike (_condition_kept), without extreme prices. `query` is searched on every site of
+    comparable_sites(platform), then each of `more` while fewer than MIN_COMPARABLES are the item; the results are
+    pooled (an ad found twice counts once). Too few left means too few: they are not topped up with the rest.
+    `filtered` says how many were dropped and why (TitleMatch.check: model, kind, condition; the stated condition
+    counts as condition too; then outliers); `searches` what was searched where. A failing site is skipped; the error
+    counts only when no search answered, with error_kind "vpn" and error_site when each one waited for the VPN to find
+    a server (vpn.VpnWait). Whether `more` is searched depends on the ads the title filter kept, not on their condition.
+    The ad's own willhaben category is not used: the same item sits in several leaves (Bosch drills in four), a leaf
+    holds accessories and other models too, and ads of other sites have none."""
+    out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
+                           "scope": "chosen" if category_url else None, "filtered": {}, "filters": FILTERS,
+                           "searches": []}
+    if not query and not category_url:
+        return out
+    own = platform or "willhaben"
+    pool: dict[tuple[str, str], dict[str, Any]] = {}
+    errors: list[tuple[str, BaseException]] = []
+    ads: list[dict[str, Any]] = []
+    dropped: dict[str, int] = {}
+    titled = 0
+    plan = [(category_url, ["willhaben"])] if category_url else \
+        [(q, comparable_sites(platform)) for q in dict.fromkeys([query, *more]) if q]
+    for q, sites in plan:
+        if out["searches"] and titled >= MIN_COMPARABLES:     # the item's own ads, whatever their condition
+            break
+        for site in sites:
+            try:
+                data = await (search_category(q) if category_url else _search(site, q))
+            except (WillhabenError, InvalidSearchUrl, PlatformError) as e:
+                log.info("comparable search on %s failed for %r: %s", site, q, e)
+                errors.append((site, e))
+                out["searches"].append({"site": site, "query": q, "error": str(e)})
+                continue
+            out["searches"].append({"site": site, "query": q, "rows_found": data["rows_found"]})
+            out["rows_found"] += data["rows_found"]
+            for a in data["ads"]:
+                pool.setdefault((a.get("platform") or site, str(a["ad_id"])), a)
+        ads, dropped, titled = _same_item([a for (pid, aid), a in pool.items()
+                                   if not (pid == own and aid == str(exclude_ad_id or "")) and a.get("price")
+                                   and a["price"] > 0 and not _wanted(a.get("title"))], title, condition)
+    if errors and len(errors) == len(out["searches"]):
+        out["error"] = str(errors[0][1])
+        if all(isinstance(e, vpn.VpnWait) for _, e in errors):    # the VPN looks for a server: not the search
+            out.update(error_kind="vpn", error_site=errors[0][0])
+        return out
     n1 = len(ads)
     ads = _trim(ads)
     out["filtered"] = {**dropped, "outliers": n1 - len(ads)}
     st = stats([a["price"] for a in ads])
     centre = price if price and price > 0 else (st or {}).get("median") or 0
     closest = sorted(sorted(ads, key=lambda a: abs(a["price"] - centre))[:CLOSEST], key=lambda a: a["price"])
-    out.update(rows_found=data["rows_found"], count=len(ads), stats=st, closest=closest)
+    out.update(count=len(ads), stats=st, closest=closest)
     return out
 
 
@@ -1194,7 +1321,8 @@ def _reference(title: str | None, query: str | None, own_query: bool, fallback_q
     own_query) when it is not the title's own search, the one the form shows first; a search agent's keyword when the
     title is filler words only. A term that came along from a list (the deals page's search, a product search's
     term) only changes the search: "iphone 13" must not make an iPhone 13 Pro Max compare with every iPhone 13."""
-    typed = (query or "").strip() if own_query and _norm_q(query) != _norm_q(query_from_title(title)) else ""
+    typed = (query or "").strip() if own_query and _norm_q(query) not in {_norm_q(q) for q in search_queries(title)} \
+        else ""
     typed = typed if tokens(typed) else ""                # "neu", "OVP": no words that say what the item is
     return typed or (title if tokens(title) else "") or (fallback_query or "").strip()
 
@@ -1262,21 +1390,29 @@ def stored_claude(ad_id: str, price: float | None) -> dict[str, Any] | None:
 
 async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = False, use_claude: bool = False,
                   find_geizhals: bool = False, fallback_query: str | None = None,
-                  category_url: str | None = None) -> dict[str, Any]:
+                  category_url: str | None = None, known_geizhals: dict[str, Any] | None = None) -> dict[str, Any]:
     """Price position of one ad. `query` overrides the comparable search; with `own_query` (the user typed it to
     compare with) it also says what the comparables must be (_reference). `fallback_query` (a search agent's
     keyword) is used only when the title gives none. Claude runs only with use_claude (verdict) or find_geizhals
-    (looks for the product on Geizhals when the automatic lookup found none) – both explicit clicks."""
+    (looks for the product on Geizhals when the automatic lookup found none) – both explicit clicks.
+    `known_geizhals`: the product a search-agent hit already has (its lookup or Claude's check), used before a lookup
+    by the title, which may find nothing ("Dream Machine (UDM SE)")."""
     own = bool(own_query and (query or "").strip())
+    known = {k: v for k, v in (known_geizhals or {}).items() if k in ("name", "url", "price_from", "by", "checked")} \
+        if (known_geizhals or {}).get("price_from") and (known_geizhals or {}).get("url") else None
     res = cached(ad.ref, query, category_url, own)
     if res is not None and ((res.get("ad") or {}).get("price") != ad.price
-                            or (res.get("ad") or {}).get("item_condition") != ad.item_condition):
-        res = None                    # price or condition changed since: re-position (searches are cached)
+                            or (res.get("ad") or {}).get("item_condition") != ad.item_condition
+                            or known and not res.get("geizhals")):
+        res = None                    # price, condition or product changed since: re-position (searches are cached)
     if res is None:
-        q = (query or "").strip() or query_from_title(ad.heading) or (fallback_query or "").strip()
+        qs = [(query or "").strip()] if (query or "").strip() else search_queries(ad.heading)
+        qs = qs or [(fallback_query or "").strip()]
+        q = qs[0]
         comp = await comparables(q, ad.ad_id, ad.price, title=_reference(ad.heading, query, own, fallback_query),
-                                 category_url=category_url, condition=ad.item_condition)
-        gh = stored_geizhals(ad.ref) or await geizhals_match(geizhals_query(ad.heading, ad.category_path))
+                                 category_url=category_url, condition=ad.item_condition, more=qs[1:],
+                                 platform=ad.platform)
+        gh = stored_geizhals(ad.ref) or known or await geizhals_match(geizhals_query(ad.heading, ad.category_path))
         res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None, "own_query": own,
                "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,

@@ -126,8 +126,9 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
     p = _platform(platform_id)
     res = deals.cached(p.ref(ad_id), q, cat, own)
     # a condition the hit learned since (the viewer wrote the ad page's): analyze() re-rates, its searches are cached
-    stale = res is not None and hit is not None and bool(hit.item_condition) \
-        and (res.get("ad") or {}).get("item_condition") != hit.item_condition
+    stale = res is not None and hit is not None and (
+        bool(hit.item_condition) and (res.get("ad") or {}).get("item_condition") != hit.item_condition
+        or bool((hit.geizhals or {}).get("price_from")) and not res.get("geizhals"))   # a product the hit knows
     if res is not None and not (use_claude or find_geizhals or stale):
         return res, None
     if p.can("detail"):
@@ -143,7 +144,8 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
     if d.item_condition is None and hit is not None and hit.item_condition:    # a page without one: what the list said
         d.item_condition, d.item_condition_label = hit.item_condition, hit.item_condition_label
     return await deals.analyze(d, query=q, own_query=own, use_claude=use_claude, find_geizhals=find_geizhals,
-                               fallback_query=fallback, category_url=cat), None
+                               fallback_query=fallback, category_url=cat,
+                               known_geizhals=hit.geizhals if hit is not None else None), None
 
 
 # Route order matters: Starlette takes the first path that matches, so the 3-segment legacy routes
