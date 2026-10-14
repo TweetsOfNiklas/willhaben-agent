@@ -61,10 +61,10 @@ It runs on your own server, from your home internet connection, and you control 
 - **Direct search and price check** (same tab, "Direct search" next to the AI search): a search text lists the ads of
   every ticked site with their price position; paste an ad link of any supported site and see whether the price is cheap or expensive: a
   bar of coloured zones, by the ad's share of the Geizhals new price per your zones for used and new items (Settings →
-  Prices; the condition the site states picks the zones), else by the comparable listings of the **same kind of item**
-  (same willhaben category, without accessories, other variants, other conditions and extreme prices; you can pick
-  another category), whose usual range is drawn under the bar either way, and, on click, Claude's verdict.
-  Also in the hit viewer, with the zone label on hit cards.
+  Prices; the condition the site states picks the zones), else by the comparable listings of the **same item** (same
+  model and variant by their titles, in any category, without accessories, extreme prices and ads in another
+  condition; you can pick a category), whose usual range is drawn under the bar either way, and, on click, Claude's
+  verdict. Also in the hit viewer, with the zone label on hit cards.
 - **Your ads**: imported from your account, with a reminder before they expire. A list with a detail pane per ad and
   three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
   automatic answers with an instruction and a minimum price (switches and text save as you type), edit text and photos
@@ -319,7 +319,7 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Own ads: edit text and photos, sold / reserved | built; saving is **not yet live-tested** |
 | Ad drafts with Claude, comparable prices, Geizhals specs, batch upload | done |
 | Publishing ads directly | done for free private ads with pickup (batch cards and single draft page, category picker); shipping/PayLivery built from the bundle but **not yet live-tested** |
-| Price check and product search (Produktsuche) | done (comparables from the same category, category selectable) |
+| Price check and product search (Produktsuche) | done (comparables of the same item by title, category selectable) |
 | Home Assistant events, pushes with action buttons | done |
 | Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
 | Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet** |

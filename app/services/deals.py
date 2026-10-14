@@ -2,7 +2,8 @@
 
 Three sources, all cached so reopening an ad costs nothing within the cache time:
 - comparables: ONE willhaben keyword search (rows 50, relevance) for a short query derived from the ad title,
-  the ad itself and "Suche …" ads left out, price percentiles p10..p90 (cached 1 h per query)
+  only the ads whose title is the same item (TitleMatch: model, variant, size, no accessories), the ad itself and
+  "Suche …" ads left out, price percentiles p10..p90 (cached 1 h per query)
 - Geizhals: lowest new price of the best matching product, only for product-like titles (cached 6 h per query)
 - Claude (only on an explicit click): deal verdict + short reason, model purpose "screen"; and, when the automatic
   Geizhals lookup found nothing, a search there: Claude names up to three Geizhals searches, the app runs them,
@@ -48,7 +49,7 @@ RESULT_TTL_S = 3600
 GEIZHALS_FAIL_TTL_S = 900    # Geizhals blocking/down: don't retry on every open
 MIN_COMPARABLES = 5          # fewer: no comparables scale (their rule, the cross-check and the mismatch need it)
 QUERY_WORDS = 3              # willhaben keyword search is AND: short queries find enough comparables
-FILTERS = 3                  # version of the comparable filters (2: RAM/storage sizes, 3: condition + zone rating);
+FILTERS = 4                  # version of the comparable filters (4: title similarity, condition, zone rating);
                              # older results are recomputed
 CLOSEST = 10
 RECENT = 10
@@ -131,8 +132,14 @@ def tokens(title: str | None) -> list[str]:
 def query_from_title(title: str | None, words: int = QUERY_WORDS) -> str:
     """The first words of the title, "4 GB" as one word "4GB" (so "Pi 4 4 GB" keeps both). willhaben matches either
     spelling (checked 10/2026: "iPhone 13 128GB" also finds the "128 GB" ads, 1326 vs 1327 hits). No size is pulled in
-    from further on (a longer AND query finds fewer); _same_size() separates the variants."""
-    return " ".join(tokens(geizhals.glue_units(title or ""))[:words])
+    from further on (a longer AND query finds fewer); TitleMatch separates the variants. Only a variant word right
+    after a model that ends the query comes along: "Sony PlayStation 5 Digital" finds Digital Editions, "Sony
+    PlayStation 5" mostly the disc console (live 10/2026: 9 against 0)."""
+    toks = tokens(geizhals.glue_units(title or ""))
+    q = toks[:words]
+    if len(toks) > words and _fold(toks[words]) in VARIANT_WORDS and TitleMatch._model_index(q) == words - 1:
+        q.append(toks[words])
+    return " ".join(q)
 
 
 def _model_token(toks: list[str], i: int) -> bool:
@@ -397,36 +404,581 @@ def _wanted(title: str | None) -> bool:
     return bool(re.match(r"\s*(suche|tausche?)\b", title or "", re.I))
 
 
-# Comparables must be the same kind of item: a "iPhone 15 Pro" is not compared with cases or a "15 Pro Max".
+# ------------------------------------------------------------------ comparable ads: title similarity
+# Another model of the same line: "iPhone 13" is not the "13 mini", a "V11 Absolute" not the "Absolute Extra", a
+# "PS5 Digital" not the disc console, an "RTX 3080" not the "3080 Ti". Both titles must name the same ones.
+# Not "xl": in a title that is mostly the clothing size ("Winterjacke Größe XL").
+VARIANT_WORDS = frozenset({"max", "plus", "mini", "ultra", "lite", "pro", "se", "air", "fe", "neo", "extra", "complete",
+                           "digital", "disc", "slim", "mesh", "lr", "ti", "xt", "oled", "cellular"}) \
+    | geizhals.VARIANT_WORDS
+# Plain words among them: "disc" right after a size says what the sized thing has ("29 Zoll Disc": disc brakes) …
+_GENERAL_VARIANTS = frozenset({"digital", "disc", "slim", "extra", "complete", "xt"})
+# … and before one of these nouns what kind of thing it is ("Digital Piano", "Digital Spiegelreflexkamera",
+# "Disc-Laufwerk", "Slim Fit"), also as the end of a compound. Anywhere else they name the variant: "PS5 Digital
+# Edition", "PS4 Slim Bundle", "PS5 Digital Gaming Konsole". "OLED" always does ("Switch OLED", "G9 OLED Monitor").
+_DESCRIBING = frozenset({"digital", "disc", "slim"})
+_DESCRIBED = ("piano", "klavier", "keyboard", "kamera", "camera", "receiver", "radio", "uhr", "waage", "thermometer",
+              "rahmen", "multimeter", "recorder", "mischpult", "schlagzeug", "orgel", "laufwerk", "player", "bremse",
+              "fit")
+# What an ad is when one of these heads its title, also in the plural or as the end of a compound ("Handyhülle",
+# "Deckeneinbauhalterung", "Ersatzfilter"): an accessory or a part, not the item itself.
 ACCESSORY_WORDS = (
-    "hülle", "huelle", "case", "cover", "bumper", "panzerglas", "schutzglas", "schutzfolie", "displayschutz", "folie",
-    "kabel", "ladekabel", "ladegerät", "ladegeraet", "netzteil", "adapter", "halterung", "tasche", "etui", "skin",
-    "ersatzteil", "ersatzteile", "teile", "display", "akku", "gehäuse", "gehaeuse", "platine", "defekt", "kaputt",
-    "bastler", "attrappe", "dummy", "karton", "verpackung", "ovp nur", "nur ovp", "leerkarton", "zubehör", "zubehoer",
+    "hülle", "case", "cover", "bumper", "panzerglas", "schutzglas", "folie", "schutz", "kabel", "ladegerät",
+    "netzteil", "adapter", "halterung", "tasche", "etui", "skin", "display", "akku", "batterie", "gehäuse", "platine",
+    "zubehör", "controller", "ladestation", "faceplate", "lüfter", "injektor", "injector", "montageplatte", "rohr",
+    "schlauch", "bürste", "düse", "filter", "schalter", "griff", "kühlkörper", "extender", "shield", "laufwerk",
+    "fernbedienung", "attrappe", "dummy", "karton", "verpackung", "schachtel", "anleitung", "handbuch", "armband",
+    "tastatur", "mainboard", "stecker", "ladeschale", "dockingstation", "sleeve", "halter", "ständer", "bezug",
+    "wanne", "sitzeinheit", "fußsack",
 )
-PARTS_WORDS = {"ersatzteil", "ersatzteile", "teile", "display", "akku", "gehäuse", "gehaeuse", "platine", "defekt",
-               "kaputt", "bastler"}
-VARIANT_WORDS = ("max", "plus", "mini", "ultra", "lite", "pro", "se", "air", "fe", "neo")
-TRIM_LOW, TRIM_HIGH = 0.35, 2.5       # around the median, after the category and title filters
+_ACCESSORY_EXACT = {"spiel", "spiele", "game", "games", "räder", "reifen", "mount", "modul"}   # whole words only
+PARTS_WORDS = {"display", "akku", "gehäuse", "platine", "batterie"}    # what a defective ad's comparables may be
+_BROKEN = ("defekt", "kaputt", "bastler")                              # word starts: "defektes", "kaputte"
+_NOT_BROKEN = {"kein", "keine", "keinen", "keinerlei", "nicht", "ohne"}   # "keine Defekte", "nicht kaputt"
+_LOT_WORDS = {"konvolut", "sammlung", "restposten", "sammelposten"}
+_BOX_WORDS = {"ovp", "box", "originalverpackung", "karton", "verpackung", "schachtel"}   # "nur OVP": the box alone
+_EXTRAS = {"mit", "inkl", "inklusive", "incl", "samt", "with", "+", "&", "und", "sowie", "zzgl"}   # what comes along
+_FOR = {"fuer", "for", "passend", "kompatibel", "compatible", "geeignet"}  # "Hülle für iPhone 13": made for the item
+_BEFORE_NUMBER = {"model", "modell", "typ", "type", "version", "gen", "generation", "series", "serie", "nr", "no", "mk"}
+MATCH_MIN = 0.7          # similarity a comparable needs (TitleMatch.score)
+PENALTY = 0.5            # an accessory, part, lot, box, other line or model list: such an ad cannot reach MATCH_MIN
+TRIM_LOW, TRIM_HIGH = 0.35, 2.5       # around the median, after the title filter
+TRIM_MAX = 0.2                        # share of the ads the trim may drop
+PLACEHOLDER = 0.1                     # below this share of the median a price is a placeholder ("1 €")
+REFERENCE_MAX = 200                   # characters of the reference title compared (a typed term can be any length)
+
+_WORD_RE = re.compile(r"[^\W_]+(?:[.\-][^\W_]+)*\+*|[+&/,()]")
+_FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+_PLURAL = ("", "e", "n", "en", "s", "er", "es")
 
 
-def _words(text: str | None) -> set[str]:
-    return set(re.findall(r"[\wäöüß]+", (text or "").lower()))
+def _fold(word: str) -> str:
+    """Lower case, umlauts spelled out ("weiß" = "weiss"), without a glued "+" ("PoE+"); "+" itself stays."""
+    w = word.lower().translate(_FOLD)
+    return w.rstrip("+") or w
 
 
-def _same_kind(other_title: str | None, ad_title: str | None) -> bool:
-    """False for accessories/parts/defects the ad itself is not about, and for other model variants."""
-    o, a = (other_title or "").lower(), (ad_title or "").lower()
-    ow, aw = _words(o), _words(a)
-    broken = bool(aw & PARTS_WORDS)          # the ad itself is defective/for parts: so are fair comparables
-    for w in ACCESSORY_WORDS:
-        if broken and w in PARTS_WORDS:
-            continue
-        hit = (w in o) if " " in w else (w in ow)
-        mine = (w in a) if " " in w else (w in aw)
-        if hit and not mine:
+_ACC = tuple(_fold(w) for w in ACCESSORY_WORDS)
+_ACC_KIND = {"case": "huelle", "cover": "huelle", "bumper": "huelle", "etui": "huelle", "tasche": "huelle",
+             "skin": "huelle", "sleeve": "huelle", "schutzglas": "panzerglas", "folie": "panzerglas",
+             "netzteil": "ladegeraet", "ladestation": "ladegeraet", "ladeschale": "ladegeraet",
+             "halter": "halterung"}                     # the same kind of accessory under another name
+_ACC_EXACT = {_fold(w) for w in _ACCESSORY_EXACT}
+_NOT_ACCESSORY = {"steelcase"}                    # a brand (office chairs), not a case
+_MATERIAL_VARIANTS = {"mesh"}                     # without a model a material ("Mesh-Rückenlehne"), not the U6 Mesh
+_PARTS = {_fold(w) for w in PARTS_WORDS}
+_FILLER_F = {_fold(w) for w in FILLER}
+_UNITS_F = {_fold(w) for w in _UNITS}
+_COUNTS = _UNITS_F | {"monate", "wochen", "tage", "stunden", "std", "km",   # "5 Jahre", "6 Schubladen": no model
+                      "schubladen", "laden", "faecher", "fach", "tueren", "sitzer", "sitze", "stuehle", "teile",
+                      "flammen", "gaenge", "zimmer", "ebenen", "boeden", "kisten", "boxen", "paar", "rollen"}
+# "4x4", "90x200cm", "20zoll", "18v"
+_MEASURE_WORD_RE = re.compile(r"\d+(x\d+)+(cm|mm|m)?|\d+([.,]\d+)?(zoll|cm|mm|m|kg|g|l|w|v|ah|mah|wh)")
+_COUNT_WORD_RE = re.compile(r"\d+-?(teilig|tlg|fach|stk|stueck|tuerig|sitzer|er)")   # "2-teilig", "3-Sitzer"
+# what follows "Akku" when it is the battery's health: ": 89 %", " 89 Prozent", "-Zustand 90%", " bei 87%" – not "18V"
+_HEALTH_RE = re.compile(r"(?:[\s:=(\-]|zustand|kapazit(?:ä|ae|a)t|gesundheit|health|status|bei|noch|ca\.?|von)*"
+                        r"\d+(?:[.,]\d+)?\s*(?:%|prozent\b)", re.I)
+_NOT_A_NAME = {"ohne", "mir", "bei", "auf", "unter", "ueber", "nach", "vor", "bis", "als", "so", "auch", "noch",
+               "ganz", "fast", "nicht", "kein", "keine", "alle", "viel", "viele", "mehr"}   # little words
+# before the model, besides filler, no product line: "Meine PS5", "Unsere Brandneue PS5"
+_LEAD_FILLER = {"mein", "dein", "sein", "unser", "euer", "ihr", "brandneu", "nagelneu"}
+_NOT_A_LINE = _FILLER_F | _BEFORE_NUMBER | _UNITS_F
+_COLOURS = frozenset(_fold(w) for w in (
+    "weiß", "schwarz", "grau", "braun", "beige", "blau", "rot", "grün", "gelb", "rosa", "pink", "lila", "violett",
+    "türkis", "silber", "gold", "golden", "anthrazit", "creme", "natur", "bunt", "orange", "oliv", "mint", "petrol",
+    "bordeaux", "taupe", "khaki", "navy", "weinrot", "kupfer", "bronze", "transparent", "black", "white", "grey",
+    "gray", "blue", "red", "green", "silver", "brown"))
+# How an item looks, not what it is: colours, materials, shapes, praise. In a title without a model they do not decide
+# ("Bürostuhl ergonomisch schwarz" compares with any office chair, "Couchtisch Holz rund" with a glass one).
+_ATTRIBUTES = _COLOURS | frozenset(_fold(w) for w in (
+    "holz", "massiv", "massivholz", "eiche", "buche", "kiefer", "fichte", "nussbaum", "walnuss", "ahorn", "birke",
+    "teak", "bambus", "rattan", "leder", "echtleder", "kunstleder", "wildleder", "stoff", "samt", "velours", "cord",
+    "leinen", "baumwolle", "wolle", "metall", "stahl", "edelstahl", "alu", "aluminium", "glas", "marmor", "stein",
+    "kunststoff", "keramik", "beton", "chrom",
+    "rund", "eckig", "oval", "groß", "klein", "lang", "kurz", "breit", "hoch", "schmal", "modern", "elegant", "schön",
+    "stabil", "bequem", "vintage", "retro", "antik", "rustikal", "edel", "edle", "hell", "dunkel", "matt", "glänzend",
+    "hochglanz", "glanz", "lack", "dekor", "gepolstert", "verchromt", "beschichtet", "gebürstet", "design",
+    "designer"))
+# adjectives and looks by their ending: "ergonomisch", "ausziehbar", "hochwertig", "lackiert", "makellos", "Holzoptik"
+_ATTRIBUTE_ENDS = ("isch", "lich", "bar", "farben", "farbig", "ig", "iert", "los", "optik")
+_NOT_ATTRIBUTE_ENDS = ("tisch", "fisch", "kaefig", "koenig", "honig", "essig", "zweig", "teig", "pfennig")
+# a clothing size is no model: "Gr. 44", "gr.48", "Größe 38/40", "in 44", "44 L"
+_WEAR_SIZE_RE = re.compile(r"\b(?:gr(?:ö|oe|o)(?:ss|ß)e|gr|size|in)\b\.?:?\s*\d+(?:\s*/\s*\d+)?\b"
+                           r"(?!\s*(?:cm|mm|m|zoll)\b)"
+                           r"|\bgr\.?\d+(?:/\d+)?\b"
+                           r"|\b\d+\s+(?:xs|m|l|xl|xxl|xxxl)\b(?![\w.])", re.I)
+
+
+def _attribute(word: str) -> bool:
+    """A (folded) word that says how the item looks, not what it is; inflected too ("weiße", "massiver"), also of
+    several parts ("weiß-grau")."""
+    if "-" in word.strip("-"):
+        return all(_attribute(p) for p in word.split("-") if p)
+    stems = {word, re.sub(r"(e|er|es|en|em)$", "", word)}
+    return any(s in _ATTRIBUTES or re.sub(r"^(dunkel|hell)", "", s) in _ATTRIBUTES
+               or (len(s) >= 6 and s.endswith(_ATTRIBUTE_ENDS) and not s.endswith(_NOT_ATTRIBUTE_ENDS)) for s in stems)
+
+
+def _accessory(word: str) -> str | None:
+    """The accessory word a (folded) title word is, by itself, in the plural or as the end of a compound."""
+    w = word.split("-")[-1]                        # "Leder-Case", "PoE-Injektor": the last part names the thing
+    if w in _NOT_ACCESSORY:
+        return None
+    if w in _ACC_EXACT:
+        return w
+    for a in _ACC:
+        if any(w == a + p for p in _PLURAL) or (len(w) >= len(a) + 3 and w.endswith(a)):
+            return _ACC_KIND.get(a, a)
+    return None
+
+
+def _initials(word: str) -> str:
+    """"PlayStation" -> "ps": the first letter and the capitals after it (spelled-out abbreviations)."""
+    return (word[:1] + "".join(c for c in word[1:] if c.isupper())).lower()
+
+
+# Model letters that stand for a line word, whatever its case ("PS5" = "Playstation 5" = "PLAYSTATION 5"). Only
+# well-known ones: written with capitals inside, a line word gives its own ("PlayStation" -> "ps", _initials).
+_ALIASES = {"ps": frozenset({"playstation"})}
+
+
+def _abbreviates(abbr: str, word: str) -> bool:
+    """"ps" for "PlayStation" (its capitals) and for "Playstation", "PLAYSTATION" (_ALIASES); not "Persona",
+    "Passat" or "Pistole"."""
+    return len(abbr) >= 2 and (_initials(word) == abbr or _fold(word) in _ALIASES.get(abbr, ()))
+
+
+def _colour(word: str) -> bool:
+    """A (folded) colour, also inflected ("schwarze", "dunkelblaue") or of several parts ("weiß-grau")."""
+    if "-" in word.strip("-"):
+        return all(_colour(p) for p in word.split("-") if p)
+    stems = {word, re.sub(r"(e|er|es|en|em)$", "", word)}
+    return any(s in _COLOURS or re.sub(r"^(dunkel|hell)", "", s) in _COLOURS for s in stems)
+
+
+def _lead_word(word: str) -> bool:
+    """A (folded) word before the model that may name the product line: no filler, also inflected ("Neuwertige",
+    "Neue", "Gebrauchte"), no possessive ("Meine"), little word or colour ("Schwarze"). Other words stay, also those
+    that end like an adjective or name a material: "Soundbar", "Kompletträder (Alu)" say what the item is."""
+    stems = {word, re.sub(r"(e|er|es|en|em)$", "", word)}
+    return not (stems & (_FILLER_F | _LEAD_FILLER) or word in _NOT_A_NAME or _colour(word))
+
+
+def _is_number(w: str) -> bool:
+    return bool(re.fullmatch(r"\d+", w))
+
+
+def _model_parts(model: str) -> tuple[str, str] | None:
+    """"u6" -> ("u", "6"), "ps5" -> ("ps", "5"): a letter prefix and a number."""
+    m = re.fullmatch(r"([a-z]{1,3})(\d+)", model)
+    return (m.group(1), m.group(2)) if m else None
+
+
+class _Title:
+    """A title split for matching: its words (folded, lower case) in order with the index of their raw token, and
+    where its extras ("mit …", "+ …") and a "für …" begin – after the first word that names something, so "Neu mit
+    OVP: iPhone 13" still names the iPhone."""
+
+    def __init__(self, title: str | None, known: set[str] = frozenset(), letters: set[str] = frozenset(),
+                 abbr: str = "") -> None:
+        self.text = geizhals.glue_units(title or "")
+        found = list(_WORD_RE.finditer(self.text))
+        self.raw = [m.group() for m in found]
+        self.ends = [m.end() for m in found]                # where each raw word ends in self.text
+        self.low = [_fold(r) for r in self.raw]
+        start = next((i for i, w in enumerate(self.low) if len(w) >= 2 and w not in _FILLER_F | _EXTRAS),
+                     len(self.low))
+        self.extras_at = next((i for i in range(start, len(self.low)) if self.low[i] in _EXTRAS), len(self.low))
+        self.for_at = next((i for i in range(start, len(self.low)) if self.low[i] in _FOR), None)
+        self.head_end = min(self.extras_at, len(self.low) if self.for_at is None else self.for_at)
+        self.seq: list[tuple[str, str, int]] = []          # (word, original spelling, raw index)
+        self.part: list[int] = []                           # which "-" part of its raw token a word is
+        for i, (r, w) in enumerate(zip(self.raw, self.low, strict=True)):
+            parts = [p for p in w.split("-") if p] if "-" in w else [w]
+            for k, p in enumerate(parts):
+                for s in self._split(p, known, letters, abbr):
+                    self.seq.append((s, r if len(parts) == 1 and s == w else s, i))
+                    self.part.append(k)
+        self.words = {w for w, _, _ in self.seq} | set(self.low)
+        self.head_words = self._words_before(self.extras_at)     # what the title sells, with "für …"
+        self.item_words = self._words_before(self.head_end)      # … and without
+        self.own_words = self._words_before(len(self.low) if self.for_at is None else self.for_at)   # with "mit …"
+
+    def _words_before(self, end: int) -> set[str]:
+        return {w for w, _, ri in self.seq if ri < end} | set(self.low[:end])
+
+    @staticmethod
+    def _split(w: str, known: set[str], letters: set[str], abbr: str = "") -> list[str]:
+        """Glued spellings the other title writes apart: "PlayStation5", "Pi4", "13mini", "U7pro", "4B" ("Model B"),
+        "RaspberryPI", "UniFiSwitch" (`known`: the other title's words; `abbr`: the letters of its model, "PlayStation5"
+        for "PS5")."""
+        if w in known or not w:
+            return [w]
+        m = re.fullmatch(r"([a-z]{2,})(\d[\w.]*)", w)
+        if m and (m.group(1) in known or _abbreviates(abbr, m.group(1))):
+            return [m.group(1), *_Title._split(m.group(2), known, letters)]
+        m = re.fullmatch(r"(.*\d)([a-z]+)", w)
+        if m and (m.group(2) in VARIANT_WORDS or m.group(2) in letters):
+            return [m.group(1), m.group(2)]
+        for k in range(2, len(w) - 1):
+            if w[:k] in known and w[k:] in known:
+                return [w[:k], w[k:]]
+        return [w]
+
+    def head_tokens(self, end: int) -> list[str]:
+        """The title's tokens (see tokens()) before raw word `end`, without counts ("4x", "3er") and clothing sizes
+        ("Gr. 44")."""
+        text = _WEAR_SIZE_RE.sub(" ", " ".join(self.raw[:end]))
+        return [w for w in tokens(geizhals.glue_units(text)) if not _COUNT_RE.fullmatch(w)]
+
+    def accessories(self, broken: bool, model: str | None, model_words: set[int] = frozenset(),
+                    line: set[str] = frozenset()) -> set[str]:
+        """Accessory words before the extras; not "2x Akku", "2 Controller" (a count: extras – but the number of the
+        model is none: "Playstation 5 Controller" for a "PS5", `model_words`: the raw words that name it), "Akku
+        Staubsauger", "Akku 18V Bohrschrauber", "Akku 18V GSR …" (the cordless kind; `line`: the ad's product line)
+        or "Akku: 89 %", "Batterie 90 Prozent" (its health); none of the parts when the ad itself is broken."""
+        out = set()
+        low = self.low
+        for i in range(self.head_end):
+            a = _accessory(low[i])
+            if a is None or (broken and a in _PARTS):
+                continue
+            if i and (re.fullmatch(r"\d+(x|er)", low[i - 1])
+                      or _is_number(low[i - 1]) and low[i - 1] != model and i - 1 not in model_words):
+                continue
+            if low[i] in ("akku", "batterie") and _HEALTH_RE.match(self.text, self.ends[i]):
+                continue
+            if a == "akku" and low[i] in ("akku", "akkus"):
+                j = i + 1
+                if j < len(low) and _is_number(low[j]) \
+                        and not (j + 1 < len(low) and low[j + 1] in (",", ".", "stueck", "stk", "x")):
+                    continue                                   # its state: "Akku 1 Jahr", "Akku ~85%", "Akku 2023 …"
+                units = []
+                while j < len(low) and _MEASURE_WORD_RE.fullmatch(low[j]):    # "Akku 18V 5Ah …"
+                    units.append(low[j])
+                    j += 1
+                nxt = low[j] if j < len(low) else ""
+                # the item follows (its line, its model) or the battery belongs to one ("E-Bike Akku 625Wh")
+                if nxt in line or (nxt and nxt == model) or j in model_words or any(u.endswith("wh") for u in units) \
+                        or re.fullmatch(r"[a-z]{4,}", nxt) and nxt not in _FILLER_F and not _accessory(nxt) \
+                        and nxt not in _EXTRAS | _FOR:
+                    continue
+            out.add(a)
+        return out
+
+    def _no_variant(self, k: int) -> bool:
+        """A general variant word (seq[k]) that names no variant: "disc" right after a size ("29 Zoll Disc": disc
+        brakes; "29 Zoll XT" stays a variant) or
+        saying what kind of thing the noun after it is ("Digital Piano", "Digital Spiegelreflexkamera",
+        "Disc-Laufwerk")."""
+        w, _, ri = self.seq[k]
+        if k and w == "disc":
+            prev, _, pri = self.seq[k - 1]
+            if re.fullmatch(r"\d+(?:zoll|cm|mm)", prev) \
+                    or prev in ("zoll", "cm", "mm") and k > 1 and _is_number(self.seq[k - 2][0]) \
+                    or _is_number(prev) and self.text.startswith(('"', "''", "”"), self.ends[pri]):
+                return True
+        if w not in _DESCRIBING or k + 1 >= len(self.seq):
             return False
-    return not any(v in ow and v not in aw for v in VARIANT_WORDS)
+        nxt, _, nri = self.seq[k + 1]
+        if nri != ri:                                     # "Digital Sat-Receiver": the compound's last part
+            nxt = self.low[nri].rsplit("-", 1)[-1]
+        return any(nxt == n + p or len(n) >= 3 and nxt.endswith(n + p) for n in _DESCRIBED for p in _PLURAL)
+
+    def variants(self) -> set[str]:
+        """Variant words before the extras ("Hülle für iPhone 13 Pro": Pro, "Switch (OLED-Modell)", "PS5 Digital
+        Gaming Konsole", "Switch OLED Zelda Edition") – a general one not where it names no variant (_no_variant).
+        "Professional" right after a number is the Pro ("UniFi 6 Professional"), after an order code Bosch's line; a
+        phone-like model with a glued "+" is the Plus ("Galaxy S23+", "U6+"; not "PoE+", "USW-24-PoE+" or "PS5+ 2
+        Spiele", where it adds the extras)."""
+        out = set()
+        for k, (w, _, ri) in enumerate(self.seq):
+            if ri < self.extras_at and w in VARIANT_WORDS and not (w in _GENERAL_VARIANTS and self._no_variant(k)):
+                out.add(w)
+        head = [(w, ri) for w, _, ri in self.seq if ri < self.extras_at]
+        out |= {"pro" for (w, _), (p, pi) in zip(head[1:], head, strict=False)   # not Bosch's "18V-55 Professional"
+                if w == "professional" and re.search(r"\d", p) and "-" not in self.raw[pi]}
+        for i, r in enumerate(self.raw[:self.extras_at]):
+            nxt = self.low[i + 1] if i + 1 < len(self.low) else ""
+            if re.fullmatch(r"(?:[^\W\d_]|note)\d+\++", r, re.I) and not (_is_number(nxt) or _COUNT_RE.fullmatch(nxt)):
+                out.add("plus")
+        return out
+
+    def broken(self) -> bool:
+        """Defective, or a part ("Ersatzteilträger", "Teile") – not "inkl. Ersatzakku" (extras), "defektfrei" or
+        "keine Defekte", "nicht kaputt"."""
+        return any(w.startswith(_BROKEN) and not w.startswith("defektfrei")
+                   and not (k and self.seq[k - 1][0] in _NOT_BROKEN) for k, (w, _, _) in enumerate(self.seq)) \
+            or any(w.startswith("ersatz") or w in ("teile", "einzelteile") for w in self.low[:self.head_end])
+
+    def box_only(self) -> bool:
+        """"nur OVP", "Nur! Schachtel": the box alone."""
+        return any(w == "nur" and set(self.low[i + 1:i + 3]) & _BOX_WORDS for i, w in enumerate(self.low))
+
+
+class TitleMatch:
+    """How similar other ads' titles are to this ad's title, as a score 0..1 (see check())."""
+
+    def __init__(self, title: str | None) -> None:
+        title = title or ""
+        if len(title) > REFERENCE_MAX:                       # a typed term: its start says what the item is
+            title = re.sub(r"\s+\S*$", "", title[:REFERENCE_MAX]) or title[:REFERENCE_MAX]   # without a cut word
+        self.title = title
+        self.sizes, self.measures = _capacities(title), _measures(title)     # once, not for every ad
+        probe = _Title(title)
+        self.known = {w for w in probe.words if re.fullmatch(r"[a-z]{2,}", w)}
+        self.letters = {w for w in probe.words if re.fullmatch(r"[a-z]", w)}
+        self.t = _Title(title, self.known, self.letters)
+        toks = self.t.head_tokens(self.t.extras_at)          # "Hülle für iPhone 13": model 13
+        first = self._model_index(toks)
+        self.model = _fold(toks[first]) if first is not None else None
+        pre = _model_parts(self.model or "")
+        self.abbr = pre[0] if pre and len(pre[0]) >= 2 else ""    # "ps" of "PS5": "PlayStation5" is split for it
+        # a model glued to its line, as written: ("PlayStation", "5") of "PlayStation5" ("PS5" names it too)
+        glued = re.fullmatch(r"([^\W\d_]{4,})(\d+)", toks[first]) if first is not None else None
+        self.glued = glued.groups() if glued else None
+        flat = re.sub(r"[^a-z0-9]", "", self.model or "")
+        # how much the model alone says: an order code ("USW-24-POE") 0.7, "V11", "S23", "42115" 0.6, "13", "M1" 0.5
+        self.model_weight = 0.0 if first is None else 0.7 if geizhals.strong_code(toks[first]) else \
+            0.6 if (re.search(r"[a-z]", flat) and len(flat) >= 3) or len(flat) >= 4 else 0.5
+        words = [(i, _fold(w)) for i, w in enumerate(toks) if i != first and self._content(w)]
+        # no line in "Neuwertige PS5", "Meine PS5", "Schwarze PS5": then the model comes first
+        lead = [w for i, w in words if first is not None and i < first and _lead_word(w)]
+        self.anchor = lead[-1] if lead else None             # the product line: "iPhone", "Pi", "Fox", "GSR"
+        self.anchor_spelled = next((w for w in toks[:first or 0] if _fold(w) == self.anchor), "")   # as written
+        if first is None:                                    # no model: what the item is called (the first
+            names = self._names(toks)                        # QUERY_WORDS 1 each, the rest 0.5 together)
+            rest = max(1, len(names) - QUERY_WORDS)
+            self.weights = {w: 1.0 if n < QUERY_WORDS else 0.5 / rest for n, w in enumerate(names)}
+        elif lead:                                           # the line 1, brand and other words before it 0.5
+            self.weights = {w: 1.0 if w == self.anchor else 0.5 for w in lead}
+        else:                                                # the model first: a weak one needs the words after it
+            self.weights = {} if self.model_weight > 0.5 else {w: 1.0 for i, w in words if i > first}
+        self.variant_set = self.t.variants()
+        self.is_broken = self.t.broken()
+        self.line = {self.anchor} if self.anchor else set()  # "Akku GSR 18V-55" for a "GSR 18V-55": the cordless tool
+        self.acc = self.t.accessories(self.is_broken, self.model, line=self.line)
+        self.lots = self.t.words & _LOT_WORDS
+        self.box = self.t.box_only()
+
+    @staticmethod
+    def _model_index(toks: list[str]) -> int | None:
+        """Where the title's model is (_model_token, geizhals.is_code): not a capacity ("128GB"), a measure
+        ("20zoll"), or a count ("6 Schubladen", "2-teilig", "2 Bürostühle" at the start)."""
+        for i, tok in enumerate(toks):
+            w, nxt = _fold(tok), _fold(toks[i + 1]) if i + 1 < len(toks) else ""
+            if not (_model_token(toks, i) or geizhals.is_code(tok)) or geizhals.CAPACITY_RE.fullmatch(tok) \
+                    or _MEASURE_WORD_RE.fullmatch(w) or _COUNT_WORD_RE.fullmatch(w):
+                continue
+            if w.isdigit() and (nxt in _COUNTS or (i == 0 and len(w) <= 2 and re.fullmatch(r"[a-z]{3,}", nxt))
+                                or nxt.isdigit() and i + 2 < len(toks) and _fold(toks[i + 2]) in _UNITS_F):
+                continue                                                # "244/157 cm": a measure
+            return i
+        return None
+
+    @staticmethod
+    def _content(tok: str) -> bool:
+        """A word that says what the item is: not a variant word (compared on its own), size, count or single letter."""
+        w = _fold(tok)
+        return len(w) >= 2 and w not in VARIANT_WORDS and w not in _UNITS_F \
+            and not geizhals.CAPACITY_RE.fullmatch(tok) and not _MEASURE_WORD_RE.fullmatch(w)
+
+    @staticmethod
+    def _names(toks: list[str]) -> list[str]:
+        """The words (folded) that name an item in a title without a model: not how it looks (_attribute), not a
+        number (a size, count or year), what a number counts ("3 Schubladen", "177 cm") or what it lacks ("ohne
+        Schlaffunktion")."""
+        low = [_fold(w) for w in toks]
+        return [w for i, w in enumerate(low) if TitleMatch._content(toks[i]) and not _attribute(w) and not w.isdigit()
+                and w not in _NOT_A_NAME and not (i and (low[i - 1].isdigit() or low[i - 1] == "ohne"))]
+
+    def _model_at(self, o: _Title) -> list[tuple[int, bool, int]]:
+        """Where (index in o.seq, abbreviated?, index of its last word) the other title names this ad's model before
+        its extras ("Gaming PC + PS5" is a PC): as written, glued or split ("Pi 4" for "Pi4", "USW 24 POE"),
+        abbreviated or spelled out ("U6" = "UniFi 6", "PS5" = "PlayStation 5", "Playstation5"; _abbreviates); not a
+        number followed by a unit ("5 Jahre") or the start of a longer code ("US-24" in "US-24-250W")."""
+        m, seq = self.model or "", o.seq
+        flat = re.sub(r"[^a-z0-9]", "", m)
+        pre = _model_parts(m)
+        out = []
+
+        def goes_on(e: int) -> bool:                  # the code goes on after seq[e]: "US-24" in "US-24-250W"
+            return e + 1 < len(seq) and seq[e + 1][2] == seq[e][2] and o.part[e + 1] > o.part[e] \
+                and ("-" in m or bool(re.search(r"\d", seq[e + 1][0])))
+
+        for i, (w, orig, ri) in enumerate(seq):
+            if ri >= o.extras_at:
+                break
+            nxt = seq[i + 1][0] if i + 1 < len(seq) else ""
+            if _is_number(m) and nxt in _COUNTS:
+                continue
+            joined = ""
+            for e in range(i, len(seq)):              # "USW-Flex-2.5G-8" in parts, "USW 24 POE" in words
+                joined += re.sub(r"[^a-z0-9]", "", seq[e][0])
+                if joined == flat:
+                    if not goes_on(e) and not ("-" in m and o.part[i] > 0):
+                        out.append((i, False, e))
+                    break
+                if not flat.startswith(joined):
+                    break
+            if pre and nxt == pre[1] and (_abbreviates(pre[0], orig) or (w in self.weights and w.startswith(pre[0]))):
+                out.append((i, True, i + 1))           # "UniFi 6" for "U6", "Playstation 5" for "PS5"
+            mp = _model_parts(w)
+            if mp and (_is_number(m) and self.anchor and mp[1] == m
+                       and (self.anchor.startswith(mp[0]) or _abbreviates(mp[0], self.anchor_spelled))
+                       or self.glued and mp[1] == self.glued[1] and _abbreviates(mp[0], self.glued[0])):
+                out.append((i, True, i))               # "U6" for "UniFi 6", "PS5" for "PLAYSTATION 5", "PlayStation5"
+        return out
+
+    def _other_line(self, seq: list[tuple[str, str, int]], at: list[tuple[int, bool, int]]) -> bool:
+        """Every mention of the model follows a word this title does not have where it names its line: "Bosch GSB
+        18V-55" for a "GSR 18V-55", "Galaxy Tab S9" for a "Galaxy S9", "Resident Evil 5" for a "PlayStation 5"."""
+        if not self.anchor or self.model_weight >= 0.7 or len(self.model or "") >= 5 and _is_number(self.model):
+            return False                         # an order code or a set number ("42115") names one product anywhere
+        for i, abbr, _ in at:
+            prev = seq[i - 1][0] if i else ""
+            if abbr or not re.fullmatch(r"[a-z][a-z.]+", prev) or prev in _NOT_A_LINE or self._has(prev, self.t.words):
+                return False
+        return True
+
+    def _siblings(self, o: _Title, at: list[tuple[int, bool, int]]) -> bool:
+        """The other title names a further model of this line: a compatibility list ("V7 V8 V10 V11"), another
+        model after the line word ("Pi 3 … 4", "Fox 2, Fox 3") or a number joined to the model ("13/ 256"). Not one
+        this title names too: a tyre "205/55 R16", a size "98/104", an ad that is itself a list match their own."""
+        m, seq = self.model or "", o.seq
+        if not _is_number(m):
+            shape = re.sub(r"\d+", "#", m)
+            return any(re.sub(r"\d+", "#", w) == shape and w not in self.t.words for w in o.low if re.search(r"\d", w))
+        for i, (w, _, _) in enumerate(seq):
+            nxt = seq[i + 1][0] if i + 1 < len(seq) else ""
+            after = seq[i + 2][0] if i + 2 < len(seq) else ""
+            if w == self.anchor and _is_number(nxt) and nxt not in self.t.words and after not in _COUNTS:
+                return True
+        for i, abbr, _ in at:
+            for d in (-2, 2):
+                j, k = i + d, i + d // 2
+                if not abbr and 0 <= j < len(seq) and seq[k][0] in ("/", ",") and _is_number(seq[j][0]) \
+                        and seq[j][0] not in self.t.words:
+                    return True
+        return False
+
+    @staticmethod
+    def _has(w: str, words: set[str]) -> bool:
+        """A word of one title in the other, also inflected either way ("Regale", "ergonomischer" for "ergonomisch"
+        and back), compounded ("Kombikinderwagen") or cut short ("Absolut")."""
+        if w in words:
+            return True
+        if len(w) < 4:
+            return False
+        return any((c.startswith(w) and len(c) - len(w) <= 2) or (len(w) >= 5 and c.endswith(w))
+                   or (len(c) >= 5 and w.startswith(c) and len(w) - len(c) <= 2) for c in words)
+
+    def _cover(self, o: _Title, at: list[tuple[int, bool, int]]) -> float:
+        """How much of this title's name the other one has, 0..1: with a model the words before its extras. Without a
+        model a feature may come after "mit" ("Ecksofa mit Schlaffunktion"), not after "für", and one of the words
+        must name the item itself ("Schreibtisch mit Bürostuhl" is a desk); and the other way round: an ad with all
+        of the name counts whatever else it says ("Bürostuhl Drehstuhl" for "Bürostuhl ergonomisch schwarz"), one
+        with part of it only when it names little else ("Ecksofa grau" for "Ecksofa grau Schlaffunktion", not "IKEA
+        Billy Regal" for "IKEA Kallax Regal")."""
+        def has(w: str, words: set[str]) -> bool:                  # "Landhaus-Kommode" is a "Kommode"
+            return self._has(w, words) or ("-" in w and self._has(w.rsplit("-", 1)[1], words))
+
+        if self.model:
+            words = o.head_words | ({self.anchor} if any(abbr for _, abbr, _ in at) else set())   # "PS5": PlayStation
+        elif not any(has(w, o.item_words) for w in self.weights):
+            return 0.0 if self.weights else 1.0
+        else:
+            words = o.words if self.t.for_at is not None else o.own_words
+        total = sum(self.weights.values())
+        cover = sum(wt for w, wt in self.weights.items() if has(w, words)) / total if total else 1.0
+        if self.model or cover >= 1:
+            return cover
+        theirs = self._names(o.head_tokens(o.head_end))
+        back = sum(all(self._has(p, self.t.words) for p in w.split("-") if p) for w in theirs) / len(theirs) \
+            if theirs else 1.0
+        return (cover + back) / 2
+
+    def check(self, other: str | None) -> tuple[float, str | None]:
+        """Similarity of another ad's title to this ad's title, 0..1, and why it is no comparable (None when it
+        is one, score >= MATCH_MIN): "model" (another product, model, variant or size), "kind" (an accessory, part,
+        lot or the box) or "condition" (defective for a working item or the other way round).
+
+        The model (this title's first model number or order code, see _model_token) weighs 0.5 to 0.7 by how much it
+        says alone (an order code 0.7, "V11"/"S23" 0.6, "13"/"M1" 0.5), the words before it the rest: the product
+        line right before the model 1, brand and other words 0.5 ("iPhone 13" for "Apple iPhone 13" scores 0.83). A
+        title without a model is compared by the words that name the item (_cover; colours, materials and the like
+        do not count), the first QUERY_WORDS (what was searched) 1 each, later ones 0.5 together. So an ad without the
+        model (willhaben also finds ads by their description: a "Cloud Key" for "UniFi U6"), with the model only in
+        its extras ("Gaming PC + PS5") or with the model and nothing else of the name ("Tekken 5" for "PlayStation
+        5") stays below 0.7.
+        0 when the variant words (Pro, Mini, Lite, Digital, OLED …, see _Title.variants) or the sizes (RAM/storage,
+        "4x4", "20 Zoll") differ, either way; minus PENALTY (0.5) each for an accessory word heading the title
+        ("Hülle", "Wandhalterung", "Controller", not after "mit", "+", "inkl": extras of the item), another condition
+        (defective or parts for a working item, working for a defective one), a lot, "nur OVP", "… für <the model>",
+        another line before the model ("GSB 18V-55" for "GSR 18V-55") and other models of the line ("V7 V8 V10 V11",
+        "Fox 2, Fox 3", "Pi 3 … 4") – unless this title says the same.
+        Why 0.7: an order code alone passes, a model number needs its line word or most of the name. Scores cluster
+        at 0, below 0.5 and above 0.75, so 0.55 to 0.85 kept the same ads on 395 hand-labelled ads of 11 searches;
+        on titles of other products 0.65 to 0.7 erred least."""
+        o = _Title(other, self.known, self.letters, self.abbr)
+        loose = set() if self.model else _MATERIAL_VARIANTS
+        sizes = _capacities(other)
+        # a general variant word both titles have is no difference, wherever it stands ("Levis 511 Slim Fit" and
+        # "Levis 511 Slim", "Casio Uhr Digital" and "Casio Digital Uhr")
+        vdiff = {w for w in (o.variants() - loose) ^ (self.variant_set - loose)
+                 if not (w in _GENERAL_VARIANTS and w in o.words and w in self.t.words)}
+        differs = bool(vdiff) or not (sizes <= self.sizes or self.sizes <= sizes) \
+            or not _measures_agree(_measures(other), self.measures)
+        at = self._model_at(o) if self.model else []
+        score = 0.0 if differs else (self.model_weight if at else 0.0) + (1 - self.model_weight) * self._cover(o, at)
+        condition = o.broken() != self.is_broken
+        acc = o.accessories(self.is_broken, self.model, {o.seq[j][2] for i, _, e in at for j in range(i, e + 1)},
+                            self.line)
+        kind = bool(acc - self.acc) + bool(self.acc - _ACC_EXACT and not acc & self.acc)   # a case wants cases
+        kind += bool((o.words & _LOT_WORDS) - self.lots) + (o.box_only() and not self.box)
+        if o.for_at is not None and self.t.for_at is None and not self.acc:   # "Hülle für iPhone 13": made for it
+            named = [o.seq[i][2] for i, _, _ in at] if self.model else [ri for w, _, ri in o.seq if w in self.weights]
+            kind += not any(ri < o.for_at for ri in named)
+        other_model = bool(at) and (self._other_line(o.seq, at) or self._siblings(o, at))
+        score = round(max(0.0, score - PENALTY * (condition + kind + other_model)), 3)
+        if score >= MATCH_MIN:
+            return score, None
+        return score, "condition" if condition else "kind" if kind else "model"
+
+    def score(self, other: str | None) -> float:
+        """The similarity alone (check())."""
+        return self.check(other)[0]
+
+
+def similarity(other_title: str | None, ad_title: str | None) -> float:
+    """TitleMatch(ad_title).score(other_title), for one pair."""
+    return TitleMatch(ad_title).score(other_title)
+
+
+_MEASURE_RE = re.compile(r"(?<![\w.,])(\d+(?:x\d+)+|\d+(?:[.,]\d+)?\s*(?:zoll|cm|mm|\"|'')"
+                         r"|\d+\s*-?\s*(?:schubladen|schubfaecher|faecher|tueren|tuerig|sitzer|flammen|gaenge))(?!\w)")
+_MEASURE_UNIT = {"zoll": "in", "''": "in", '"': "in", "tuerig": "tueren"}
+
+
+def _measures(title: str | None) -> dict[str, set[str]]:
+    """The measures in a title by kind: {"x": {"4x4"}, "in": {"20"}, "mm": {"41"}, "sitzer": {"3"}}."""
+    out: dict[str, set[str]] = {}
+    for m in _MEASURE_RE.findall((title or "").lower().translate(_FOLD)):
+        m = re.sub(r"[\s-]", "", m.replace(",", "."))
+        num, unit = (m, "x") if re.fullmatch(r"\d+(x\d+)+", m) else re.fullmatch(r"([\d.]+)(.+)", m).groups()
+        out.setdefault(_MEASURE_UNIT.get(unit, unit), set()).add(num)
+    return out
+
+
+def _measures_agree(o: dict[str, set[str]], a: dict[str, set[str]]) -> bool:
+    return all(o[u] <= a[u] or a[u] <= o[u] for u in o.keys() & a.keys())
+
+
+def _same_measures(other_title: str | None, ad_title: str | None) -> bool:
+    """False for another size of the same item: "Kallax 2x4" for a "Kallax 4x4", a "20 Zoll" for a "24 Zoll" bike, a
+    41mm for a 45mm watch, a "3-Sitzer" for a "2-Sitzer", "3 Schubladen" for "6 Schubladen". Only measures of the same
+    kind are compared ("147 cm" says nothing against "4x4"); a title without one still counts."""
+    return _measures_agree(_measures(other_title), _measures(ad_title))
 
 
 _PAIR_RE = re.compile(r"(?<![\w.,])(\d+)\s*/\s*(\d+(?:\.\d+)?)(gb|tb)\b", re.I)   # "8/256GB": RAM/storage
@@ -456,28 +1008,18 @@ def _same_size(other_title: str | None, ad_title: str | None) -> bool:
     return o <= a or a <= o
 
 
-def _category_scope(ads: list[dict[str, Any]], category_id: str | None) -> tuple[list[dict[str, Any]], str | None]:
-    """Same leaf category as the ad; too few -> same parent category; none known -> unchanged."""
-    if not category_id:
-        return ads, None
-    leaf = [a for a in ads if (a.get("category_ids") or [None])[-1] == category_id]
-    if len(leaf) >= MIN_COMPARABLES:
-        return leaf, "leaf"
-    parents = {tuple(a["category_ids"][:-1]) for a in leaf if len(a.get("category_ids") or []) > 1}
-    if len(parents) == 1:
-        parent = next(iter(parents))
-        same_parent = [a for a in ads if tuple((a.get("category_ids") or [])[:-1]) == parent]
-        if len(same_parent) >= MIN_COMPARABLES:
-            return same_parent, "parent"
-    return (leaf, "leaf") if leaf else (ads, None)
-
-
 def _trim(ads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop extreme prices (a "€1 Tausch" or a bundle of five) once the list is the same kind of item."""
+    """Drop extreme prices (a "€1 Tausch" or a bundle of five) once the list is the same kind of item. Placeholder
+    prices (below PLACEHOLDER of the median: "1 €") always go, however many. Other extremes are few: when more than
+    TRIM_MAX of the ads lie outside, they are a second group (games among consoles), not outliers, and trimming around
+    the median could drop the item itself – then the list stays as it is."""
     if len(ads) < MIN_COMPARABLES:
         return ads
     med = statistics.median(a["price"] for a in ads)
-    return [a for a in ads if TRIM_LOW * med <= a["price"] <= TRIM_HIGH * med]
+    ads = [a for a in ads if a["price"] >= PLACEHOLDER * med]
+    med = statistics.median(a["price"] for a in ads)
+    kept = [a for a in ads if TRIM_LOW * med <= a["price"] <= TRIM_HIGH * med]
+    return kept if len(ads) - len(kept) <= TRIM_MAX * len(ads) else ads
 
 
 async def search_ads(query: str) -> dict[str, Any]:
@@ -511,14 +1053,17 @@ def _condition_kept(other: str | None, mine: str | None) -> bool:
     return other == "new" if price_zones.group(mine) == "new" else other not in ("new", "defect")
 
 
-async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None, *,
-                      category_id: str | None = None, title: str | None = None,
+async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None, *, title: str | None = None,
                       category_url: str | None = None, condition: str | None = None) -> dict[str, Any]:
-    """Comparable ads: the keyword search narrowed to the ad's own category (or a category the user picked),
-    without accessories/other variants (RAM/storage sizes too), other conditions (when enough are left) and extreme
-    prices. `filtered` says how many each step dropped."""
+    """Comparable ads: the keyword search (or a category the user picked) narrowed to the ads whose title is this
+    item (TitleMatch: same model and variant, no accessories, same condition, RAM/storage sizes too) and whose stated
+    condition prices alike (_condition_kept), without extreme prices. Too few left means too few: they are not
+    topped up with the rest. `filtered` says how many were dropped and why (TitleMatch.check: model, kind,
+    condition; the stated condition counts as condition too; then outliers). The ad's own willhaben category is not
+    used: the same item sits in several leaves (Bosch drills in four), a leaf holds accessories and other models too,
+    and ads of other sites have none."""
     out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
-                           "scope": None, "filtered": {}, "filters": FILTERS}
+                           "scope": "chosen" if category_url else None, "filtered": {}, "filters": FILTERS}
     if not query and not category_url:
         return out
     try:
@@ -529,23 +1074,22 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
         return out
     ads = [a for a in data["ads"] if str(a["ad_id"]) != str(exclude_ad_id or "") and a.get("price")
            and a["price"] > 0 and not _wanted(a.get("title"))]
-    n0 = len(ads)
-    if category_url:
-        scope = "chosen"
-    else:
-        ads, scope = _category_scope(ads, category_id)
-    n1 = len(ads)
+    dropped = {"model": 0, "kind": 0, "condition": 0}
     if title:
-        for same in (_same_kind, _same_size):     # sizes leaving too few do not undo the accessory filter
-            kept = [a for a in ads if same(a.get("title"), title)]
-            ads = kept if len(kept) >= MIN_COMPARABLES else ads
-    n2 = len(ads)
+        match, kept = TitleMatch(title), []
+        for a in ads:
+            why = match.check(a.get("title"))[1]
+            if why:
+                dropped[why] += 1
+            else:
+                kept.append(a)
+        ads = kept
     kept = [a for a in ads if _condition_kept(a.get("item_condition"), condition)]
-    ads = kept if len(kept) >= MIN_COMPARABLES else ads
-    n3 = len(ads)
+    dropped["condition"] += len(ads) - len(kept)
+    ads = kept
+    n1 = len(ads)
     ads = _trim(ads)
-    out["scope"], out["filtered"] = scope, {"category": n0 - n1, "kind": n1 - n2, "condition": n2 - n3,
-                                            "outliers": n3 - len(ads)}
+    out["filtered"] = {**dropped, "outliers": n1 - len(ads)}
     st = stats([a["price"] for a in ads])
     centre = price if price and price > 0 else (st or {}).get("median") or 0
     closest = sorted(sorted(ads, key=lambda a: abs(a["price"] - centre))[:CLOSEST], key=lambda a: a["price"])
@@ -641,8 +1185,23 @@ def _ad_summary(ad: AdDetail) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ analysis
-def _key(ad_id: str, query: str | None, category_url: str | None = None) -> tuple[str, str]:
-    q = re.sub(r"\s+", " ", (query or "").strip().lower())
+def _norm_q(query: str | None) -> str:
+    return re.sub(r"\s+", " ", (query or "").strip().lower())
+
+
+def _reference(title: str | None, query: str | None, own_query: bool, fallback_query: str | None) -> str:
+    """What the comparables must be: the ad's title; a search term the user typed to compare with ("Compare again":
+    own_query) when it is not the title's own search, the one the form shows first; a search agent's keyword when the
+    title is filler words only. A term that came along from a list (the deals page's search, a product search's
+    term) only changes the search: "iphone 13" must not make an iPhone 13 Pro Max compare with every iPhone 13."""
+    typed = (query or "").strip() if own_query and _norm_q(query) != _norm_q(query_from_title(title)) else ""
+    typed = typed if tokens(typed) else ""                # "neu", "OVP": no words that say what the item is
+    return typed or (title if tokens(title) else "") or (fallback_query or "").strip()
+
+
+def _key(ad_id: str, query: str | None, category_url: str | None = None, own_query: bool = False) -> tuple[str, str]:
+    q = _norm_q(query)
+    q = "\x01" + q if own_query and q else q             # the same term typed to compare with is another check
     return str(ad_id), f"{q}\x00{category_url}" if category_url else q
 
 
@@ -664,22 +1223,25 @@ def _current(res: dict[str, Any] | None) -> bool:
     return bool(res) and (res.get("comparables") or {}).get("filters") == FILTERS
 
 
-def cached(ad_id: str, query: str | None = None, category_url: str | None = None) -> dict[str, Any] | None:
+def cached(ad_id: str, query: str | None = None, category_url: str | None = None,
+           own_query: bool = False) -> dict[str, Any] | None:
     """A fresh analysis from memory or the DealCheck table, without any request. Freshness counts from when the
     analysis ran (result["checked_at"]), not from the last view (row.checked_at, only used for ordering)."""
-    hit = _cached(_results, _key(ad_id, query, category_url), RESULT_TTL_S)
+    key = _key(ad_id, query, category_url, own_query)
+    hit = _cached(_results, key, RESULT_TTL_S)
     if hit and _current(hit[1]):
         return rerate(hit[1])
     with session() as db:
         row = db.get(DealCheck, str(ad_id))
     if row and _current(row.result) and row.result.get("category_url") == category_url \
-            and _key(ad_id, row.result.get("asked_query"))[1] == _key(ad_id, query)[1]:
+            and _key(ad_id, row.result.get("asked_query"), None, row.result.get("own_query"))[1] \
+            == _key(ad_id, query, None, own_query)[1]:
         at = _ran_at(row.result)
         age = (utcnow() - at).total_seconds() if at else RESULT_TTL_S
         if 0 <= age < RESULT_TTL_S:
             price = (row.result.get("ad") or {}).get("price")
             res = {**row.result, "claude": _claude_for(row.claude or row.result.get("claude"), price)}
-            _put(_results, _key(ad_id, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - age)
+            _put(_results, key, res, RESULT_TTL_S, at=time.monotonic() - age)
             return rerate(res)
     return None
 
@@ -698,27 +1260,30 @@ def stored_claude(ad_id: str, price: float | None) -> dict[str, Any] | None:
     return _claude_for(row.claude, price) if row else None
 
 
-async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = False, find_geizhals: bool = False,
-                  fallback_query: str | None = None, category_url: str | None = None) -> dict[str, Any]:
-    """Price position of one ad. `query` overrides the comparable search; `fallback_query` (a search agent's
+async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = False, use_claude: bool = False,
+                  find_geizhals: bool = False, fallback_query: str | None = None,
+                  category_url: str | None = None) -> dict[str, Any]:
+    """Price position of one ad. `query` overrides the comparable search; with `own_query` (the user typed it to
+    compare with) it also says what the comparables must be (_reference). `fallback_query` (a search agent's
     keyword) is used only when the title gives none. Claude runs only with use_claude (verdict) or find_geizhals
     (looks for the product on Geizhals when the automatic lookup found none) – both explicit clicks."""
-    res = cached(ad.ref, query, category_url)
+    own = bool(own_query and (query or "").strip())
+    res = cached(ad.ref, query, category_url, own)
     if res is not None and ((res.get("ad") or {}).get("price") != ad.price
                             or (res.get("ad") or {}).get("item_condition") != ad.item_condition):
         res = None                    # price or condition changed since: re-position (searches are cached)
     if res is None:
         q = (query or "").strip() or query_from_title(ad.heading) or (fallback_query or "").strip()
-        comp = await comparables(q, ad.ad_id, ad.price, category_id=ad.category_id, title=ad.heading,
+        comp = await comparables(q, ad.ad_id, ad.price, title=_reference(ad.heading, query, own, fallback_query),
                                  category_url=category_url, condition=ad.item_condition)
         gh = stored_geizhals(ad.ref) or await geizhals_match(geizhals_query(ad.heading, ad.category_path))
-        res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None,
+        res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None, "own_query": own,
                "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,
                "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None, ad.item_condition),
                "claude": stored_claude(ad.ref, ad.price), "checked_at": utcnow().isoformat()}
         if not comp.get("error"):
-            _put(_results, _key(ad.ref, query, category_url), res, RESULT_TTL_S)
+            _put(_results, _key(ad.ref, query, category_url, own), res, RESULT_TTL_S)
     if find_geizhals and not res.get("geizhals") and not res.get("geizhals_none"):
         found = await claude_geizhals(ad)
         if "error" in found:
@@ -727,21 +1292,22 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
         stats = (res.get("comparables") or {}).get("stats")
         res = {**res, "geizhals": gh, "geizhals_none": found.get("none"),
                "position": position(ad.price, stats, gh["price_from"] if gh else None, ad.item_condition)}
-        _keep(res, ad.ref, query, category_url)
+        _keep(res, ad.ref, query, category_url, own)
     if use_claude and not _claude_for(res.get("claude"), ad.price):
         verdict = await ask_claude(ad, res)
         res = {**res, "claude": verdict}
         if "deal" in verdict:
-            _keep(res, ad.ref, query, category_url)
+            _keep(res, ad.ref, query, category_url, own)
             save_claude(ad.ref, verdict)
     return rerate(res)
 
 
-def _keep(res: dict[str, Any], ad_id: str, query: str | None, category_url: str | None) -> None:
+def _keep(res: dict[str, Any], ad_id: str, query: str | None, category_url: str | None, own_query: bool) -> None:
     """Cache a result Claude added to; it keeps the age of the analysis (Claude does not make it fresher)."""
     at = _ran_at(res)
     age = (utcnow() - at).total_seconds() if at else 0
-    _put(_results, _key(ad_id, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - max(0.0, age))
+    _put(_results, _key(ad_id, query, category_url, own_query), res, RESULT_TTL_S,
+         at=time.monotonic() - max(0.0, age))
 
 
 def remember(res: dict[str, Any]) -> None:

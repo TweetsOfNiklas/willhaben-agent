@@ -145,6 +145,18 @@ def test_query_from_title_glues_sizes():
     assert deals.query_from_title("MacBook Air M1 8GB 256GB") == "MacBook Air M1"   # no size pulled in from further on
 
 
+@pytest.mark.parametrize("title, query", [
+    ("Sony PlayStation 5 Digital Edition", "Sony PlayStation 5 Digital"),        # the variant right after the model
+    ("Ubiquiti UniFi U6 Mesh WiFi 6 Access Point", "Ubiquiti UniFi U6 Mesh"),
+    ("Apple iPhone 13 Pro Max 256GB", "Apple iPhone 13 Pro"),                     # one word only
+    ("Dyson V11 Absolute Extra", "Dyson V11 Absolute"),                            # not after the model
+    ("Nintendo Switch OLED Modell weiß", "Nintendo Switch OLED"),
+    ("Damen Winterjacke schwarz Größe XL", "Damen Winterjacke schwarz"),
+])
+def test_query_from_title_keeps_the_variant_after_the_model(title, query):
+    assert deals.query_from_title(title) == query
+
+
 def test_geizhals_query_only_for_products():
     assert deals.geizhals_query("iPhone 13 128GB Display kaputt") == "iPhone 13 128GB"
     assert deals.geizhals_query("Bosch GSR 18V-55 Akkuschrauber") == "Bosch GSR 18V-55"
@@ -504,7 +516,8 @@ def test_deals_pages_and_claude_on_post(app_client):
     assert "Comparable ads" in result and "this ad" in result and "<html" not in result
     assert "Recently checked" in app_client.get(f"/deals/ad/{AD_ID}").text      # the check is remembered
     assert app_client.calls["search"] == 2   # comparables served from cache; +1 for the category navigator (selector)
-    assert 'name="cat"' in result and "Automatic (category of this ad)" in result
+    assert 'name="cat"' in result and "Automatic (all categories)" in result
+    assert 'name="was" value="Bosch GSR 18V-55"' in result and 'name="own"' not in result
     assert app_client.fake.calls == []                           # never automatic
 
     verdict = app_client.post(f"/deals/ad/{AD_ID}/claude", data={"q": "Bosch GSR 18V-55"}).text
@@ -633,49 +646,194 @@ def test_deals_page_rejects_non_ad_links(app_client):
 
 
 
-def _summ(n, title, price, cats):
+def _summ(n, title, price, cats="2691;5013000"):
     return {"ad_id": f"20000000{n:02d}", "title": title, "price": price, "category_ids": cats.split(";")}
 
 
-async def test_comparables_same_category_kind_and_trimmed(monkeypatch):
-    """iPhone 15 Pro at 490: cases (other category), a 15 Pro Max and a €1 swap must not shape the bar."""
+async def test_comparables_same_item_and_trimmed(monkeypatch):
+    """iPhone 15 Pro at 490: cases, a 15 Pro Max and a €1 swap must not shape the bar."""
     phone, case_cat = "2691;2722;2724;5013241", "2691;2722;2752"
     ads = [_summ(n, "iPhone 15 Pro 128GB", p, phone) for n, p in enumerate([520, 560, 600, 640, 580, 610, 590])]
     ads += [_summ(20, "iPhone 15 Pro Max 256GB", 900, phone), _summ(21, "iPhone 15 Pro Hülle MagSafe", 12, phone),
-            _summ(22, "iPhone 15 Pro", 1, phone)]
+            _summ(22, "Apple iPhone 15 Pro", 1, phone)]
     ads += [_summ(30 + n, "Panzerglas iPhone 15 Pro", 8, case_cat) for n in range(6)]
-
-    async def search_ads(q):
-        return {"rows_found": len(ads), "ads": ads}
-
-    monkeypatch.setattr(deals, "search_ads", search_ads)
-    out = await deals.comparables("iPhone 15 pro", AD_ID, 490, category_id="5013241", title="iPhone 15 pro")
-    assert out["scope"] == "leaf" and out["count"] == 7
-    assert out["filtered"] == {"category": 6, "kind": 2, "condition": 0, "outliers": 1}
+    _fake_search(monkeypatch, ads)
+    out = await deals.comparables("iPhone 15 pro", AD_ID, 490, title="iPhone 15 pro")
+    assert out["scope"] is None and out["count"] == 7
+    assert out["filtered"] == {"model": 1, "kind": 7, "condition": 0, "outliers": 1}
     assert out["stats"]["min"] == 520 and out["stats"]["max"] == 640
+    assert {a["title"] for a in out["closest"]} == {"iPhone 15 Pro 128GB"}           # the list is what the stats use
     assert deals.position(490, out["stats"], None)["level"] == "bargain"      # was "teuer" against cases at €12
 
 
-async def test_comparables_fall_back_to_parent_category(monkeypatch):
-    ads = [_summ(n, "Rennrad Shimano 105", p, "1;2;3") for n, p in enumerate([400, 500, 600])]
-    ads += [_summ(10 + n, "Rennrad Ultegra", p, "1;2;4") for n, p in enumerate([450, 550, 650])]
+async def test_comparables_ignore_the_ads_category(monkeypatch):
+    """The same drill sits in several willhaben leaves (an ad in two trees reads "[…, …]"): the title decides."""
+    cats = ["3541;3778;3817;3818;3819", "3541;3778;3817;3818;3821", "3541;3778;3817;3834;3843", "3541;3778;3779;3816",
+            "[5387;5714;5717, 5387;5418;5430]"]
+    ads = [_summ(n, "Bosch Professional GSR 18V-55", 100 + 10 * n, c) for n, c in enumerate(cats)]
+    ads += [_summ(10, "Bosch Professional 18V Geräteset", 390, cats[0])]          # found by its description
+    _fake_search(monkeypatch, ads)
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    ad = _ad(120)
+    ad.category_id = "3819"
+    res = await deals.analyze(ad)
+    assert res["comparables"]["count"] == 5 and res["position"]["basis"] == "comparables"
 
-    async def search_ads(q):
-        return {"rows_found": len(ads), "ads": ads}
 
-    monkeypatch.setattr(deals, "search_ads", search_ads)
-    out = await deals.comparables("rennrad", AD_ID, 500, category_id="3", title="Rennrad")
-    assert out["scope"] == "parent" and out["count"] == 6
-    out = await deals.comparables("rennrad", AD_ID, 500, category_id=None, title="Rennrad")
-    assert out["scope"] is None and out["count"] == 6
+async def _no_geizhals(q):
+    return None
 
 
-def test_same_kind_rules():
-    assert deals._same_kind("iPhone 15 Pro 256GB blau", "iPhone 15 pro")
-    assert not deals._same_kind("iPhone 15 Pro Max", "iPhone 15 pro")
-    assert not deals._same_kind("Hülle für iPhone 15 Pro", "iPhone 15 pro")
-    assert deals._same_kind("iPhone 15 Pro Display defekt", "iPhone 15 Pro defekt")    # the ad itself is defective
-    assert not deals._same_kind("Nur OVP iPhone 15 Pro", "iPhone 15 pro")
+@pytest.mark.parametrize("other, ad, ok", [
+    # spellings: glued, abbreviated, spelled out, cut short
+    ("UniFi U7pro", "UniFi U7 Pro WiFi 7 Access Point mit Halterung", True),
+    ("Apple iPhone 13mini", "Apple iPhone 13 128GB", False),
+    ("Sony PlayStation5", "Sony PlayStation 5", True),
+    ("Kinderwagen Bugaboo Fox3", "Bugaboo Fox 3 Kinderwagen", True),
+    ("UniFi 6 Lite Access Point", "UniFi Access Point U6 Lite", True),                 # U6 = UniFi 6
+    ("Sony PS5 Digital Edition", "Sony PlayStation 5 Digital Edition", True),
+    ("Ubiquiti UniFiSwitch 24 Gigabit Managed PoE Switch, 24x RJ-45, 2x SFP USW-24-POE",
+     "Ubiquiti UniFi Switch USW-24-POE", True),
+    ("Dyson V11 Abolute", "Dyson V11 Absolute Akkusauger", True),
+    ("Ikea-Regal Kallax", "IKEA Kallax Regal 4x4 weiss", True),
+    # the comparables of the reported U6 Mesh check: none is that access point
+    ("Ubiquiti UniFi Cloud Key UC-CK", "Ubiquiti UniFi U6 Mesh WiFi 6 Access Point neuwertig", False),
+    ("Ubiquiti UniFi U-POE++ PoE-Injektor (60W) - Neuwertig", "Ubiquiti UniFi U6 Mesh WiFi 6 Access Point", False),
+    ("Unifi - Ubiquiti - U6 lite Cover in Concrete", "Ubiquiti UniFi U6 Mesh WiFi 6 Access Point", False),
+    ("Ubiquiti UniFi nanoHD-RCM-3 Deckeneinbauhalterung 3er-Set", "Ubiquiti UniFi U6 Mesh WiFi 6 Access Point", False),
+    ("UniFi 6 Professional Access Point", "Ubiquiti UniFi U6 Mesh WiFi 6 Access Point", False),   # the U6 Pro
+    # other models and variants
+    ("Dyson V11 Absolute Extra", "Dyson V11 Absolute", False),
+    ("iPhone 15 Pro Max", "iPhone 15 Pro", False),
+    ("Raspberry Pi 5 4GB", "Raspberry Pi 4 4GB", False),
+    ("Raspberry Pi 4 8GB", "Raspberry Pi 4 4GB", False),
+    ("Raspberry Pi Compute Module 4", "Raspberry Pi 4", False),
+    ("Raspberry Pi 3 Model B / B+ / 4 + CM4 Adapter Konvolut", "Raspberry Pi 4 4GB", False),
+    ("Dyson Led Fugendüse V7 V8 V10 V11", "Dyson V11 Absolute", False),               # a compatibility list
+    ("Bugaboo Fox, Fox 2, Fox 3 Fahrgestell", "Bugaboo Fox 3", False),
+    ("Apple iPhone 13/ 256", "Apple iPhone 13 128GB", False),
+    ("Bosch GSB 18V-55", "Bosch GSR 18V-55", False),                                  # another line
+    ("Sony PlayStation 2 Tekken 5", "Sony PlayStation 5", False),
+    ("Bosch Professional 18V Geräteset", "Bosch GSR 18V-55 Akkuschrauber", False),    # no model: a description hit
+    ("Ubiquiti UniFi Switch 24 250W (US-24-250W)", "Ubiquiti UniFi Switch US-24", False),   # a longer order code
+    ("Ikea Kallax 2x4", "IKEA Kallax Regal 4x4 weiß", False),
+    ("Kinderfahrrad 24 Zoll", "Kinderfahrrad 20 Zoll Puky", False),
+    ("IKEA Billy Regal", "IKEA Kallax Regal", False),
+    # accessories, parts and extras
+    ("Dyson V11 ABSOLUTE mit Zubehör, Ladegerät & Wandhalterung", "Dyson V11 Absolute", True),
+    ("Bugaboo Fox 3 + Zubehör", "Bugaboo Fox 3 Kinderwagen", True),
+    ("Bosch Akku-Bohrschrauber GSR 18V-55", "Bosch GSR 18V-55", True),               # cordless, not a battery
+    ("Dyson V11 absolute Akku Staubsauger", "Dyson V11 Absolute", True),
+    ("Akku Bohrschrauber 2x Akku 4.0Ah Bosch Professional GSR 18V-55", "Bosch GSR 18V-55 Akkuschrauber", True),
+    ("Apple iPhone 13 128GB Akku 89%", "Apple iPhone 13 128GB", True),                # the battery's health
+    ("NEUER 3900mAh Akku für Dyson V11", "Dyson V11 Absolute", False),
+    ("Handyhülle für Apple iPhone 13", "Apple iPhone 13", False),
+    ("Hutschienengehäuse für Raspberry Pi 4", "Raspberry Pi 4 4GB", False),
+    ("Sony Playstation 5 Controller", "Sony PlayStation 5", False),
+    ("Apple iPhone 13 (Nur! Schachtel + Zubehör)", "Apple iPhone 13", False),
+    ("iPhone 15 Pro OVP nur 2 Monate alt", "iPhone 15 Pro", True),
+    ("Ubiquiti UniFi US-48-500W Ersatzteilträger defekt", "Ubiquiti UniFi US-48-500W", False),
+    ("Apple Leather Case iPhone 13", "Apple iPhone 13 Hülle", True),                  # an accessory: the same kind
+    ("Apple iPhone 13", "Hülle für iPhone 13", False),
+    ("iPhone 15 Pro Display defekt", "iPhone 15 Pro defekt", True),                   # the ad itself is defective
+    ("iPhone 15 Pro Display defekt", "iPhone 15 Pro", False),
+    # products no word list here was written for
+    ("Samsung S23 Ultra", "Samsung Galaxy S23 Ultra 256GB", True),
+    ("Samsung Galaxy S23", "Samsung Galaxy S23 Ultra 256GB", False),
+    ("RTX 3080 10GB", "MSI GeForce RTX 3080 Gaming X Trio 10GB", True),
+    ("RTX 3080 Ti", "MSI GeForce RTX 3080 Gaming X Trio 10GB", False),
+    ("Canon 80D", "Canon EOS 80D Body", True),
+    ("Canon EOS 80D Kamera", "Canon EOS 80D Body", True),                              # a camera is no accessory
+    ("FIFA 23 PS5", "FIFA 23 PS5 Spiel", True),
+    ("Sony WH-1000XM5", "Sony WH-1000XM4 Kopfhörer", False),
+    ("Lego 42115", "LEGO Technic 42115 Lamborghini Sián", True),
+    ("Apple Watch Series 8 41mm", "Apple Watch Series 8 45mm GPS", False),
+    ("Nintendo Switch", "Nintendo Switch OLED", False),
+    ("Cybex Priam", "Cybex Priam Kinderwagen", True),
+    ("Cybex Balios Kinderwagen", "Cybex Priam Kinderwagen", False),
+    ("MacBook Air 13 Zoll M1 8GB 256GB", "MacBook Air M1 8GB 256GB", True),
+    ("iMac M1", "MacBook Air M1 8GB 256GB", False),
+    ("Lego 42115", "LEGO Technic 42115 Lamborghini Sián", True),
+    ("Bosch GSR 18V-55 Professional Akku-Bohrschrauber", "Bosch GSR 18V-55 Akkuschrauber", True),   # Bosch's line
+    # the model only in the extras: the item is something else
+    ("Gaming PC + PS5", "Sony PlayStation 5", False),
+    ("Neu mit OVP: Apple iPhone 13", "Apple iPhone 13", True),                       # extras before the name
+    # condition both ways
+    ("iPhone 13 128GB", "iPhone 13 Display defekt", False),
+    ("iPhone 13 kaputt", "iPhone 13 Display defekt", True),
+    # more accessories and parts
+    ("MacBook Air M1 Tastatur", "MacBook Air M1 8GB 256GB", False),
+    ("Bugaboo Fox 3 Sitzeinheit", "Bugaboo Fox 3 Kinderwagen", False),
+    ("Bugaboo Fox 3 Babywanne", "Bugaboo Fox 3 Kinderwagen", False),
+    ("Dyson Halter V7 V8 V10 V11 V15", "Dyson V11 Absolute", False),
+    ("Raspberry Pi Netzstecker", "Raspberry Pi 4 4GB", False),
+    ("Steelcase Bürostuhl schwarz", "Bürostuhl ergonomisch schwarz", True),          # a brand, no case
+    # titles without a model: what the item is, not how it looks
+    ("Bürostuhl grau", "Bürostuhl ergonomisch schwarz", True),
+    ("Ergonomischer Bürostuhl Drehstuhl", "Bürostuhl ergonomisch schwarz", True),
+    ("Ergonomischer Bürostuhl schwarz/ weiß - Mesh Rückenlehne", "Bürostuhl ergonomisch schwarz", True),
+    ("Drehstuhl schwarz", "Bürostuhl ergonomisch schwarz", False),
+    ("Nintendo Switch Lite grau", "Nintendo Switch Lite türkis", True),
+    ("Nintendo Switch grau", "Nintendo Switch Lite türkis", False),
+    ("Couchtisch Glas eckig", "Couchtisch Holz rund", True),
+    ("Beistelltisch Holz rund", "Couchtisch Holz rund", False),
+    ("Ecksofa grau", "Ecksofa grau Schlaffunktion", True),
+    ("Kinderhochbett mit Rutsche und Vorhang", "Hochbett mit Rutsche", True),
+    ("IKEA Billy Regal weiß", "IKEA Kallax Regal 4x4 weiss", False),
+    ("Kommode Hemnes 8 Schubladen", "Weiße Kommode mit 3 Schubladen", False),       # 8 drawers, not 3
+    # clothing sizes are no model, "XL" no variant
+    ("Damen Winterjacke, Größe XL, schwarz", "Damen Winterjacke, Größe M, schwarz", True),
+    ("Damen Winterjacke grau Gr. 40", "Damen Winterjacke schwarz in 44", True),
+    ("Herren Lederjacke schwarz Größe 50", "Herren Lederjacke braun gr.48", True),
+    ("Herren Winterjacke schwarz", "Damen Winterjacke schwarz", False),
+    # tyres: the size is the model, the season its line
+    ("Michelin Sommerreifen 205/55 R16", "Sommerreifen 205/55 R16", True),
+    ("Sommerreifen 205/60 R16", "Sommerreifen 205/55 R16", False),
+    ("Winterreifen 205/55 R16", "Sommerreifen 205/55 R16", False),
+])
+def test_similarity(other, ad, ok):
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+
+@pytest.mark.parametrize("title", [
+    "Sommerreifen 205/55 R16", "205/55/ R16 Sommerreifen", "Gr. 98/104 Matschhose", "Kinderjacke 128/134",
+    "ECKSOFA 244/157 cm in Velours Grau Schlaffunktion, Stauraum", "MTB 27,5 Zoll", "Damen Winterjacke schwarz 44 L",
+    "Bugaboo Fox, Fox 2, Fox 3 Fahrgestell", "Dyson Led Fugendüse V7 V8 V10 V11", "Raspberry pi 4/5 flirc case",
+    "Apple iPhone 13 (Nur! Schachtel + Zubehör)", "Kinderfahrrad 20zoll und 12zoll", "Weiße Kommode mit 3 Schubladen",
+    "Ubiquiti UniFiSwitch Flex Desktop 2.5G Smart Switch - USW-Flex-2.5G-8", "Hochbett mit Rutsche",
+])
+def test_a_title_is_its_own_comparable(title):
+    """Numbers the ad itself names ("205/55", "98/104", "Fox 2, Fox 3") are no other model, its own extras no
+    accessory: an ad's title always passes against itself, else such ads never get comparables."""
+    assert deals.TitleMatch(title).check(title) == (1.0, None)
+
+
+def test_why_an_ad_is_no_comparable():
+    m = deals.TitleMatch("Apple iPhone 13 128GB")
+    assert m.check("Apple iPhone 13 128GB Mitternacht") == (1.0, None)
+    assert m.check("Apple iPhone 13 mini")[1] == "model"
+    assert m.check("Apple iPhone 12 128GB")[1] == "model"
+    assert m.check("Handyhülle für Apple iPhone 13")[1] == "kind"
+    assert m.check("Apple iPhone 13 128GB Display defekt")[1] == "condition"
+
+
+def test_similarity_scores():
+    assert deals.similarity("Apple iPhone 13", "Apple iPhone 13") == 1.0
+    assert deals.similarity("iPhone 13", "Apple iPhone 13") == pytest.approx(0.833, abs=0.001)   # no brand
+    assert deals.similarity("Apple 13 Pro Max Hülle", "Apple iPhone 13") == 0.0                   # variant
+    assert deals.similarity("Tekken 5 Sony", "Sony PlayStation 5") < 0.7                        # model, no line
+    assert deals.similarity("anything", "") == 1.0                       # nothing to compare with: no filter
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    ("Kallax 2x4", "Kallax 4x4", False), ("Kallax", "Kallax 4x4", True), ("Fahrrad 20\"", "Fahrrad 20 Zoll", True),
+    ("Fahrrad 24 Zoll", "Fahrrad 20 Zoll", False), ("Apple Watch 41mm", "Apple Watch 45 mm", False),
+    ("Kallax 147 cm", "Kallax 4x4", True),                                     # another kind of measure says nothing
+    ("Malm Kommode 3 Schubladen", "IKEA Malm Kommode 6 Schubladen", False), ("Sofa 3-Sitzer", "Sofa 2 Sitzer", False),
+    ("Schrank 2-türig", "Schrank 2 Türen", True), ("MTB 27,5 Zoll", "MTB 27.5\"", True),
+])
+def test_same_measures(other, ad, ok):
+    assert deals._same_measures(other, ad) is ok
 
 
 @pytest.mark.parametrize("other, ad, ok", [
@@ -700,6 +858,333 @@ def test_same_size(other, ad, ok):
     assert deals._same_size(other, ad) is ok
 
 
+def test_trim_keeps_a_second_group():
+    """Extreme prices are few; 5 consoles among 6 games are a second group – trimming around the games' median would
+    drop the consoles, so nothing is dropped."""
+    ads = [{"price": p} for p in [480, 500, 520, 550, 600, 15, 20, 25, 30, 35, 40]]
+    assert deals._trim(ads) == ads
+    ads = [{"price": p} for p in [1, 480, 500, 520, 550, 600]]
+    assert [a["price"] for a in deals._trim(ads)] == [480, 500, 520, 550, 600]
+
+
+def test_trim_drops_placeholder_prices_however_many():
+    """Two "1 €" ads among six at 280–330 are more than TRIM_MAX, yet no second group: placeholders always go."""
+    ads = [{"price": p} for p in [1, 1, 280, 290, 300, 310, 320, 330]]
+    assert [a["price"] for a in deals._trim(ads)] == [280, 290, 300, 310, 320, 330]
+    ads = [{"price": p} for p in [1, 280, 290, 300, 310, 320, 330, 1500, 1600]]
+    assert [a["price"] for a in deals._trim(ads)] == [280, 290, 300, 310, 320, 330, 1500, 1600]   # 2 of 8 high
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    ("Sony playstation 5", "PS5", True), ("Sony Playstation 5", "Sony PS5", True), ("PlayStation5", "PS5", True),
+    ("SONY PLAYSTATION 5 DIGITAL EDITION", "PS5 Digital Edition", True), ("playstation 5 digital", "PS5 Digital", True),
+    ("PS5", "Sony playstation 5", True), ("Sony PS5 Digital", "SONY PLAYSTATION 5 DIGITAL EDITION", True),
+    ("PS5 Digital Edition", "PlayStation5 Digital", True), ("Sony Playstation 5 Konsole", "Sony PS5 Konsole", True),
+    ("Sony Playstation 4 Pro", "Sony PS4 Pro", True), ("Sony Playstation 4", "PS4", True),
+    ("Philips 5", "PS5", False), ("Pens 5", "PS5", False), ("Playstation4", "PS5", False),   # not the letters, model
+    ("Sony PlayStation 5", "PS5 Digital Edition", False),
+    # other words with the letters: only the aliases count, not any word that has them in order
+    ("Persona 5 Royal", "Sony PS5", False), ("Persona 5 Royal", "PS5", False),
+    ("Persona 5 Strikers", "PS5 Konsole", False),
+    ("Persona 4 Golden", "Sony PS4", False), ("Postal 4", "Sony PS4", False), ("Persona 3 Reload", "Sony PS3", False),
+    ("Passat 5", "Sony PS5", False), ("Passat 5", "PS5", False), ("Pistole 5", "Sony PS5 Konsole", False),
+    ("Pass 2", "Sony PS2", False), ("Maxi 5", "Mazda MX5", False),
+])
+def test_abbreviation_whatever_the_case(other, ad, ok):
+    """"PS5" is "PlayStation 5" however the title writes it: "Playstation", "PLAYSTATION", glued "PlayStation5" – by
+    a short alias table, so "Persona 5" or "Passat 5" are no PS5."""
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+
+@pytest.mark.parametrize("other, ad", [
+    ("Sony Playstation 5 Controller", "Sony PS5"), ("Sony PlayStation 5 Controller", "Sony PS5"),
+    ("Sony Playstation 5 Controller", "PS5"), ("Sony PlayStation 5 Controller", "PS5"),
+    ("Playstation 5 Controller", "PS5 Konsole"), ("Playstation 5 Spiele", "PS5 Konsole"),
+    ("Playstation 5 Spiele", "Sony PS5"), ("Playstation 5 Ladestation", "Sony PS5"),
+    ("PLAYSTATION 5 Controller", "Sony PS5"), ("Playstation5 Controller", "Sony PS5"), ("PS 5 Controller", "Sony PS5"),
+    ("Sony Playstation 5 Digital Edition Controller", "Sony PS5 Digital Edition"),
+    ("Playstation 5 Slim Controller", "PS5 Slim"), ("Sony Playstation 5 Controller", "Neue PS5"),
+])
+def test_the_number_of_the_model_is_no_count(other, ad):
+    """"2 Controller" are extras, but the "5" of "Playstation 5 Controller" names the PS5: the ad is a controller."""
+    assert deals.TitleMatch(ad).check(other)[1] == "kind"
+
+
+@pytest.mark.parametrize("ad, others", [
+    ("Neuwertige PS5 Digital Edition", ["PS5 Digital Edition", "Sony PS5 Digital Edition"]),
+    ("Neue PS5", ["PS5", "Sony PS5", "Sony PlayStation 5"]),
+    ("Meine PS5 Digital", ["PS5 Digital Edition", "Sony PS5 Digital Edition"]),
+    ("Schwarze PS5 Slim Digital", ["PS5 Slim Digital", "Sony PS5 Slim Digital"]),
+])
+def test_no_product_line_in_words_before_the_model(ad, others):
+    """Praise, possessives and colours before the model are no product line: the model comes first, any brand will
+    do."""
+    m = deals.TitleMatch(ad)
+    assert m.anchor is None and m.weights == {}
+    assert all(m.check(o) == (1.0, None) for o in others)
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    ("Bose 700 Kopfhörer", "Bose Soundbar 700", False),
+    ("Bose 700 Noise Cancelling Kopfhörer", "Bose Soundbar 700", False),
+    ("Bose Soundbar 700", "Neue Bose Soundbar 700", True), ("Bose Soundbar 600", "Bose Smart Soundbar 600", True),
+    ("Michelin Sommerreifen 205/55 R16", "Kompletträder Sommerreifen (Alu) 205/55 R16", False),
+    ("Sommerreifen 205/55 R16", "Kompletträder Sommerreifen (Alu) 205/55 R16", False),
+    ("Kompletträder Sommerreifen Alu 205/55 R16", "Kompletträder Sommerreifen (Alu) 205/55 R16", True),
+])
+def test_a_line_word_that_ends_like_an_adjective_stays_the_line(other, ad, ok):
+    """"Soundbar" ends like "ausziehbar", "Alu" is a material: before the model they still say what the item is."""
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+
+@pytest.mark.parametrize("a, b", [
+    ("Nintendo Switch", "Nintendo Switch OLED"), ("Nintendo Switch", "Nintendo Switch (OLED-Modell) weiß"),
+    ("Nintendo Switch", "Nintendo Switch OLED Zelda Edition"), ("Nintendo Switch Neon", "Nintendo Switch OLED Neon"),
+    ("Nintendo Switch", "Nintendo Switch OLED Bundle"), ("Nintendo Switch", "Nintendo Switch 64GB OLED"),
+    ("Nintendo Switch", "Nintendo Switch, OLED"), ("Nintendo Switch", "Nintendo Switch OLED Modell"),
+    ("Nintendo Switch Konsole", "Nintendo Switch Oled Konsole"), ("Nintendo Switch Lite", "Nintendo Switch OLED"),
+    ("Xbox Series X", "Xbox Series X Digital Edition"),
+    ("Microsoft Xbox Series X 1TB", "Xbox Series X Digital Edition"),
+    ("Sony PS5", "Sony PS5 Digital Gaming Konsole"), ("Sony PS5 Konsole", "Sony PS5 Digital Gaming Konsole"),
+    ("Sony PS5", "Sony PS5 Digital CFI-1216B"), ("Sony PS5", "PS5 Digital Bundle"), ("Sony PS5", "PS5 Slim Bundle"),
+    ("Sony PS5", "PS5 Digital Edition"), ("Sony PS5 Digital Edition", "Sony PS5 Disc Edition"),
+    ("Sony PS5 Slim", "Sony CFI-2016 PS5 Slim Digital"), ("Sony PlayStation 5", "Sony PlayStation 5 Digital Edition"),
+    ("Sony PlayStation 4", "Sony PlayStation 4 Slim Bundle"), ("PS4", "PS4 Slim Bundle"),
+    ("PS4", "Playstation 4 Slim Konsole"), ("Sony PlayStation 4", "Sony PlayStation 4 Slim Konsole 500GB"),
+    ("Dyson V11 Absolute", "Dyson V11 Absolute Extra Akkusauger"), ("AMD RX 6700", "Sapphire Pulse RX 6700 XT"),
+    ("Yamaha P-45", "Yamaha P-45 Digital"), ("Canon EOS 2000D", "Canon EOS 2000D Digital"),
+    ("Shimano SLX Bremse", "Shimano XT Bremse"), ("Samsung Odyssey G9 Monitor", "Samsung Odyssey G9 OLED Monitor"),
+    ("LG 55 Zoll TV", "LG 55 Zoll OLED TV"),
+])
+def test_variant_words_differ_either_way(a, b):
+    """A variant word one title has and the other lacks makes another product, whichever is the ad: also after a
+    capacity, a comma or in brackets, before "Bundle", a colour or an edition's name."""
+    assert deals.similarity(a, b) < deals.MATCH_MIN and deals.similarity(b, a) < deals.MATCH_MIN
+
+
+@pytest.mark.parametrize("other, ad, both", [
+    ("Canon EOS 2000D Digital Spiegelreflexkamera", "Canon EOS 2000D", True),
+    ("Casio CT-S1 Digital Keyboard", "Casio CT-S1 Keyboard", True),
+    ("Yamaha P-45", "Yamaha P-45 Digital Piano", True),
+    ("Cube Attention 29 Zoll Disc", "Cube Attention 29 Zoll", True),
+    ("Cube Attention 29\" Disc", "Cube Attention 29 Zoll", False),          # as the ad: "29" (no unit) its model
+    ("Technisat Sat-Receiver HD", "Technisat Digital Sat-Receiver HD", True),
+    ("Shimano Deore XT M8100 Bremse", "Shimano XT Bremse", False),          # as the ad: M8100 its model
+])
+def test_a_plain_variant_word_that_describes_a_noun_or_a_size_is_none(other, ad, both):
+    """"Digital Piano", "Digital Spiegelreflexkamera", "Digital Sat-Receiver": the kind of thing; "29 Zoll Disc": what
+    the wheel size has. No variant, whichever title is the ad."""
+    assert deals.similarity(other, ad) >= deals.MATCH_MIN
+    assert deals.TitleMatch(other).variant_set == deals.TitleMatch(ad).variant_set
+    if both:
+        assert deals.similarity(ad, other) >= deals.MATCH_MIN
+
+
+def test_variant_words_of_a_title():
+    assert deals._Title("LG OLED 55 C1").variants() == {"oled"}
+    assert deals._Title("PS5 Slim Digital Edition").variants() == {"slim", "digital"}
+    assert deals._Title("Nintendo Switch (OLED-Modell) weiß").variants() == {"oled"}
+    assert deals._Title("Yamaha P-45 Digital Piano").variants() == set()
+    assert deals._Title("Sony PS5 Disc-Laufwerk").variants() == set()          # a part: the drive for discs
+    assert deals.TitleMatch("Sony PS5").check("Sony PS5 Disc-Laufwerk")[1] == "kind"
+    assert deals._Title("Samsung Galaxy S23+ 256GB").variants() == {"plus"}
+    assert deals._Title("UniFi Switch USW-24-PoE+").variants() == set()
+    assert deals._Title("Sony PS5+ 2 Spiele").variants() == set()
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    ("Galaxy S23 Plus", "Samsung Galaxy S23+", True), ("Samsung Galaxy S23+ 256GB", "Galaxy S23 Plus 256GB", True),
+    ("Samsung Galaxy S23 Plus", "Samsung Galaxy S23+", True), ("Ubiquiti UniFi U6 Plus", "Ubiquiti UniFi U6+", True),
+    ("Galaxy S23", "Samsung Galaxy S23+", False), ("Samsung Galaxy S23+", "Samsung Galaxy S23", False),
+    ("UniFi U6+", "Ubiquiti UniFi U6", False),
+    # no Plus: the "+" of PoE+, inside an order code, or adding extras
+    ("Ubiquiti PoE Injektor", "Ubiquiti PoE+ Injektor", True),
+    ("UniFi Switch USW-24-PoE+", "UniFi Switch USW-24-POE", True),
+    ("Sony PS5+ 2 Spiele", "Sony PS5", True),
+])
+def test_a_plus_glued_to_the_model_is_the_plus(other, ad, ok):
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+
+@pytest.mark.parametrize("other, ok", [
+    ("Defektfreies iPhone 13", True), ("iPhone 13 - keine Defekte", True), ("iPhone 13 nicht defekt", True),
+    ("iPhone 13 ohne Defekt", True), ("iPhone 13 nicht kaputt", True), ("iPhone 13 128GB, kein Bastler", True),
+    ("iPhone 13 defekt", False), ("iPhone 13 Display-defekt", False),
+])
+def test_no_defect_is_no_defect(other, ok):
+    assert (deals.similarity(other, "Apple iPhone 13") >= deals.MATCH_MIN) is ok
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    ("Makita BL1850B 18V 5,0Ah Akku", "Makita Akku 18V 5Ah", True),     # a battery: "18V 5Ah" is no battery health
+    ("Makita 18V Akku 5Ah", "Makita Akku 18V 5Ah", True),
+    ("Makita Akku 18V 5Ah", "Makita DHP482 Akku-Schlagbohrschrauber", False),
+    # the cordless kind
+    ("Bosch Akku 18V Bohrschrauber GSR 18V-55", "Bosch GSR 18V-55 Akkuschrauber", True),
+    ("Makita Akku 18V Bohrschrauber DDF485", "Makita Akku Bohrschrauber 18V", True),
+    ("Bosch Akku 18V GSR 18V-55", "Bosch GSR 18V-55", True), ("Bosch Akku GSR 18V-55", "Bosch GSR 18V-55", True),
+    # the battery's health
+    ("iPhone 13 128GB Akku 89%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku: 89%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku 89 %", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku 89 Prozent", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB, Akku: 90 %", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB (Akku: 100%)", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku bei 89%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku 89,5%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128 GB Akkuzustand 89%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku-Kapazität 88%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Batterie 89%", "Apple iPhone 13 128GB", True),
+    ("iPhone 13 128GB Akku", "Apple iPhone 13 128GB", False),
+])
+def test_battery_health_only_as_a_percentage(other, ad, ok):
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+
+
+@pytest.mark.parametrize("other, ad, ok", [
+    # "Akku" with a voltage or capacity before the model or the item: a cordless tool, an e-bike, a phone's battery
+    ("Makita Akku 18V DHP482 Schlagbohrschrauber", "Makita DHP482", True),
+    ("Makita DHP482", "Makita Akku 18V DHP482 Schlagbohrschrauber", True),
+    ("DeWalt Akku 18V DCD796", "DeWalt DCD796", True),
+    ("KTM Macina Sport 610 Akku 625Wh", "KTM Macina Sport 610", True),
+    ("Apple iPhone 12 64GB, Akku ~85%", "Apple iPhone 12 64GB", True),
+    ("Apple iPhone 12 64GB Akku 2023 getauscht", "Apple iPhone 12 64GB", True),
+    ("Makita Akku 18V 5Ah", "Makita DHP482", False),                             # still a battery
+    # a "+" glued to a model is the Plus only for a letter (or "Note") and digits: S23+, U6+, Note10+
+    ("Sony PS5+ FIFA 24", "Sony PS5", True),
+    ("Thermomix TM6+ Varoma", "Thermomix TM6", True),
+    ("Samsung Galaxy S23+", "Samsung Galaxy S23", False),
+    ("Samsung Galaxy Note10+", "Samsung Galaxy Note10", False),
+    # a general variant word both titles have is the same item, wherever it stands
+    ("Levis 511 Slim Fit Jeans", "Levis 511 Slim", True),
+    ("Yamaha P-45 Digital Piano", "Yamaha P-45 Digital", True),
+    ("Casio Uhr Digital", "Casio Digital Uhr", True),
+    ("Yamaha P-45 Digital", "Yamaha P-45", False),
+    # only "disc" after a size is no variant (disc brakes); "29 Zoll XT" is one
+    ("Cube Attention 29 Zoll Disc", "Cube Attention 29 Zoll", True),
+    ("Cube Aim 29 Zoll XT", "Cube Aim 29 Zoll", False),
+])
+def test_akku_plus_and_general_variant_words(other, ad, ok):
+    assert (deals.similarity(other, ad) >= deals.MATCH_MIN) is ok
+
+def test_a_long_reference_is_cut_and_its_sizes_read_once(monkeypatch):
+    """A typed term can be any length ("?q=<2000 digits>&own=1"): only its start is compared, and its sizes are read
+    once, not again for every ad (that took seconds per search)."""
+    m = deals.TitleMatch("1" * 2000 + " iPhone 13")
+    assert len(m.title) == deals.REFERENCE_MAX
+    assert deals.TitleMatch(" " + "1" * 2000).title.strip()                   # never cut down to nothing
+    m = deals.TitleMatch("Apple iPhone 13 128GB " + "neu " * 100)
+    assert len(m.title) <= deals.REFERENCE_MAX and m.model == "13" and m.sizes == {"128gb"}
+    read = []
+    real = deals._capacities
+    monkeypatch.setattr(deals, "_capacities", lambda t: read.append(t) or real(t))
+    assert [m.check("Apple iPhone 13 128GB")[1], m.check("Apple iPhone 13 256GB")[1]] == [None, "model"]
+    assert read == ["Apple iPhone 13 128GB", "Apple iPhone 13 256GB"]        # the other ads' titles only
+
+
+UNIFI = load("deals_unifi_searches.json")
+
+
+@pytest.fixture
+def unifi(monkeypatch):
+    """The willhaben searches of three reported Kleinanzeigen UniFi checks (fixture), Geizhals off."""
+    async def search_ads(q):
+        return copy.deepcopy(UNIFI.get(q) or {"rows_found": 0, "ads": []})
+    monkeypatch.setattr(deals, "search_ads", search_ads)
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+
+
+def _hit(title, price, ad_id="3540356386"):
+    """What a Kleinanzeigen hit or list result knows: title and price (AdDetail.from_result)."""
+    return AdDetail.from_result({"ad_id": ad_id, "title": title, "price": price, "platform": "kleinanzeigen"})
+
+
+async def test_unifi_u7_pro_is_compared_with_the_u7_pro(unifi):
+    """The reported check: a U7 Pro "mit Halterung" (title only); willhaben has one U7 Pro – too few for a level."""
+    res = await deals.analyze(_hit("UniFi U7 Pro WiFi 7 Access Point mit Halterung", 139.0))
+    comp = res["comparables"]
+    assert res["query"] == "UniFi U7 Pro" and [a["title"] for a in comp["closest"]] == ["UniFi U7pro"]
+    assert comp["count"] == 1 and res["position"] == {"pos": None, "reason": "few_data"}
+
+
+async def test_unifi_u6_mesh_gets_none_of_the_reported_list(unifi):
+    """The list the user saw (Cloud Key 30, PoE injector 30, U6 Lite cover 35, nanoHD mount 35) came from the U6 Mesh
+    check's search "Ubiquiti UniFi U6" (today's query adds "Mesh"; the search is given here as a list's link would):
+    none of it is a U6 Mesh, nor are the U6 Pros; too few is too few, the list is not topped up."""
+    hit = _hit("Ubiquiti UniFi U6 Mesh WiFi 6 Access Point neuwertig", 139.0, "3540356279")
+    assert deals.query_from_title(hit.heading) == "Ubiquiti UniFi U6 Mesh"
+    res = await deals.analyze(hit, query="Ubiquiti UniFi U6")
+    comp = res["comparables"]
+    assert comp["count"] == 0 and comp["closest"] == []
+    # model: the Cloud Key and the two U6 Pros; kind: the PoE injector, the U6 Lite cover and the nanoHD mount
+    assert comp["filtered"] == {"model": 3, "kind": 3, "condition": 0, "outliers": 0}
+    assert res["position"]["reason"] == "few_data"
+
+
+async def test_unifi_u6_lite_out_of_a_broad_search(unifi):
+    """ "UniFi Access Point" finds 41 UniFi devices and others; only the two U6 Lites ("UniFi 6 Lite") compare."""
+    res = await deals.analyze(_hit("UniFi Access Point U6 Lite", 70.0, "3540000001"))
+    comp = res["comparables"]
+    assert sorted(a["title"] for a in comp["closest"]) == [
+        "Ubiquiti UniFi 6 Lite Access Point + Trench Networks WLAN-System", "UniFi 6 Lite Access Point"]
+    assert comp["count"] == 2 and res["position"]["reason"] == "few_data"
+
+
+async def test_typed_search_term_is_what_comparables_must_be(monkeypatch):
+    """"Compare again" with a term of the user's own: that term, not the title, says what counts. A term that came
+    along from a list ("Check" on the deals page, a product search's term) or the form's own unchanged default only
+    changes the search: an iPhone 13 Pro Max checked from a search for "iphone 13" is no base iPhone 13."""
+    ads = [_summ(0, "Bosch GSR 18V-55 Akkuschrauber", 100), _summ(1, "Makita DDF484 Akkuschrauber", 120),
+           _summ(2, "Einhell Akkuschrauber", 60), _summ(3, "Bohrer Set", 15)]
+    _fake_search(monkeypatch, ads)
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    by_title = await deals.analyze(_ad(100))
+    assert [a["title"] for a in by_title["comparables"]["closest"]] == ["Bosch GSR 18V-55 Akkuschrauber"]
+    typed = await deals.analyze(_ad(100), query="Akkuschrauber", own_query=True)
+    assert typed["comparables"]["count"] == 3 and typed["own_query"] is True
+    linked = await deals.analyze(_ad(100), query="Akkuschrauber")          # the same term from a list's link
+    assert linked["comparables"]["count"] == 1 and linked["own_query"] is False
+    assert deals.cached(AD_ID, "Akkuschrauber", None, True) == typed        # each kept apart (re-rated copies)
+    assert deals.cached(AD_ID, "Akkuschrauber") == linked
+
+    phones = [_summ(n, "Apple iPhone 13 128GB", 300 + n, "2691") for n in range(6)]
+    phones += [_summ(10 + n, "Apple iPhone 13 Pro Max 256GB", 600 + n, "2691") for n in range(2)]
+    _fake_search(monkeypatch, phones)
+    pro_max = _ad(620, heading="Apple iPhone 13 Pro Max 256GB", ad_id="1000000009")
+    for q, own in [("iphone 13", False), ("Apple iPhone 13 Pro", True)]:        # a list's term; the unchanged default
+        deals.clear_cache()
+        res = await deals.analyze(pro_max, query=q, own_query=own)
+        assert {a["title"] for a in res["comparables"]["closest"]} == {"Apple iPhone 13 Pro Max 256GB"}
+    deals.clear_cache()
+    res = await deals.analyze(pro_max, query="iphone 13", own_query=True)       # typed on purpose: what the user says
+    assert res["comparables"]["count"] == 6
+
+
+async def test_a_typed_term_of_filler_words_leaves_the_title(monkeypatch):
+    """"neu" or "OVP" typed to compare with names no item: the title still says what counts, not everything goes."""
+    assert deals._reference("Bosch GSR 18V-55 Akkuschrauber", "neu OVP", True, None) == "Bosch GSR 18V-55 Akkuschrauber"
+    ads = [_summ(0, "Bosch GSR 18V-55 Akkuschrauber", 100), _summ(1, "Makita DDF484 Akkuschrauber", 120),
+           _summ(2, "Einhell Akkuschrauber", 60), _summ(3, "Bohrer Set", 15)]
+    _fake_search(monkeypatch, ads)
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    res = await deals.analyze(_ad(100), query="neu", own_query=True)
+    assert [a["title"] for a in res["comparables"]["closest"]] == ["Bosch GSR 18V-55 Akkuschrauber"]
+
+
+def test_compare_again_marks_a_changed_term_as_the_users_own(app_client):
+    """The "Compare again" form sends the term it showed as `was`: a changed term is the user's own (own=1 goes on to
+    the result), an unchanged one is not; a list's "Check" link sends none."""
+    base = f"/deals/ad/{AD_ID}"
+    assert "own=1" not in app_client.get(base, params={"q": "Bosch GSR 18V-55"}).text
+    assert "own=1" not in app_client.get(base, params={"q": "Bosch GSR 18V-55", "was": "Bosch GSR 18V-55"}).text
+    assert f'hx-get="{base}/result?q=Akkuschrauber&amp;cat=&amp;own=1"' in \
+        app_client.get(base, params={"q": "Akkuschrauber", "was": "Bosch GSR 18V-55"}).text
+    assert "own=1" in app_client.get(base, params={"q": "Akkuschrauber", "own": "1"}).text   # the category form
+    result = app_client.get(f"{base}/result", params={"q": "Akkuschrauber", "own": "1"}).text
+    assert 'name="was" value=""' in result and 'name="own" value="1"' in result and '"own": "1"' in result
+
+
 def _fake_search(monkeypatch, ads):
     async def search_ads(q):
         return {"rows_found": len(ads), "ads": ads}
@@ -713,27 +1198,28 @@ async def test_comparables_leave_out_other_sizes(monkeypatch):
     ads += [_summ(20 + n, "Raspberry Pi 4 8GB", p, pi) for n, p in enumerate([80, 85, 90])]
     ads += [_summ(30, "Raspberry Pi 4 Gehäuse", 10, pi)]
     _fake_search(monkeypatch, ads)
-    out = await deals.comparables("Raspberry Pi 4", AD_ID, 50, category_id="5013000", title="Raspberry Pi 4 4GB")
+    out = await deals.comparables("Raspberry Pi 4", AD_ID, 50, title="Raspberry Pi 4 4GB")
     assert out["count"] == 6 and out["stats"]["max"] == 60
-    assert out["filtered"] == {"category": 0, "kind": 4, "condition": 0, "outliers": 0}   # 3 x 8GB + the case
+    assert out["filtered"] == {"model": 3, "kind": 1, "condition": 0, "outliers": 0}   # 3 x 8GB, the case
 
     mac = [_summ(n, "MacBook Air M1 8GB 256GB", p, pi) for n, p in enumerate([600, 650, 700, 720])]
     mac += [_summ(10, "MacBook Air M1 8 GB / 256 GB", 680, pi), _summ(11, "MacBook Air M1 256GB", 640, pi)]
     mac += [_summ(20, "MacBook Air M1 16GB 256GB", 900, pi), _summ(21, "MacBook Air M1 8GB 512GB", 820, pi)]
     _fake_search(monkeypatch, mac)
-    out = await deals.comparables("MacBook Air M1", AD_ID, 650, category_id="5013000", title="MacBook Air M1 8GB 256GB")
-    assert out["count"] == 6 and out["stats"]["max"] == 720 and out["filtered"]["kind"] == 2
+    out = await deals.comparables("MacBook Air M1", AD_ID, 650, title="MacBook Air M1 8GB 256GB")
+    assert out["count"] == 6 and out["stats"]["max"] == 720 and out["filtered"]["model"] == 2
 
 
-async def test_comparables_too_few_of_the_size_keep_the_accessory_filter(monkeypatch):
+async def test_comparables_too_few_of_the_size_stay_too_few(monkeypatch):
+    """Three Pi 4 4GB among other sizes: three comparables (no level from them), not all sizes as before."""
     pi = "2691;5013000"
     ads = [_summ(n, "Raspberry Pi 4 4GB", p, pi) for n, p in enumerate([50, 55])] + [_summ(5, "Raspberry Pi 4", 52, pi)]
     ads += [_summ(20 + n, "Raspberry Pi 4 8GB", p, pi) for n, p in enumerate([80, 85, 90, 95, 100, 70])]
     ads += [_summ(30, "Raspberry Pi 4 Gehäuse", 10, pi)]
     _fake_search(monkeypatch, ads)
-    out = await deals.comparables("Raspberry Pi 4", AD_ID, 50, category_id="5013000", title="Raspberry Pi 4 4GB")
-    assert out["count"] == 9 and out["filtered"]["kind"] == 1               # all sizes, but not the case
-    assert out["stats"]["min"] == 50
+    out = await deals.comparables("Raspberry Pi 4", AD_ID, 50, title="Raspberry Pi 4 4GB")
+    assert out["count"] == 3 and out["filtered"] == {"model": 6, "kind": 1, "condition": 0, "outliers": 0}
+    assert out["stats"]["min"] == 50 and deals.position(50, out["stats"], None)["reason"] == "few_data"
 
 
 async def test_category_choices_and_chosen_category(monkeypatch):
@@ -760,8 +1246,8 @@ async def test_category_choices_and_chosen_category(monkeypatch):
         return {"rows_found": 2, "ads": [_summ(n, "Handy", p, "9") for n, p in enumerate([100, 120, 140, 160, 180])]}
 
     monkeypatch.setattr(deals, "search_category", search_category)
-    out = await deals.comparables("iphone", AD_ID, 150, category_id="5013241", title="Handy", category_url=cat)
-    assert got == [cat] and out["scope"] == "chosen" and out["count"] == 5   # no leaf filter on a chosen category
+    out = await deals.comparables("iphone", AD_ID, 150, title="Handy", category_url=cat)
+    assert got == [cat] and out["scope"] == "chosen" and out["count"] == 5
 
 
 # ------------------------------------------------------------------ Claude looks for the product on Geizhals
@@ -946,18 +1432,16 @@ async def test_comparables_in_another_condition_are_left_out(monkeypatch):
     ads = [_cond(n, p, "used") for n, p in enumerate([500, 520, 540, 560, 580])] + [_cond(5, 600, None)]
     ads += [_cond(10 + n, p, "new") for n, p in enumerate([900, 950])] + [_cond(20, 200, "defect")]
     _fake_search(monkeypatch, ads)
-    out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, category_id="5013241", title="iPhone 15 Pro")
+    out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, title="iPhone 15 Pro")
     assert out["count"] == 6 and out["filtered"]["condition"] == 3 and out["stats"]["max"] == 600   # used ad
-    out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, category_id="5013241", title="iPhone 15 Pro",
-                                  condition="defect")
+    out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, title="iPhone 15 Pro", condition="defect")
     assert out["count"] == 9 and out["filtered"]["condition"] == 0          # a defective ad: nothing to pick
-    _fake_search(monkeypatch, ads[2:])                                        # 3 used + 1 unknown left: kept all
-    out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, category_id="5013241", title="iPhone 15 Pro")
-    assert out["filtered"]["condition"] == 0
+    _fake_search(monkeypatch, ads[2:])               # 3 used + 1 unknown left: too few, not topped up with new ones
+    out = await deals.comparables("iPhone 15 Pro", AD_ID, 500, title="iPhone 15 Pro")
+    assert out["count"] == 4 and out["filtered"]["condition"] == 3
     new = [_cond(n, p, "new") for n, p in enumerate([900, 920, 940, 960])] + [_cond(9, 950, None)]
     _fake_search(monkeypatch, new + ads[:5])
-    out = await deals.comparables("iPhone 15 Pro", AD_ID, 950, category_id="5013241", title="iPhone 15 Pro",
-                                  condition="new")
+    out = await deals.comparables("iPhone 15 Pro", AD_ID, 950, title="iPhone 15 Pro", condition="new")
     assert out["count"] == 5 and out["filtered"]["condition"] == 5 and out["stats"]["min"] == 900
 
 
@@ -965,7 +1449,7 @@ async def test_results_of_filter_version_2_are_recomputed(wh, monkeypatch):
     async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
-    assert deals.FILTERS == 3
+    assert deals.FILTERS == 4
     res = await deals.analyze(_ad(100))
     deals.remember({**res, "comparables": {**res["comparables"], "filters": 2}})
     deals.clear_cache()

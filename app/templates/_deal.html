@@ -4,7 +4,7 @@
 {% import "_ui.html" as ui %}{% import "_price_bar.html" as pb %}
 {% if error and not res %}<p class="text-[13px] text-muted">{{ _("Price check failed: {error}", error=error) }}</p>
 {% elif res %}
-{% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set st = c.stats or {} %}{% set gh = res.geizhals %}{% set ad = res.ad or {} %}{% set path = res.category_path or [] %}{% set fl = c.filtered or {} %}
+{% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set st = c.stats or {} %}{% set gh = res.geizhals %}{% set ad = res.ad or {} %}{% set fl = c.filtered or {} %}
 {% set cond = condition_text(ad.item_condition, ad.item_condition_label, ad.platform) %}{% set guessed = ad.item_condition and not ad.item_condition_label %}
 <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-200 px-4 py-3.5">
   <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -41,15 +41,15 @@
     {%- endif %}</p>
   {% else %}<p class="text-[12.5px] text-muted">{{ deal_explain(res) }}</p>{% endif %}
   <p class="text-[12.5px] text-muted">
-    {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% elif c.scope == 'leaf' and path %}{{ _("Compared within „{category}“.", category=path[-1]) }}{% elif c.scope == 'parent' and path|length > 1 %}{{ _("Compared within „{category}“ (too few ads in „{leaf}“).", category=path[-2], leaf=path[-1]) }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
-    {% if fl.kind %} {{ _("{n} accessories/parts or other variants left out.", n=fl.kind) }}{% endif %}{% if fl.condition %} {{ _("{n} ads in another condition left out.", n=fl.condition) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
+    {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
+    {% if fl.model %} {{ _("{n} other products, models or variants left out.", n=fl.model) }}{% endif %}{% if fl.kind %} {{ _("{n} accessories or parts left out.", n=fl.kind) }}{% endif %}{% if fl.condition %} {{ _("{n} ads in another condition left out.", n=fl.condition) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
     {% if compact %} <a class="link link-primary whitespace-nowrap no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
   {% if gh %}{% if p.basis != 'geizhals' %}<a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}</span>{% endif %}{% if gh.by == 'claude' %} <span class="text-muted">· {{ _("found by Claude") }}</span>{% endif %}</a>{% endif %}
   {% elif res.geizhals_none %}<p class="text-[12.5px] text-muted">{{ _("Claude found no matching product on Geizhals: {reason}", reason=res.geizhals_none) }}</p>
   {% else %}{# Claude looks for it on Geizhals – only on this click; the answer redraws this section #}
   <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted"><span>{{ _("No matching product found on Geizhals.") }}</span>
     <button type="button" class="btn btn-xs disabled:opacity-60" hx-post="/deals/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}/geizhals"
-            hx-vals='{"q": {{ (res.asked_query or '')|tojson }}, "hit": {{ (h.id if h else '')|string|tojson }}, "cat": {{ (res.category_url or '')|tojson }}, "compact": {{ ('1' if compact else '')|tojson }}}'
+            hx-vals='{"q": {{ (res.asked_query or '')|tojson }}, "hit": {{ (h.id if h else '')|string|tojson }}, "cat": {{ (res.category_url or '')|tojson }}, "compact": {{ ('1' if compact else '')|tojson }}, "own": {{ ('1' if res.own_query else '')|tojson }}}'
             hx-target="closest section" hx-swap="outerHTML" hx-disabled-elt="this">
       <span class="loading loading-spinner loading-xs hidden busy:inline-block"></span> {{ _("Let Claude search Geizhals") }}</button>
     {% if res.geizhals_error %}<span>{{ _("Claude failed: {error}", error=res.geizhals_error) }}</span>{% endif %}</div>

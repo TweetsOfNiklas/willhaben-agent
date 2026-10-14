@@ -114,12 +114,13 @@ def _known(p: platforms.Platform, ad_id: str, hit: Hit | None) -> AdDetail | Non
 
 async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str | None = None,
                     use_claude: bool = False, cat: str | None = None, hit: Hit | None = None,
-                    find_geizhals: bool = False) -> tuple[dict[str, Any] | None, str | None]:
+                    find_geizhals: bool = False, own: bool = False) -> tuple[dict[str, Any] | None, str | None]:
     """(result, error). A fresh cached result costs no request; otherwise ad detail (cached) + analysis. Sites
     without an ad-detail call, and a site that fails, use what the hit or the list that showed the ad knows (as the
-    ad viewer does); the comparables are willhaben listings either way."""
+    ad viewer does); the comparables are willhaben listings either way. `own`: the user typed q to compare with
+    (deals.analyze own_query); a q from a list's "Check" link only changes the search."""
     p = _platform(platform_id)
-    res = deals.cached(p.ref(ad_id), q, cat)
+    res = deals.cached(p.ref(ad_id), q, cat, own)
     # a condition the hit learned since (the viewer wrote the ad page's): analyze() re-rates, its searches are cached
     stale = res is not None and hit is not None and bool(hit.item_condition) \
         and (res.get("ad") or {}).get("item_condition") != hit.item_condition
@@ -137,8 +138,8 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
         return None, t("This ad is no longer online (sold, expired or deleted).")
     if d.item_condition is None and hit is not None and hit.item_condition:    # a page without one: what the list said
         d.item_condition, d.item_condition_label = hit.item_condition, hit.item_condition_label
-    return await deals.analyze(d, query=q, use_claude=use_claude, find_geizhals=find_geizhals, fallback_query=fallback,
-                               category_url=cat), None
+    return await deals.analyze(d, query=q, own_query=own, use_claude=use_claude, find_geizhals=find_geizhals,
+                               fallback_query=fallback, category_url=cat), None
 
 
 # Route order matters: Starlette takes the first path that matches, so the 3-segment legacy routes
@@ -168,22 +169,24 @@ async def hit_ad_detail_platform(request: Request, platform: str, ad_id: str, hi
 
 
 @router.post("/deals/ad/{ad_id}/claude", response_class=HTMLResponse)
-async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str = Form(""), cat: str = Form("")):
+async def deal_claude(request: Request, ad_id: str, q: str = Form(""), hit: str = Form(""), cat: str = Form(""),
+                      own: str = Form("")):
     if not ad_id.isdigit():
         raise HTTPException(400)
-    return await deal_claude_platform(request, "willhaben", ad_id, q, hit, cat)
+    return await deal_claude_platform(request, "willhaben", ad_id, q, hit, cat, own)
 
 
 @router.post("/deals/ad/{platform}/{ad_id}/claude", response_class=HTMLResponse)
 async def deal_claude_platform(request: Request, platform: str, ad_id: str, q: str = Form(""), hit: str = Form(""),
-                               cat: str = Form("")):
+                               cat: str = Form(""), own: str = Form("")):
     """Claude's verdict – only ever on this explicit click; cached with the analysis. Shown among the background
     jobs while Claude thinks (quietly: this page shows the answer)."""
     h, fallback = _hit(int(hit) if hit.isdigit() else None)
-    async with jobs.track("deal-claude", t("Claude rates the price: „{title}“", title=_title(platform, ad_id, q, cat, h)),
+    async with jobs.track("deal-claude", t("Claude rates the price: „{title}“",
+                                           title=_title(platform, ad_id, q, cat, h, own == "1")),
                           link=_page(platform, ad_id), quiet=True) as job:
         res, error = await _analysis(platform, ad_id, q or None, fallback, use_claude=True, cat=_cat(cat, platform),
-                                     hit=h)
+                                     hit=h, own=own == "1")
         cl = (res or {}).get("claude") or {}
         if error or cl.get("error"):
             job.status, job.result = "failed", error or cl["error"]
@@ -197,15 +200,16 @@ async def deal_claude_platform(request: Request, platform: str, ad_id: str, q: s
 
 @router.post("/deals/ad/{platform}/{ad_id}/geizhals", response_class=HTMLResponse)
 async def deal_geizhals_platform(request: Request, platform: str, ad_id: str, q: str = Form(""), hit: str = Form(""),
-                                 cat: str = Form(""), compact: str = Form("")):
+                                 cat: str = Form(""), compact: str = Form(""), own: str = Form("")):
     """Claude looks for the product on Geizhals – only on this explicit click, when the automatic lookup found none.
     Answers with the whole price section: a new price can place the ad on the bar. A hit the viewer was opened from
     gets the product too (the hit list shows the comparison)."""
     h, fallback = _hit(int(hit) if hit.isdigit() else None)
-    async with jobs.track("geizhals-claude", t("Claude searches Geizhals: „{title}“", title=_title(platform, ad_id, q, cat, h)),
+    async with jobs.track("geizhals-claude", t("Claude searches Geizhals: „{title}“",
+                                               title=_title(platform, ad_id, q, cat, h, own == "1")),
                           link=_page(platform, ad_id), quiet=True) as job:
         res, error = await _analysis(platform, ad_id, q or None, fallback, cat=_cat(cat, platform), hit=h,
-                                     find_geizhals=True)
+                                     find_geizhals=True, own=own == "1")
         r = res or {}
         if error or r.get("geizhals_error"):
             job.status, job.result = "failed", error or r["geizhals_error"]
@@ -219,9 +223,9 @@ async def deal_geizhals_platform(request: Request, platform: str, ad_id: str, q:
                                                                  "h": h})
 
 
-def _title(platform: str, ad_id: str, q: str, cat: str, h: Hit | None) -> str:
+def _title(platform: str, ad_id: str, q: str, cat: str, h: Hit | None, own: bool = False) -> str:
     """The ad's title for a job label, without a request: the hit's, or the one of the analysis on screen."""
-    res = deals.cached(_platform(platform).ref(ad_id), q or None, _cat(cat, platform))
+    res = deals.cached(_platform(platform).ref(ad_id), q or None, _cat(cat, platform), own)
     title = (h.heading if h else None) or ((res or {}).get("ad") or {}).get("title") or ad_id
     return title if len(title) <= 60 else title[:59] + "…"
 
@@ -449,20 +453,21 @@ async def deals_page(request: Request, q: str = "", search: int | None = None, m
 
 
 @router.get("/deals/ad/{ad_id}/result", response_class=HTMLResponse)
-async def deals_ad_result(request: Request, ad_id: str, q: str = "", cat: str = ""):
+async def deals_ad_result(request: Request, ad_id: str, q: str = "", cat: str = "", own: str = ""):
     if not ad_id.isdigit():
         raise HTTPException(400)
-    return await deals_ad_result_platform(request, "willhaben", ad_id, q, cat)
+    return await deals_ad_result_platform(request, "willhaben", ad_id, q, cat, own=own)
 
 
 @router.get("/deals/ad/{platform}/{ad_id}/result", response_class=HTMLResponse)
 async def deals_ad_result_platform(request: Request, platform: str, ad_id: str, q: str = "", cat: str = "",
-                                   hit: int | None = None):
+                                   hit: int | None = None, own: str = ""):
     """The price check of one ad as a fragment (_deal_result.html), loaded by /deals/ad/<id>."""
     from app.main import templates
 
     h, fallback = _hit(hit)
-    res, error = await _analysis(platform, ad_id, q.strip() or None, fallback, cat=_cat(cat, platform), hit=h)
+    res, error = await _analysis(platform, ad_id, q.strip() or None, fallback, cat=_cat(cat, platform), hit=h,
+                                 own=own == "1")
     choices = None
     if res is not None:
         deals.remember(res)
@@ -473,19 +478,23 @@ async def deals_ad_result_platform(request: Request, platform: str, ad_id: str, 
 
 
 @router.get("/deals/ad/{ad_id}", response_class=HTMLResponse)
-async def deals_ad(request: Request, ad_id: str, q: str = "", cat: str = ""):
+async def deals_ad(request: Request, ad_id: str, q: str = "", cat: str = "", own: str = "", was: str | None = None):
     if not ad_id.isdigit():
         raise HTTPException(400)
-    return await deals_ad_platform(request, "willhaben", ad_id, q, cat)
+    return await deals_ad_platform(request, "willhaben", ad_id, q, cat, own=own, was=was)
 
 
 @router.get("/deals/ad/{platform}/{ad_id}", response_class=HTMLResponse)
 async def deals_ad_platform(request: Request, platform: str, ad_id: str, q: str = "", cat: str = "",
-                            hit: int | None = None):
+                            hit: int | None = None, own: str = "", was: str | None = None):
+    """The page of one ad's price check. q from a list's "Check" link only changes the search; "Compare again"
+    sends the term with `was` (the term it showed): a changed term is the user's own (own=1, deals.analyze
+    own_query), an unchanged one stays what it was."""
     from app.main import render
 
     p = _platform(platform)
+    own_q = own == "1" or (was is not None and " ".join(q.split()).lower() != " ".join(was.split()).lower())
     # the page answers at once; the analysis (willhaben requests) loads into it: /deals/ad/<id>/result
     return render(request, "deals.html", q=q.strip(), results=None, spread=None, error=None, recent=deals.recent(),
-                  res=None, pending_ad=ad_id, pending_platform=p.id, pending_hit=hit, pending_cat=cat, quote=quote,
-                  **_direct_ctx(), **_search_ctx())
+                  res=None, pending_ad=ad_id, pending_platform=p.id, pending_hit=hit, pending_cat=cat,
+                  pending_own=own_q and bool(q.strip()), quote=quote, **_direct_ctx(), **_search_ctx())
