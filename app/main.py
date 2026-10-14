@@ -99,6 +99,7 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await task
     scheduler.shutdown()
+    await vpn_check.shutdown()                    # a running VPN test, before its clients and exits close
     try:
         await get_session().stop()
         await get_public().aclose()
@@ -1944,6 +1945,16 @@ def _vpn_back(msg: str, next_url: str = "") -> RedirectResponse:
     return back(f"{target}?msg={quote(msg, safe='')}")
 
 
+from app.services import vpn_check  # noqa: E402
+
+templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → Test the sites (settings/_vpn_test.html)
+
+
+def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
+    """The test panel alone (htmx): it asks for itself every 2 s while a test runs; `note`: why none started."""
+    return templates.TemplateResponse(request, "settings/_vpn_test.html", {"vpn_note": note})
+
+
 @app.post("/settings/vpn/upload")
 async def settings_vpn_upload(file: UploadFile | None = File(None)):
     """A .zip of WireGuard configs (the app works through them) or one .conf (a dedicated profile); replaces the old
@@ -1955,6 +1966,7 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
         mode, n, skipped = vpn.import_upload(file.filename, data)
     except ValueError as e:
         return _vpn_back(str(e))
+    await vpn_check.source_changed("uploaded")     # a running test stops before its exits do
     await vpn.source_changed()
     if get_setting("platform_willhaben_vpn") == "":
         vpn.set_enabled("willhaben", True)
@@ -1967,6 +1979,7 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
 
 @app.post("/settings/vpn/forget")
 async def settings_vpn_forget():
+    vpn_check.stop("forgotten")                    # it would ask again the exits it already saw fail
     vpn.forget()
     return _vpn_back(t("Blocks forgotten; every exit gets a new chance"))
 
@@ -1974,6 +1987,7 @@ async def settings_vpn_forget():
 @app.post("/settings/vpn/clear")
 async def settings_vpn_clear():
     vpn.remove_source()
+    await vpn_check.source_changed("removed")
     await vpn.source_changed()
     return _vpn_back(t("WireGuard configs removed; sites with the VPN on pause until you upload new ones"))
 
@@ -1989,6 +2003,35 @@ async def settings_vpn_site(pid: str, enabled: str = Form(""), next: str = Form(
     if not enabled:
         await vpn.stop_site(p.id)
     return _vpn_back(t("Changes saved"), next)
+
+
+@app.get("/settings/vpn/test", response_class=HTMLResponse)
+async def settings_vpn_test_panel(request: Request):
+    """The test panel (settings/_vpn_test.html); polled every 2 s while a test runs."""
+    return _vpn_test_panel(request)
+
+
+@app.post("/settings/vpn/test")
+async def settings_vpn_test(request: Request, site: str = Form(""), forget: str = Form("")):
+    """Test every site with the VPN on, or `site` only ("Test now", "Test 10 more"); `forget` drops that site's
+    blocks first (app/services/vpn_check.py). Runs in the background; one test at a time."""
+    only = site.strip().lower() or None
+    if only:
+        try:
+            platforms.get(only)
+        except platforms.UnknownPlatform:
+            raise HTTPException(404) from None
+    why = vpn_check.start(only, forget=bool(forget))
+    return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("VPN test started"))
+
+
+@app.post("/settings/vpn/test/stop")
+async def settings_vpn_test_stop(request: Request):
+    """Stop after the exit each site is trying."""
+    vpn_check.stop()
+    if _hx(request):
+        return _vpn_test_panel(request)
+    return _vpn_back(t("The VPN test stops after the exit each site is trying"))
 
 
 def _timeline_section() -> dict[str, Any]:

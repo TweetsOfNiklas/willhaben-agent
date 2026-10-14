@@ -24,7 +24,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from app.config import get_settings
 from app.i18n import t
-from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
+from app.platforms.base import InvalidSearchUrl, NotTheExit, Platform, PlatformError
 from app.platforms.httpclient import FetchResponse, HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
 from app.platforms.text import clean_text, euro, one_line, parse_iso, to_float
@@ -236,8 +236,8 @@ class KleinanzeigenClient(HttpPlatformClient):
 
     def _check_status(self, r: FetchResponse) -> None:
         if r.status_code in (401, 403):          # the app credentials were rotated, not a block of this IP
-            raise PlatformError(t("Kleinanzeigen refused the app credentials (HTTP {status}); enter current ones in "
-                                  "Settings → Platforms", status=r.status_code))
+            raise NotTheExit(t("Kleinanzeigen refused the app credentials (HTTP {status}); enter current ones in "
+                               "Settings → Platforms", status=r.status_code))
         super()._check_status(r)
 
     async def search_ads(self, params: dict[str, Any], *, cache_s: float = 0) -> SearchPage:

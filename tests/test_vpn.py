@@ -301,6 +301,97 @@ def test_health_is_off_without_switches():
     assert vpn.health()[0] == "off"
 
 
+# ------------------------------------------------------------------ for the VPN test (app/services/vpn_check.py)
+N1, N2, N3 = "at-vie-wg-001", "at-vie-wg-002", "at-vie-wg-003"
+
+
+async def test_listeners_hear_every_exit(fake):
+    _collection(N1, N2, N3)
+    fake.unreachable, fake.broken = {N1}, {N2}
+    _on("willhaben")
+    tn = vpn.tunnel_for("willhaben")
+    heard = []
+
+    def broken_hook(*_):
+        raise RuntimeError("a display hook")
+
+    with tn.listen(lambda *a: heard.append(a)), tn.listen(broken_hook):     # a failing listener breaks nothing
+        r = await tn.ensure()
+        assert heard == [(N1, "trying", ""), (N1, "unreachable", "no connection to www.willhaben.at"),
+                         (N2, "trying", ""), (N2, "broken", "wireproxy stopped: bad config"),
+                         (N3, "trying", ""), (N3, "using", "")]
+        assert await tn.failed(r, "botcheck", detail="x") is True
+        assert heard[-1] == (N3, "botcheck", "x") and vpn.marks("willhaben")[N3][1] == "botcheck"
+        assert await tn.failed(r, "botcheck", detail="x") is False          # the same, now old route
+    assert tn._listeners == [] and len(heard) == 7
+
+
+async def test_ensure_probes_as_many_as_asked(fake):
+    _collection(N1, N2)
+    fake.unreachable = {N1}
+    _on("willhaben")
+    tn = vpn.tunnel_for("willhaben")
+    with pytest.raises(PlatformError, match="1 tried"):
+        await tn.ensure(probes=1)
+    assert len(fake.probes) == 1 and not tn.failing
+    r = await tn.ensure(probes=1)
+    assert r.name == tn.config == N2 and tn.current() == r
+    vpn._procs[N2].handle.returncode = 1                       # wireproxy died
+    assert tn.current() is None
+
+
+async def test_a_cancelled_probe_leaves_no_process(monkeypatch):
+    class Hanging(FakeRunner):
+        async def probe(self, port, host):
+            await asyncio.Event().wait()
+
+    r = Hanging()
+    monkeypatch.setattr(vpn, "runner", r)
+    _collection(N1)
+    _on("willhaben")
+    task = asyncio.create_task(vpn.tunnel_for("willhaben").ensure())
+    while not vpn._procs:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert vpn._procs == {} and len(r.stopped) == 1
+
+
+async def test_a_cancelled_start_leaves_no_wireproxy(monkeypatch, tmp_path):
+    proc = FakeProc()
+
+    async def spawn(*_a, **_kw):
+        return proc
+
+    async def never(*_a, **_kw):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(vpn.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(vpn.asyncio, "open_connection", never)
+    monkeypatch.setattr(vpn.Runner, "binary", lambda self: "/usr/bin/true")
+    conf = tmp_path / "x.conf"
+    conf.write_text(_conf())
+    task = asyncio.create_task(vpn.Runner().start(conf, 1))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert proc.returncode == 0                               # terminated, not left without owner
+
+
+def test_botcheck_mark_forget_one_site_and_unmark():
+    assert vpn.MARK_TTL_S["botcheck"] == 3600 and vpn.reason_label("botcheck") == "answered with a bot check"
+    vpn.mark("willhaben", N1, "botcheck")
+    vpn.mark("willhaben", N2, "blocked")
+    vpn.mark("kleinanzeigen", N1, "blocked")
+    vpn.unmark("willhaben", N1)
+    vpn.unmark("willhaben", "nope")
+    assert set(vpn.marks("willhaben")) == {N2}
+    vpn.forget("willhaben")
+    assert vpn.marks("willhaben") == {} and set(vpn.marks("kleinanzeigen")) == {N1}
+
+
 # ------------------------------------------------------------------ photos
 async def test_photos_of_a_site_on_the_vpn_never_go_direct(fake, tmp_path):
     from app.services import ad_images

@@ -1,0 +1,75 @@
+{# Settings → VPN → Test the sites (app/services/vpn_check.py): each site with the VPN on searches through its exit; when
+   the site does not answer properly the next exit is tried until one works, which stays in use.
+   vt = vpn_test(): {live, stopping, blocked, run, n, summary, finished_at, elapsed, max_exits, site_min, rows: [{pid,
+   name, status (idle|waiting|testing|done), verdict, label, tone, message, hint, tried, requests, elapsed, attempts:
+   [{exit, label, tone, detail, requests, secs}], action (test|more|forget|None), action_label}]}.
+   While a test runs the panel asks for itself every 2 s (same id and hx attributes: polling ends with the test) and has
+   no <details> (a swap would close them) and no per-site buttons. A test that ends while the page is open, also one
+   started in another tab, refreshes this panel and #vpn-sites (data-refresh-on-lane="vpn", base.html).
+   vpn_note: why a test did not start. #}
+{% import "_ui.html" as ui %}
+{% macro requests(n) %}{{ _("1 request") if n == 1 else _("{n} requests", n=n) }}{% endmacro %}
+{# one exit tried: name, verdict, then detail and cost as one text that wraps as a whole on phones #}
+{% macro attempt(a) -%}
+{%- set more = ([a.detail] if a.detail else []) + ([requests(a.requests)] if a.requests is not none else [])
+               + ([_("{n} s", n=a.secs)] if a.requests is not none and a.secs is not none else []) %}
+<li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5"><span class="break-all font-medium tabular-nums">{{ a.exit }}</span>{{ ui.pill(a.label, a.tone, false) }}
+  {%- if more %}<span class="min-w-0 break-words tabular-nums">{{ more|join(" · ") }}</span>{% endif %}</li>
+{%- endmacro %}
+{% set vt = vpn_test() %}
+<section id="vpn-test" data-refresh-on-lane="vpn" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4"
+  {%- if vt.live %} hx-get="/settings/vpn/test" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="flex min-w-0 flex-1 basis-[260px] flex-col gap-0.5">
+      <span class="font-medium">{{ _("Test the sites") }}</span>
+      <small class="text-[12.5px] text-muted" aria-live="polite">
+        {%- if vt.stopping %}{{ _("Stopping after the exit each site is trying …") }}
+        {%- elif vt.live %}{{ _("Testing {n} sites side by side · {s} s", n=vt.n, s=vt.elapsed) }}
+        {%- elif vt.run %}{{ vt.summary }} · {{ vt.finished_at|ago }}
+        {%- else %}{{ _("Each site with the VPN on searches once through its exit. If the site does not answer properly, the next exit is tried until one works; the site then keeps using it.") }}{% endif %}</small>
+    </div>
+    {% if vt.live %}
+    <form method="post" action="/settings/vpn/test/stop" hx-post="/settings/vpn/test/stop" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
+      <button class="btn btn-sm max-sm:w-full"{% if vt.stopping %} disabled{% endif %}>{{ ui.icon('pause', 14) }}{{ _("Stop") }}</button></form>
+    {% else %}
+    <form method="post" action="/settings/vpn/test" hx-post="/settings/vpn/test" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
+      <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.blocked %} disabled{% endif %}>{{ ui.icon('play', 14) }}{{ _("Test again") if vt.run else _("Test the sites") }}</button></form>
+    {% endif %}
+  </div>
+  {% if not vt.live %}<small class="text-[12.5px] {{ 'text-warning' if vt.blocked else 'text-muted' }}">{{ vt.blocked or _("About 10 s per site when its exit works; every further exit adds 5 to 30 s (eBay and Vinted are the slowest). Per site at most {n} exits, {m} minutes and a quarter of its hourly requests; every try is a real search. Search agents keep running meanwhile.", n=vt.max_exits, m=vt.site_min) }}</small>{% endif %}
+  {% if vpn_note %}<div role="status" class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ vpn_note }}</div>{% endif %}
+  {% if vt.rows %}
+  <ul class="m-0 flex list-none flex-col p-0">
+    {% for r in vt.rows %}
+    <li class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 py-2.5">
+      <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span class="font-medium">{{ r.name }}</span>
+        {% if r.status == 'testing' %}<span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>
+        {% elif r.label %}{{ ui.pill(r.label, r.tone) }}{% endif %}
+        {% if r.status == 'idle' %}<span class="text-[12.5px] text-muted">{{ r.message }}</span>
+        {%- if r.action and not vt.live %}
+        <form method="post" action="/settings/vpn/test" hx-post="/settings/vpn/test" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 ml-auto">
+          <input type="hidden" name="site" value="{{ r.pid }}"><button class="btn btn-sm">{{ r.action_label }}</button></form>{% endif %}
+        {% else %}<small class="ml-auto shrink-0 text-[12px] text-muted tabular-nums">{{ _("{n} tried", n=r.tried) }} · {{ requests(r.requests) }} · {{ _("{n} s", n=r.elapsed) }}</small>{% endif %}
+      </div>
+      {% if r.message and r.status != 'idle' %}<span class="break-words text-[12.5px] {{ 'text-error' if r.tone == 'bad' else 'text-muted' }}">{{ r.message }}</span>{% endif %}
+      {% if r.hint %}<span class="break-words text-[12.5px] text-muted">{{ r.hint }}</span>{% endif %}
+      {% if r.attempts and vt.live %}
+      <ul class="m-0 flex list-none flex-col gap-0.5 p-0 text-[12.5px] text-muted">
+        {% for a in r.attempts[-3:]|reverse %}{{ attempt(a) }}{% endfor %}
+        {% if r.attempts|length > 3 %}<li>{{ _("… and {n} before", n=r.attempts|length - 3) }}</li>{% endif %}
+      </ul>
+      {% elif r.attempts %}
+      <details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("Exits tried ({n})", n=r.attempts|length) }}</summary>
+        <ol class="mt-1 flex flex-col gap-0.5 pl-4">{% for a in r.attempts %}{{ attempt(a) }}{% endfor %}</ol></details>
+      {% endif %}
+      {% if r.action and not vt.live and r.status != 'idle' %}
+      <form method="post" action="/settings/vpn/test" hx-post="/settings/vpn/test" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0">
+        <input type="hidden" name="site" value="{{ r.pid }}">{% if r.action == 'forget' %}<input type="hidden" name="forget" value="1">{% endif %}
+        <button class="btn btn-sm max-sm:w-full">{{ r.action_label }}</button></form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

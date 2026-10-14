@@ -541,6 +541,7 @@ class EbayPlatform(Platform):
     capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
     access = "http"
     min_interval_s = 300                      # every search is a whole result page (about 1.5 MB)
+    vpn_test_requests = 1 + WARMUP_RETRIES    # a new visitor per exit: its warm-up 403s are asked again there
 
     @property
     def limiter(self) -> RateLimiter:

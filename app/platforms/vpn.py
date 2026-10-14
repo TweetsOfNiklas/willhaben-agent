@@ -17,6 +17,9 @@ process: two tunnels with one key on the same server would knock each other off 
 Fail closed: with the switch on and no working exit, `Tunnel.ensure()` raises PlatformError and nothing falls back to
 the home IP. Exits a site refused or could not reach are marked for that site (setting `vpn_state`) and skipped until
 the mark expires (MARK_TTL_S).
+
+Settings → VPN → "Test the sites" (app/services/vpn_check.py) walks each site through its exits on demand, one probe
+at a time (`ensure(probes=1)`); `Tunnel.listen()` lets it show every exit the site tries.
 """
 from __future__ import annotations
 
@@ -33,10 +36,10 @@ import socket
 import tempfile
 import time
 import zipfile
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Callable, Iterator, NamedTuple
 
 from app.config import get_settings
 from app.i18n import t
@@ -45,7 +48,8 @@ from app.platforms.base import PlatformError
 log = logging.getLogger(__name__)
 
 MODES = ("profile", "collection")
-MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "unreachable": 3600, "broken": 24 * 3600}
+MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "unreachable": 3600, "broken": 24 * 3600,
+              "botcheck": 3600}      # botcheck: a page in place of the one asked for (only the VPN test marks it)
 MAX_PROBES = 4                 # exits one ensure() call tries before it gives up for this request
 EXHAUSTED_S = 600              # after a pass without a working exit, requests fail at once for this long
 PROBE_TIMEOUT_S = 15           # WireGuard repeats a lost handshake after 5 s
@@ -58,6 +62,7 @@ NEAR = ("at", "de", "ch", "cz", "sk", "hu", "si", "it", "pl", "nl", "be", "lu", 
 STATE_KEY = "vpn_state"
 _KEY = re.compile(r"^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$")       # a WireGuard key, base64 of 32 bytes
 _ENDPOINT = re.compile(r"^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):\d{1,5}$")
+Listener = Callable[[str, str, str], None]   # (exit, event, detail): see Tunnel.listen()
 
 
 # ------------------------------------------------------------------ the uploaded source
@@ -276,21 +281,32 @@ def _set_current(pid: str, name: str | None) -> None:
     _save(state)
 
 
-def forget() -> None:
-    """Clear every mark ("Forget blocks"); the next request starts from the top of the list again."""
+def forget(pid: str | None = None) -> None:
+    """Clear the marks of every site ("Forget blocks"), or of `pid` only; those sites start from the top again."""
     state = _load()
-    for site in state.values():
-        if isinstance(site, dict):
+    for key, site in state.items():
+        if isinstance(site, dict) and pid in (None, key):
             site["marks"] = {}
     _save(state)
-    for tn in _tunnels.values():
-        tn.reset_failure()
+    for key, tn in _tunnels.items():
+        if pid in (None, key):
+            tn.reset_failure()
+
+
+def unmark(pid: str, name: str) -> None:
+    """Drop one exit's mark for this site (the VPN test asks a dedicated profile again)."""
+    state = _load()
+    site = state.get(pid)
+    if isinstance(site, dict) and name in (site.get("marks") or {}):
+        del site["marks"][name]
+        _save(state)
 
 
 # ------------------------------------------------------------------ wireproxy processes
 class Route(NamedTuple):
     proxy: str           # http://127.0.0.1:<port>
     gen: int             # which switch of the tunnel it belongs to; an older one changes nothing in failed()
+    name: str = ""       # the exit (config) behind it
 
 
 @dataclass
@@ -335,20 +351,23 @@ class Runner:
             proc = await asyncio.create_subprocess_exec(binary, "-s", "-c", str(cfg), stdin=asyncio.subprocess.DEVNULL,
                                                         stdout=asyncio.subprocess.DEVNULL, stderr=err,
                                                         preexec_fn=_die_with_parent)
-        end = time.monotonic() + START_TIMEOUT_S
-        while time.monotonic() < end:
-            if proc.returncode is not None:
-                tail = err_log.read_text("utf-8", "replace").strip().splitlines()[-1:] if err_log.exists() else []
-                raise OSError(t("wireproxy stopped: {error}", error=(tail[0] if tail else proc.returncode)))
-            try:
-                _r, w = await asyncio.open_connection("127.0.0.1", port)
-            except OSError:
-                await asyncio.sleep(0.1)
-                continue
-            w.close()
-            return proc
-        await self.stop(proc)
-        raise OSError(t("wireproxy did not open its port"))
+        try:
+            end = time.monotonic() + START_TIMEOUT_S
+            while time.monotonic() < end:
+                if proc.returncode is not None:
+                    tail = err_log.read_text("utf-8", "replace").strip().splitlines()[-1:] if err_log.exists() else []
+                    raise OSError(t("wireproxy stopped: {error}", error=(tail[0] if tail else proc.returncode)))
+                try:
+                    _r, w = await asyncio.open_connection("127.0.0.1", port)
+                except OSError:
+                    await asyncio.sleep(0.1)
+                    continue
+                w.close()
+                return proc
+            raise OSError(t("wireproxy did not open its port"))
+        except BaseException:          # did not start, or cancelled meanwhile (VPN test, shutdown): no orphan
+            await self.stop(proc)
+            raise
 
     async def probe(self, port: int, host: str) -> bool:
         """CONNECT host:443 through the proxy: wireproxy dials through the tunnel and answers 200 only when the site
@@ -448,6 +467,7 @@ class Tunnel:
         self.since: float | None = None
         self._exhausted_until = 0.0
         self._lock_: tuple[Any, asyncio.Lock] | None = None
+        self._listeners: list[Listener] = []
 
     def _lock(self) -> asyncio.Lock:
         self._lock_ = _loop_lock(self._lock_)
@@ -456,6 +476,27 @@ class Tunnel:
     def _alive(self) -> bool:
         p = _procs.get(self.config) if self.config else None
         return p is not None and p.alive and self.pid in p.users
+
+    def current(self) -> Route | None:
+        """The route requests go through right now; None without one or when its process died (a read, no lock)."""
+        return self.route if self.route is not None and self._alive() else None
+
+    @contextmanager
+    def listen(self, fn: Listener) -> Iterator[None]:
+        """While the block runs, `fn(exit, event, detail)` hears of every exit this site tries, whoever asked (the VPN
+        test lists them): trying | using | unreachable | broken | blocked | rate | botcheck."""
+        self._listeners.append(fn)
+        try:
+            yield
+        finally:
+            self._listeners.remove(fn)
+
+    def _tell(self, name: str, event: str, detail: str = "") -> None:
+        for fn in list(self._listeners):
+            try:
+                fn(name, event, detail)
+            except Exception as e:  # noqa: BLE001 - a display hook must never break a request
+                log.debug("VPN %s listener: %s", self.pid, e)
 
     def reset_failure(self) -> None:
         self._exhausted_until, self.failing, self.error = 0.0, False, None
@@ -478,9 +519,12 @@ class Tunnel:
         self.error, self.failing, self.route, self.config = message, hard, None, None
         return PlatformError(message)
 
-    async def ensure(self) -> Route:
+    async def ensure(self, *, probes: int = MAX_PROBES) -> Route:
         """The route to send through, starting or switching the exit when needed. PlatformError when there is no
-        working exit right now (fail closed: the caller must not send without it)."""
+        working exit right now (fail closed: the caller must not send without it).
+
+        `probes`: exits this call starts and probes at most (the VPN test passes 1, so Stop and the site's own requests
+        wait for one probe at most). Cancelled meanwhile, it leaves no process behind for an exit it did not take."""
         async with self._lock():
             if self.route is not None and self._alive():
                 return self.route
@@ -497,27 +541,36 @@ class Tunnel:
             if runner.binary() is None:
                 raise self._fail(t("The VPN is on for {name}, but wireproxy is not installed", name=self.label))
             cands = self.candidates(mode, names)
-            for name in cands[:MAX_PROBES]:
+            for name in cands[:probes]:
+                self._tell(name, "trying")
                 try:
                     proc = await _join(name, self.pid)
                 except OSError as e:
                     log.warning("VPN %s: %s does not start: %s", self.pid, name, e)
                     mark(self.pid, name, "broken")
+                    self._tell(name, "broken", str(e))
                     continue
-                if await runner.probe(proc.port, self.host):
+                try:
+                    reached = await runner.probe(proc.port, self.host)
+                except asyncio.CancelledError:   # VPN test stopped, shutdown, job timeout: not this site's exit
+                    await _leave(name, self.pid)
+                    raise
+                if reached:
                     self.gen += 1
-                    self.route = Route(f"http://127.0.0.1:{proc.port}", self.gen)
+                    self.route = Route(f"http://127.0.0.1:{proc.port}", self.gen, name)
                     self.config, self.since = name, time.time()
                     self.reset_failure()
                     _set_current(self.pid, name)
                     log.info("VPN %s: exit %s", self.pid, name)
+                    self._tell(name, "using")
                     return self.route
                 log.warning("VPN %s: %s does not reach %s", self.pid, name, self.host)
                 mark(self.pid, name, "unreachable")
+                self._tell(name, "unreachable", t("no connection to {host}", host=self.host))
                 await _leave(name, self.pid)
-            if len(cands) > MAX_PROBES:          # more to try: the next request goes on with them
+            if len(cands) > probes:              # more to try: the next request goes on with them
                 raise self._fail(t("No working VPN exit for {name} yet ({n} tried, the next request tries more)",
-                                   name=self.label, n=MAX_PROBES), hard=False)
+                                   name=self.label, n=probes), hard=False)
             self._exhausted_until = time.monotonic() + EXHAUSTED_S
             _set_current(self.pid, None)
             if mode == "profile":
@@ -527,24 +580,28 @@ class Tunnel:
             raise self._fail(t("No working VPN exit for {name}: all {n} configs are blocked or unreachable",
                                name=self.label, n=len(names)))
 
-    async def failed(self, route: Route | None, reason: str) -> None:
-        """The site refused this exit (`blocked`, `rate`) or it did not answer (`unreachable`): mark it for this site
-        and leave it; the next ensure() takes the next one. A route from before the last switch changes nothing."""
+    async def failed(self, route: Route | None, reason: str, detail: str = "") -> bool:
+        """The site refused this exit (`blocked`, `rate`, the VPN test's `botcheck`) or it did not answer
+        (`unreachable`): mark it for this site and leave it; the next ensure() takes the next one. A route from before
+        the last switch changes nothing. `detail` ("HTTP 403", the network error) goes to the log and the listeners.
+        True when the exit was marked and left; False for a route from before the last switch, or a dead process."""
         if route is None:
-            return
+            return False
         async with self._lock():
             if self.route is None or route.gen != self.gen:
-                return
+                return False
             name, p = self.config, _procs.get(self.config or "")
             self.route = None
             if reason == "unreachable" and p is not None and not p.alive:
-                return                           # the process died, not the exit: ensure() starts it again
+                return False                     # the process died, not the exit: ensure() starts it again
             mark(self.pid, name or "", reason)
             self.config = None
             self.error = t("{name}: exit {exit} {reason}, switching", name=self.label, exit=name,
                            reason=reason_label(reason))
-            log.warning("VPN %s: exit %s %s, switching", self.pid, name, reason)
+            log.warning("VPN %s: exit %s %s (%s), switching", self.pid, name, reason, detail or "-")
+            self._tell(name or "", reason, detail)
             await _leave(name, self.pid)
+            return True
 
     async def stop(self) -> None:
         async with self._lock():
@@ -555,7 +612,8 @@ class Tunnel:
 
 def reason_label(reason: str) -> str:
     return {"blocked": t("blocked by the site"), "rate": t("rate-limited by the site"),
-            "unreachable": t("not reachable"), "broken": t("does not start")}.get(reason, reason)
+            "unreachable": t("not reachable"), "broken": t("does not start"),
+            "botcheck": t("answered with a bot check")}.get(reason, reason)
 
 
 def tunnel_for(pid: str) -> Tunnel | None:

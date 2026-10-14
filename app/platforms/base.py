@@ -31,6 +31,11 @@ class Blocked(PlatformError):
     sent = False
 
 
+class NotTheExit(PlatformError):
+    """The site answered and says the problem is not the IP (e.g. Kleinanzeigen's rotated app credentials): every exit
+    would get the same, so the VPN test stops instead of moving on."""
+
+
 class InvalidSearchUrl(ValueError):
     """Not a result-list link of a supported site."""
 
@@ -67,6 +72,7 @@ class Platform(ABC):
     capabilities: frozenset[str] = frozenset()
     access: str = "http"                 # http | browser (how the site is reached; its settings page shows it)
     min_interval_s: int = 0              # a floor for agent intervals (0 = the global minimum)
+    vpn_test_requests: int = 1           # requests one VPN test search may send through an exit (eBay: its warm-up)
 
     def can(self, cap: str) -> bool:
         return cap in self.capabilities

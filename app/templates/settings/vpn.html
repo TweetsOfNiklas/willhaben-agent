@@ -1,6 +1,7 @@
 {# Settings → Platforms → VPN: WireGuard exits for the anonymous requests of every site (app/platforms/vpn.py).
    `vpn` from vpn.status(): {mode, count, profile, countries, binary, sites: [{id, name, on, exit, error, failing,
-   marks}], any_on}. Private keys never reach this page. #}
+   marks}], any_on}. Private keys never reach this page. The test panel (settings/_vpn_test.html) follows the sites;
+   #vpn-sites is refreshed when a test ends. #}
 {% import "_ui.html" as ui %}
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
@@ -14,7 +15,7 @@
   <small class="text-[12.5px] text-muted">{{ _("Only the anonymous requests use the VPN: search agents, hit screening, the price check, the ad viewer and the product search, with their photos. The logged-in willhaben browser never does. When no exit works, these requests pause; they never fall back to your own connection.") }}</small>
 </section>
 
-<section class="flex flex-col rounded-box border border-base-300 bg-base-100 px-5 py-2">
+<section id="vpn-sites" data-refresh-on-lane="vpn" class="flex flex-col rounded-box border border-base-300 bg-base-100 px-5 py-2">
   {% for s in vpn.sites %}
   <div class="flex flex-col gap-1.5 py-3 {{ 'border-t border-base-300' if not loop.first else '' }}">
     <form method="post" action="/settings/vpn/site/{{ s.id }}" class="m-0">
@@ -31,6 +32,7 @@
   </div>
   {% endfor %}
 </section>
+{% if vpn.mode or vpn_test().run %}{% include "settings/_vpn_test.html" %}{% endif %}
 
 <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
   <form method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">

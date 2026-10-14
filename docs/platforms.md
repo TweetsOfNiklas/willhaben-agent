@@ -53,6 +53,12 @@ request fails and is never sent directly. Two things to set for a new site:
 - `api_host` on the adapter: the host its requests go to. A new exit is checked with a `CONNECT` to it.
 - `_exit_blocked(r)` on the client, when 403 or 429 means something else there. kleinanzeigen counts only Akamai's
   HTML 403 and 429 as a refused exit; its JSON 401/403 still reports rotated credentials.
+- The VPN test (Settings → VPN, `app/services/vpn_check.py`) runs `search(keyword_search("fahrrad"), rows=1)` through
+  one exit at a time. `search()` must raise `PlatformError` for a 200 that is not the result list: a JSON answer the
+  parser rejects counts as the site's error, any other page as a bot check. Raise `NotTheExit` when an answer says the
+  IP is not the problem (rotated credentials).
+- Set `vpn_test_requests` on the adapter when one search may send more than one request through an exit (eBay: its
+  warm-up).
 
 A transport you build yourself must take the route's `proxy` (see `transport_factory`) and must not read proxy
 settings from the environment.

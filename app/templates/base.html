@@ -454,7 +454,7 @@ document.addEventListener('alpine:init', () => {
       if (this.seen === null) this.seen = new Set(this.recent.map(j => j.id));     // known at load: no refresh
       const fresh = this.recent.filter(j => !this.seen.has(j.id));                 // finished since: even a quick one
       fresh.forEach(j => this.seen.add(j.id));
-      const here = location.pathname + location.search;
+      const here = pageUrl();     // a flash message (?msg=) does not make it another page
       if (this.live) fresh.filter(j => !j.quiet && !(j.link && j.link.split('#')[0] === here)).forEach(j =>
         this.notice({key: 'j' + j.id, title: j.label, text: j.result || this.T[j.status] || '', href: j.link,
                      bad: j.status === 'failed' || !!j.problems}));
@@ -553,6 +553,9 @@ document.addEventListener('alpine:init', () => {
 
 });
 
+// This page's URL without the flash message (?msg=): the page a job links to, and the one refreshInPlace fetches.
+function pageUrl() { const q = new URLSearchParams(location.search); q.delete('msg'); return location.pathname + (q.toString() ? '?' + q : ''); }
+
 // Replace elements by their fresh copy (same id) from the page fetched in the background (one request per URL);
 // gone there = removed here. An element you are typing in or have edited waits until you leave it.
 function refreshInPlace(els) {
@@ -569,7 +572,6 @@ function refreshInPlace(els) {
       f.type === 'checkbox' || f.type === 'radio' ? f.checked !== f.defaultChecked
         : f.tagName === 'SELECT' ? [...f.options].some(o => o.selected !== o.defaultSelected) : f.value !== f.defaultValue);
   };
-  const pageUrl = () => { const q = new URLSearchParams(location.search); q.delete('msg'); return location.pathname + (q.toString() ? '?' + q : ''); };
   const byUrl = new Map();
   els.forEach(el => {
     if (!el.id) return;
