@@ -726,7 +726,7 @@ def _trigger_text(sh: Shuffle, names: dict[str, str]) -> str:
         return t("New configs")
     site = names.get(sh.by) or ("Geizhals" if sh.by == vpn.GEIZHALS else sh.by)
     if sh.why == "none":
-        return t("{site} found no server", site=site)
+        return t("no server yet ({site} needed one)", site=site)
     return t("{site}: {server} {reason}", site=site, server=sh.before or "?", reason=vpn.reason_label(sh.why)) \
         + (f" ({vpn.describe(sh.detail)})" if sh.detail else "")
 

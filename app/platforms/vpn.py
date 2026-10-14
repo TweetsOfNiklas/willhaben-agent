@@ -379,6 +379,11 @@ class Route(NamedTuple):
     name: str = ""       # the server (config) behind it
 
 
+class VpnWait(PlatformError):
+    """The VPN holds this site's requests for now: a shuffle is under way, or the site refused the current server and
+    pauses until the next one. Nothing is wrong with the request itself (a search agent does not count it as failed)."""
+
+
 class Unreachable(Exception):
     """The server started, but the site's host cannot be reached through it."""
 
@@ -619,7 +624,7 @@ class Tunnel:
         error = ""
         for first in (True, False):
             if not await conn.wait_idle(SHUFFLE_WAIT_S):
-                raise PlatformError(t("The VPN is changing its server; {name} waits for it", name=self.label))
+                raise VpnWait(t("The VPN is changing its server; {name} waits for it", name=self.label))
             self._check()
             if (route := conn.current()) is not None:
                 return route
@@ -649,9 +654,9 @@ class Tunnel:
         if runner.binary() is None:
             raise PlatformError(t("The VPN is on for {name}, but wireproxy is not installed", name=self.label))
         if (p := paused(self.pid)) is not None:
-            raise PlatformError(t("{name} refused the VPN server {server} ({reason}); its requests pause until the "
-                                  "server changes", name=self.label, server=conn_state().get("server") or "?",
-                                  reason=reason_label(p[0])))
+            raise VpnWait(t("{name} refused the VPN server {server} ({reason}); its requests pause until the server "
+                            "changes", name=self.label, server=conn_state().get("server") or "?",
+                            reason=reason_label(p[0])))
 
     async def failed(self, route: Route | None, reason: str, detail: str = "") -> bool:
         """The site refused the server (`blocked`, `rate`, `botcheck`) or it did not answer (`unreachable`): mark

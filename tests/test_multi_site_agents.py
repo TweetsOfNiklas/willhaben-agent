@@ -83,6 +83,26 @@ async def test_a_site_that_is_gone_is_skipped_not_fatal(sites):
     assert "Unknown platform" in (await run_agent(agent.id)).error             # nothing left to search
 
 
+
+async def test_a_search_the_vpn_holds_is_no_error(sites):
+    """A shuffle under way or a site paused on the current VPN server holds its searches: the other site's run as
+    usual, the agent shows no error, and a run the VPN held completely leaves the last result as it was."""
+    from app.platforms.vpn import VpnWait
+
+    a, b = sites
+    agent = create_agent_on_sites([a.keyword_search("rad"), b.keyword_search("rad")])
+    a.pages = [[listing("1", "Rad A", 100.0)]]
+    b.pages = [VpnWait("The VPN is changing its server; Other waits for it")]
+    res = await run_agent(agent.id)
+    with session() as db:
+        row = db.get(SearchAgent, agent.id)
+    assert res.error is None and row.last_error is None and set(_hits(agent.id)) == {("fake", "1")}
+    a.pages = [VpnWait("Fake refused the VPN server at-vie-wg-001 (blocked by the site)")]
+    res = await run_agent(agent.id)
+    with session() as db:
+        again = db.get(SearchAgent, agent.id)
+    assert res.error is None and again.last_error is None and again.last_run_at == row.last_run_at
+
 def test_create_form_with_several_sites(client):
     r = client.post("/agents", data={"keyword": "rennrad", "price_to": "500", "sites": ["fake", "other"],
                                      "interval_min": "10"}, follow_redirects=False)

@@ -147,7 +147,6 @@
  "The shuffle failed: {error}": "Der Wechsel ist fehlgeschlagen: {error}",
  "Started by you": "Von dir gestartet",
  "New configs": "Neue Konfigurationen",
- "{site} found no server": "{site} fand keinen Server",
  "{site}: {server} {reason}": "{site}: {server} {reason}",
  "Brought forward: {site} found no server.": "Vorgezogen: {site} fand keinen Server.",
  "Brought forward: {site} refused the server ({reason}).": "Vorgezogen: {site} hat den Server abgewiesen ({reason}).",
@@ -161,5 +160,7 @@
  "connection dropped": "Verbindung abgebrochen",
  "TLS error": "TLS-Fehler",
  "{server} stays untested: no site could be asked this time": "{server} bleibt ungetestet: Diesmal konnte keine Seite gefragt werden",
- "not tested": "nicht getestet"
+ "not tested": "nicht getestet",
+ "no server yet ({site} needed one)": "noch kein Server ({site} brauchte einen)",
+ "Reason: {what}": "Anlass: {what}"
 }

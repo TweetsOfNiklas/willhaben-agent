@@ -63,7 +63,7 @@
     {%- if vt.live %} hx-get="/settings/vpn/test" hx-trigger="every 2s" hx-select="#vpn-test-body" hx-swap="outerHTML" hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML"{% endif %}>
     <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
       {{ ui.eyebrow(_("This test") if vt.live and vt.profile else _("This shuffle") if vt.live else _("Last test") if vt.profile else _("Last shuffle")) }}
-      <small class="text-[12px] text-muted">{{ vt.trigger }}{% if not vt.live and vt.finished_at %} · <span class="whitespace-nowrap">{{ vt.finished_at|ago }}</span>{% endif %}</small>
+      <small class="text-[12px] text-muted">{{ _("Reason: {what}", what=vt.trigger) }}{% if not vt.live and vt.finished_at %} · <span class="whitespace-nowrap">{{ vt.finished_at|ago }}</span>{% endif %}</small>
     </div>
     {% if vt.summary %}<span class="break-words text-[13px] font-medium {{ {'bad': 'text-error', 'warn': 'text-warning'}.get(vt.tone, '') }}">{{ vt.summary }}</span>{% endif %}
     {# sites with nothing to say as chips in one line, the others with their message below #}
@@ -72,7 +72,7 @@
     {% if quiet %}
     <ul class="m-0 flex list-none flex-wrap gap-x-4 gap-y-1.5 p-0">
       {% for r in quiet %}<li class="inline-flex items-center gap-1.5"><span class="font-medium">{{ r.name }}</span>
-        {%- if r.spinner %}<span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-label="{{ _('asking') }}"></span>
+        {%- if r.spinner %}<span class="inline-flex items-center gap-1 text-[12px] text-muted"><span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>{{ _("asking") }}</span>
         {%- elif r.label %}{{ ui.pill(r.label, r.tone, r.tone != '') }}{% endif %}</li>
       {% endfor %}
     </ul>
@@ -83,7 +83,7 @@
       <li class="flex min-w-0 flex-col gap-1 border-t border-base-300 py-2 {{ '' if quiet else 'first:border-t-0' }}">
         <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           <span class="font-medium">{{ r.name }}</span>
-          {% if r.spinner %}<span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>
+          {% if r.spinner %}<span class="inline-flex items-center gap-1 text-[12px] text-muted"><span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>{{ _("asking") }}</span>
           {% elif r.label %}{{ ui.pill(r.label, r.tone) }}{% endif %}
         </div>
         {% if r.message %}<span class="break-words text-[12.5px] {{ 'text-error' if r.tone == 'bad' else 'text-muted' }}">{{ r.message }}</span>{% endif %}

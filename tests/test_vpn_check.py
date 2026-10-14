@@ -713,6 +713,7 @@ async def test_the_live_panel_polls_its_body_and_keeps_its_header(sites, fake):
     assert html.index('aria-live="polite"') < body and html.count('hx-trigger="every 2s"') == 1
     assert 'hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML"' in html
     assert "<details" not in html and " disabled>" in html                # no "Shuffle now" while one runs
+    assert ">asking</span>" in html and "Reason: Started by you" in html  # a spinner says what it does; the cause
     g.set()
     await vpn_check._run.task
     html = templates.get_template("settings/_vpn_test.html").render(vpn_note=None)
@@ -721,6 +722,7 @@ async def test_the_live_panel_polls_its_body_and_keeps_its_header(sites, fake):
 
 async def test_the_panel_in_german(sites, fake):
     from app.i18n import set_request_lang
+    from app.main import templates
 
     _collection(N(1), N(2))
     sites({N(1): [NO], N(2): [PAGE]}, {N(1): [PAGE], N(2): [PAGE]})
@@ -729,6 +731,8 @@ async def test_the_panel_in_german(sites, fake):
     try:
         v = vpn_check.view()
         assert v["summary"] == f"{N(2)}: alle 2 Seiten antworten" and v["trigger"] == "Von dir gestartet"
+        html = templates.get_template("settings/_vpn_test.html").render(vpn_note=None)
+        assert "Anlass: Von dir gestartet" in html                               # the cause, not a result
         assert v["servers"][0]["parts"] == ["Fake: von der Seite gesperrt (HTTP\u00a0403)"]
         assert v["servers"][0]["label"] == "1 von 2 antworten"
     finally:

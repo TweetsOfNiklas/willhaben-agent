@@ -24,6 +24,7 @@ from app.i18n import t
 from app.services import product_search, scam, screening
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ad_ref
+from app.platforms import vpn
 from app.services.notify import notify
 
 log = logging.getLogger(__name__)
@@ -421,17 +422,23 @@ def create_agent_from_search(search_id: int, name: str | None = None, interval_s
 
 
 async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> tuple[
-        list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, list[dict[str, Any] | None]]:
+        list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, list[dict[str, Any] | None],
+        list[str]]:
     """Run an agent's searches one after another (uncached), each on its platform. Returns (ads with their query,
     de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; the queries of
-    the searches that succeeded). A block stops the remaining searches of this run."""
+    the searches that succeeded; the searches the VPN held: a shuffle under way or a site paused on the current
+    server, no error of the search). A block stops the remaining searches of this run."""
     ads: list[tuple[Listing, dict[str, Any] | None]] = []
     seen: set[tuple[str, str]] = set()
-    rows, errors, first_exc, ok = 0, [], None, []
+    rows, errors, first_exc, ok, held = 0, [], None, [], []
     n = len(specs)
     for i, (spec, q) in enumerate(specs, 1):
         try:
             page = await platforms.get(spec.platform).search(spec)
+        except vpn.VpnWait as e:
+            log.info("agent search %s/%s (%s) waits for the VPN: %s", i, n, spec.keyword, e)
+            held.append(str(e))
+            continue
         except PlatformError as e:
             log.warning("agent search %s/%s (%s) failed: %s", i, n, spec.keyword, e)
             errors.append(t("search {i}/{n} failed: {error}", i=i, n=n, error=e) if n > 1 else str(e))
@@ -449,7 +456,7 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
                 continue
             seen.add((spec.platform, ad.ad_id))
             ads.append((ad, q))
-    return ads, rows, errors, first_exc, ok
+    return ads, rows, errors, first_exc, ok, held
 
 
 def _apply(hit: Hit, ad: Listing) -> None:
@@ -541,7 +548,10 @@ async def _run_agent(agent_id: int) -> RunResult:
         return _fail("; ".join(skipped))
     # quiet searches last: an ad an older search finds too counts as that one's (first occurrence wins) and pushes
     usable.sort(key=lambda x: _quiet(x[1]))
-    found, rows_found, errors, first_exc, ok = await _search_all(usable)
+    found, rows_found, errors, first_exc, ok, held = await _search_all(usable)
+    if not ok and not errors:                # the VPN held every search: no error, the next check runs as planned
+        log.info("agent %s: every search waits for the VPN (%s)", agent_id, held[0])
+        return res
     if not ok:
         return _fail(str(first_exc))         # every search failed (one search: its error)
     partial_error = "; ".join(skipped + errors) or None
