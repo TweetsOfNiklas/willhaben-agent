@@ -145,7 +145,7 @@ CASES = {
         "keyword": "rennrad",
         "install": _installer("vinted", "VintedClient", VINTED_ROUTES)[0],
         "uninstall": _installer("vinted", "VintedClient", VINTED_ROUTES)[1],
-        "expect_ads": 4,
+        "expect_ads": 2,                  # of 4: the iPhone 16 case and the cable lack "15"
         "detail_id": "10341874098",
     },
     "preisjaeger": {

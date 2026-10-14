@@ -9,8 +9,10 @@ site has a higher minimum agent interval. DataDome guards the site: requests go 
 Chrome (app/platforms/httpclient.py), a 403 is a block.
 
 A search link keeps every filter of the website (category path, brand, size, condition, …) and drops page and
-session values; the agents always ask for the newest items first. Listings come without date and place; opening
-an ad reads "uploaded 6 min. ago" from its page.
+session values; the agents always ask for the newest items first. Vinted's search is loose: with the newest first,
+most of a page names none of the search words (shoes and make-up for "Raspberry pi 5", 10-14), so a result is kept
+only when its title and brand/size line hold every word. Listings come without date and place; opening an ad reads
+"uploaded 6 min. ago" from its page.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ from app.platforms import condition
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
-from app.platforms.text import clean_text, euro, one_line, to_float
+from app.platforms.text import clean_text, euro, mentions, one_line, to_float
 from app.platforms.types import AdDetail, Listing, SearchPage, SearchSpec
 
 log = logging.getLogger(__name__)
@@ -315,6 +317,8 @@ class VintedPlatform(Platform):
 
         host = spec.extra.get("host") or HOST
         page = await self.client.catalog(self._url(spec, spec.sort), host, cache_s=cache_s)
+        if spec.keyword:     # Vinted also finds ads that name none of the words (make-up for "Unifi"): left out
+            page.ads = [ad for ad in page.ads if mentions(f"{ad.heading} {ad.body or ''}", spec.keyword)]
         page.ads = page.ads[:rows or get_settings().search_rows]
         page.title = spec.keyword
         return page

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 
@@ -51,6 +52,19 @@ def one_line(s: str | None) -> str | None:
         return None
     s = re.sub(r"\s+", " ", str(s)).strip()
     return s or None
+
+
+def fold(s: str | None) -> str:
+    """Case-folded without accents: "Écho Show" -> "echo show"."""
+    s = unicodedata.normalize("NFKD", s or "")
+    return "".join(c for c in s if not unicodedata.combining(c)).casefold()
+
+
+def mentions(text: str | None, words: str | None) -> bool:
+    """Every word of `words` (a search term) is in `text`, whatever the case, accents, spaces and punctuation:
+    "Pi5 8GB" mentions "pi 5", "Écho show-8" mentions "Echo Show 8". True without words."""
+    hay = "".join(re.findall(r"[^\W_]+", fold(text)))
+    return all(w in hay for w in re.findall(r"[^\W_]+", fold(words)))
 
 
 def euro(amount: float) -> str:

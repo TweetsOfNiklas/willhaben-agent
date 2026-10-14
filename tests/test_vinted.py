@@ -9,6 +9,7 @@ from app.db import Hit, session, set_setting
 from app.platforms import Blocked, InvalidSearchUrl, PlatformError
 from app.platforms import vinted as vi
 from app.platforms.ratelimit import RateLimiter
+from app.platforms.text import mentions
 from app.services.search_agents import create_agent, run_agent
 from tests.conftest import FIXTURES
 from tests.test_kleinanzeigen import Queue
@@ -103,6 +104,18 @@ async def test_request_asks_for_the_flight_data_newest_first(platform, client):
     assert d.heading and client._transport.calls[-1][0] == f"https://www.vinted.de/items/{ITEM}"
 
 
+async def test_results_without_every_search_word_are_left_out(platform, client):
+    page = await platform.search(platform.keyword_search("iphone 15 pro"))
+    assert [a.heading for a in page.ads] == ["Cover iPhone 15 pro Dsquared2", "Rhode coque iPhone 15/16 pro Max"]
+    assert page.rows_found == 960                                       # Vinted's own count stays
+    assert len((await platform.search(platform.keyword_search("Cimar"))).ads) == 1      # the brand line counts
+
+
+def test_mentions_ignores_case_accents_spaces_and_punctuation():
+    assert mentions("Pi5 8GB", "pi 5") and mentions("Écho show-8 (2. Gen)", "Echo Show 8") and mentions("x", "")
+    assert not mentions("Fond de teint Luna by Lisa", "Unifi") and not mentions(None, "Unifi")
+
+
 async def test_block_and_missing_items():
     c = vi.VintedClient(transport=Queue([(403, b""), (500, b""), (404, b"")]))
     c.limiter = RateLimiter(0, name="Vinted")
@@ -121,4 +134,4 @@ async def test_agent_end_to_end(platform, client):
     assert res.baseline and res.error is None and res.rows_found == 960
     with session() as db:
         hits = list(db.exec(select(Hit).where(Hit.agent_id == a.id)))
-    assert len(hits) == 4 and {h.platform for h in hits} == {"vinted"}
+    assert len(hits) == 2 and {h.platform for h in hits} == {"vinted"}      # the iPhone 16 case and the cable: out
