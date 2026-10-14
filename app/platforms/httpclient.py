@@ -9,11 +9,12 @@ The wire is behind `Transport`: `HttpxTransport` (willhaben) or `CurlTransport` 
 the TLS fingerprint; curl_cffi impersonates a browser). Tests hand in a fake transport or an httpx MockTransport.
 Adapters never import the logged-in willhaben session (tests/test_anonymous_public.py).
 
-With the site's VPN switch on (app/platforms/vpn.py) every request goes through the shared connection's local proxy;
-a refused or unreachable server is reported (the site pauses, a shuffle starts) and the request asks again once there
-is a route for it (up to VPN_ATTEMPTS); with none it fails instead of going out directly. An injected transport means
-no VPN (tests, unless they pass `tunnel`). The test after a shuffle (app/services/vpn_check.py) sends its searches
-under a `Trial`: through the server under test only, never another, never directly.
+With the site's VPN switch on (app/platforms/vpn.py) every request goes through the local proxy of the site's
+server; a refused or unreachable server is reported (the site pauses, a search starts in the background) and the
+request asks again once there is a route for it (up to VPN_ATTEMPTS); with none it fails instead of going out directly.
+An injected transport means no VPN (tests, unless they pass `tunnel`). The VPN search (app/services/vpn_check.py) sends
+its test searches under a `Trial`: through the server under test only, never another, never directly, and as a
+visitor of its own (its own transport and cookies), so the live requests of the same client keep theirs.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import asyncio
 import json
 import logging
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Protocol
@@ -42,6 +43,7 @@ NOT_FOUND_CACHE_S = 30
 ANON_SESSION_S = 6 * 3600   # fresh anonymous visitor every 6 h
 TIMEOUT_S = 30
 VPN_ATTEMPTS = 3            # exits one request may use before it gives up (each one through the limiter)
+TRIAL_TIMEOUT_S = 10        # a test request of the VPN search: a server that does not answer by then is out
 
 
 @dataclass
@@ -80,27 +82,64 @@ def is_challenge(r: FetchResponse) -> bool:
 
 
 class ExitMoved(PlatformError):
-    """The connection changed (a shuffle, wireproxy stopped) while the request waited for the limiter; nothing was
-    sent."""
+    """The site's server changed (a switch-over, wireproxy stopped) while the request waited for the limiter;
+    nothing was sent."""
+
+
+@dataclass(eq=False)
+class _Visitor:
+    """One anonymous visitor of a site: its transport (connections, cookies), the route it was built for and when its
+    cookies started. The live requests share the client's; each Trial has its own (a test never resets the live
+    visitor, nor eBay's warm-up of it)."""
+    transport: Transport | None = None
+    proxy: str | None = None
+    gen: int = 0                  # the VPN process start the transport belongs to (Route.gen)
+    since: float = field(default_factory=time.monotonic)
+    extra: dict[str, Any] = field(default_factory=dict)    # a site's own state per visitor (eBay: its warm-up)
 
 
 @dataclass
 class Trial:
-    """One site's try in the test after a shuffle (app/services/vpn_check.py): requests of the task that set it go
-    out through `route` alone, never through another server and never directly; what they met is noted here (the
-    shuffle marks a refused server, not the client)."""
+    """One site's try in the VPN search (app/services/vpn_check.py): requests of the task that set it go out through
+    `route` alone, never through another server and never directly, as a visitor of their own; what they met is
+    noted here (the search marks a refused server, not the client). close() when done."""
     route: Route
     limit: int = 1                # requests it may send (eBay's warm-up: 3); one more refuses the server
-    sent: int = 0                 # requests that went out through it
+    sent: int = 0                 # requests that went out through it and came back (or failed)
+    wire: int = 0                 # requests put on the wire (one under way: wire > sent)
     status: int | None = None     # the last answer's status
     ctype: str = ""               # the last answer's content type: a JSON 200 the parser rejects is the site's error
     challenge: bool = False       # the last answer was Cloudflare's challenge
     refused: str | None = None    # blocked | rate | unreachable
     detail: str = ""              # "HTTP 403", the network error
+    visitors: dict[int, tuple[Any, _Visitor]] = field(default_factory=dict, repr=False)   # per client
+
+    def visitor(self, client: Any) -> _Visitor:
+        return self.visitors.setdefault(id(client), (client, _Visitor()))[1]
+
+    def close(self) -> None:
+        """Close the test's transports in the background (a live request never used them)."""
+        for client, v in self.visitors.values():
+            if v.transport is not None and v.transport is not client._live.transport:
+                _close_later(v.transport)
+            v.transport = None
+        self.visitors.clear()
 
 
 _trial: ContextVar[Trial | None] = ContextVar("vpn_trial", default=None)
-_closing: set[asyncio.Task] = set()     # transports dropped by a cancelled test request, closing in the background
+_closing: set[asyncio.Task] = set()     # transports of tests and of dropped visitors, closing in the background
+
+
+def _close_later(transport: Transport) -> None:
+    async def close() -> None:
+        try:
+            await transport.aclose()
+        except Exception as e:  # noqa: BLE001 - closing a transport nobody uses any more
+            log.debug("closing a transport: %s", e)
+
+    task = asyncio.get_running_loop().create_task(close())
+    _closing.add(task)
+    task.add_done_callback(_closing.discard)
 
 
 @contextmanager
@@ -221,10 +260,44 @@ class HttpPlatformClient:
             tunnel = lambda: vpn.tunnel_for(platform_id)                                    # noqa: E731
         self._factory = transport_factory
         self._tunnel: Callable[[], Tunnel | None] = tunnel or (lambda: None)
-        self._proxy: str | None = None
-        self._gen = 0                       # the VPN connection the transport belongs to (Route.gen)
-        self._transport: Transport | None = transport_factory(None) if injected else None   # else built on first use
-        self._jar_since = time.monotonic()
+        self._live = _Visitor(transport_factory(None) if injected else None)   # else built on first use
+
+    def _visitor(self) -> _Visitor:
+        """The visitor this request belongs to: the Trial's own under the VPN search, else the live one."""
+        tr = _trial.get()
+        return tr.visitor(self) if tr is not None else self._live
+
+    @property
+    def _transport(self) -> Transport | None:
+        return self._visitor().transport
+
+    @_transport.setter
+    def _transport(self, value: Transport | None) -> None:
+        self._visitor().transport = value
+
+    @property
+    def _proxy(self) -> str | None:
+        return self._visitor().proxy
+
+    @_proxy.setter
+    def _proxy(self, value: str | None) -> None:
+        self._visitor().proxy = value
+
+    @property
+    def _gen(self) -> int:
+        return self._visitor().gen
+
+    @_gen.setter
+    def _gen(self, value: int) -> None:
+        self._visitor().gen = value
+
+    @property
+    def _jar_since(self) -> float:
+        return self._visitor().since
+
+    @_jar_since.setter
+    def _jar_since(self, value: float) -> None:
+        self._visitor().since = value
 
     @property
     def _client(self) -> httpx.AsyncClient | None:
@@ -247,8 +320,8 @@ class HttpPlatformClient:
         self._jar_since = time.monotonic()
 
     async def aclose(self) -> None:
-        if self._transport is not None:
-            await self._transport.aclose()
+        if self._live.transport is not None:
+            await self._live.transport.aclose()
 
     def _check_status(self, r: FetchResponse) -> None:
         """403/429 = the site throttles or blocks this IP: new visitor, back-off, Blocked. A site may treat some
@@ -267,7 +340,7 @@ class HttpPlatformClient:
         return True
 
     def _exit_blocked(self, r: FetchResponse) -> bool:
-        """Through the VPN: does this answer refuse the server (then the connection shuffles)? 403 = the site blocks
+        """Through the VPN: does this answer refuse the server (then a search finds another)? 403 = the site blocks
         the server's IP (willhaben: Cloudflare), 429 = others on the shared server used up its rate. A site overrides
         this when one of these codes means something else there."""
         return r.status_code in (403, 429)
@@ -275,15 +348,16 @@ class HttpPlatformClient:
     async def _use(self, proxy: str | None) -> Transport:
         """The transport for this route; a new route gets a new one (new connections, new visitor). Called with the
         limiter held, so no request of this client is in flight on the old one."""
-        if self._transport is None or proxy != self._proxy:
-            old, self._transport, self._proxy = self._transport, self._factory(proxy), proxy
-            self._jar_since = time.monotonic()
-            if old is not None and old is not self._transport:
+        v = self._visitor()
+        if v.transport is None or proxy != v.proxy:
+            old, v.transport, v.proxy = v.transport, self._factory(proxy), proxy
+            v.since = time.monotonic()
+            if old is not None and old is not v.transport:
                 try:
                     await old.aclose()
                 except Exception as e:  # noqa: BLE001 - closing the transport of a dead route
                     log.debug("closing transport of %s: %s", self.platform, e)
-        return self._transport
+        return v.transport
 
     async def _get(self, url: str, *, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None,
                    cache_s: float = 0, kind: str | None = None,
@@ -347,10 +421,10 @@ class HttpPlatformClient:
             transport = await self._use(route.proxy if route is not None else None)
             if time.monotonic() - self._jar_since > self.session_s:
                 self.new_anonymous_session()
-            with access_log.track(self.channel, kind, platform=self.platform) as tr:
+            with access_log.track(self.channel, kind, platform=self.platform) as tr, self._hold(route):
                 started = time.monotonic()
                 try:
-                    r = await transport.send("GET", full, headers=headers)
+                    r = await self._send(transport, full, headers)
                 except TransportError as e:
                     recorder.record_http(self.channel, kind, "GET", full, req_headers=headers, outcome="error", error=str(e),
                                          duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
@@ -365,11 +439,30 @@ class HttpPlatformClient:
                              duration_ms=int((time.monotonic() - started) * 1000), platform=self.platform)
         return r
 
+    async def _send(self, transport: Transport, full: str, headers: dict[str, str] | None) -> FetchResponse:
+        """The request on the wire; under a Trial at most TRIAL_TIMEOUT_S (the search moves on instead of waiting for
+        a server that does not answer)."""
+        if (tr := _trial.get()) is None:
+            return await transport.send("GET", full, headers=headers)
+        tr.wire += 1
+        try:
+            return await asyncio.wait_for(transport.send("GET", full, headers=headers), TRIAL_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            self._drop_transport()                # cut off mid-request: no other request reuses it
+            raise TransportError(f"timed out after {TRIAL_TIMEOUT_S} s") from None
+
     def _pinned(self, route: Route) -> bool:
-        """`route` is still the connection's (checked once the limiter let the request through: a shuffle may have
-        started meanwhile, or wireproxy stopped)."""
+        """`route` may still be used (checked once the limiter let the request through): a live request's route is
+        still its site's (no switch-over meanwhile, wireproxy did not stop); a Trial's route still runs."""
         tunnel = self._tunnel()
-        return tunnel is not None and tunnel.current() == route
+        if tunnel is None:
+            return False
+        return tunnel.alive(route) if _trial.get() is not None else tunnel.current() == route
+
+    def _hold(self, route: Route | None) -> Any:
+        """A request in flight on `route`: a switch-over lets it finish before that server stops."""
+        tunnel = self._tunnel() if route is not None else None
+        return tunnel.hold(route) if tunnel is not None else nullcontext()
 
     def _drop_transport(self) -> None:
         """Forget the transport at once (a cancelled request may have left it half-used); it closes in the background
@@ -377,18 +470,16 @@ class HttpPlatformClient:
         old, self._transport, self._proxy = self._transport, None, None
         self.new_anonymous_session()          # eBay: a new warm-up too
         if old is not None:
-            task = asyncio.get_running_loop().create_task(old.aclose())
-            _closing.add(task)
-            task.add_done_callback(_closing.discard)
+            _close_later(old)
 
     async def _send_vpn(self, tunnel: Tunnel, full: str, kind: str, headers: dict[str, str] | None,
                         valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
-        """Through the VPN's shared connection: a refused server (403/429, a bot check: Cloudflare's challenge or a
-        200 `valid` rejects) or one that does not answer is reported (Tunnel.failed(): the site pauses, a shuffle
-        starts) and the request asks again once ensure() has a route for it, at most VPN_ATTEMPTS times. No
-        limiter.penalize() for a refused server: willhaben's limiter is shared with the logged-in session on the home
-        IP, which the refusal says nothing about. No route: PlatformError, never a direct request. Under a Trial (the
-        test after a shuffle) one try through its server only (_send_trial)."""
+        """Through the site's VPN server: a refused server (403/429, a bot check: Cloudflare's challenge or a 200
+        `valid` rejects) or one that does not answer is reported (Tunnel.failed(): the site pauses, a search starts)
+        and the request asks again once ensure() has a route for it, at most VPN_ATTEMPTS times; a paused site's
+        ensure() raises VpnWait. No limiter.penalize() for a refused server: willhaben's limiter is shared with the
+        logged-in session on the home IP, which the refusal says nothing about. No route: PlatformError, never a
+        direct request. Under a Trial (the VPN search) one try through its server only (_send_trial)."""
         if (tr := _trial.get()) is not None:
             return await self._send_trial(tunnel, tr, full, kind, headers)
         last: PlatformError | None = None
@@ -396,7 +487,7 @@ class HttpPlatformClient:
             route = await tunnel.ensure()                 # PlatformError when there is no route (fail closed)
             try:
                 r = await self._send_once(full, kind, headers, route)
-            except ExitMoved as e:                        # a shuffle began while it waited: ensure() waits for it
+            except ExitMoved as e:                        # switched over while it waited: the new route
                 last = e
                 continue
             except TransportError as e:
@@ -408,7 +499,7 @@ class HttpPlatformClient:
             if self._exit_blocked(r):
                 reason = "rate" if r.status_code == 429 else "blocked"
             elif (is_challenge(r) or (r.status_code == 200 and valid is not None and not valid(r))) \
-                    and not tunnel.odd():       # the last shuffle found the site changed, not the servers
+                    and not tunnel.odd():       # a search found the site changed, not the servers
                 reason = "botcheck"
             else:
                 return r
@@ -423,11 +514,11 @@ class HttpPlatformClient:
 
     async def _send_trial(self, tunnel: Tunnel, tr: Trial, full: str, kind: str,
                           headers: dict[str, str] | None) -> FetchResponse:
-        """The test's request: through tr.route once. ExitMoved when the connection left that route (nothing sent);
-        a refused or unreachable server ends the try, noted in `tr` (the shuffle marks it). A try that already sent
-        tr.limit requests without an answer the site accepted (eBay: warm-up 403s, however often its client starts a
-        new visitor) refuses the server instead of asking again."""
-        if tunnel.current() != tr.route:
+        """The test's request: through tr.route once. ExitMoved when that server stopped (nothing sent); a refused or
+        unreachable server ends the try, noted in `tr` (the search marks it). A try that already sent tr.limit
+        requests without an answer the site accepted (eBay: warm-up 403s, however often its client starts a new
+        visitor) refuses the server instead of asking again."""
+        if not tunnel.alive(tr.route):
             raise ExitMoved(t("{name}: the VPN server changed before the request went out", name=self.name))
         if tr.sent >= tr.limit:
             tr.refused = "rate" if tr.status == 429 else "blocked"

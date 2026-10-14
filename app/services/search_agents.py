@@ -426,8 +426,8 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
         list[str]]:
     """Run an agent's searches one after another (uncached), each on its platform. Returns (ads with their query,
     de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; the queries of
-    the searches that succeeded; the searches the VPN held: a shuffle under way or a site paused on the current
-    server, no error of the search). A block stops the remaining searches of this run."""
+    the searches that succeeded; the searches the VPN held: a site waiting for the search to find it a server, no
+    error of the search). A block stops the remaining searches of this run."""
     ads: list[tuple[Listing, dict[str, Any] | None]] = []
     seen: set[tuple[str, str]] = set()
     rows, errors, first_exc, ok, held = 0, [], None, [], []

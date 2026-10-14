@@ -434,7 +434,23 @@ class EbayClient(HttpPlatformClient):
     def __init__(self, transport: Transport | None = None) -> None:
         super().__init__("ebay", ebay_limiter(), name="eBay", headers={"Accept-Language": "de-AT,de;q=0.9"},
                          transport=transport, backend="curl")
-        self._warm, self._warmups = False, WARMUP_RETRIES
+
+    # the warm-up belongs to the visitor: a test of the VPN search warms up its own, the live one stays as it is
+    @property
+    def _warm(self) -> bool:
+        return self._visitor().extra.get("warm", False)
+
+    @_warm.setter
+    def _warm(self, value: bool) -> None:
+        self._visitor().extra["warm"] = value
+
+    @property
+    def _warmups(self) -> int:
+        return self._visitor().extra.get("warmups", WARMUP_RETRIES)
+
+    @_warmups.setter
+    def _warmups(self, value: int) -> None:
+        self._visitor().extra["warmups"] = value
 
     def classify(self, url: str) -> str:
         return classify(url)

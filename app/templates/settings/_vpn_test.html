@@ -1,18 +1,20 @@
-{# Settings → VPN → the connection (app/services/vpn_check.py): the one server every site with the VPN on shares, when
-   it shuffles next, and the last shuffle with the test of every site through the server it kept.
-   vt = vpn_test(): {live, blocked, profile, server, since, connected, error, interval, next_at, next_due, pending, run,
-   progress, elapsed, summary, tone, trigger, finished_at, rows: [{pid, name, label, tone, message, spinner, action:
-   {label, href} or None}], servers: [{name, label, tone, kept, parts, secs}]}.
-   While a shuffle runs, #vpn-test-body asks for itself every 2 s and brings the progress and the clock along
-   (hx-select-oob, innerHTML): the header and its live region stay in place. The first poll after the end swaps the
-   whole panel (HX-Retarget, main.py). Live, the servers are a plain list (a swap would close a <details>). A shuffle
-   that ends while the page is open refreshes this panel and #vpn-sites (data-refresh-on-lane="vpn", base.html).
-   vpn_note: why no shuffle started. #}
+{# Settings → VPN → the connection (app/services/vpn_check.py): the server(s) the sites with the VPN on use now (one, or
+   two that share them), the sites waiting for one, when the next regular search starts, and the search: its progress
+   while it runs in the background, then its result per site and per server.
+   vt = vpn_test(): {live, blocked, profile, connections: [{name, since, connected, sites}], two, waiting: [{name,
+   note, tone}], connected, error, interval, next_at, next_due, pending, run, progress, now, best, wait, clock,
+   summary, tone, trigger, finished_at, rows: [{pid, name, label, tone, message, spinner, action: {label, href} or
+   None}], servers: [{name, label, tone, live, kept, parts, secs}], more}.
+   While a search runs, #vpn-test-body asks for itself every 3 s and brings the progress, the clock and the live
+   connections along (hx-select-oob, innerHTML): the header, its live region and the interval form stay in place. The
+   first poll after the end swaps the whole panel (HX-Retarget, main.py). Live, the servers are a plain list of the
+   newest (a swap would close a <details>). A search that ends while the page is open refreshes this panel and
+   #vpn-sites (data-refresh-on-lane="vpn", base.html). vpn_note: why no search started. #}
 {% import "_ui.html" as ui %}
-{# one server tried: name, outcome, then the refusals as text that wraps like a sentence, never inside "15 s" #}
+{# one server asked: name, outcome, then the refusals as text that wraps like a sentence, never inside "15 s" #}
 {% macro server(s) -%}
 <li class="leading-6"><span class="break-all font-medium tabular-nums">{{ s.name }}</span> {{ ui.pill(s.label, s.tone, false) }}
-  {%- if s.kept %} {{ ui.pill(_("in use"), 'brand', false) }}{% endif %}
+  {%- if s.kept %} {{ ui.pill(_("in use"), 'brand', false) }}{% elif s.live %} {{ ui.pill(_("was in use"), '', false) }}{% endif %}
   {%- if s.parts or s.secs %} <span class="break-words">{{ s.parts|join(' · ') }}{% if s.secs %}{% if s.parts %} · {% endif %}<span class="whitespace-nowrap tabular-nums">{{ s.secs }}</span>{% endif %}</span>{% endif %}</li>
 {%- endmacro %}
 {% set vt = vpn_test() %}
@@ -21,29 +23,50 @@
     <div class="flex min-w-0 flex-1 basis-[260px] flex-col gap-0.5">
       <div class="flex flex-wrap items-center gap-2">
         <span class="font-medium">{{ _("Connection") }}</span>
-        {% if vt.live %}{{ ui.pill(_("Testing") if vt.profile else _("Changing server"), 'brand') }}
-        {% elif vt.connected %}{{ ui.pill(_("Connected"), 'ok') }}
-        {% elif vt.server %}{{ ui.pill(_("Ready"), '') }}
+        {% if vt.connected %}{{ ui.pill(_("2 servers") if vt.two else _("Connected"), 'ok') }}
+        {% elif vt.connections %}{{ ui.pill(_("Ready"), '') }}
         {% elif vt.error %}{{ ui.pill(_("No server"), 'bad') }}{% endif %}
+        {% if vt.live %}{{ ui.pill(_("Testing") if vt.profile else _("Searching"), 'brand') }}{% endif %}
       </div>
       <small class="text-[12.5px] text-muted">
-        {%- if vt.live %}<span id="vpn-test-progress" aria-live="polite">{{ vt.progress }}</span> · <span id="vpn-test-clock" class="tabular-nums">{{ _("{n} s", n=vt.elapsed) }}</span>
+        {%- if vt.live %}<span id="vpn-test-progress" aria-live="polite">{{ vt.progress }}</span> · <span id="vpn-test-clock" class="tabular-nums">{{ vt.clock }}</span>
         {%- elif vt.profile %}{{ _("All sites with the VPN on use the profile. It is tested every few hours and at once when a site refuses it: every site sends one search through it.") }}
-        {%- else %}{{ _("All sites with the VPN on share one EU server. It changes every few hours, and at once when a site refuses it; then every site sends one search through the new one, until one suits all.") }}{% endif %}</small>
+        {%- else %}{{ _("The sites with the VPN on share one EU server, or two when no single one answers them all. A search in the background tests other servers on tunnels of its own while the sites keep working, and switches over once it found better ones.") }}{% endif %}</small>
     </div>
-    <form method="post" action="/settings/vpn/shuffle" hx-post="/settings/vpn/shuffle" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
-      <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.live or vt.blocked %} disabled{% endif %}>{{ ui.icon('play' if vt.profile else 'refresh', 14) }}{{ _("Test now") if vt.profile else _("Shuffle now") }}</button></form>
+    {% if vt.live %}
+    <form method="post" action="/settings/vpn/stop" hx-post="/settings/vpn/stop" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
+      <button class="btn btn-sm max-sm:w-full">{{ ui.icon('x', 14) }}{{ _("Stop") }}</button></form>
+    {% else %}
+    <form method="post" action="/settings/vpn/search" hx-post="/settings/vpn/search" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
+      <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.blocked %} disabled{% endif %}>{{ ui.icon('play' if vt.profile else 'search', 14) }}{{ _("Test now") if vt.profile else _("Search now") }}</button></form>
+    {% endif %}
   </div>
   {% if vt.blocked %}<small class="text-[12.5px] text-warning">{{ vt.blocked }}</small>{% endif %}
   {% if vpn_note and vpn_note != vt.blocked %}<div role="status" class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ vpn_note }}</div>{% endif %}
 
+  <div id="vpn-live" class="flex flex-col gap-2 text-[13px]">
+    {% if vt.connections %}
+    <ul class="m-0 flex list-none flex-col gap-1.5 p-0">
+      {% for c in vt.connections %}
+      <li class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span class="text-muted">{{ _("Profile") if vt.profile else (_("Server {n}", n=loop.index) if vt.two else _("Server")) }}</span>
+        <span class="break-all font-medium tabular-nums">{{ c.name }}</span>
+        {% if vt.two and c.sites %}<span class="min-w-0 break-words">{{ _("for {sites}", sites=c.sites) }}</span>{% endif %}
+        {% if c.since %}<span class="whitespace-nowrap text-muted">· {{ _("since {time}", time=c.since|local) }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% elif vt.error %}<span class="text-error">{{ vt.error }}</span>
+    {% else %}<span class="text-muted">{{ _("No server yet: the first search finds one.") }}</span>{% endif %}
+    {% if vt.waiting %}
+    <ul class="m-0 flex list-none flex-col gap-1 p-0">
+      {% for w in vt.waiting %}<li class="min-w-0 break-words text-[12.5px] {{ 'text-error' if w.tone == 'bad' else 'text-warning' }}"><span class="font-medium">{{ w.name }}</span> · {{ w.note }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
   <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2 text-[13px] max-sm:grid-cols-1 max-sm:gap-y-0">
-    <dt class="text-muted">{{ _("Profile") if vt.profile else _("Server") }}</dt>
-    <dd class="m-0 min-w-0 max-sm:mb-2">
-      {%- if vt.server %}<span class="break-all font-medium tabular-nums">{{ vt.server }}</span>{% if vt.since %} <span class="whitespace-nowrap text-muted">· {{ _("since {time}", time=vt.since|local) }}</span>{% endif %}
-      {%- elif vt.error %}<span class="text-error">{{ vt.error }}</span>
-      {%- else %}<span class="text-muted">{{ _("none yet: the first shuffle picks one") }}</span>{% endif %}</dd>
-    <dt class="text-muted">{{ _("Next test") if vt.profile else _("Next shuffle") }}</dt>
+    <dt class="text-muted">{{ _("Next test") if vt.profile else _("Next search") }}</dt>
     <dd class="m-0 min-w-0 max-sm:mb-2">
       {%- if vt.live %}<span class="text-muted">{{ _("after this one") }}</span>
       {%- elif vt.blocked %}<span class="text-muted">–</span>
@@ -53,24 +76,31 @@
     <dt class="text-muted">{{ _("Every") }}</dt>
     <dd class="m-0">
       <form method="post" action="/settings/vpn/interval" class="m-0 flex flex-wrap items-center gap-2">
-        <label class="input input-sm w-[7.5rem] bg-base-100"><input type="number" name="hours" min="1" max="168" step="1" value="{{ vt.interval }}" required aria-label="{{ _('Hours between two shuffles') }}" class="tabular-nums"><span class="text-muted">{{ _("hours") }}</span></label>
+        <label class="input input-sm w-[7.5rem] bg-base-100"><input type="number" name="hours" min="1" max="168" step="1" value="{{ vt.interval }}" required aria-label="{{ _('Hours between two regular searches') }}" class="tabular-nums"><span class="text-muted">{{ _("hours") }}</span></label>
         <button class="btn btn-sm">{{ _("Save") }}</button>
       </form></dd>
   </dl>
 
   {% if vt.run %}
   <div id="vpn-test-body" class="flex flex-col gap-2 border-t border-base-300 pt-3"
-    {%- if vt.live %} hx-get="/settings/vpn/test" hx-trigger="every 2s" hx-select="#vpn-test-body" hx-swap="outerHTML" hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML"{% endif %}>
+    {%- if vt.live %} hx-get="/settings/vpn/test" hx-trigger="every 3s" hx-select="#vpn-test-body" hx-swap="outerHTML" hx-select-oob="#vpn-test-progress:innerHTML,#vpn-test-clock:innerHTML,#vpn-live:innerHTML"{% endif %}>
     <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-      {{ ui.eyebrow(_("This test") if vt.live and vt.profile else _("This shuffle") if vt.live else _("Last test") if vt.profile else _("Last shuffle")) }}
+      {{ ui.eyebrow(_("This test") if vt.live and vt.profile else _("This search") if vt.live else _("Last test") if vt.profile else _("Last search")) }}
       <small class="text-[12px] text-muted">{{ _("Reason: {what}", what=vt.trigger) }}{% if not vt.live and vt.finished_at %} · <span class="whitespace-nowrap">{{ vt.finished_at|ago }}</span>{% endif %}</small>
     </div>
+    {% if vt.live and not vt.profile %}
+    <div class="flex flex-col gap-0.5 text-[13px]">
+      <span class="min-w-0 break-words"><span class="text-muted">{{ _("Best so far:") }}</span> {{ vt.best }}</span>
+      {% if vt.wait %}<span class="min-w-0 break-words text-[12.5px] text-warning">{{ vt.wait }}</span>{% endif %}
+    </div>
+    {% endif %}
     {% if vt.summary %}<span class="break-words text-[13px] font-medium {{ {'bad': 'text-error', 'warn': 'text-warning'}.get(vt.tone, '') }}">{{ vt.summary }}</span>{% endif %}
-    {# sites with nothing to say as chips in one line, the others with their message below #}
-    {% set quiet = vt.rows|rejectattr('message')|list %}
+    {# live: the sites asked on the newest server as chips; the ones with something to say with their message #}
+    {% set quiet = vt.rows|rejectattr('message')|list if vt.live else [] %}
     {% set loud = vt.rows|selectattr('message')|list %}
     {% if quiet %}
     <ul class="m-0 flex list-none flex-wrap gap-x-4 gap-y-1.5 p-0">
+      {% if vt.live and vt.now %}<li class="text-[12px] text-muted">{{ _("On {server}:", server=vt.now) }}</li>{% endif %}
       {% for r in quiet %}<li class="inline-flex items-center gap-1.5"><span class="font-medium">{{ r.name }}</span>
         {%- if r.spinner %}<span class="inline-flex items-center gap-1 text-[12px] text-muted"><span class="loading loading-spinner loading-xs shrink-0 text-primary" aria-hidden="true"></span>{{ _("asking") }}</span>
         {%- elif r.label %}{{ ui.pill(r.label, r.tone, r.tone != '') }}{% endif %}</li>
@@ -94,11 +124,11 @@
     {% endif %}
     {% if vt.servers and vt.live %}
     <div class="flex flex-col gap-1 text-[12.5px] text-muted">
-      <span>{{ _("Servers tried") }}</span>
+      <span>{{ _("Servers asked, the newest {n}", n=vt.servers|length) if vt.more else _("Servers asked") }}</span>
       <ol class="m-0 flex flex-col pl-4">{% for s in vt.servers %}{{ server(s) }}{% endfor %}</ol>
     </div>
     {% elif vt.servers %}
-    <details class="text-[12.5px] text-muted"{% if vt.tone == 'bad' %} open{% endif %}><summary class="cursor-pointer">{{ _("Servers tried ({n})", n=vt.servers|length) }}</summary>
+    <details class="text-[12.5px] text-muted"{% if vt.tone == 'bad' %} open{% endif %}><summary class="cursor-pointer">{{ _("Servers asked ({n})", n=vt.servers|length) }}</summary>
       <ol class="mt-1 flex flex-col pl-4">{% for s in vt.servers %}{{ server(s) }}{% endfor %}</ol></details>
     {% endif %}
   </div>

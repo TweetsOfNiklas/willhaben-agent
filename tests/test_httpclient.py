@@ -1,5 +1,6 @@
 """The shared platform HTTP client: pacing, cache, blocks, network errors, recording per platform, transports."""
 import asyncio
+from contextlib import contextmanager
 
 import httpx
 import pytest
@@ -131,14 +132,14 @@ async def test_public_client_is_a_platform_client():
 
 # ------------------------------------------------------------------ through the VPN (app/platforms/vpn.py)
 class FakeTunnel:
-    """Hands out routes http://exit1, http://exit2, ... (each a server of the shared connection); failed() moves on,
-    as a shuffle would. `dead`: no server works (fail closed)."""
+    """Hands out routes http://exit1, http://exit2, ... (each the site's server); failed() moves on, as a switch-over
+    would. `dead`: no server works (fail closed). `running`: routes of other servers still up (the search's)."""
 
     def __init__(self, dead=False):
         from app.platforms.vpn import Route
 
         self.Route, self.dead, self.n, self.route, self.failures, self.details = Route, dead, 0, None, [], []
-        self.odd_site = False
+        self.odd_site, self.running, self.held = False, set(), []
 
     async def ensure(self):
         if self.dead:
@@ -158,6 +159,17 @@ class FakeTunnel:
 
     def current(self):
         return self.route
+
+    def alive(self, route):
+        return route == self.route or route in self.running
+
+    @contextmanager
+    def hold(self, route):
+        self.held.append(route)
+        try:
+            yield
+        finally:
+            self.held.remove(route)
 
     def odd(self):
         return self.odd_site
@@ -491,3 +503,83 @@ async def test_a_cancelled_trial_request_drops_its_transport():
     assert hanging.closed                         # closed in the background
     assert (await c._get("https://fake.example/api")).status_code == 200      # a live request: a new transport
     assert seen == ["http://exit1", "http://exit1"] and len(fresh.calls) == 1
+
+
+async def test_a_trial_is_a_visitor_of_its_own_and_the_live_one_keeps_its_transport():
+    from app.platforms import ebay
+    from app.platforms.vpn import Route
+    from tests.conftest import FIXTURES
+
+    page = (FIXTURES / "ebay_search.html").read_bytes()
+    exits = {"http://exit1": FakeTransport([(200, page), (200, page)]),
+             "http://exit9": FakeTransport([(403, b""), (200, page)])}
+    built = []
+    tunnel = FakeTunnel()
+    c = ebay.EbayClient(transport=FakeTransport([]))
+    c.limiter = RateLimiter(0, name="eBay")
+    c._factory = lambda proxy: built.append(proxy) or exits[proxy]
+    c._tunnel, c._transport = (lambda: tunnel), None
+    await c.search_page({"_nkw": "iphone"})                  # the live visitor, warm on exit1
+    live = c._transport
+    assert c._warm and c.proxy == "http://exit1"
+    search = Route("http://exit9", 9, "de-ber-wg-001")        # a server the search tests, not the site's
+    tunnel.running.add(search)
+    tr = Trial(search, limit=3)
+    with trial(tr):
+        assert not c._warm                                    # a new visitor: its own warm-up
+        await c.search_page({"_nkw": "fahrrad"})              # its warm-up 403, then the page
+        assert c.proxy == "http://exit9" and c._transport is exits["http://exit9"] and c._warm
+    assert (tr.sent, tr.wire, tr.refused) == (2, 2, None) and tunnel.failures == []
+    assert c._transport is live and c.proxy == "http://exit1" and c._warm      # the live one untouched
+    tr.close()
+    assert tr.visitors == {}
+    await c.search_page({"_nkw": "ipad"})                     # still the live visitor's transport
+    assert built == ["http://exit1", "http://exit9"] and len(exits["http://exit1"].calls) == 2
+
+
+async def test_a_trial_request_gives_up_after_its_timeout(monkeypatch):
+    from app.platforms import httpclient
+
+    monkeypatch.setattr(httpclient, "TRIAL_TIMEOUT_S", 0.05)
+
+    class Silent(FakeTransport):
+        closed = False
+
+        async def send(self, method, url, *, params=None, headers=None):
+            self.calls.append(url)
+            await asyncio.Event().wait()                     # a server that never answers
+
+        async def aclose(self):
+            self.closed = True
+
+    silent = Silent([])
+    tunnel = FakeTunnel()
+    c = HttpPlatformClient("fake", RateLimiter(0, name="Fake"), name="Fake", transport_factory=lambda proxy: silent,
+                           tunnel=lambda: tunnel)
+    tr = Trial(await tunnel.ensure())
+    with trial(tr), pytest.raises(PlatformError, match="timed out after 0.05 s"):
+        await c._get("https://fake.example/api")
+    assert (tr.refused, tr.sent, tr.wire) == ("unreachable", 1, 1) and tunnel.failures == []
+    await asyncio.sleep(0)
+    assert silent.closed                                      # dropped: never reused
+
+
+async def test_a_request_is_held_on_its_route_while_it_is_under_way():
+    gate = asyncio.Event()
+    tunnel = FakeTunnel()
+
+    class Slow(FakeTransport):
+        async def send(self, method, url, *, params=None, headers=None):
+            await gate.wait()
+            return await super().send(method, url, params=params, headers=headers)
+
+    slow = Slow([(200, b"{}")])
+    c = HttpPlatformClient("fake", RateLimiter(0, name="Fake"), name="Fake", transport_factory=lambda proxy: slow,
+                           tunnel=lambda: tunnel)
+    task = asyncio.create_task(c._get("https://fake.example/api"))
+    while not tunnel.held:
+        await asyncio.sleep(0)
+    assert tunnel.held == [tunnel.route]                      # a switch-over lets it finish first
+    gate.set()
+    await task
+    assert tunnel.held == []

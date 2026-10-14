@@ -398,31 +398,49 @@ Each site has its own switch, on its settings page and on the VPN page; Geizhals
 one on the VPN page, off by default. The first upload switches it on for willhaben; the others stay off until you
 switch them on.
 
-**One connection, shuffled:** every site with its switch on sends through the same server. Every 6 hours (Settings →
-VPN, "Every … hours"), on "Shuffle now", after an upload, and at once when a site refuses the server (403/429, a bot
-check) or it does not answer, the app picks another random server and tests it: every site with the VPN on, and
-Geizhals when its switch is on, sends one search through it with its own client and checks. When all answer, the
-server stays. Otherwise the server is skipped for the refusing sites (a day when blocked, an hour for a rate limit,
-no answer or a bot check) and the next random one is tried, up to 10; when none suits all, the one most sites answer
-through stays and the others pause until the next shuffle. A dedicated profile is only tested, never swapped. Every
-test request counts towards the site's hourly budget: per shuffle at most a quarter of it and half of what is left of
-the hour; a site that cannot afford it stays untested and keeps using the server. Automatic shuffles start at least 5
-minutes after the last one and at most 3 an hour; requests wait up to a minute for a shuffle under way. The time of
-the last shuffle is stored, so a restart keeps the schedule.
+**One server for all, or two:** the sites with the switch on (and Geizhals with its switch) share one EU server.
+A search in the background looks for one that every site answers: each site sends one search through a server with
+its own client and checks (eBay up to 3 requests: its warm-up). When no single server answers them all, two share the
+sites, each site on one that answers it (e.g. one for most sites and one for Preisjäger); when not even two cover
+all, the pair that covers the most stays and the rest pause with a note until the next regular search. Searches run
+every 6 hours (Settings → VPN, "Every … hours"; a regular search also changes the server now and then), on "Search
+now", after an upload, when you switch a site on (it is asked through the server in use first), and when a site
+refuses its server (403/429, a bot check) or gets no answer through it.
 
-**Fail closed:** when a site's switch is on and there is no working server, while the server changes, or while the
-site is paused on the current server, its anonymous requests fail with an error and the connection tile on Home
-turns red. They never fall back to your home connection. "Forget blocks" gives every server a new chance and ends
-every pause.
+**In the background:** the search tests servers on tunnels of its own, beside the live ones, while the sites keep
+working; it never starts a server that is in use. A site whose server refused it waits (its agent searches are
+skipped without an error) until the search finds it one; the others go on. Every better result goes live at once
+(a server found for the waiting site becomes the second connection) and the search goes on for a single server.
+"Stop" ends it; what it found stays.
 
-How it works: the server in use runs as one [wireproxy](https://github.com/windtf/wireproxy) process (userspace
+**Fast and frugal:** all EU servers in the collection are searched, Austria first, then the neighbours, random within
+each tier; those a waiting site answered through lately first. A site is asked only while its answer can still
+matter: the sites without a server first, then the one that refused most. A server the pickiest site refuses costs
+one request; one a site refused lately (a day when blocked or dead, an hour for a rate limit or a bot check) is
+skipped without a request when that site's answer is needed. Up to 8 tunnels start at once (no site request; a dead
+server shows within 5 s by its missing WireGuard handshake) and up to 3 servers are asked at once, each site through
+one server at a time; a test request gives up after 10 s, and a slow one (eBay's warm-up) stops as soon as its
+server can no longer help. Every test request counts towards the site's hourly budget: the search sends a site at
+most a quarter of it an hour and never takes it past 90 % with the agents' requests; it waits for the site rather
+than skipping it, and the page says for which one. Automatic searches start at least 5 minutes after the last one and
+at most 3 an hour, and a site starts at most one between two regular searches. A restart resumes a search it cut
+off. A dedicated profile is only tested, never swapped.
+
+**Fail closed:** when a site's switch is on and there is no working server, or while the site waits for one, its
+anonymous requests are not sent: search agents skip them without an error, a page that needs one says why, and the
+connection tile on Home turns red when no search is looking for a server for it. They never fall back to your home
+connection. "Forget blocks" gives every server a new chance and ends every pause.
+
+How it works: each server in use runs as a [wireproxy](https://github.com/windtf/wireproxy) process (userspace
 WireGuard, part of the image: no root, no tun device, no `NET_ADMIN`). It offers an HTTP proxy on `127.0.0.1` that
-only the anonymous clients are given. Host names are resolved inside the tunnel. Before a server is tested, a
-`CONNECT` to a site checks that it gets through, without sending an HTTP request to it. A refused server does not
-trigger willhaben's (or Geizhals') back-off, because those limiters are about your home IP.
+only the anonymous clients are given. Host names are resolved inside the tunnel. Before a server is tested, its
+handshake and a `CONNECT` to a site check that it gets through, without sending an HTTP request to it. A switch-over
+lets requests under way finish before the old server stops. A refused server does not trigger willhaben's (or
+Geizhals') back-off, because those limiters are about your home IP.
 
 Configs live in `DATA_DIR/wireguard` (readable only by the app) and are part of backups. All configs of one Mullvad
-download share one key, which is why only one process runs at a time. Give the app its **own Mullvad device**: if the
+download share one key: the app connects it to several servers at once (the ones in use and the ones under test), but
+never twice to the same server, which would drop both connections. Give the app its **own Mullvad device**: if the
 same key is also connected from another device to the same server, both connections drop.
 
 ## Risks

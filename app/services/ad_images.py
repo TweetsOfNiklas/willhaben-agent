@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -43,18 +44,20 @@ async def download(url: str | None, folder: Path, name: str,
     from app.platforms import PlatformError, vpn
 
     site = _site(url, platform)                           # a CDN image of one of the platforms: counts as its access
-    proxy = None
+    proxy, held = None, nullcontext()
     if site and (tunnel := vpn.tunnel_for(site.id)) is not None:
         try:
-            proxy = (await tunnel.ensure()).proxy
+            vroute = await tunnel.ensure()
         except PlatformError as e:
             log.info("ad image not downloaded, no VPN server: %s", e)
             return None
+        proxy, held = vroute.proxy, tunnel.hold(vroute)   # a switch-over lets the download finish
     started = time.monotonic()
     try:
         route = {"transport": transport} if transport is not None else {"proxy": proxy}   # tests: the mock, no proxy
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True, **route) as c:
-            r = await c.get(url)
+        with held:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True, **route) as c:
+                r = await c.get(url)
         if site:
             access_log.record("anonymous", "other", access_log.outcome_for_status(r.status_code), platform=site.id)
             recorder.record_http("download", "other", "GET", url, status=r.status_code, resp_headers=dict(r.headers),

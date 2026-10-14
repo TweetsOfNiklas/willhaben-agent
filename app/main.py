@@ -102,15 +102,15 @@ async def lifespan(app: FastAPI):
             await task
     scheduler.shutdown()
     try:
-        await vpn_check.shutdown()                # a running VPN test, before its clients and exits close
+        await vpn_check.shutdown()                # a running VPN search, before its clients and tunnels close
     except Exception as e:  # noqa: BLE001 - the cleanup below must run
-        log.warning("VPN test at shutdown: %s", e)
+        log.warning("VPN search at shutdown: %s", e)
     try:
         await get_session().stop()
         await get_public().aclose()
         await platforms.aclose_all()              # the other sites' clients
     finally:
-        await vpn.shutdown()                      # wireproxy processes of the VPN exits
+        await vpn.shutdown()                      # the wireproxy processes of the VPN
         from app.willhaben import recorder
         await recorder.drain()                    # willhaben recordings still being written
         access_log.flush()                        # last unwritten willhaben access counts
@@ -1994,8 +1994,9 @@ templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → t
 
 
 def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
-    """The connection panel alone (htmx); `note`: why no shuffle started. While a shuffle runs its body asks for
-    itself every 2 s; the first time after the end the whole panel replaces the panel (new header and buttons)."""
+    """The connection panel alone (htmx); `note`: why no search started. While a search runs its body asks for
+    itself every few seconds; the first time after the end the whole panel replaces the panel (new header and
+    buttons)."""
     r = templates.TemplateResponse(request, "settings/_vpn_test.html", {"vpn_note": note})
     if request.headers.get("hx-target") == "vpn-test-body" and not vpn_check.running():
         r.headers.update({"HX-Retarget": "#vpn-test", "HX-Reswap": "outerHTML", "HX-Reselect": "#vpn-test"})
@@ -2004,7 +2005,7 @@ def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
 
 @app.post("/settings/vpn/upload")
 async def settings_vpn_upload(file: UploadFile | None = File(None)):
-    """A .zip of WireGuard configs (the app shuffles among them) or one .conf (a dedicated profile); replaces the old
+    """A .zip of WireGuard configs (the search picks among them) or one .conf (a dedicated profile); replaces the old
     source. The first upload switches the VPN on for willhaben (a later removal then pauses it, never goes direct)."""
     if file is None or not file.filename:
         return _vpn_back(t("Choose a file first"))
@@ -2014,15 +2015,15 @@ async def settings_vpn_upload(file: UploadFile | None = File(None)):
     except ValueError as e:
         return _vpn_back(str(e))
     try:
-        await vpn_check.source_changed("uploaded")  # a running shuffle stops before its server does
+        await vpn_check.source_changed("uploaded")  # a running search stops before its servers do
     finally:
         await vpn.source_changed()
     if get_setting("platform_willhaben_vpn") == "":
         vpn.set_enabled("willhaben", True)
     if not vpn_check.blocker():
         vpn_check.start("new")                     # a server right away (else the first request asks for one)
-    msg = (t("{n} configs uploaded; the sites with the VPN on share one of the EU servers, shuffled now and then",
-             n=n) if mode == "collection" else t("Profile uploaded"))
+    msg = (t("{n} configs uploaded; a search in the background finds the EU server every site with the VPN on "
+             "answers", n=n) if mode == "collection" else t("Profile uploaded"))
     if skipped:
         msg += "\n" + t("Skipped {n}: {first}", n=len(skipped), first=skipped[0])
     return _vpn_back(msg)
@@ -2053,14 +2054,16 @@ async def settings_vpn_site(pid: str, enabled: str = Form(""), next: str = Form(
         except platforms.UnknownPlatform:
             raise HTTPException(404) from None
     vpn.set_enabled(pid, bool(enabled))
-    if not enabled:
+    if enabled:
+        vpn_check.site_on(pid)                     # a search asks the site through the server in use first
+    else:
         await vpn.site_off(pid)
     return _vpn_back(t("Changes saved"), next)
 
 
 @app.post("/settings/vpn/interval")
 async def settings_vpn_interval(hours: str = Form("")):
-    """How often the connection shuffles (hours, 1 to 168)."""
+    """How often a regular search looks for another server (hours, 1 to 168)."""
     hours = hours.strip()
     if not (hours.isdecimal() and hours.isascii() and 1 <= int(hours) <= 168):   # not "²", not 0 or 999 clamped
         return _vpn_back(t("Enter whole hours, 1 to 168"))
@@ -2070,15 +2073,23 @@ async def settings_vpn_interval(hours: str = Form("")):
 
 @app.get("/settings/vpn/test", response_class=HTMLResponse)
 async def settings_vpn_test_panel(request: Request):
-    """The connection panel (settings/_vpn_test.html); its body is polled every 2 s while a shuffle runs."""
+    """The connection panel (settings/_vpn_test.html); its body is polled while a search runs."""
     return _vpn_test_panel(request)
 
 
-@app.post("/settings/vpn/shuffle")
-async def settings_vpn_shuffle(request: Request):
-    """"Shuffle now" (a profile: "Test now"): another server and the test of every site, in the background."""
+@app.post("/settings/vpn/search")
+@app.post("/settings/vpn/shuffle")                 # the old path, for a page loaded before the update
+async def settings_vpn_search(request: Request):
+    """"Search now" (a profile: "Test now"): a search for the server(s) every site answers, in the background."""
     why = vpn_check.start("manual")
-    return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("Shuffle started"))
+    return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("Search started"))
+
+
+@app.post("/settings/vpn/stop")
+async def settings_vpn_stop(request: Request):
+    """Stop the running search; the servers it switched to so far stay."""
+    await vpn_check.cancel("stopped")
+    return _vpn_test_panel(request) if _hx(request) else _vpn_back(t("Search stopped"))
 
 
 def _timeline_section() -> dict[str, Any]:

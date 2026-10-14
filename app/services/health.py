@@ -209,9 +209,9 @@ def _disk() -> Status:
 
 
 def _vpn() -> Status:
-    """The anonymous requests' WireGuard connection (app/platforms/vpn.py): off unless a site has its VPN switch
-    on; a problem when there is no working server or such a site is paused on it (its requests fail, they never go
-    out directly); unknown while it changes its server."""
+    """The anonymous requests' WireGuard connections (app/platforms/vpn.py): off unless a site has its VPN switch
+    on; a problem when there is no working server or such a site has none (its requests wait, they never go out
+    directly); unknown while the search looks for a server for a waiting site."""
     from app.platforms import vpn
 
     state, reason = vpn.health()

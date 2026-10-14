@@ -85,14 +85,14 @@ async def test_a_site_that_is_gone_is_skipped_not_fatal(sites):
 
 
 async def test_a_search_the_vpn_holds_is_no_error(sites):
-    """A shuffle under way or a site paused on the current VPN server holds its searches: the other site's run as
+    """A site waiting for the VPN search to find it a server holds its searches: the other site's run as
     usual, the agent shows no error, and a run the VPN held completely leaves the last result as it was."""
     from app.platforms.vpn import VpnWait
 
     a, b = sites
     agent = create_agent_on_sites([a.keyword_search("rad"), b.keyword_search("rad")])
     a.pages = [[listing("1", "Rad A", 100.0)]]
-    b.pages = [VpnWait("The VPN is changing its server; Other waits for it")]
+    b.pages = [VpnWait("The VPN is searching a server for Other")]
     res = await run_agent(agent.id)
     with session() as db:
         row = db.get(SearchAgent, agent.id)

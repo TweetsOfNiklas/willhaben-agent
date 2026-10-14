@@ -1,4 +1,4 @@
-"""WireGuard for the anonymous requests: one connection every site shares, shuffled to another server now and then.
+"""WireGuard for the anonymous requests: one or two connections the sites share, found by a search in the background.
 
 Only the anonymous clients use it (search agents, screening, price checks, the ad viewer, the product search and
 their photo downloads, Geizhals); the logged-in browser never does. Each site has its own switch (setting
@@ -6,22 +6,27 @@ their photo downloads, Geizhals); the logged-in browser never does. Each site ha
 
 The source is uploaded in Settings → VPN and kept in DATA_DIR/wireguard (folder 700, files 600):
   profile/<name>.conf    one dedicated profile, used as it is (tested, never swapped)
-  collection/*.conf      many configs (e.g. Mullvad's zip of every server); shuffles pick among the EU ones
+  collection/*.conf      many configs (e.g. Mullvad's zip of every server); searches pick among the EU ones
 A new upload replaces the old source.
 
-One connection: the server in use runs as one wireproxy process (userspace WireGuard: no root, no tun device) with an
-HTTP CONNECT proxy on 127.0.0.1, and every site with its switch on sends through it (`tunnel_for(pid)` is a site's
-view of it). A new server always replaces the old process: two tunnels with one key knock each other off (Mullvad's zip
-has one key for all servers). The clients get the proxy explicitly; nothing sets HTTP(S)_PROXY, so Chromium never sees
-it. Host names are resolved inside the tunnel (the clients send CONNECT host:port).
+Connections: a server in use runs as a wireproxy process (userspace WireGuard: no root, no tun device) with an HTTP
+CONNECT proxy on 127.0.0.1. Usually one server serves every site with its switch on; when no single server answers
+them all, two do, each site on the one that answers it (`assign`; MAX_LIVE). The search (app/services/vpn_check.py)
+tests servers on tunnels of its own (SEARCH_TUNNELS at most), beside the live ones, and switches over (`switch()`)
+once it found better ones; a switch-over lets requests under way finish (`hold()`, DRAIN_S) before the old server
+stops. Never two processes on one server: one key on one server twice knocks both off (Mullvad's zip has one key for
+all servers), so the search never starts a server that is live or one it runs already. A new process must show a
+WireGuard handshake within HANDSHAKE_S (wireproxy's info address, /metrics) and reach the site's host (CONNECT, no
+HTTP request), so a dead server fails in seconds. The clients get the proxy explicitly; nothing sets HTTP(S)_PROXY,
+so Chromium never sees it. Host names are resolved inside the tunnel (the clients send CONNECT host:port).
+`tunnel_for(pid)` is a site's view: the route of its server.
 
-Shuffles (app/services/vpn_check.py: on a schedule, on demand, and when a site refuses the server) pick a random
-server (`pick()`), connect it (`connect()`) and test it with every site. This module keeps what they need: the
-process, the connection state (setting `vpn_conn`: server, since, last shuffle, paused sites, automatic shuffles) and
-the marks of servers a site refused (setting `vpn_state`), skipped by later picks until they expire (MARK_TTL_S).
+State (settings): `vpn_conn` holds the live servers, which site uses which, since when, the paused sites, the last
+search and its automatic starts; `vpn_state` per site the servers it refused (marks, skipped until they expire,
+MARK_TTL_S) and the ones it answered through (kept as long, they steer the order of a search).
 
-Fail closed: with the switch on and no working server, while a shuffle runs (after waiting up to SHUFFLE_WAIT_S) and
-for a site paused on the current server, `Tunnel.ensure()` raises PlatformError; nothing falls back to the home IP.
+Fail closed: with the switch on and no working server, or for a site whose server refused it (it waits for the search:
+VpnWait), `Tunnel.ensure()` raises; nothing falls back to the home IP.
 """
 from __future__ import annotations
 
@@ -39,9 +44,9 @@ import socket
 import tempfile
 import time
 import zipfile
-from collections.abc import Collection, Iterable
-from contextlib import suppress
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -52,10 +57,14 @@ from app.platforms.base import PlatformError
 log = logging.getLogger(__name__)
 
 MODES = ("profile", "collection")
-MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "unreachable": 3600, "broken": 24 * 3600,
-              "botcheck": 3600}      # botcheck: a page in place of the one asked for (only the test marks it)
-SHUFFLE_WAIT_S = 60            # a request waits this long for a shuffle under way, then fails (closed)
-PROBE_TIMEOUT_S = 15           # WireGuard repeats a lost handshake after 5 s
+MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "botcheck": 3600,   # botcheck: a page in place of the one asked
+              "unreachable": 24 * 3600, "broken": 24 * 3600,   # dead servers (stale configs) drop out for a day
+              "ok": 24 * 3600}       # answered through it: tried first when the site needs a server again
+MAX_LIVE = 2                   # live connections at most (the search's tunnels come on top)
+SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
+DRAIN_S = 15                   # a server switched away from stops once its requests in flight ended, or after this
+HANDSHAKE_S = 5                # no WireGuard handshake within this: the server is dead (an answer takes < 1 s)
+PROBE_TIMEOUT_S = 8            # the CONNECT to the site's host once the handshake is there
 START_TIMEOUT_S = 5
 MAX_UPLOAD = 20 << 20
 MAX_MEMBERS = 2000
@@ -66,11 +75,11 @@ EU = frozenset({"at", "be", "bg", "cy", "cz", "de", "dk", "ee", "es", "fi", "fr"
                 "lu", "lv", "mt", "nl", "pl", "pt", "ro", "se", "si", "sk"})
 NEAR = (("at",), ("de", "cz", "sk", "hu", "si", "it"), ("pl", "nl", "be", "lu", "dk", "fr", "hr"))  # home first
 GEIZHALS = "geizhals"          # not a platform, but its lookups can go through the connection too
-STATE_KEY = "vpn_state"        # marks: {pid: {"marks": {server: [until, reason]}}}
+STATE_KEY = "vpn_state"        # {pid: {"marks": {server: [until, reason]}, "ok": {server: until}}}
 CONN_KEY = "vpn_conn"
 _KEY = re.compile(r"^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$")       # a WireGuard key, base64 of 32 bytes
 _ENDPOINT = re.compile(r"^(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):\d{1,5}$")
-_choice = random.choice        # tests pick deterministically
+_shuffled: Callable[[list[str]], list[str]] = lambda xs: random.sample(xs, len(xs))   # noqa: E731 - tests: sorted
 
 
 # ------------------------------------------------------------------ the uploaded source
@@ -231,21 +240,21 @@ def secure() -> None:
             os.chmod(os.path.join(d, n), 0o600)
 
 
-def pick(exclude: Collection[str] = (), skip_for: Iterable[str] = ()) -> str | None:
-    """The next server to try: the profile as it is; in a collection a random EU server, nearest first (AT, then DE
-    and the neighbours, then the rest of NEAR, then any EU country), not in `exclude` and not marked for a site in
-    `skip_for` (when every one is, the marks are ignored). None when no server is left: never one outside the EU."""
+def order(exclude: Collection[str] = ()) -> list[str]:
+    """The servers a search may try, in its order: the profile alone; in a collection the EU servers, nearest first
+    (AT, then DE and the neighbours, then the rest of NEAR, then any EU country), random within each tier. Never one
+    outside the EU, not even when none is left."""
     mode, names = source()
     if mode == "profile":
-        return None if names[0] in exclude else names[0]
+        return [n for n in names[:1] if n not in exclude]
     eu = [n for n in names if country(n) in EU and n not in exclude]
-    marked = {n for pid in skip_for for n in marks(pid)}
-    pool = [n for n in eu if n not in marked] or eu
+    out: list[str] = []
+    seen: set[str] = set()
     for tier in (*NEAR, EU):
-        group = [n for n in pool if country(n) in tier]
-        if group:
-            return _choice(group)
-    return None
+        group = [n for n in eu if country(n) in tier and n not in seen]
+        seen.update(group)
+        out += _shuffled(group)
+    return out
 
 
 def eu_count(names: list[str]) -> int:
@@ -315,18 +324,32 @@ def marks(pid: str) -> dict[str, tuple[float, str]]:
             if isinstance(m, list) and len(m) == 2 and float(m[0]) > now}
 
 
+def oks(pid: str) -> dict[str, float]:
+    """The servers this site answered through lately: name -> until."""
+    now = time.time()
+    raw = (_load().get(pid) or {}).get("ok") or {}
+    return {n: float(u) for n, u in raw.items() if isinstance(u, (int, float)) and u > now}
+
+
 def mark(pid: str, name: str, reason: str) -> None:
+    """Note what `name` did for this site: refused it (blocked, rate, unreachable, broken, botcheck) or answered it
+    ("ok"). The newer note replaces the older one; expired ones go."""
     state = _load()
     site = state.setdefault(pid, {})
     now = time.time()
-    kept = {n: m for n, m in (site.get("marks") or {}).items() if isinstance(m, list) and len(m) == 2 and m[0] > now}
-    kept[name] = [now + MARK_TTL_S.get(reason, 3600), reason]
-    site["marks"] = kept
+    refused = {n: m for n, m in (site.get("marks") or {}).items()
+               if isinstance(m, list) and len(m) == 2 and m[0] > now and n != name}
+    answered = {n: u for n, u in (site.get("ok") or {}).items() if isinstance(u, (int, float)) and u > now and n != name}
+    if reason == "ok":
+        answered[name] = now + MARK_TTL_S["ok"]
+    else:
+        refused[name] = [now + MARK_TTL_S.get(reason, 3600), reason]
+    site["marks"], site["ok"] = refused, answered
     _save(state)
 
 
 def forget(pid: str | None = None) -> None:
-    """Clear the marks of every site ("Forget blocks"), or of `pid` only; those sites are no longer paused either."""
+    """Clear the refusals of every site ("Forget blocks"), or of `pid` only; those sites are no longer paused either."""
     state = _load()
     for key, site in state.items():
         if isinstance(site, dict) and pid in (None, key):
@@ -335,15 +358,21 @@ def forget(pid: str | None = None) -> None:
     unpause(pid)
 
 
-# ------------------------------------------------------------------ the connection's state (setting vpn_conn)
+# ------------------------------------------------------------------ the connections' state (setting vpn_conn)
 def conn_state() -> dict[str, Any]:
-    """server (in use or to start again after a restart), since, shuffled (end of the last finished shuffle), paused
-    {pid: [reason, detail]} (sites that refused the server: their requests fail until it changes), failing (the sites
-    the server a shuffle kept as the best one fails: their marks do not steer the next pick), odd (sites
-    whose bot-check-like pages are the site's change, not the servers'), auto (starts of the automatic shuffles of
-    the last hour), triggered (sites that started one since the last regular shuffle), pending ([at, pid, reason,
-    detail]: an automatic shuffle waiting for its turn), error (why there is no server)."""
-    return _json_setting(CONN_KEY)
+    """servers (the live ones, the primary first; started again after a restart), assign {pid: server} (the server a
+    search found each site answering through; a site without one uses the primary until a search asked it), since
+    {server: ts}, paused {pid: [reason, detail]} (the site has no server now: it refused its one and waits for the
+    search, or "none": the last search found none for it; its requests wait), odd (sites whose bot-check-like pages
+    are the site's change, not the servers'), shuffled (end of the last finished search), auto (starts of the
+    automatic searches of the last hour), triggered (sites that started one since the last regular search), pending
+    (a search waiting for its turn), error (why there is no server at all). A state from before the search (one
+    `server`) reads as one live server."""
+    d = _json_setting(CONN_KEY)
+    if "servers" not in d and d.get("server"):
+        name, ts = d.pop("server"), d.get("since")
+        d["servers"], d["since"] = [name], ({name: ts} if isinstance(ts, (int, float)) else {})
+    return d
 
 
 def update_conn(**fields: Any) -> dict[str, Any]:
@@ -353,8 +382,30 @@ def update_conn(**fields: Any) -> dict[str, Any]:
     return d
 
 
+def live_servers(st: dict[str, Any] | None = None) -> list[str]:
+    """The servers in use, the primary first (it serves most sites); never one the source no longer allows."""
+    st = conn_state() if st is None else st
+    return [s for s in st.get("servers") or [] if isinstance(s, str) and allowed(s)][:MAX_LIVE]
+
+
+def server_for(pid: str, st: dict[str, Any] | None = None) -> str | None:
+    """The server this site sends through: its own among the live ones, else the primary (a site switched on since
+    the last search, until one asked it). None without a live server."""
+    st = conn_state() if st is None else st
+    live = live_servers(st)
+    own = (st.get("assign") or {}).get(pid)
+    return own if own in live else (live[0] if live else None)
+
+
+def since(name: str, st: dict[str, Any] | None = None) -> float | None:
+    d = (conn_state() if st is None else st).get("since")
+    v = d.get(name) if isinstance(d, dict) else None
+    return float(v) if isinstance(v, (int, float)) else None
+
+
 def paused(pid: str) -> tuple[str, str] | None:
-    """(reason, detail) when this site refused the current server; None when it may use it."""
+    """(reason, detail) while this site has no server (it refused its one, or "none" answers it); None when it may
+    send."""
     p = (conn_state().get("paused") or {}).get(pid)
     return (str(p[0]), str(p[1])) if isinstance(p, list) and len(p) == 2 else None
 
@@ -372,31 +423,40 @@ def unpause(pid: str | None = None) -> None:
         _set_json(CONN_KEY, d)
 
 
-# ------------------------------------------------------------------ the wireproxy process
+# ------------------------------------------------------------------ the wireproxy processes
 class Route(NamedTuple):
     proxy: str           # http://127.0.0.1:<port>
-    gen: int             # which connection it belongs to; an older one changes nothing in failed()
+    gen: int             # which process start it belongs to; an older one changes nothing in failed()
     name: str = ""       # the server (config) behind it
 
 
 class VpnWait(PlatformError):
-    """The VPN holds this site's requests for now: a shuffle is under way, or the site refused the current server and
-    pauses until the next one. Nothing is wrong with the request itself (a search agent does not count it as failed)."""
+    """The VPN holds this site's requests for now: the site refused its server and waits for the search to find it
+    another one, or none answers it until the next search. Nothing is wrong with the request itself (a search agent
+    does not count it as failed)."""
 
 
 class Unreachable(Exception):
-    """The server started, but the site's host cannot be reached through it."""
+    """The server started, but no WireGuard handshake came (`handshake`: the server is down, the config stale), or the
+    site's host cannot be reached through it."""
 
-    def __init__(self, host: str) -> None:
-        super().__init__(t("no connection to {host}", host=host))
-        self.host = host
+    def __init__(self, host: str, handshake: bool = False) -> None:
+        super().__init__(t("no WireGuard handshake in {s} s", s=HANDSHAKE_S) if handshake else
+                         t("no connection to {host}", host=host))
+        self.host, self.handshake = host, handshake
+
+    @property
+    def detail(self) -> str:
+        """For marks and the page (vpn.describe() translates it)."""
+        return f"no handshake in {HANDSHAKE_S} s" if self.handshake else f"no connection to {self.host}"
 
 
-@dataclass
+@dataclass(eq=False)
 class _Proc:
     name: str
     port: int
     handle: Any
+    gens: set[int] = field(default_factory=set)     # its routes: the search's, then the live one once taken over
 
     @property
     def alive(self) -> bool:
@@ -411,11 +471,31 @@ def _die_with_parent() -> None:     # runs in the child between fork and exec: n
         _libc.prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG: wireproxy never outlives a crashed app
 
 
+def _port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 class Runner:
     """Starts and stops wireproxy and probes its proxy; tests swap in a fake (vpn.runner = ...)."""
 
+    _info: dict[str, bool] = {}      # binary -> it has the info address (-i: /metrics with the last handshake)
+
     def binary(self) -> str | None:
         return shutil.which(get_settings().wireproxy_bin)
+
+    async def _has_info(self, binary: str) -> bool:
+        if binary not in self._info:
+            try:
+                p = await asyncio.create_subprocess_exec(binary, "--help", stdin=asyncio.subprocess.DEVNULL,
+                                                         stdout=asyncio.subprocess.PIPE,
+                                                         stderr=asyncio.subprocess.STDOUT)
+                out, _ = await asyncio.wait_for(p.communicate(), 5)
+            except (OSError, asyncio.TimeoutError):
+                out = b""
+            self._info[binary] = b"--info" in out
+        return self._info[binary]
 
     async def start(self, conf: Path, port: int) -> Any:
         global _libc
@@ -429,10 +509,13 @@ class Runner:
         run.mkdir(mode=0o700, exist_ok=True)
         cfg, err_log = run / f"{conf.stem}.conf", run / f"{conf.stem}.log"
         cfg.write_text(f"WGConfig = {conf}\n\n[http]\nBindAddress = 127.0.0.1:{port}\n", encoding="utf-8")
+        info = f"127.0.0.1:{_port()}" if await self._has_info(binary) else None
         with open(err_log, "wb") as err:     # a file, not a pipe: an unread pipe would stall wireproxy
-            proc = await asyncio.create_subprocess_exec(binary, "-s", "-c", str(cfg), stdin=asyncio.subprocess.DEVNULL,
+            proc = await asyncio.create_subprocess_exec(binary, "-s", "-c", str(cfg), *(["-i", info] if info else []),
+                                                        stdin=asyncio.subprocess.DEVNULL,
                                                         stdout=asyncio.subprocess.DEVNULL, stderr=err,
                                                         preexec_fn=_die_with_parent)
+        proc.info = info
         try:
             end = time.monotonic() + START_TIMEOUT_S
             while time.monotonic() < end:
@@ -451,9 +534,27 @@ class Runner:
             await self.stop(proc)
             raise
 
-    async def probe(self, port: int, host: str) -> bool:
-        """CONNECT host:443 through the proxy: wireproxy dials through the tunnel and answers 200 only when the site
-        is reachable that way. Checks handshake and route without sending an HTTP request to the site."""
+    async def probe(self, handle: Any, port: int, host: str) -> str:
+        """"" when `host` is reachable through the tunnel, else what failed: "handshake" (no WireGuard handshake
+        within HANDSHAKE_S: a dead server fails in seconds, not after the CONNECT timeout) or "connect". The CONNECT
+        host:443 makes wireproxy handshake and dial through the tunnel; it answers 200 only when the site is reachable
+        that way. No HTTP request reaches the site."""
+        connect = asyncio.ensure_future(self._connect(port, host))
+        try:
+            info = getattr(handle, "info", None)
+            if info:
+                end = time.monotonic() + HANDSHAKE_S
+                while not connect.done() and not await self._handshake(info):
+                    if time.monotonic() >= end:
+                        return "handshake"
+                    await asyncio.wait({connect}, timeout=0.25)
+            return "" if await connect else "connect"
+        finally:
+            connect.cancel()
+            with suppress(BaseException):
+                await connect
+
+    async def _connect(self, port: int, host: str) -> bool:
         try:
             reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
         except (OSError, asyncio.TimeoutError):
@@ -461,7 +562,7 @@ class Runner:
         try:
             writer.write(f"CONNECT {host}:443 HTTP/1.1\r\nHost: {host}:443\r\n\r\n".encode())
             await writer.drain()
-            parts = (await asyncio.wait_for(reader.readline(), PROBE_TIMEOUT_S)).split()
+            parts = (await asyncio.wait_for(reader.readline(), HANDSHAKE_S + PROBE_TIMEOUT_S)).split()
             return len(parts) >= 2 and parts[0].startswith(b"HTTP/1.") and parts[1] == b"200"
         except (OSError, asyncio.TimeoutError):
             return False
@@ -469,6 +570,24 @@ class Runner:
             writer.close()
             with suppress(Exception):
                 await writer.wait_closed()
+
+    async def _handshake(self, info: str) -> bool:
+        """wireproxy's /metrics (the info address) shows a completed handshake: last_handshake_time_sec > 0."""
+        host, _, port = info.rpartition(":")
+        try:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, int(port)), 1)
+        except (OSError, asyncio.TimeoutError):
+            return False
+        try:
+            writer.write(b"GET /metrics HTTP/1.0\r\nHost: wireproxy\r\n\r\n")
+            await writer.drain()
+            body = await asyncio.wait_for(reader.read(), 1)
+        except (OSError, asyncio.TimeoutError):
+            return False
+        finally:
+            writer.close()
+        m = re.search(rb"last_handshake_time_sec=(\d+)", body)
+        return bool(m and int(m.group(1)) > 0)
 
     async def stop(self, handle: Any) -> None:
         if handle.returncode is not None:
@@ -484,17 +603,19 @@ class Runner:
 
 
 runner = Runner()
+
 _tunnels: dict[str, Tunnel] = {}
-_plock_: tuple[Any, asyncio.Lock] | None = None
+_locks_: tuple[Any, dict[str, asyncio.Lock]] | None = None
 
 
-def _plock() -> asyncio.Lock:
-    """An asyncio.Lock of the running loop (tests run one loop per test): one start or stop at a time."""
-    global _plock_
+def _lock(kind: str) -> asyncio.Lock:
+    """An asyncio.Lock of the running loop (tests run one loop per test): one for the live connections, one for the
+    search's tunnel, so a slow start of a server under test never holds up a live one. Both: live first."""
+    global _locks_
     loop = asyncio.get_running_loop()
-    if _plock_ is None or _plock_[0] is not loop:
-        _plock_ = (loop, asyncio.Lock())
-    return _plock_[1]
+    if _locks_ is None or _locks_[0] is not loop:
+        _locks_ = (loop, {})
+    return _locks_[1].setdefault(kind, asyncio.Lock())
 
 
 _last_port = 0
@@ -515,134 +636,320 @@ def _free_port() -> int:
 
 
 class Connection:
-    """The one process and its route; `busy` while a shuffle (vpn_check) starts and tests servers."""
+    """The processes: one per live server (MAX_LIVE at most) and the search's own tunnel beside them."""
 
     def __init__(self) -> None:
-        self.proc: _Proc | None = None
-        self.route: Route | None = None
+        self.live: dict[str, tuple[_Proc, Route]] = {}
+        self.probes: dict[str, tuple[_Proc, Route]] = {}   # the servers the search tests, beside the live ones
+        self._starting: set[str] = set()                  # search tunnels starting right now
         self.gen = 0
-        self.busy = False
         self.closing = False             # the app shuts down: no new process
-        self._idle: tuple[Any, asyncio.Event] | None = None
+        self._inflight: dict[int, int] = {}                # route gen -> requests in flight
+        self._retiring: set[_Proc] = set()                 # switched away from, stopping once their requests ended
+        self._tasks: set[asyncio.Task] = set()
+
+    # ---- reads (no lock)
+    def route(self, name: str | None) -> Route | None:
+        """The live route of server `name` while its process runs."""
+        p = self.live.get(name) if name else None
+        return p[1] if p is not None and p[0].alive else None
+
+    def routes(self) -> list[Route]:
+        return [r for p, r in self.live.values() if p.alive]
 
     def current(self) -> Route | None:
-        """The route requests go through now; None without one or when its process died (a read, no lock). During
-        a shuffle the server under test (its Trials send through it; live requests wait in ensure())."""
-        return self.route if self.route is not None and self.proc is not None and self.proc.alive else None
+        """The primary's route."""
+        servers = live_servers()
+        return self.route(servers[0]) if servers else None
 
-    def _event(self) -> asyncio.Event:
-        loop = asyncio.get_running_loop()
-        if self._idle is None or self._idle[0] is not loop:
-            ev = asyncio.Event()
-            if not self.busy:
-                ev.set()
-            self._idle = (loop, ev)
-        return self._idle[1]
+    def _procs(self) -> list[_Proc]:
+        return [p for p, _r in [*self.live.values(), *self.probes.values()]] + list(self._retiring)
 
-    def begin(self) -> None:
-        """A shuffle starts: requests wait (no await before it, so two cannot start)."""
-        self.busy = True
-        self._event().clear()
+    def alive(self, route: Route) -> bool:
+        """`route`'s process still runs: a live one, the search's tunnel (also once taken over), or one that stops
+        once its requests ended."""
+        return any(route.gen in p.gens and p.alive for p in self._procs())
 
-    def end(self) -> None:
-        self.busy = False
-        self._event().set()
+    def is_live(self, route: Route) -> bool:
+        """`route` is the route of a live server now."""
+        p = self.live.get(route.name)
+        return p is not None and p[1] == route and p[0].alive
 
-    async def wait_idle(self, timeout: float) -> bool:
-        """Wait up to `timeout` for a shuffle under way; True when none runs (any more)."""
-        if not self.busy:
-            return True
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(self._event().wait(), timeout)
-        return not self.busy
+    def processes(self) -> int:
+        return sum(p.alive for p in self._procs())
 
-    async def connect(self, name: str, host: str) -> Route:
-        """`name` as the one process, `host` reachable through it (CONNECT host:443, no HTTP request): the running
-        process when it is that server and alive, else the old one stops first (one key, one tunnel). OSError: it
-        does not start; Unreachable: it does not reach `host` (stopped again). Cancelled meanwhile: no process left."""
-        async with _plock():
+    @contextmanager
+    def hold(self, route: Route) -> Iterator[None]:
+        """A request in flight on `route`: a switch-over lets it finish before its process stops (≤ DRAIN_S)."""
+        self._inflight[route.gen] = self._inflight.get(route.gen, 0) + 1
+        try:
+            yield
+        finally:
+            n = self._inflight.pop(route.gen, 1) - 1
+            if n > 0:
+                self._inflight[route.gen] = n
+
+    def _busy(self, proc: _Proc) -> bool:
+        return any(self._inflight.get(g) for g in proc.gens)
+
+    # ---- starts and stops
+    async def _start(self, name: str, host: str) -> _Proc:
+        """Start `name` and check that `host` is reachable through it (CONNECT host:443, no HTTP request). OSError:
+        it does not start; Unreachable: it does not reach `host` (stopped again). Cancelled meanwhile: stopped."""
+        if self.closing:
+            raise PlatformError(t("The app is shutting down"))
+        port = _free_port()
+        handle = await runner.start(config_path(name), port)
+        try:
+            reached = await runner.probe(handle, port, host)
+        except BaseException:
+            await runner.stop(handle)
+            raise
+        if reached:
+            await runner.stop(handle)
+            raise Unreachable(host, handshake=reached == "handshake")
+        return _Proc(name, port, handle)
+
+    def _route(self, proc: _Proc) -> Route:
+        self.gen += 1
+        proc.gens.add(self.gen)
+        return Route(f"http://127.0.0.1:{proc.port}", self.gen, proc.name)
+
+    async def start_live(self, name: str, host: str) -> Route | None:
+        """The process of live server `name` after a restart or a crash (Tunnel.ensure()); None when `name` is no
+        longer live. Never beside the search's tunnel on the same server (it stops there first)."""
+        async with _lock("live"):
+            if (r := self.route(name)) is not None:
+                return r
+            if name not in live_servers():
+                return None
+            dead = self.live.pop(name, None)
+            if dead is not None:
+                await runner.stop(dead[0].handle)
+            if name in self._starting:
+                raise OSError(t("{server} is being tested right now", server=name))
+            async with _lock("search"):
+                probe = self.probes.pop(name, None)
+            if probe is not None:
+                await self._stop(probe[0])
+            proc = await self._start(name, host)
+            self.live[name] = (proc, self._route(proc))
+            log.info("VPN: server %s started", name)
+            return self.live[name][1]
+
+    async def start_search(self, name: str, host: str) -> Route:
+        """A tunnel of the search on `name`, beside the live ones and its other tunnels (several start at once).
+        Never a live server, never one twice: one key on one server twice would knock both off."""
+        async with _lock("search"):
             if self.closing:
                 raise PlatformError(t("The app is shutting down"))
-            if self.current() is not None and self.proc.name == name:
-                return self.route
-            await self._stop()
-            port = _free_port()
-            handle = await runner.start(config_path(name), port)
-            try:
-                reached = await runner.probe(port, host)
-            except BaseException:
-                await runner.stop(handle)
-                raise
-            if not reached:
-                await runner.stop(handle)
-                raise Unreachable(host)
-            self.proc, self.gen = _Proc(name, port, handle), self.gen + 1
-            self.route = Route(f"http://127.0.0.1:{port}", self.gen, name)
-            log.info("VPN: server %s", name)
-            return self.route
+            if name in self.live or name in live_servers() or name in self.probes or name in self._starting:
+                raise RuntimeError(f"{name} runs already")
+            self._starting.add(name)
+        try:
+            proc = await self._start(name, host)
+        finally:
+            self._starting.discard(name)
+        if self.closing:
+            await self._stop(proc)
+            raise PlatformError(t("The app is shutting down"))
+        self.probes[name] = (proc, self._route(proc))
+        return self.probes[name][1]
 
-    async def _stop(self) -> None:
-        proc, self.proc, self.route = self.proc, None, None
-        if proc is not None:
+    async def stop_search(self, name: str | None = None) -> None:
+        """Stop the search's tunnel on `name`, or all of them; a server taken over meanwhile is live and stays."""
+        async with _lock("search"):
+            gone = [self.probes.pop(n) for n in ([name] if name else list(self.probes)) if n in self.probes]
+        for proc, _r in gone:
+            await self._stop(proc)
+
+    def testing(self) -> list[str]:
+        """The servers on the search's tunnels (starting or started)."""
+        return sorted({*self.probes, *self._starting})
+
+    async def switch(self, servers: list[str], hosts: dict[str, str], commit: Callable[[], None]) -> None:
+        """Make `servers` the live ones: the search's tunnel is taken over when it runs one of them (no new
+        handshake), a live one stays as it is, any other starts (it must reach `hosts[name]`). Then in one step with
+        `commit()` (the new state) the routes change: a site on another server than before gets that server's route
+        (a new transport, a new visitor). The servers left stop once their requests in flight ended (≤ DRAIN_S).
+        OSError/Unreachable when a server does not start: nothing changed."""
+        async with _lock("live"), _lock("search"):
+            started: dict[str, _Proc] = {}
+            probes = {n: p for n, p in self.probes.items() if p[0].alive}
+            try:
+                for name in servers:
+                    if name in self._starting:
+                        raise OSError(t("{server} is being tested right now", server=name))
+                    if self.route(name) is None and name not in probes:
+                        started[name] = await self._start(name, hosts.get(name) or "www.willhaben.at")
+            except BaseException:
+                for p in started.values():
+                    await runner.stop(p.handle)
+                raise
+            new: dict[str, tuple[_Proc, Route]] = {}
+            for name in servers:
+                if name in started:
+                    new[name] = (started[name], self._route(started[name]))
+                elif name in probes:
+                    proc = self.probes.pop(name)[0]
+                    new[name] = (proc, self._route(proc))
+                else:
+                    new[name] = self.live[name]
+            gone = [p for p, _r in self.live.values() if all(p is not q for q, _x in new.values())]
+            fresh = [n for n in servers if new[n] is not self.live.get(n)]
+            self.live = new
+            commit()
+        if fresh:
+            log.info("VPN: live now %s (new: %s)", " + ".join(servers), ", ".join(fresh))
+        for p in gone:
+            await self._stop_or_retire(p)
+
+    async def _stop_or_retire(self, proc: _Proc) -> None:
+        """Stop a process that left: at once when no request is in flight on it, else once they ended (≤ DRAIN_S),
+        in the background."""
+        if not self._busy(proc) or not proc.alive:
+            await self._stop(proc)
+            return
+        self._retiring.add(proc)
+        task = asyncio.get_running_loop().create_task(self._drain(proc))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _drain(self, proc: _Proc) -> None:
+        try:
+            end = time.monotonic() + DRAIN_S
+            while self._busy(proc) and proc.alive and time.monotonic() < end:
+                await asyncio.sleep(0.1)
+        finally:
+            await self._stop(proc)
+
+    async def _stop(self, proc: _Proc) -> None:
+        try:
             await runner.stop(proc.handle)
+        finally:
+            self._retiring.discard(proc)
+
+    async def drop(self, name: str) -> None:
+        """Live server `name` leaves (it no longer starts, or no site uses it)."""
+        async with _lock("live"):
+            p = self.live.pop(name, None)
+        if p is not None:
+            await self._stop_or_retire(p[0])
 
     async def disconnect(self) -> None:
-        async with _plock():
-            await self._stop()
+        """Every process stops, also the ones still finishing requests (the configs changed, the app shuts down)."""
+        async with _lock("live"), _lock("search"):
+            procs = [p for p, _r in [*self.live.values(), *self.probes.values()]]
+            self.live, self.probes = {}, {}
+        for task in list(self._tasks):
+            task.cancel()
+        for p in procs + list(self._retiring):
+            with suppress(Exception):
+                await self._stop(p)
 
 
 conn = Connection()
 
 
-def _shuffle(pid: str, reason: str, detail: str) -> bool:
-    """Ask for a shuffle (app/services/vpn_check.py tests the sites through their adapters, so it lives there); True
-    when one runs now, False when its guards let it wait or none can run."""
+def _search(pid: str, reason: str, detail: str) -> bool:
+    """Ask for a search (app/services/vpn_check.py tests the sites through their adapters, so it lives there); True
+    when one runs or comes, False when its guards let this site wait for the next regular one or none can run."""
     from app.services import vpn_check
 
     return vpn_check.trigger(pid, reason, detail)
 
 
-# ------------------------------------------------------------------ one site's view of the connection
+async def switch(servers: list[str], assign: dict[str, str], hosts: dict[str, str]) -> None:
+    """The search's result goes live: `servers` (the primary first, MAX_LIVE at most), each site on its server in
+    `assign` (see Connection.switch). A server that stays keeps its route and its `since`."""
+    servers = servers[:MAX_LIVE]
+
+    def commit() -> None:
+        st = conn_state()
+        was, now = live_servers(st), time.time()
+        update_conn(servers=servers, assign={p: s for p, s in assign.items() if s in servers}, error="",
+                    since={s: (since(s, st) if s in was and since(s, st) else now) for s in servers})
+
+    await conn.switch(servers, hosts, commit)
+
+
+async def drop(name: str, error: str = "") -> None:
+    """A live server that does not start again leaves: its sites use the other one, if any (untested there until a
+    search asks them), else they wait for a search."""
+    st = conn_state()
+    servers = [s for s in live_servers(st) if s != name]
+    update_conn(servers=servers, assign={p: s for p, s in (st.get("assign") or {}).items() if s != name},
+                error="" if servers else error)
+    await conn.drop(name)
+
+
+async def prune() -> None:
+    """After a switch went off: a live server no site with its switch on uses any more stops (the state stays when no
+    site uses the VPN at all: switched on again, it starts the same server)."""
+    on = {pid for pid, _ in users()}
+    if not on:
+        await conn.disconnect()
+        return
+    st = conn_state()
+    servers = live_servers(st)
+    assign = {p: s for p, s in (st.get("assign") or {}).items() if p in on and s in servers}
+    used = set(assign.values()) | ({servers[0]} if servers and on - set(assign) else set())
+    keep = [s for s in servers if s in used]
+    if keep != servers or assign != (st.get("assign") or {}):
+        update_conn(servers=keep, assign=assign)
+    for s in servers:
+        if s not in keep:
+            await conn.drop(s)
+
+
+# ------------------------------------------------------------------ one site's view of the connections
 class Tunnel:
-    """The route a site sends through (the shared one), and its report when the site refuses the server."""
+    """The route a site sends through (its server's), and its report when the site refuses that server."""
 
     def __init__(self, pid: str, host: str, label: str | None = None) -> None:
         self.pid, self.host, self.label = pid, host, label or pid
 
     def current(self) -> Route | None:
-        return conn.current()
+        return conn.route(server_for(self.pid))
+
+    def alive(self, route: Route) -> bool:
+        """`route`'s process still runs (a test of the search may send through a server that is not the site's)."""
+        return conn.alive(route)
+
+    def hold(self, route: Route) -> Any:
+        return conn.hold(route)
 
     def odd(self) -> bool:
-        """A shuffle found this site answering with bot-check-like pages through several servers: the site changed,
-        not the servers, so its live bot checks refuse no server until the next regular shuffle."""
+        """A search found this site answering with bot-check-like pages through several servers: the site changed,
+        not the servers, so its live bot checks refuse no server until the next regular search."""
         return self.pid in (conn_state().get("odd") or [])
 
     async def ensure(self) -> Route:
-        """The route to send through. Waits for a shuffle under way (up to SHUFFLE_WAIT_S); after a restart or a
-        crash of wireproxy starts the stored server again; asks for a shuffle when there is none or it does not
-        answer. PlatformError when this site has no working server now (fail closed: the caller must not send)."""
+        """The route to send through: the process of this site's server, started again after a restart or a crash
+        (a server that no longer starts leaves; the other one, if any, takes over). VpnWait while the site waits for
+        a server (it refused its one, or none is there yet and a search runs or comes); PlatformError when none is
+        there and none comes (fail closed: the caller must not send)."""
         error = ""
-        for first in (True, False):
-            if not await conn.wait_idle(SHUFFLE_WAIT_S):
-                raise VpnWait(t("The VPN is changing its server; {name} waits for it", name=self.label))
+        for _ in range(MAX_LIVE + 1):
             self._check()
-            if (route := conn.current()) is not None:
+            name = server_for(self.pid)
+            if name is None:
+                break
+            if (route := conn.route(name)) is not None:
                 return route
-            server = conn_state().get("server")
-            if not first:
-                break
-            if server and allowed(server):
-                try:
-                    return await conn.connect(server, self.host)
-                except (OSError, Unreachable) as e:
-                    reason, error = ("unreachable" if isinstance(e, Unreachable) else "broken"), str(e)
-                log.warning("VPN %s: server %s %s again: %s", self.pid, server, reason, error)
-                mark(self.pid, server, reason)
-                update_conn(server=None, error=t("{server} {reason}", server=server, reason=reason_label(reason)))
-                if not _shuffle(self.pid, reason, error):
-                    break
-            elif not _shuffle(self.pid, "none", ""):
-                break
+            try:
+                route = await conn.start_live(name, self.host)
+            except (OSError, Unreachable) as e:
+                reason, error = ("unreachable" if isinstance(e, Unreachable) else "broken"), str(e)
+                log.warning("VPN %s: server %s %s again: %s", self.pid, name, reason, error)
+                mark(self.pid, name, reason)
+                await drop(name, t("{server} {reason}", server=name, reason=reason_label(reason)))
+                _search(self.pid, reason, error)
+                continue
+            if route is not None:
+                return route
+        if _search(self.pid, "none", ""):
+            raise VpnWait(t("The VPN is searching a server for {name}", name=self.label))
         why = conn_state().get("error") or error
         raise PlatformError(t("No working VPN server for {name} right now", name=self.label)
                             + (f" ({why})" if why else ""))
@@ -654,26 +961,28 @@ class Tunnel:
         if runner.binary() is None:
             raise PlatformError(t("The VPN is on for {name}, but wireproxy is not installed", name=self.label))
         if (p := paused(self.pid)) is not None:
-            raise VpnWait(t("{name} refused the VPN server {server} ({reason}); its requests pause until the server "
-                            "changes", name=self.label, server=conn_state().get("server") or "?",
+            if p[0] == "none":
+                raise VpnWait(t("No VPN server answers {name} right now; its requests wait for the next search",
+                                name=self.label))
+            raise VpnWait(t("{name} refused the VPN server {server} ({reason}); its requests wait until the search "
+                            "finds another one", name=self.label, server=server_for(self.pid) or "?",
                             reason=reason_label(p[0])))
 
     async def failed(self, route: Route | None, reason: str, detail: str = "") -> bool:
-        """The site refused the server (`blocked`, `rate`, `botcheck`) or it did not answer (`unreachable`): mark
-        the server for the site, pause the site and ask for a shuffle (whose guards may let it wait). Nothing for a
-        route of an earlier connection, during a shuffle (its test decides), for a site paused already, or when the
-        process died (ensure() starts it again). `detail` ("HTTP 403", the network error) goes to the log and the
-        page. True when the server was marked."""
-        if route is None or conn.busy or route.gen != conn.gen or conn.route is None or paused(self.pid):
+        """The site refused its server (`blocked`, `rate`, `botcheck`) or got no answer through it (`unreachable`):
+        mark the server for the site, pause the site (its requests wait) and ask for a search, whose guards may let
+        it wait; the other sites go on. Nothing for a route that is no longer the site's (a switch-over, a dead
+        process: ensure() starts it again), for a site paused already, or for the bot checks of a site a search
+        found changed. `detail` ("HTTP 403", the network error) goes to the log and the page. True when the server
+        was marked."""
+        if route is None or not conn.is_live(route) or route.name != server_for(self.pid) or paused(self.pid):
             return False
         if reason == "botcheck" and self.odd():
             return False
-        if reason == "unreachable" and conn.current() is None:
-            return False
         mark(self.pid, route.name, reason)
         pause(self.pid, reason, detail)
-        log.warning("VPN %s: server %s %s (%s), asking for another", self.pid, route.name, reason, detail or "-")
-        _shuffle(self.pid, reason, detail)
+        log.warning("VPN %s: server %s %s (%s), asking for a search", self.pid, route.name, reason, detail or "-")
+        _search(self.pid, reason, detail)
         return True
 
 
@@ -682,6 +991,8 @@ def describe(detail: str) -> str:
     low = detail.lower()
     if m := re.fullmatch(r"(?:no connection to|keine Verbindung zu) (\S+)", detail):
         return t("no connection to {host}", host=m.group(1))
+    if m := re.fullmatch(r"no handshake in (\d+) s", detail):
+        return t("no WireGuard handshake in {s} s", s=m.group(1))
     if "timed out" in low or "timeout" in low:
         return t("no answer in time")
     if "refused" in low:
@@ -690,17 +1001,17 @@ def describe(detail: str) -> str:
         return t("connection dropped")
     if "ssl" in low or "tls" in low or "certificate" in low:
         return t("TLS error")
-    return detail.replace("HTTP ", "HTTP\u00a0")
+    return detail.replace("HTTP ", "HTTP ")
 
 
 def reason_label(reason: str) -> str:
     return {"blocked": t("blocked by the site"), "rate": t("rate-limited by the site"),
             "unreachable": t("not reachable"), "broken": t("does not start"),
-            "botcheck": t("bot check")}.get(reason, reason)
+            "botcheck": t("bot check"), "none": t("no server answers it")}.get(reason, reason)
 
 
 def tunnel_for(pid: str) -> Tunnel | None:
-    """The site's view of the connection while its VPN switch is on, else None (requests go out directly)."""
+    """The site's view of the connections while its VPN switch is on, else None (requests go out directly)."""
     if not enabled(pid):
         return None
     tn = _tunnels.get(pid)
@@ -719,37 +1030,63 @@ def tunnel_for(pid: str) -> Tunnel | None:
     return tn
 
 
+def host_of(pid: str) -> str:
+    """The host a server must reach for this site (probed when it starts)."""
+    tn = _tunnels.get(pid) or (tunnel_for(pid) if enabled(pid) else None)
+    return tn.host if tn is not None else "www.willhaben.at"
+
+
 async def site_off(pid: str) -> None:
-    """A switch went off: that site is no longer paused, and the process stops once no site uses it."""
+    """A switch went off: that site is no longer paused, and a server no site uses any more stops."""
     unpause(pid)
-    if not users() and not conn.busy:
-        await conn.disconnect()
+    await prune()
 
 
 async def source_changed() -> None:
-    """After an upload or removal: the old server, its marks and the connection state are gone."""
+    """After an upload or removal: the old servers, their marks and the connection state are gone."""
     await conn.disconnect()
     _save({})
     _set_json(CONN_KEY, {})
 
 
 async def shutdown() -> None:
-    """Stop the process, after a start under way (it holds the lock); none starts after this."""
+    """Stop every process, after a start under way (it holds a lock); none starts after this."""
     conn.closing = True
-    async with _plock():
-        with suppress(Exception):
-            await conn._stop()
+    with suppress(Exception):
+        await conn.disconnect()
 
 
 def reset() -> None:
-    """Tests: forget the connection and the tunnels (fakes; nothing to stop)."""
-    global _plock_, conn
+    """Tests: forget the connections and the tunnels (fakes; nothing to stop)."""
+    global _locks_, conn
     _tunnels.clear()
     conn = Connection()
-    _plock_ = None
+    _locks_ = None
 
 
 # ------------------------------------------------------------------ status for Settings → VPN and the health check
+def _searching() -> tuple[bool, bool]:
+    """(a search runs, one comes: pending)."""
+    from app.services import vpn_check
+
+    return vpn_check.running(), vpn_check.pending() is not None
+
+
+def pause_note(p: tuple[str, str], server: str | None = None) -> str:
+    """Why a site waits, for its row and its settings page."""
+    if p[0] == "none":
+        n, _, total = p[1].partition("/")
+        return t("Paused: no VPN server answers. The last search checked {n} of {total} EU servers; the next regular "
+                 "search tries again.", n=n or "?", total=total or "?")
+    running, coming = _searching()
+    reason = reason_label(p[0]) + (f", {describe(p[1])}" if p[1] else "")
+    if running or coming:
+        return t("Waits for a server: refused {server} ({reason}). The search looks for another one; the other sites "
+                 "go on.", server=server or "?", reason=reason)
+    return t("Waits for a server: refused {server} ({reason}). Its requests wait for the next search.",
+             server=server or "?", reason=reason)
+
+
 def status() -> dict[str, Any]:
     from app import platforms
 
@@ -758,22 +1095,30 @@ def status() -> dict[str, Any]:
     for n in names:
         counts[country(n) or "?"] = counts.get(country(n) or "?", 0) + 1
     st = conn_state()
+    servers, assign = live_servers(st), st.get("assign") or {}
+    on = users()
 
     def row(pid: str, name: str) -> dict[str, Any]:
-        p = paused(pid)
-        m = marks(pid)
-        return {"id": pid, "name": name, "on": enabled(pid),
-                "paused": {"reason": reason_label(p[0]), "detail": describe(p[1])} if p else None,
+        p, m, is_on = paused(pid), marks(pid), enabled(pid)
+        server = server_for(pid, st) if is_on else None
+        return {"id": pid, "name": name, "on": is_on, "server": server, "tested": assign.get(pid) in servers,
+                "paused": {"kind": "none" if p[0] == "none" else "wait", "reason": reason_label(p[0]),
+                           "detail": describe(p[1]) if p[0] != "none" else "",
+                           "note": pause_note(p, server)} if p else None,
                 "marks": sorted(((n, reason_label(r), until) for n, (until, r) in m.items()), key=lambda x: x[2],
                                 reverse=True)}
 
     sites = [row(p.id, p.name) for p in platforms.all(enabled_only=False)]
     gz = row(GEIZHALS, "Geizhals")
+    conns = [{"name": s, "since": since(s, st), "connected": conn.route(s) is not None, "primary": i == 0,
+              "sites": [n for pid, n in on if server_for(pid, st) == s and not paused(pid)]}
+             for i, s in enumerate(servers)]
+    running, _coming = _searching()
     return {"mode": mode, "count": len(names), "eu": eu_count(names) if mode == "collection" else len(names),
             "profile": names[0] if mode == "profile" else None,
             "countries": sorted(counts.items(), key=lambda x: (-x[1], x[0])), "binary": runner.binary() is not None,
-            "server": st.get("server"), "since": st.get("since"), "connected": conn.current() is not None,
-            "shuffling": conn.busy, "error": st.get("error") or "", "sites": sites, "geizhals": gz,
+            "servers": conns, "server": servers[0] if servers else None, "connected": bool(conn.routes()),
+            "searching": running, "error": st.get("error") or "", "sites": sites, "geizhals": gz,
             "any_on": any(s["on"] for s in sites) or gz["on"]}
 
 
@@ -786,17 +1131,24 @@ def health() -> tuple[str, str]:
         return "problem", t("No WireGuard config uploaded")
     if runner.binary() is None:
         return "problem", t("wireproxy is not installed")
-    if conn.busy:
-        return "unknown", t("Changing the server")
     st = conn_state()
-    stopped = [name for pid, name in on if paused(pid)]
-    if stopped:
-        return "problem", t("{sites} paused: refused {server}", sites=", ".join(stopped),
-                            server=st.get("server") or "?")
-    if conn.current() is not None:
-        return "ok", conn.current().name
-    if st.get("server"):
-        return "ok", t("{server}, starts with the next request", server=st["server"])
+    running, coming = _searching()
+    lost = [name for pid, name in on if (p := paused(pid)) and p[0] == "none"]
+    waiting = [name for pid, name in on if (p := paused(pid)) and p[0] != "none"]
+    if lost:
+        return "problem", t("{sites} paused: no VPN server answers them", sites=", ".join(lost))
+    if waiting and (running or coming):
+        return "unknown", t("Searching a server for {sites}", sites=", ".join(waiting))
+    if waiting:
+        return "problem", t("{sites} paused: refused {server}", sites=", ".join(waiting),
+                            server=" + ".join(live_servers(st)) or "?")
+    servers = live_servers(st)
+    if servers and conn.routes():
+        return "ok", " + ".join(servers)
+    if servers:
+        return "ok", t("{server}, starts with the next request", server=" + ".join(servers))
+    if running:
+        return "unknown", t("Searching a server")
     if st.get("error"):
         return "problem", st["error"]
     return "unknown", t("Not used yet")

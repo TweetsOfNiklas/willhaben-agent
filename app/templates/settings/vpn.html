@@ -1,17 +1,23 @@
-{# Settings → Platforms → VPN: one WireGuard connection for the anonymous requests of every site (app/platforms/vpn.py).
-   `vpn` from vpn.status(): {mode, count, eu, profile, countries, binary, server, since, connected, shuffling, error,
-   sites: [{id, name, on, paused: {reason, detail} or None, marks}], geizhals: (the same), any_on}. Private keys never
-   reach this page. The connection panel (settings/_vpn_test.html) follows the configs; #vpn-sites is refreshed when a
-   shuffle ends. #}
+{# Settings → Platforms → VPN: the WireGuard connections for the anonymous requests of every site (app/platforms/vpn.py).
+   `vpn` from vpn.status(): {mode, count, eu, profile, countries, binary, servers: [{name, since, connected, primary,
+   sites}], server, connected, searching, error, sites: [{id, name, on, server, tested, paused: {kind, reason, detail,
+   note} or None, marks}], geizhals: (the same), any_on}. Private keys never reach this page. The connection panel
+   (settings/_vpn_test.html) follows the configs; #vpn-sites is refreshed when a search ends. #}
 {% import "_ui.html" as ui %}
+{# what a site with its switch on does now: works through a server, waits for one, or has none #}
+{% macro site_state(s) -%}
+{% if s.paused %}<span class="text-[12.5px] {{ 'text-error' if s.paused.kind == 'none' else 'text-warning' }}">{{ s.paused.note }}</span>
+{% elif s.server and s.tested %}<span class="text-[12.5px] text-muted">{{ ui.pill(_("Works"), 'ok') }} {{ _("through {server}", server=s.server) }}</span>
+{% elif s.server %}<span class="text-[12.5px] text-muted">{{ _("Uses {server}; the search asks it there next.", server=s.server) if vpn.searching else _("Uses {server}; not tested there yet.", server=s.server) }}</span>
+{% elif vpn.mode %}<span class="text-[12.5px] {{ 'text-error' if vpn.error else 'text-muted' }}">{{ vpn.error or _("No server yet: the first search finds one.") }}</span>
+{% endif %}
+{%- endmacro %}
 {% macro site_row(s, title, desc='', first=false) -%}
 <div class="flex flex-col gap-1.5 py-3 {{ '' if first else 'border-t border-base-300' }}">
   <form method="post" action="/settings/vpn/site/{{ s.id }}" class="m-0">
     {{ ui.switch_row(title, desc, s.on, 'name="enabled" value="1" onchange="this.form.submit()"') }}
   </form>
-  {% if s.on and s.paused %}
-  <span class="text-[12.5px] text-error">{{ _("Paused: refused {server} ({reason}). Its requests wait for the next shuffle.", server=vpn.server or '?', reason=s.paused.reason ~ (', ' ~ s.paused.detail if s.paused.detail else '')) }}</span>
-  {% endif %}
+  {% if s.on %}{{ site_state(s) }}{% endif %}
   {% if s.on and s.marks %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("{n} servers skipped for now", n=s.marks|length) }}</summary>
     <ul class="mt-1 flex flex-col gap-0.5 pl-4">{% for name, reason, until in s.marks[:50] %}<li><span class="tabular-nums">{{ name }}</span> · {{ reason }}</li>{% endfor %}{% if s.marks|length > 50 %}<li>…</li>{% endif %}</ul>
   </details>{% endif %}
@@ -25,7 +31,7 @@
     {% else %}{{ ui.pill(_("Nothing uploaded"), '', false) }}{% endif %}
   </div>
   {% if vpn.mode == 'collection' %}<small class="text-[12.5px] text-muted">{% for cc, n in vpn.countries[:14] %}{{ cc|upper }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}{% if vpn.countries|length > 14 %} · …{% endif %}</small>
-  <small class="text-[12.5px] {{ 'text-muted' if vpn.eu else 'text-error' }}">{{ _("Shuffles use the {n} servers in EU countries only, Austria first: outside the EU, sites show other prices (eBay adds Swiss VAT through a Swiss server).", n=vpn.eu) }}</small>{% endif %}
+  <small class="text-[12.5px] {{ 'text-muted' if vpn.eu else 'text-error' }}">{{ _("Searches use the {n} servers in EU countries only, Austria first: outside the EU, sites show other prices (eBay adds Swiss VAT through a Swiss server).", n=vpn.eu) }}</small>{% endif %}
   {% if not vpn.binary %}{{ ui.msg(_("wireproxy is not installed, so no tunnel can start. It is part of the app's Docker image; outside of it set WIREPROXY_BIN."), 'warn') }}{% endif %}
   <small class="text-[12.5px] text-muted">{{ _("Only the anonymous requests use the VPN: search agents, hit screening, the price check, the ad viewer and the product search, with their photos, and Geizhals when you switch it on. The logged-in willhaben browser never does. When no server works, these requests pause; they never fall back to your own connection.") }}</small>
 </section>
@@ -39,7 +45,7 @@
 <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
   <form method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <span class="font-medium">{{ _("Config collection (.zip)") }}</span>
-    <small class="text-[12.5px] text-muted">{{ _("Many configs, e.g. Mullvad's download of all servers. The app uses one EU server at a time and shuffles to another one every few hours, or when a site refuses it.") }}</small>
+    <small class="text-[12.5px] text-muted">{{ _("Many configs, e.g. Mullvad's download of all servers. A search in the background finds the EU server every site answers (two when none does), every few hours and when a site refuses its server.") }}</small>
     <input type="file" name="file" accept=".zip,application/zip" required class="file-input file-input-sm w-full bg-base-200">
     <button class="btn btn-primary btn-sm self-start">{{ _("Upload collection") }}</button>
   </form>
