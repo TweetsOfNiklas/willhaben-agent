@@ -122,7 +122,8 @@ def test_the_ad_page_condition_goes_to_every_hit_of_the_ad(client):
     assert 'title="Condition according to the ad"' in frag and ">Gut</span>" in frag
     with session() as db:
         assert [(db.get(Hit, i).item_condition, db.get(Hit, i).item_condition_label) for i in ids] == [("used", "Gut")] * 2
-    assert " · Gut · published" in client.get("/hits?state=all").text           # the hit card's details line
+    cards = client.get("/hits?state=all").text                                  # a pill next to the price
+    assert cards.count('title="Condition according to the ad">Gut</span>') == 2 and " · Gut · " not in cards
     frag = client.get(f"/hits/ad/preisjaeger/369807?hit={deal.id}").text
     assert ">New (shop deal)</span>" in frag and "Condition assumed (Preisjäger lists shop deals)" in frag
     # an ad page without a condition shows what the hit knows

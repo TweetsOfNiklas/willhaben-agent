@@ -553,6 +553,8 @@ async def _run_agent(agent_id: int) -> RunResult:
         existing = {((h.platform or "willhaben"), h.ad_id): h for h in db.exec(select(Hit).where(Hit.agent_id == agent_id))}
         id_site = {ad_id: pid for pid, ad_id in existing}     # Hit is unique per (agent, ad id), whatever the site
         scam_ctx = _scam_context(existing.values(), [ad for ad, _ in found])
+        known = _known_conditions(db, [ad for ad, _ in found if ad.ad_id and not ad.item_condition
+                                       and (ad.platform, ad.ad_id) not in existing])
         for ad, query in found:
             if not ad.ad_id:
                 continue
@@ -568,6 +570,8 @@ async def _run_agent(agent_id: int) -> RunResult:
                 hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
                           state="seen" if quiet else "new")
                 _apply(hit, ad)
+                if not hit.item_condition and (cond := known.get((ad.platform, ad.ad_id))):
+                    hit.item_condition, hit.item_condition_label = cond      # what another agent's hit learned
                 hit.scam_flags = scam.flags(hit, scam_ctx, home_country=_site(ad.platform).home_country) or None   # before screening
                 _mark_scam_issue(hit)
                 db.add(hit)
@@ -810,6 +814,16 @@ def _screen_data(h: Hit) -> dict:
         return {}
     return {"screen_relevant": h.screen_relevant, "screen_deal": h.screen_deal, "screen_reason": h.screen_reason,
             "screen_issues": h.screen_issues or []}
+
+
+def _known_conditions(db, ads: list[Listing]) -> dict[tuple[str, str], tuple[str, str | None]]:
+    """The condition other agents' hits of these ads already know, by (platform, ad id): a list without one (Shpock
+    states it only on the ad page) then gives a new hit what the viewer learned there. One query."""
+    if not ads:
+        return {}
+    rows = db.exec(select(Hit.platform, Hit.ad_id, Hit.item_condition, Hit.item_condition_label)
+                   .where(col(Hit.ad_id).in_(sorted({ad.ad_id for ad in ads})), col(Hit.item_condition).is_not(None)))
+    return {((pid or "willhaben"), ad_id): (cond, label) for pid, ad_id, cond, label in rows}
 
 
 def _scam_context(hits, ads) -> dict:

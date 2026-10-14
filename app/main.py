@@ -17,6 +17,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from sqlmodel import col, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -190,7 +191,19 @@ def _eur(v: float | None) -> str:
     return f"€ {v:,.0f}".replace(",", ".") if v == int(v) else f"€ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-templates.env.filters.update(local=_local, ago=_ago, eur=_eur)
+_KEEP_TOGETHER = re.compile(r"(?<=€) (?=\d)|(?<=\d) (?=%)|(?<=\d)–(?=[\d€])")
+
+
+def _nb(s: Any) -> Any:
+    """Running text whose amounts, shares and ranges never break across lines ("€ 101,15", "79 %", "50–79"): their
+    space becomes a no-break space, a dash between them gets a word joiner. The rest of the text still wraps."""
+    if not isinstance(s, str):
+        return s
+    out = _KEEP_TOGETHER.sub(lambda m: "\u00a0" if m.group() == " " else "\u2013\u2060", s)
+    return Markup(out) if isinstance(s, Markup) else out
+
+
+templates.env.filters.update(local=_local, ago=_ago, eur=_eur, nb=_nb)
 from app.services.price_gauge import gauge as _price_gauge  # noqa: E402
 from app.services.deals import level_label as _level_label  # noqa: E402
 

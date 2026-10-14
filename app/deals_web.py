@@ -41,12 +41,13 @@ def install(app: FastAPI, templates: Jinja2Templates) -> None:
 
 
 def price_zone_view() -> dict[str, Any]:
-    """What settings/prices.html and its script need: the zones, the defaults, the label names and texts."""
+    """What settings/prices.html and its script need: the zones, the defaults, the label names and texts, and the
+    ends of the bar's scale (deals.position's axis)."""
     zones = price_zones.config()
     return {"used": list(zones["used"]), "new": list(zones["new"]),
             "defaults": {g: list(v) for g, v in price_zones.DEFAULTS.items()}, "names": list(deals.LEVEL_NAMES),
             "labels": {n: deals.level_label(n) for n in deals.LEVEL_NAMES},
-            "t": {"below": t("below {n} %"), "from": t("from {n} %")}}
+            "t": {"below": t("below {n} %"), "from": t("from {n} %")}, "axis": [deals.AXIS_MIN, deals.AXIS_MAX]}
 
 
 @router.post("/settings/prices")
@@ -119,7 +120,10 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
     ad viewer does); the comparables are willhaben listings either way."""
     p = _platform(platform_id)
     res = deals.cached(p.ref(ad_id), q, cat)
-    if res is not None and not (use_claude or find_geizhals):
+    # a condition the hit learned since (the viewer wrote the ad page's): analyze() re-rates, its searches are cached
+    stale = res is not None and hit is not None and bool(hit.item_condition) \
+        and (res.get("ad") or {}).get("item_condition") != hit.item_condition
+    if res is not None and not (use_claude or find_geizhals or stale):
         return res, None
     if p.can("detail"):
         try:

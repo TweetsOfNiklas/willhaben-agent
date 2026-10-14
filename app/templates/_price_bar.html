@@ -1,24 +1,31 @@
 {# The price bar (deals.position + price_bar.layout = b): the level zones (the ad's own zone in full colour, the others
    dimmed), the ring (or a needle on mini bars), the Geizhals new-price marker and the usual range of the comparable ads
-   as a strip under the track. All x in % of the bar. Import: {% import "_price_bar.html" as pb %} #}
-{# band=false: no usual-range strip where no legend explains it (the buy dialog) #}
+   as a bracket under the track. All x in % of the bar. Import: {% import "_price_bar.html" as pb %} #}
+{# band=false: no usual-range bracket where no legend explains it (the buy dialog) #}
 {% macro track(b, cls='h-2.5', gap='border-base-200', ring=true, mini=false, band=true) -%}
 <div class="deal-zones relative {{ cls }}"{% if ring or mini %} role="img" aria-label="{{ b.aria }}"{% else %} aria-hidden="true"{% endif %}>
   <div class="absolute inset-0 overflow-hidden rounded-full">{% for s in b.segments %}<span class="absolute inset-y-0 {{ 'border-l' if mini else 'border-l-2' }} {{ gap }} first-of-type:border-l-0 {{ {'bargain': 'bg-lvl-bargain', 'cheap': 'bg-lvl-cheap', 'fair': 'bg-lvl-fair', 'expensive': 'bg-lvl-expensive', 'very_expensive': 'bg-lvl-very_expensive'}[s.level] }}{{ '' if s.level == b.level else ' opacity-60' }}" style="left:{{ s.from }}%;width:{{ (s.to - s.from)|round(1) }}%"></span>{% endfor %}</div>
-  {% if b.band and band and not mini %}<span class="absolute top-full mt-1 h-1 rounded-full bg-base-content/45" style="left:{{ b.band.from }}%;width:{{ [(b.band.to - b.band.from)|round(1), 1]|max }}%"></span>{% endif %}
+  {# a range |—| clear of the ring; no right end where it runs past the scale #}
+  {% if b.band and band and not mini %}<span class="deal-band absolute top-full mt-[5px] h-1.5 border-base-content/60 {{ 'border-l-2' if b.band.off else 'border-x-2' }}" style="left:{{ b.band.from }}%;width:{{ [(b.band.to - b.band.from)|round(1), 1]|max }}%"><span class="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-base-content/45"></span></span>{% endif %}
   {% if b.new_at is not none %}<span class="absolute -top-1.5 -bottom-1.5 w-0.5 -translate-x-1/2 rounded-full bg-base-content" style="left:{{ b.new_at }}%"></span>{% endif %}
   {% if mini %}<span class="absolute -top-[3px] h-3 w-[3px] -translate-x-1/2 rounded-sm bg-base-content" style="left:{{ b.ring }}%"></span>
   {% elif ring %}<span class="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-base-content bg-base-200 shadow-sm" style="left:{{ b.ring }}%"></span>{% endif %}
 </div>
 {%- endmacro %}
 
+{# the legend glyph of the usual-range bracket #}
+{% macro band_glyph() -%}
+<span class="relative mr-1.5 inline-block h-1.5 w-4 border-x-2 border-base-content/60 align-middle" aria-hidden="true"><span class="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-base-content/45"></span></span>
+{%- endmacro %}
+
 {# the full bar: the price over the ring and "New" over the marker (top lane), the zone limits or the comparables'
-   marks below (one lane); labels that would touch were dropped by price_bar.layout, "wide" ones show only on bars of
-   400 px and more (container query) #}
+   marks below (one lane, headed by "New" when it does not fit above); labels that would touch were dropped by
+   price_bar.layout, those with from_px show only on bars that wide (container query) #}
 {% macro bar(b) -%}
+{% set wide = {260: ' hidden @min-[260px]:inline', 400: ' hidden @min-[400px]:inline'} %}
 <div class="@container relative mx-2 pt-6 pb-1">
-  {% for l in b.top %}<span class="absolute top-0 whitespace-nowrap text-[12.5px] tabular-nums {{ 'font-bold' if l.kind == 'price' else 'font-semibold text-muted' }} {{ {'c': '-translate-x-1/2', 'l': '', 'r': '-translate-x-full'}[l.anchor] }}{{ ' hidden @min-[400px]:inline' if l.wide }}" style="left:{{ l.x }}%">{{ l.text }}</span>{% endfor %}
+  {% for l in b.top %}<span class="absolute top-0 whitespace-nowrap text-[12.5px] tabular-nums {{ 'font-bold' if l.kind == 'price' else 'font-semibold text-muted' }} {{ {'c': '-translate-x-1/2', 'l': '', 'r': '-translate-x-full'}[l.anchor] }}{{ wide.get(l.from_px, '') }}" style="left:{{ l.x }}%">{{ l.text }}</span>{% endfor %}
   {{ track(b) }}
-  {% if b.lane %}<div class="relative mt-2.5 h-4 text-[11.5px] leading-4 text-muted tabular-nums">{% for l in b.lane %}{% if l.kind == 'tick' %}<span class="absolute -top-2 h-1.5 w-px -translate-x-1/2 bg-base-content/40" style="left:{{ l.x }}%"></span>{% endif %}<span class="absolute whitespace-nowrap {{ {'c': '-translate-x-1/2', 'l': '', 'r': '-translate-x-full'}[l.anchor] }}{{ ' hidden @min-[400px]:inline' if l.wide }}" style="left:{{ l.x }}%">{{ l.text }}</span>{% endfor %}</div>{% endif %}
+  {% if b.lane %}<div class="relative {{ 'mt-3' if b.band else 'mt-2.5' }} h-4 text-[11.5px] leading-4 text-muted tabular-nums">{% for l in b.lane %}{% if l.kind == 'tick' %}<span class="absolute -top-2 h-1.5 w-px -translate-x-1/2 bg-base-content/40" style="left:{{ l.x }}%"></span>{% endif %}<span class="absolute whitespace-nowrap {{ {'c': '-translate-x-1/2', 'l': '', 'r': '-translate-x-full'}[l.anchor] }}{{ ' font-semibold text-base-content/80' if l.kind == 'new' }}{{ wide.get(l.from_px, '') }}" style="left:{{ l.x }}%">{{ l.text }}</span>{% endfor %}</div>{% endif %}
 </div>
 {%- endmacro %}

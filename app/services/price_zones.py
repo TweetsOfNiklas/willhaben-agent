@@ -7,6 +7,7 @@ as search_agents._geizhals_cents: the floored % shown next to a label and the la
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.db import get_setting, set_setting
@@ -36,13 +37,14 @@ def group(condition: str | None) -> str:
 
 
 def parse(values: Any, grp: str) -> tuple[int, int, int, int]:
-    """Four whole numbers LOW..HIGH, each higher than the one before (" 30 " is fine, "30.5" is not)."""
+    """Four whole numbers LOW..HIGH, each higher than the one before (" 30 " is fine; "30.5", "1e2", "1_0" and "+50"
+    are not: the settings page's script accepts the same text)."""
     if not isinstance(values, (list, tuple)):
         raise ZoneError(grp, "range")
-    try:
-        v = tuple(int(str(x).strip()) for x in values)
-    except (TypeError, ValueError):
-        raise ZoneError(grp, "range") from None
+    texts = [str(x).strip() for x in values]
+    if not all(re.fullmatch(r"[0-9]{1,3}", x) for x in texts):
+        raise ZoneError(grp, "range")
+    v = tuple(int(x) for x in texts)
     if len(v) != 4 or any(not LOW <= x <= HIGH for x in v):
         raise ZoneError(grp, "range")
     if any(b <= a for a, b in zip(v, v[1:], strict=False)):

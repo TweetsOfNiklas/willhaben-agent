@@ -140,11 +140,15 @@ _VINTED = re.compile(r"Zustand: (Neu, (?:mit|ohne) Etikett|[^,]+)")
 
 def vinted_listing(box: dict[str, Any]) -> tuple[str | None, str | None]:
     """A catalog item's itemBox: "…, Zustand: Sehr gut, …" in its accessibility label (the label itself may hold a
-    comma), else the second line when it is a condition."""
+    comma), else the second line when it is a condition; there clothes put the size first ("M · Neu, mit Etikett"),
+    so only its last part counts when that names one."""
     m = _VINTED.search(str(box.get("accessibilityLabel") or ""))
     if m and (found := pair(m.group(1)))[0]:
         return found
-    return pair(box.get("secondLine"))
+    line = str(box.get("secondLine") or "")
+    if (last := pair(line.rsplit(" · ", 1)[-1]))[0]:
+        return last
+    return pair(line)
 
 
 def vinted_item(attrs: dict[str, Any]) -> tuple[str | None, str | None]:

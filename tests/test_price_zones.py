@@ -22,6 +22,9 @@ def test_defaults_when_unset_or_broken():
     ([0, 50, 80, 90], "used-range"), ([30, 50, 80, 301], "used-range"), (["x", 50, 80, 90], "used-range"),
     ([30, 50, 80], "used-range"), ([30, 50, 80, 90, 95], "used-range"), (["30.5", 50, 80, 90], "used-range"),
     ([30, 50, 50, 90], "used-order"), ([90, 80, 50, 30], "used-order"), ("30,50,80,90", "used-range"),
+    # what int() would take but the page's script does not: the same text is refused on both sides
+    (["1e2", 150, 200, 250], "used-range"), (["1_0", 50, 80, 90], "used-range"), (["+30", 50, 80, 90], "used-range"),
+    (["٣٠", 50, 80, 90], "used-range"), (["0030", 50, 80, 90], "used-range"), ([True, 50, 80, 90], "used-range"),
 ])
 def test_parse_refuses_with_a_code(values, code):
     with pytest.raises(pz.ZoneError) as e:
@@ -85,6 +88,10 @@ def test_settings_page_and_navigation(client):
     assert page.status_code == 200 and 'href="/settings/prices"' in page.text and "Price rating" in page.text
     assert 'x-data="priceZones(' in page.text and page.text.count('name="used"') == 4 and page.text.count('name="new"') == 4
     assert "30–49 %" in page.text and "from 90 %" in page.text and "below 75 %" in page.text   # readback chips
+    from app.deals_web import price_zone_view
+    from app.services import deals
+    assert price_zone_view()["axis"] == [deals.AXIS_MIN, deals.AXIS_MAX] == [110, pz.HIGH + 10]   # the preview's scale
+    assert ":class=\"{'input-error': bad('used', 1)}\"" in page.text            # the field that breaks the rule
     set_setting("ui_lang", "de")
     page = client.get("/settings/prices").text
     assert "Preiseinstufung" in page and ">Preise<" in page and "Gebrauchtes" in page and "Neuware" in page

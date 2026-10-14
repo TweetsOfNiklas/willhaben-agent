@@ -9,7 +9,7 @@
 {% set pl_fact = _("Shipping {amount}", amount=ship.paylivery|eur) if d.shipping_price is not none else _("Shipping about {amount}", amount=ship.paylivery|eur) %}
 {% set fee_pct = ("%g"|format(fee.pct))|replace('.', ',') %}
 {% set fair_parts = [] %}{% if fair %}{# the zones: % of the new price; else the comparables' median; then how many #}
-{% if fair.basis == 'geizhals' %}{% set _x = fair_parts.append(_("{n} % of the new price", n=fair.pct)) %}
+{% if fair.basis == 'geizhals' %}{% set _x = fair_parts.append(_("{n} % of the new price", n=fair.pct) if fair.pct else _("below 1 % of the new price")) %}
 {% elif fair.diff is not none %}{% set _x = fair_parts.append(_("{n} % below the median", n=-fair.diff) if fair.diff < 0 else (_("{n} % above the median", n=fair.diff) if fair.diff > 0 else _("exactly the median"))) %}{% endif %}
 {% if fair.count %}{% set _x = fair_parts.append(_("{n} comparable ads", n=fair.count)) %}{% endif %}{% endif %}
 {% set fair_line %}{% if fair %}{{ ui.deal_lvl(fair.level, deal_level_label(fair.level)) }} <span class="text-[12.5px] text-muted">{{ fair_parts|join(' · ') }}</span>{% endif %}{% endset %}
@@ -63,6 +63,8 @@
           <span class="deal-needle absolute top-1.5 -ml-0.5 h-4 w-1 rounded-sm bg-base-content shadow-[0_0_0_2px_var(--color-base-100)]" style="left:{{ (fair.pos * 100)|round(1) }}%"></span>
           {% if fair.js %}<span class="bd-pin absolute top-[3px] -ml-[11px] size-[22px] rounded-full border-[3px] border-base-content bg-base-100 shadow-md" hidden></span>{% endif %}
         </div>
+        {# the zones' new-price marker is named right under it, so it never passes for the needle (the asking price) #}
+        {% if fair.bar and fair.bar.new_at is not none %}<div class="bd-new relative -mt-1.5 h-4 text-[11.5px] leading-4 text-muted"><span class="absolute whitespace-nowrap font-semibold {{ '-translate-x-full' if fair.bar.new_at > 80 else '-translate-x-1/2' }}" style="left:{{ fair.bar.new_at }}%">{{ _("New") }} {{ fair.new_price|eur }}</span></div>{% endif %}
         {% if fair.js and fair.min is not none %}<div class="bd-ends flex flex-wrap justify-between gap-2 text-[11.5px] text-muted"><span>{{ fair.min|eur }}</span><span>{{ fair.max|eur }}</span></div>{% endif %}
         {% if fair.chips %}<div class="bd-sugg flex flex-wrap gap-1.5">{% for c in fair.chips %}{% set tpl = _('Cheapest · {x}') if c.key == 'min' else _('Cheap · {x}') if c.key == 'cheap' else _('Market price · {x}') %}<button type="button" class="k-{{ c.key }} rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary [&.bd-on]:border-primary [&.bd-on]:bg-brand-soft [&.bd-on]:text-primary" data-v="{{ '%.2f'|format(c.v) }}" data-tpl="{{ tpl }}" onclick="wbBuy.pick(this.form, +this.dataset.v)">{{ tpl.replace('{x}', ((c.v + (ship[pre] if pre else 0) + (fee_of(c.v) if pre == 'paylivery' else 0))|round(2)|eur)) }}</button>{% endfor %}</div>{% endif %}
       </div>

@@ -482,12 +482,14 @@ def test_step2_bar_ends_name_the_cheapest_and_the_dearest_comparable(client, mon
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert '<span>€ 180</span><span>€ 320</span>' in step2 and 'class="bd-ends' in step2
     assert step2.index('class="bd-gauge ') < step2.index('class="bd-ends') < step2.index('class="bd-sugg')
+    assert "bd-new" not in step2                                           # no new-price marker on this basis
     # too few comparable ads, but a Geizhals new price: the zones decide, a straight scale to drag on, no ends, no chips
     res = _market_res(180.0, 200.0, 220.0, count=3)
     res["geizhals"] = {"price_from": 300.0}
     _use(monkeypatch, _ad(), res)
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert "bd-ends" not in step2 and "bd-drag" in step2 and 'class="bd-gauge ' in step2 and "bd-sugg" not in step2
+    assert step2.index('class="bd-gauge ') < step2.index('class="bd-new')    # the marker's name under the bar
     from app import purchase_routes
     assert purchase_routes._fair(_ad(), _market_res(180.0, 200.0, 220.0))["min"] == 180.0
     assert purchase_routes._fair(_ad(), res)["min"] is None and purchase_routes._fair(_ad(), res)["max"] is None
@@ -509,6 +511,9 @@ def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noq
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert "bd-gauge" in frag and "data-fair" in frag and "bd-sugg" not in frag and "bd-live" in frag and "bd-pin" in frag
     assert "83 % of the new price · 3 comparable ads" in frag and "bg-lvl-expensive" in frag and "bd-ends" not in frag
+    # the new-price marker is named right under it (right-aligned to it near the end), never a second unnamed needle
+    new = re.search(r'<div class="bd-new[^"]*"><span class="([^"]*)" style="left:([\d.]+)%">([^<]*)</span>', frag)
+    assert new and new.group(2) == "90.9" and "-translate-x-full" in new.group(1) and new.group(3) == "New € 300"
     import html as htmllib
     import json
     js = json.loads(htmllib.unescape(re.search(r"data-fair='([^']*)'", frag).group(1)))

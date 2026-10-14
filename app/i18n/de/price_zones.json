@@ -5,6 +5,7 @@
  "Defective": "Defekt",
  "New (shop deal)": "Neu (Shop-Deal)",
  "Condition according to the ad": "Zustand laut Inserat",
+ "Condition: {label}": "Zustand: {label}",
  "Condition assumed (Preisjäger lists shop deals)": "Zustand angenommen (Preisjäger zeigt Shop-Angebote)",
  "Price rating": "Preiseinstufung",
  "When Geizhals knows the new price, the price check rates an ad by its price as a share of the lowest new price there. Set from which share each label applies, separately for used and new items.": "Kennt Geizhals den Neupreis, stuft die Preisprüfung eine Anzeige nach ihrem Anteil am günstigsten Neupreis dort ein. Lege fest, ab welchem Anteil welche Einstufung gilt – getrennt für Gebrauchtes und Neuware.",
@@ -25,12 +26,14 @@
  "Price zones saved": "Preiszonen gespeichert",
  "Without a new price the comparable ads decide: the middle half of their prices counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.": "Ohne Neupreis entscheiden die Vergleichsanzeigen: die mittlere Hälfte ihrer Preise gilt als fair, das günstigste Zehntel als Schnäppchen, das teuerste als sehr teuer.",
  "{n} % of the new price": "{n} % vom Neupreis",
+ "below 1 % of the new price": "unter 1 % vom Neupreis",
  "usual among comparable ads:": "üblich bei Vergleichsanzeigen:",
  "outside the scale": "außerhalb der Skala",
+ "reaches past the scale": "reicht über die Skala hinaus",
  "below {price}": "unter {price}",
  "{low} to below {high}": "{low} bis unter {high}",
- "For used items {range} of the new price counts as „{level}“ ({prices}).": "Bei Gebrauchtem gilt {range} vom Neupreis als „{level}“ ({prices}).",
- "For new items {range} of the new price counts as „{level}“ ({prices}).": "Bei Neuware gilt {range} vom Neupreis als „{level}“ ({prices}).",
+ "For used items „{level}“ means: {range} of the new price ({prices}).": "Bei Gebrauchtem gilt als „{level}“: {range} vom Neupreis ({prices}).",
+ "For new items „{level}“ means: {range} of the new price ({prices}).": "Bei Neuware gilt als „{level}“: {range} vom Neupreis ({prices}).",
  "Condition according to the ad: {label}.": "Zustand laut Inserat: {label}.",
  "Condition assumed: {label}.": "Zustand angenommen: {label}.",
  "Condition unknown – the zones for used items apply.": "Zustand unbekannt – es gelten die Zonen für Gebrauchtes.",
@@ -43,5 +46,6 @@
  "Defective according to the ad – it is not rated against working items.": "Laut Inserat defekt – keine Einstufung gegen funktionierende Ware.",
  "The badges compare each ad with the other results of this search: the middle half counts as fair.": "Die Markierungen vergleichen jede Anzeige mit den anderen Ergebnissen dieser Suche: die mittlere Hälfte gilt als fair.",
  "{price}: {level}, {n} % of the new price": "{price}: {level}, {n} % vom Neupreis",
- "{price}: {level} among the comparable ads": "{price}: {level} unter den Vergleichsanzeigen"
+ "{price}: {level} among the comparable ads": "{price}: {level} unter den Vergleichsanzeigen",
+ "By the Geizhals new price alone; the price check of the ad also weighs comparable ads.": "Nur nach dem Geizhals-Neupreis; die Preisprüfung der Anzeige bezieht auch Vergleichsanzeigen ein."
 }

@@ -61,9 +61,10 @@
 {%- endmacro %}
 
 {# the item condition the site states (condition.shown): new stands out, defect is red; nothing when unknown. A value
-   without the site's words was inferred (Preisjäger deals are shop offers), the tooltip says so. #}
-{% macro condition_pill(value, label, platform, cls='') -%}
-{%- set text = condition_text(value, label, platform) %}{% if text %}{{ pill(text|truncate(24, true, '…'), condition_tone(value), false, cls, _('Condition according to the ad') if label else _('Condition assumed (Preisjäger lists shop deals)')) }}{% endif -%}
+   without the site's words was inferred (Preisjäger deals are shop offers), the tooltip says so. named: "Condition: …",
+   where a bare "Good" would read as a verdict (next to the price check's label). #}
+{% macro condition_pill(value, label, platform, cls='', named=false) -%}
+{%- set text = condition_text(value, label, platform) %}{% if text %}{% set text = text|truncate(24, true, '…') %}{{ pill(_("Condition: {label}", label=text) if named else text, condition_tone(value), false, cls, _('Condition according to the ad') if label else _('Condition assumed (Preisjäger lists shop deals)')) }}{% endif -%}
 {%- endmacro %}
 
 {# a price range: "€ 100 – € 300", "from € 100", "up to € 300"; nothing without one #}

@@ -22,14 +22,14 @@
         <div class="relative mt-2.5 h-4 text-[11.5px] leading-4 text-muted"><span class="absolute whitespace-nowrap font-semibold" :class="at('{{ g }}', 100) > 80 ? '-translate-x-full' : '-translate-x-1/2'" :style="`left:${at('{{ g }}', 100)}%`">{{ _("New") }} = 100 %</span></div>
       </div>
       <label class="flex flex-wrap items-center gap-1.5 text-[13px] text-muted" x-cloak>{{ _("Example:") }}
-        <input type="number" min="1" max="300" step="1" inputmode="numeric" x-model.number="probe['{{ g }}']" class="input input-sm w-[72px] bg-base-200 text-right tabular-nums"> {{ _("% of the new price") }} →
-        <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold text-white" x-show="ok('{{ g }}')" :class="cls[level('{{ g }}')]" x-text="labels[level('{{ g }}')]"></span></label>
+        <input type="number" min="1" max="300" step="1" inputmode="numeric" x-model.number="probe['{{ g }}']" class="input input-sm w-[72px] bg-base-200 text-right tabular-nums"> {{ _("% of the new price") }}
+        <span class="whitespace-nowrap" x-show="ok('{{ g }}')">→ <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold text-white" :class="cls[level('{{ g }}')]" x-text="labels[level('{{ g }}')]"></span></span></label>
       <div class="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-2">
         <span>{{ ui.deal_lvl('bargain', deal_level_label('bargain')) }}</span>
         <span class="col-span-2 text-[13px] text-muted" x-text="range('{{ g }}', 0)">{{ _("below {n} %", n=v[g][0]) }}</span>
         {% for name in ['cheap', 'fair', 'expensive', 'very_expensive'] %}{% set i = loop.index %}
         <span>{{ ui.deal_lvl(name, deal_level_label(name)) }}</span>
-        <label class="input input-sm w-auto gap-1 bg-base-200"><span class="text-muted">{{ _("starting at") }}</span><input type="number" name="{{ g }}" min="1" max="300" step="1" required inputmode="numeric" value="{{ v[g][i - 1] }}" x-model.number="z['{{ g }}'][{{ i - 1 }}]" class="w-9 text-right font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" aria-label="{{ _('{level}: from this share of the new price (%)', level=deal_level_label(name)) }}"><span class="text-muted">%</span></label>
+        <label class="input input-sm w-auto gap-1 bg-base-200" :class="{'input-error': bad('{{ g }}', {{ i - 1 }})}"><span class="text-muted">{{ _("starting at") }}</span><input type="number" name="{{ g }}" min="1" max="300" step="1" required inputmode="numeric" value="{{ v[g][i - 1] }}" x-model="z['{{ g }}'][{{ i - 1 }}]" :aria-invalid="bad('{{ g }}', {{ i - 1 }})" class="w-9 text-right font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" aria-label="{{ _('{level}: from this share of the new price (%)', level=deal_level_label(name)) }}"><span class="text-muted">%</span></label>
         <span class="justify-self-start whitespace-nowrap rounded-full bg-hover px-1.5 py-0.5 text-[12px] text-muted tabular-nums" x-text="range('{{ g }}', {{ i }})">{% if i == 4 %}{{ _("from {n} %", n=v[g][3]) }}{% elif v[g][i] - 1 == v[g][i - 1] %}{{ v[g][i - 1] }} %{% else %}{{ v[g][i - 1] }}–{{ v[g][i] - 1 }} %{% endif %}</span>
         {% endfor %}
       </div>
@@ -42,20 +42,23 @@
 </section>
 <script>
 document.addEventListener('alpine:init', () => Alpine.data('priceZones', (o) => ({
-  // the zones of both groups as typed (written z['new']: new is a keyword)
-  z: {used: [...o.used], 'new': [...o['new']]}, d: o.defaults, names: o.names, labels: o.labels, t: o.t,
+  // the zones of both groups as typed, raw text (written z['new']: new is a keyword)
+  z: {used: [...o.used], 'new': [...o['new']]}, d: o.defaults, names: o.names, labels: o.labels, t: o.t, ax: o.axis,
   probe: {used: 68, 'new': 98},
   cls: {bargain: 'bg-lvl-bargain', cheap: 'bg-lvl-cheap', fair: 'bg-lvl-fair', expensive: 'bg-lvl-expensive', very_expensive: 'bg-lvl-very_expensive'},
-  // the server's price_zones.parse: four whole numbers 1..300, strictly ascending
-  ok(g) { const v = this.z[g]; return v.every(x => Number.isInteger(x) && x >= 1 && x <= 300) && v.every((x, i) => !i || x > v[i - 1]); },
+  // the server's price_zones.parse: the text of four whole numbers 1..300 ("1e2" is not one), strictly ascending
+  num(x) { return /^\d{1,3}$/.test(String(x).trim()) && +x >= 1 && +x <= 300; },
+  ok(g) { const v = this.z[g]; return v.every(x => this.num(x)) && v.every((x, i) => !i || +x > +v[i - 1]); },
+  // the field that breaks the rule: no whole number 1..300, or not above the one before
+  bad(g, i) { const v = this.z[g]; return !this.num(v[i]) || (i > 0 && this.num(v[i - 1]) && +v[i] <= +v[i - 1]); },
   // the scale of the preview as deals.position's axis: at least 110 %, 10 % past the last limit and past the example
-  axis(g) { const v = this.z[g]; return Math.min(300, Math.ceil(Math.max(110, (+v[3] || 0) + 10, (+this.probe[g] || 0) + 8) / 10) * 10); },
+  axis(g) { const v = this.z[g]; return Math.min(this.ax[1], Math.ceil(Math.max(this.ax[0], (+v[3] || 0) + 10, (+this.probe[g] || 0) + 8) / 10) * 10); },
   at(g, pct) { return Math.max(0, Math.min(100, (+pct || 0) * 100 / this.axis(g))); },
   segs(g) { if (!this.ok(g)) return []; const e = [0, ...this.z[g].map(b => this.at(g, b)), 100];
     return this.names.map((n, i) => ({level: n, from: e[i], to: e[i + 1]})).filter(s => s.to > s.from); },
   // the label of the example share: whole % against the "from" limits, as price_zones.level_for
-  level(g) { const p = +this.probe[g] || 0; return this.names[this.z[g].filter(b => p >= b).length]; },
-  range(g, i) { const v = this.z[g]; if (!this.ok(g)) return '–';
+  level(g) { const p = +this.probe[g] || 0; return this.names[this.z[g].filter(b => p >= +b).length]; },
+  range(g, i) { const v = this.z[g].map(x => +x); if (!this.ok(g)) return '–';
     if (i === 0) return this.t.below.replace('{n}', v[0]); if (i === 4) return this.t.from.replace('{n}', v[3]);
     return v[i] - 1 === v[i - 1] ? `${v[i - 1]} %` : `${v[i - 1]}–${v[i] - 1} %`; },
   reset(g) { this.z[g] = [...this.d[g]]; },

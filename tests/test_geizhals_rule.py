@@ -271,6 +271,15 @@ def test_settings_drawer_and_pages(fake):
             db.add(Hit(agent_id=a.id, platform="fake", ad_id="9", heading="iPhone 13", url="https://fake.example/ad/9",
                        price=400.0, geizhals=dict(GH), state="filtered"))
             db.commit()
+            db.add(Hit(agent_id=a.id, platform="fake", ad_id="10", heading="iPhone 13 defekt", price=100.0,
+                       url="https://fake.example/ad/10", geizhals=dict(GH), state="filtered", item_condition="defect",
+                       item_condition_label="Defekt"))
+            db.commit()
         page = c.get("/hits?state=filtered").text
-        assert "Geizhals new from" in page and "20 % less" in page and GH["url"] in page
+        assert "Geizhals new from" in page and GH["url"] in page
         assert 'bg-lvl-expensive">expensive</span>' in page              # 80 % of new: the user's used zones
+        # next to a zone badge the share it comes from (a floored "20 % less" next to it read as 80 % or 81 %)
+        assert "Geizhals new from €\xa0500 · 80\xa0% of the new price" in page and "20 % less" not in page
+        assert 'title="By the Geizhals new price alone; the price check of the ad also weighs comparable ads."' in page
+        assert "80\xa0% less" in page                                   # no badge for a defective item: as before
+        assert '>Defekt</span>' in page and "bg-bad-soft text-error" in page     # its condition as a pill

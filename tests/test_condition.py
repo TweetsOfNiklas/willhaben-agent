@@ -64,8 +64,11 @@ def test_vinted_catalog_and_item():
     assert (second.item_condition, second.item_condition_label) == ("used", "Sehr gut")
     d = vi.parse_item((FIXTURES / "vinted_item.rsc").read_text(encoding="utf-8"), "10341874098")
     assert (d.item_condition, d.item_condition_label) == ("new", "Neu, mit Etikett")
-    assert condition.vinted_listing({"secondLine": "M · Neu, mit Etikett"}) == ("new", "M · Neu, mit Etikett")
+    # clothes put the size first: only the condition is the label
+    assert condition.vinted_listing({"secondLine": "M · Neu, mit Etikett"}) == ("new", "Neu, mit Etikett")
+    assert condition.vinted_listing({"secondLine": "42 · Sehr gut"}) == ("used", "Sehr gut")
     assert condition.vinted_listing({"secondLine": "Zara"}) == (None, None)
+    assert condition.vinted_listing({"secondLine": "Zara · M"}) == (None, None)
 
 
 def test_shpock_item_page_only():

@@ -128,6 +128,32 @@ async def test_hits_keep_the_condition(responses):
     assert stored[ids[0]] == ("used", "Gebraucht") and stored[ids[1]] == ("defect", "Defekt")
 
 
+async def test_a_new_hit_takes_the_condition_another_agent_learned(responses):
+    """Agent A's hit got its condition from the ad page (as Shpock states it only there); agent B finds the same ad in
+    a list without one: its new hit starts with what A's knows, so both cards say the same."""
+    queue, _ = responses
+    base = load("search_fahrrad_rows3.json")
+    for ad in base["advertSummaryList"]["advertSummary"]:
+        ad["attributes"]["attribute"] = [a for a in ad["attributes"]["attribute"] if a["name"] != "categorytreeattributeids"]
+    ids = [a["id"] for a in base["advertSummaryList"]["advertSummary"]]
+    first = create_agent(URL)
+    queue.append(copy.deepcopy(base))
+    await run_agent(first.id)
+    with dbmod.session() as db:
+        hit = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == ids[0])).one()
+        assert hit.item_condition is None
+        hit.item_condition, hit.item_condition_label = "used", "Gut"           # the viewer wrote the ad page's
+        db.add(hit)
+        db.commit()
+    second = create_agent(URL)
+    queue.append(copy.deepcopy(base))
+    await run_agent(second.id)
+    with dbmod.session() as db:
+        got = {h.ad_id: (h.item_condition, h.item_condition_label)
+               for h in db.exec(select(dbmod.Hit).where(dbmod.Hit.agent_id == second.id))}
+    assert got[ids[0]] == ("used", "Gut") and got[ids[1]] == (None, None)
+
+
 async def test_blocked_sets_error_and_backoff(responses):
     queue, _ = responses
     agent = create_agent(URL)

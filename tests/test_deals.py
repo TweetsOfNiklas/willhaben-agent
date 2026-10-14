@@ -428,7 +428,7 @@ def test_viewer_has_lazy_price_section(app_client):
     assert "deal-zones" in frag and "10 comparable ads" in frag and "fair" in frag
     assert "71 % of the new price · 10 comparable ads" in frag                # € 100 of € 139, by the used zones
     assert 'href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html" target="_blank" rel="noopener"' in frag
-    assert "New from € 139 on Geizhals" in frag and "Ask Claude" in frag
+    assert "New from €\xa0139 on Geizhals" in frag and "Ask Claude" in frag        # the amount never breaks
     assert "Comparable ads" in frag and "closest by price" in frag   # list in the viewer too
     assert "this ad" in frag
     assert app_client.fake.calls == []
@@ -452,6 +452,36 @@ def test_viewer_keeps_screening_and_uses_agent_keyword(app_client, wh):
         db.refresh(h)
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text
     assert "Ask Claude" not in frag   # screened hit: assessment already shown
+
+
+def test_price_section_follows_a_condition_the_hit_learned_since(app_client, monkeypatch):
+    """The first check knew no condition (used zones). Once the hit knows one (the viewer wrote what the ad page
+    said), the cached check is re-rated with it at once, without a new search."""
+    from app.platforms import condition
+    monkeypatch.setattr(condition, "willhaben_detail", lambda ad: (None, None))     # a page that states none
+    with dbmod.session() as db:
+        a = dbmod.SearchAgent(name="Bosch", source_url="https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=bosch",
+                              webapi_url="x")
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        h = dbmod.Hit(agent_id=a.id, ad_id=AD_ID, heading="Bosch GSR 18V-55", url="u")
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    frag = _plain(app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text)
+    assert "Condition unknown – the zones for used items apply." in frag and "„fair“ means: 50–79 %" in frag
+    searches = app_client.calls["search"]
+    with dbmod.session() as db:
+        hit = db.get(dbmod.Hit, h.id)
+        hit.item_condition, hit.item_condition_label = "new", "Neu"
+        db.add(hit)
+        db.commit()
+    frag = _plain(app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text)
+    assert "Condition according to the ad: Neu." in frag and "For new items „bargain“ means: below 75 %" in frag
+    assert app_client.calls["search"] == searches
+    frag = _plain(app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text)          # now cached with it
+    assert "For new items „bargain“" in frag and app_client.calls["search"] == searches
 
 
 def test_deals_pages_and_claude_on_post(app_client):
@@ -492,7 +522,7 @@ def test_deals_page_german(app_client):
     page = app_client.get("/deals").text
     assert "Produktsuche" in page and "Claude wird nur auf Klick gefragt" in page
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
-    assert "Neu ab € 139 auf Geizhals" in frag and "vergleichbare Anzeigen" in frag
+    assert "Neu ab € 139 auf Geizhals" in _plain(frag) and "vergleichbare Anzeigen" in frag
 
 
 # ------------------------------------------------------------------ review fixes
@@ -863,7 +893,7 @@ def test_viewer_offers_claude_and_updates_the_hit(app_client, no_auto_gh, monkey
     assert fake.calls == []
 
     section = app_client.post(f"/deals/ad/willhaben/{AD_ID}/geizhals", data={"hit": str(h.id), "compact": "1"}).text
-    assert section.lstrip().startswith("<section") and "New from € 139 on Geizhals" in section
+    assert section.lstrip().startswith("<section") and "New from € 139 on Geizhals" in _plain(section)
     assert "found by Claude" in section and "Let Claude search Geizhals" not in section
     from app.services import jobs
     shown = jobs.snapshot()["recent"][0]                         # shown in the jobs indicator while Claude searched
@@ -886,7 +916,7 @@ async def test_zone_change_applies_to_cached_results_without_a_request(wh, gh):
     deals.clear_cache()
     assert deals.cached(AD_ID)["position"]["level"] == "expensive"            # revived from the DealCheck row
     again = await deals.analyze(_ad(100))
-    assert again["position"]["level"] == "expensive" and calls["search"] == 1 and len(gh) == 2
+    assert again["position"]["level"] == "expensive" and calls["search"] == 1 and len(gh) == 1   # one card search
 
 
 async def test_a_stored_label_is_never_read(wh, monkeypatch):
@@ -964,6 +994,11 @@ def test_deal_prompt_names_the_zones_and_the_condition():
     assert "Einordnung der App: keine (laut Inserat defekt)" in deals.deal_prompt(_ad(400), res, "Deutsch", None)
 
 
+def _plain(html):
+    """The text without the no-break spaces and word joiners that keep amounts on one line (main._nb)."""
+    return html.replace("\xa0", " ").replace("\u2060", "")
+
+
 def _render_deal(res, lang="de"):
     from app import i18n
     from app.main import templates
@@ -989,29 +1024,49 @@ def test_price_section_by_zones_in_german():
     html = _render_deal(_res(139, USER_CASE, 202.30))
     small = re.search(r'<small class="text-muted">([^<]*)</small>', html).group(1)
     assert small == "68 % vom Neupreis · 4 vergleichbare Anzeigen"              # never a leading " · "
-    assert "Neu ab € 202,30 auf Geizhals" in html
+    assert "Neu ab €\xa0202,30 auf Geizhals" in html
     assert 'üblich bei Vergleichsanzeigen: <span class="whitespace-nowrap">€ 131–€ 155</span>' in html
-    assert "Bei Gebrauchtem gilt 50–79 % vom Neupreis als „fair“ (€ 101,15 bis unter € 161,84)." in html
+    # amounts, shares and ranges never break across lines
+    assert "Bei Gebrauchtem gilt als „fair“: 50–\u206079\xa0% vom Neupreis (€\xa0101,15 bis unter €\xa0161,84)." in html
     assert "Zustand unbekannt – es gelten die Zonen für Gebrauchtes." in html and "Zonen ändern" in html
     assert 'href="/settings/prices"' in html and "deal-zones" in html and "diese Anzeige kostet" not in html
     assert 'aria-label="€ 139: fair, 68 % vom Neupreis"' in html
-    html = _render_deal(_res(195.02, None, 199.0, "new", "Neu"))
-    assert "Bei Neuware gilt 75–99 % vom Neupreis als „günstig“ (€ 149,25 bis unter € 199)." in html
+    html = _plain(_render_deal(_res(195.02, None, 199.0, "new", "Neu")))
+    assert "Bei Neuware gilt als „günstig“: 75–99 % vom Neupreis (€ 149,25 bis unter € 199)." in html
     assert "Zustand laut Inserat: Neu." in html
-    html = _render_deal(_res(400, None, 202.30))
-    assert "ab 90 % vom Neupreis als „sehr teuer“ (ab € 182,07)" in html
-    html = _render_deal(_res(20, None, 202.30, "new", None))                      # inferred: "angenommen"
-    assert "unter 75 % vom Neupreis als „Schnäppchen“ (unter € 151,73)" in html and "Zustand angenommen: Neu." in html
+    # the open ends read as German too: the sentence has its subject in every form
+    html = _plain(_render_deal(_res(400, None, 202.30)))
+    assert "Bei Gebrauchtem gilt als „sehr teuer“: ab 90 % vom Neupreis (ab € 182,07)." in html
+    html = _plain(_render_deal(_res(20, None, 202.30, "new", None)))              # inferred: "angenommen"
+    assert "Bei Neuware gilt als „Schnäppchen“: unter 75 % vom Neupreis (unter € 151,73)." in html
+    assert "Zustand angenommen: Neu." in html
+    html = _plain(_render_deal(_res(400, None, 202.30), lang="en"))
+    assert "For used items „very expensive“ means: from 90 % of the new price (from € 182,07)." in html
+
+
+def test_price_header_names_the_condition_and_tiny_shares():
+    """The site's words next to "Price" never read as a verdict ("Price · In Ordnung"): the pill says "Condition: …"
+    and the group wraps on narrow columns; a price under 1 % of new does not claim 0 %."""
+    res = _res(80, [70, 90], None, "used", "In Ordnung")
+    res["ad"]["platform"] = "kleinanzeigen"
+    html = _render_deal(res)
+    head = html[html.index("<strong>Preis</strong>"):html.index("</span>\n", html.index("<strong>Preis</strong>"))]
+    assert ">Zustand: In Ordnung</span>" in head and "bg-lvl-" not in head          # few data: no level badge
+    assert '<span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"><strong>Preis</strong>' in html
+    html = _render_deal(_res(139, None, 202.30, "new", "Neu – Sonstige (siehe Artikelbeschreibung)"))
+    assert ">Zustand: Neu – Sonstige (siehe A…</span>" in html
+    small = re.search(r'<small class="text-muted">([^<]*)</small>', _render_deal(_res(1, None, 202.30))).group(1)
+    assert small == "unter 1 % vom Neupreis"
 
 
 def test_price_section_warnings_and_defect():
     html = _render_deal(_res(140, [130, 140, 150, 160, 170], 100.0), lang="en")
     assert "By the new price it is „very expensive“, among the comparable ads it would be „fair“" in html
-    assert "outside the scale" in html and "Comparable ads cost 150 %" not in html
+    assert "reaches past the scale" in html and "outside the scale" not in html and "Comparable ads cost 150 %" not in html
     html = _render_deal(_res(120, [130, 140, 150, 160, 170], 100.0, "new", "New"), lang="en")
-    assert "Comparable ads cost 150 % of the new price on average" in html
+    assert "Comparable ads cost 150\xa0% of the new price on average" in html
     html = _render_deal(_res(400, [380, 390, 400, 410, 420, 430], 100.0), lang="en")
-    assert "Geizhals new price not used: the comparable ads cost 405 % of it on average" in html
+    assert "Geizhals new price not used: the comparable ads cost 405\xa0% of it on average" in html
     assert "this ad is 400 % of new" in html and "Among the comparable ads the middle half" in html
     html = _render_deal(_res(50, PRICES, 100.0, "defect", "Defekt"), lang="en")
     assert "Defective according to the ad" in html and "deal-zones" not in html and "this ad is 50 % of new" in html
@@ -1023,5 +1078,5 @@ def test_price_section_by_comparables_reads_the_stats_median():
     html = _render_deal(_res(100, PRICES, None))
     small = re.search(r'<small class="text-muted">([^<]*)</small>', html).group(1)
     assert small == "5 % unter dem Median · 10 vergleichbare Anzeigen"
-    assert "Unter den Vergleichsanzeigen gilt die mittlere Hälfte (€ 82,50–€ 127,50) als fair" in html
-    assert ">€ 82<" in html and ">€ 105<" in html and ">€ 128<" in html            # the marks below the bar
+    assert "Unter den Vergleichsanzeigen gilt die mittlere Hälfte (€\xa082,50–\u2060€\xa0127,50) als fair" in html
+    assert ">€ 83<" in html and ">€ 105<" in html and ">€ 128<" in html            # the marks below the bar

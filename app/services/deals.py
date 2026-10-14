@@ -64,7 +64,8 @@ QUANTILE_SEGMENTS = {"bargain": (0.0, 0.10), "cheap": (0.10, 0.25), "fair": (0.2
                      "expensive": (0.75, 0.90), "very_expensive": (0.90, 1.0)}
 MISMATCH_LOW, MISMATCH_HIGH = 0.15, 2.0   # comparables median outside this × new price: the new price is ignored
 MISMATCH_HINT = 1.25                      # comparables median above this × new price: a hint only
-AXIS_MIN, AXIS_MAX = 110, 300             # the zones bar's scale in % of the new price
+# the zones bar's scale in % of the new price; it ends past the highest limit a user may set, so that zone always shows
+AXIS_MIN, AXIS_MAX = 110, price_zones.HIGH + 10
 
 FILLER = {
     "neu", "neuwertig", "neuwertiger", "neuwertiges", "neuw", "gebraucht", "gebrauchter", "gebrauchtes", "top",
@@ -241,6 +242,11 @@ def anchors(comp: dict[str, Any] | None) -> list[tuple[float, float]] | None:
     return [(comp[k], q) for k, q in zip(keys, (0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0), strict=True)]
 
 
+def _whole(v: float) -> int:
+    """Whole euros, half up (392.50 is 393, as next to a caption with cents; round() would give 392)."""
+    return math.floor(v + 0.5)
+
+
 def level_label(lvl: str | None) -> str:
     return {"bargain": t("bargain"), "cheap": t("cheap"), "fair": t("fair"), "expensive": t("expensive"),
             "very_expensive": t("very expensive")}.get(lvl or "", "")
@@ -291,12 +297,12 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
         lo, hi = QUANTILE_SEGMENTS[lvl]
         pos = min(hi, max(lo, _interp(price, scale)))
         ticks: list[list[float]] = []      # the marks at the fair segment's ends and the middle, equal € once
-        if round(comp["p25"]) == round(comp["p75"]):
-            ticks = [[0.5, round(comp["median"])]]
+        if _whole(comp["p25"]) == _whole(comp["p75"]):
+            ticks = [[0.5, _whole(comp["median"])]]
         else:
             seen: set[int] = set()
             for at, key in ((0.25, "p25"), (0.5, "median"), (0.75, "p75")):
-                if (v := round(comp[key])) not in seen:
+                if (v := _whole(comp[key])) not in seen:
                     seen.add(v)
                     ticks.append([at, v])
         return {"pos": round(pos, 3), "level": lvl, "basis": "comparables", "condition": condition, "ticks": ticks,

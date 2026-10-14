@@ -172,9 +172,10 @@ def _fair(d, res: dict[str, Any] | None) -> dict[str, Any] | None:
     from the comparables' median, and what the browser needs to rate the maximum while it is typed and to move it by
     dragging the ring: "js" = the bar's price scale (deals.js_scale), the rule of position() (deals.js_rule: the
     zones and the new price, or the comparables' p10/p25/p75/p90) and the label names. "bar" draws the zones (no
-    ring: the needle and the pin are the markers). "min"/"max" are the cheapest and the dearest comparable (the
-    ends of a comparables bar). "chips" are the (at most three) item prices worth a maximum - cheapest, lower
-    quartile, median - only with 5+ comparables and at least 1 % below the asking price. None without a position."""
+    ring: the needle and the pin are the markers; the dialog names the new-price marker under the bar, "new_price").
+    "min"/"max" are the cheapest and the dearest comparable (the ends of a comparables bar). "chips" are the (at most
+    three) item prices worth a maximum - cheapest, lower quartile, median - only with 5+ comparables and at least 1 %
+    below the asking price. None without a position."""
     res = deals.rerate(res) if res else None
     pos = (res or {}).get("position") or {}
     ask = d.price if d.price and d.price > 0 else None
@@ -191,7 +192,7 @@ def _fair(d, res: dict[str, Any] | None) -> dict[str, Any] | None:
     comparables = pos.get("basis") == "comparables"
     scale, rule = deals.js_scale(pos, st), deals.js_rule(pos, st)
     return {"pos": pos["pos"], "level": pos["level"], "basis": pos.get("basis"), "pct": pos.get("pct"),
-            "diff": round((ask - median) * 100 / median) if median else None,
+            "new_price": pos.get("new_price"), "diff": round((ask - median) * 100 / median) if median else None,
             "count": comp.get("count") or st.get("count"), "chips": chips,
             "min": st["min"] if comparables else None, "max": st["max"] if comparables else None,
             "bar": price_bar.layout(pos),
