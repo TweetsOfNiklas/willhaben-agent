@@ -168,3 +168,29 @@ def test_chat_sync_window():
     set_setting("chat_sync_limit", "x")
     set_setting("chat_sync_since", "garbage")
     assert sync_window() == (10, None)
+
+
+def test_style_examples_are_only_my_own_words():
+    """Style examples: messages the owner typed themselves, newest first; never the partner's, not Claude's sent
+    drafts (those would teach Claude its own style), 👍-rated drafts only fill up when there are too few."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.db import Conversation, Draft, session
+    from app.services.chats import _style_examples, _upsert_message
+
+    t0 = datetime(2026, 10, 8, 16, 0, tzinfo=timezone.utc)
+    with session() as db:
+        db.add(Conversation(id="c1", role="seller"))
+        _upsert_message(db, "c1", "p1", "in", "Hallo! Ich verstehe, dass Sie sparen müssen. Wäre 40 € ok?", t0)
+        _upsert_message(db, "c1", "m1", "out", "passt, 45 geht aber nicht drunter", t0 + timedelta(minutes=1))
+        _upsert_message(db, "c1", "m2", "out", "Gerne, der Artikel ist noch verfügbar.", t0 + timedelta(minutes=2))  # sent draft
+        _upsert_message(db, "c1", "m3", "out", "ok", t0 + timedelta(minutes=3))                                     # too short
+        _upsert_message(db, "c1", "m4", "unknown", "PayLivery-Hinweis für Verkäufer", t0 + timedelta(minutes=4))
+        _upsert_message(db, "c1", "m5", "out", "morgen 18h beim billa?", t0 + timedelta(minutes=5))
+        db.add(Draft(conversation_id="c1", text="Gerne, der Artikel ist noch verfügbar.", status="sent", sent_at=t0,
+                     feedback="up"))
+        db.add(Draft(conversation_id="c1", text="Entwurf, nie gesendet", status="draft"))
+        db.commit()
+    assert _style_examples() == ["morgen 18h beim billa?", "passt, 45 geht aber nicht drunter",
+                                 "Gerne, der Artikel ist noch verfügbar."]     # the 👍 draft only fills up at the end
+    assert _style_examples(limit=2) == ["morgen 18h beim billa?", "passt, 45 geht aber nicht drunter"]

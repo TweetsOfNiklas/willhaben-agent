@@ -19,7 +19,8 @@ from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, 
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
-    AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM, auto_rules,
+    AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM,
+    auto_rules,
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
@@ -329,12 +330,26 @@ def drafts_of(conversation_id: str) -> list[Draft]:
                             .order_by(Draft.created_at.desc())))
 
 
-def _style_examples(limit: int = 3) -> list[str]:
-    """Recent sent answers as style examples; the ones rated 👍 in Telegram come first."""
+def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
+    """The owner's own voice: messages they typed themselves on willhaben (outgoing, not sent from a Claude draft),
+    newest first; only when there are too few, sent drafts rated 👍 in Telegram fill up. Never the partner's messages."""
     with session() as db:
-        rows = db.exec(select(Draft).where(Draft.status == "sent")
-                       .order_by((Draft.feedback == "up").desc(), Draft.sent_at.desc()).limit(limit))
-        return [r.text for r in rows]
+        sent = {d.strip() for d in db.exec(select(Draft.text).where(Draft.status == "sent")).all()}
+        rows = db.exec(select(Message).where(Message.direction == "out", Message.kind.is_(None))  # type: ignore[union-attr]
+                       .order_by(Message.created_at.desc()).limit(200))
+        out: list[str] = []
+        for m in rows:
+            text = " ".join(m.text.split())
+            if len(text) < 8 or text in sent or text in out:
+                continue
+            out.append(text)
+            if len(out) == limit:
+                return out
+        if len(out) < limit:
+            liked = db.exec(select(Draft).where(Draft.status == "sent", Draft.feedback == "up")
+                            .order_by(Draft.sent_at.desc()).limit(limit - len(out)))
+            out += [r.text for r in liked if r.text not in out]
+        return out
 
 
 MAX_ALTERNATIVES = 3
