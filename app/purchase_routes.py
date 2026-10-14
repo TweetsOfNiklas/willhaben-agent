@@ -20,7 +20,7 @@ from jinja2 import pass_context
 
 from app.db import get_setting, set_setting
 from app.i18n import t
-from app.services import deals, purchase
+from app.services import deals, price_bar, purchase
 from app.services.purchase import PurchaseError
 from app.willhaben.public import WillhabenError, get_public
 
@@ -167,13 +167,15 @@ async def _market(d) -> dict[str, Any] | None:
 
 
 def _fair(d, res: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The one price-fairness hint of the dialog, from the product search's own numbers: where the asking price lies among
-    the comparable ads (position, level), how far it is from their median, and - only with a real comparables scale (at
-    least MIN_COMPARABLES ads) - what the browser needs to rate the maximum while it is typed and to move it by dragging
-    the ring: "js" is the scale (deals.anchors, the one position() reads), the level bounds and the level names; "min" and
-    "max" are the cheapest and the most expensive comparable price (the ends of the bar). "chips" are the (at most three)
-    item prices that would be worth a maximum - cheapest, lower quartile, median - only when they lie at least 1 % below
-    the asking price. None without a position."""
+    """The one price-fairness hint of the dialog, from the price check (re-rated now: the current zones): where the
+    asking price lies (position, level, basis, its % of the Geizhals new price on the zones basis), how far it is
+    from the comparables' median, and what the browser needs to rate the maximum while it is typed and to move it by
+    dragging the ring: "js" = the bar's price scale (deals.js_scale), the rule of position() (deals.js_rule: the
+    zones and the new price, or the comparables' p10/p25/p75/p90) and the label names. "bar" draws the zones (no
+    ring: the needle and the pin are the markers). "min"/"max" are the cheapest and the dearest comparable (the
+    ends of a comparables bar). "chips" are the (at most three) item prices worth a maximum - cheapest, lower
+    quartile, median - only with 5+ comparables and at least 1 % below the asking price. None without a position."""
+    res = deals.rerate(res) if res else None
     pos = (res or {}).get("position") or {}
     ask = d.price if d.price and d.price > 0 else None
     if ask is None or pos.get("pos") is None:
@@ -181,18 +183,20 @@ def _fair(d, res: dict[str, Any] | None) -> dict[str, Any] | None:
     comp = (res or {}).get("comparables") or {}
     st = comp.get("stats") or {}
     median = st.get("median")
-    scale = deals.anchors(st) if pos.get("basis") == "comparables" else None
     chips: list[dict[str, Any]] = []
-    if scale:
+    if deals.anchors(st):
         for key, v in (("min", st["min"]), ("cheap", st["p25"]), ("market", median)):
             if round((ask - v) * 100 / ask) >= 1 and not (chips and round(v) == round(chips[-1]["v"])):
                 chips.append({"key": key, "v": round(v, 2)})
-    return {"pos": pos["pos"], "level": pos.get("level"),
+    comparables = pos.get("basis") == "comparables"
+    scale, rule = deals.js_scale(pos, st), deals.js_rule(pos, st)
+    return {"pos": pos["pos"], "level": pos["level"], "basis": pos.get("basis"), "pct": pos.get("pct"),
             "diff": round((ask - median) * 100 / median) if median else None,
             "count": comp.get("count") or st.get("count"), "chips": chips,
-            "min": st["min"] if scale else None, "max": st["max"] if scale else None,
-            "js": {"pos": pos["pos"], "scale": [[v, q] for v, q in scale], "levels": [[b, n] for b, n in deals.LEVELS],
-                   "labels": {n: deals.level_label(n) for _, n in deals.LEVELS}} if scale else None}
+            "min": st["min"] if comparables else None, "max": st["max"] if comparables else None,
+            "bar": price_bar.layout(pos),
+            "js": {"pos": pos["pos"], "scale": scale, "rule": rule,
+                   "labels": {n: deals.level_label(n) for n in deals.LEVEL_NAMES}} if scale and rule else None}
 
 
 async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[str, Any]:

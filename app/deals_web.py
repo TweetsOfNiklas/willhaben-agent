@@ -21,7 +21,7 @@ from app import platforms, scheduler
 from app.db import Hit, SearchAgent, session
 from app.i18n import t
 from app.platforms import AdDetail, InvalidSearchUrl, PlatformError, UnknownPlatform, condition
-from app.services import deals, jobs, product_search, screening, search_agents
+from app.services import deals, jobs, price_bar, price_zones, product_search, screening, search_agents
 from app.willhaben.parse import url_param
 from app.willhaben.public import WillhabenError
 
@@ -32,8 +32,33 @@ log = logging.getLogger(__name__)
 def install(app: FastAPI, templates: Jinja2Templates) -> None:
     templates.env.globals.update(deal_level_label=deals.level_label, deal_explain=deals.explain,
                                  plan_query_url=plan_query_url, condition_text=condition.shown,
-                                 condition_tone=condition.tone)
+                                 condition_tone=condition.tone, deal_rerate=deals.rerate, deal_bar=price_bar.layout,
+                                 deal_card_position=deals.card_position, deal_zone_span=deals.zone_span,
+                                 share_pct=price_zones.share, hit_level=deals.hit_level,
+                                 price_zone_config=price_zones.config, price_zone_view=price_zone_view,
+                                 price_zone_error=price_zones.error_text)
     app.include_router(router)
+
+
+def price_zone_view() -> dict[str, Any]:
+    """What settings/prices.html and its script need: the zones, the defaults, the label names and texts."""
+    zones = price_zones.config()
+    return {"used": list(zones["used"]), "new": list(zones["new"]),
+            "defaults": {g: list(v) for g, v in price_zones.DEFAULTS.items()}, "names": list(deals.LEVEL_NAMES),
+            "labels": {n: deals.level_label(n) for n in deals.LEVEL_NAMES},
+            "t": {"below": t("below {n} %"), "from": t("from {n} %")}}
+
+
+@router.post("/settings/prices")
+async def settings_prices(request: Request):
+    """The price zones (Settings → Prices → Price rating): saved only when both groups are valid; a refusal
+    redirects with an error code, never with text from the request."""
+    form = await request.form()
+    try:
+        price_zones.save({g: form.getlist(g) for g in price_zones.GROUPS})
+    except price_zones.ZoneError as e:
+        return RedirectResponse(f"/settings/prices?err={e.code}", status_code=303)
+    return RedirectResponse(f"/settings/prices?msg={quote(t('Price zones saved'), safe='')}", status_code=303)
 
 
 def plan_query_url(q: dict[str, Any], settings: dict[str, Any] | None = None) -> str:
@@ -409,8 +434,9 @@ async def deals_page(request: Request, q: str = "", search: int | None = None, m
         else:
             spread = deals.stats([a["price"] for a in ads if a.get("price")])
             results = []
-            for a in ads:
-                pos = deals.position(a.get("price"), spread, None) if spread and spread["count"] >= deals.MIN_COMPARABLES else None
+            for a in ads:             # among the other results: no new price in a list (comparables only)
+                pos = (deals.position(a.get("price"), spread, None, a.get("item_condition"))
+                       if spread and spread["count"] >= deals.MIN_COMPARABLES else None)
                 results.append({**a, "level": (pos or {}).get("level")})
     prefill = _prefill(from_)
     return render(request, "deals.html", q=q, results=results, spread=spread, error=error, recent=deals.recent(),

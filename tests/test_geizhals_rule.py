@@ -273,3 +273,4 @@ def test_settings_drawer_and_pages(fake):
             db.commit()
         page = c.get("/hits?state=filtered").text
         assert "Geizhals new from" in page and "20 % less" in page and GH["url"] in page
+        assert 'bg-lvl-expensive">expensive</span>' in page              # 80 % of new: the user's used zones

@@ -1,32 +1,50 @@
-{# Price position of one ad. res = deals.analyze() or None, compact = inside the ad viewer, h = Hit or None #}
-{% import "_ui.html" as ui %}
+{# Price position of one ad. res = deals.analyze() (re-rated on read) or None, compact = inside the ad viewer, h = Hit or None.
+   With a Geizhals new price the user's zones decide (bar: zones, the new-price marker, the comparables' usual range as
+   a strip); without one the comparable ads do (bar: their percentile segments). #}
+{% import "_ui.html" as ui %}{% import "_price_bar.html" as pb %}
 {% if error and not res %}<p class="text-[13px] text-muted">{{ _("Price check failed: {error}", error=error) }}</p>
 {% elif res %}
-{% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set gh = res.geizhals %}{% set ad = res.ad or {} %}{% set path = res.category_path or [] %}{% set fl = c.filtered or {} %}
+{% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set st = c.stats or {} %}{% set gh = res.geizhals %}{% set ad = res.ad or {} %}{% set path = res.category_path or [] %}{% set fl = c.filtered or {} %}
+{% set cond = condition_text(ad.item_condition, ad.item_condition_label, ad.platform) %}{% set guessed = ad.item_condition and not ad.item_condition_label %}
 <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-200 px-4 py-3.5">
   <div class="flex flex-wrap items-baseline justify-between gap-2">
     <span class="flex items-center gap-2"><strong>{{ _("Price") }}</strong>{% if p.pos is not none %}{{ ui.deal_lvl(p.level, deal_level_label(p.level)) }}{% endif %}{{ ui.condition_pill(ad.item_condition, ad.item_condition_label, ad.platform) }}</span>
-    <small class="text-muted">{% if c.median and ad.price %}{% set diff = ((ad.price - c.median) * 100 / c.median)|round|int %}{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% endif %}{% if c.count %} · {{ _("{n} comparable ads", n=c.count) }}{% endif %}</small>
+    {% set head = [] %}
+    {% if p.basis == 'geizhals' %}{% set _x = head.append(_("{n} % of the new price", n=p.pct)) %}
+    {% elif st.median and ad.price and p.reason != 'defect' %}{% set diff = ((ad.price - st.median) * 100 / st.median)|round|int %}{% set _x = head.append(_("{n} % below the median", n=-diff) if diff < 0 else (_("{n} % above the median", n=diff) if diff > 0 else _("exactly the median"))) %}{% endif %}
+    {% if c.count %}{% set _x = head.append(_("{n} comparable ads", n=c.count)) %}{% endif %}
+    {% if head %}<small class="text-muted">{{ head|join(' · ') }}</small>{% endif %}
   </div>
-  {% if p.pos is not none %}{% set pct = (p.pos * 100)|round(1) %}
-  {# the bar: the price as a ring on the track (like the buy dialog), its label above; scale marks with values below #}
-  <div class="relative mx-2 pt-6 pb-1">
-    {# centred over the ring; only at the very ends aligned to the edge so it stays inside the card #}
-    <span class="absolute top-0 whitespace-nowrap text-[12.5px] font-bold tabular-nums" style="left:{{ pct }}%;transform:translateX(-{{ 50 if 8 <= pct <= 92 else (0 if pct < 8 else 100) }}%)">{{ ad.price|eur }}</span>
-    <div class="deal-track relative">
-      {% for pos, v in p.ticks %}<span class="absolute top-full mt-0.5 h-1.5 w-px -translate-x-1/2 bg-base-content/40" style="left:{{ (pos * 100)|round(1) }}%"></span>{% endfor %}
-      <span class="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-base-content bg-base-200 shadow-sm" style="left:{{ pct }}%" role="img" aria-label="{{ ad.price|eur }}"></span>
-    </div>
-    <div class="relative mt-2.5 h-4 text-[11.5px] text-muted tabular-nums">{% for pos, v in p.ticks %}<span class="absolute -translate-x-1/2 whitespace-nowrap" style="left:{{ (pos * 100)|round(1) }}%">{{ v|eur }}</span>{% endfor %}</div>
+  {% if p.pos is not none %}{% set b = deal_bar(p, ad.price|eur) %}
+  {{ pb.bar(b) }}
+  {% if b.basis == 'geizhals' %}
+  {# legend: the marker is the Geizhals new price, the strip the middle half of the comparable ads #}
+  <div class="mx-2 flex flex-wrap gap-x-3 gap-y-1 text-[12.5px] text-muted">
+    {% if gh %}<span><a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary no-underline"><span class="mr-1.5 inline-block h-3 w-0.5 rounded-full bg-base-content align-[-2px]" aria-hidden="true"></span>{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗</a>{% if gh.by == 'claude' %} · {{ _("found by Claude") }}{% endif %}</span>{% endif %}
+    {% if b.band %}<span><span class="mr-1.5 inline-block h-1 w-4 rounded-full bg-base-content/45 align-middle" aria-hidden="true"></span>{{ _("usual among comparable ads:") }} <span class="whitespace-nowrap">{{ p.band.low|round|eur }}–{{ p.band.high|round|eur }}</span>{% if b.band.off %} · {{ _("outside the scale") }}{% endif %}</span>{% endif %}
   </div>
+  {% endif %}
   {% if p.suspicious %}<div class="self-start rounded-md bg-bad-soft px-2 py-1 text-[12.5px] font-semibold text-error">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</div>{% endif %}
+  {% if p.cross %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("By the new price it is „{level}“, among the comparable ads it would be „{other}“ – check that the Geizhals product is the right one.", level=deal_level_label(p.level), other=deal_level_label(p.cross)) }}</div>
+  {% elif p.mismatch %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Comparable ads cost {n} % of the new price on average – is the Geizhals product the right one?", n=p.mismatch) }}</div>{% endif %}
+  {% if p.new_price_ignored %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Geizhals new price not used: the comparable ads cost {n} % of it on average – probably another product.", n=p.new_price_ignored) }}</div>{% endif %}
+  {% set cond_line = (_("Condition assumed: {label}.", label=cond) if guessed else _("Condition according to the ad: {label}.", label=cond)) if cond else '' %}
+  <p class="text-[12.5px] text-muted">
+    {%- if b.basis == 'geizhals' %}{% set zs = deal_zone_span(p) %}
+    {%- if zs.from_pct is none %}{% set rng, prices = _("below {n} %", n=zs.to_pct), _("below {price}", price=zs.to|eur) %}
+    {%- elif zs.to_pct is none %}{% set rng, prices = _("from {n} %", n=zs.from_pct), _("from {price}", price=zs.from|eur) %}
+    {%- else %}{% set rng = (zs.from_pct ~ ' %') if zs.to_pct - 1 == zs.from_pct else (zs.from_pct ~ '–' ~ (zs.to_pct - 1) ~ ' %') %}{% set prices = _("{low} to below {high}", low=zs.from|eur, high=zs.to|eur) %}{% endif %}
+    {{ _("For new items {range} of the new price counts as „{level}“ ({prices}).", range=rng, level=deal_level_label(p.level), prices=prices) if p.group == 'new' else _("For used items {range} of the new price counts as „{level}“ ({prices}).", range=rng, level=deal_level_label(p.level), prices=prices) }}
+    {{ cond_line or _("Condition unknown – the zones for used items apply.") }} <a class="link link-primary whitespace-nowrap no-underline" href="/settings/prices">{{ _("Change zones") }} →</a>
+    {%- else %}
+    {{ _("Among the comparable ads the middle half ({low}–{high}) counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.", low=st.p25|eur, high=st.p75|eur) }}{% if cond_line %} {{ cond_line }}{% endif %}
+    {%- endif %}</p>
   {% else %}<p class="text-[12.5px] text-muted">{{ deal_explain(res) }}</p>{% endif %}
   <p class="text-[12.5px] text-muted">
     {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% elif c.scope == 'leaf' and path %}{{ _("Compared within „{category}“.", category=path[-1]) }}{% elif c.scope == 'parent' and path|length > 1 %}{{ _("Compared within „{category}“ (too few ads in „{leaf}“).", category=path[-2], leaf=path[-1]) }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
-    {% if fl.kind %} {{ _("{n} accessories/parts or other variants left out.", n=fl.kind) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
-    {% if p.pos is not none %} {% if p.basis == 'comparables' %}{{ _("Cheapest to most expensive comparable ad; marks at 25 %, median and 75 %.") }}{% else %}{{ _("Few comparable ads: estimated from the new price (used items usually sell for 40–70 %).") }}{% endif %}{% endif %}
-    {% if compact %} <a class="link link-primary no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
-  {% if gh %}<a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=(ad.price * 100 / gh.price_from)|round|int) }}</span>{% endif %}{% if gh.by == 'claude' %} <span class="text-muted">· {{ _("found by Claude") }}</span>{% endif %}</a>
+    {% if fl.kind %} {{ _("{n} accessories/parts or other variants left out.", n=fl.kind) }}{% endif %}{% if fl.condition %} {{ _("{n} ads in another condition left out.", n=fl.condition) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
+    {% if compact %} <a class="link link-primary whitespace-nowrap no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
+  {% if gh %}{% if p.basis != 'geizhals' %}<a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary text-[13px] no-underline">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}</span>{% endif %}{% if gh.by == 'claude' %} <span class="text-muted">· {{ _("found by Claude") }}</span>{% endif %}</a>{% endif %}
   {% elif res.geizhals_none %}<p class="text-[12.5px] text-muted">{{ _("Claude found no matching product on Geizhals: {reason}", reason=res.geizhals_none) }}</p>
   {% else %}{# Claude looks for it on Geizhals – only on this click; the answer redraws this section #}
   <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted"><span>{{ _("No matching product found on Geizhals.") }}</span>

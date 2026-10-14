@@ -1,5 +1,5 @@
 {# Buy dialog body — markup for window.wbBuy (JS: _buy_script.html; the bd-* hooks are its own). #}
-{% import "_ui.html" as ui %}
+{% import "_ui.html" as ui %}{% import "_price_bar.html" as pb %}
 {% if not on %}
 <div class="mx-5 my-4 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning"><p>{{ _("Purchase orders are switched off. Turn them on in Settings.") }}</p><a class="text-primary hover:underline" href="/settings/purchase">{{ _("Turn on purchases in Settings") }}</a></div>
 {% elif wh_error %}<p class="mx-5 my-4 rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error">{{ _("willhaben error: {error}", error=wh_error) }}</p>
@@ -8,7 +8,11 @@
 {% set ask = d.price or 0 %}{% set seller = ((d.seller_name or '').split() or [''])[0] %}
 {% set pl_fact = _("Shipping {amount}", amount=ship.paylivery|eur) if d.shipping_price is not none else _("Shipping about {amount}", amount=ship.paylivery|eur) %}
 {% set fee_pct = ("%g"|format(fee.pct))|replace('.', ',') %}
-{% set fair_line %}{% if fair %}{{ ui.deal_lvl(fair.level, deal_level_label(fair.level)) }} <span class="text-[12.5px] text-muted">{% if fair.diff is not none %}{% if fair.diff < 0 %}{{ _("{n} % below the median", n=-fair.diff) }}{% elif fair.diff > 0 %}{{ _("{n} % above the median", n=fair.diff) }}{% else %}{{ _("exactly the median") }}{% endif %}{% if fair.count %} · {{ _("{n} comparable ads", n=fair.count) }}{% endif %}{% endif %}</span>{% endif %}{% endset %}
+{% set fair_parts = [] %}{% if fair %}{# the zones: % of the new price; else the comparables' median; then how many #}
+{% if fair.basis == 'geizhals' %}{% set _x = fair_parts.append(_("{n} % of the new price", n=fair.pct)) %}
+{% elif fair.diff is not none %}{% set _x = fair_parts.append(_("{n} % below the median", n=-fair.diff) if fair.diff < 0 else (_("{n} % above the median", n=fair.diff) if fair.diff > 0 else _("exactly the median"))) %}{% endif %}
+{% if fair.count %}{% set _x = fair_parts.append(_("{n} comparable ads", n=fair.count)) %}{% endif %}{% endif %}
+{% set fair_line %}{% if fair %}{{ ui.deal_lvl(fair.level, deal_level_label(fair.level)) }} <span class="text-[12.5px] text-muted">{{ fair_parts|join(' · ') }}</span>{% endif %}{% endset %}
 <form method="post" action="/purchases" class="bd-form" data-ask="{{ ask }}" data-ship='{{ ship|tojson }}' data-fee='{{ fee|tojson }}' data-discount="{{ '%g'|format(discount) }}" data-empty="–"{% if fair and fair.js %} data-fair='{{ fair.js|tojson }}'{% endif %}
       onkeydown="wbBuy.enter(event)" onsubmit="this.elements.back.value = location.pathname + location.search + location.hash">
  <div class="grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)]">
@@ -55,7 +59,7 @@
       <div class="bd-fair flex flex-col gap-1.5">
         <p class="bd-fairline flex flex-wrap items-center gap-2">{{ fair_line }}</p>
         <div class="bd-gauge relative py-2.5 {{ 'bd-drag cursor-ew-resize touch-none select-none' if fair.js else 'cursor-default' }}" role="img">
-          <div class="deal-track"></div>
+          {{ pb.track(fair.bar, cls='h-2', gap='border-base-100', ring=false, band=false) }}
           <span class="deal-needle absolute top-1.5 -ml-0.5 h-4 w-1 rounded-sm bg-base-content shadow-[0_0_0_2px_var(--color-base-100)]" style="left:{{ (fair.pos * 100)|round(1) }}%"></span>
           {% if fair.js %}<span class="bd-pin absolute top-[3px] -ml-[11px] size-[22px] rounded-full border-[3px] border-base-content bg-base-100 shadow-md" hidden></span>{% endif %}
         </div>

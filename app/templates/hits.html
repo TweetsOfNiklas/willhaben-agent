@@ -24,6 +24,7 @@
 
 {% if hits %}
 <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
+{% set pz = price_zone_config() %}{# the zone label of a hit with a Geizhals new price (deals.hit_level), read once #}
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
@@ -37,7 +38,7 @@
       <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
       <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
         {% if h.old_price and h.price and h.old_price > h.price %}<span class="text-[13px] text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}</div>
-      {% set gh_pct = geizhals_below_pct(h) %}{% if gh_pct is not none %}<a href="{{ h.geizhals.url }}" target="_blank" rel="noopener" class="text-[12.5px] text-muted no-underline hover:underline" title="{{ h.geizhals.name }}">{{ _("Geizhals new from {price}", price=h.geizhals.price_from|eur) }} · {{ _("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct) }}{% if h.geizhals.checked %} · {{ _("checked by Claude") }}{% endif %}</a>{% endif %}
+      {% set gh_pct = geizhals_below_pct(h) %}{% if gh_pct is not none %}<div class="flex flex-wrap items-center gap-1.5">{% set lvl = hit_level(h, pz) %}{% if lvl %}{{ ui.deal_lvl(lvl, deal_level_label(lvl)) }}{% endif %}<a href="{{ h.geizhals.url }}" target="_blank" rel="noopener" class="text-[12.5px] text-muted no-underline hover:underline" title="{{ h.geizhals.name }}">{{ _("Geizhals new from {price}", price=h.geizhals.price_from|eur) }} · {{ _("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct) }}{% if h.geizhals.checked %} · {{ _("checked by Claude") }}{% endif %}</a></div>{% endif %}
       {% if h.screen_relevant is not none %}
       {# verdict above, reason below at full width: cut by lines (ellipsis), the tooltip has the whole text #}
       <div class="flex flex-col items-start gap-1 text-[12.5px] text-muted" title="{{ h.screen_reason or '' }}">

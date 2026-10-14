@@ -8,12 +8,16 @@ Three sources, all cached so reopening an ad costs nothing within the cache time
   Geizhals lookup found nothing, a search there: Claude names up to three Geizhals searches, the app runs them,
   Claude picks the product (kept with the ad's check, so a recomputed analysis does not lose it)
 
-The position is a 0..1 scale from cheap to expensive: with enough comparables it is the ad price's
-percentile among them, otherwise used items are assumed to go for 40–70 % of the Geizhals new price.
+The label (bargain … very expensive) comes from the user's price zones (price_zones, Settings → Prices) whenever
+Geizhals knows the new price: the ad price as a share of it, in whole cents. Defective items get no label, and a new
+price the comparables contradict hard (their median below 15 % or above 200 % of it) is not used. Otherwise, with
+enough comparables, the comparables decide: below p10 bargain, below p25 cheap, p25..p75 fair, up to p90 expensive.
+The label is never read from storage: rerate() recomputes it on every read, so a zone change applies at once.
 """
 from __future__ import annotations
 
 import logging
+import math
 import re
 import statistics
 import tempfile
@@ -29,7 +33,8 @@ from sqlmodel import col, select
 from app.db import DealCheck, ProductSearch, session, utcnow
 from app.i18n import LANGS, lang, t
 from app.llm.base import LLMError, get_backend
-from app.services import geizhals
+from app.platforms.condition import GERMAN
+from app.services import geizhals, price_zones
 from app.willhaben.parse import AdDetail, InvalidSearchUrl, to_webapi_url
 from app.willhaben.public import WillhabenError, get_public
 from app.services import timeline
@@ -41,18 +46,25 @@ COMPARABLES_TTL_S = 3600
 GEIZHALS_TTL_S = 6 * 3600
 RESULT_TTL_S = 3600
 GEIZHALS_FAIL_TTL_S = 900    # Geizhals blocking/down: don't retry on every open
-MIN_COMPARABLES = 5          # fewer -> Geizhals new price as anchor, or no position at all
+MIN_COMPARABLES = 5          # fewer: no comparables scale (their rule, the cross-check and the mismatch need it)
 QUERY_WORDS = 3              # willhaben keyword search is AND: short queries find enough comparables
-FILTERS = 2                  # version of the comparable filters (2: RAM/storage sizes); older results are recomputed
+FILTERS = 3                  # version of the comparable filters (2: RAM/storage sizes, 3: condition + zone rating);
+                             # older results are recomputed
 CLOSEST = 10
 RECENT = 10
 GH_FIND_SEARCHES = 3         # Geizhals searches Claude may name (one request each; Geizhals blocks quickly)
 GH_FIND_CANDIDATES = 12      # results Claude picks from
-USED_LOW, USED_HIGH = 0.40, 0.70   # used items typically sell for 40–70 % of the new price
 DEAL_ENUM = ["great", "good", "fair", "overpriced", "unknown"]
 
-# (upper bound of the position, level) – cheap to expensive
-LEVELS = [(0.12, "bargain"), (0.35, "cheap"), (0.65, "fair"), (0.88, "expensive"), (2.0, "very_expensive")]
+LEVEL_NAMES = price_zones.NAMES      # cheap to expensive
+LEVEL_DE = {"bargain": "Schnäppchen", "cheap": "günstig", "fair": "fair", "expensive": "teuer",
+            "very_expensive": "sehr teuer"}          # for Claude's prompts (always German)
+# the comparables bar: fixed percentile segments, so the colour under the ring is the label even with tied prices
+QUANTILE_SEGMENTS = {"bargain": (0.0, 0.10), "cheap": (0.10, 0.25), "fair": (0.25, 0.75),
+                     "expensive": (0.75, 0.90), "very_expensive": (0.90, 1.0)}
+MISMATCH_LOW, MISMATCH_HIGH = 0.15, 2.0   # comparables median outside this × new price: the new price is ignored
+MISMATCH_HINT = 1.25                      # comparables median above this × new price: a hint only
+AXIS_MIN, AXIS_MAX = 110, 300             # the zones bar's scale in % of the new price
 
 FILLER = {
     "neu", "neuwertig", "neuwertiger", "neuwertiges", "neuw", "gebraucht", "gebrauchter", "gebrauchtes", "top",
@@ -193,8 +205,31 @@ def _interp(x: float, anchors: list[tuple[float, float]]) -> float:
     return pts[-1][1]
 
 
-def level(pos: float) -> str:
-    return next(name for bound, name in LEVELS if pos < bound)
+def comparables_level(price: float, st: dict[str, Any]) -> str:
+    """The label of a price among the comparable ads: below p10 bargain, below p25 cheap, p25..p75 fair (both ends),
+    up to p90 expensive, above very expensive. The € caption and the buy dialog's script use the same rule."""
+    if price < st["p10"]:
+        return "bargain"
+    if price < st["p25"]:
+        return "cheap"
+    if price <= st["p75"]:
+        return "fair"
+    if price <= st["p90"]:
+        return "expensive"
+    return "very_expensive"
+
+
+def level_at(pos: float) -> str:
+    """The label of a stored 0..1 position (product-search cards from before the cards kept their stats)."""
+    if pos < 0.10:
+        return "bargain"
+    if pos < 0.25:
+        return "cheap"
+    if pos <= 0.75:
+        return "fair"
+    if pos <= 0.90:
+        return "expensive"
+    return "very_expensive"
 
 
 def anchors(comp: dict[str, Any] | None) -> list[tuple[float, float]] | None:
@@ -211,35 +246,129 @@ def level_label(lvl: str | None) -> str:
             "very_expensive": t("very expensive")}.get(lvl or "", "")
 
 
-def position(price: float | None, comp: dict[str, Any] | None, new_price: float | None) -> dict[str, Any]:
-    """{"pos": 0..1, "level", "basis", "ticks": [[pos, €]], "ref", "suspicious"} or {"pos": None, "reason"}."""
+def position(price: float | None, comp: dict[str, Any] | None, new_price: float | None,
+             condition: str | None = None, zones: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Where a price lies and its label, or {"pos": None, "reason"} (no_price, free, defect, few_data).
+
+    With a Geizhals new price (basis "geizhals"): the price as a share of it against the user's zones of the item's
+    group (price_zones.group: "new" only for new items); "pos" is that share on a 0..axis % scale. "band" is p25..p75
+    of the comparable ads (a cross-check drawn under the bar), "cross" their own label when it is 2 or more steps
+    away (used items, 5+ comparables), "mismatch" their median in % of new when it is above MISMATCH_HINT × new.
+    A new price the comparables contradict hard (median outside MISMATCH_LOW..MISMATCH_HIGH × new) is ignored and
+    named in "new_price_ignored". Without one, 5+ comparables decide (basis "comparables", comparables_level()); the
+    ring is clamped into its label's segment, so tied quantiles never put it on another colour."""
     if price is None:
         return {"pos": None, "reason": "no_price"}
     if price <= 0:
         return {"pos": None, "reason": "free"}
+    if condition == "defect":
+        return {"pos": None, "reason": "defect"}
     scale = anchors(comp)
+    ignored = None
+    if new_price and new_price > 0 and comp and scale \
+            and not MISMATCH_LOW <= comp["median"] / new_price <= MISMATCH_HIGH:
+        ignored, new_price = round(comp["median"] * 100 / new_price), None
+    if new_price and new_price > 0 and price_zones._cents(new_price) > 0:
+        g = price_zones.group(condition)
+        lim = tuple((zones or price_zones.config())[g])
+        exact = price_zones.share_exact(price, new_price)
+        axis = min(AXIS_MAX, math.ceil(max(AXIS_MIN, lim[3] + 10, exact + 8) / 10) * 10)
+        lvl = price_zones.level_for(price, new_price, lim)
+        cross = comparables_level(price, comp) if comp and scale and g == "used" else None
+        if cross and abs(LEVEL_NAMES.index(cross) - LEVEL_NAMES.index(lvl)) < 2:
+            cross = None
+        return {"pos": round(min(1.0, exact / axis), 3), "level": lvl, "basis": "geizhals", "group": g,
+                "condition": condition, "pct": price_zones.share(price, new_price), "new_price": new_price,
+                "zones": list(lim), "axis": axis,
+                "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]}
+                if comp and comp.get("p25") is not None else None,
+                "cross": cross,
+                "mismatch": round(comp["median"] * 100 / new_price)
+                if comp and scale and comp["median"] > MISMATCH_HINT * new_price else None,
+                "suspicious": exact < lim[0] / 2 or bool(comp and scale and price < 0.5 * comp["p25"])}
     if comp and scale:
-        pos = _interp(price, scale)
-        ticks, seen = [], set()
-        for key in ("p25", "median", "p75"):
-            v = round(comp[key])
-            if v not in seen:
-                seen.add(v)
-                ticks.append([round(_interp(comp[key], scale), 3), v])
-        return {"pos": round(pos, 3), "level": level(pos), "basis": "comparables", "ticks": ticks,
-                "ref": {k: comp[k] for k in ("count", "p10", "p25", "median", "p75", "p90")},
-                "suspicious": price < 0.5 * comp["p25"]}
-    if new_price and new_price > 0:
-        low, high = USED_LOW * new_price, USED_HIGH * new_price
-        mid = (low + high) / 2
-        span = (high - low) * 2                     # low..high is the middle half of the bar
-        start = mid - span / 2
-        pos = min(1.0, max(0.0, (price - start) / span))
-        return {"pos": round(pos, 3), "level": level(pos), "basis": "geizhals",
-                "ticks": [[0.25, round(low)], [0.5, round(mid)], [0.75, round(high)]],
-                "ref": {"new_price": new_price, "low": low, "high": high},
-                "suspicious": price < 0.2 * new_price}
+        lvl = comparables_level(price, comp)
+        lo, hi = QUANTILE_SEGMENTS[lvl]
+        pos = min(hi, max(lo, _interp(price, scale)))
+        ticks: list[list[float]] = []      # the marks at the fair segment's ends and the middle, equal € once
+        if round(comp["p25"]) == round(comp["p75"]):
+            ticks = [[0.5, round(comp["median"])]]
+        else:
+            seen: set[int] = set()
+            for at, key in ((0.25, "p25"), (0.5, "median"), (0.75, "p75")):
+                if (v := round(comp[key])) not in seen:
+                    seen.add(v)
+                    ticks.append([at, v])
+        return {"pos": round(pos, 3), "level": lvl, "basis": "comparables", "condition": condition, "ticks": ticks,
+                "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]},
+                "new_price_ignored": ignored, "suspicious": price < 0.5 * comp["p25"]}
     return {"pos": None, "reason": "few_data"}
+
+
+def rerate(res: dict[str, Any] | None, zones: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """The result with its position computed afresh from the stored numbers (price, comparables, new price,
+    condition) and the current zones: a label is never read from storage. No request."""
+    if res is None:
+        return None
+    ad = res.get("ad")
+    if not ad:
+        return res
+    return {**res, "position": position(ad.get("price"), (res.get("comparables") or {}).get("stats"),
+                                        (res.get("geizhals") or {}).get("price_from"), ad.get("item_condition"),
+                                        zones)}
+
+
+def card_position(r: dict[str, Any]) -> dict[str, Any]:
+    """The position of a product-search card, computed now from its stats (lists know no new price: comparables
+    only); a card stored before the cards kept their stats keeps its position with the current label bounds."""
+    if r.get("stats"):
+        return position(r.get("price"), r["stats"], None, r.get("item_condition"))
+    p = r.get("position") or {}
+    if p.get("pos") is not None:
+        return {**p, "level": level_at(p["pos"])}
+    return p
+
+
+def hit_level(h: Any, zones: dict[str, Any] | None = None) -> str | None:
+    """The zone label of a search-agent hit with a Geizhals new price (hit cards); None without one, without a
+    price or for a defective item."""
+    new_price = (getattr(h, "geizhals", None) or {}).get("price_from")
+    price = getattr(h, "price", None)
+    condition = getattr(h, "item_condition", None)
+    if not new_price or not price or price <= 0 or condition == "defect" or price_zones._cents(new_price) <= 0:
+        return None
+    return price_zones.level_for(price, new_price, (zones or price_zones.config())[price_zones.group(condition)])
+
+
+def zone_span(p: dict[str, Any]) -> dict[str, Any]:
+    """The current zone of a zones-basis position: its % limits and the prices where it starts and where the next
+    one starts (None at the open ends)."""
+    z, new_price = p["zones"], p["new_price"]
+    i = LEVEL_NAMES.index(p["level"])
+    lo, hi = (z[i - 1] if i else None), (z[i] if i < 4 else None)
+    return {"from_pct": lo, "to_pct": hi,
+            "from": price_zones.price_from(new_price, lo) if lo is not None else None,
+            "to": price_zones.price_from(new_price, hi) if hi is not None else None}
+
+
+def js_rule(p: dict[str, Any], st: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The rule of position() for the buy dialog's script (wbBuy.levelOf): the zones and the new price, or the
+    comparables' p10/p25/p75/p90 with the segment of each label."""
+    if p.get("basis") == "geizhals":
+        return {"kind": "share", "new_price": p["new_price"], "zones": list(p["zones"]), "names": list(LEVEL_NAMES)}
+    if p.get("basis") == "comparables" and st:
+        return {"kind": "quantile", "cuts": [st["p10"], st["p25"], st["p75"], st["p90"]],
+                "segs": {n: list(v) for n, v in QUANTILE_SEGMENTS.items()}, "names": list(LEVEL_NAMES)}
+    return None
+
+
+def js_scale(p: dict[str, Any], st: dict[str, Any] | None) -> list[list[float]] | None:
+    """The bar's price scale for the buy dialog's script ([price, 0..1] points, wbBuy.place): linear from 0 to the
+    end of the zones axis, or the comparables' anchors."""
+    if p.get("basis") == "geizhals":
+        return [[0.0, 0.0], [p["new_price"] * p["axis"] / 100, 1.0]]
+    sc = anchors(st) if p.get("basis") == "comparables" else None
+    return [[v, q] for v, q in sc] if sc else None
 
 
 def explain(res: dict[str, Any]) -> str:
@@ -249,6 +378,8 @@ def explain(res: dict[str, Any]) -> str:
         return t("The ad has no price.")
     if reason == "free":
         return t("The item is free – nothing to compare.")
+    if reason == "defect":
+        return t("Defective according to the ad – it is not rated against working items.")
     n = (res.get("comparables") or {}).get("count", 0)
     if (res.get("comparables") or {}).get("error"):
         return t("Comparable search failed: {error}", error=res["comparables"]["error"])
@@ -366,12 +497,20 @@ async def search_category(category_url: str) -> dict[str, Any]:
     return data
 
 
+def _condition_kept(other: str | None, mine: str | None) -> bool:
+    """A comparable in a condition that prices alike: new items among new ones, used ones (unknown included) without
+    new and defective ones. Unknown comparables always count; a defective ad has nothing to pick from."""
+    if other is None or mine == "defect":
+        return True
+    return other == "new" if price_zones.group(mine) == "new" else other not in ("new", "defect")
+
+
 async def comparables(query: str, exclude_ad_id: str | None, price: float | None = None, *,
                       category_id: str | None = None, title: str | None = None,
-                      category_url: str | None = None) -> dict[str, Any]:
+                      category_url: str | None = None, condition: str | None = None) -> dict[str, Any]:
     """Comparable ads: the keyword search narrowed to the ad's own category (or a category the user picked),
-    without accessories/other variants (RAM/storage sizes too) and extreme prices. `filtered` says how many each
-    step dropped."""
+    without accessories/other variants (RAM/storage sizes too), other conditions (when enough are left) and extreme
+    prices. `filtered` says how many each step dropped."""
     out: dict[str, Any] = {"query": query, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
                            "scope": None, "filtered": {}, "filters": FILTERS}
     if not query and not category_url:
@@ -395,8 +534,12 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
             kept = [a for a in ads if same(a.get("title"), title)]
             ads = kept if len(kept) >= MIN_COMPARABLES else ads
     n2 = len(ads)
+    kept = [a for a in ads if _condition_kept(a.get("item_condition"), condition)]
+    ads = kept if len(kept) >= MIN_COMPARABLES else ads
+    n3 = len(ads)
     ads = _trim(ads)
-    out["scope"], out["filtered"] = scope, {"category": n0 - n1, "kind": n1 - n2, "outliers": n2 - len(ads)}
+    out["scope"], out["filtered"] = scope, {"category": n0 - n1, "kind": n1 - n2, "condition": n2 - n3,
+                                            "outliers": n3 - len(ads)}
     st = stats([a["price"] for a in ads])
     centre = price if price and price > 0 else (st or {}).get("median") or 0
     closest = sorted(sorted(ads, key=lambda a: abs(a["price"] - centre))[:CLOSEST], key=lambda a: a["price"])
@@ -520,7 +663,7 @@ def cached(ad_id: str, query: str | None = None, category_url: str | None = None
     analysis ran (result["checked_at"]), not from the last view (row.checked_at, only used for ordering)."""
     hit = _cached(_results, _key(ad_id, query, category_url), RESULT_TTL_S)
     if hit and _current(hit[1]):
-        return hit[1]
+        return rerate(hit[1])
     with session() as db:
         row = db.get(DealCheck, str(ad_id))
     if row and _current(row.result) and row.result.get("category_url") == category_url \
@@ -531,7 +674,7 @@ def cached(ad_id: str, query: str | None = None, category_url: str | None = None
             price = (row.result.get("ad") or {}).get("price")
             res = {**row.result, "claude": _claude_for(row.claude or row.result.get("claude"), price)}
             _put(_results, _key(ad_id, query, category_url), res, RESULT_TTL_S, at=time.monotonic() - age)
-            return res
+            return rerate(res)
     return None
 
 
@@ -555,28 +698,29 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
     keyword) is used only when the title gives none. Claude runs only with use_claude (verdict) or find_geizhals
     (looks for the product on Geizhals when the automatic lookup found none) – both explicit clicks."""
     res = cached(ad.ref, query, category_url)
-    if res is not None and (res.get("ad") or {}).get("price") != ad.price:
-        res = None                                    # price changed since: re-position (searches are cached)
+    if res is not None and ((res.get("ad") or {}).get("price") != ad.price
+                            or (res.get("ad") or {}).get("item_condition") != ad.item_condition):
+        res = None                    # price or condition changed since: re-position (searches are cached)
     if res is None:
         q = (query or "").strip() or query_from_title(ad.heading) or (fallback_query or "").strip()
         comp = await comparables(q, ad.ad_id, ad.price, category_id=ad.category_id, title=ad.heading,
-                                 category_url=category_url)
+                                 category_url=category_url, condition=ad.item_condition)
         gh = stored_geizhals(ad.ref) or await geizhals_match(geizhals_query(ad.heading, ad.category_path))
         res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None,
                "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,
-               "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None),
+               "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None, ad.item_condition),
                "claude": stored_claude(ad.ref, ad.price), "checked_at": utcnow().isoformat()}
         if not comp.get("error"):
             _put(_results, _key(ad.ref, query, category_url), res, RESULT_TTL_S)
     if find_geizhals and not res.get("geizhals") and not res.get("geizhals_none"):
         found = await claude_geizhals(ad)
         if "error" in found:
-            return {**res, "geizhals_error": found["error"]}      # not kept: the next click tries again
+            return rerate({**res, "geizhals_error": found["error"]})   # not kept: the next click tries again
         gh = found.get("match")
         stats = (res.get("comparables") or {}).get("stats")
         res = {**res, "geizhals": gh, "geizhals_none": found.get("none"),
-               "position": position(ad.price, stats, gh["price_from"] if gh else None)}
+               "position": position(ad.price, stats, gh["price_from"] if gh else None, ad.item_condition)}
         _keep(res, ad.ref, query, category_url)
     if use_claude and not _claude_for(res.get("claude"), ad.price):
         verdict = await ask_claude(ad, res)
@@ -584,7 +728,7 @@ async def analyze(ad: AdDetail, *, query: str | None = None, use_claude: bool = 
         if "deal" in verdict:
             _keep(res, ad.ref, query, category_url)
             save_claude(ad.ref, verdict)
-    return res
+    return rerate(res)
 
 
 def _keep(res: dict[str, Any], ad_id: str, query: str | None, category_url: str | None) -> None:
@@ -661,6 +805,9 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
     lines = [f"Anzeige: {ad.heading}", f"Preis: {ad.price_display or (f'{ad.price:g} €' if ad.price is not None else 'keiner')}",
              f"Ort: {ad.location or '?'} · "
              f"{'privat' if ad.is_private else 'Händler' if ad.is_private is False else 'Anbieter unbekannt'}"]
+    v, label = ad.item_condition, ad.item_condition_label
+    lines.append(f"Zustand laut Inserat: {label}" if v and label else f"Zustand angenommen: {GERMAN[v]}" if v
+                 else "Zustand: unbekannt")
     if ad.category_path:
         lines.append(f"Kategorie: {' > '.join(ad.category_path)}")
     if photo:
@@ -679,8 +826,23 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
         lines.append(f"Vergleichsanzeigen: zu wenige ({comp.get('count', 0)}) für die Suche „{comp.get('query') or '-'}“")
     lines.append(f"Neupreis laut Geizhals: ab {gh['price_from']:g} € ({gh['name']})" if gh
                  else "Neupreis laut Geizhals: kein passendes Produkt gefunden")
-    if pos.get("pos") is not None:
-        lines.append(f"Einordnung der App: {pos['pos']:.2f} auf einer Skala 0 = billig bis 1 = teuer ({pos['level']})")
+    if pos.get("reason") == "defect":
+        lines.append("Einordnung der App: keine (laut Inserat defekt)")
+    elif pos.get("pos") is not None and pos.get("basis") == "geizhals":
+        z = pos["zones"]
+        lines.append(f"Einordnung der App: {LEVEL_DE[pos['level']]} – {pos['pct']} % vom günstigsten "
+                     f"Geizhals-Neupreis (Zonen des Nutzers für {'Neuware' if pos['group'] == 'new' else 'Gebrauchtes'}: "
+                     f"Schnäppchen unter {z[0]} %, günstig ab {z[0]} %, fair ab {z[1]} %, teuer ab {z[2]} %, "
+                     f"sehr teuer ab {z[3]} %)")
+        if pos.get("cross"):
+            lines.append(f"Unter den Vergleichsanzeigen wäre es {LEVEL_DE[pos['cross']]} – der Geizhals-Artikel "
+                         "passt vielleicht nicht.")
+    elif pos.get("pos") is not None:
+        lines.append(f"Einordnung der App: {LEVEL_DE[pos['level']]} unter den Vergleichsanzeigen "
+                     "(die mittlere Hälfte gilt als fair)")
+        if pos.get("new_price_ignored"):
+            lines.append(f"Der Geizhals-Neupreis passt wohl nicht: die Vergleichsanzeigen kosten im Mittel "
+                         f"{pos['new_price_ignored']} % davon.")
     lines += ["", f"Sprache für reason: {language}", "Aufgabe: Bewerte den Preis dieser Anzeige."]
     return "\n".join(lines)
 

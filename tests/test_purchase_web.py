@@ -320,7 +320,7 @@ def _market_res(low: float, p25: float, median: float, count: int = 9, price: fl
     """What deals.analyze returns (only the parts the dialog reads): the position comes from deals.position itself."""
     stats = {"count": count, "min": low, "p10": (low + p25) / 2, "p25": p25, "median": median, "p75": median + 30,
              "p90": median + 60, "max": median + 100}
-    return {"ad": {"price": price}, "comparables": {"count": count, "stats": stats},
+    return {"ad": {"price": price}, "comparables": {"count": count, "stats": stats}, "geizhals": None,
             "position": deals.position(price, stats, None)}
 
 
@@ -403,8 +403,8 @@ def test_step2_has_one_fairness_hint_from_the_product_search_bar(client, monkeyp
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     step2 = _step2(frag)
     pos = deals.position(250.0, _market_res(180.0, 200.0, 220.0)["comparables"]["stats"], None)
-    # the bar of the product search: gradient track, needle at the position of the asking price, the level badge
-    assert 'bd-drag ' in step2 and 'class="deal-track"' in step2
+    # the price bar's zones (no ring of its own), the needle at the position of the asking price, the level badge
+    assert 'bd-drag ' in step2 and 'deal-zones' in step2 and 'border-[3px]' not in step2.split('bd-pin')[0]
     assert 'class="deal-needle ' in step2 and f'style="left:{round(pos["pos"] * 100, 1)}%"' in step2
     assert f'bg-lvl-{pos["level"]}">' in step2 and deals.level_label(pos["level"]) in step2
     # one short line, worded as on the product search card; the numbers of the old pills and the market line are gone
@@ -429,8 +429,10 @@ def test_step2_scale_for_the_browser_is_the_one_position_reads(client, monkeypat
     js = json.loads(htmllib.unescape(re.search(r"data-fair='([^']*)'", frag).group(1)))
     stats = res["comparables"]["stats"]
     assert js["scale"] == [[v, q] for v, q in deals.anchors(stats)] and js["scale"][3] == [220.0, 0.5]
-    assert js["pos"] == res["position"]["pos"] and js["levels"][0] == [0.12, "bargain"] and js["levels"][-1][1] == "very_expensive"
-    assert js["labels"]["cheap"] == "cheap" and set(js["labels"]) == {n for _, n in deals.LEVELS}
+    assert js["pos"] == res["position"]["pos"] and js["rule"]["kind"] == "quantile"
+    assert js["rule"]["cuts"] == [stats["p10"], stats["p25"], stats["p75"], stats["p90"]]
+    assert js["rule"]["segs"]["fair"] == [0.25, 0.75] and js["rule"]["names"] == list(deals.LEVEL_NAMES)
+    assert js["labels"]["cheap"] == "cheap" and set(js["labels"]) == set(deals.LEVEL_NAMES)
     assert re.search(r'class="bd-pin [^"]*" hidden', frag) and 'data-tpl="{n} % · {level}"' in frag and 'bd-drag ' in frag
 
 
@@ -480,12 +482,12 @@ def test_step2_bar_ends_name_the_cheapest_and_the_dearest_comparable(client, mon
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert '<span>€ 180</span><span>€ 320</span>' in step2 and 'class="bd-ends' in step2
     assert step2.index('class="bd-gauge ') < step2.index('class="bd-ends') < step2.index('class="bd-sugg')
-    # too few comparable ads: no scale, no ends, no drag
+    # too few comparable ads, but a Geizhals new price: the zones decide, a straight scale to drag on, no ends, no chips
     res = _market_res(180.0, 200.0, 220.0, count=3)
-    res["position"] = {"pos": 0.4, "level": "fair", "basis": "geizhals"}
+    res["geizhals"] = {"price_from": 300.0}
     _use(monkeypatch, _ad(), res)
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert "bd-ends" not in step2 and "bd-drag" not in step2 and 'class="bd-gauge ' in step2
+    assert "bd-ends" not in step2 and "bd-drag" in step2 and 'class="bd-gauge ' in step2 and "bd-sugg" not in step2
     from app import purchase_routes
     assert purchase_routes._fair(_ad(), _market_res(180.0, 200.0, 220.0))["min"] == 180.0
     assert purchase_routes._fair(_ad(), res)["min"] is None and purchase_routes._fair(_ad(), res)["max"] is None
@@ -499,13 +501,19 @@ def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noq
     for gone in ["bd-gauge", "deal-track", "deal-needle", "bd-sugg", "bd-live", "bd-pin", "deal-lvl"]:
         assert gone not in step2 and gone not in summary, gone
     assert "data-fair" not in frag and 'name="max_price"' in step2 and "Rating" not in summary
-    # too few comparable ads: the position comes from the new price, no scale for the browser, no chips, no pill
+    # too few comparable ads: the zones rate against the Geizhals new price (€ 250 of € 300 = 83 %: expensive); the
+    # browser gets their rule, so the pill, the pin and the drag work; no chips without 5 comparables
     res = _market_res(180.0, 200.0, 220.0, count=3)
-    res["position"] = {"pos": 0.4, "level": "fair", "basis": "geizhals"}
+    res["geizhals"] = {"price_from": 300.0}
     _use(monkeypatch, _ad(), res)
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    assert "bd-gauge" in frag and "data-fair" not in frag and "bd-sugg" not in frag and "bd-live" not in frag and "bd-pin" not in frag
-    assert "14 % above the median · 3 comparable ads" in frag
+    assert "bd-gauge" in frag and "data-fair" in frag and "bd-sugg" not in frag and "bd-live" in frag and "bd-pin" in frag
+    assert "83 % of the new price · 3 comparable ads" in frag and "bg-lvl-expensive" in frag and "bd-ends" not in frag
+    import html as htmllib
+    import json
+    js = json.loads(htmllib.unescape(re.search(r"data-fair='([^']*)'", frag).group(1)))
+    assert js["rule"] == {"kind": "share", "new_price": 300.0, "zones": [30, 50, 80, 90], "names": list(deals.LEVEL_NAMES)}
+    assert js["scale"] == [[0.0, 0.0], [330.0, 1.0]] and js["pos"] == pytest.approx(250 / 330, abs=0.001)
 
 
 def test_maximum_field_holds_the_default_number_and_has_no_placeholder(client, monkeypatch):  # noqa: F811
@@ -706,7 +714,8 @@ function node(props) { return Object.assign({ dataset: {}, hidden: false, disabl
   focus() { this.focused = true; } }, props || {}); }
 // the scale of deals.anchors for min 100, p10 120, p25 150, median 200, p75 250, p90 300, max 400 (asking price 250 = 0.75)
 const FAIR = { pos: 0.75, scale: [[100, 0], [120, 0.1], [150, 0.25], [200, 0.5], [250, 0.75], [300, 0.9], [400, 1]],
-  levels: [[0.12, 'bargain'], [0.35, 'cheap'], [0.65, 'fair'], [0.88, 'expensive'], [2.0, 'very_expensive']],
+  rule: { kind: 'quantile', cuts: [120, 150, 250, 300], names: ['bargain', 'cheap', 'fair', 'expensive', 'very_expensive'],
+          segs: { bargain: [0, 0.1], cheap: [0.1, 0.25], fair: [0.25, 0.75], expensive: [0.75, 0.9], very_expensive: [0.9, 1] } },
   labels: { bargain: 'bargain', cheap: 'cheap', fair: 'fair', expensive: 'expensive', very_expensive: 'very expensive' } };
 function form(o) {
   const radios = {};
@@ -931,13 +940,13 @@ def test_buy_steps_script_in_node():  # noqa: F811
                          "next2": False, "sum": "€ 240"}
     assert r["mode"]["sumMode"] == "paylivery" and r["mode"]["sumShip"] == "Shipping € 7.90 · Buyer protection € 11,25"
     assert r["step2"] == {"step": "2", "shown": [False, True, False], "chipDone": True, "chipOn": True, "next2": False}
-    # the default is the ad's own price: 0 %, expensive (0.75); the ring is shown (around the needle), not hidden; the chips
-    # add shipping 7.90 and the fee of their own item price (200: 9, 150: 6.75)
-    assert r["dflt"] == {"pill": ["0 % · expensive", False, True], "pinHidden": False,
+    # the default is the ad's own price: 0 %, fair (250 = p75, the end of the middle half); the ring is shown (around the
+    # needle), not hidden; the chips add shipping 7.90 and the fee of their own item price (200: 9, 150: 6.75)
+    assert r["dflt"] == {"pill": ["0 % · fair", False, True], "pinHidden": False,
                          "chips": ["Cheap · € 216,90", "Cheap · € 164,65"], "on": [False, False]}
     # cleared: valid and passable, no pill and no ring while empty, the summary shows the default; leaving the field refills the number
     assert r["empty"] == {"next2": False, "maxDefault": "1", "pill": ["", True, False], "pinHidden": True, "sumMax": "€ 269,15"}
-    assert r["blur"] == {"value": "269.15", "maxDefault": "1", "pill": ["0 % · expensive", False, True], "pinHidden": False}
+    assert r["blur"] == {"value": "269.15", "maxDefault": "1", "pill": ["0 % · fair", False, True], "pinHidden": False}
     assert r["emptyMode"] == "269.15" and r["badInput"] is False and r["emptyGoes"] == {"step": "3", "value": "269.15"}
     assert r["changed"] == "" and r["changedKept"] == "200" and r["backToDefault"] == "1" and r["chipRefill"] == "269.15"
     assert r["below1"] == {"next2": True, "maxDefault": "", "pill": ["", True, False]}       # below € 1 (and no item price left): no pill
@@ -975,7 +984,7 @@ def test_buy_steps_script_in_node():  # noqa: F811
     assert dr["move"] == {"value": "243.03", "pill": ["−10 % · fair", False, True], "sum": "€ 243,03"}   # item 225 + 7.90 + 10.13
     assert dr["right"] == "425.90" and dr["left"] == {"value": "112.40", "pin": "0.0%"}              # 400 + 7.90 + 18 / 100 + 7.90 + 4.50
     assert dr["after"] == {"value": "112.40", "drag": False} and dr["right_button"] == "112.40"
-    assert dr["touch"] == {"value": "269.15", "flag": "1", "pill": ["0 % · expensive", False, True]}   # on the needle: the default again
+    assert dr["touch"] == {"value": "269.15", "flag": "1", "pill": ["0 % · fair", False, True]}   # on the needle: the default again
     assert r["cheapDrag"] == "4.60" and r["noScaleDrag"] is False
     # costs()/item() are the same cents maths as purchase.py: fee, total and the inverse agree for all three fee regimes
     from app.services.purchase import costs_of, item_ceiling, paylivery_fee
@@ -994,3 +1003,73 @@ def test_buy_steps_script_in_node():  # noqa: F811
     # the summary row names the fee of the item price at the maximum (the asking price while the field is empty)
     assert r["sumFee"] == "Shipping € 7.90 · Buyer protection € 9" and r["sumFeeEmpty"] == "Shipping € 7.90 · Buyer protection € 11,25"
     assert r["sumNoFee"] == "Shipping about € 6"
+
+
+# the cases come on stdin (argv is limited); per case either every cent's level (share rules) or [level, pos] of
+# wbBuy.rate() on a fake form without shipping (the item price is the typed maximum)
+PARITY_HARNESS = r"""
+const cases = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const out = cases.map(cs => {
+  const res = {};
+  if (cs.cents) {
+    let s = '';
+    for (let c = 1; c <= cs.cents; c++) s += cs.rule.names.indexOf(wbBuy.levelOf(cs.rule, c / 100));
+    res.levels = s;
+  }
+  const f = { dataset: { ask: '1', fair: JSON.stringify({ pos: 0, scale: cs.scale, rule: cs.rule, labels: {} }) },
+              elements: { max_price: { value: '' } }, querySelector: () => null };
+  res.rated = (cs.prices || []).map(c => { f.elements.max_price.value = String(c); const r = wbBuy.rate(f);
+    return r ? [r.level, r.pos] : null; });
+  return res;
+});
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is needed to run the dialog script")
+def test_buy_dialog_rating_is_the_one_of_position():
+    """wbBuy.levelOf/rate (the live pill and the pin) against deals.position: every cent up to 3 × new for the zones,
+    and the comparables rule around every cut, tied quantiles included."""
+    import json
+    import subprocess
+
+    from app.services import price_zones
+
+    html = (Path(__file__).resolve().parent.parent / "app" / "templates" / "_buy_script.html").read_text(encoding="utf-8")
+    script = re.search(r"<script>\s*// Buy dialog.*?</script>", html, re.S).group(0)
+    code = ("var window = {};\n" + script.replace("<script>", "").replace("</script>", "")
+            + "\nconst wbBuy = window.wbBuy;\n" + PARITY_HARNESS)
+    cases, checks = [], []
+    for new in (202.30, 199.99, 37.5):
+        for zones in ((30, 50, 80, 90), (75, 100, 110, 125), (85, 86, 87, 88)):
+            zz = {"used": zones, "new": zones}
+            own = deals.position(round(new * 0.68, 2), None, new, None, zz)
+            prices = [round(new * k / 200, 2) for k in range(1, 601, 7)]
+            cases.append({"rule": deals.js_rule(own, None), "scale": deals.js_scale(own, None),
+                          "cents": round(new * 300), "prices": prices})
+            checks.append(("share", new, zones, own, prices))
+    for prices_ in ([100] * 5 + [200], [90, 100, 100, 150, 150, 150, 150, 300], [40, 60, 80, 90, 100, 110, 120, 130, 150, 200],
+                    [520, 560, 600, 640, 580, 610, 590]):
+        st = deals.stats(prices_)
+        own = deals.position(st["median"], st, None)
+        grid = [st["min"] - 10 + k / 2 for k in range(int((st["max"] - st["min"] + 20) * 2) + 1)]
+        grid += [round(st[k] + d, 2) for k in ("p10", "p25", "p75", "p90") for d in (-0.01, 0, 0.01)]
+        cases.append({"rule": deals.js_rule(own, st), "scale": deals.js_scale(own, st), "prices": grid})
+        checks.append(("quantile", st, None, own, grid))
+    out = subprocess.run(["node", "-e", code], input=json.dumps(cases), capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    answers = json.loads(out.stdout)
+    for (kind, a, zones, own, prices), ans in zip(checks, answers, strict=True):
+        if kind == "share":
+            want = "".join(str(price_zones.NAMES.index(price_zones.level_for(c / 100, a, zones)))
+                           for c in range(1, round(a * 300) + 1))
+            assert ans["levels"] == want, (a, zones)
+            for price, got in zip(prices, ans["rated"], strict=True):
+                p = deals.position(price, None, a, None, {"used": zones, "new": zones})
+                assert got[0] == p["level"], (a, zones, price)
+                if p["axis"] == own["axis"]:                     # the same scale as the dialog's bar
+                    assert got[1] == pytest.approx(p["pos"], abs=0.001), (a, zones, price)
+        else:
+            for price, got in zip(prices, ans["rated"], strict=True):
+                p = deals.position(price, a, None)
+                assert got[0] == p["level"] and got[1] == pytest.approx(p["pos"], abs=0.001), (price, got, p)

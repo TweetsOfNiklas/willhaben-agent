@@ -410,7 +410,7 @@ def test_page_renamed_and_search_flow(app_client):
         time.sleep(0.05)
     assert "Fit 92" in frag and "Leise, 60 cm, gut im Budget." in frag and 'data-ad=' in frag
     assert 'data-ad="2000000001"' in frag and "/deals/ad/2000000001?q=Geschirrsp%C3%BCler" in frag
-    assert ">Check price<" in frag and "deal-track" in frag and "Generated searches (3)" in frag
+    assert ">Check price<" in frag and "deal-zones" in frag and "Generated searches (3)" in frag
     assert "3 searches" in frag and "Zustand unklar" in frag
     assert ps.get(sid).settings["depth"] == "deep"
     assert "Höchstzahl an Suchen: 12" in app_client.fake.calls[0]["prompt"]

@@ -82,8 +82,6 @@ MAX_ANSWER = 200             # chars of one answer (free text included)
 _ID_RE = re.compile(r"[^a-z0-9_]+")
 DEFAULT_PATH = "kaufen-und-verkaufen/marktplatz"
 _PATH_RE = re.compile(r"^kaufen-und-verkaufen/marktplatz/[a-z0-9-]+-\d+$")
-_LEVEL_DE = {"bargain": "Schnäppchen", "cheap": "günstig", "fair": "fair", "expensive": "teuer",
-             "very_expensive": "sehr teuer"}
 
 _transport = None             # tests inject a mock transport for the photo downloads
 _tasks: set[asyncio.Task] = set()
@@ -414,7 +412,7 @@ def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dic
     """Everything the result list shows about one ad, price position and scam flags included (no request)."""
     comp = _price_without(prices, ad.price)
     st = deals.stats(comp)
-    pos = deals.position(ad.price, st, None)
+    pos = deals.position(ad.price, st, None, ad.item_condition)    # lists know no new price: comparables only
     item = {"heading": ad.heading, "body": ad.body, "price": ad.price, "is_private": ad.is_private}
     return {"ad_id": ad.ad_id, "platform": ad.platform, "ref": ad.ref, "title": ad.heading, "price": ad.price,
             "price_display": ad.price_display,
@@ -433,7 +431,7 @@ def _rank_line(nr: int, c: dict[str, Any]) -> dict[str, Any]:
     return {"nr": nr, "title": _one_line(c["title"])[:120],
             "price": c["price_display"] or (f"{c['price']:g} €" if c["price"] is not None else None),
             "location": c["location"], "private": c["is_private"], "text": c["text"],
-            "level": _LEVEL_DE.get((c.get("position") or {}).get("level") or ""),
+            "level": deals.LEVEL_DE.get((c.get("position") or {}).get("level") or ""),
             "scam": [f["label"] for f in scam.warnings(c["scam_flags"])]}
 
 
@@ -528,7 +526,7 @@ async def check_photos(description: str, plan: dict[str, Any], results: list[dic
             images.append(img)
             items.append({"nr": nr, "title": _one_line(r.get("title"))[:120],
                           "price": r.get("price_display") or (f"{r['price']:g} €" if r.get("price") is not None else None),
-                          "level": _LEVEL_DE.get((r.get("position") or {}).get("level") or ""),
+                          "level": deals.LEVEL_DE.get((r.get("position") or {}).get("level") or ""),
                           "fit": r.get("fit"), "reason": _one_line(r.get("reason"))[:300],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...
                           "photo": f"foto{len(images)}{img.suffix}"})
