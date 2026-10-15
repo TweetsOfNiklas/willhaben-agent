@@ -14,6 +14,15 @@
   {%- elif url %}{{ ui.icon('external', 11, 2, 'hidden text-muted sm:block') }}
   {%- endif %}</{{ 'a' if url else 'span' }}>
 {%- endmacro %}
+{# what a site run did beyond its one search: its price bands (each linked, with its result) and the descriptions loaded
+   for its shortlisted offers (Facebook) #}
+{% macro extras(s, label='') -%}
+{%- if s.bands or s.details or s.gone %}<div class="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[12px] leading-snug text-muted">{% if label %}<span class="font-medium">{{ label }}:</span>{% endif %}
+  {%- if s.bands %}<span>{{ _("price bands") }}</span>{% for b in s.bands %}<a href="{{ b.url }}" target="_blank" rel="noopener" title="{{ b.error or (_('Not run: the site paused the search before or its hourly request limit was used up') if b.skipped else (_('{n} ads, {k} new candidates', n=count(b.found), k=b.kept) if b.found is number else '')) }}" class="whitespace-nowrap tabular-nums no-underline hover:underline {{ 'text-error' if b.error }}">{{ b.price_from|eur ~ ' – ' ~ b.price_to|eur if b.price_from else _("up to {price}", price=b.price_to|eur) }}
+    {%- if b.error %} {{ ui.icon('alert', 11, 2, 'inline align-[-1px]') }}{% elif b.skipped %} ({{ _("skipped") }}){% elif b.found is number %} ({{ count(b.found) }}{% if b.kept %}, <span class="font-semibold text-primary">+{{ b.kept }}</span>{% endif %}){% endif %}</a>{{ ' ·' if not loop.last }}{% endfor %}{% endif %}
+  {%- if s.details %}<span>{{ '· ' if s.bands }}{{ _("{n} descriptions loaded", n=s.details) }}</span>{% endif %}
+  {%- if s.gone %}<span>· {{ _("{n} no longer available", n=s.gone) }}</span>{% endif %}</div>{% endif -%}
+{%- endmacro %}
 {% macro found(r) -%}
 {%- if r.found %}<span class="text-base-content">{{ _("{n} ads", n=count(r.found)) }}</span><br><span class="{{ 'font-semibold text-primary' if r.kept else 'text-muted' }}">{{ _("{n} new", n=r.kept) }}</span>
 {%- elif r.found is number %}{{ _("nothing found") }}
@@ -28,7 +37,7 @@
   <div class="flex flex-col gap-3 px-4 py-3.5">
     <p class="italic text-muted">„{{ ps.description }}“</p>
     {% if live and ps.status != 'more' %}{% set pr = ps.progress or {} %}
-    <div class="flex items-center gap-2.5"><div class="min-w-0 flex-1"><div class="font-semibold">{% if ps.status == 'planning' %}{{ _("Claude is planning the searches …") }}{% elif ps.status == 'searching' %}{{ _("Searching: {done} of {total} searches done …", done=pr.done or 0, total=pr.total or 0) }}{% elif ps.status == 'photos' %}{{ _("Claude is looking at the photos …") }}{% else %}{{ _("Claude is picking the best offers …") }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div></div><span class="loading loading-spinner loading-sm shrink-0 text-primary"></span></div>
+    <div class="flex items-center gap-2.5"><div class="min-w-0 flex-1"><div class="font-semibold">{% if ps.status == 'planning' %}{{ _("Claude is planning the searches …") }}{% elif ps.status == 'searching' and pr.step == 'details' %}{{ _("Loading the descriptions of the shortlisted Facebook offers: {done} of {total} …", done=pr.done or 0, total=pr.total or 0) }}{% elif ps.status == 'searching' %}{{ _("Searching: {done} of {total} searches done …", done=pr.done or 0, total=pr.total or 0) }}{% if pr.bands %} <span class="font-normal text-muted">{{ _("(incl. {n} Facebook price bands)", n=pr.bands) }}</span>{% endif %}{% elif ps.status == 'photos' %}{{ _("Claude is looking at the photos …") }}{% else %}{{ _("Claude is picking the best offers …") }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div></div><span class="loading loading-spinner loading-sm shrink-0 text-primary"></span></div>
     {{ ui.bar(((pr.done or 0) * 100 / pr.total)|round|int if ps.status == 'searching' and pr.total else (20 if ps.status == 'planning' else 85), 'brand', 'h-1') }}
     {% elif ps.status == 'asking' %}{% set qs = plan.questions or [] %}
     <form method="post" action="/deals/search/{{ ps.id }}/answers" id="ps-ask-{{ ps.id }}" class="flex flex-col gap-3 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-3">
@@ -92,11 +101,13 @@
       <tr class="*:align-top *:first:pl-0 *:last:pr-0 {{ '*:border-b-0 *:pb-1.5' if multi_site }}">
         <td><div class="flex flex-wrap items-baseline gap-x-1.5">{% set url = '' if multi_site else plan_query_url(one, ps.settings) %}{% if url %}<a href="{{ url }}" target="_blank" rel="noopener" title="{{ _('Search on {platform}', platform=platform_name(one.platform)) }}" class="font-medium break-words text-base-content no-underline hover:underline">{{ term.keyword }}{{ ui.icon('external', 11, 2, 'ml-1 inline align-baseline text-muted') }}</a>{% else %}<span class="font-medium break-words text-base-content">{{ term.keyword }}</span>{% endif %}{{ ui.price_range(term.price_from, term.price_to) }}</div>
           {% if term.why or term.category_hint %}<div class="mt-0.5 text-[12px] leading-snug text-muted">{{ term.why }}{% if term.category_hint %} <span class="whitespace-nowrap">{{ ui.icon('tag', 11, 2, 'mr-0.5 inline align-[-1px]') }}{{ term.category_hint }}</span>{% endif %}</div>{% endif %}
-          {% if not multi_site and one.error %}<div class="mt-0.5 text-[12px] text-error">{{ one.error }}</div>{% endif %}</td>
+          {% if not multi_site and one.error %}<div class="mt-0.5 text-[12px] text-error">{{ one.error }}</div>{% endif %}
+          {% if not multi_site %}{{ extras(one) }}{% endif %}</td>
         {% if ran %}<td class="text-right text-[12px] leading-snug whitespace-nowrap tabular-nums">{{ found(term) }}</td>{% endif %}
       </tr>
       {% if multi_site %}<tr><td colspan="{{ 2 if ran else 1 }}" class="px-0 pt-0"><div class="flex flex-wrap gap-1">{% for s in term.sites %}{{ site_run(s, ps.settings) }}{% endfor %}</div>
-        {% for s in term.sites if s.error %}{% set name = platform_name(s.platform) %}<div class="mt-1 text-[12px] leading-snug text-error">{{ name ~ ': ' if name not in s.error }}{{ s.error }}</div>{% endfor %}</td></tr>{% endif %}
+        {% for s in term.sites if s.error %}{% set name = platform_name(s.platform) %}<div class="mt-1 text-[12px] leading-snug text-error">{{ name ~ ': ' if name not in s.error }}{{ s.error }}</div>{% endfor %}
+        {% for s in term.sites %}{{ extras(s, platform_name(s.platform)) }}{% endfor %}</td></tr>{% endif %}
       {% endfor %}</tbody></table></details>{% endif %}
     {% if ps.status in ('done', 'more') and plan.queries %}
       {% for a in ps_agents %}<small><a class="link link-primary" href="/agents">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% if ps_agents|length > 1 or ps_agent_sites %} ({{ platform_name(a.platform) }}){% endif %}</small>{% endfor %}
