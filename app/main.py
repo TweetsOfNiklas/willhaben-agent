@@ -296,7 +296,8 @@ def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("nav_counts", _nav_counts())
         lim = llm_usage.limit()
         if lim["limit"]:       # the Claude meter + popover in the sidebar (monthly limit from Settings → Claude)
-            ctx.setdefault("claude_usage", {**lim, "by_task": llm_usage.month_by_task(), "by_model": llm_usage.month_by_model()})
+            ctx.setdefault("claude_usage", {**lim, "by_task": llm_usage.month_by_task(), "by_model": llm_usage.month_by_model(),
+                                            "cost_by_model": llm_usage.month_cost_by_model()})
         ctx.setdefault("inbox_items", _inbox_items())
         ctx.setdefault("inbox_unread", ctx["nav_counts"].get("inbox", 0))
         if auth.enabled():

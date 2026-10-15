@@ -123,6 +123,19 @@ def month_by_model() -> list[dict[str, Any]]:
     return sorted(out, key=lambda r: -r["tokens"])
 
 
+def month_cost_by_model() -> list[dict[str, Any]]:
+    """This month's API price per model (the CLI's own costUSD, what the usage would cost pay-as-you-go) for the
+    Claude popover: [{label, model, cost_usd, color}], biggest first."""
+    from app.llm import models
+
+    with session() as db:
+        rows = db.exec(select(LLMCall.model, func.coalesce(func.sum(col(LLMCall.cost_usd)), 0.0))
+                       .where(LLMCall.ts >= month_start()).group_by(LLMCall.model)).all()
+    out = [{"label": models.label(m), "model": m, "cost_usd": float(c or 0),
+            "color": MODEL_COLORS.get(models.line_of(m), "var(--muted)")} for m, c in rows if c]
+    return sorted(out, key=lambda r: -r["cost_usd"])
+
+
 def _limit_reached_push() -> None:
     """Once per month: a push when the token limit is reached (whatever the mode)."""
     import asyncio

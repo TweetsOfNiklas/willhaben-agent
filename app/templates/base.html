@@ -248,7 +248,8 @@
   </div>
 </div>
 
-{# ---- Claude usage (needs claude_usage; optional claude_usage.by_task / by_model = [{label, tokens, color}]) ---- #}
+{# ---- Claude usage (needs claude_usage; optional claude_usage.by_task / by_model = [{label, tokens, color}] and
+     cost_by_model = [{label, cost_usd, color}], the CLI's pay-as-you-go estimate, covered by the subscription) ---- #}
 {% if cu %}
 <div id="claude-pop" x-cloak x-show="layer === 'claude'" class="fixed inset-0 z-[90]" @click.self="close()">
   <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5">
@@ -265,7 +266,14 @@
     <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for t in parts %}<span class="block h-full" style="width:{{ [t.tokens * 100 / cu.limit, 1.5]|max|round(1) }}%;background:{{ t.color }}" title="{{ t.label }}"></span>{% endfor %}</div>
     <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">{% for t in parts %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ t.color }}"></span><span class="truncate text-muted">{{ t.label }}</span><span class="ml-auto tabular-nums">{{ tokens(t.tokens) }}</span></div>{% endfor %}</div>
     {% else %}<div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300"><span class="block h-full bg-primary" style="width:{{ cpct }}%"></span></div>{% endfor %}
-    <div class="flex flex-wrap justify-between gap-2 border-t border-base-300 pt-3 text-[12.5px] text-muted"><span>{{ _("Limit {n} M", n=(cu.limit / 1e6)|round|int) }} · {{ _("covered by your subscription") }}</span><a class="link link-primary no-underline" href="/settings/claude">{{ _("Limit & statistics") }} →</a></div>
+    {# the API price: shares of this month's total, not of the limit #}
+    {% set costs = cu.cost_by_model if cu.cost_by_model is defined else [] %}{% set cost_total = costs|map(attribute='cost_usd')|sum %}
+    {% if costs %}
+    <div class="mt-1 flex items-baseline justify-between gap-2 text-[11.5px] uppercase tracking-wide text-muted"><span class="font-medium">{{ _("API price") }} · {{ '$%.2f'|format(cost_total) }}</span><span class="normal-case tracking-normal">{{ _("covered by your subscription") }}</span></div>
+    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for t in costs %}<span class="block h-full" style="width:{{ [t.cost_usd * 100 / cost_total, 1.5]|max|round(1) }}%;background:{{ t.color }}" title="{{ t.label }}"></span>{% endfor %}</div>
+    <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">{% for t in costs %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ t.color }}"></span><span class="truncate text-muted">{{ t.label }}</span><span class="ml-auto tabular-nums">{{ '$%.2f'|format(t.cost_usd) }}</span></div>{% endfor %}</div>
+    {% endif %}
+    <div class="flex flex-wrap justify-between gap-2 border-t border-base-300 pt-3 text-[12.5px] text-muted"><span>{{ _("Limit {n} M", n=(cu.limit / 1e6)|round|int) }}{% if not costs %} · {{ _("covered by your subscription") }}{% endif %}</span><a class="link link-primary no-underline" href="/settings/claude">{{ _("Limit & statistics") }} →</a></div>
   </div>
 </div>
 {% endif %}

@@ -60,6 +60,9 @@ def test_month_by_model_and_task():
     pop = home[home.index('id="claude-pop"'):]
     assert ("By task" in pop or "Nach Aufgabe" in pop) and ("By model" in pop or "Nach Modell" in pop)
     assert pop.index("Opus") < pop.index("Sonnet 5.5") < pop.index("Haiku 5.5")   # biggest first, by model
+    costs = usage.month_cost_by_model()                                          # the CLI's costUSD per model
+    assert [(c["label"], round(c["cost_usd"], 3)) for c in costs] == [("Sonnet 5.5", 0.012), ("Haiku 5.5", 0.001)]
+    assert ("API price" in pop or "API-Preis" in pop) and "$0.01" in pop and "$0.00" in pop   # total 0.013 and the Haiku part
 
 
 async def test_cli_records_purpose_and_errors(monkeypatch):
