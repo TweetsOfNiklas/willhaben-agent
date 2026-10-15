@@ -1953,7 +1953,13 @@ def _platform_row(p: Any) -> dict[str, Any]:
             "product_search": get_setting(f"platform_{p.id}_product_search") != "0",
             "last_hour": access_stats.last_hour(platform=p.id),
             "auth": get_setting(f"{p.id}_api_auth") if p.id == "kleinanzeigen" else None,
+            "fb_location": _fb_location() if p.id == "facebook" else None,
             "auth_default": st.get("auth_default")}
+
+
+def _fb_location() -> dict[str, Any] | None:
+    from app.platforms import facebook as fb
+    return fb.location()
 
 
 @app.post("/settings/platform/{pid}")
@@ -1979,6 +1985,16 @@ async def settings_platform(request: Request, pid: str):
         if auth != get_setting("kleinanzeigen_api_auth"):
             set_setting("kleinanzeigen_api_auth", auth if re.fullmatch(r"[^:\s]+:[^\s]+", auth) else "")
             ka.set_client(None)           # the next request builds a client with the new credentials
+    if p.id == "facebook":
+        from app.platforms import facebook as fb
+        link = str(form.get("fb_location") or "").strip()
+        if not link:
+            fb.clear_location()
+        elif link != (fb.location() or {}).get("link"):
+            try:
+                await fb.save_location(link)       # one test search: does Facebook know the place?
+            except (InvalidSearchUrl, PlatformError) as e:
+                return back(f"/settings/{p.id}?msg={quote(str(e), safe='')}")
     return back(f"/settings/{p.id}?msg={quote(t('Changes saved'), safe='')}")
 
 

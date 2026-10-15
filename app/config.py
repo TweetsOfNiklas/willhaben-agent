@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     wh_replay: bool = False
     # --- platforms (app/platforms): which search-agent adapters exist besides willhaben; switching them on for
     # the user happens in Settings → Platforms
-    platforms_enabled: str = "willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay"
+    platforms_enabled: str = "willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay,facebook"
     # hourly budgets: None = willhaben's (requests_per_hour, as set in Settings → willhaben), so all sites get the same
     platform_kleinanzeigen_min_gap_s: float = 3.0
     platform_kleinanzeigen_per_hour: int | None = None
@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     platform_preisjaeger_per_hour: int | None = None
     platform_ebay_min_gap_s: float = 8.0            # Akamai watches the website; every search is a whole page
     platform_ebay_per_hour: int | None = None
+    platform_facebook_min_gap_s: float = 8.0        # logged-out web pages; Facebook's terms forbid automated access
+    platform_facebook_per_hour: int | None = 60     # own budget, below willhaben's
     kleinanzeigen_api_auth: str = ""            # "user:pw" of the kleinanzeigen app API; empty = the bundled default
     # --- VPN for the anonymous requests (app/platforms/vpn.py): WireGuard configs are uploaded in Settings → VPN
     wireproxy_bin: str = "wireproxy"             # userspace WireGuard with a local proxy; part of the image

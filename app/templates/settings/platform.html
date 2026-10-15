@@ -19,6 +19,10 @@
   <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("App credentials (user:password) – only when the bundled ones stop working") }}</span><input name="auth" value="{{ site.auth or '' }}" placeholder="{{ _('bundled default in use') if site.auth_default else '' }}" autocomplete="off" class="input w-full min-w-0 bg-base-200"></label>
   <small class="text-[12.5px] text-muted">{{ _("The search agents use the API of the Kleinanzeigen app. Its credentials are the app's own and public, but they can change; a 401/403 on an agent means they did.") }}</small>
   {% endif %}
+  {% if p.id == 'facebook' %}
+  <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Location for keyword searches (product search): a Marketplace link from facebook.com") }}</span><input name="fb_location" type="url" value="{{ site.fb_location.link if site.fb_location else '' }}" placeholder="https://www.facebook.com/marketplace/vienna/search?query=sofa&radius=40" class="input w-full min-w-0 bg-base-200"></label>
+  <small class="text-[12.5px] text-muted">{% if site.fb_location %}{{ _("Searching around {place}", place=site.fb_location.place) }}{% if site.fb_location.radius %} · {{ _("radius {n} km", n=site.fb_location.radius) }}{% endif %} · {% endif %}{{ _("Open Marketplace on facebook.com, set the location and radius, search for anything and paste the link; saving runs one test search. Search agents take the location from their own link.") }}</small>
+  {% endif %}
   <label class="flex cursor-pointer items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="min-w-0 font-medium">{{ _("Use for the product search") }}</span><input type="checkbox" class="toggle toggle-primary" name="product_search" {% if site.product_search %}checked{% endif %}></label>
   <div class="flex flex-wrap items-center justify-between gap-3">
     <button class="btn btn-primary">{{ _("Save") }}</button>

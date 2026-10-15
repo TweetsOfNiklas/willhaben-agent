@@ -179,7 +179,7 @@ def test_registry_knows_kleinanzeigen():
     assert [p.id for p in platforms.all()] == ["willhaben", "kleinanzeigen"]
     assert platforms.for_host("img.kleinanzeigen.de").id == "kleinanzeigen"
     assert platforms.names() == "willhaben, Kleinanzeigen"
-    assert get_settings().platforms_enabled == "willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay"
+    assert get_settings().platforms_enabled == "willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay,facebook"
 
 
 def test_city_with_district_is_one_line():
