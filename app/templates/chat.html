@@ -21,24 +21,30 @@
   </div>
 
   <div id="chat-messages" class="flex flex-1 flex-col justify-end gap-2 px-4 py-5 md:px-5">
+    {# my messages: ✓ sent, ✓✓ seen by the other person (Message.read, chats.mark_seen); the newest one says it in words #}
+    {% set last_out = messages|selectattr('direction', 'equalto', 'out')|rejectattr('kind')|list|last %}
     {% for m in messages %}
       {% if m.kind or m.direction == 'unknown' %}{# willhaben's notices (PayLivery, shipping, status); rows stored before
          notices got their kind only carry direction "unknown" – neither side wrote them #}
       <div data-notice class="mx-auto max-w-[85%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere] md:max-w-[80%]">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
       {% else %}
-      <div class="chat {{ 'chat-end' if m.direction == 'out' else 'chat-start' }}">
-        <div class="chat-bubble max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere] md:max-w-[72%] {{ 'chat-bubble-primary' if m.direction == 'out' else 'border border-base-300 bg-base-100 text-base-content' }}">{{ m.text }}<small class="mt-1 block text-right text-[11.5px] opacity-70">{{ m.created_at|local }}</small></div>
+      {% set mine = m.direction == 'out' %}
+      {% set state = (_("Seen {time}", time=m.read_at|local) if m.read_at else _("Seen")) if m.read else _("Sent") %}
+      <div class="chat {{ 'chat-end' if mine else 'chat-start' }}"{% if mine %} data-seen="{{ 1 if m.read else 0 }}"{% endif %}>
+        <div class="chat-bubble max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere] md:max-w-[72%] {{ 'chat-bubble-primary' if mine else 'border border-base-300 bg-base-100 text-base-content' }}">{{ m.text }}<small class="mt-1 flex items-center justify-end gap-1 text-[11.5px]"><span class="opacity-70">{{ m.created_at|local }}</span>{% if mine %}<span class="{{ '' if m.read else 'opacity-70' }}" title="{{ state }}">{{ ui.icon('checks' if m.read else 'check', 14, 2.25) }}<span class="sr-only">{{ state }}</span></span>{% endif %}</small></div>
+        {% if last_out and m.id == last_out.id %}<div class="chat-footer mt-0.5 text-[11.5px] text-muted" aria-hidden="true">{{ state }}</div>{% endif %}
       </div>
       {% endif %}
     {% else %}<p class="text-muted">{{ _("No history stored.") }}</p>{% endfor %}
   </div>
 
+  {# drafts come newest first (chats.drafts_of): the composer shows the newest open one, never an older, stale draft #}
   {% set sending = drafts|selectattr('status', 'equalto', 'sending')|list %}
   {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
   {# One flow: what the draft is → what to read first → the text → send → or have Claude rewrite it.
      An answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done. #}
   <div id="chat-composer" class="sticky bottom-0 z-[2] flex max-h-[85dvh] flex-col gap-3 overflow-y-auto border-t border-base-300 bg-base-100 px-4 pt-3.5 pb-4 shadow-[0_-8px_20px_-16px_rgba(0,0,0,.35)] max-md:bottom-[60px] max-md:max-h-[calc(100dvh-120px)] md:px-5"
-       {% if sending %}data-pending-key="draft:{{ (sending|last).id }}" data-refresh-also="chat-messages"{% elif conv.drafting %}data-pending-key="drafting:{{ conv.id }}"{% endif %}>
+       {% if sending %}data-pending-key="draft:{{ (sending|first).id }}" data-refresh-also="chat-messages"{% elif conv.drafting %}data-pending-key="drafting:{{ conv.id }}"{% endif %}>
     {% if conv.drafting %}
     {# Claude writes in the background (lane claude): the draft appears here by itself #}
     <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -50,10 +56,10 @@
       <span class="h-2.5 w-3/5 animate-pulse rounded-full bg-base-300"></span>
     </div>
     <small class="text-[12.5px] text-muted">{{ _("Takes 10–60 seconds – you can leave the chat.") }}</small>
-    {% elif sending %}{% set d = sending|last %}
+    {% elif sending %}{% set d = sending|first %}
     <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">{{ ui.pending('draft:' ~ d.id, _("Sending…"), _("Queued: send"), 'font-semibold') }}</div>
     <p class="rounded-[10px] bg-base-200 px-3.5 py-3 break-words whitespace-pre-wrap text-muted">{{ d.text }}</p>
-    {% elif open %}{% set d = open|last %}
+    {% elif open %}{% set d = open|first %}
     {% set label = intent_label(d.intent) %}
     {% set scam = d.intent == 'scam_suspect' %}
     {# needs_info: what Claude was missing, plus its note to me ("Hinweis: …", chats.draft_reply) #}

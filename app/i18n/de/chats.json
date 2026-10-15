@@ -134,5 +134,6 @@
  "Sold notice": "Info: verkauft",
  "Reserved notice": "Info: reserviert",
  "Claude's draft": "Entwurf von Claude",
- "Check before sending": "Vor dem Senden prüfen"
+ "Check before sending": "Vor dem Senden prüfen",
+ "Seen {time}": "Gesehen {time}"
 }

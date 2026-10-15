@@ -62,6 +62,7 @@ class ConversationSummary:
     raw: dict[str, Any]
     role: str | None = None  # seller | buyer, when the response says who posted the ad
     last_is_mine: bool | None = None  # the newest message was written by me (not news for a push)
+    last_read: bool | None = None     # the newest message's read flag: with last_is_mine, the other person has seen it
 
 
 @dataclass
@@ -70,7 +71,7 @@ class ChatMessage:
     text: str
     created_at: datetime | None
     direction: str  # in | out | unknown
-    read: bool | None = None  # willhaben's read flag (for incoming messages: did I read it)
+    read: bool | None = None  # willhaben's read flag: incoming, did I read it; my own, has the other person seen it
     kind: str | None = None   # system | integration: willhaben's own notice (PayLivery, status); None = a normal message
     raw_links: list[str] = field(default_factory=list)  # every http(s) string inside the message object
     params: dict[str, Any] | None = None  # willhaben's structured `parameters` of the message (notices carry them)
@@ -129,6 +130,7 @@ def parse_conversations(data: Any) -> list[ConversationSummary]:
             raw=c,
             role=_role(c),
             last_is_mine=_pick(c, "last_message.is_mine") if isinstance(_pick(c, "last_message.is_mine"), bool) else None,
+            last_read=_pick(c, "last_message.read") if isinstance(_pick(c, "last_message.read"), bool) else None,
         ))
     return out
 

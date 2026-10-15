@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import case
 from sqlmodel import col, func, select
 
 from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, session, set_setting, utcnow
@@ -25,7 +26,7 @@ from app.llm.prompts import (
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
 from app.services.notify import notify
-from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed
+from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
 from app.services import timeline
@@ -96,6 +97,8 @@ async def sync(force: bool = False) -> dict[str, Any]:
             row.last_message_at = c.last_at or row.last_message_at
             row.synced_at = utcnow()
             db.add(row)
+            if c.last_is_mine and c.last_read and c.last_at is not None:
+                mark_seen(db, c.id, until=c.last_at)    # they read my newest message: all mine before it too
             if is_new or newer or force:
                 changed.append(c.id)
             if not first_sync and c.unread_count > 0 and (newer or more_unread) and not c.last_is_mine:
@@ -186,6 +189,50 @@ def _drop_sent_placeholders(db, conversation_id: str) -> None:
     db.flush()
 
 
+SEEN_SLACK = timedelta(seconds=10)   # a `draft-<id>` row holds our clock after sending, willhaben's is a bit earlier
+
+
+def mark_seen(db, conversation_id: str, until: datetime | None = None, at: datetime | None = None) -> int:
+    """The other person has seen my messages in this chat up to `until` (all of them without): mark them read,
+    with `at` as the time they did, when known. Local database only; returns how many changed."""
+    n = 0
+    for m in db.exec(select(Message).where(Message.conversation_id == conversation_id, Message.direction == "out")):
+        if until is not None and m.created_at is not None and _aware(m.created_at) > _aware(until) + SEEN_SLACK:
+            continue
+        if m.read and (m.read_at is not None or at is None):
+            continue
+        m.read, m.read_at = True, m.read_at or at
+        db.add(m)
+        n += 1
+    return n
+
+
+SEEN_EVENTS = ("mark_message_as_read", "mark_inbox_as_read")
+
+
+def _seen_event(conversation_id: str, frame: dict[str, Any]) -> bool:
+    """A read event of the live socket from the other person (`incoming` true; false = I read theirs): my message
+    (`message_id`, and everything before it) or the whole chat (`mark_inbox_as_read`) has been seen. Stored here,
+    nothing new to fetch from willhaben. Seen in recorded frames 2026-10-15."""
+    kind = frame.get("type") or frame.get("req_type")
+    if kind not in SEEN_EVENTS or frame.get("incoming") is not True:
+        return False
+    payload = frame.get("payload") if isinstance(frame.get("payload"), dict) else {}
+    at = _when(frame.get("created_at"))
+    with session() as db:
+        if kind == "mark_inbox_as_read":
+            n = mark_seen(db, conversation_id, until=at or utcnow(), at=at)
+        else:
+            mine = db.exec(select(Message).where(Message.conversation_id == conversation_id, Message.direction == "out",
+                                                 Message.ext_id == str(payload.get("message_id") or ""))).first()
+            # their copies of willhaben's notices carry ids I do not have: nothing of mine was read
+            n = mark_seen(db, conversation_id, until=mine.created_at or at, at=at) if mine else 0
+        db.commit()
+    if n:
+        log.info("%d message(s) seen in %s", n, conversation_id)
+    return True
+
+
 def _same_message(row: Message, text: str, created_at) -> bool:
     if row.text != text or not _is_fallback_id(row.ext_id):
         return False
@@ -197,12 +244,15 @@ def _same_message(row: Message, text: str, created_at) -> bool:
 
 
 def _upsert_message(db, conversation_id: str, ext_id: str, direction: str, text: str, created_at,
-                    authoritative: bool = False, kind: str | None = None, params: dict | None = None) -> None:
+                    authoritative: bool = False, kind: str | None = None, params: dict | None = None,
+                    read: bool | None = None) -> None:
     """Insert or update one message. `authoritative` = direction comes from the full history, not a guess.
 
     A row with the same text and time but another ext_id is the same message stored earlier under a
     fallback id (last-message preview, or before the real message_id was parsed): it is re-keyed.
     `kind` marks willhaben notices (system | integration); `params` is their structured `parameters`.
+    `read` is willhaben's flag; it is kept for my own messages only (the other person has seen it) and never
+    goes back from seen to unseen.
     """
     exists = db.exec(select(Message).where(Message.conversation_id == conversation_id,
                                            Message.ext_id == ext_id)).first()
@@ -223,9 +273,13 @@ def _upsert_message(db, conversation_id: str, ext_id: str, direction: str, text:
         if params is not None and exists.params != params:
             exists.params = params
             db.add(exists)
+        if exists.direction == "out" and exists.read is not True and read is not None and exists.read != read:
+            exists.read = read
+            db.add(exists)
         return
     db.add(Message(conversation_id=conversation_id, ext_id=ext_id, direction=direction,
-                   text=text, created_at=created_at, kind=kind, params=params))
+                   text=text, created_at=created_at, kind=kind, params=params,
+                   read=read if direction == "out" else None))
 
 
 async def sync_messages(conversation_id: str) -> str:
@@ -240,7 +294,7 @@ async def sync_messages(conversation_id: str) -> str:
         if msgs is not None:
             for m in msgs:
                 _upsert_message(db, conversation_id, m.ext_id, m.direction, m.text, m.created_at,
-                                authoritative=True, kind=m.kind, params=m.params)
+                                authoritative=True, kind=m.kind, params=m.params, read=m.read)
             _drop_sent_placeholders(db, conversation_id)
             mode = "full"
         else:
@@ -343,7 +397,8 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
         out = {"list": fp([list(r) for r in convs], open_drafts, get_session().chat_live.get("state"))}
         conv = db.get(Conversation, conversation_id) if conversation_id else None
         if conv is not None:
-            msgs = db.exec(select(func.count(), func.max(Message.id)).where(Message.conversation_id == conv.id)).one()
+            msgs = db.exec(select(func.count(), func.max(Message.id), func.sum(case((col(Message.read).is_(True), 1), else_=0)),
+                                  func.max(Message.read_at)).where(Message.conversation_id == conv.id)).one()   # seen ticks too
             drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent)
                              .where(Draft.conversation_id == conv.id)).all()
             ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
@@ -743,7 +798,10 @@ last_sync_at: list = [None]  # set by sync(); the poll job skips while live is h
 
 
 async def on_live_event(conversation_id: str, frame: dict[str, Any]) -> None:
-    """Called for every chat frame the live WebSocket pushes; coalesces bursts into one sync."""
+    """Called for every chat frame the live WebSocket pushes; coalesces bursts into one sync. The other person
+    reading my messages is stored right away and needs no sync."""
+    if _seen_event(conversation_id, frame):
+        return
     _live["pending"] = True
     if _live["task"] is None or _live["task"].done():
         _live["task"] = asyncio.create_task(_live_sync())

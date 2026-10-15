@@ -119,6 +119,10 @@ class Message(SQLModel, table=True):
     created_at: datetime | None = None
     kind: str | None = None  # system | integration: willhaben's own notice (see app/services/paylivery.py); None = normal
     params: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # willhaben's structured `parameters`
+    # my own messages (direction out): the other person has seen it - willhaben's read flag, the chat list's flag for
+    # the newest message, or a live read event (chats.mark_seen). None = not known yet; a sent message never unsees.
+    read: bool | None = None
+    read_at: datetime | None = None   # when they saw it, if a live read event told (the history's flag has no time)
 
 
 class Draft(SQLModel, table=True):
