@@ -126,5 +126,13 @@
  "Chat removed here (still on willhaben); it comes back when they write again": "Chat hier entfernt (auf willhaben noch da); schreibt die Person wieder, taucht er wieder auf",
  "drafted automatically": "automatisch entworfen",
  "Claude revises the answer to {name}": "Claude überarbeitet die Antwort an {name}",
- "Instead:": "Stattdessen:"
+ "Availability": "Verfügbarkeit",
+ "Price negotiation": "Preisverhandlung",
+ "Pickup & shipping": "Abholung & Versand",
+ "Question": "Frage",
+ "Agreement": "Einigung",
+ "Sold notice": "Info: verkauft",
+ "Reserved notice": "Info: reserviert",
+ "Claude's draft": "Entwurf von Claude",
+ "Check before sending": "Vor dem Senden prüfen"
 }

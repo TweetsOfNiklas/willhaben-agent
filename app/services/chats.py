@@ -403,6 +403,18 @@ def clean_alternatives(raw: Any) -> list[dict[str, str]] | None:
     return out or None
 
 
+def intent_label(intent: str | None) -> str:
+    """A draft's intent in the UI language (Jinja global, the draft's header on the chat page): REPLY_SCHEMA's enum
+    and sold.NOTICE_INTENTS. "" for none and for "other" (says nothing); an unknown value (a draft saved over the API)
+    shows as written, underscores as spaces."""
+    if not intent or intent == "other":
+        return ""
+    labels = {"availability": t("Availability"), "price_negotiation": t("Price negotiation"),
+              "logistics": t("Pickup & shipping"), "question": t("Question"), "agreement": t("Agreement"),
+              "scam_suspect": t("Suspected scam"), "sold_notice": t("Sold notice"), "reserved_notice": t("Reserved notice")}
+    return labels.get(intent) or intent.replace("_", " ")
+
+
 @timeline.scoped(conversation_id="conversation_id")
 async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool = False) -> Draft:
     conv = await ensure_ad_context(conversation_id)

@@ -12,9 +12,9 @@
   {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<div class="break-words text-[12.5px] text-muted">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</div>{% endif %}
   <div class="flex flex-wrap items-center gap-1.5">
     {% for a in pl.actions %}
-    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" class="flex flex-wrap items-center gap-1.5">
+    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" class="flex max-w-full min-w-0 flex-wrap items-center gap-1.5">
       {% if a.input %}<input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required placeholder="€" aria-label="{{ _('Offer amount in euros') }}" class="input input-sm w-[90px] bg-base-200" {% if a.disabled %}disabled{% endif %}>{% endif %}
-      <button class="btn btn-sm {{ 'btn-primary' if a.name == 'buy' else '' }}" {% if a.disabled %}disabled{% endif %} {% if a.confirm %}data-confirm="{{ a.confirm }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
+      <button class="btn btn-sm h-auto min-h-8 max-w-full py-1 whitespace-normal {{ 'btn-primary' if a.name == 'buy' else '' }}" {% if a.disabled %}disabled{% endif %} {% if a.confirm %}data-confirm="{{ a.confirm }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
       {% if a.disabled %}<small class="text-xs text-muted">{{ a.note }}</small>{% endif %}
     </form>
     {% endfor %}

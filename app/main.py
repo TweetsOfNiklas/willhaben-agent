@@ -213,6 +213,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
+templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html

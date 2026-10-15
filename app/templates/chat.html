@@ -1,34 +1,33 @@
 {% extends "chats.html" %}
 {% import "_ui.html" as ui %}
 {# The thread fills the detail column of chats.html (list → detail). The route for /chats/<id> passes the list context too
-   (convs, open_drafts, hidden_count, show_hidden). Phones: a back link to the list; the context column goes below the thread. #}
+   (convs, open_drafts, hidden_count, show_hidden). Phones: a back link to the list; the context column goes below the thread.
+   The thread is at least one screen tall: the messages fill it from the bottom up, the composer sits at its foot (sticky). #}
 {% block thread %}
 {% set ad = conv.ad_context or {} %}
 {% set selling = conv.role == 'seller' %}
-<div class="flex min-w-0 flex-1 basis-full flex-col md:basis-[380px]">
-  <div class="sticky top-0 z-[2] flex flex-wrap items-center justify-between gap-2.5 border-b border-base-300 bg-base-100 px-5 py-3.5">
-    <div class="flex min-w-0 items-center gap-2.5">
-      <a href="/chats" class="btn btn-ghost btn-sm btn-square -ml-2 md:hidden" aria-label="{{ _('Chats') }}">{{ ui.icon('back', 18) }}</a>
-      <div class="min-w-0">
-        <div class="truncate text-base font-semibold">{{ conv.partner_name or _('unknown') }}{% if conv.hidden_at %} {{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}</div>
-        <div class="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}<span class="truncate">{{ conv.ad_title or '' }}</span></div>
-      </div>
+<div class="flex min-w-0 flex-1 basis-full flex-col max-md:min-h-[calc(100dvh-60px)] md:basis-[380px]">
+  <div class="sticky top-0 z-[2] flex items-center gap-2.5 border-b border-base-300 bg-base-100 px-4 py-3 md:px-5 md:py-3.5">
+    <a href="/chats" class="btn btn-ghost btn-sm btn-square -ml-2 md:hidden" aria-label="{{ _('Chats') }}">{{ ui.icon('back', 18) }}</a>
+    <div class="min-w-0 flex-1">
+      <div class="truncate text-base font-semibold">{{ conv.partner_name or _('unknown') }}{% if conv.hidden_at %} {{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}</div>
+      <div class="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}<span class="truncate">{{ conv.ad_title or '' }}</span></div>
     </div>
-    <div class="flex flex-wrap items-center gap-1.5">
-      <form method="post" action="/chats/{{ conv.id }}/refresh" hx-post="/chats/{{ conv.id }}/refresh" hx-swap="none"><button class="btn btn-sm">{{ ui.icon('refresh', 14) }}{{ _("Reload") }}</button></form>
+    <div class="flex shrink-0 items-center gap-1.5">
+      <form method="post" action="/chats/{{ conv.id }}/refresh" hx-post="/chats/{{ conv.id }}/refresh" hx-swap="none"><button class="btn btn-sm max-sm:px-2" title="{{ _('Reload') }}">{{ ui.icon('refresh', 14) }}<span class="max-sm:sr-only">{{ _("Reload") }}</span></button></form>
       <a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" rel="noopener" class="btn btn-sm">willhaben{{ ui.icon('external', 14) }}</a>
       {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
     </div>
   </div>
 
-  <div id="chat-messages" class="flex flex-col gap-2 px-5 py-5">
+  <div id="chat-messages" class="flex flex-1 flex-col justify-end gap-2 px-4 py-5 md:px-5">
     {% for m in messages %}
       {% if m.kind or m.direction == 'unknown' %}{# willhaben's notices (PayLivery, shipping, status); rows stored before
          notices got their kind only carry direction "unknown" – neither side wrote them #}
-      <div data-notice class="mx-auto max-w-[80%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
+      <div data-notice class="mx-auto max-w-[85%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere] md:max-w-[80%]">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
       {% else %}
       <div class="chat {{ 'chat-end' if m.direction == 'out' else 'chat-start' }}">
-        <div class="chat-bubble max-w-[72%] whitespace-pre-wrap [overflow-wrap:anywhere] {{ 'chat-bubble-primary' if m.direction == 'out' else 'border border-base-300 bg-base-100 text-base-content' }}">{{ m.text }}<small class="mt-1 block text-right text-[11.5px] opacity-70">{{ m.created_at|local }}</small></div>
+        <div class="chat-bubble max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere] md:max-w-[72%] {{ 'chat-bubble-primary' if m.direction == 'out' else 'border border-base-300 bg-base-100 text-base-content' }}">{{ m.text }}<small class="mt-1 block text-right text-[11.5px] opacity-70">{{ m.created_at|local }}</small></div>
       </div>
       {% endif %}
     {% else %}<p class="text-muted">{{ _("No history stored.") }}</p>{% endfor %}
@@ -36,73 +35,107 @@
 
   {% set sending = drafts|selectattr('status', 'equalto', 'sending')|list %}
   {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
-  {# an answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done #}
-  <div id="chat-composer" class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-5 pt-3.5 pb-[18px] max-md:bottom-[60px]"
+  {# One flow: what the draft is → what to read first → the text → send → or have Claude rewrite it.
+     An answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done. #}
+  <div id="chat-composer" class="sticky bottom-0 z-[2] flex max-h-[85dvh] flex-col gap-3 overflow-y-auto border-t border-base-300 bg-base-100 px-4 pt-3.5 pb-4 shadow-[0_-8px_20px_-16px_rgba(0,0,0,.35)] max-md:bottom-[60px] max-md:max-h-[calc(100dvh-120px)] md:px-5"
        {% if sending %}data-pending-key="draft:{{ (sending|last).id }}" data-refresh-also="chat-messages"{% elif conv.drafting %}data-pending-key="drafting:{{ conv.id }}"{% endif %}>
     {% if conv.drafting %}
     {# Claude writes in the background (lane claude): the draft appears here by itself #}
-    <div class="flex flex-wrap items-center gap-2">{{ ui.pending('drafting:' ~ conv.id, _("Claude is writing an answer…"), _("Queued: Claude writes an answer")) }}</div>
-    <small class="text-muted">{{ _("Takes 10–60 seconds – you can leave the chat.") }}</small>
-    {% elif sending %}{% set d = sending|last %}
-    <div class="flex flex-wrap items-center gap-2">{{ ui.pending('draft:' ~ d.id, _("Sending…"), _("Queued: send")) }}</div>
-    <p class="rounded-[10px] bg-base-200 px-3.5 py-2.5 break-words whitespace-pre-wrap text-muted">{{ d.text }}</p>
-    {% elif open %}{% set d = open|last %}
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex min-w-0 flex-wrap items-center gap-2">{{ ui.pill(_("Draft"), 'brand', dot=false) }}<span class="text-[12.5px] text-muted">{{ d.created_at|local('%H:%M') }}{% if d.intent %} · {{ d.intent }}{% endif %}{% if d.suggested_price %} · {{ _("Price {price}", price=d.suggested_price|eur) }}{% endif %}{% if d.auto %} · {{ _("automatic") }}{% endif %}</span></div>
-      <form method="post" action="/chats/{{ conv.id }}/draft" class="flex min-w-0 flex-wrap items-center gap-1.5" hx-disabled-elt="find button"
-            hx-post="/chats/{{ conv.id }}/draft" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
-        <input name="hint" placeholder="{{ _('Guidance, e.g. counter-offer €180, pickup Saturday') }}" class="input input-sm w-64 max-w-full bg-base-200">
-        <button class="btn btn-sm">{{ _("Redraft") }}</button>
-      </form>
+    <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+      <span class="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary">{{ ui.icon('sparkle', 15) }}{{ _("Claude's draft") }}</span>
+      {{ ui.pending('drafting:' ~ conv.id, _("Claude is writing an answer…"), _("Queued: Claude writes an answer")) }}
     </div>
-    {% if d.intent == 'scam_suspect' %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error">{{ _("Caution: possible scam attempt.") }}</div>{% endif %}
-    {% if d.needs_info %}<ul class="list-disc pl-[18px] text-[12.5px] text-muted">{% for n in d.needs_info %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
-    {% if d.meetup %}<div class="text-[12.5px] text-muted">{{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}</div>{% endif %}
-    {% if d.alternatives %}
-    {# Claude's other decisions for this situation (same buttons as in Telegram): one click revises the draft in the background #}
-    <form method="post" action="/drafts/{{ d.id }}/revise" class="flex flex-wrap items-center gap-1.5" hx-disabled-elt="find button"
-          hx-post="/drafts/{{ d.id }}/revise" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
-      <span class="text-[12.5px] text-muted">{{ _("Instead:") }}</span>
-      {% for a in d.alternatives %}<button name="instruction" value="{{ a.instruction }}" title="{{ a.instruction }}" class="btn btn-sm">{{ a.label }}</button>{% endfor %}
-    </form>
+    <div class="flex flex-col gap-2.5 rounded-[10px] bg-base-200 px-3.5 py-4" aria-hidden="true">
+      <span class="h-2.5 w-11/12 animate-pulse rounded-full bg-base-300"></span>
+      <span class="h-2.5 w-3/5 animate-pulse rounded-full bg-base-300"></span>
+    </div>
+    <small class="text-[12.5px] text-muted">{{ _("Takes 10–60 seconds – you can leave the chat.") }}</small>
+    {% elif sending %}{% set d = sending|last %}
+    <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">{{ ui.pending('draft:' ~ d.id, _("Sending…"), _("Queued: send"), 'font-semibold') }}</div>
+    <p class="rounded-[10px] bg-base-200 px-3.5 py-3 break-words whitespace-pre-wrap text-muted">{{ d.text }}</p>
+    {% elif open %}{% set d = open|last %}
+    {% set label = intent_label(d.intent) %}
+    {% set scam = d.intent == 'scam_suspect' %}
+    {# needs_info: what Claude was missing, plus its note to me ("Hinweis: …", chats.draft_reply) #}
+    {% set check = namespace(notes=[], missing=[]) %}
+    {% for n in d.needs_info or [] if n %}{% if n.startswith('Hinweis:') %}{% set check.notes = check.notes + [n[8:]|trim] %}{% else %}{% set check.missing = check.missing + [n] %}{% endif %}{% endfor %}
+    {# 1 · what this is #}
+    <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted" data-draft-head>
+      <span class="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary">{{ ui.icon('sparkle', 15) }}{{ _("Claude's draft") if d.model and d.model not in ('telegram', 'template') else _("Draft") }}</span>
+      {# each detail carries its own dot: a wrapped line starts with "·", none dangles at the end of the line #}
+      <span class="tabular-nums">{{ d.created_at|local('%H:%M') }}</span>
+      {% if label %}<span class="whitespace-nowrap" data-intent="{{ d.intent }}"><span class="mr-2" aria-hidden="true">·</span>{{ label }}</span>{% endif %}
+      {% if d.suggested_price %}<span class="whitespace-nowrap"><span class="mr-2" aria-hidden="true">·</span><span class="font-semibold text-base-content tabular-nums">{{ _("Price {price}", price=d.suggested_price|eur) }}</span></span>{% endif %}
+      {% if d.auto %}<span class="whitespace-nowrap"><span class="mr-2" aria-hidden="true">·</span>{{ _("automatic") }}</span>{% endif %}
+    </div>
+    {# 2 · what to read before sending #}
+    {% if scam or check.notes or check.missing %}
+    <div role="{{ 'alert' if scam else 'note' }}" data-draft-check
+         class="flex gap-2.5 rounded-[10px] border px-3.5 py-2.5 text-[13px] {{ 'border-error/30 bg-bad-soft' if scam else 'border-warning/30 bg-warn-soft' }}">
+      <span class="mt-px {{ 'text-error' if scam else 'text-warning' }}">{{ ui.icon('alert', 16) }}</span>
+      <div class="flex min-w-0 flex-1 flex-col gap-1">
+        <div class="font-semibold {{ 'text-error' if scam else 'text-warning' }}">{{ _("Caution: possible scam attempt.") if scam else _("Check before sending") }}</div>
+        {% for n in check.notes %}<p class="break-words">{{ n }}</p>{% endfor %}
+        {% if check.missing %}<p class="break-words">{{ _("Claude needs info: {items}", items=check.missing|join(', ')) }}</p>{% endif %}
+      </div>
+    </div>
     {% endif %}
-    {# in the background: the answer is queued and the composer swaps to "Sending…" (no reload) #}
+    {% if d.meetup %}<div class="flex items-start gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]"><span class="mt-px text-primary">{{ ui.icon('calendar', 16) }}</span><span class="min-w-0 break-words">{{ _("This answer fixes an appointment: {when}", when=d.meetup.start.replace('T', ' ')) }}{% if d.meetup.location %} · {{ d.meetup.location }}{% endif %}</span></div>{% endif %}
+    {# 3 · the text, 4 · send. In the background: the answer is queued and the composer swaps to "Sending…" (no reload) #}
     <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" class="flex flex-col gap-2.5"
           hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML" hx-select-oob="#chat-messages">
-      <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea w-full rounded-[10px] bg-base-200">{{ d.text }}</textarea>
-      {% if d.error %}<small class="text-error">{{ d.error }}</small>{% endif %}
-      <div class="flex flex-wrap items-center gap-1.5">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ _("Copy") }}</button>
-        <button class="btn btn-sm" formaction="/drafts/{{ d.id }}/mark-sent" hx-post="/drafts/{{ d.id }}/mark-sent">{{ _("Sent manually") }}</button>
-        <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ _("Discard") }}</button>
+      <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea min-h-20 max-h-[35dvh] w-full rounded-[10px] bg-base-200 px-3.5 py-3 text-[14.5px] leading-relaxed field-sizing-content md:min-h-24">{{ d.text }}</textarea>
+      {% if d.error %}<div class="flex items-start gap-2 text-[12.5px] text-error">{{ ui.icon('alert', 14, 2, 'mt-px') }}<span class="min-w-0 break-words">{{ d.error }}</span></div>{% endif %}
+      <div class="flex flex-wrap items-center gap-1" data-draft-actions>
+        <button type="button" class="btn btn-ghost btn-sm max-sm:px-2" title="{{ _('Copy') }}" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ ui.icon('copy', 15) }}<span class="max-sm:sr-only">{{ _("Copy") }}</span></button>
+        <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/mark-sent" hx-post="/drafts/{{ d.id }}/mark-sent">{{ ui.icon('check', 15) }}{{ _("Sent manually") }}</button>
+        <button class="btn btn-ghost btn-sm hover:bg-bad-soft hover:text-error max-sm:px-2" title="{{ _('Discard') }}" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ ui.icon('trash', 15) }}<span class="max-sm:sr-only">{{ _("Discard") }}</span></button>
         <span class="flex-1"></span>
-        <button class="btn btn-primary" hx-post="/drafts/{{ d.id }}/send" hx-confirm="{{ _('Send this message via willhaben now?') }}"
-                data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return !!window.htmx || confirm(this.dataset.confirm)">{{ _("Send") }}</button>
+        <button class="btn btn-primary px-5" hx-post="/drafts/{{ d.id }}/send" hx-confirm="{{ _('Send this message via willhaben now?') }}"
+                data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return !!window.htmx || confirm(this.dataset.confirm)">{{ ui.icon('send', 16) }}{{ _("Send") }}</button>
       </div>
     </form>
+    {# 5 · or let Claude rewrite it: one of its other decisions for this situation (same buttons as in Telegram; one click
+       revises the draft in the background), or a new draft from my own instruction #}
+    <div class="flex flex-col gap-2 border-t border-base-300 pt-3" data-draft-revise>
+      <div class="flex items-center gap-1.5 text-[12.5px] font-semibold text-muted">{{ ui.icon('sparkle', 13) }}{{ _("Revise with Claude") }}</div>
+      {% if d.alternatives %}
+      <form method="post" action="/drafts/{{ d.id }}/revise" class="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0" hx-disabled-elt="find button"
+            hx-post="/drafts/{{ d.id }}/revise" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
+        {% for a in d.alternatives %}<button name="instruction" value="{{ a.instruction }}" title="{{ a.instruction }}" class="btn btn-sm shrink-0 rounded-full font-normal">{{ a.label }}</button>{% endfor %}
+      </form>
+      {% endif %}
+      <form method="post" action="/chats/{{ conv.id }}/draft" class="flex min-w-0 items-center gap-1.5" hx-disabled-elt="find button"
+            hx-post="/chats/{{ conv.id }}/draft" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
+        <input name="hint" placeholder="{{ _('Guidance, e.g. counter-offer €180, pickup Saturday') }}" aria-label="{{ _('Revise with Claude') }}" class="input input-sm min-w-0 flex-1 bg-base-200">
+        <button class="btn btn-sm shrink-0">{{ _("Redraft") }}</button>
+      </form>
+    </div>
     {% else %}
-    <form method="post" action="/chats/{{ conv.id }}/draft" class="flex flex-wrap items-center gap-1.5" hx-disabled-elt="find button"
+    <form method="post" action="/chats/{{ conv.id }}/draft" class="flex flex-col gap-2 sm:flex-row sm:items-center" hx-disabled-elt="find button"
           hx-post="/chats/{{ conv.id }}/draft" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
-      <input name="hint" placeholder="{{ _('Guidance for this answer (optional), e.g. counter-offer €180, pickup Saturday from 10 am') }}" class="input min-w-0 flex-1 bg-base-200">
-      <button class="btn btn-primary whitespace-nowrap">{{ _("Prepare answer with Claude") }}</button>
+      <input name="hint" placeholder="{{ _('Guidance for this answer (optional), e.g. counter-offer €180, pickup Saturday from 10 am') }}" class="input w-full min-w-0 bg-base-200 sm:w-auto sm:flex-1">
+      <button class="btn btn-primary whitespace-nowrap">{{ ui.icon('sparkle', 16) }}{{ _("Prepare answer with Claude") }}</button>
     </form>
-    <small class="text-muted">{{ _("Takes 10–60 seconds.") }}</small>
-    {% if conv.draft_error %}<small class="text-error">{{ conv.draft_error }}</small>{% endif %}
+    <small class="text-[12.5px] text-muted">{{ _("Takes 10–60 seconds.") }}</small>
+    {% if conv.draft_error %}<div class="flex items-start gap-2 text-[12.5px] text-error">{{ ui.icon('alert', 14, 2, 'mt-px') }}<span class="min-w-0 break-words">{{ conv.draft_error }}</span></div>{% endif %}
     {% endif %}
     {% set sent = drafts|selectattr('status', 'equalto', 'sent')|list %}
-    {% if sent %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("{n} earlier drafts", n=sent|length) }}</summary>{% for d in sent %}<p class="mt-1.5 break-words whitespace-pre-wrap">{{ d.sent_at|local }} · {{ d.text }}</p>{% endfor %}</details>{% endif %}
+    {% if sent %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer select-none">{{ _("{n} earlier drafts", n=sent|length) }}</summary><div class="mt-1.5 flex max-h-40 flex-col gap-1.5 overflow-y-auto">{% for d in sent %}<p class="break-words whitespace-pre-wrap"><span class="tabular-nums">{{ d.sent_at|local }}</span> · {{ d.text }}</p>{% endfor %}</div></details>{% endif %}
   </div>
 </div>
 
-<aside id="chat-context" class="flex w-full min-w-0 shrink-0 flex-col gap-4 border-t border-base-300 bg-base-200 px-[18px] py-5 md:w-[280px] md:border-t-0 md:border-l">
+{# the context column stays in view beside a long thread (desktop); phones: below the thread #}
+<aside id="chat-context" class="flex w-full min-w-0 shrink-0 flex-col gap-4 *:shrink-0 border-t border-base-300 bg-base-200 px-4 py-5 md:sticky md:top-0 md:max-h-screen md:w-[280px] md:overflow-y-auto md:border-t-0 md:border-l md:px-[18px]">
   {% if ad %}
   <section class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100">
     {% if ad.images %}{{ ui.thumb(ad.images[0], 'h-[110px] w-full', '', '') }}{% endif %}
     <div class="flex min-w-0 flex-col gap-1 px-3.5 py-3">
       <div class="flex min-w-0 flex-wrap items-center gap-1.5">{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}<span class="text-[12.5px] text-muted">{{ _("Your ad") if selling else _("Someone else's ad") }}</span></div>
       <a href="{{ ad.url }}" target="_blank" rel="noopener" class="break-words font-semibold text-base-content no-underline hover:underline">{{ ad.title }}</a>
-      <div class="break-words text-[13px] text-muted">{{ ad.price or '' }} · {{ ad.location or '' }} · {{ ad.status or '' }}</div>
-      <details class="mt-1.5 text-[13px]"><summary class="cursor-pointer text-primary">{{ _("Description") }}</summary><p class="mt-1.5 break-words whitespace-pre-wrap">{{ ad.description or '' }}</p></details>
+      {% set where = [ad.location, ad.status]|select|join(' · ') %}
+      {% if ad.price or where %}<div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">{% if ad.price %}<span class="text-[15px] font-semibold tabular-nums">{{ ad.price }}</span>{% endif %}{% if where %}<span class="min-w-0 break-words text-[12.5px] text-muted">{{ where }}</span>{% endif %}</div>{% endif %}
+      {% if ad.description %}<details class="mt-1.5 text-[13px]"><summary class="cursor-pointer text-primary">{{ _("Description") }}</summary><p class="mt-1.5 break-words whitespace-pre-wrap">{{ ad.description }}</p></details>{% endif %}
     </div>
   </section>
   {% endif %}
@@ -125,7 +158,7 @@
     <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Calendar") }}</h3>
     {% if meetup and meetup.event_id %}
       <div class="break-words text-[13px]"><strong>{{ _("In your calendar") }}</strong> · {{ meetup.start.replace('T', ' ') }}{% if meetup.location %} · {{ meetup.location }}{% endif %} {% if meetup.event_link %}<a class="link link-primary" href="{{ meetup.event_link }}" target="_blank" rel="noopener">{{ _("Open") }}{{ ui.icon('external', 13) }}</a>{% endif %}</div>
-      <form method="post" action="/chats/{{ conv.id }}/calendar/forget"><button class="btn btn-xs">{{ _("New appointment") }}</button></form>
+      <form method="post" action="/chats/{{ conv.id }}/calendar/forget"><button class="btn btn-sm">{{ _("New appointment") }}</button></form>
     {% elif meetup %}
       <form method="post" action="/chats/{{ conv.id }}/calendar" class="flex flex-col gap-2">
         <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("When") }}</span><input type="datetime-local" name="start" value="{{ meetup.start }}" required class="input input-sm w-full bg-base-200"></label>

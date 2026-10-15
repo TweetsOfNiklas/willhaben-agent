@@ -107,6 +107,49 @@ def test_chat_page_offers_claudes_alternatives(client):
     assert client.post("/drafts/999/revise", data={"instruction": "x"}).status_code == 404
 
 
+def test_chat_composer_reads_top_down_and_groups_the_rewrites(client):
+    """The composer names the draft (German intent label, price), shows what to check before the text, and keeps
+    both ways of having Claude rewrite it, the alternatives and the free instruction, together under the actions."""
+    _conversation()
+    dbmod.set_setting("ui_lang", "de")
+    client.post("/chats/c1/draft", data={"hint": ""})
+    wait_jobs()
+    with dbmod.session() as db:
+        d = db.exec(select(dbmod.Draft)).one()
+    page = client.get("/chats/c1").text
+    composer = page[page.index('id="chat-composer"'):page.index('id="chat-context"')]
+    head = composer[composer.index("data-draft-head"):composer.index("data-draft-check")]
+    assert "Entwurf von Claude" in head and "Preisverhandlung" in head and "Preis € 180" in head
+    assert ">price_negotiation<" not in composer                       # the raw key only as a data attribute
+    check = composer[composer.index("data-draft-check"):composer.index('name="text"')]
+    assert "Vor dem Senden prüfen" in check and "Claude braucht Infos: Abholzeit" in check
+    revise = composer[composer.index("data-draft-revise"):]
+    assert "Mit Claude überarbeiten" in revise
+    assert f'action="/drafts/{d.id}/revise"' in revise and 'value="Nimm die 150 € an."' in revise
+    assert 'action="/chats/c1/draft"' in revise and 'name="hint"' in revise and "Neu entwerfen" in revise
+    # nothing to rewrite with above the text and the send button any more
+    before = composer[:composer.index("data-draft-revise")]
+    assert 'name="hint"' not in before and 'name="instruction"' not in before
+    assert before.index("data-draft-actions") > before.index('name="text"') and "Senden" in before
+
+
+def test_intent_labels():
+    from app.i18n import set_request_lang
+    from app.services.chats import intent_label
+
+    assert intent_label("price_negotiation") == "Price negotiation" and intent_label("logistics") == "Pickup & shipping"
+    assert intent_label(None) == "" and intent_label("other") == ""              # nothing worth saying
+    assert intent_label("counter_offer") == "counter offer"                      # a value from the API, as written
+    set_request_lang("de")
+    try:
+        assert [intent_label(i) for i in ("availability", "price_negotiation", "logistics", "question", "agreement",
+                                          "scam_suspect", "sold_notice", "reserved_notice")] == [
+            "Verfügbarkeit", "Preisverhandlung", "Abholung & Versand", "Frage", "Einigung", "Betrugsverdacht",
+            "Info: verkauft", "Info: reserviert"]
+    finally:
+        set_request_lang("en")
+
+
 def test_chat_draft_send_flow(client):
     _conversation()
     r = client.post("/chats/c1/draft", data={"hint": "Gegenangebot 180"}, follow_redirects=False)
