@@ -217,13 +217,21 @@ def test_position_by_zones_the_users_case():
     assert p["basis"] == "geizhals" and p["level"] == "fair" and p["pct"] == 68 and p["axis"] == 110
     assert p["group"] == "used" and p["zones"] == [30, 50, 80, 90] and p["new_price"] == 202.30
     assert p["band"] == {"low": 131.25, "high": 155, "count": 4} and p["pos"] == pytest.approx(0.625, abs=0.001)
-    assert p["cross"] is None and p["mismatch"] is None and p["suspicious"] is False
+    assert "cross" not in p and p["mismatch"] is None and p["suspicious"] is False
 
 
-def test_zones_win_over_enough_comparables():
-    st = deals.stats(PRICES)                                  # comparables alone: 105 is fair
-    p = deals.position(105, st, 120.0)                         # 87 % of new: expensive by the zones
-    assert p["basis"] == "geizhals" and p["level"] == "expensive" and p["pct"] == 87
+def test_enough_comparables_rate_a_used_item_the_zones_a_new_one():
+    """A used item's market beats a share of a new price, which for an old product is often a leftover shop's: a
+    UniFi AP AC Pro new from 146 €, used ones at 75–79 €, read 45 € as a bargain. New items keep the zones."""
+    st = deals.stats(PRICES)                                  # comparables: 105 is fair
+    for cond in (None, "used", "like_new"):
+        p = deals.position(105, st, 120.0, cond)               # 87 % of new would be expensive by the zones
+        assert p["basis"] == "comparables" and p["level"] == "fair" and p["market"] is True
+    p = deals.position(105, st, 120.0, "new")
+    assert p["basis"] == "geizhals" and p["level"] == "cheap" and p["pct"] == 87     # new items: 75–99 % cheap
+    assert deals.position(105, st, None)["market"] is False                         # no new price to beat
+    few = deals.position(105, deals.stats([100, 110, 120]), 120.0)                  # under 5 comparables: the zones
+    assert few["basis"] == "geizhals" and few["level"] == "expensive"
 
 
 def test_new_items_use_the_new_zones():
@@ -246,8 +254,9 @@ def test_suspicious_by_zones():
     assert deals.position(15, None, 100.0)["suspicious"] is False
     assert deals.position(37, None, 100.0, "new")["suspicious"] is True      # 37.5 % for new items
     st = deals.stats([100, 110, 120, 130, 140, 150])                         # p25 112.5: below 56.25 is suspicious
-    p = deals.position(56, st, 150.0)
+    p = deals.position(56, st, 150.0, "new")
     assert p["basis"] == "geizhals" and p["pct"] == 37 and p["suspicious"] is True
+    assert deals.position(56, st, 150.0)["suspicious"] is True                   # a used one: by the comparables
 
 
 def test_hard_mismatch_ignores_the_new_price():
@@ -258,19 +267,14 @@ def test_hard_mismatch_ignores_the_new_price():
     assert low["basis"] == "comparables" and low["new_price_ignored"] == 12
 
 
-def test_soft_mismatch_hint_and_cross_note():
+def test_soft_mismatch_hint():
     st = deals.stats([130, 140, 150, 160, 170])                              # median 150 = 1.5 × new
-    p = deals.position(140, st, 100.0)
-    assert p["basis"] == "geizhals" and p["level"] == "very_expensive" and p["cross"] == "fair"
-    assert p["mismatch"] == 150
-    p = deals.position(120, st, 100.0, "new")                                # new items: no cross note
-    assert p["cross"] is None and p["mismatch"] == 150 and p["level"] == "expensive"
-    near = deals.position(90, deals.stats([80, 85, 90, 95, 100]), 100.0)     # very expensive vs fair: 2 steps
-    assert near["cross"] == "fair" and near["mismatch"] is None
-    one = deals.position(85, deals.stats([80, 85, 90, 95, 100]), 100.0)      # expensive vs fair: 1 step, no note
-    assert one["level"] == "expensive" and one["cross"] is None
-    few = deals.position(140, deals.stats([130, 150, 170]), 100.0)            # under 5 comparables: neither
-    assert few["cross"] is None and few["mismatch"] is None and few["band"]["count"] == 3
+    p = deals.position(120, st, 100.0, "new")                                # new items: the zones, with the hint
+    assert p["basis"] == "geizhals" and p["mismatch"] == 150 and p["level"] == "expensive"
+    used = deals.position(140, st, 100.0)                                    # a used one: its comparables decide
+    assert used["basis"] == "comparables" and used["level"] == "fair" and "mismatch" not in used
+    few = deals.position(140, deals.stats([130, 150, 170]), 100.0)            # under 5 comparables: no hint
+    assert few["basis"] == "geizhals" and few["mismatch"] is None and few["band"]["count"] == 3
 
 
 def test_tied_quantiles_keep_the_ring_in_its_zone():
@@ -446,7 +450,7 @@ def test_viewer_has_lazy_price_section(app_client):
     assert app_client.calls["search"] == 0                       # opening the ad does not search yet
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
     assert "deal-zones" in frag and "10 comparable ads" in frag and "fair" in frag
-    assert "71 % of the new price · 10 comparable ads" in frag                # € 100 of € 139, by the used zones
+    assert "For used items enough comparable ads decide" in frag and "this ad is 71 % of new" in frag   # 10 ads
     assert 'href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html" target="_blank" rel="noopener"' in frag
     assert "New from €\xa0139 on Geizhals" in frag and "Ask Claude" in frag        # the amount never breaks
     assert "Comparable ads" in frag and "closest by price" in frag   # list in the viewer too
@@ -475,8 +479,9 @@ def test_viewer_keeps_screening_and_uses_agent_keyword(app_client, wh):
 
 
 def test_price_section_follows_a_condition_the_hit_learned_since(app_client, monkeypatch):
-    """The first check knew no condition (used zones). Once the hit knows one (the viewer wrote what the ad page
-    said), the cached check is re-rated with it at once, without a new search."""
+    """The first check knew no condition (used: its 10 comparables decide). Once the hit knows one (the viewer wrote
+    what the ad page said), the cached check is re-rated with it at once, without a new search: new items by the
+    zones."""
     from app.platforms import condition
     monkeypatch.setattr(condition, "willhaben_detail", lambda ad: (None, None))     # a page that states none
     with dbmod.session() as db:
@@ -490,7 +495,7 @@ def test_price_section_follows_a_condition_the_hit_learned_since(app_client, mon
         db.commit()
         db.refresh(h)
     frag = _plain(app_client.get(f"/hits/ad/{AD_ID}/deal?hit={h.id}").text)
-    assert "Condition unknown – the zones for used items apply." in frag and "„fair“ means: 50–79 %" in frag
+    assert "For used items enough comparable ads decide" in frag and "means:" not in frag
     searches = app_client.calls["search"]
     with dbmod.session() as db:
         hit = db.get(dbmod.Hit, h.id)
@@ -1408,15 +1413,17 @@ def test_viewer_offers_claude_and_updates_the_hit(app_client, no_auto_gh, monkey
 async def test_zone_change_applies_to_cached_results_without_a_request(wh, gh):
     from app.services import price_zones
     calls, _ = wh
-    res = await deals.analyze(_ad(100))                      # € 100 of € 139 = 71 %: fair by the default used zones
-    assert res["position"]["level"] == "fair" and calls["search"] == 1
+    new = _ad(100)
+    new.item_condition = "new"                               # new items: the zones decide, comparables or not
+    res = await deals.analyze(new)                           # € 100 of € 139 = 71 %: a bargain (below 75 %)
+    assert res["position"]["level"] == "bargain" and calls["search"] == 1
     deals.remember(res)
-    price_zones.save({"used": [30, 50, 70, 90], "new": list(price_zones.DEFAULTS["new"])})
-    assert deals.cached(AD_ID)["position"]["level"] == "expensive"            # from memory
+    price_zones.save({"used": [30, 50, 80, 90], "new": [70, 100, 110, 125]})
+    assert deals.cached(AD_ID)["position"]["level"] == "cheap"                # from memory
     deals.clear_cache()
-    assert deals.cached(AD_ID)["position"]["level"] == "expensive"            # revived from the DealCheck row
-    again = await deals.analyze(_ad(100))
-    assert again["position"]["level"] == "expensive" and calls["search"] == 1 and len(gh) == 1   # one card search
+    assert deals.cached(AD_ID)["position"]["level"] == "cheap"                # revived from the DealCheck row
+    again = await deals.analyze(new)
+    assert again["position"]["level"] == "cheap" and calls["search"] == 1 and len(gh) == 1   # one card search
 
 
 async def test_a_stored_label_is_never_read(wh, monkeypatch):
@@ -1558,11 +1565,12 @@ def test_price_header_names_the_condition_and_tiny_shares():
 
 
 def test_price_section_warnings_and_defect():
-    html = _render_deal(_res(140, [130, 140, 150, 160, 170], 100.0), lang="en")
-    assert "By the new price it is „very expensive“, among the comparable ads it would be „fair“" in html
-    assert "reaches past the scale" in html and "outside the scale" not in html and "Comparable ads cost 150 %" not in html
+    html = _render_deal(_res(140, [130, 140, 150, 160, 170], 100.0), lang="en")     # used: its comparables decide
+    assert "For used items enough comparable ads decide" in html and "this ad is 140 % of new" in html
+    assert "By the new price it is" not in html and "Comparable ads cost 150" not in html
     html = _render_deal(_res(120, [130, 140, 150, 160, 170], 100.0, "new", "New"), lang="en")
     assert "Comparable ads cost 150\xa0% of the new price on average" in html
+    assert "usual among comparable ads:" in html                                  # their range under the zones
     html = _render_deal(_res(400, [380, 390, 400, 410, 420, 430], 100.0), lang="en")
     assert "Geizhals new price not used: the comparable ads cost 405\xa0% of it on average" in html
     assert "this ad is 400 % of new" in html and "Among the comparable ads the middle half" in html

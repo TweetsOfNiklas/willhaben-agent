@@ -114,7 +114,7 @@ def test_labels_never_touch_at_the_narrowest_bar(group, new_price):
 
 
 def test_off_scale_band_is_clipped():
-    b = price_bar.layout(deals.position(140, deals.stats([130, 140, 150, 160, 170]), 100.0), "€ 140")
+    b = price_bar.layout(deals.position(140, deals.stats([130, 140, 150, 160, 170]), 100.0, "new"), "€ 140")
     assert b["band"]["to"] == 100 and b["band"]["from"] <= 99 and b["band"]["off"] is True
     assert b["band"]["out"] is False                                # "reaches past the scale", not "outside"
     far = price_bar.layout(deals.position(60, deals.stats([300, 320, 340]), 100.0), "€ 60")   # 3 ads: no mismatch rule

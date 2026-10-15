@@ -3,7 +3,7 @@
    error code only (?err=used-order), whose text price_zone_error() looks up. #}
 {% import "_ui.html" as ui %}{% set v = price_zone_view() %}{% set err = price_zone_error(request.query_params.get('err')) %}
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  <p class="text-muted">{{ _("When Geizhals knows the new price, the price check rates an ad by its price as a share of the lowest new price there. Set from which share each label applies, separately for used and new items.") }}</p>
+  <p class="text-muted">{{ _("When Geizhals knows the new price, the price check rates an ad by its price as a share of the lowest new price there – a used item only while there are fewer than 5 comparable ads; with more, they decide. Set from which share each label applies, separately for used and new items.") }}</p>
   {% if err %}{{ ui.msg(err, 'error') }}{% endif %}
   <form method="post" action="/settings/prices" x-data="priceZones({{ v|tojson|forceescape }})" class="flex flex-col gap-5">
   {% for g, title, hint in [('used', _("Used items"), _("Also like new, refurbished and ads whose condition the site does not say.")),

@@ -60,11 +60,12 @@ It runs on your own server, from your home internet connection, and you control 
   transfer the amount yourself and press Paid.
 - **Direct search and price check** (same tab, "Direct search" next to the AI search): a search text lists the ads of
   every ticked site with their price position; paste an ad link of any supported site and see whether the price is cheap or expensive: a
-  bar of coloured zones, by the ad's share of the Geizhals new price per your zones for used and new items (Settings →
-  Prices; the condition the site states picks the zones), else by the comparable listings of the **same item** (same
-  model and variant by their titles, in any category, without accessories, extreme prices and ads in another
-  condition; you can pick a category), whose usual range is drawn under the bar either way, and, on click, Claude's
-  verdict. Also in the hit viewer, with the zone label on hit cards.
+  bar rated by the comparable listings of the **same item** (searched by its model on willhaben and on the ad's own
+  site; same model, variant and generation by their titles, in any category, without accessories, extreme prices and
+  ads in another condition; you can pick a category) when a used item has 5 or more, else by the ad's share of the
+  Geizhals new price per your zones for used and new items (Settings → Prices; the condition the site states picks
+  the zones), with the comparables' usual range drawn under the bar, and, on click, Claude's verdict. Also in the hit
+  viewer, with the zone label and Claude's screening verdict on hit cards.
 - **Your ads**: imported from your account, with a reminder before they expire. A list with a detail pane per ad and
   three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
   automatic answers with an instruction and a minimum price (switches and text save as you type), edit text and photos

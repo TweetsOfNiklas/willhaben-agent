@@ -10,10 +10,11 @@ Three sources, all cached so reopening an ad costs nothing within the cache time
   Geizhals lookup found nothing, a search there: Claude names up to three Geizhals searches, the app runs them,
   Claude picks the product (kept with the ad's check, so a recomputed analysis does not lose it)
 
-The label (bargain … very expensive) comes from the user's price zones (price_zones, Settings → Prices) whenever
-Geizhals knows the new price: the ad price as a share of it, in whole cents. Defective items get no label, and a new
-price the comparables contradict hard (their median below 15 % or above 200 % of it) is not used. Otherwise, with
-enough comparables, the comparables decide: below p10 bargain, below p25 cheap, p25..p75 fair, up to p90 expensive.
+The label (bargain … very expensive): a used item with enough comparables (5) is rated by them: below p10 bargain,
+below p25 cheap, p25..p75 fair, up to p90 expensive. Otherwise the user's price zones (price_zones, Settings →
+Prices) decide whenever Geizhals knows the new price: the ad price as a share of it, in whole cents; for new items
+always. Defective items get no label, and a new price the comparables contradict hard (their median below 15 % or
+above 200 % of it) is not used. Without a new price enough comparables decide.
 The label is never read from storage: rerate() recomputes it on every read, so a zone change applies at once.
 """
 from __future__ import annotations
@@ -318,13 +319,16 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
              condition: str | None = None, zones: dict[str, Any] | None = None) -> dict[str, Any]:
     """Where a price lies and its label, or {"pos": None, "reason"} (no_price, free, defect, few_data).
 
-    With a Geizhals new price (basis "geizhals"): the price as a share of it against the user's zones of the item's
-    group (price_zones.group: "new" only for new items); "pos" is that share on a 0..axis % scale. "band" is p25..p75
-    of the comparable ads (a cross-check drawn under the bar), "cross" their own label when it is 2 or more steps
-    away (used items, 5+ comparables), "mismatch" their median in % of new when it is above MISMATCH_HINT × new.
-    A new price the comparables contradict hard (median outside MISMATCH_LOW..MISMATCH_HIGH × new) is ignored and
-    named in "new_price_ignored". Without one, 5+ comparables decide (basis "comparables", comparables_level()); the
-    ring is clamped into its label's segment, so tied quantiles never put it on another colour."""
+    A used item (or one whose condition is unknown) with 5+ comparable ads is rated by them (basis "comparables",
+    comparables_level()), also when Geizhals knows a new price ("market": True): what the item sells for used says
+    more than a share of a new price, which for an old product is often a leftover shop's (a UniFi AP AC Pro listed
+    new at 146 €, used ones at 75–79 €: 45 € read as a bargain). Otherwise, with a Geizhals new price (basis
+    "geizhals"): the price as a share of it against the user's zones of the item's group (price_zones.group: "new"
+    only for new items); "pos" is that share on a 0..axis % scale. "band" is p25..p75 of the comparable ads (a
+    cross-check drawn under the bar), "mismatch" their median in % of new when it is above MISMATCH_HINT × new. A new
+    price the comparables contradict hard (median outside MISMATCH_LOW..MISMATCH_HIGH × new) is named in
+    "new_price_ignored". Without one, 5+ comparables decide; the ring is clamped into its label's segment, so tied
+    quantiles never put it on another colour."""
     if price is None:
         return {"pos": None, "reason": "no_price"}
     if price <= 0:
@@ -336,21 +340,20 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
     if new_price and new_price > 0 and comp and scale \
             and not MISMATCH_LOW <= comp["median"] / new_price <= MISMATCH_HIGH:
         ignored, new_price = round(comp["median"] * 100 / new_price), None
+    market = bool(new_price and comp and scale and price_zones.group(condition) == "used")
+    if market:
+        new_price = None                  # a used item with a market of its own: the comparables decide
     if new_price and new_price > 0 and price_zones._cents(new_price) > 0:
         g = price_zones.group(condition)
         lim = tuple((zones or price_zones.config())[g])
         exact = price_zones.share_exact(price, new_price)
         axis = min(AXIS_MAX, math.ceil(max(AXIS_MIN, lim[3] + 10, exact + 8) / 10) * 10)
         lvl = price_zones.level_for(price, new_price, lim)
-        cross = comparables_level(price, comp) if comp and scale and g == "used" else None
-        if cross and abs(LEVEL_NAMES.index(cross) - LEVEL_NAMES.index(lvl)) < 2:
-            cross = None
         return {"pos": round(min(1.0, exact / axis), 3), "level": lvl, "basis": "geizhals", "group": g,
                 "condition": condition, "pct": price_zones.share(price, new_price), "new_price": new_price,
                 "zones": list(lim), "axis": axis,
                 "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]}
                 if comp and comp.get("p25") is not None else None,
-                "cross": cross,
                 "mismatch": round(comp["median"] * 100 / new_price)
                 if comp and scale and comp["median"] > MISMATCH_HINT * new_price else None,
                 "suspicious": exact < lim[0] / 2 or bool(comp and scale and price < 0.5 * comp["p25"])}
@@ -368,7 +371,7 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
                     seen.add(v)
                     ticks.append([at, v])
         return {"pos": round(pos, 3), "level": lvl, "basis": "comparables", "condition": condition, "ticks": ticks,
-                "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]},
+                "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]}, "market": market,
                 "new_price_ignored": ignored, "suspicious": price < 0.5 * comp["p25"]}
     return {"pos": None, "reason": "few_data"}
 
@@ -1538,7 +1541,7 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
     st = comp.get("stats")
     lines.append("")
     if st:
-        lines.append(f"Vergleichsanzeigen auf willhaben (Suche „{comp.get('query')}“, {st['count']} mit Preis): "
+        lines.append(f"Vergleichsanzeigen auf {_site_names(comp)} (Suche „{comp.get('query')}“, {st['count']} mit Preis): "
                      f"Median {st['median']:.0f} €, mittlere Hälfte {st['p25']:.0f}–{st['p75']:.0f} €, "
                      f"10–90 % {st['p10']:.0f}–{st['p90']:.0f} €")
         for a in comp.get("closest") or []:
@@ -1555,17 +1558,29 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
                      f"Geizhals-Neupreis (Zonen des Nutzers für {'Neuware' if pos['group'] == 'new' else 'Gebrauchtes'}: "
                      f"Schnäppchen unter {z[0]} %, günstig ab {z[0]} %, fair ab {z[1]} %, teuer ab {z[2]} %, "
                      f"sehr teuer ab {z[3]} %)")
-        if pos.get("cross"):
-            lines.append(f"Unter den Vergleichsanzeigen wäre es {LEVEL_DE[pos['cross']]} – der Geizhals-Artikel "
-                         "passt vielleicht nicht.")
     elif pos.get("pos") is not None:
         lines.append(f"Einordnung der App: {LEVEL_DE[pos['level']]} unter den Vergleichsanzeigen "
-                     "(die mittlere Hälfte gilt als fair)")
+                     "(die mittlere Hälfte gilt als fair)"
+                     + ("; bei Gebrauchtem mit genug Vergleichsanzeigen zählen diese, der Neupreis ist nur Information"
+                        if pos.get("market") else ""))
         if pos.get("new_price_ignored"):
             lines.append(f"Der Geizhals-Neupreis passt wohl nicht: die Vergleichsanzeigen kosten im Mittel "
                          f"{pos['new_price_ignored']} % davon.")
     lines += ["", f"Sprache für reason: {language}", "Aufgabe: Bewerte den Preis dieser Anzeige."]
     return "\n".join(lines)
+
+
+def _site_names(comp: dict[str, Any]) -> str:
+    """Where the comparables were found, for the prompt: "willhaben", "Kleinanzeigen und willhaben"."""
+    from app import platforms
+
+    names = []
+    for pid in dict.fromkeys(s["site"] for s in comp.get("searches") or [] if "error" not in s):
+        try:
+            names.append(platforms.get(pid).name)
+        except platforms.UnknownPlatform:
+            names.append(pid)
+    return " und ".join(names) or "willhaben"
 
 
 @timeline.scoped(ad_id=lambda a: a["ad"].ad_id)
