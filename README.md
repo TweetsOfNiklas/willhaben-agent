@@ -389,8 +389,8 @@ never uses it, so chats, your ads and publishing keep your own IP. Set it up in 
 of two uploads:
 
 - **Config collection (.zip):** many configs, e.g. Mullvad's "all servers, Linux" download as it comes. The app uses
-  one server at a time and only servers in EU countries, Austria first, then Germany and the neighbours, then the rest
-  of the EU. Never one outside the EU: through a Swiss server eBay.at shows every price with Swiss VAT (+8.1 %), and
+  one server (two when no single one suits every site) and only servers in EU countries, Austria first, then Germany
+  and the neighbours, then the rest of the EU. Never one outside the EU: through a Swiss server eBay.at shows every price with Swiss VAT (+8.1 %), and
   the price checks would see drops that are none.
 - **Dedicated profile (.conf):** one config, used as it is (also outside the EU: your choice).
 
@@ -422,16 +422,14 @@ needed. Up to 8 tunnels start at once (no site request; a dead server shows with
 handshake) and up to 3 servers are asked at once, each site through one server at a time; a test request gives up
 after 10 s, and a slow one (eBay's warm-up) stops as soon as its server can no longer help.
 
-**Careful with failures:** a server without a handshake is marked dead for a day only once it failed again on its
-own (at most 10 per search); until then the search just leaves it out. When three tunnels in a row (or half of the
-last ones) get no handshake, the search checks the server in use: no answer there either means your internet is
-down, so it stops, marks nothing, takes back what it marked and tries again 5 minutes later; otherwise it goes on
-one tunnel at a time. Whether one key may be connected to several servers at once is not verified: when a server in
-use stops answering while a search tunnel is up (or a server gets a handshake only when nothing else runs), the app
-takes back what that search marked and from then on runs one server at a time: one live server, and a server under
-test replaces it for its test while the sites wait a few seconds. Settings → VPN says so; "Forget blocks" or a new
-upload tries several at once again. When nothing else is left, servers marked only for not answering are tried
-anyway.
+**Careful with failures:** a server without a handshake is marked dead for a day only at the end of a search, once
+it failed again on its own and while the internet works (at most 10 per search); until then the search just leaves
+it out. When three tunnels in a row (or half of the last ones) get no handshake, the search looks closer: if other
+tunnels came up lately, your internet works, so a server in use that no longer gets through is dead and its sites
+get another one; if none came up and the server in use does not get through either, your internet is down, so the
+search stops, marks nothing and tries again 5 minutes later. Otherwise it goes on one tunnel at a time. A search
+that ends with a run of servers without a handshake pauses no site for good but runs again 5 minutes later. When
+nothing else is left, servers marked only for not answering are tried anyway.
 
 Every test request counts towards the site's hourly budget: the search sends a site at
 most a quarter of it an hour and never takes it past 90 % with the agents' requests; it waits for the site rather
@@ -453,10 +451,12 @@ Geizhals') back-off, because those limiters are about your home IP.
 
 Configs live in `DATA_DIR/wireguard` (readable only by the app) and are part of backups. All configs of one Mullvad
 download share one key. The app never connects it twice to the same server (not even while an old connection still
-finishes its requests), which would drop both connections; connecting it to several different servers at once (the
-ones in use and the ones under test) is not verified, which is why the app watches for it and falls back to one
-server at a time (above). Give the app its **own Mullvad device**: if the same key is also connected from another
-device to the same server, both connections drop.
+finishes its requests), which would drop both connections. Connecting it to several different servers at once (the
+ones in use and the ones under test) works: verified on 2026-10-15, a second wireproxy with the same key on another
+server ran beside the live one for 2 min 40 s (past WireGuard's 120 s rekey), and 60 of 60 requests through the two
+proxies, alternating every 5 s, were answered, each through its own exit, without disturbing the live tunnel. Give
+the app its **own Mullvad device**: if the same key is also connected from another device to the same server, both
+connections drop.
 
 ## Risks
 

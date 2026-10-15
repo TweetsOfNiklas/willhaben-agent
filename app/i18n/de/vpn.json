@@ -191,11 +191,8 @@
  "answered: {sites}": "geantwortet: {sites}",
  "{ok} of {n} answer": "{ok} von {n} antworten",
  "{t} min": "{t} min",
- "The VPN tests a server for a moment; {name} waits for it": "Das VPN testet kurz einen Server; {name} wartet darauf",
  "no WireGuard handshake": "kein WireGuard-Handshake",
- "One key does not seem to run on several servers at once here ({why}). So one server at a time: while the search tests one, the sites wait a few seconds, and there is no second server. \"Forget blocks\" tries several again.": "Ein Schlüssel scheint hier nicht auf mehreren Servern gleichzeitig zu laufen ({why}). Daher ein Server nach dem anderen: Während die Suche einen testet, warten die Seiten ein paar Sekunden, und es gibt keinen zweiten Server. „Sperren vergessen“ versucht es wieder mit mehreren.",
  "Stopped: the internet connection seems down (no server and not the one in use answer); nothing was marked, it runs again in {m} min": "Abgebrochen: Die Internetverbindung scheint weg zu sein (kein Server antwortet, auch der genutzte nicht); nichts wurde markiert, sie läuft in {m} min wieder",
  "one server at a time": "ein Server nach dem anderen",
- "{live} stopped answering while {server} ran": "{live} hat nicht mehr geantwortet, während {server} lief",
- "{server} gets a handshake only while no other server runs": "{server} bekommt nur einen Handshake, solange kein anderer Server läuft"
+ "No server answers yet: the last servers tried gave no handshake; the search runs again in {m} min": "Noch antwortet kein Server: Die zuletzt probierten Server gaben keinen Handshake; die Suche läuft in {m} min wieder"
 }

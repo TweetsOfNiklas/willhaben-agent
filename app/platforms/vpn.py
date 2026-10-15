@@ -16,18 +16,18 @@ tests servers on tunnels of its own (SEARCH_TUNNELS at most), beside the live on
 once it found better ones; a switch-over lets requests under way finish (`hold()`, DRAIN_S) before the old server
 stops. Never two processes on one server: one key on one server twice knocks both off (Mullvad's zip has one key for
 all servers), so nothing starts a server that has a process (live, the search's, or one still finishing requests).
-Whether one key works on several *different* servers at once is not verified: the search checks the live routes
-while its tunnels are up, and when one fails only then it switches to one process at a time for good
-(parallel_off(): one live server, a server under test replaces it for its test while the sites wait, `alone`).
-A new process must show a WireGuard handshake within HANDSHAKE_S (wireproxy's info address, /metrics) and reach the
+One key on several *different* servers at once works (verified on 2026-10-15 with Mullvad: a second wireproxy with
+the same key on another server ran beside the live one for 2 min 40 s, past WireGuard's 120 s rekey; 60 of 60
+requests through the two proxies, alternating every 5 s, were answered, each through its own exit, and the live
+tunnel was undisturbed). A new process must show a WireGuard handshake within HANDSHAKE_S (wireproxy's info address, /metrics) and reach the
 site's host (CONNECT, no HTTP request), so a dead server fails in seconds. The clients get the proxy explicitly;
 nothing sets HTTP(S)_PROXY, so Chromium never sees it. Host names are resolved inside the tunnel (the clients send
 CONNECT host:port). `tunnel_for(pid)` is a site's view: the route of its server.
 
 State (settings): `vpn_conn` holds the live servers, which site uses which, since when, the paused sites, the last
-search and its automatic starts, parallel_off; `vpn_state` per site the servers it refused (marks, skipped until they
-expire, MARK_TTL_S: a dead server only once a test alone confirmed it) and the ones it answered through (kept as long,
-they steer the order of a search).
+search and its automatic starts; `vpn_state` per site the servers it refused (marks, skipped until they expire,
+MARK_TTL_S: a dead server only once it failed again on its own) and the ones it answered through (kept as long, they
+steer the order of a search).
 
 Fail closed: with the switch on and no working server, or for a site whose server refused it (it waits for the search:
 VpnWait), `Tunnel.ensure()` raises; nothing falls back to the home IP.
@@ -63,7 +63,7 @@ log = logging.getLogger(__name__)
 MODES = ("profile", "collection")
 MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "botcheck": 3600,   # botcheck: a page in place of the one asked
               "unreachable": 3600,   # no answer through it (a timeout, a CONNECT that failed)
-              "dead": 24 * 3600, "broken": 24 * 3600,   # no handshake / does not start, confirmed alone: stale configs
+              "dead": 24 * 3600, "broken": 24 * 3600,   # no handshake / does not start, confirmed: stale configs
               "ok": 24 * 3600}       # answered through it: tried first when the site needs a server again
 MAX_LIVE = 2                   # live connections at most (the search's tunnels come on top)
 SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
@@ -354,16 +354,13 @@ def mark(pid: str, name: str, reason: str) -> None:
 
 
 def forget(pid: str | None = None) -> None:
-    """Clear the refusals of every site ("Forget blocks", which also allows several servers at once again), or of
-    `pid` only; those sites are no longer paused either."""
+    """Clear the refusals of every site ("Forget blocks"), or of `pid` only; those sites are no longer paused either."""
     state = _load()
     for key, site in state.items():
         if isinstance(site, dict) and pid in (None, key):
             site["marks"] = {}
     _save(state)
     unpause(pid)
-    if pid is None and conn_state().get("parallel_off"):
-        update_conn(parallel_off=None)
 
 
 def unmark(pid: str, name: str) -> None:
@@ -400,11 +397,9 @@ def update_conn(**fields: Any) -> dict[str, Any]:
 
 
 def live_servers(st: dict[str, Any] | None = None) -> list[str]:
-    """The servers in use, the primary first (it serves most sites); never one the source no longer allows, and one
-    only when parallel_off()."""
+    """The servers in use, the primary first (it serves most sites); never one the source no longer allows."""
     st = conn_state() if st is None else st
-    most = 1 if isinstance(st.get("parallel_off"), dict) and st["parallel_off"].get("at") else MAX_LIVE
-    return [s for s in st.get("servers") or [] if isinstance(s, str) and allowed(s)][:most]
+    return [s for s in st.get("servers") or [] if isinstance(s, str) and allowed(s)][:MAX_LIVE]
 
 
 def server_for(pid: str, st: dict[str, Any] | None = None) -> str | None:
@@ -676,15 +671,13 @@ def _free_port(taken: Collection[int] = ()) -> int:
 
 class Connection:
     """The processes: one per live server (MAX_LIVE at most), the search's tunnels beside them, and the ones that
-    stop once their requests ended. `alone`: the fallback when one key does not run on several servers at once (see
-    parallel_off()): the search tests that server while no live process runs, and the sites wait meanwhile."""
+    stop once their requests ended."""
 
     def __init__(self) -> None:
         self.live: dict[str, tuple[_Proc, Route]] = {}
         self.probes: dict[str, tuple[_Proc, Route]] = {}   # the servers the search tests, beside the live ones
         self._starting: set[str] = set()                  # search tunnels starting right now
         self._ports: set[int] = set()                     # ports handed out to processes and starts under way
-        self.alone: str | None = None
         self.gen = 0
         self.closing = False             # the app shuts down: no new process
         self._inflight: dict[int, int] = {}                # route gen -> requests in flight
@@ -785,10 +778,8 @@ class Connection:
     async def start_live(self, name: str, host: str) -> Route | None:
         """The process of live server `name` after a restart or a crash (Tunnel.ensure()); None when `name` is no
         longer live. Never beside another process on the same server (one of the search's or one still draining
-        stops first). VpnWait while the search tests a server alone."""
+        stops first)."""
         async with _lock("live"):
-            if self.alone is not None:
-                raise VpnWait(t("The VPN tests a server for a moment; {name} waits for it", name=name))
             if (r := self.route(name)) is not None:
                 return r
             if name not in live_servers():
@@ -807,17 +798,6 @@ class Connection:
             self.live[name] = (proc, self._route(proc))
             log.info("VPN: server %s started", name)
             return self.live[name][1]
-
-    async def restart_live(self, name: str, host: str) -> bool:
-        """Stop live server `name` and start it again (a fresh handshake); True when it reaches `host` then."""
-        async with _lock("live"):
-            p = self.live.pop(name, None)
-        if p is not None:
-            await self._stop(p[0])
-        try:
-            return await self.start_live(name, host) is not None and await self.reach(name, host)
-        except (OSError, Unreachable, PlatformError):
-            return False
 
     async def start_search(self, name: str, host: str) -> tuple[Route, bool]:
         """A tunnel of the search on `name`, beside the live ones and its other tunnels (several start at once);
@@ -839,39 +819,10 @@ class Connection:
         self.probes[name] = (proc, self._route(proc))
         return self.probes[name][1], reached
 
-    async def test_alone(self, name: str, host: str) -> tuple[Route, bool]:
-        """The fallback when one key runs on one server at a time: every live process stops (the sites wait,
-        Tunnel.ensure() raises VpnWait while `alone` is set), then `name` starts as the search's tunnel. stop_search()
-        or switch() ends it; the live servers start again with the next request."""
-        async with _lock("live"), _lock("search"):
-            if self.closing:
-                raise PlatformError(t("The app is shutting down"))
-            if name in self.busy() and name not in self.live:
-                raise RuntimeError(f"{name} runs already")
-            self.alone = name
-            gone = [p for p, _r in [*self.live.values(), *self.probes.values()]] + list(self._retiring)
-            self.live, self.probes = {}, {}
-            self._retiring.update(gone)              # stopped below, also when cancelled meanwhile
-            self._starting.add(name)
-        try:
-            for p in gone:
-                await self._stop(p)
-            proc, reached = await self._start(name, host, need_host=False)
-        except BaseException:
-            self.alone = None
-            raise
-        finally:
-            self._starting.discard(name)
-        self.probes[name] = (proc, self._route(proc))
-        return self.probes[name][1], reached
-
     async def stop_search(self, name: str | None = None) -> None:
-        """Stop the search's tunnel on `name`, or all of them; a server taken over meanwhile is live and stays. A test
-        alone ends with it."""
+        """Stop the search's tunnel on `name`, or all of them; a server taken over meanwhile is live and stays."""
         async with _lock("search"):
             gone = [self.probes.pop(n) for n in ([name] if name else list(self.probes)) if n in self.probes]
-            if name is None or name == self.alone:
-                self.alone = None
             self._retiring.update(p for p, _r in gone)
         for proc, _r in gone:
             await self._stop(proc)
@@ -884,8 +835,8 @@ class Connection:
         """Make `servers` the live ones: the search's tunnel is taken over when it runs one of them (no new
         handshake), a live one stays as it is, any other starts (it must reach `hosts[name]`). Then in one step with
         `commit()` (the new state) the routes change: a site on another server than before gets that server's route
-        (a new transport, a new visitor). The servers left stop once their requests in flight ended (≤ DRAIN_S). A
-        test alone ends. OSError/Unreachable when a server does not start: nothing changed."""
+        (a new transport, a new visitor). The servers left stop once their requests in flight ended (≤ DRAIN_S).
+        OSError/Unreachable when a server does not start: nothing changed."""
         async with _lock("live"), _lock("search"):
             started: dict[str, _Proc] = {}
             probes = {n: p for n, p in self.probes.items() if p[0].alive}
@@ -911,7 +862,7 @@ class Connection:
                     new[name] = self.live[name]
             gone = [p for p, _r in self.live.values() if all(p is not q for q, _x in new.values())]
             fresh = [n for n in servers if new[n] is not self.live.get(n)]
-            self.live, self.alone = new, None
+            self.live = new
             self._retiring.update(gone)              # stopped below, also when cancelled meanwhile
             commit()
         if fresh:
@@ -956,7 +907,7 @@ class Connection:
         """Every process stops, also the ones still finishing requests (the configs changed, the app shuts down)."""
         async with _lock("live"), _lock("search"):
             procs = [p for p, _r in [*self.live.values(), *self.probes.values()]]
-            self.live, self.probes, self.alone = {}, {}, None
+            self.live, self.probes = {}, {}
             self._retiring.update(procs)
         for task in list(self._tasks):
             task.cancel()
@@ -976,24 +927,16 @@ def _search(pid: str, reason: str, detail: str) -> bool:
     return vpn_check.trigger(pid, reason, detail)
 
 
-def parallel_off(st: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """{at, why} once a search found that one key does not run on several servers at once (a live route failed
-    while a search tunnel was up): one process at a time from then on (one live server; a server under test
-    replaces it for its test). "Forget blocks" and a new upload clear it."""
-    p = (conn_state() if st is None else st).get("parallel_off")
-    return p if isinstance(p, dict) and p.get("at") else None
-
-
 async def switch(servers: list[str], assign: dict[str, str], hosts: dict[str, str]) -> None:
-    """The search's result goes live: `servers` (the primary first, MAX_LIVE at most, one when parallel_off()),
-    each site on its server in `assign` (see Connection.switch). A server that stays keeps its route and `since`."""
-    servers = servers[:1 if parallel_off() else MAX_LIVE]
+    """The search's result goes live: `servers` (the primary first, MAX_LIVE at most), each site on its server in
+    `assign` (see Connection.switch). A server that stays keeps its route and its `since`."""
+    servers = servers[:MAX_LIVE]
 
     def commit() -> None:
         st = conn_state()
         was, now = live_servers(st), time.time()
         update_conn(servers=servers, assign={p: s for p, s in assign.items() if s in servers}, error="",
-                    since={s: (since(s, st) if s in was and since(s, st) else now) for s in servers})
+                    since={s: (since(s, st) if s in was and since(s, st) else now) for s in servers}, dropped=[])
 
     await conn.switch(servers, hosts, commit)
 
@@ -1004,7 +947,7 @@ async def drop(name: str, error: str = "") -> None:
     st = conn_state()
     servers = [s for s in live_servers(st) if s != name]
     update_conn(servers=servers, assign={p: s for p, s in (st.get("assign") or {}).items() if s != name},
-                error="" if servers else error)
+                error="" if servers else error, dropped=[name])      # the search's reference for the network
     await conn.drop(name)
 
 
@@ -1093,8 +1036,6 @@ class Tunnel:
             raise VpnWait(t("{name} refused the VPN server {server} ({reason}); its requests wait until the search "
                             "finds another one", name=self.label, server=waits_on(self.pid) or "?",
                             reason=reason_label(p[0])))
-        if conn.alone is not None:
-            raise VpnWait(t("The VPN tests a server for a moment; {name} waits for it", name=self.label))
 
     async def failed(self, route: Route | None, reason: str, detail: str = "") -> bool:
         """The site refused its server (`blocked`, `rate`, `botcheck`) or got no answer through it (`unreachable`):
@@ -1172,8 +1113,7 @@ async def site_off(pid: str) -> None:
 
 
 async def source_changed() -> None:
-    """After an upload or removal: the old servers, their marks and the connection state are gone (parallel_off()
-    too: new configs, maybe a new key)."""
+    """After an upload or removal: the old servers, their marks and the connection state are gone."""
     await conn.disconnect()
     _save({})
     _set_json(CONN_KEY, {})
@@ -1249,7 +1189,6 @@ def status() -> dict[str, Any]:
             "countries": sorted(counts.items(), key=lambda x: (-x[1], x[0])), "binary": runner.binary() is not None,
             "servers": conns, "server": servers[0] if servers else None, "connected": bool(conn.routes()),
             "searching": running, "error": st.get("error") or "", "sites": sites, "geizhals": gz,
-            "parallel_off": parallel_off(st),
             "any_on": any(s["on"] for s in sites) or gz["on"]}
 
 
