@@ -14,6 +14,10 @@ Flow of one search (a background task, the page polls its progress):
             If the plan has questions, the cards are stored and the search waits in status "asking" (no task, no
             Claude call) until the person answers or skips them (continue_run); the answers go into the ranking and
             photo prompts and into the screening brief of a search agent made from the search.
+            Facebook (BAND_SITES, DETAIL_SITES) serves only ~24 listings per search without a login and no ad text:
+            there each query also runs in the lower and upper half of its budget (at most MAX_BANDS by depth,
+            round-robin over the queries, after all whole-range searches), and before the ranking the listing pages
+            of up to MAX_DETAILS shortlisted Facebook candidates fill in their description (load_details).
 3. rank   – ONE more Claude call: the best TOP_N with a fit score, a short reason and red flags. The app adds the
             price position (deals.position against the other ads of the same query, no extra request) and the
             rule-based scam flags (scam.flags, pure function).
@@ -79,6 +83,13 @@ CONDITIONS = ("good", "worn", "damaged", "unclear")
 MAX_QUESTIONS = 3            # clarifying questions from the plan call
 MAX_OPTIONS = 4
 MAX_ANSWER = 200             # chars of one answer (free text included)
+# Facebook serves only ~24 listings per search without a login, and its lists carry no ad text. So each query there also
+# runs in two price bands inside the budget, and the shortlist's listing pages are loaded before the ranking. Facebook
+# paces at 8 s per request and 60 per hour: the extras stay a few per search.
+BAND_SITES = ("facebook",)
+MAX_BANDS = {"normal": 4, "thorough": 6, "deep": 8}   # band searches per site and product search, by depth
+DETAIL_SITES = ("facebook",)
+MAX_DETAILS = 8              # shortlisted candidates per site whose listing page (description) is loaded
 _ID_RE = re.compile(r"[^a-z0-9_]+")
 DEFAULT_PATH = "kaufen-und-verkaufen/marktplatz"
 _PATH_RE = re.compile(r"^kaufen-und-verkaufen/marktplatz/[a-z0-9-]+-\d+$")
@@ -314,22 +325,69 @@ def by_term(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return terms
 
 
+def price_bands(q: dict[str, Any], plan: dict[str, Any]) -> list[tuple[float | None, float]]:
+    """The price bands a query also runs in on a BAND_SITES site, (from, to): the lower and the upper half of its budget
+    (the query's price_to, else the plan's max_price) above its price_from. No budget, no bands: there are no halves to
+    search then, and the whole-range search already ran."""
+    budget = q.get("price_to") or plan.get("max_price")
+    low = q.get("price_from") or 0
+    if not budget or budget - low < 2:
+        return []
+    mid = float(round(low + (budget - low) / 2))
+    return [(low or None, mid), (mid, float(budget))]
+
+
+def max_bands(settings: dict[str, Any] | None) -> int:
+    return MAX_BANDS.get((settings or {}).get("depth") or "normal", MAX_BANDS["normal"])
+
+
+def band_runs(plan: dict[str, Any] | None, settings: dict[str, Any] | None) -> list[tuple[int, float | None, float]]:
+    """(run index, price from, price to) of the band searches run_queries sends after the whole-range ones: on each
+    BAND_SITES site every query's lower half, then every query's upper half, at most max_bands per site."""
+    queries = (plan or {}).get("queries") or []
+    sites = run_sites(settings)
+    runs = [(q, p) for q in queries for p in sites]
+    out: list[tuple[int, float | None, float]] = []
+    for p in sites:
+        if p.id not in BAND_SITES:
+            continue
+        mine = [(i, price_bands(q, plan or {})) for i, (q, rp) in enumerate(runs) if rp.id == p.id]
+        out += [(i, *bs[k]) for k in range(2) for i, bs in mine if k < len(bs)][:max_bands(settings)]
+    return out
+
+
 async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
                       on_progress: Callable[[int, int, int], None] | None = None) -> dict[str, Any]:
-    """Run each of the plan's queries on every site of the search, one after another.
+    """Run each of the plan's queries on every site of the search, one after another, then the price bands.
 
     Returns {per_query, pools, prices, query_of, requests, warning}: one entry per (query, site) run, query-major;
     pools[i] = the new, kept ads of run i (relevance order), prices[i] = all prices of run i (comparables from the
     same site), query_of[i] = the plan query's index. requests counts only requests that actually went out (not those
-    a limiter refused); on_progress(done, total, requests). A block stops only that site's remaining searches."""
+    a limiter refused); on_progress(done, total, requests). A block stops only that site's remaining searches.
+
+    On a BAND_SITES site the runs come back once more in price_bands, after every whole-range search: each query's
+    lower half, then each one's upper half, at most max_bands per site. A band belongs to its run: its new ads go
+    into that run's pool, its count into the run's found, and the run's entry lists it under `bands` ({price_from,
+    price_to, url, found, kept, error, skipped}). Band prices are no comparables (a band would skew the median); a run
+    that did not answer gets no bands, and the hourly budget only ever goes to bands when the whole-range searches
+    are done."""
     queries = plan.get("queries") or []
     sites = run_sites(settings)
+    sort = (settings or make_settings()).get("sort") or "relevance"
     runs = [(qi, q, p) for qi, q in enumerate(queries) for p in sites]
     per_query = []
     for _qi, q, p in runs:
         spec = query_spec(p, q, settings)
         per_query.append({**q, "platform": p.id, "url": spec.url, "spec": spec.to_json(), "found": None, "kept": 0,
                           "error": None, "skipped": False})
+    jobs: list[tuple[int, int | None]] = [(i, None) for i in range(len(runs))]     # (run, band index or None)
+    for i, lo, hi in band_runs(plan, settings):
+        q, p = runs[i][1], runs[i][2]
+        spec = p.keyword_search(q.get("keyword") or "", lo, hi, sort=sort)
+        per_query[i].setdefault("bands", []).append({"price_from": lo, "price_to": hi, "url": spec.url,
+                                                     "spec": spec.to_json(), "found": None, "kept": 0,
+                                                     "error": None, "skipped": False})
+        jobs.append((i, len(per_query[i]["bands"]) - 1))
     pools: list[list[Listing]] = [[] for _ in runs]
     prices: list[list[float]] = [[] for _ in runs]
     seen: set[str] = set()
@@ -343,44 +401,109 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             warnings.append(t("Hourly request limit of {platform} almost used up: only {n} of {total} searches run.",
                               platform=p.name, n=budget, total=wanted))
     stopped: set[str] = set()
-    for i, (_qi, q, p) in enumerate(runs):
-        if p.id in stopped or (left[p.id] is not None and left[p.id] <= 0):
-            per_query[i]["skipped"] = True
+    for n, (i, k) in enumerate(jobs):
+        _qi, q, p = runs[i]
+        entry = per_query[i] if k is None else per_query[i]["bands"][k]
+        if p.id in stopped or (left[p.id] is not None and left[p.id] <= 0) \
+                or (k is not None and per_query[i]["found"] is None):
+            entry["skipped"] = True
             continue
         if left[p.id] is not None:
             left[p.id] -= 1
         try:
-            page = await p.search(SearchSpec.from_json(per_query[i]["spec"]), rows=ROWS)   # uncached: real requests
+            page = await p.search(SearchSpec.from_json(entry["spec"]), rows=ROWS)   # uncached: real requests
             requests += 1
         except Blocked as e:
             requests += int(getattr(e, "sent", False))      # False: refused by the limiter, nothing was sent
-            per_query[i]["error"] = str(e)
+            entry["error"] = str(e)
             stopped.add(p.id)
-            done = sum(1 for k in range(i) if runs[k][2].id == p.id)
+            done = sum(1 for m in range(n) if runs[jobs[m][0]][2].id == p.id)
             warnings.append(t("{platform} paused the search ({error}): stopped after {n} searches there, the offers "
                               "found so far are ranked.", platform=p.name, error=e, n=done))
             continue
         except PlatformError as e:
             requests += 1                                   # went through the limiter (network error / HTTP status)
-            per_query[i]["error"] = str(e)
+            entry["error"] = str(e)
             continue
         finally:
             if on_progress:
-                on_progress(i + 1, len(runs), requests)
-        per_query[i]["found"] = page.rows_found
+                on_progress(n + 1, len(jobs), requests)
+        entry["found"] = page.rows_found
+        new = 0
         for ad in page.ads:
-            if ad.price and ad.price > 0 and not deals._wanted(ad.heading):
+            if k is None and ad.price and ad.price > 0 and not deals._wanted(ad.heading):
                 prices[i].append(ad.price)
             if not ad.ad_id or ad.ref in seen:
                 continue
             seen.add(ad.ref)
             if drop_reason(ad, plan, q) is None:
                 pools[i].append(ad)
+                new += 1
+        entry["kept"] = new
+        if k is not None:
+            per_query[i]["found"] += page.rows_found
         per_query[i]["kept"] = len(pools[i])
     for e in per_query:
         e.pop("spec", None)
+        for b in e.get("bands") or []:
+            b.pop("spec", None)
     return {"per_query": per_query, "pools": pools, "prices": prices, "query_of": [qi for qi, _, _ in runs],
             "requests": requests, "warning": " ".join(warnings) or None}
+
+
+def detail_todo(picked: list[tuple[int, Listing]]) -> list[tuple[int, Listing]]:
+    """The candidates load_details opens: among the first MAX_CANDIDATES (those Claude ranks), per DETAIL_SITES site
+    the first MAX_DETAILS without a text, in pick order."""
+    out: list[tuple[int, Listing]] = []
+    for pi, ad in picked[:MAX_CANDIDATES]:
+        if ad.platform in DETAIL_SITES and not ad.body \
+                and sum(1 for _, a in out if a.platform == ad.platform) < MAX_DETAILS:
+            out.append((pi, ad))
+    return out
+
+
+async def load_details(picked: list[tuple[int, Listing]], per_query: list[dict[str, Any]],
+                       on_progress: Callable[[int, int], None] | None = None
+                       ) -> tuple[list[tuple[int, Listing]], int, str | None]:
+    """(picked, requests, warning): the listing pages of detail_todo(picked) fill in the description, the place, the
+    dealer flag and the condition, so Claude ranks them by more than the title; a listing the site no longer shows
+    (gone, sold) leaves the candidates. per_query[pool]["details"] / ["gone"] count them per search. A block stops
+    that site's loading (the rest keep their title only), an error skips one ad. on_progress(done, total)."""
+    todo = detail_todo(picked)
+    gone: set[str] = set()
+    stopped: dict[str, str] = {}
+    requests = 0
+    for n, (pi, ad) in enumerate(todo, 1):
+        if ad.platform in stopped:
+            continue
+        site = platforms.get(ad.platform)
+        before = site.limiter.last_hour       # a page the client still has cached, or a refusal, sends nothing
+        try:
+            d = await site.detail(ad.ad_id, url=ad.url)
+        except Blocked as e:
+            stopped[ad.platform] = str(e)
+            continue
+        except PlatformError:
+            continue
+        finally:
+            requests += max(0, site.limiter.last_hour - before)
+            if on_progress:
+                on_progress(n, len(todo))
+        row = per_query[pi]
+        if d is None or d.status == "sold":
+            gone.add(ad.ref)
+            row["gone"] = row.get("gone", 0) + 1
+            continue
+        ad.body = d.description or ad.body
+        ad.location = d.location or ad.location
+        if d.is_private is not None:
+            ad.is_private = d.is_private
+        if d.item_condition:
+            ad.item_condition, ad.item_condition_label = d.item_condition, d.item_condition_label
+        row["details"] = row.get("details", 0) + 1
+    warning = " ".join(t("{platform} paused loading the descriptions ({error}); the other offers are ranked by their "
+                         "title.", platform=platforms.get(pid).name, error=err) for pid, err in stopped.items())
+    return [(pi, ad) for pi, ad in picked if ad.ref not in gone], requests, warning or None
 
 
 def pick_candidates(pools: list[list[Listing]], cap: int = MAX_CANDIDATES) -> list[tuple[int, Listing]]:
@@ -670,10 +793,17 @@ async def run(search_id: int, replan: bool = True) -> None:
                 return
         n = len(plan["queries"])
         _update(search_id, status="searching", plan=plan, progress={"done": 0, "total": n})
+        bands = {"bands": n_bands} if (n_bands := len(band_runs(plan, settings))) else {}
         found = await run_queries(plan, settings,
-                                  on_progress=lambda d, total, sent: _update(search_id, requests=sent,
-                                                                             progress={"done": d, "total": total}))
+                                  on_progress=lambda d, total, sent: _update(
+                                      search_id, requests=sent, progress={"done": d, "total": total, **bands}))
         picked = pick_candidates(found["pools"], cap=MAX_CANDIDATES + MAX_POOL)
+        if detail_todo(picked):
+            # the page loads are no searches: the header counts searches, the table the descriptions per search
+            picked, _sent, msg = await load_details(picked, found["per_query"], on_progress=lambda d, total: _update(
+                search_id, progress={"done": d, "total": total, "step": "details"}))
+            if msg:
+                found["warning"] = f"{found['warning']} {msg}" if found["warning"] else msg
         cards = [card(found["query_of"][pi], ad, plan, found["prices"][pi]) for pi, ad in picked]
         cards, reserve = cards[:MAX_CANDIDATES], cards[MAX_CANDIDATES:]      # the reserve is for "load more"
         searched = {"queries": found["per_query"], "requests": found["requests"], "candidates": len(cards),

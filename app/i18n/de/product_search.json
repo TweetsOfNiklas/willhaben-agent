@@ -66,5 +66,11 @@
  "New search": "Neue Suche",
  "New search with this text": "Neue Suche mit diesem Text",
  "A link to an ad (from any switched-on site) checks its price against comparable willhaben ads; a text lists the matching ads of the ticked sites with their price position. No Claude call until you ask for it.": "Ein Link zu einer Anzeige (von jeder eingeschalteten Seite) prüft ihren Preis gegen vergleichbare willhaben-Anzeigen; ein Text listet die passenden Anzeigen der angehakten Seiten mit ihrer Preislage. Claude wird erst gefragt, wenn du es willst.",
- "Search for something else?": "Etwas anderes suchen?"
+ "Search for something else?": "Etwas anderes suchen?",
+ "{platform} paused loading the descriptions ({error}); the other offers are ranked by their title.": "{platform} hat das Laden der Beschreibungen pausiert ({error}); die übrigen Angebote werden nach ihrem Titel bewertet.",
+ "price bands": "Preisbereiche",
+ "{n} descriptions loaded": "{n} Beschreibungen geladen",
+ "{n} no longer available": "{n} nicht mehr verfügbar",
+ "Loading the descriptions of the shortlisted Facebook offers: {done} of {total} …": "Lade die Beschreibungen der engeren Facebook-Auswahl: {done} von {total} …",
+ "(incl. {n} Facebook price bands)": "(inkl. {n} Facebook-Preisbereiche)"
 }
