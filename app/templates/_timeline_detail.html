@@ -12,13 +12,12 @@
     {% for k, v in facts %}<dt class="text-muted">{{ k }}</dt><dd class="break-words">{{ v }}</dd>{% endfor %}
   </dl>
   {% set links = tl_links(e) %}
-  {% if links or narrow or steps %}
   <div class="flex flex-wrap items-center gap-2">
     {% for l in links %}<a href="{{ l.href }}"{% if l.ad %} data-ad="{{ l.ad }}"{% endif %} class="btn btn-xs">{{ l.label }}{{ ui.icon('external', 12) }}</a>{% endfor %}
     {% for label, href in narrow %}<a href="{{ href }}" class="btn btn-ghost btn-xs">{{ label }}</a>{% endfor %}
     {% if e.kind in ('job', 'agent_run', 'sched') %}<a href="/timeline?job={{ e.id }}" class="btn btn-ghost btn-xs">{{ _("All steps as a list") }}</a>{% endif %}
+    <a href="/timeline/{{ e.id }}/download" download class="btn btn-ghost btn-xs" title="{{ _("The whole entry with its steps, texts and the sites' answers as one file. It can contain chats and names.") }}">{{ _("Download (.json)") }}</a>
   </div>
-  {% endif %}
   {% for name, label, text in texts %}
   <section data-text class="overflow-hidden rounded-field border border-base-300 bg-base-100">
     <header class="flex items-center justify-between gap-2 border-b border-base-300 px-3 py-1.5">

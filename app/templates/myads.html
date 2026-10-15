@@ -78,12 +78,12 @@
     {% set on = cur and cur.ad_id == a.ad_id %}
     {# the columns without the checkbox are plain classes, so a row is laid out before Alpine starts (page load,
        fresh copy after a job); Alpine only adds the checkbox column while selecting #}
-    <a href="/myads?ad={{ a.ad_id }}{{ keep }}" id="row-{{ a.ad_id }}" @click="rowClick($event)"
+    <a href="/myads?ad={{ a.ad_id }}{{ keep }}" id="row-{{ a.ad_id }}" @click="rowClick($event)" @mousedown="selecting && $event.shiftKey && $event.preventDefault()"
        {% if a.pending_action %}data-pending-key="ad:{{ a.ad_id }}"{% endif %}
        class="grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] p-2.5 text-left text-base-content no-underline {{ 'bg-brand-soft' if on else 'hover:bg-hover' }}"
        :class="selecting && 'grid-cols-[20px_52px_minmax(0,1fr)_auto]!'">
       {% if not a.replaced_by and not a.pending_action %}<input type="checkbox" name="ids" value="{{ a.ad_id }}" form="bulk" class="sel checkbox checkbox-primary checkbox-sm"
-             data-title="{{ a.heading or a.ad_id }}" x-show="selecting" x-cloak x-model="picked" @click.stop>
+             data-title="{{ a.heading or a.ad_id }}" x-show="selecting" x-cloak x-model="picked" @click.stop="boxClick($event)">
       {% else %}<span x-show="selecting" x-cloak></span>{% endif %}
       {{ ui.thumb(a.image_url) }}
       <span class="min-w-0"><span class="block truncate font-semibold">{{ a.heading or a.ad_id }}</span>
@@ -174,21 +174,30 @@
 
 <script>
 document.addEventListener('alpine:init', () => Alpine.data('myadsList', () => ({
-  selecting: false, picked: [], total: 0,
+  selecting: false, picked: [], total: 0, last: null,
   T: {none: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}, activate: {{ _("Put these ads online again on willhaben?")|tojson }},
       deactivate: {{ _("Take these ads offline on willhaben? You can activate them again.")|tojson }}, delete: {{ _("Delete these ads on willhaben for good? This cannot be undone.")|tojson }},
       hide: {{ _("Hide these ads from this list? They stay online on willhaben.")|tojson }}, unhide: {{ _("Show these ads in the list again?")|tojson }}},
   boxes() { return [...this.$root.querySelectorAll('input.sel')]; },
   init() { this.total = this.boxes().length; },
-  mode(on) { this.selecting = on; if (!on) this.picked = []; },
+  mode(on) { this.selecting = on; this.last = null; if (!on) this.picked = []; },
   all(on) { this.picked = on ? this.boxes().map(b => b.value) : []; },
+  // ticks or unticks one box; with Shift every box between the one clicked before and this one, like a file manager
+  tick(b, on, shift) {
+    const boxes = this.boxes(), i = boxes.indexOf(b), j = boxes.findIndex(x => x.value === this.last);
+    const ids = (shift && j >= 0 ? boxes.slice(Math.min(i, j), Math.max(i, j) + 1) : [b]).map(x => x.value);
+    this.picked = on ? [...new Set([...this.picked, ...ids])] : this.picked.filter(v => !ids.includes(v));
+    this.last = b.value;
+  },
   // in selection mode a click on the row ticks it instead of opening the ad
   rowClick(e) {
     if (!this.selecting) return;
     e.preventDefault();
     const b = e.currentTarget.querySelector('input.sel');
-    if (b) { b.checked = !b.checked; b.dispatchEvent(new Event('change', {bubbles: true})); }
+    if (b) this.tick(b, !this.picked.includes(b.value), e.shiftKey);
   },
+  // the box toggles itself (x-model); Shift also takes the boxes in between along
+  boxClick(e) { this.tick(e.target, e.target.checked, e.shiftKey); },
   // htmx sends the bulk buttons: one confirm with the picked titles, then the request
   confirmHx(e) {
     const btn = e.detail.elt;

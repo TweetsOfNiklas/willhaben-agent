@@ -218,6 +218,8 @@ class AdvertList(list):
 
 # Link ids in an own ad's advertEditStatusActionsList (from the /bbx-adin myadverts bundle, 2026-10-09)
 ACTION_ACTIVATE = "4"     # deactivated ad back online: PUT, no body
+ACTION_FINALIZE = "5"     # unfinished insertion ("Fertigstellen", e.g. a renewal that was never completed): no call of
+#                           its own, willhaben's button opens the insertion form for this same ad id; finished like a new ad
 ACTION_REPUBLISH = "6"    # expired / passive ad: POST -> new insertion draft (new adId), finished like a new ad
 ACTION_DEACTIVATE = "2"   # take a live ad offline (reversible via ACTIVATE): PUT, no body
 ACTION_DELETE = "3"       # delete the ad for good: DELETE, no body (the delete-reason survey is optional)
@@ -263,7 +265,7 @@ def parse_my_adverts(next_data: dict[str, Any]) -> AdvertList:
                 image_url=(images[0].get("mainImageUrl") or images[0].get("thumbnailImageUrl")) if images else None,
                 actions={str(link.get("id")): link for link in
                          ((ad.get("advertEditStatusActionsList") or {}).get("contextLinkList") or {}).get("contextLink") or []
-                         if link.get("relativePath")},
+                         if link.get("relativePath") or str(link.get("id")) == ACTION_FINALIZE},   # 5 needs no path
                 reasons_query=bool(ad.get("deleteReasonQueryParameter")),
             ))
     return out
@@ -466,8 +468,9 @@ class AccountClient:
     async def reactivate(self, ad_id: str, ads: list[OwnAdvert] | None = None) -> str:
         """Put an own ad online again, like the buttons in "Meine Anzeigen". Returns the ad id afterwards.
 
-        Deactivated ads offer ACTIVATE (same id). Expired and passive ads offer REPUBLISH, which creates a new
-        insertion draft with a NEW id; it is finished like a new ad (save -> empty cart -> checkout, never paid).
+        Deactivated ads offer ACTIVATE (same id). An unfinished insertion offers FINALIZE ("Fertigstellen"): the
+        draft is finished under its own id. Expired and passive ads offer REPUBLISH, which creates a new insertion
+        draft with a NEW id. Drafts are finished like a new ad (save -> empty cart -> checkout, never paid).
         `ads`: an account list fetched before (several ads in a row need only one list request).
         """
         from app.willhaben import insert
@@ -479,6 +482,10 @@ class AccountClient:
         if link := links.get(ACTION_ACTIVATE):
             await self.s.api_json("PUT", _link_path(link))
             return ad.ad_id
+        if ACTION_FINALIZE in links:     # before REPUBLISH: finishing this draft never leaves a second copy behind
+            base = await insert.get_own_ad(self.s, ad.ad_id)
+            res = await insert.publish(self.s, base, [], existing_ad_id=ad.ad_id)
+            return res["ad_id"]
         if (link := links.get(ACTION_REPUBLISH)) and ad.status in REPUBLISHABLE:   # never duplicate a live ad
             new = await self.s.api_json("POST", _link_path(link))
             new_id = str((new or {}).get("adId") or "")

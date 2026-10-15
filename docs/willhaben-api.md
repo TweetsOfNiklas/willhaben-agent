@@ -95,6 +95,7 @@ search-agent builder and the price-check category selector)
 | Activate a deactivated ad | `PUT /webapi/<serviceName><relativePath>` of my-adverts link `4`, no body | V (bundle) |
 | Put a passive ad online again | "Passiv" (`advertStatus{id:"passive", statusId:60}`): deactivated by hand it offers link `4` (row above); otherwise it has **no** `4`, only `6` "Neu veröffentlichen" (`serviceName` `iad`, `relativePath` `/bap/copy/{id}`), `requestBillLink` and `3`, and comes back like an expired ad (row below) under a new id | V (links without `4`, 2026-10-09) |
 | Renew an expired ad | `POST /webapi/<svc><path>` of link `6` (REPUBLISH) → JSON with a **new** `adId` (insertion draft), then the normal insertion flow from "Save" (see "Placing an ad"); the renewad page's "Neu veröffentlichen" uses the same call | V (bundle), first real renewal pending |
+| Finish an unfinished insertion ("Fertigstellen") | link `5` (FINALIZE) has no call of its own: the my-adverts page opens `/iad/anzeigenaufgabe/marktplatz?adId=<same id>&adTypeId=…`; the app finishes the draft like a new ad from "Save" (`GET /webapi/iad/bap/{id}` → save → empty cart → checkout), same id | V (bundle 2026-10-13), seen live: an ad offering only "Fertigstellen" |
 | Deactivate / delete own ad | link `2` `PUT` / link `3` `DELETE`, no body; bulk variants `PUT`/`DELETE` with `{bulkChangeAdIds:[…]}` via the list's BULK_* links; delete reasons optionally via `GET/POST /webapi/iad/deletereasons?adId=` | V (delete used live) |
 | Edit own ad | `GET /webapi/iad/bap/{id}` (editor JSON) → `PUT /webapi/iad/bap/edit` with the full object | V (read) / ? (save) |
 | Photos of own ad | `GET` link `imageList` (`/webapi/iad/atimage/{id}`) → `advertImage[]` with `reference` + thumbnails; new files `POST /webapi/iad-upload/atimage/temp`; then one `PUT /webapi/iad-upload/atimage/{id}/order-and-associate` `{advertImage:[{reference}], floorPlans:[…]}` (left-out photos are removed, first = cover) | V (read) / ? (save) |
@@ -247,7 +248,7 @@ header on non-GET). **V** (bundle) — **needs live verification** (no call made
 - The actions are context links of each ad in the my-adverts list:
   `advertEditStatusActionsList.contextLinkList.contextLink[] = {id, serviceName, relativePath, uri}`. The page calls
   `fetch("/webapi/" + serviceName + relativePath)`, so the path is taken from the link, never built by hand.
-  Link ids (enum in chunk 1730): `1` edit, `2` deactivate, `3` delete, `4` activate, `6` republish,
+  Link ids (enum in chunk 1730): `1` edit, `2` deactivate, `3` delete, `4` activate, `5` finalize, `6` republish,
   `setAdSold`, `markAdReserved`, `removeMarkAdReserved`, `changeDeliveryOptions`, bulk ids.
 - **Sold** ("Auf verkauft setzen"): `PUT /webapi/<svc><setAdSold.relativePath>` (seen: `/bap/sold/{id}`), no body.
   Before it, only when the ad has a non-empty `deleteReasonQueryParameter`, the dialog loads
