@@ -29,7 +29,8 @@ from app.db import (
     get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage
-from app.llm.base import MODELS, PURPOSES, LLMError, get_backend, model_for
+from app.llm import models as llm_models
+from app.llm.base import PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
 from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
@@ -295,7 +296,7 @@ def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("nav_counts", _nav_counts())
         lim = llm_usage.limit()
         if lim["limit"]:       # the Claude meter + popover in the sidebar (monthly limit from Settings → Claude)
-            ctx.setdefault("claude_usage", {**lim, "by_task": llm_usage.month_by_task()})
+            ctx.setdefault("claude_usage", {**lim, "by_task": llm_usage.month_by_task(), "by_model": llm_usage.month_by_model()})
         ctx.setdefault("inbox_items", _inbox_items())
         ctx.setdefault("inbox_unread", ctx["nav_counts"].get("inbox", 0))
         if auth.enabled():
@@ -1854,12 +1855,14 @@ def _claude_section() -> dict[str, Any]:
     lim = llm_usage.limit()
     rows = []
     fmt = lambda n: "{:,}".format(n or 0).replace(",", ".")   # noqa: E731
-    fac, names = cost_factors(), {m: name.split()[0] for m, name in MODELS}   # "Haiku 5.5" -> "Haiku"
+    choices = llm_models.choices()                                  # fetched from the API (settings_section)
+    fac, names = cost_factors(m for m, _n in choices), {m: name.split()[0] for m, name in choices}   # "Haiku 5.5" -> "Haiku"
     for g in (llm_usage.summary().get("groups") or []):
         rows.append({"label": t(PURPOSES[g["purpose"]][1]) if g["purpose"] in PURPOSES else t("Other (tests, misc.)"),
                      "model": g["model"], "calls": g["calls"], "tokens_in": fmt(g["input"]), "tokens_out": fmt(g["output"]),
                      "cost": g["cost_usd"]})
-    return {"models": {p: _alias(model_for(p)) for p in PURPOSES}, "model_choices": MODELS,   # full model ids
+    return {"models": {p: _alias(model_for(p)) for p in PURPOSES}, "model_choices": choices,   # full model ids
+            "model_list": llm_models.last_fetch,                   # {ok, at, error}: where the list comes from
             "model_costs": [(names[m], f) for m, f in fac.items()],   # relative token price, cheapest first
             "claude_usage": {"used": lim["used"], "limit": lim["limit"]},
             "claude_limit_mode": lim["mode"], "token_usage": rows,
@@ -1870,11 +1873,10 @@ def _claude_section() -> dict[str, Any]:
 async def settings_claude(request: Request):
     """Model per task and the monthly token limit (Settings → Claude & usage)."""
     form = await request.form()
-    ids = {m[0] for m in MODELS}
-    short = {m[0].split("-")[1]: m[0] for m in MODELS}         # haiku / sonnet / opus / fable -> model id
+    await llm_models.refresh()
+    ids = llm_models.ids()
     for purpose, (key, _label, _hint) in PURPOSES.items():
-        m = str(form.get(f"model_{purpose}") or "")
-        m = short.get(m, m)
+        m = llm_models.resolve_alias(str(form.get(f"model_{purpose}") or ""))   # haiku / sonnet / … -> newest of the line
         if m in ids:
             set_setting(key, m)
     try:
@@ -1918,6 +1920,8 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
         raise HTTPException(404)
     keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
+    if section == "claude":
+        await llm_models.refresh()                 # the selectable models, fresh from the API
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
@@ -2177,16 +2181,17 @@ async def settings_save(request: Request):
 
 
 def _alias(model: str) -> str:
-    # LLM_MODEL=opus / sonnet from .env -> the matching entry in the selector
-    return {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5"}.get(model, model)
+    # LLM_MODEL=opus / sonnet from .env -> the newest model of that line in the selector
+    return llm_models.resolve_alias(model)
 
 
 @app.post("/settings/model")
 async def settings_model(purpose: str = Form(...), model: str = Form(...)):
-    if purpose not in PURPOSES or model not in {m for m, _ in MODELS}:
+    await llm_models.refresh()
+    if purpose not in PURPOSES or model not in llm_models.ids():
         raise HTTPException(400, t("unknown model"))
     set_setting(PURPOSES[purpose][0], model)
-    label = next(lbl for m, lbl in MODELS if m == model)
+    label = llm_models.label(model)
     return back(f"/settings/claude?msg={quote(f'{t(PURPOSES[purpose][1])}: {label}', safe='')}")
 
 

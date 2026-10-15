@@ -1,6 +1,7 @@
 """LLM backend interface. The app only ever asks for one structured JSON object."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -34,8 +35,8 @@ def _(text: str) -> str:
     return text
 
 
-# Selectable in Settings (id, name) - the current models of the API. Full ids on purpose: in CLI 2.1.286 the alias
-# "haiku" still means Haiku 4.5.
+# Static fallback for the selector in Settings (id, name), used only until the list has been fetched from the API
+# (app/llm/models.py). Full ids on purpose: in CLI 2.1.286 the alias "haiku" still means Haiku 4.5.
 MODELS = [
     ("claude-opus-5-5", "Opus 5.5"),
     ("claude-fable-5-1", "Fable 5.1"),
@@ -54,10 +55,10 @@ PRICES = {
 }
 
 
-def cost_factors() -> dict[str, int]:
-    """Token price of each model in MODELS relative to the cheapest one (input + output list price), cheapest first,
-    e.g. {"claude-haiku-5-5": 1, "claude-sonnet-5-5": 20, …}. Models without a price are left out."""
-    priced = sorted((sum(PRICES[m]), m) for m, _n in MODELS if m in PRICES)
+def cost_factors(ids: Iterable[str] | None = None) -> dict[str, int]:
+    """Token price of each model (default: MODELS) relative to the cheapest one (input + output list price),
+    cheapest first, e.g. {"claude-haiku-5-5": 1, "claude-sonnet-5-5": 20, …}. Models without a price are left out."""
+    priced = sorted((sum(PRICES[m]), m) for m in (ids if ids is not None else [m for m, _n in MODELS]) if m in PRICES)
     return {m: round(p / priced[0][0]) for p, m in priced} if priced else {}
 
 
@@ -93,7 +94,7 @@ def model_for(purpose: str | None) -> str:
     model = ((key and get_setting(key)) or PURPOSE_DEFAULTS.get(purpose or "")
              or get_setting("llm_model") or get_settings().llm_model)
     if get_setting("claude_limit_mode") == "haiku" and usage.limit()["over"]:
-        return usage.HAIKU    # monthly token limit reached (Settings → Claude): everything on Haiku
+        return usage.haiku()  # monthly token limit reached (Settings → Claude): everything on Haiku
     return model
 
 

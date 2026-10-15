@@ -248,7 +248,7 @@
   </div>
 </div>
 
-{# ---- Claude usage (needs claude_usage; optional claude_usage.by_task = [{label, tokens, color}]) ---- #}
+{# ---- Claude usage (needs claude_usage; optional claude_usage.by_task / by_model = [{label, tokens, color}]) ---- #}
 {% if cu %}
 <div id="claude-pop" x-cloak x-show="layer === 'claude'" class="fixed inset-0 z-[90]" @click.self="close()">
   <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5">
@@ -258,8 +258,13 @@
         <div class="text-[12.5px] text-muted">{{ cpct }} % {{ _("of your {n} M token limit", n=(cu.limit / 1e6)|round|int) }}{% if cu.calls is defined %} · {{ cu.calls }} {{ _("calls") }}{% endif %}</div></div>
       <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
     </div>
-    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for t in cu.by_task if cu.by_task is defined %}<span class="block h-full" style="width:{{ [t.tokens * 100 / cu.limit, 1.5]|max|round(1) }}%;background:{{ t.color }}" title="{{ t.label }}"></span>{% else %}<span class="block h-full bg-primary" style="width:{{ cpct }}%"></span>{% endfor %}</div>
-    {% if cu.by_task is defined %}<div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">{% for t in cu.by_task %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ t.color }}"></span><span class="truncate text-muted">{{ t.label }}</span><span class="ml-auto tabular-nums">{{ tokens(t.tokens) }}</span></div>{% endfor %}</div>{% endif %}
+    {# one bar + legend per split (by task, by model), each bar the share of the limit; a plain bar without splits #}
+    {% set splits = [(_("By task"), cu.by_task if cu.by_task is defined else []), (_("By model"), cu.by_model if cu.by_model is defined else [])]|selectattr(1)|list %}
+    {% for caption, parts in splits %}
+    <div class="text-[11.5px] font-medium uppercase tracking-wide text-muted{% if not loop.first %} mt-1{% endif %}">{{ caption }}</div>
+    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for t in parts %}<span class="block h-full" style="width:{{ [t.tokens * 100 / cu.limit, 1.5]|max|round(1) }}%;background:{{ t.color }}" title="{{ t.label }}"></span>{% endfor %}</div>
+    <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[12.5px]">{% for t in parts %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ t.color }}"></span><span class="truncate text-muted">{{ t.label }}</span><span class="ml-auto tabular-nums">{{ tokens(t.tokens) }}</span></div>{% endfor %}</div>
+    {% else %}<div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300"><span class="block h-full bg-primary" style="width:{{ cpct }}%"></span></div>{% endfor %}
     <div class="flex flex-wrap justify-between gap-2 border-t border-base-300 pt-3 text-[12.5px] text-muted"><span>{{ _("Limit {n} M", n=(cu.limit / 1e6)|round|int) }} · {{ _("covered by your subscription") }}</span><a class="link link-primary no-underline" href="/settings/claude">{{ _("Limit & statistics") }} →</a></div>
   </div>
 </div>

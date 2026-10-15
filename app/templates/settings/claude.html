@@ -18,13 +18,14 @@
   <form method="post" action="/settings/claude" class="flex flex-col gap-3.5 border-t border-base-300 pt-3.5" x-data="{ limit: {{ (cu.limit / 1e6)|round|int }} }">
     <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Model per task") }}</span><small class="text-[12.5px] text-muted">{# factors from llm.base.PRICES #}{% for name, f in model_costs %}{{ name }} {{ f }}×{% if not loop.last %} · {% endif %}{% endfor %} {{ _("tokens cost") }} · {{ _("Haiku price for prompts up to 100K tokens") }}</small></div>
     <div class="overflow-hidden rounded-box border border-base-300">
-      {# rows = llm.base.PURPOSES, options = llm.base.MODELS (full ids); a model not in the list (LLM_MODEL from .env) stays selected and is kept on Save #}
+      {# rows = llm.base.PURPOSES, options = llm.models.choices() (full ids, fetched from the API); a model not in the list (LLM_MODEL from .env) stays selected and is kept on Save #}
       {% for key, label, hint, cur in purposes %}{% set sel = models[key] if models is defined and key in models else cur %}
       <div class="grid grid-cols-1 items-center gap-2.5 border-b border-base-300 px-3.5 py-2.5 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_190px]">
         <div class="min-w-0"><div class="font-medium">{{ _(label) }}</div><div class="text-[12.5px] text-muted">{{ _(hint) }}</div></div>
         <select name="model_{{ key }}" class="select w-full min-w-0 bg-base-200 text-[13px]">{% if sel not in model_choices|map('first')|list %}<option value="{{ sel }}" selected>{{ sel }}</option>{% endif %}{% for m, name in model_choices %}<option value="{{ m }}" {% if sel == m %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
       {% endfor %}
     </div>
+    {% if model_list is defined and model_list.at %}<small class="text-[12.5px] text-muted">{% if model_list.ok %}{{ _("Model list from the Claude API, fetched {t}", t=model_list.at|ago) }}{% else %}{{ _("The model list could not be fetched from the Claude API ({error}) – this is the last known list.", error=model_list.error) }}{% endif %}</small>{% endif %}
     <div class="flex flex-col gap-2.5 border-t border-base-300 pt-3.5">
       <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Monthly token limit") }}</span><small class="text-[12.5px] text-muted">{{ '%.1f'|format(cu.used / 1e6) }} M {{ _("used") }} · {{ '%.1f'|format((cu.limit - cu.used) / 1e6) }} M {{ _("left") }}</small></div>
       {{ ui.bar(cpct, 'brand', 'h-1.5') }}

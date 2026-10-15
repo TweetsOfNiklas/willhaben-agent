@@ -57,7 +57,14 @@ def record(purpose: str | None, model: str, data: dict[str, Any] | None, *, ok: 
 
 
 LIMIT_MODES = ("pause", "haiku", "notify")   # over the limit: pause hit screening / everything on Haiku / only a push
-HAIKU = "claude-haiku-5-5"
+HAIKU = "claude-haiku-5-5"      # fallback when the fetched model list has no Haiku line (see haiku())
+
+
+def haiku() -> str:
+    """The model everything runs on over the limit in "haiku" mode: the newest Haiku of the fetched list."""
+    from app.llm import models
+
+    return models.newest("haiku") or HAIKU
 
 
 def month_start():
@@ -97,6 +104,22 @@ def month_by_task() -> list[dict[str, Any]]:
                        .where(LLMCall.ts >= month_start()).group_by(LLMCall.purpose)).all()
     out = [{"label": t(PURPOSES[p][1]) if p in PURPOSES else t("Other (tests, misc.)"), "tokens": int(n or 0),
             "color": TASK_COLORS.get(p, "var(--muted)")} for p, n in rows if n]
+    return sorted(out, key=lambda r: -r["tokens"])
+
+
+MODEL_COLORS = {"opus": "#6366f1", "fable": "#d946ef", "sonnet": "#0ea5e9", "haiku": "#22c55e"}   # per line
+
+
+def month_by_model() -> list[dict[str, Any]]:
+    """This month's tokens per model for the Claude popover: [{label, model, tokens, color}], biggest first.
+    Names come from the fetched model list (app/llm/models.py), the colour from the model's line."""
+    from app.llm import models
+
+    with session() as db:
+        rows = db.exec(select(LLMCall.model, func.coalesce(func.sum(col(LLMCall.input_tokens) + col(LLMCall.output_tokens)), 0))
+                       .where(LLMCall.ts >= month_start()).group_by(LLMCall.model)).all()
+    out = [{"label": models.label(m), "model": m, "tokens": int(n or 0),
+            "color": MODEL_COLORS.get(models.line_of(m), "var(--muted)")} for m, n in rows if n]
     return sorted(out, key=lambda r: -r["tokens"])
 
 

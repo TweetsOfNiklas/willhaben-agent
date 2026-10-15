@@ -38,6 +38,30 @@ def test_record_per_model_and_summary():
     assert [x["purpose"] for x in s["groups"]][0] == "chat"
 
 
+def test_month_by_model_and_task():
+    usage.record("chat", "claude-sonnet-5-5", CLI_RESULT, ok=True)            # 1500 Sonnet + 120 Haiku
+    usage.record("ads", "opus", {"usage": {"input_tokens": 2000, "output_tokens": 800}}, ok=True)   # alias as model id
+    usage.record("chat", "claude-sonnet-5-5", None, ok=False, error="timeout")  # no tokens: not listed
+    with session() as db:                                                       # last month: not this month's use
+        db.add(LLMCall(ts=utcnow() - timedelta(days=40), purpose="chat", model="claude-fable-5-1", call_part=0,
+                       input_tokens=9000, output_tokens=0))
+        db.commit()
+    by_model = usage.month_by_model()
+    assert [(m["label"], m["tokens"]) for m in by_model] == [("Opus", 2800), ("Sonnet 5.5", 1500), ("Haiku 5.5", 120)]
+    assert by_model[0]["color"] == usage.MODEL_COLORS["opus"] and by_model[2]["color"] == usage.MODEL_COLORS["haiku"]
+    assert [(x["tokens"]) for x in usage.month_by_task()] == [2800, 1620]
+    from fastapi.testclient import TestClient
+
+    from app.db import set_setting
+    from app.main import app
+    set_setting("claude_token_limit_m", "10")                                   # the sidebar meter needs a limit
+    with TestClient(app) as c:
+        home = c.get("/").text
+    pop = home[home.index('id="claude-pop"'):]
+    assert ("By task" in pop or "Nach Aufgabe" in pop) and ("By model" in pop or "Nach Modell" in pop)
+    assert pop.index("Opus") < pop.index("Sonnet 5.5") < pop.index("Haiku 5.5")   # biggest first, by model
+
+
 async def test_cli_records_purpose_and_errors(monkeypatch):
     cli = ClaudeCLI(cmd=FAKE, model="claude-opus-5-5", purpose="screen")
     await cli.complete(system="s", prompt="p", schema={"type": "object"})
