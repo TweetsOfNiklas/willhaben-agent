@@ -3,15 +3,17 @@ answers through, and switches over once it found better ones.
 
 Goal: one EU server every site answers (each site with its VPN switch on, and Geizhals when its switch is on); when
 none does, two that share the sites, each site on one that answers it (vpn.MAX_LIVE); when not even two cover them
-all, the pair that covers the most, and the rest pause with a note until the next regular search.
+all, the pair that covers the most, and the rest pause with a note until the next search (_retry()).
 
 Triggers: the schedule (every `vpn_shuffle_h` hours after the last search, default 6), "Search now" and new configs
 are regular searches: they look for a server other than the one in use, so the server changes now and then. A switch
 turned on (is the new site answered by the server in use?) and a site that refuses its server or gets no answer
 (Tunnel.failed(), or a request that finds no server) start one too; the automatic ones are guarded against storms:
 AUTO_GAP_S after the last search and AUTO_PER_HOUR an hour (one that may not run yet waits: `pending`, started by
-tick(), as is one a restart cut off), and a site starts at most one between two regular ones (refusing again, it waits
-for the next regular one). One search at a time; a site switched on or off meanwhile joins or leaves the running one.
+tick(), as is one a restart cut off), and a site that started one since the last regular search waits RETRY_S (growing
+each time) before its next one. A site still waiting at the end (no server answered it) gets the next search the same
+way (tick(), _retry()), not only the regular one hours later. One search at a time; a site switched on or off
+meanwhile joins or leaves the running one.
 
 In the background: the search tests servers on a tunnel of its own (never a live server: one key twice on one server
 knocks both off) while the live connections keep serving every site that has a server. A site whose server refused
@@ -99,6 +101,9 @@ WAIT_STEP_S = 30          # a wait for a site's budget looks again this often (t
 BOTCHECK_STREAK = 3       # bot-check pages through this many servers in a row: the site changed, not the servers
 AUTO_GAP_S = 300          # an automatic search starts at least this long after the end of the last one
 AUTO_PER_HOUR = 3         # and at most this many an hour
+RETRY_S = (900, 1800, 3600, 7200)   # a site's next automatic search after its last one: the 2nd, 3rd, 4th, ... time
+TRIAL_BLOCKED_TTL_S = 6 * 3600      # a 403 in a search's test marks the server for the site this long (eBay refuses
+                                    # at random; a live refusal that counted (vpn.CONFIRM) keeps vpn.MARK_TTL_S)
 INTERVAL_H = 6            # default of the setting vpn_shuffle_h
 INTERVAL_KEY = "vpn_shuffle_h"
 STOP_WAIT_S = 10          # cancel(): longest wait for the search to end
@@ -262,12 +267,49 @@ def pending(st: dict[str, Any] | None = None) -> dict[str, Any] | None:
 
 
 def next_at() -> float | None:
-    """When the next search starts: a pending one, else the regular one; None when none is due yet (never searched:
-    the next tick)."""
+    """When the next search starts: a pending one, else a waiting site's (_retry) or the regular one, whichever comes
+    first; None when none is due yet (never searched: the next tick)."""
     st = vpn.conn_state()
     if p := pending(st):
         return p["at"]
-    return float(st["shuffled"]) + interval_h() * 3600 if st.get("shuffled") else None
+    regular = float(st["shuffled"]) + interval_h() * 3600 if st.get("shuffled") else None
+    if (r := _retry(st, time.time())) is not None and (regular is None or r[0] < regular):
+        return r[0]
+    return regular
+
+
+def _triggered(st: dict[str, Any]) -> dict[str, tuple[float, int]]:
+    """The sites that started an automatic search since the last regular one: {pid: (when, how many times)} (an older
+    state holds only the time)."""
+    out: dict[str, tuple[float, int]] = {}
+    for pid, v in (st.get("triggered") or {}).items():
+        if isinstance(v, (int, float)):
+            out[pid] = (float(v), 1)
+        elif isinstance(v, list) and len(v) == 2 and isinstance(v[0], (int, float)) and isinstance(v[1], int):
+            out[pid] = (float(v[0]), max(v[1], 1))
+    return out
+
+
+def _again_at(st: dict[str, Any], pid: str) -> float:
+    """When this site may start an automatic search again: at once the first time, then RETRY_S after its last one."""
+    if (last := _triggered(st).get(pid)) is None:
+        return 0.0
+    when, n = last
+    return when + RETRY_S[min(n, len(RETRY_S)) - 1]
+
+
+def _retry(st: dict[str, Any], now: float) -> tuple[float, str, str, str] | None:
+    """The next search for a site that still waits (it refused its server, or no server answered it): (when, pid,
+    why, detail) of the earliest one, at its back-off (_again_at) and the storm guards (_auto_at)."""
+    on = {pid for pid, _ in vpn.users()}
+    out = None
+    for pid, p in (st.get("paused") or {}).items():
+        if pid not in on or not isinstance(p, list) or len(p) != 2:
+            continue
+        at = max(_again_at(st, pid), _auto_at(st, now))
+        if out is None or at < out[0]:
+            out = (at, pid, str(p[0]), str(p[1]))
+    return out
 
 
 def _auto_at(st: dict[str, Any], now: float) -> float:
@@ -286,23 +328,24 @@ def running() -> bool:
 
 def trigger(pid: str, reason: str, detail: str = "") -> bool:
     """A site refused its server (reason blocked | rate | unreachable | broken | botcheck) or found none (none): a
-    search now, or once the guards allow it (pending, started by tick()). True when one runs or comes; False when
-    this site started one since the last regular search (it waits for the next regular one) or none can run."""
+    search now, or once the guards allow it (pending, started by tick()): AUTO_GAP_S, AUTO_PER_HOUR, and for a site
+    that started one since the last regular search its back-off (RETRY_S). True when one runs or comes; False when
+    none can run."""
     if running() and not _run.closing:
         return True                              # the running search takes it in
     if blocker():
         return False
     st, now = vpn.conn_state(), time.time()
-    if reason != "none" and pid in (st.get("triggered") or {}):
-        log.info("VPN: %s %s again; it waits for the next regular search", pid, reason)
-        return False
     at = _auto_at(st, now)
+    if reason != "none" and (again := _again_at(st, pid)) > now:
+        log.info("VPN: %s %s again; its next search in %.0f s", pid, reason, again - now)
+        at = max(at, again)
     if running():                                # one is finishing and takes in nothing new: the next one comes
         at = max(at, now + AUTO_GAP_S)
     if at > now:
-        if not pending(st):
-            vpn.update_conn(pending={"at": at, "trigger": "auto", "by": pid, "why": reason, "detail": detail},
-                            triggered={**(st.get("triggered") or {}), **({pid: now} if reason != "none" else {})})
+        p = pending(st)
+        if p is None or at < p["at"]:            # the earlier one: a search takes in every waiting site
+            vpn.update_conn(pending={"at": at, "trigger": "auto", "by": pid, "why": reason, "detail": detail})
             log.info("VPN: %s %s, the next search may start in %.0f s", pid, reason, at - now)
         return True
     return start("auto", by=pid, why=reason, detail=detail) is None
@@ -339,6 +382,9 @@ async def tick() -> None:
         return
     if now >= float(st.get("shuffled") or 0) + interval_h() * 3600:
         start("schedule")
+        return
+    if (r := _retry(st, now)) is not None and r[0] <= now:     # a site still waits: its next search came
+        start("auto", by=r[1], why=r[2], detail=r[3])
 
 
 # ------------------------------------------------------------------ starting and stopping
@@ -355,8 +401,8 @@ def start(trigger: str = "manual", *, by: str = "", why: str = "", detail: str =
     before = vpn.live_servers(st) or [s for s in st.get("dropped") or [] if isinstance(s, str) and vpn.allowed(s)]
     auto = [x for x in st.get("auto") or [] if now - float(x) < 3600] + ([now] if trigger == "auto" else [])
     triggered = {} if trigger in REGULAR else dict(st.get("triggered") or {})
-    if trigger == "auto" and why != "none":
-        triggered[by] = now
+    if trigger == "auto" and by:
+        triggered[by] = [now, (_triggered(st).get(by) or (0.0, 0))[1] + 1]
     vpn.update_conn(pending=None, auto=auto, triggered=triggered)
     _run = Search(trigger, [Site(tg.pid, tg.name) for tg in tgs], by=by, why=why, detail=detail,
                   profile=vpn.source()[0] == "profile", before=before)
@@ -1160,7 +1206,7 @@ async def _ask_one(sh: Search, srv: Server, route: vpn.Route, tg: Target, job: j
     if a.verdict == "error":
         srv.errors[tg.pid] = srv.errors.get(tg.pid, 0) + 1
     elif a.verdict in ("blocked", "rate", "botcheck"):         # the site's own answer: real, kept
-        vpn.mark(tg.pid, srv.name, a.verdict)
+        vpn.mark(tg.pid, srv.name, a.verdict, ttl=TRIAL_BLOCKED_TTL_S if a.verdict == "blocked" else None)
         if vpn.server_for(tg.pid) == srv.name and not vpn.paused(tg.pid):
             vpn.pause(tg.pid, a.verdict, a.detail)
     elif a.verdict in ("ok", "site_error"):
@@ -1250,7 +1296,7 @@ async def _improve(sh: Search) -> None:
 
 
 async def _finish(sh: Search, retry: bool = False) -> None:
-    """The end: the sites no connection serves pause with a note until the next regular search; none served at all:
+    """The end: the sites no connection serves pause with a note until the next search (_retry); none served at all:
     no server, their requests fail closed. `retry`: the walk ended with a run of tunnels without a handshake (maybe
     the network): no site pauses for good, the search runs again OFFLINE_RETRY_S later."""
     await vpn.prune()                                # a live server no site uses stops
@@ -1499,8 +1545,8 @@ def _row(sh: Search, s: Site, srv: Server | None, live: bool) -> dict[str, Any]:
         refused = sum(a.verdict in REFUSED for a in said)
         row.update(label=t("No server"), tone="bad",
                    message=t("Refused every server it was asked through ({n}); its requests wait for the next "
-                             "regular search.", n=refused) if refused else
-                   t("No server got as far as asking {site}; its requests wait for the next regular search.",
+                             "search.", n=refused) if refused else
+                   t("No server got as far as asking {site}; its requests wait for the next search.",
                      site=s.name))
         return row
     server = (plan.get("assign") or {}).get(s.pid)

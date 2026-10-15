@@ -43,6 +43,7 @@ NOT_FOUND_CACHE_S = 30
 ANON_SESSION_S = 6 * 3600   # fresh anonymous visitor every 6 h
 TIMEOUT_S = 30
 VPN_ATTEMPTS = 3            # exits one request may use before it gives up (each one through the limiter)
+VPN_TRIES = 8               # ... and sends at most (a refusal is asked again until it counts: vpn.CONFIRM)
 TRIAL_TIMEOUT_S = 10        # a test request of the VPN search: a server that does not answer by then is out
 
 
@@ -475,16 +476,23 @@ class HttpPlatformClient:
     async def _send_vpn(self, tunnel: Tunnel, full: str, kind: str, headers: dict[str, str] | None,
                         valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
         """Through the site's VPN server: a refused server (403/429, a bot check: Cloudflare's challenge or a 200
-        `valid` rejects) or one that does not answer is reported (Tunnel.failed(): the site pauses, a search starts)
-        and the request asks again once ensure() has a route for it, at most VPN_ATTEMPTS times; a paused site's
-        ensure() raises VpnWait. No limiter.penalize() for a refused server: willhaben's limiter is shared with the
+        `valid` rejects) or one that does not answer is reported (Tunnel.refused()). Until the refusals in a row
+        count (vpn.CONFIRM) the request asks again through the same server with the same visitor (eBay's bot
+        manager refuses at random and lets the next one in); once they count, the site moves to its other server
+        or pauses and a search starts, and the request asks again once ensure() has a route for it: VPN_ATTEMPTS
+        exits and VPN_TRIES sends at most; a paused site's ensure() raises VpnWait. An accepted answer resets the
+        count (Tunnel.answered()). No limiter.penalize() for a refused server: willhaben's limiter is shared with the
         logged-in session on the home IP, which the refusal says nothing about. No route: PlatformError, never a
         direct request. Under a Trial (the VPN search) one try through its server only (_send_trial)."""
         if (tr := _trial.get()) is not None:
             return await self._send_trial(tunnel, tr, full, kind, headers)
         last: PlatformError | None = None
-        for _ in range(VPN_ATTEMPTS):
+        exits: set[Route] = set()
+        for _ in range(VPN_TRIES):
             route = await tunnel.ensure()                 # PlatformError when there is no route (fail closed)
+            exits.add(route)
+            if len(exits) > VPN_ATTEMPTS:
+                break
             try:
                 r = await self._send_once(full, kind, headers, route)
             except ExitMoved as e:                        # switched over while it waited: the new route
@@ -493,7 +501,7 @@ class HttpPlatformClient:
             except TransportError as e:
                 if not self._exit_unreachable(full):
                     raise PlatformError(t("Network error through the VPN: {error}", error=e)) from e
-                await tunnel.failed(route, "unreachable", detail=str(e)[:160])
+                await tunnel.refused(route, "unreachable", detail=str(e)[:160])
                 last = PlatformError(t("Network error through the VPN: {error}", error=e))
                 continue
             if self._exit_blocked(r):
@@ -502,9 +510,11 @@ class HttpPlatformClient:
                     and not tunnel.odd():       # a search found the site changed, not the servers
                 reason = "botcheck"
             else:
+                if r.status_code not in (403, 429):      # not eBay's warm-up 403 either: an answer the site accepted
+                    tunnel.answered(route)
                 return r
-            await tunnel.failed(route, reason, detail=f"HTTP {r.status_code}")
-            self.new_anonymous_session()
+            if await tunnel.refused(route, reason, detail=f"HTTP {r.status_code}"):
+                self.new_anonymous_session()             # it counted: the next server gets a new visitor
             last = Blocked(t("{name} refused the VPN server (HTTP {status})", name=self.name, status=r.status_code)
                            if reason != "botcheck" else
                            t("{name} answered through the VPN server with a bot check", name=self.name))

@@ -133,13 +133,27 @@ async def test_public_client_is_a_platform_client():
 # ------------------------------------------------------------------ through the VPN (app/platforms/vpn.py)
 class FakeTunnel:
     """Hands out routes http://exit1, http://exit2, ... (each the site's server); failed() moves on, as a switch-over
-    would. `dead`: no server works (fail closed). `running`: routes of other servers still up (the search's)."""
+    would. `dead`: no server works (fail closed). `running`: routes of other servers still up (the search's).
+    `confirm`: refusals in a row before one counts (vpn.CONFIRM; 1 here unless a test asks for more)."""
 
-    def __init__(self, dead=False):
+    def __init__(self, dead=False, confirm=1):
         from app.platforms.vpn import Route
 
         self.Route, self.dead, self.n, self.route, self.failures, self.details = Route, dead, 0, None, [], []
         self.odd_site, self.running, self.held = False, set(), []
+        self.confirm, self.strikes, self.refusals, self.accepted = confirm, 0, [], []
+
+    async def refused(self, route, reason, detail=""):
+        self.refusals.append((route.proxy, reason))
+        self.strikes += 1
+        if self.strikes < self.confirm:
+            return False
+        self.strikes = 0
+        return await self.failed(route, reason, detail)
+
+    def answered(self, route):
+        self.strikes = 0
+        self.accepted.append(route.proxy)
 
     async def ensure(self):
         if self.dead:
@@ -205,6 +219,23 @@ async def test_three_refusals_give_up_for_this_request():
         await c._get("https://fake.example/api")
     assert info.value.sent and "refused the VPN server" in str(info.value) and len(built) == 3
     assert [f[1] for f in tunnel.failures] == ["blocked", "rate", "blocked"] and c.limiter.cooling_down_s == 0
+
+
+async def test_a_refusal_is_asked_again_through_the_same_server_with_the_same_visitor_until_it_counts():
+    tunnel = FakeTunnel(confirm=3)
+    c, transports, built = _vpn_client({"http://exit1": [(403, b""), (403, b""), (200, b"{}")]}, tunnel)
+    r = await c._get("https://fake.example/api")
+    assert r.status_code == 200 and built == ["http://exit1"]           # one server, one visitor (its cookies kept)
+    assert tunnel.failures == [] and len(tunnel.refusals) == 2 and tunnel.accepted == ["http://exit1"]
+    assert c.limiter.cooling_down_s == 0
+
+
+async def test_refusals_in_a_row_move_on_to_the_next_server_with_a_new_visitor():
+    tunnel = FakeTunnel(confirm=3)
+    c, transports, built = _vpn_client({"http://exit1": [(403, b"")] * 3, "http://exit2": [(200, b"{}")]}, tunnel)
+    r = await c._get("https://fake.example/api")
+    assert r.status_code == 200 and built == ["http://exit1", "http://exit2"]
+    assert tunnel.failures == [("http://exit1", "blocked")] and len(transports["http://exit1"].calls) == 3
 
 
 async def test_no_server_means_no_request_at_all():

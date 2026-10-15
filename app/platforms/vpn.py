@@ -29,6 +29,13 @@ search and its automatic starts; `vpn_state` per site the servers it refused (ma
 MARK_TTL_S: a dead server only once it failed again on its own) and the ones it answered through (kept as long, they
 steer the order of a search).
 
+Failover (Tunnel.refused() → failed()): a site's refusal of its live server counts once it came CONFIRM times in a row
+(network errors: CONFIRM_UNREACHABLE), with no answer the site accepted in between; until then the request asks again
+through the same server. Sites like eBay (Akamai) refuse at random now and then: one 403 says little about the
+server. A refusal that counts marks the server for the site; the site moves to the other live server when it has
+not refused that one too (no pause, no search: untested there until a search asks it), else it waits (VpnWait) for a
+search (vpn_check.trigger(): a site that refuses again gets one after a growing back-off, never only the regular one).
+
 Fail closed: with the switch on and no working server, or for a site whose server refused it (it waits for the search:
 VpnWait), `Tunnel.ensure()` raises; nothing falls back to the home IP.
 """
@@ -66,6 +73,9 @@ MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "botcheck": 3600,   # botcheck
               "dead": 24 * 3600, "broken": 24 * 3600,   # no handshake / does not start, confirmed: stale configs
               "ok": 24 * 3600}       # answered through it: tried first when the site needs a server again
 MAX_LIVE = 2                   # live connections at most (the search's tunnels come on top)
+CONFIRM = 3                    # refusals in a row (403/429/bot check) before a site leaves its live server
+CONFIRM_UNREACHABLE = 2        # ... network errors in a row (a single timeout is no dead server)
+CONFIRM_WINDOW_S = 900         # older refusals no longer count
 SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
 DRAIN_S = 15                   # a server switched away from stops once its requests in flight ended, or after this
 HANDSHAKE_S = 5                # no WireGuard handshake within this: the server is dead (an answer takes < 1 s)
@@ -336,9 +346,9 @@ def oks(pid: str) -> dict[str, float]:
     return {n: float(u) for n, u in raw.items() if isinstance(u, (int, float)) and u > now}
 
 
-def mark(pid: str, name: str, reason: str) -> None:
+def mark(pid: str, name: str, reason: str, ttl: float | None = None) -> None:
     """Note what `name` did for this site: refused it (blocked, rate, unreachable, broken, botcheck) or answered it
-    ("ok"). The newer note replaces the older one; expired ones go."""
+    ("ok"), for MARK_TTL_S of the reason or `ttl` seconds. The newer note replaces the older one; expired ones go."""
     state = _load()
     site = state.setdefault(pid, {})
     now = time.time()
@@ -346,9 +356,9 @@ def mark(pid: str, name: str, reason: str) -> None:
                if isinstance(m, list) and len(m) == 2 and m[0] > now and n != name}
     answered = {n: u for n, u in (site.get("ok") or {}).items() if isinstance(u, (int, float)) and u > now and n != name}
     if reason == "ok":
-        answered[name] = now + MARK_TTL_S["ok"]
+        answered[name] = now + (ttl or MARK_TTL_S["ok"])
     else:
-        refused[name] = [now + MARK_TTL_S.get(reason, 3600), reason]
+        refused[name] = [now + (ttl or MARK_TTL_S.get(reason, 3600)), reason]
     site["marks"], site["ok"] = refused, answered
     _save(state)
 
@@ -921,7 +931,7 @@ conn = Connection()
 
 def _search(pid: str, reason: str, detail: str) -> bool:
     """Ask for a search (app/services/vpn_check.py tests the sites through their adapters, so it lives there); True
-    when one runs or comes, False when its guards let this site wait for the next regular one or none can run."""
+    when one runs or comes (now or after its guards and back-off), False when none can run."""
     from app.services import vpn_check
 
     return vpn_check.trigger(pid, reason, detail)
@@ -972,6 +982,9 @@ async def prune() -> None:
 
 
 # ------------------------------------------------------------------ one site's view of the connections
+_strikes: dict[tuple[str, str], list[float]] = {}   # (site, server) -> its refusals in a row (Tunnel.refused())
+
+
 class Tunnel:
     """The route a site sends through (its server's), and its report when the site refuses that server."""
 
@@ -1037,18 +1050,54 @@ class Tunnel:
                             "finds another one", name=self.label, server=waits_on(self.pid) or "?",
                             reason=reason_label(p[0])))
 
+    def _concerns(self, route: Route | None) -> bool:
+        """`route` is this site's live server now (not an earlier process, not another server since a switch-over),
+        and the site is not paused already."""
+        return route is not None and conn.is_live(route) and route.name == server_for(self.pid) and not paused(self.pid)
+
+    async def refused(self, route: Route | None, reason: str, detail: str = "") -> bool:
+        """A refusal through the site's server, or no answer (`unreachable`): it counts (failed()) once it came CONFIRM
+        times in a row (CONFIRM_UNREACHABLE for network errors) within CONFIRM_WINDOW_S, with no answer the site
+        accepted in between (answered()). Before that the caller asks again through the same server. True when it
+        counted and the server was marked."""
+        if not self._concerns(route) or (reason == "botcheck" and self.odd()):
+            return False
+        assert route is not None
+        now, key = time.monotonic(), (self.pid, route.name)
+        seen = [x for x in _strikes.get(key, []) if now - x < CONFIRM_WINDOW_S] + [now]
+        need = CONFIRM_UNREACHABLE if reason == "unreachable" else CONFIRM
+        if len(seen) < need:
+            _strikes[key] = seen
+            log.info("VPN %s: server %s %s (%s), %d of %d in a row: asking again", self.pid, route.name, reason,
+                     detail or "-", len(seen), need)
+            return False
+        _strikes.pop(key, None)
+        return await self.failed(route, reason, detail)
+
+    def answered(self, route: Route | None) -> None:
+        """The site accepted an answer through `route`: its refusals in a row start again from none."""
+        if route is not None:
+            _strikes.pop((self.pid, route.name), None)
+
     async def failed(self, route: Route | None, reason: str, detail: str = "") -> bool:
         """The site refused its server (`blocked`, `rate`, `botcheck`) or got no answer through it (`unreachable`):
-        mark the server for the site, pause the site (its requests wait) and ask for a search, whose guards may let
-        it wait; the other sites go on. Nothing for a route that is no longer the site's (a switch-over, a dead
-        process: ensure() starts it again), for a site paused already, or for the bot checks of a site a search
-        found changed. `detail` ("HTTP 403", the network error) goes to the log and the page. True when the server
-        was marked."""
-        if route is None or not conn.is_live(route) or route.name != server_for(self.pid) or paused(self.pid):
+        mark the server for the site. When the other live server is one the site has not refused, the site moves
+        there (untested there until a search asks it; no pause, no search); else it pauses (its requests wait) and
+        asks for a search, whose guards may let it wait; the other sites go on. Nothing for a route that is no
+        longer the site's (a switch-over, a dead process: ensure() starts it again), for a site paused already, or
+        for the bot checks of a site a search found changed. `detail` ("HTTP 403", the network error) goes to the log
+        and the page. True when the server was marked."""
+        if not self._concerns(route) or (reason == "botcheck" and self.odd()):
             return False
-        if reason == "botcheck" and self.odd():
-            return False
+        assert route is not None
         mark(self.pid, route.name, reason)
+        st = conn_state()
+        refused = marks(self.pid)
+        if (other := next((s for s in live_servers(st) if s != route.name and s not in refused), None)) is not None:
+            update_conn(assign={p: s for p, s in (st.get("assign") or {}).items() if p != self.pid})
+            log.warning("VPN %s: server %s %s (%s), moved to %s", self.pid, route.name, reason, detail or "-", other)
+            await prune()                        # the refused server stops once no site uses it
+            return True
         pause(self.pid, reason, detail)
         log.warning("VPN %s: server %s %s (%s), asking for a search", self.pid, route.name, reason, detail or "-")
         _search(self.pid, reason, detail)
@@ -1130,6 +1179,7 @@ def reset() -> None:
     """Tests: forget the connections and the tunnels (fakes; nothing to stop)."""
     global _locks_, conn
     _tunnels.clear()
+    _strikes.clear()
     conn = Connection()
     _locks_ = None
 
@@ -1146,8 +1196,8 @@ def pause_note(p: tuple[str, str], server: str | None = None) -> str:
     """Why a site waits, for its row and its settings page."""
     if p[0] == "none":
         n, _, total = p[1].partition("/")
-        return t("Paused: no VPN server answers. The last search checked {n} of {total} EU servers; the next regular "
-                 "search tries again.", n=n or "?", total=total or "?")
+        return t("Paused: no VPN server answers. The last search checked {n} of {total} EU servers; the next search "
+                 "tries again.", n=n or "?", total=total or "?")
     running, coming = _searching()
     reason = reason_label(p[0]) + (f", {describe(p[1])}" if p[1] else "")
     if running or coming:

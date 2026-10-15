@@ -255,11 +255,11 @@ async def test_a_server_for_all_is_found_in_the_background_while_the_old_one_kee
 async def test_a_refused_site_waits_without_an_error_while_the_others_go_on(sites, fake):
     _collection(N(1), N(2), N(3))
     gate = asyncio.Event()
-    a, b = sites({N(1): [NO], N(2): [gate, PAGE, PAGE]}, {N(1): [PAGE, PAGE, PAGE], N(2): [PAGE, PAGE]})
+    a, b = sites({N(1): [NO] * vpn.CONFIRM, N(2): [gate, PAGE, PAGE]}, {N(1): [PAGE, PAGE, PAGE], N(2): [PAGE, PAGE]})
     _live(N(1), fake=N(1), fake2=N(1))
     _gap_passed()
     with pytest.raises(vpn.VpnWait, match="its requests wait until the search finds another one"):
-        await a.search(a.keyword_search("x"))                      # refused: it waits, the search starts
+        await a.search(a.keyword_search("x"))                      # refused 3 times in a row: it waits, a search starts
     sh = vpn_check._run
     assert (sh.trigger, sh.by, sh.why, sh.detail) == ("auto", "fake", "blocked", "HTTP 403")
     await _until(lambda: a.calls(N(2)) == 1)
@@ -328,7 +328,7 @@ async def test_when_two_cannot_cover_all_the_best_pair_stays_and_the_rest_pauses
     v = vpn_check.view()
     assert v["tone"] == "warn" and v["summary"].startswith(f"No server for {site.name} after 3 of 3 EU servers")
     row = next(r for r in v["rows"] if r["pid"] == left)
-    assert (row["label"], row["tone"]) == ("No server", "bad") and "next regular search" in row["message"]
+    assert (row["label"], row["tone"]) == ("No server", "bad") and "wait for the next search" in row["message"]
     note = next(s for s in vpn.status()["sites"] if s["id"] == left)["paused"]["note"]
     assert note.startswith("Paused: no VPN server answers. The last search checked 3 of 3 EU servers")
     assert vpn.health() == ("problem", f"{site.name} paused: no VPN server answers them")
@@ -807,6 +807,38 @@ async def test_geizhals_refusing_the_server_in_use_gets_one_found_and_never_goes
     assert [t.pid for t in vpn_check.targets()] == ["fake"]
 
 
+async def test_geizhals_asks_again_through_its_server_before_a_refusal_counts(sites, fake, monkeypatch):
+    _collection(N(1), N(2))
+    seen = gz(monkeypatch, fake, {N(1): [(403, ""), (403, ""), (200, "<html></html>")], "direct": []})
+    _live(N(1), geizhals=N(1))
+    assert await geizhals.search("x") == [] and seen == [N(1)] * 3       # two 403s, then the answer: it stays
+    assert vpn.marks(vpn.GEIZHALS) == {} and vpn.paused(vpn.GEIZHALS) is None and not vpn_check.running()
+
+
+async def test_a_403_in_a_search_marks_the_server_for_hours_not_a_day(sites, fake):
+    _collection(N(1), N(2))
+    sites({N(1): [NO], N(2): [PAGE]})
+    sh = await _search()
+    assert sh.plan["servers"] == [N(2)]
+    until, reason = vpn.marks("fake")[N(1)]
+    assert reason == "blocked" and until == pytest.approx(time.time() + vpn_check.TRIAL_BLOCKED_TTL_S, abs=30)
+
+
+async def test_a_site_no_server_answered_gets_the_next_search_after_its_back_off(sites, fake, monkeypatch):
+    _collection(N(1))
+    sites({N(1): []})
+    started = []
+    monkeypatch.setattr(vpn_check, "start", lambda trigger="manual", **kw: started.append((trigger, kw)))
+    now = time.time()
+    vpn.update_conn(shuffled=now - 60, paused={"fake": ["none", "40/40"]}, triggered={"fake": [now - 60, 1]}, auto=[])
+    assert vpn_check.next_at() == pytest.approx(now - 60 + vpn_check.RETRY_S[0])   # not the regular one in 6 h
+    await vpn_check.tick()
+    assert started == []
+    vpn.update_conn(triggered={"fake": [now - vpn_check.RETRY_S[0] - 1, 1]}, shuffled=now - vpn_check.AUTO_GAP_S - 1)
+    await vpn_check.tick()
+    assert started == [("auto", {"by": "fake", "why": "none", "detail": "40/40"})]
+
+
 async def test_geizhals_queued_when_its_switch_goes_on_goes_through_the_vpn(fake, monkeypatch):
     _collection(N(1))
     vpn.update_conn(servers=[N(1)])
@@ -919,11 +951,12 @@ async def test_a_site_paused_after_a_block_is_waited_for(sites, fake, serial, mo
 # ------------------------------------------------------------------ triggers and guards
 async def test_a_block_between_searches_triggers_one_search_not_a_storm(sites, fake):
     _collection(N(1), N(2), N(3))
-    a, b = sites({N(1): [NO], N(2): [PAGE, NO], N(3): [PAGE]}, {N(1): [PAGE], N(2): [PAGE, NO], N(3): [PAGE]})
+    a, b = sites({N(1): [NO] * vpn.CONFIRM, N(2): [PAGE, NO], N(3): [PAGE]},
+                 {N(1): [PAGE], N(2): [PAGE] + [NO] * vpn.CONFIRM, N(3): [PAGE]})
     _live(N(1), fake=N(1), fake2=N(1))
     _gap_passed()
     with pytest.raises(vpn.VpnWait):
-        await a.search(a.keyword_search("x"))                       # 403 through N1: it waits, a search starts
+        await a.search(a.keyword_search("x"))                       # 403s through N1: it waits, a search starts
     sh2 = vpn_check._run
     await asyncio.wait_for(sh2.task, 5)
     assert sh2.plan["servers"] == [N(2)] and vpn.paused("fake") is None
@@ -946,9 +979,11 @@ async def test_a_block_between_searches_triggers_one_search_not_a_storm(sites, f
     assert vpn.conn_state()["pending"] is None and len(vpn.conn_state()["auto"]) == 2
 
 
-async def test_a_site_starts_one_automatic_search_between_two_regular_ones(sites, fake):
+async def test_a_site_that_refuses_again_gets_its_next_search_after_a_growing_back_off(sites, fake):
+    """Not only the regular search hours later: a site whose new server refuses it too waits RETRY_S, longer each time."""
     _collection(N(1), N(2), N(3))
-    a, b = sites({N(1): [NO], N(2): [PAGE, NO], N(3): [PAGE, PAGE]}, {N(1): [PAGE], N(2): [PAGE], N(3): [PAGE, PAGE]})
+    a, b = sites({N(1): [NO] * vpn.CONFIRM, N(2): [PAGE] + [NO] * vpn.CONFIRM, N(3): [PAGE, PAGE]},
+                 {N(1): [PAGE], N(2): [PAGE], N(3): [PAGE, PAGE]})
     _live(N(1), fake=N(1), fake2=N(1))
     _gap_passed()
     with pytest.raises(vpn.VpnWait):
@@ -958,11 +993,21 @@ async def test_a_site_starts_one_automatic_search_between_two_regular_ones(sites
     assert sh2.plan["servers"] == [N(2)]
     _gap_passed()
     with pytest.raises(vpn.VpnWait, match="refused the VPN server"):
-        await a.search(a.keyword_search("x"))                       # answers the test, refuses live: no second one
-    assert vpn_check._run is sh2 and vpn.conn_state().get("pending") is None and vpn.paused("fake")
-    assert vpn.health()[0] == "problem"                             # it waits, and no search comes
-    sh3 = await _search()                                           # the next regular one tests it again
-    assert sh3.plan["servers"] == [N(3)] and vpn.paused("fake") is None and vpn.conn_state()["triggered"] == {}
+        await a.search(a.keyword_search("x"))                       # answers the test, refuses live: again
+    when, n = vpn_check._triggered(vpn.conn_state())["fake"]
+    p = vpn_check.pending()
+    assert vpn_check._run is sh2 and vpn.paused("fake") and n == 1
+    assert (p["by"], p["why"]) == ("fake", "blocked") and p["at"] == pytest.approx(when + vpn_check.RETRY_S[0])
+    assert vpn.health()[0] == "unknown" and vpn_check.next_at() == p["at"]   # it waits, and its next search comes
+    await vpn_check.tick()
+    assert vpn_check._run is sh2                                    # not yet
+    vpn.update_conn(pending={**p, "at": time.time() - 1})
+    await vpn_check.tick()
+    sh3 = vpn_check._run
+    await asyncio.wait_for(sh3.task, 5)
+    assert (sh3.trigger, sh3.by) == ("auto", "fake") and sh3.plan["servers"] == [N(3)] and vpn.paused("fake") is None
+    when, n = vpn_check._triggered(vpn.conn_state())["fake"]
+    assert n == 2 and vpn_check._again_at(vpn.conn_state(), "fake") == when + vpn_check.RETRY_S[1]   # longer now
 
 
 async def test_a_site_whose_pages_changed_does_not_keep_the_searches_going(fake, serial):

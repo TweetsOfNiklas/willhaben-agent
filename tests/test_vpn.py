@@ -341,6 +341,68 @@ async def test_a_refusal_marks_pauses_and_asks_for_a_search_the_others_go_on(fak
         await wh.ensure()
 
 
+async def test_a_refusal_counts_only_after_several_in_a_row_and_an_answer_starts_the_count_again(fake, no_search):
+    """eBay's bot manager refuses now and then and lets the next request in: one 403 says little about the server."""
+    _collection("at-vie-wg-001", "at-vie-wg-002")
+    _on("willhaben")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    tn = vpn.tunnel_for("willhaben")
+    r = await tn.ensure()
+    for _ in range(vpn.CONFIRM - 1):
+        assert await tn.refused(r, "blocked", "HTTP 403") is False      # asked again through the same server
+    tn.answered(r)                                                      # an answer between: from none again
+    for _ in range(vpn.CONFIRM - 1):
+        assert await tn.refused(r, "blocked", "HTTP 403") is False
+    assert vpn.marks("willhaben") == {} and vpn.paused("willhaben") is None and no_search == []
+    assert await tn.refused(r, "blocked", "HTTP 403") is True           # the third in a row counts
+    assert vpn.paused("willhaben") == ("blocked", "HTTP 403") and no_search == [("willhaben", "blocked", "HTTP 403")]
+    assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "blocked"
+
+
+async def test_network_errors_count_after_two_and_old_refusals_no_longer_count(fake, no_search):
+    _collection("at-vie-wg-001")
+    _on("willhaben")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    tn = vpn.tunnel_for("willhaben")
+    r = await tn.ensure()
+    vpn._strikes[("willhaben", r.name)] = [time.monotonic() - vpn.CONFIRM_WINDOW_S - 1] * 5   # long ago
+    assert await tn.refused(r, "unreachable", "timed out") is False
+    assert await tn.refused(r, "unreachable", "timed out") is True
+    assert vpn.paused("willhaben") == ("unreachable", "timed out")
+    old = vpn.Route(r.proxy, r.gen - 1, r.name)
+    assert await tn.refused(old, "blocked") is False and len(no_search) == 1   # not its route: never counts
+
+
+async def test_a_refusal_that_counts_moves_the_site_to_the_other_live_server_without_a_pause(fake, no_search):
+    _collection("at-vie-wg-001", "at-vie-wg-002")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(servers=["at-vie-wg-001", "at-vie-wg-002"],
+                    assign={"willhaben": "at-vie-wg-001", "kleinanzeigen": "at-vie-wg-002"})
+    wh = vpn.tunnel_for("willhaben")
+    r = await wh.ensure()
+    assert r.name == "at-vie-wg-001"
+    assert await wh.failed(r, "blocked", "HTTP 403") is True
+    assert vpn.paused("willhaben") is None and no_search == []          # it goes on at once: no pause, no search
+    assert vpn.server_for("willhaben") == "at-vie-wg-002" and "willhaben" not in vpn.conn_state()["assign"]
+    assert vpn.live_servers() == ["at-vie-wg-002"]                      # the refused one stopped: nobody uses it
+    r2 = await wh.ensure()
+    assert r2.name == "at-vie-wg-002"
+    assert await wh.failed(r2, "blocked", "HTTP 403") is True           # refused there too: nowhere left to go
+    assert vpn.paused("willhaben") == ("blocked", "HTTP 403") and no_search == [("willhaben", "blocked", "HTTP 403")]
+
+
+async def test_a_site_does_not_move_to_a_live_server_it_refused_lately(fake, no_search):
+    _collection("at-vie-wg-001", "at-vie-wg-002")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(servers=["at-vie-wg-001", "at-vie-wg-002"],
+                    assign={"willhaben": "at-vie-wg-001", "kleinanzeigen": "at-vie-wg-002"})
+    vpn.mark("willhaben", "at-vie-wg-002", "blocked")
+    wh = vpn.tunnel_for("willhaben")
+    r = await wh.ensure()
+    assert await wh.failed(r, "blocked", "HTTP 403") is True
+    assert vpn.paused("willhaben") == ("blocked", "HTTP 403") and len(no_search) == 1
+
+
 async def test_a_switch_over_lets_requests_in_flight_finish_first(fake, no_search, monkeypatch):
     monkeypatch.setattr(vpn, "DRAIN_S", 5)
     _collection("at-vie-wg-001", "at-vie-wg-002")

@@ -152,11 +152,27 @@ def _client(proxy: str | None) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=15, follow_redirects=True, proxy=proxy, trust_env=False)
 
 
+class _AskAgain(GeizhalsError):
+    """A refusal through the live server: asked again (through the same server until it counts, then the next)."""
+
+
 async def _get_vpn(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str:
     """Through Geizhals' VPN server; no route: GeizhalsError, never a direct request. A 403/429, Cloudflare's
-    challenge or no answer refuses the server (Tunnel.failed(): Geizhals waits for the search to find it another one)
-    and does not penalize the limiter, whose pause is for blocks of the home IP. Under a Trial (the VPN search)
-    through its server only, and what it met is noted there."""
+    challenge or no answer is a refusal (Tunnel.refused()): asked again through the same server until the refusals
+    in a row count (vpn.CONFIRM), then Geizhals moves to the other live server or waits for the search to find it
+    another one. A refusal does not penalize the limiter, whose pause is for blocks of the home IP. Under a Trial
+    (the VPN search) once, through its server only, and what it met is noted there."""
+    last: GeizhalsError | None = None
+    for _ in range(vpn.CONFIRM + 2):
+        try:
+            return await _get_vpn_once(tunnel, url, headers)
+        except _AskAgain as e:
+            last = e
+    assert last is not None
+    raise GeizhalsError(str(last))
+
+
+async def _get_vpn_once(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str:
     tr = current_trial()
     try:
         route = tr.route if tr is not None else await tunnel.ensure()
@@ -184,9 +200,9 @@ async def _get_vpn(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str
         detail = str(error)[:160] or type(error).__name__
         if tr is not None:
             tr.sent, tr.refused, tr.detail = tr.sent + 1, "unreachable", detail
-        else:
-            await tunnel.failed(route, "unreachable", detail)
-        raise GeizhalsError(t("Geizhals unreachable through the VPN: {error}", error=detail)) from error
+            raise GeizhalsError(t("Geizhals unreachable through the VPN: {error}", error=detail)) from error
+        await tunnel.refused(route, "unreachable", detail)
+        raise _AskAgain(t("Geizhals unreachable through the VPN: {error}", error=detail)) from error
     challenge = r.headers.get("cf-mitigated", "").lower() == "challenge"
     if tr is not None:
         tr.sent, tr.status = tr.sent + 1, r.status_code
@@ -195,9 +211,11 @@ async def _get_vpn(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str
         reason = "rate" if r.status_code == 429 else "blocked" if r.status_code == 403 else "botcheck"
         if tr is not None:
             tr.refused, tr.detail = reason, f"HTTP {r.status_code}"
-        else:
-            await tunnel.failed(route, reason, f"HTTP {r.status_code}")
-        raise GeizhalsError(t("Geizhals refused the VPN server (HTTP {status})", status=r.status_code))
+            raise GeizhalsError(t("Geizhals refused the VPN server (HTTP {status})", status=r.status_code))
+        await tunnel.refused(route, reason, f"HTTP {r.status_code}")
+        raise _AskAgain(t("Geizhals refused the VPN server (HTTP {status})", status=r.status_code))
+    if tr is None:
+        tunnel.answered(route)
     if r.status_code == 200:
         _limiter.reward()
     if r.status_code != 200:
