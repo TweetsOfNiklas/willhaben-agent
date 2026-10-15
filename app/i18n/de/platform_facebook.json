@@ -1,0 +1,18 @@
+{
+ "Facebook page without search results (login wall or changed page)": "Facebook-Seite ohne Suchergebnisse (Login-Sperre oder geänderte Seite)",
+ "Not a Facebook Marketplace link with a location (facebook.com/marketplace/<city>/…)": "Kein Facebook-Marketplace-Link mit Ort (facebook.com/marketplace/<stadt>/…)",
+ "login wall": "Login-Sperre",
+ "Facebook refused the request ({why}); pausing {s}s": "Facebook hat den Abruf abgelehnt ({why}); Pause {s} s",
+ "Facebook search returned HTTP {status}": "Facebook-Suche lieferte HTTP {status}",
+ "Facebook ad {id}: HTTP {status}": "Facebook-Anzeige {id}: HTTP {status}",
+ "Not a facebook.com link": "Kein facebook.com-Link",
+ "The Facebook link has no search term (query=…)": "Der Facebook-Link enthält keinen Suchbegriff (query=…)",
+ "Facebook Marketplace needs a location: set it in Settings → Facebook Marketplace": "Facebook Marketplace braucht einen Ort: in Einstellungen → Facebook Marketplace festlegen",
+ "Facebook does not know this location; open the search on Facebook, pick the location there and copy the link again": "Facebook kennt diesen Ort nicht; öffne die Suche auf Facebook, wähle dort den Ort und kopiere den Link erneut",
+ "Not a Facebook Marketplace search with a location (facebook.com/marketplace/<city>/search?query=…)": "Keine Facebook-Marketplace-Suche mit Ort (facebook.com/marketplace/<stadt>/search?query=…)",
+ "Reads the public Marketplace pages without a Facebook account: the newest ~24 listings per search (more need a login), a few of them from outside the radius. Opening an ad loads its page with the description, condition and all photos. Facebook's terms do not allow automated access.": "Liest die öffentlichen Marketplace-Seiten ohne Facebook-Konto: die neuesten ~24 Anzeigen pro Suche (mehr gibt es nur mit Login), einige davon von außerhalb des Umkreises. Beim Öffnen einer Anzeige wird ihre Seite mit Beschreibung, Zustand und allen Fotos geladen. Facebooks Nutzungsbedingungen erlauben keinen automatisierten Zugriff.",
+ "Location for keyword searches (product search): a Marketplace link from facebook.com": "Ort für Stichwortsuchen (Produktsuche): ein Marketplace-Link von facebook.com",
+ "Searching around {place}": "Sucht um {place}",
+ "radius {n} km": "Umkreis {n} km",
+ "Open Marketplace on facebook.com, set the location and radius, search for anything and paste the link; saving runs one test search. Search agents take the location from their own link.": "Öffne Marketplace auf facebook.com, stell Ort und Umkreis ein, such nach irgendetwas und füge den Link ein; beim Speichern läuft eine Testsuche. Suchagenten nehmen den Ort aus ihrem eigenen Link."
+}

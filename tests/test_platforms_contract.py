@@ -94,6 +94,9 @@ PREISJAEGER_ROUTES = [("/search", "preisjaeger_search.html", "text/html")]
 EBAY_ROUTES = [("/itmdesc/920036165580", "ebay_desc.html", "text/html"),
                ("/itm/920036165580", "ebay_item.html", "text/html"), ("/sch/i.html", "ebay_search.html", "text/html")]
 
+FACEBOOK_ROUTES = [("/marketplace/item/1438848741764802", "facebook_item.html", "text/html"),
+                   ("/search", "facebook_search.html", "text/html")]
+
 
 def _installer(module, client_cls, routes):
     def install():
@@ -108,7 +111,29 @@ def _installer(module, client_cls, routes):
     return install, uninstall
 
 
+def _install_fb():
+    import json as _json
+
+    from app.db import set_setting
+    from app.platforms import facebook as fb
+    set_setting(fb.LOCATION_KEY, _json.dumps({"loc": "vienna", "radius": "40", "place": "Wien, Österreich"}))
+    return _installer("facebook", "FacebookClient", FACEBOOK_ROUTES)[0]()
+
+
 CASES = {
+    "facebook": {
+        "url": "https://www.facebook.com/marketplace/vienna/search?query=fahrrad&maxPrice=100&radius=20",
+        "volatile": "https://www.facebook.com/marketplace/vienna/search?query=fahrrad&maxPrice=100&radius=20&ref=search&referral_code=x&exact=false",
+        "invalid": ["https://www.facebook.com/marketplace/item/1438848741764802/", "https://example.com/marketplace/vienna/search?query=x",
+                    "https://www.facebook.com/marketplace/vienna/search", "https://www.facebook.com/marketplace/category/search?query=x"],
+        "ad_url": "https://www.facebook.com/marketplace/item/1438848741764802/?ref=share",
+        "ad_id": "1438848741764802",
+        "keyword": "rennrad",
+        "install": _install_fb,
+        "uninstall": _installer("facebook", "FacebookClient", FACEBOOK_ROUTES)[1],
+        "expect_ads": 3,
+        "detail_id": "1438848741764802",
+    },
     "ebay": {
         "url": "https://www.ebay.at/sch/i.html?_nkw=iphone+13&_udlo=100&_udhi=500",
         "volatile": "https://www.ebay.at/sch/i.html?_nkw=iphone+13&_udlo=100&_udhi=500&_pgn=2&_ipg=240&rt=nc&_from=R40",

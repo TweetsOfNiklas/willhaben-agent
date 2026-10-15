@@ -103,6 +103,22 @@ def shpock(extra_properties: list[Any] | None) -> tuple[str | None, str | None]:
     return None, None
 
 
+# ------------------------------------------------------------------ Facebook Marketplace
+# attribute_data entry "Zustand"/"Condition" of an item page (seen live: used_good "Gebraucht – guter Zustand")
+FACEBOOK = {"new": "new", "used_like_new": "like_new", "used_good": "used", "used_fair": "used",
+            "refurbished": "refurbished", "used_poor": "used"}
+
+
+def facebook(attributes: list[Any] | None) -> tuple[str | None, str | None]:
+    """An item page's attribute_data: the condition entry by its value, else its label."""
+    for a in attributes or []:
+        if isinstance(a, dict) and str(a.get("value") or "") in FACEBOOK or \
+                isinstance(a, dict) and str(a.get("attribute_name") or "").lower() in ("zustand", "condition"):
+            text = str(a.get("label") or "")
+            return _coded(FACEBOOK.get(str(a.get("value") or "")) or from_text(text), text or None)
+    return None, None
+
+
 # ------------------------------------------------------------------ Kleinanzeigen
 # attribute "<category>.condition" (seen live in Handy & Telefon, list and ad: new "Neu", like_new "Sehr Gut",
 # ok "Gut", alright "In Ordnung", defect "Defekt"); <category>.battery_condition is another thing

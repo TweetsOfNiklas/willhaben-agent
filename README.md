@@ -12,7 +12,7 @@ It runs on your own server, from your home internet connection, and you control 
 (English or German).
 
 - **Search agents**: build a search with willhaben's own filters, or paste a search link or type a search term for
-  another supported site (kleinanzeigen.de, Shpock, Vinted, Preisjäger, eBay; see "Supported platforms"); one agent can
+  another supported site (kleinanzeigen.de, Shpock, Vinted, Preisjäger, eBay, Facebook Marketplace; see "Supported platforms"); one agent can
   watch several sites at once (the same search term and price range on each) and several search terms (add them and
   tick the sites in the agent's settings), and get notified about new listings and price drops, usually much faster
   than the sites' e-mail alerts. Hits open in a detail view inside the dashboard.
@@ -140,9 +140,12 @@ pacing and budget.
 | shpock.com | AT, DE | the GraphQL API of the Shpock website (direct requests, no login) | link, keyword with a price range, product search | yes (the ad's page: posting time, condition, seller) | against willhaben listings | no | built; search and ad pages checked once against the live site (2026-10-12), no agent has run for days yet |
 | vinted.at, vinted.de | AT, DE | the catalog data the website renders for a browser (direct requests, no login, about 3 MB per search, agents every 5 min at most) | link with the site's own filters, keyword with a price range, product search | yes (the ad's page) | against willhaben listings | no | built; search and ad pages checked once against the live site (2026-10-12), no agent has run for days yet |
 | preisjaeger.at | AT | the deal cards of the search page (direct requests, no login); deals from shops, not private listings | link, keyword (the app applies the price range), product search | the listing only | against willhaben listings | no | built; search checked once against the live site (2026-10-12), no agent has run for days yet |
+| facebook.com/marketplace | AT | the public (logged-out) Marketplace pages, never a Facebook account; the newest ~24 listings per search, agents every 10 min at most | link (location, radius, price kept), keyword around the location set in Settings → Facebook Marketplace, product search | yes (the listing page: description, condition, all photos, category) | against willhaben listings | no | built; search and listing pages checked against the live site (2026-10-15), no agent has run for days yet |
 | ebay.at | AT | the result cards of the search page (direct requests, no login, no API keys); only Buy It Now offers located in Austria, no auctions; agents every 5 min at most | link (category, condition and a wider place are kept), keyword with a price range, product search | the listing only | against willhaben listings | no | built; searches checked against the live site (2026-10-13), no agent has run for days yet |
 
-Facebook Marketplace needs a login and is not supported. Shpock and Vinted listings come without a date (opening one
+Facebook Marketplace is read without a login, so it gives only the first ~24 listings of a search (newest first for
+agents) and mixes in a few from outside the radius; its result list carries no coordinates to filter them out. Facebook's
+terms do not allow automated access: it has its own, slower pacing, and a refusal pauses it. Shpock and Vinted listings come without a date (opening one
 loads it), Vinted's also without a place; on Preisjäger the shop is shown where the other sites show the place.
 eBay's cards name no place either (only "aus <country>" for items from abroad). eBay sits behind a bot check that
 refuses a new visitor's first request or two; the app keeps that visitor's cookies and asks again, and only a refusal
@@ -223,8 +226,8 @@ Every variable is optional. Values set in the dashboard win over the environment
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude token from `claude setup-token`, instead of signing in through the dashboard |
 | `HA_URL`, `HA_TOKEN`, `HA_NOTIFY_SERVICE` | Home Assistant without the connect flow |
 | `REQUEST_MIN_GAP_S`, `REQUESTS_PER_HOUR` | Rate limit for all willhaben requests (defaults 3 s, 240/h) |
-| `PLATFORMS_ENABLED`, `PLATFORM_KLEINANZEIGEN_MIN_GAP_S`, `PLATFORM_KLEINANZEIGEN_PER_HOUR`, `KLEINANZEIGEN_API_AUTH` | Which other sites exist (default `willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay`), kleinanzeigen's pacing (3 s, 120/h) and, in case the bundled ones stop working, the Kleinanzeigen app's API credentials (`user:password`); all also in Settings → Platforms |
-| `PLATFORM_SHPOCK_MIN_GAP_S`, `PLATFORM_SHPOCK_PER_HOUR`, `PLATFORM_VINTED_MIN_GAP_S`, `PLATFORM_VINTED_PER_HOUR`, `PLATFORM_PREISJAEGER_MIN_GAP_S`, `PLATFORM_PREISJAEGER_PER_HOUR`, `PLATFORM_EBAY_MIN_GAP_S`, `PLATFORM_EBAY_PER_HOUR` | Pacing of the other sites (Shpock 4 s, 90/h; Vinted 8 s, 40/h; Preisjäger 4 s, 60/h; eBay 8 s, 40/h); also in Settings → Platforms |
+| `PLATFORMS_ENABLED`, `PLATFORM_KLEINANZEIGEN_MIN_GAP_S`, `PLATFORM_KLEINANZEIGEN_PER_HOUR`, `KLEINANZEIGEN_API_AUTH` | Which other sites exist (default `willhaben,kleinanzeigen,shpock,vinted,preisjaeger,ebay,facebook`), kleinanzeigen's pacing (3 s, 120/h) and, in case the bundled ones stop working, the Kleinanzeigen app's API credentials (`user:password`); all also in Settings → Platforms |
+| `PLATFORM_SHPOCK_MIN_GAP_S`, `PLATFORM_SHPOCK_PER_HOUR`, `PLATFORM_VINTED_MIN_GAP_S`, `PLATFORM_VINTED_PER_HOUR`, `PLATFORM_PREISJAEGER_MIN_GAP_S`, `PLATFORM_PREISJAEGER_PER_HOUR`, `PLATFORM_EBAY_MIN_GAP_S`, `PLATFORM_EBAY_PER_HOUR`, `PLATFORM_FACEBOOK_MIN_GAP_S`, `PLATFORM_FACEBOOK_PER_HOUR` | Pacing of the other sites (Shpock 4 s, 90/h; Vinted 8 s, 40/h; Preisjäger 4 s, 60/h; eBay 8 s, 40/h; Facebook 8 s, 60/h); also in Settings → Platforms |
 | `DEFAULT_AGENT_INTERVAL_S`, `MIN_AGENT_INTERVAL_S`, `CHAT_POLL_INTERVAL_S` | Polling intervals |
 | `VNC_PASSWORD`, `NOVNC_URL` | Optional noVNC view of the login browser (port 6080, LAN only) |
 | `PROXY_VIA`, `PROXY_HOSTS` | Map hostnames (e.g. your HA domain) to a reverse-proxy container on a shared network |
@@ -310,6 +313,7 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Search agents, hits, price drops, quiet hours, human pace | done |
 | Search agents on kleinanzeigen.de (platform adapter framework) | built; the API answers were checked once live, **no agent has run against it for days yet** |
 | Search agents on Shpock, Vinted and Preisjäger | built; searches and ad pages were checked once live (2026-10-12), **no agent has run against them for days yet** |
+| Search agents on Facebook Marketplace (logged out, newest ~24 per search) | built; searches and listing pages were checked live (2026-10-15), **no agent has run against it for days yet** |
 | Search agents on eBay (ebay.at, Buy It Now, located in Austria) | built; searches were checked live (2026-10-13), **no agent has run against it for days yet** |
 | Claude screening of hits (with reasons), scam check | done (thresholds still being tuned on real hits) |
 | willhaben login in the dashboard, session check, silent re-login | done |
