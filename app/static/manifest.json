@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "willhaben Agent",
+  "short_name": "WH Agent",
+  "description": "Search agents, chats and ads on willhaben and other second-hand sites.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fa",
+  "theme_color": "#ffffff",
+  "handle_links": "preferred",
+  "launch_handler": {"client_mode": "navigate-existing"},
+  "icons": [
+    {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}

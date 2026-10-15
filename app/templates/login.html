@@ -2,7 +2,8 @@
 {# Log-in page: standalone (no rail, no base.html). Own head with the built stylesheet; the only script is the show/hide toggle. #}
 <html lang="{{ ui_lang() }}" class="h-full">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  {% include "_app_head.html" %}
   <title>{{ _("Log in") }} · willhaben Agent</title>
   <script>try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="stylesheet" href="/static/app.css?v={{ asset_version() }}">

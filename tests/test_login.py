@@ -65,3 +65,21 @@ def test_lockout(pw):
             c.post("/login", data={"username": "admin", "password": "x"})
         r = c.post("/login", data={"username": "admin", "password": "geheim"}, follow_redirects=False)
         assert r.status_code == 401 and "Too many failed attempts" in r.text
+
+
+def test_the_home_screen_app_gets_its_manifest_and_icons_before_any_login(pw):
+    """iOS and Android fetch the manifest and the icon when the page is added to the home screen; the app then opens
+    in a window of its own (standalone), the log-in page included."""
+    with TestClient(app) as c:
+        m = c.get("/static/manifest.json")
+        assert m.status_code == 200 and m.json()["display"] == "standalone" and m.json()["start_url"] == "/"
+        for icon in m.json()["icons"]:
+            r = c.get(icon["src"])
+            assert r.status_code == 200 and r.headers["content-type"] == icon["type"]
+        assert c.get("/static/icons/apple-touch-icon.png").headers["content-type"] == "image/png"
+        page = c.get("/login").text
+        c.post("/login", data={"username": "admin", "password": "geheim", "next": "/"})
+        for html in (page, c.get("/").text):
+            assert '<link rel="manifest" href="/static/manifest.json">' in html
+            assert 'name="apple-mobile-web-app-capable" content="yes"' in html and "viewport-fit=cover" in html
+            assert 'rel="apple-touch-icon"' in html

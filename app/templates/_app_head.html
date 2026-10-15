@@ -1,0 +1,16 @@
+{# Home-screen app (iOS "Add to Home Screen", Android "Install"): it opens in a window of its own, without the browser's
+   bars (manifest display standalone, apple-mobile-web-app-capable), with its icon and name. viewport-fit=cover hands
+   the iPhone's safe areas to env(safe-area-inset-*): the tab bar, the chat composer and the toasts keep clear of the
+   home indicator. The status bar stays "default" (its own light or dark background): "black-translucent" would put
+   white text over the light theme. Shared by base.html and login.html. #}
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="WH Agent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171c26" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
