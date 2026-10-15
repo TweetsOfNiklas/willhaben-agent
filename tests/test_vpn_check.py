@@ -354,27 +354,385 @@ async def test_a_server_one_site_refuses_still_records_the_others_and_becomes_a_
 
 
 # ------------------------------------------------------------------ parallel and fast
-async def test_tunnels_start_in_parallel_within_the_cap_and_dead_servers_drop_out_fast(sites, fake):
+async def test_tunnels_start_in_parallel_and_dead_servers_are_marked_only_once_confirmed_alone(sites, fake):
     _collection(*(N(i) for i in range(1, 21)))
     fake.dead = {N(i) for i in range(1, 13)}                       # stale configs: no handshake
     held = asyncio.Event()
     for i in range(1, 21):
         fake.gates[N(i)] = held
-    a, b = sites({N(13): [PAGE]}, {N(13): [PAGE]}, default=NO)
+    a, b = sites({N(13): [PAGE, PAGE]}, {N(13): [PAGE, PAGE]}, default=NO)
     assert vpn_check.start("manual") is None
     sh = vpn_check._run
     await _until(lambda: len(fake.procs) >= vpn.SEARCH_TUNNELS // 2)
     await asyncio.sleep(0.05)
     assert 2 <= len(vpn.conn.testing()) <= vpn.SEARCH_TUNNELS and fake.alive() == len(vpn.conn.testing())
+    assert vpn.marks("fake") == {}                                 # nothing stored while they fail beside others
     held.set()
     await asyncio.wait_for(sh.task, 5)
     assert sh.plan["servers"] == [N(13)] and fake.running() == [N(13)]
-    assert fake.most <= vpn.SEARCH_TUNNELS and len(fake.starts) == len(set(fake.starts))   # never one twice
+    assert fake.most <= vpn.MAX_LIVE + vpn.SEARCH_TUNNELS
     dead = [s for s in sh.servers if s.problem]
     assert {s.name for s in dead} == fake.dead and all(s.detail == "no handshake in 5 s" for s in dead)
-    until, reason = vpn.marks("fake")[N(1)]
-    assert reason == "unreachable" and until > time.time() + 23 * 3600           # a day: they drop out
+    marked = {n: r for n, (until, r) in vpn.marks("fake").items() if until > time.time() + 23 * 3600}
+    assert len(marked) == vpn_check.MAX_DEAD_MARKS and set(marked.values()) == {"dead"}   # confirmed, capped
+    assert sum(s.confirmed for s in dead) == vpn_check.MAX_DEAD_MARKS and vpn.parallel_off() is None
     assert a.calls(N(1)) == 0                                      # a dead server costs no site request
+
+
+# ------------------------------------------------------------------ the review's guards
+async def test_a_connect_failure_counts_only_for_the_site_whose_host_it_was(sites, fake, serial):
+    _collection(N(1), N(2))
+    fake.unreachable = {N(1)}                                      # the handshake works, the first site's host not
+    a, b = sites({N(2): [PAGE, PAGE]}, {N(1): [PAGE], N(2): [PAGE, PAGE]})
+    sh = await _search()
+    assert _asked(sh, N(1)) == {"fake": "unreachable", "fake2": "ok"}     # the other site was asked through it
+    assert a.calls(N(1)) == 0 and N(1) not in vpn.marks("fake") and N(1) in vpn.oks("fake2")
+    assert sh.plan["servers"] == [N(2)]
+
+
+async def test_a_live_request_without_an_answer_marks_its_server_for_an_hour(sites, fake):
+    _collection(N(1), N(2))
+    (a,) = sites({N(1): [PAGE, TransportError("timed out")] + [TransportError("timed out")] * 2})
+    _live(N(1), fake=N(1))
+    vpn.update_conn(shuffled=time.time())                          # no search now (the gap)
+    await a.search(a.keyword_search("x"))
+    with pytest.raises(PlatformError):
+        await a.search(a.keyword_search("x"))
+    until, reason = vpn.marks("fake")[N(1)]
+    assert reason == "unreachable" and time.time() + 3000 < until < time.time() + 3700
+
+
+async def test_a_network_outage_writes_nothing_and_the_search_runs_again(sites, fake):
+    names = [N(i) for i in range(1, 17)]
+    _collection(*names)
+    down = TransportError("All connection attempts failed")
+    a, b = sites({n: [PAGE] * 4 for n in names}, {n: [PAGE] * 4 for n in names})
+    _live(N(1), fake=N(1), fake2=N(1))
+    await a.search(a.keyword_search("x"))
+    await b.search(b.keyword_search("x"))
+    fake.dead, fake.down = set(names), {N(1)}                      # the router reboots: no handshake, nothing through
+    for s in (a, b):
+        s.factory.transports[N(1)].answers[:] = [down] * 6
+    _gap_passed()
+    for s in (a, b):
+        with pytest.raises(PlatformError):
+            await s.search(s.keyword_search("x"))
+    sh = vpn_check._run
+    await asyncio.wait_for(sh.task, 10)
+    assert (sh.status, sh.reason) == ("failed", "offline")
+    assert vpn.marks("fake") == vpn.marks("fake2") == {}           # no server marked, not even the live one
+    assert vpn.paused("fake") is None and vpn.paused("fake2") is None and vpn.live_servers() == [N(1)]
+    assert vpn_check.pending()["at"] == pytest.approx(time.time() + vpn_check.OFFLINE_RETRY_S, abs=5)
+    assert "internet connection seems down" in vpn_check.view()["summary"]
+    fake.dead, fake.down = set(), set()                            # back two minutes later
+    for s in (a, b):
+        s.factory.transports[N(1)].answers[:] = [PAGE]
+        await s.search(s.keyword_search("x"))                      # through the same server as before
+        assert s.client.proxy == vpn.conn.route(N(1)).proxy
+
+
+async def test_servers_dead_beside_a_working_live_one_are_asked_again_one_at_a_time(sites, fake, monkeypatch):
+    names = [N(i) for i in range(1, 26)]
+    _collection(*names)
+    fake.dead = {N(i) for i in range(2, 22)}                       # 20 stale configs, N22 is fine
+    a, b = sites({N(1): [PAGE, PAGE], N(22): [PAGE, PAGE]}, {N(1): [PAGE, PAGE], N(22): [PAGE, PAGE]},
+                 default=NO)
+    _live(N(1), fake=N(1), fake2=N(1))
+    await a.search(a.keyword_search("x"))
+    sh = await _search()
+    assert sh.plan["servers"] == [N(22)] and sh.mode == "serial"   # the breaker: one at a time from then on
+    dead = {n for n, (_u, r) in vpn.marks("fake").items() if r == "dead"}
+    assert len(dead) == vpn_check.MAX_DEAD_MARKS and dead <= fake.dead   # confirmed alone, at most ten
+    assert vpn.parallel_off() is None and sh.status == "done"
+
+
+class KeyRunner(FakeRunner):
+    """One key on several servers at once does not work (the review's models). latest: only the tunnel whose
+    handshake came last gets through; exclusive: no handshake while another tunnel of the key runs; flap: like
+    latest, and a tunnel that does not get through handshakes again with its next packet."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.model, self.latest = model, None
+
+    def works(self, name):
+        return self.latest == name and name in self.running()
+
+    async def probe(self, handle, port, host):
+        name = self.ports[port]
+        self.probes.append((name, host))
+        if self.model == "exclusive" and any(p is not handle and p.returncode is None for p in self.procs):
+            return "handshake"
+        self.latest = name
+        await asyncio.sleep(0.005)
+        return "" if self.latest == name else "connect"
+
+    async def reach(self, port, host):
+        name = self.ports[port]
+        ok = self.works(name)
+        if not ok and self.model == "flap":
+            self.latest = name
+        await asyncio.sleep(0)
+        return ok
+
+
+class KeyTransport:
+    def __init__(self, runner, name):
+        self.runner, self.name, self.calls = runner, name, 0
+
+    async def send(self, method, url, *, params=None, headers=None):
+        self.calls += 1
+        await asyncio.sleep(0.002)
+        if not self.runner.works(self.name):
+            if self.runner.model == "flap" and self.name in self.runner.running():   # a stopped one sends nothing
+                self.runner.latest = self.name
+            raise TransportError("timed out")
+        return FetchResponse(200, JSON, b'{"results": []}', url)
+
+    def clear_cookies(self):
+        pass
+
+    async def aclose(self):
+        pass
+
+
+def _key_site(cls, runner):
+    s = cls(runner, {})
+
+    def factory(proxy):
+        assert proxy is not None, "a request went out directly"
+        return KeyTransport(runner, runner.ports[int(proxy.rsplit(":", 1)[1])])
+
+    s.client = HttpPlatformClient(s.id, RateLimiter(0, 240, name=s.name), name=s.name, transport_factory=factory)
+    platforms.set_platform(s.id, s)
+    vpn.set_enabled(s.id, True)
+    return s
+
+
+async def _agent(site, out, stop):
+    while not stop.is_set():
+        try:
+            await site.search(site.keyword_search("x"))
+            out["ok"] += 1
+        except vpn.VpnWait:
+            out["wait"] += 1
+        except PlatformError:
+            out["error"] += 1
+        await asyncio.sleep(0.005)
+
+
+@pytest.mark.parametrize("model", ["latest", "exclusive", "flap"])
+async def test_one_key_that_does_not_run_on_two_servers_falls_back_to_one_at_a_time(model, monkeypatch, request):
+    import collections
+
+    runner = KeyRunner(model)
+    monkeypatch.setattr(vpn, "runner", runner)
+    monkeypatch.setattr(vpn, "_shuffled", sorted)
+    request.addfinalizer(platforms.reset)
+    servers = [N(i) for i in range(1, 7)] + [f"de-fra-wg-{i:03d}" for i in range(1, 11)]
+    _collection(*servers)
+    a, b = _key_site(FakeSite, runner), _key_site(FakeSite2, runner)
+    _live(N(1), fake=N(1), fake2=N(1))
+    await a.search(a.keyword_search("x"))                          # the live server works
+    out, stop = collections.Counter(), asyncio.Event()
+    agents = [asyncio.create_task(_agent(s, out, stop)) for s in (a, b)]
+    assert vpn_check.start("schedule") is None
+    sh = vpn_check._run
+    await asyncio.wait_for(sh.task, 30)
+    stop.set()
+    await asyncio.gather(*agents)
+    flag = vpn.parallel_off()
+    assert flag is not None and sh.note == "conflict" and sh.mode == "alone"
+    assert sh.status == "done" and len(vpn.live_servers()) == 1 and vpn.live_servers() != [N(1)]   # the change
+    dead = [(p, n) for p in ("fake", "fake2") for n, (_u, r) in vpn.marks(p).items() if r in ("dead", "broken")]
+    assert dead == []                                              # no server marked dead for the key's sake
+    assert out["ok"] > 0
+    for s in (a, b):
+        await s.search(s.keyword_search("x"))                      # both work through the one server
+    assert "One key does not seem to run on several servers" in vpn_check.view()["single"]
+    vpn.forget()                                                   # "Forget blocks": several at once again
+    assert vpn.parallel_off() is None
+
+
+async def test_parallel_off_holds_the_sites_while_one_server_is_tested_and_a_new_upload_clears_it(sites, fake):
+    _collection(N(1), N(2), N(3))
+    gate = asyncio.Event()
+    a, b = sites({N(1): [PAGE], N(2): [gate, PAGE, PAGE]}, {N(1): [PAGE], N(2): [PAGE, PAGE]})
+    _live(N(1), fake=N(1), fake2=N(1))
+    vpn.update_conn(parallel_off={"at": time.time(), "why": "test"})
+    await a.search(a.keyword_search("x"))
+    assert vpn_check.start("manual") is None
+    sh = vpn_check._run
+    await _until(lambda: a.calls(N(2)) == 1)
+    assert sh.mode == "alone" and vpn.conn.alone == N(2) and fake.running() == [N(2)]   # N1 stopped for its test
+    with pytest.raises(vpn.VpnWait, match="tests a server for a moment"):
+        await b.search(b.keyword_search("x"))                      # the sites wait meanwhile, no error
+    gate.set()
+    await asyncio.wait_for(sh.task, 5)
+    assert sh.plan["servers"] == [N(2)] and fake.running() == [N(2)] and vpn.conn.alone is None
+    await b.search(b.keyword_search("x"))
+    await vpn.source_changed()                                     # a new upload: several at once again
+    assert vpn.parallel_off() is None
+
+
+async def test_servers_out_only_for_not_answering_are_tried_when_nothing_else_is_left(sites, fake):
+    _collection(N(1), N(2))
+    for n in (N(1), N(2)):
+        for pid in ("fake", "fake2"):
+            vpn.mark(pid, n, "dead")                               # both marked dead lately
+    a, b = sites({N(1): [PAGE, PAGE]}, {N(1): [PAGE, PAGE]})
+    sh = await _search()
+    assert sh.plan["servers"] == [N(1)] and N(1) in fake.starts   # tried anyway, as pick() did
+
+
+async def test_a_server_still_finishing_requests_is_never_started_twice(sites, fake, monkeypatch):
+    twice, real = [], fake.start
+
+    async def start(conf, port):
+        if conf.stem in fake.running():
+            twice.append(conf.stem)
+            raise AssertionError(f"{conf.stem} twice")
+        return await real(conf, port)
+
+    monkeypatch.setattr(fake, "start", start)
+    monkeypatch.setattr(vpn, "DRAIN_S", 5)
+    _collection(N(1), N(2), N(3))
+    a, b = sites({N(1): [PAGE, PAGE, PAGE], N(2): [PAGE, PAGE], N(3): [PAGE]}, {N(1): [PAGE], N(2): [NO], N(3): [PAGE]})
+    vpn.set_enabled("fake2", False)
+    _live(N(1), fake=N(1))
+    await a.search(a.keyword_search("x"))
+    held = vpn.conn.hold(vpn.conn.route(N(1)))                     # a photo download under way through N1
+    held.__enter__()
+    try:
+        sh = await _search()                                       # N2 for Fake: N1 drains
+        assert sh.plan["servers"] == [N(2)] and N(1) in fake.running() and vpn.conn.draining() == 1
+        vpn.set_enabled("fake2", True)
+        vpn_check.site_on("fake2")                                 # Fake 2 refuses N2: a server for it, not N1 now
+        await asyncio.wait_for(vpn_check._run.task, 5)
+        assert twice == [] and N(1) not in [s.name for s in vpn_check._run.servers if not s.live]
+    finally:
+        held.__exit__(None, None, None)
+
+
+async def test_an_ask_that_sent_nothing_is_asked_once_more_not_taken_as_an_answer(sites, fake, serial):
+    _collection(N(1), N(2))
+    a, b = sites({N(1): [RuntimeError("recorder: database is locked"), NO], N(2): [PAGE, PAGE]},
+                 {N(1): [PAGE], N(2): [PAGE, PAGE]})
+    sh = await _search()
+    srv = next(s for s in sh.servers if s.name == N(1))
+    assert srv.errors == {"fake": 1} and srv.answers["fake"].verdict == "blocked"   # asked again: the real answer
+    assert sh.plan["servers"] == [N(2)]
+
+
+async def test_a_cancelled_switch_over_leaves_no_process_behind(sites, fake, monkeypatch):
+    _collection(N(1), N(2))
+    sites({N(1): [PAGE]})
+    _live(N(1), fake=N(1))
+    await vpn.tunnel_for("fake").ensure()
+    gate, real = asyncio.Event(), fake.stop
+
+    async def slow_stop(handle):
+        await gate.wait()
+        await real(handle)
+
+    monkeypatch.setattr(fake, "stop", slow_stop)
+    task = asyncio.create_task(vpn.switch([N(2)], {"fake": N(2)}, {N(2): "api.fake.example"}))
+    await _until(lambda: vpn.live_servers() == [N(2)])
+    task.cancel()                                                  # cancelled while N1 stops
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    gate.set()
+    await vpn.conn.disconnect()
+    assert fake.alive() == 0                                       # N1 was not left without an owner
+
+
+def test_parallel_starts_never_share_a_port(monkeypatch):
+    ports = iter([40001, 40001, 40002, 40002, 40003])
+
+    class Sock:
+        def __init__(self, *a):
+            self.port = next(ports)
+
+        def bind(self, addr):
+            pass
+
+        def getsockname(self):
+            return ("127.0.0.1", self.port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(vpn.socket, "socket", Sock)
+    first = vpn._free_port()
+    assert vpn._free_port({first}) == 40002 and vpn._free_port({40001, 40002}) == 40003
+
+
+async def test_a_refusal_while_a_search_finishes_starts_the_next_one(sites, fake):
+    _collection(N(1), N(2))
+    gate = asyncio.Event()
+    a, b = sites({N(1): [gate, PAGE]}, {N(1): [PAGE]})
+    assert vpn_check.start("manual") is None
+    sh = vpn_check._run
+    await _until(lambda: a.calls(N(1)) == 1)
+    sh.closing = True                                              # as when it is past its loop
+    assert vpn_check.trigger("fake2", "blocked", "HTTP 403") is True
+    p = vpn_check.pending()
+    assert (p["by"], p["why"]) == ("fake2", "blocked") and p["at"] >= time.time() + vpn_check.AUTO_GAP_S - 5
+    gate.set()
+    await asyncio.wait_for(sh.task, 5)
+    assert vpn_check.pending() is not None                         # still there for tick()
+
+
+def test_a_site_never_falls_back_to_a_server_it_refused(fake):
+    _collection(N(1), N(2))
+    vpn.set_enabled("willhaben", True)
+    vpn.update_conn(servers=[N(1)], assign={})
+    assert vpn.server_for("willhaben") == N(1)
+    vpn.mark("willhaben", N(1), "blocked")
+    assert vpn.server_for("willhaben") is None and vpn.waits_on("willhaben") == N(1)
+
+
+async def test_while_the_pickiest_site_waits_for_its_budget_another_is_asked(sites, fake, serial, monkeypatch):
+    Clock(monkeypatch)
+    _collection(N(1), N(2))
+    for old in ("de-old-wg-001", "de-old-wg-002"):
+        vpn.mark("fake", old, "blocked")                           # Fake: the pickiest
+    a, b = sites({N(2): [PAGE, PAGE]}, {N(2): [NO]}, per_hour=(4, 0))
+    vpn_check._spend("fake", 1)                                    # its quarter of 4 is used for this hour
+    _live(N(1), fake=N(1), fake2=N(1))
+    assert vpn_check.start("manual") is None
+    sh = vpn_check._run
+    await asyncio.wait_for(sh.task, 5)
+    assert b.calls(N(2)) == 1 and a.calls(N(2)) == 0                # Fake 2 asked while Fake's hour is used ...
+    assert _asked(sh, N(2)) == {"fake2": "blocked"}                # ... and its refusal ended N2 without Fake
+
+
+async def test_processes_still_draining_count_against_the_tunnel_cap(sites, fake, monkeypatch):
+    _collection(N(1), N(2))
+    sites({N(2): [PAGE]})
+    draining = [vpn.SEARCH_TUNNELS]
+    monkeypatch.setattr(vpn.conn, "draining", lambda: draining[0])
+    assert vpn_check.start("manual") is None
+    sh = vpn_check._run
+    await asyncio.sleep(0.1)
+    assert fake.starts == [] and not sh.task.done()                # no room: it waits, nothing started
+    draining[0] = 0
+    await asyncio.wait_for(sh.task, 5)
+    assert sh.plan["servers"] == [N(2)]
+
+
+async def test_a_search_that_leaves_no_site_covered_reports_failed_and_stops_the_server(sites, fake):
+    _collection(N(1), N(2))
+    a, b = sites({}, {}, default=NO)
+    _live(N(1), fake=N(1), fake2=N(1))
+    for pid in ("fake", "fake2"):
+        vpn.mark(pid, N(1), "blocked")
+        vpn.pause(pid, "blocked", "HTTP 403")                      # both refused the live server
+    sh = await _search()
+    assert sh.status == "failed" and fake.alive() == 0 and vpn.live_servers() == []
 
 
 async def test_a_slow_ask_stops_once_its_server_cannot_help_a_quick_one_is_kept(sites, fake, serial):

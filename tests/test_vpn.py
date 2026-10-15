@@ -45,7 +45,7 @@ def _collection(*names: str) -> None:
 class FakeProc:
     def __init__(self, name: str = ""):
         self.returncode = None
-        self.name = name
+        self.name, self.port = name, 0
 
     def terminate(self):
         self.returncode = 0
@@ -59,12 +59,13 @@ class FakeProc:
 
 class FakeRunner:
     """wireproxy without wireproxy: `dead` configs give no handshake, `unreachable` ones no CONNECT to the host,
-    `broken` ones do not start, `gates` hold a server's probe until set. `most` is the largest number of processes
-    that ran at the same time; a server never runs twice at once."""
+    `broken` ones do not start, `gates` hold a server's probe until set; `down`: servers whose running tunnel no
+    longer gets through (reach()). `most` is the largest number of processes that ran at the same time; a server
+    never runs twice at once, and no two processes share a port."""
 
     def __init__(self):
-        self.starts, self.stopped, self.probes = [], [], []
-        self.unreachable, self.broken, self.dead = set(), set(), set()
+        self.starts, self.stopped, self.probes, self.reached = [], [], [], []
+        self.unreachable, self.broken, self.dead, self.down = set(), set(), set(), set()
         self.gates: dict[str, asyncio.Event] = {}
         self.ports: dict[int, str] = {}
         self.procs: list[FakeProc] = []
@@ -83,15 +84,23 @@ class FakeRunner:
     async def start(self, conf, port):
         assert conf.is_file() and conf.suffix == ".conf"
         assert conf.stem not in self.running(), f"{conf.stem} runs twice"       # one key on one server twice
+        assert all(p.port != port for p in self.procs if p.returncode is None), f"port {port} taken"
         if conf.stem in self.broken:
             raise OSError("wireproxy stopped: bad config")
         self.starts.append(conf.stem)
         self.ports[port] = conf.stem
         await asyncio.sleep(0)
         proc = FakeProc(conf.stem)
+        proc.port = port
         self.procs.append(proc)
         self.most = max(self.most, self.alive())
         return proc
+
+    async def reach(self, port, host):
+        name = self.ports[port]
+        self.reached.append(name)
+        await asyncio.sleep(0)
+        return name not in self.down and name not in self.dead
 
     async def probe(self, handle, port, host):
         name = self.ports[port]
@@ -230,13 +239,14 @@ def test_marks_expire_and_are_kept_per_site(monkeypatch):
     monkeypatch.setattr(vpn.time, "time", lambda: now)
     vpn.mark("willhaben", "at-vie-wg-001", "blocked")
     vpn.mark("willhaben", "at-vie-wg-002", "rate")
-    vpn.mark("willhaben", "at-vie-wg-003", "unreachable")
+    vpn.mark("willhaben", "at-vie-wg-003", "dead")
     vpn.mark("willhaben", "at-vie-wg-004", "ok")
-    assert set(vpn.marks("willhaben")) == {"at-vie-wg-001", "at-vie-wg-002", "at-vie-wg-003"}
+    vpn.mark("willhaben", "at-vie-wg-005", "unreachable")
+    assert set(vpn.marks("willhaben")) == {"at-vie-wg-001", "at-vie-wg-002", "at-vie-wg-003", "at-vie-wg-005"}
     assert set(vpn.oks("willhaben")) == {"at-vie-wg-004"} and vpn.marks("kleinanzeigen") == {}
     now += 2 * 3600
-    assert set(vpn.marks("willhaben")) == {"at-vie-wg-001", "at-vie-wg-003"}    # a 429 counts for an hour,
-    now += 23 * 3600                                                             # a dead server for a day
+    assert set(vpn.marks("willhaben")) == {"at-vie-wg-001", "at-vie-wg-003"}    # a 429 or no answer: an hour,
+    now += 23 * 3600                                                             # a confirmed dead server: a day
     assert vpn.marks("willhaben") == {} and vpn.oks("willhaben") == {}
     vpn.mark("willhaben", "x", "ok")
     vpn.mark("willhaben", "x", "blocked")                       # the newer note replaces the older one
@@ -354,8 +364,8 @@ async def test_the_search_tunnels_never_run_a_live_server_or_one_twice(fake):
     vpn.update_conn(servers=["at-vie-wg-001"])
     with pytest.raises(RuntimeError):
         await vpn.conn.start_search("at-vie-wg-001", "www.willhaben.at")          # live
-    r2 = await vpn.conn.start_search("at-vie-wg-002", "www.willhaben.at")
-    r3 = await vpn.conn.start_search("at-vie-wg-003", "www.willhaben.at")       # several at once
+    r2, _ = await vpn.conn.start_search("at-vie-wg-002", "www.willhaben.at")
+    r3, _ = await vpn.conn.start_search("at-vie-wg-003", "www.willhaben.at")    # several at once
     with pytest.raises(RuntimeError):
         await vpn.conn.start_search("at-vie-wg-002", "www.willhaben.at")      # twice
     assert vpn.conn.testing() == ["at-vie-wg-002", "at-vie-wg-003"] and vpn.conn.alive(r2) and vpn.conn.alive(r3)

@@ -415,12 +415,25 @@ skipped without an error) until the search finds it one; the others go on. Every
 
 **Fast and frugal:** all EU servers in the collection are searched, Austria first, then the neighbours, random within
 each tier; those a waiting site answered through lately first. A site is asked only while its answer can still
-matter: the sites without a server first, then the one that refused most. A server the pickiest site refuses costs
-one request; one a site refused lately (a day when blocked or dead, an hour for a rate limit or a bot check) is
-skipped without a request when that site's answer is needed. Up to 8 tunnels start at once (no site request; a dead
-server shows within 5 s by its missing WireGuard handshake) and up to 3 servers are asked at once, each site through
-one server at a time; a test request gives up after 10 s, and a slow one (eBay's warm-up) stops as soon as its
-server can no longer help. Every test request counts towards the site's hourly budget: the search sends a site at
+matter: the sites without a server first, then the one that refused most (one that has to wait for its budget lets
+the next one go first). A server the pickiest site refuses costs one request; one a site refused lately (a day when
+blocked, an hour for a rate limit, a bot check or no answer) is skipped without a request when that site's answer is
+needed. Up to 8 tunnels start at once (no site request; a dead server shows within 5 s by its missing WireGuard
+handshake) and up to 3 servers are asked at once, each site through one server at a time; a test request gives up
+after 10 s, and a slow one (eBay's warm-up) stops as soon as its server can no longer help.
+
+**Careful with failures:** a server without a handshake is marked dead for a day only once it failed again on its
+own (at most 10 per search); until then the search just leaves it out. When three tunnels in a row (or half of the
+last ones) get no handshake, the search checks the server in use: no answer there either means your internet is
+down, so it stops, marks nothing, takes back what it marked and tries again 5 minutes later; otherwise it goes on
+one tunnel at a time. Whether one key may be connected to several servers at once is not verified: when a server in
+use stops answering while a search tunnel is up (or a server gets a handshake only when nothing else runs), the app
+takes back what that search marked and from then on runs one server at a time: one live server, and a server under
+test replaces it for its test while the sites wait a few seconds. Settings → VPN says so; "Forget blocks" or a new
+upload tries several at once again. When nothing else is left, servers marked only for not answering are tried
+anyway.
+
+Every test request counts towards the site's hourly budget: the search sends a site at
 most a quarter of it an hour and never takes it past 90 % with the agents' requests; it waits for the site rather
 than skipping it, and the page says for which one. Automatic searches start at least 5 minutes after the last one and
 at most 3 an hour, and a site starts at most one between two regular searches. A restart resumes a search it cut
@@ -439,9 +452,11 @@ lets requests under way finish before the old server stops. A refused server doe
 Geizhals') back-off, because those limiters are about your home IP.
 
 Configs live in `DATA_DIR/wireguard` (readable only by the app) and are part of backups. All configs of one Mullvad
-download share one key: the app connects it to several servers at once (the ones in use and the ones under test), but
-never twice to the same server, which would drop both connections. Give the app its **own Mullvad device**: if the
-same key is also connected from another device to the same server, both connections drop.
+download share one key. The app never connects it twice to the same server (not even while an old connection still
+finishes its requests), which would drop both connections; connecting it to several different servers at once (the
+ones in use and the ones under test) is not verified, which is why the app watches for it and falls back to one
+server at a time (above). Give the app its **own Mullvad device**: if the same key is also connected from another
+device to the same server, both connections drop.
 
 ## Risks
 

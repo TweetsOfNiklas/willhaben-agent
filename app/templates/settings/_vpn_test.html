@@ -1,7 +1,8 @@
 {# Settings → VPN → the connection (app/services/vpn_check.py): the server(s) the sites with the VPN on use now (one, or
    two that share them), the sites waiting for one, when the next regular search starts, and the search: its progress
    while it runs in the background, then its result per site and per server.
-   vt = vpn_test(): {live, blocked, profile, connections: [{name, since, connected, sites}], two, waiting: [{name,
+   vt = vpn_test(): {live, blocked, profile, single (why one server at a time), connections: [{name, since,
+   connected, sites}], two, waiting: [{name,
    note, tone}], connected, error, interval, next_at, next_due, pending, run, progress, now, best, wait, clock,
    summary, tone, trigger, finished_at, rows: [{pid, name, label, tone, message, spinner, action: {label, href} or
    None}], servers: [{name, label, tone, live, kept, parts, secs}], more}.
@@ -42,6 +43,7 @@
     {% endif %}
   </div>
   {% if vt.blocked %}<small class="text-[12.5px] text-warning">{{ vt.blocked }}</small>{% endif %}
+  {% if vt.single %}<small class="text-[12.5px] text-warning">{{ vt.single }}</small>{% endif %}
   {% if vpn_note and vpn_note != vt.blocked %}<div role="status" class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ vpn_note }}</div>{% endif %}
 
   <div id="vpn-live" class="flex flex-col gap-2 text-[13px]">

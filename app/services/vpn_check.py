@@ -42,6 +42,19 @@ as the partner a site without a server needs), its slow asks stop (not sent yet,
 goes; a single request under way finishes and counts, so a server one site refused still records the others' answers
 and can become the partner of a pair.
 
+Careful with failures (_Walk): what fails on the search's tunnels stays with the search; a dead server (no handshake,
+does not start) is marked for a day only once it failed again with no other search tunnel up (confirm_dead(), at
+most MAX_DEAD_MARKS a search), and a site's host that a tunnel cannot reach counts only for that site. The breaker:
+three tunnels in a row (or half of the last ones) without a handshake make it check the live servers: they do not
+get through either, so the network is down (_Offline: nothing marked, what it marked taken back, again after
+OFFLINE_RETRY_S); otherwise serial mode (one tunnel at a time, the failed ones asked again). Whether one key runs on
+several servers at once is not verified: a live server that stops getting through while a tunnel came up (and does
+again without it), or a server that gets a handshake only alone (one key test a search), sets vpn.parallel_off():
+what the search wrote is taken back and from then on one process at a time ("alone": a server under test replaces
+the live one for its test, the sites wait meanwhile, plans have one server). Servers marked only for not answering
+are tried when nothing else is left (pick()'s old fallback). An error (nothing sent) is asked once more, not taken
+as an answer.
+
 Pacing: every test request goes through the site's own client and limiter, so it counts towards the site's hourly
 budget. The search sends a site at most a quarter of that budget an hour (NO_BUDGET_PER_HOUR without one), never past
 BUDGET_FULL of it with the agents' requests, and nothing during a pause after a block: it waits for the site instead of
@@ -71,7 +84,7 @@ from app import platforms
 from app.db import get_setting, set_setting
 from app.i18n import lang, t
 from app.platforms import vpn
-from app.platforms.base import Blocked, NotTheExit, Platform
+from app.platforms.base import Blocked, NotTheExit, Platform, PlatformError
 from app.platforms.httpclient import ExitMoved, Trial, trial
 from app.platforms.ratelimit import RateLimiter
 from app.services import jobs
@@ -92,10 +105,13 @@ INTERVAL_KEY = "vpn_shuffle_h"
 STOP_WAIT_S = 10          # cancel(): longest wait for the search to end
 STATE_KEY = "vpn_test"
 REGULAR = ("schedule", "manual", "new")         # they look for another server: the change now and then
-ANSWERED = ("ok", "site_error", "odd_page", "error")
+ANSWERED = ("ok", "site_error", "odd_page")    # an "error" (nothing sent) says nothing: asked once more
 REFUSED = ("blocked", "rate", "unreachable", "botcheck")
 SHOW_SERVERS = 6          # servers the live panel lists (the newest)
 ASK_PARALLEL = 3          # servers asked at the same time (each site asks through one at a time)
+MAX_DEAD_MARKS = 10       # dead servers one search marks at most (each confirmed alone first)
+OFFLINE_AFTER = 20        # without a live server: this many tunnels without a handshake and none up: no network
+OFFLINE_RETRY_S = 300     # the network seemed down: the search runs again this much later
 
 _clock: Callable[[], float] = time.monotonic          # tests move the hour on
 _sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
@@ -104,7 +120,7 @@ _sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
 @dataclass
 class Answer:
     """One site through one server."""
-    verdict: str = "waiting"   # waiting | asking | ANSWERED | REFUSED | off | skipped | moved
+    verdict: str = "waiting"   # waiting | asking | ANSWERED | REFUSED | error | off | skipped | moved
     detail: str = ""           # "HTTP 403", the network error, the site's message
     requests: int = 0
     secs: float | None = None
@@ -116,10 +132,12 @@ class Server:
     name: str
     status: str = "starting"   # starting | testing | done
     live: bool = False         # asked through a live connection (no process of its own)
-    problem: str = ""          # broken | unreachable: no site was asked
+    problem: str = ""          # dead (no handshake) | broken (does not start): no site was asked
     detail: str = ""
     answers: dict[str, Answer] = field(default_factory=dict)
     secs: float | None = None
+    errors: dict[str, int] = field(default_factory=dict)   # asks of a site that sent nothing (asked once more)
+    confirmed: bool = False    # its problem showed again alone: marked for a day
 
     def refused(self) -> list[str]:
         return [pid for pid, a in self.answers.items() if a.verdict in REFUSED]
@@ -151,8 +169,11 @@ class Search:
     plan: dict[str, Any] = field(default_factory=dict)    # what it left live: {servers, assign, uncovered}
     switched: int = 0          # switch-overs it made
     odd: list[str] = field(default_factory=list)          # sites whose bot-check pages are the site's change
+    mode: str = "parallel"     # parallel | serial (tunnels without a handshake) | alone (one process at a time)
+    note: str = ""             # conflict: one key does not run on several servers at once
+    wrote: list[list[str]] = field(default_factory=list)  # ["mark", pid, server] | ["pause", pid, reason]: taken back
     status: str = "running"    # running | done | failed | stopped | interrupted
-    reason: str = ""           # failed: no_eu | none | profile; stopped: stopped | uploaded | removed | interrupted
+    reason: str = ""           # failed: no_eu | none | profile | offline; stopped: stopped | uploaded | removed | ...
     started: float = field(default_factory=time.time)
     finished: float | None = None
     wait: dict[str, Any] = field(default_factory=dict, compare=False)   # what it waits for now (not saved)
@@ -160,6 +181,7 @@ class Search:
     discarded: bool = field(default=False, repr=False, compare=False)    # its configs are gone: never saved again
     streak: dict[str, int] = field(default_factory=dict, repr=False, compare=False)
     targets: dict[str, Target] = field(default_factory=dict, repr=False, compare=False)
+    closing: bool = field(default=False, repr=False, compare=False)    # past its loop: takes in no new refusal
 
     def site(self, pid: str) -> Site:
         return next(s for s in self.sites if s.pid == pid)
@@ -267,8 +289,8 @@ def trigger(pid: str, reason: str, detail: str = "") -> bool:
     """A site refused its server (reason blocked | rate | unreachable | broken | botcheck) or found none (none): a
     search now, or once the guards allow it (pending, started by tick()). True when one runs or comes; False when
     this site started one since the last regular search (it waits for the next regular one) or none can run."""
-    if running():
-        return True
+    if running() and not _run.closing:
+        return True                              # the running search takes it in
     if blocker():
         return False
     st, now = vpn.conn_state(), time.time()
@@ -276,6 +298,8 @@ def trigger(pid: str, reason: str, detail: str = "") -> bool:
         log.info("VPN: %s %s again; it waits for the next regular search", pid, reason)
         return False
     at = _auto_at(st, now)
+    if running():                                # one is finishing and takes in nothing new: the next one comes
+        at = max(at, now + AUTO_GAP_S)
     if at > now:
         if not pending(st):
             vpn.update_conn(pending={"at": at, "trigger": "auto", "by": pid, "why": reason, "detail": detail},
@@ -389,6 +413,9 @@ class Plan(NamedTuple):
     key: tuple[int, ...]       # (sites covered, -servers, the change, servers kept, -rank): larger is better
 
 
+SOFT = ("unreachable", "dead", "broken")    # marks of servers that did not answer at all (not a site's refusal)
+
+
 class Board:
     """What a search knows now, as bitmasks over the sites (see the module docstring)."""
 
@@ -399,6 +426,7 @@ class Board:
         self.bit = {pid: 1 << i for i, pid in enumerate(self.pids)}
         self.full = (1 << len(self.pids)) - 1
         self.live = vpn.live_servers(st)
+        self.most = 1 if sh.mode == "alone" or vpn.parallel_off(st) else vpn.MAX_LIVE   # servers a plan may have
         self.before = set(sh.before)
         self.regular = sh.trigger in REGULAR
         self.odd = self.mask(sh.odd)
@@ -406,6 +434,7 @@ class Board:
         self.rank = {s: i for i, s in enumerate(self.live)}
         self.ok: dict[str, int] = {}
         self.no: dict[str, int] = {}
+        self.soft: dict[str, int] = {}             # refusals that are only "did not answer" marks (the fallback)
         self.asked: dict[str, int] = {}
         assign, paused = st.get("assign") or {}, st.get("paused") or {}
         self.using = {s: self.mask(p for p in self.pids if assign.get(p) == s and p not in paused) for s in self.live}
@@ -425,13 +454,15 @@ class Board:
                 elif a.verdict in REFUSED:
                     self._add(self.no, srv.name, pid)
                     self.refusals[pid] += 1
-                else:
-                    continue
+                elif not (a.verdict == "error" and srv.errors.get(pid, 0) >= 2):
+                    continue                       # not asked to the end: unknown (an error is asked once more)
                 self._add(self.asked, srv.name, pid)
         self.marks = {pid: vpn.marks(pid) for pid in self.pids}
         for pid, m in self.marks.items():
-            for name in m:
+            for name, (_until, reason) in m.items():
                 self._add(self.no, name, pid)
+                if reason in SOFT:
+                    self._add(self.soft, name, pid)
         for s, m in self.ok.items():                   # an answer of this search beats an older mark
             self.no[s] = self.no.get(s, 0) & ~m
         self._memo: dict[tuple[int, int, bool, bool, int], bool] = {}
@@ -450,9 +481,11 @@ class Board:
     def names(self, m: int) -> list[str]:
         return [pid for pid in self.pids if m & self.bit[pid]]
 
-    def unknown(self, s: str) -> int:
-        """Sites not asked through `s` whose answer there is not known either."""
-        return self.full & ~(self.ok.get(s, 0) | self.no.get(s, 0) | self.asked.get(s, 0) | self.odd)
+    def unknown(self, s: str, soft: bool = False) -> int:
+        """Sites not asked through `s` whose answer there is not known either; `soft`: as if no "did not answer"
+        mark existed (vpn.order()'s fallback when nothing else is left)."""
+        no = self.no.get(s, 0) & ~(self.soft.get(s, 0) if soft else 0)
+        return self.full & ~(self.ok.get(s, 0) | no | self.asked.get(s, 0) | self.odd)
 
     def _best(self, ok: dict[str, int], must: int) -> Plan:
         """The best plan over `ok` (server -> sites answering) that covers `must`: one server or two."""
@@ -469,7 +502,7 @@ class Board:
         servers = list(reps.values())
         cover = {s: (ok[s] | self.odd) & self.full for s in servers}
         for i, a in enumerate(servers):
-            for b in [None, *servers[i + 1:]]:
+            for b in [None, *(servers[i + 1:] if self.most > 1 else [])]:
                 cov = cover[a] | (cover[b] if b else 0)
                 if cov & must != must:
                     continue
@@ -503,9 +536,9 @@ class Board:
             self._plan_now = self._best(self.ok, self.must)
         return self._plan_now
 
-    def could(self, s: str) -> bool:
+    def could(self, s: str, soft: bool = False) -> bool:
         """Could answers through `s` still make the best plan better (every site not asked there answering)?"""
-        unk = self.unknown(s)
+        unk = self.unknown(s, soft)
         if not unk:
             return False
         memo = (self.ok.get(s, 0), unk, s in self.before, s in self.live, self.rank.get(s, self.next_rank))
@@ -552,6 +585,28 @@ def _note_best(sh: Search, b: Board) -> None:
     sh.best = {"servers": list(p.servers), "assign": b.assign(p, vpn.conn_state().get("assign") or {})}
 
 
+def _mark(sh: Search, pid: str, server: str, reason: str) -> None:
+    """A mark this search writes (taken back when it finds the network down or a key conflict)."""
+    vpn.mark(pid, server, reason)
+    if reason != "ok":
+        sh.wrote.append(["mark", pid, server])
+
+
+def _pause(sh: Search, pid: str, reason: str, detail: str) -> None:
+    vpn.pause(pid, reason, detail)
+    sh.wrote.append(["pause", pid, reason])
+
+
+def _undo(sh: Search) -> None:
+    """Take back the marks and pauses this search wrote."""
+    for kind, pid, x in reversed(sh.wrote):
+        if kind == "mark":
+            vpn.unmark(pid, x)
+        elif (p := vpn.paused(pid)) is not None and p[0] == x:
+            vpn.unpause(pid)
+    sh.wrote.clear()
+
+
 # ------------------------------------------------------------------ the search
 async def _main(sh: Search) -> None:
     global _run
@@ -565,7 +620,7 @@ async def _main(sh: Search) -> None:
                 sh.status = "interrupted" if sh.reason == "interrupted" else "stopped"
             finally:
                 with suppress(Exception):
-                    await vpn.conn.stop_search()   # the server under test; the live ones stay
+                    await vpn.conn.stop_search()   # the servers under test; the live ones stay
             job.result = _summary(sh)
             job.problems = len(sh.plan.get("uncovered") or []) + (sh.status == "failed")
             if job.problems:
@@ -576,7 +631,7 @@ async def _main(sh: Search) -> None:
         with suppress(Exception):
             await vpn.conn.stop_search()
     finally:
-        sh.finished, sh.wait = time.time(), {}
+        sh.finished, sh.wait, sh.closing = time.time(), {}, True
         if sh.status == "running":
             sh.status = "interrupted"
         if not sh.discarded:
@@ -590,6 +645,10 @@ async def _main(sh: Search) -> None:
             _run = None
 
 
+class _Offline(Exception):
+    """No tunnel gets a handshake and the live server does not get through either: the home network is down."""
+
+
 @dataclass(eq=False)
 class _Slot:
     """A server the search asks through: one of its tunnels, or a live server (no process of its own)."""
@@ -598,12 +657,13 @@ class _Slot:
     asks: dict[str, asyncio.Task] = field(default_factory=dict)    # site -> its ask under way
     trials: dict[str, Trial] = field(default_factory=dict)        # site -> its Trial (what it sent so far)
     t0: float = field(default_factory=time.monotonic)
+    single: bool = False       # started with no other search tunnel allowed (serial or alone mode)
+    soft: bool = False         # tried although marked for not answering lately (nothing else was left)
 
 
 async def _search(sh: Search, job: jobs.Job) -> None:
-    """Until one server serves every site or none is left that could help (the module docstring): servers start
-    on the search's tunnels several at a time (no site request), sites are asked on several of them at once (each
-    site one ask at a time, its limiter paces it), and each better result goes live at once."""
+    """Until one server serves every site or none is left that could help (the module docstring); each better
+    result goes live at once. Without network: stops, writes nothing, tries again later."""
     order = vpn.order()
     sh.total = len(order)
     if not order:
@@ -611,123 +671,421 @@ async def _search(sh: Search, job: jobs.Job) -> None:
         vpn.update_conn(servers=[], assign={}, error=_failed_text(sh))
         await vpn.conn.disconnect()
         return
-    slots: dict[str, _Slot] = {}                         # servers being asked through (or ready for it)
-    starts: dict[asyncio.Task, _Slot] = {}               # tunnels starting
-    asks: dict[asyncio.Task, tuple[_Slot, str]] = {}     # asks under way
+    if vpn.parallel_off():
+        sh.mode = "alone"
+    w = _Walk(sh, job, order)
+    await w.baseline()
+    offline = False
     try:
-        while True:
-            tgs = _refresh(sh)
-            if not tgs:
-                break
-            b = Board(sh, tgs)
-            _note_best(sh, b)
-            if b.done():
-                break
-            await _retire(sh, b, slots)
-            _dispatch(sh, b, slots, asks, job)
-            _start_more(sh, b, order, slots, starts, asks)
-            if not starts and not asks:
-                break
-            job.step, job.done, job.total = _progress(sh), sh.checked(), sh.total
-            done, _ = await asyncio.wait({*starts, *asks}, return_when=asyncio.FIRST_COMPLETED)
-            for task in sorted(done, key=lambda x: x in asks):     # tunnels first: their slots in order
-                if task in starts:
-                    _started(sh, starts.pop(task), task, slots)
-                else:
-                    _asked(sh, *asks.pop(task), task)
-            await _improve(sh)
-    finally:                                             # done, stopped or cut off: nothing keeps running
-        for task in [*starts, *asks]:
-            task.cancel()
-        if starts or asks:
-            await asyncio.gather(*starts, *asks, return_exceptions=True)
-        for task, (slot, pid) in asks.items():
-            _asked(sh, slot, pid, task)
-        for slot in [*slots.values(), *starts.values()]:
-            if slot.srv.status != "done":
-                slot.srv.status, slot.srv.secs = "done", round(time.monotonic() - slot.t0, 1)
-        sh.servers = [s for s in sh.servers if s.answers or s.problem]   # up ahead but never needed: not checked
-        await vpn.conn.stop_search()
+        await w.loop()
+    except _Offline:
+        offline = True
+    finally:
+        await w.close()
+    if offline:
+        _offline(sh)
+        return
+    sh.closing = True                                    # a refusal from now on waits for the next search
+    await w.confirm_dead()
     await _finish(sh)
 
 
-def _wave(b: Board, s: str, inflight: set[str]) -> list[str]:
+class _Walk:
+    """One search's servers under way: the tunnels starting and the servers being asked, and its guards: the
+    breaker (tunnels without a handshake: the network or the servers?), the key-conflict detector (a live route that
+    fails while a tunnel is up) and the confirmation of dead servers before they are marked."""
+
+    def __init__(self, sh: Search, job: jobs.Job, order: list[str]) -> None:
+        self.sh, self.job, self.order = sh, job, order
+        self.slots: dict[str, _Slot] = {}                    # servers being asked through (or ready for it)
+        self.starts: dict[asyncio.Task, _Slot] = {}          # tunnels starting
+        self.asks: dict[asyncio.Task, tuple[_Slot, str]] = {}  # asks under way
+        self.recent: deque[bool] = deque(maxlen=vpn.SEARCH_TUNNELS)   # tunnel starts lately: came up?
+        self.streak = 0                  # tunnel starts in a row without a handshake
+        self.failed = 0                  # tunnel starts without a handshake in this search
+        self.up = False                  # a tunnel of this search came up: the network works
+        self.live_ok: set[str] = set()   # live servers that got through when the search started (or went live)
+        self.checked_live: set[str] = set()
+        self.key_tested = False
+        self.unconfirmed: list[Server] = []   # failed beside other tunnels: marked only once confirmed alone
+        self.stored = 0                  # dead servers marked by this search
+
+    # ---- the loop
+    async def loop(self) -> None:
+        sh = self.sh
+        while True:
+            tgs = _refresh(sh)
+            if not tgs:
+                return
+            b = Board(sh, tgs)
+            _note_best(sh, b)
+            if b.done():
+                return
+            await self.retire(b)
+            self.dispatch(b)
+            if self.start_more(b) and not self.starts and not self.asks:
+                await asyncio.sleep(0.2)              # only processes still draining fill the room: wait for them
+                continue
+            if not self.starts and not self.asks:
+                return
+            self.job.step, self.job.done, self.job.total = _progress(sh), sh.checked(), sh.total
+            done, _ = await asyncio.wait({*self.starts, *self.asks}, return_when=asyncio.FIRST_COMPLETED)
+            for task in sorted(done, key=lambda x: x in self.asks):     # tunnels first: their slots in order
+                if task in self.starts:
+                    await self.started(self.starts.pop(task), task)
+                elif task in self.asks:
+                    _asked(sh, *self.asks.pop(task), task)
+            await _improve(sh)
+
+    async def close(self) -> None:
+        """Nothing keeps running: the asks and starts under way stop, the tunnels go."""
+        tasks = [*self.starts, *self.asks]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for task, (slot, pid) in list(self.asks.items()):
+            _asked(self.sh, slot, pid, task)
+        for slot in [*self.slots.values(), *self.starts.values()]:
+            if slot.srv.status != "done":
+                slot.srv.status, slot.srv.secs = "done", round(time.monotonic() - slot.t0, 1)
+        self.slots, self.starts, self.asks = {}, {}, {}
+        self.sh.servers = [s for s in self.sh.servers if s.answers or s.problem]   # up ahead, never needed
+        await vpn.conn.stop_search()
+
+    # ---- asks
+    def dispatch(self, b: Board) -> None:
+        """Start the asks that may run now: live servers first (no new process), then the search's tunnels in the
+        order they started, ASK_PARALLEL of them at a time (one in serial and alone mode); a site asks through one
+        server at a time."""
+        sh = self.sh
+        busy = {pid for _s, pid in self.asks.values()}
+        blocked = {pid for pid, tg in sh.targets.items() if _budget(tg)[0]}
+        limit = ASK_PARALLEL if sh.mode == "parallel" else 1
+        asking = sum(1 for n, s in self.slots.items() if s.asks and n not in b.live and not s.srv.live)
+        rank = {s.name: i for i, s in enumerate(sh.servers)}       # the search's order, not the order tunnels came up
+        live = [] if vpn.conn.alone else b.live                    # alone: the live servers are down meanwhile
+        names = [*live, *sorted((n for n, s in self.slots.items() if s.route is not None and n not in b.live),
+                                key=lambda n: rank.get(n, 0))]
+        for name in names:
+            slot = self.slots.get(name)
+            if name not in b.live and not slot.asks and asking >= limit:
+                continue
+            inflight = set(slot.asks) if slot else set()
+            waiting = {p for p in inflight if slot.srv.answers.get(p, Answer()).verdict == "waiting"}
+            wave = [pid for pid in _wave(b, name, inflight, waiting, blocked, bool(slot and slot.soft))
+                    if pid not in busy]
+            if not wave:
+                continue
+            if slot is None:
+                srv = Server(name, status="testing", live=True)
+                sh.servers.append(srv)
+                slot = self.slots[name] = _Slot(srv)
+            elif name not in b.live and not slot.asks:
+                asking += 1
+            for pid in wave:
+                task = asyncio.create_task(_ask_slot(sh, slot, sh.targets[pid], self.job))
+                self.asks[task], slot.asks[pid] = (slot, pid), task
+                busy.add(pid)
+
+    async def retire(self, b: Board) -> None:
+        """A server that can no longer help (neither as the one server nor as the partner a site without a server
+        needs: Board.could): its slow asks stop (not sent yet, or eBay's warm-up; a single request under way ends
+        within TRIAL_TIMEOUT_S and is kept), and its tunnel stops once nothing runs there. One the best plan needs
+        stays."""
+        keep = set(b.best().servers)
+        for name, slot in list(self.slots.items()):
+            if slot.route is None and not slot.srv.live or name in keep or b.could(name, slot.soft):
+                continue
+            for pid, task in slot.asks.items():
+                tr = slot.trials.get(pid)
+                if tr is None or not tr.wire or tr.limit > 1:
+                    task.cancel()
+            if slot.asks:
+                continue
+            del self.slots[name]
+            if slot.srv.status != "done":
+                slot.srv.status, slot.srv.secs = "done", round(time.monotonic() - slot.t0, 1)
+            if not slot.srv.live:
+                await vpn.conn.stop_search(name)       # no-op for one that went live meanwhile
+                log.info("VPN search: %s (%s)", name,
+                         ", ".join(f"{p}: {a.verdict}" for p, a in slot.srv.answers.items()) or "-")
+                if self.sh.mode == "alone":
+                    await self.relive()
+
+    # ---- tunnels
+    def start_more(self, b: Board) -> bool:
+        """More servers on the search's tunnels while there is room (vpn.SEARCH_TUNNELS in parallel mode, one in
+        serial mode, the processes still draining counted) and few started ones wait to be asked. Alone: one at a
+        time, nothing else under way (the live servers stop for its test). True when only draining processes kept a
+        server that could help from starting."""
+        sh = self.sh
+        if any(s.srv.live for s, _p in self.asks.values()):
+            return False                         # a live server may settle it: no tunnel before its answer
+        if sh.mode == "alone" and (self.starts or self.asks or any(not x.srv.live for x in self.slots.values())):
+            return False                         # alone: one server at a time, nothing else under way
+        room = vpn.SEARCH_TUNNELS if sh.mode == "parallel" else 1
+        ready = sum(1 for n, s in self.slots.items() if s.route is not None and not s.asks and n not in b.live
+                    and not b.asked.get(n, 0))
+        while ready + len(self.starts) < 2 * ASK_PARALLEL:
+            used = len(vpn.conn.testing()) + len(self.starts) - self._reserved()
+            if used + vpn.conn.draining() >= room:
+                return used < room and _candidate(sh, b, self.order)[0] is not None
+            name, soft = _candidate(sh, b, self.order)
+            if name is None:
+                return False
+            pid = (_wave(b, name, set(), set(), set(), soft) or b.pickiest(b.unknown(name, soft)) or [None])[0]
+            slot = _Slot(Server(name), single=sh.mode != "parallel", soft=soft)
+            sh.servers.append(slot.srv)
+            host = sh.targets[pid].host if pid else "www.willhaben.at"
+            task = asyncio.create_task(_start_slot(slot, host, pid, alone=sh.mode == "alone"))
+            self.starts[task] = slot
+            if sh.mode == "alone":
+                return False
+        return False
+
+    def _reserved(self) -> int:
+        """Starts already counted by vpn.conn.testing() (they reserved their server)."""
+        testing = set(vpn.conn.testing())
+        return sum(1 for s in self.starts.values() if s.srv.name in testing)
+
+    async def started(self, slot: _Slot, task: asyncio.Task) -> None:
+        """A tunnel came up, or did not: the guards."""
+        sh, srv = self.sh, slot.srv
+        if task.cancelled():
+            return
+        if (e := task.exception()) is not None:
+            srv.problem, srv.detail, srv.status = "broken", _short(e), "done"
+            log.warning("VPN search: %s did not start: %s", srv.name, e)
+            return
+        if slot.route is not None:
+            self.slots[srv.name] = slot
+            self.up, self.streak = True, 0
+            self.recent.append(True)
+            if sh.mode != "alone":
+                await self.detect_conflict(srv.name)
+            return
+        if sh.mode == "alone":
+            await self.relive()                       # the live servers stopped for this test
+        if srv.problem not in ("dead", "broken"):
+            return                                    # skipped (a process runs there)
+        if not slot.single and sh.mode != "parallel":
+            sh.servers.remove(srv)                    # started beside others before the breaker: asked again alone
+            return
+        self.streak, self.failed = self.streak + 1, self.failed + 1
+        self.recent.append(False)
+        if sh.mode == "alone" or sh.mode == "serial" and self.key_tested:
+            self.store(srv)                           # alone beside the live ones, the key works: confirmed
+        else:
+            self.unconfirmed.append(srv)
+        if self.streak >= 3 or len(self.recent) >= 4 and 2 * self.recent.count(False) >= len(self.recent):
+            await self.breaker(srv)
+
+    async def breaker(self, last: Server) -> None:
+        """Tunnels without a handshake, three in a row or half of the last ones: the home network, the servers or
+        the key? Network down: stop (_Offline). Else serial mode (one tunnel at a time, the failed ones asked again)
+        and, failing there too, one test alone (no live process): a handshake then means the key does not run on
+        two servers at once."""
+        sh = self.sh
+        self.streak = 0
+        self.recent.clear()
+        state = await self.live_state()
+        if state == "down" or state == "none" and not self.up and self.failed >= OFFLINE_AFTER:
+            log.warning("VPN search: no handshake anywhere and no live route: the network seems down")
+            raise _Offline
+        if state == "none" and not self.up:
+            return                                    # nothing to compare with yet: stale configs or no network
+        if sh.mode == "parallel":
+            sh.mode = "serial"
+            log.info("VPN search: tunnels without a handshake; one at a time from now on")
+            failed = {s.name for s in self.unconfirmed}
+            sh.servers = [s for s in sh.servers if s.name not in failed]   # asked again, one at a time
+            self.unconfirmed.clear()
+        elif sh.mode == "serial" and not self.key_tested:
+            self.key_tested = True
+            if state == "ok" and await self.key_test(last.name):
+                await self.conflict(t("{server} gets a handshake only while no other server runs", server=last.name))
+                return
+            for srv in self.unconfirmed:
+                self.store(srv)
+            self.unconfirmed.clear()
+
+    async def live_state(self) -> str:
+        """The live servers: "ok" when one gets through (a CONNECT through its tunnel, started when needed), "down"
+        when none does, "none" without one."""
+        servers = vpn.live_servers()
+        if not servers:
+            return "none"
+        for name in servers:
+            host = self.host_for(name)
+            if await vpn.conn.reach(name, host):
+                return "ok"
+            if vpn.conn.route(name) is None:
+                with suppress(OSError, vpn.Unreachable, PlatformError):
+                    if await vpn.conn.start_live(name, host) is not None:
+                        return "ok"
+        return "down"
+
+    def host_for(self, server: str) -> str:
+        st = vpn.conn_state()
+        pids = [p for p in self.sh.targets if vpn.server_for(p, st) == server] or list(self.sh.targets)
+        return self.sh.targets[pids[0]].host if pids else "www.willhaben.at"
+
+    async def baseline(self) -> None:
+        """The live servers that get through before any tunnel of this search runs (the detector's reference); one
+        not running yet starts now, as with the next request."""
+        if self.sh.mode == "alone":
+            return
+        for name in vpn.live_servers():
+            host = self.host_for(name)
+            if vpn.conn.route(name) is None:
+                with suppress(OSError, vpn.Unreachable, PlatformError):
+                    await vpn.conn.start_live(name, host)
+            if vpn.conn.route(name) is not None and await vpn.conn.reach(name, host):
+                self.live_ok.add(name)
+
+    async def detect_conflict(self, new: str) -> None:
+        """A tunnel came up: do the live servers that got through before still do? One that fails now, and gets
+        through again once the search's tunnels are down, means one key does not run on several servers at once. A
+        server that went live during the search (and gets through) is watched from then on."""
+        for name in vpn.live_servers():
+            if name not in self.live_ok and name not in self.checked_live and vpn.conn.route(name) is not None:
+                self.checked_live.add(name)
+                if await vpn.conn.reach(name, self.host_for(name)):
+                    self.live_ok.add(name)            # it got through with this tunnel up: the reference
+        for name in sorted(self.live_ok):
+            host = self.host_for(name)
+            if await vpn.conn.reach(name, host):
+                continue
+            await self.stop_tunnels()
+            if await vpn.conn.reach(name, host) or await vpn.conn.restart_live(name, host):
+                await self.conflict(t("{live} stopped answering while {server} ran", live=name, server=new))
+                return
+            self.live_ok.discard(name)               # the live server itself went down: not the search's doing
+
+    async def key_test(self, name: str) -> bool:
+        """`name` started while no other process runs (the sites wait a few seconds): a handshake now?"""
+        await self.stop_tunnels(live_too=True)
+        try:
+            await vpn.conn.test_alone(name, self.sh.targets[next(iter(self.sh.targets))].host)
+        except (OSError, vpn.Unreachable, RuntimeError):
+            return False
+        finally:
+            await vpn.conn.stop_search(name)
+            await self.relive()
+        return True
+
+    async def relive(self) -> None:
+        """After a test alone: the live servers start again at once, not with the next request."""
+        for live in vpn.live_servers():
+            with suppress(OSError, vpn.Unreachable, PlatformError):
+                await vpn.conn.start_live(live, self.host_for(live))
+
+    async def conflict(self, why: str) -> None:
+        """One key does not run on several servers at once here: everything this search learnt in parallel goes
+        (the marks and pauses too), one process at a time from now on (parallel_off), this search goes on alone."""
+        sh = self.sh
+        log.warning("VPN: one key on several servers at once does not work here (%s); one process at a time", why)
+        await self.stop_tunnels(live_too=True)
+        _undo(sh)
+        sh.servers, self.unconfirmed = [], []
+        sh.mode, sh.note = "alone", "conflict"
+        vpn.update_conn(parallel_off={"at": time.time(), "why": why})
+        st = vpn.conn_state()
+        live = vpn.live_servers(st)                  # one now
+        if len(vpn.conn.live) > len(live):
+            assign = {p: s for p, s in (st.get("assign") or {}).items() if s in live}
+            with suppress(OSError, vpn.Unreachable):
+                await vpn.switch(live, assign, {})
+
+    async def stop_tunnels(self, live_too: bool = False) -> None:
+        """Every tunnel of the search goes now, with the asks and starts on them (`live_too`: the asks through live
+        servers as well, before their processes stop for a test alone)."""
+        tasks = [*self.starts, *(t_ for t_, (s, _p) in self.asks.items() if live_too or not s.srv.live)]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for task in tasks:
+            if task in self.asks:
+                _asked(self.sh, *self.asks.pop(task), task)
+            elif task in self.starts:
+                slot = self.starts.pop(task)
+                slot.srv.status = "done"
+        for name, slot in list(self.slots.items()):
+            if live_too and not slot.asks or not slot.srv.live:
+                del self.slots[name]
+                slot.srv.status = "done"
+        await vpn.conn.stop_search()
+
+    # ---- dead servers
+    def store(self, srv: Server) -> None:
+        """Mark a confirmed dead server for every site (a day), MAX_DEAD_MARKS per search at most."""
+        if srv.confirmed or self.stored >= MAX_DEAD_MARKS:
+            return
+        srv.confirmed, self.stored = True, self.stored + 1
+        for pid in self.sh.targets:
+            _mark(self.sh, pid, srv.name, srv.problem)
+
+    async def confirm_dead(self) -> None:
+        """The servers that failed beside other tunnels: started again one at a time; still dead, they are marked
+        (MAX_DEAD_MARKS a search). The first that fails again is also tested alone, once: a handshake then means the
+        key conflict, not a dead server."""
+        if not self.unconfirmed or await self.live_state() == "down":
+            return
+        for srv in list(self.unconfirmed):
+            if self.stored >= MAX_DEAD_MARKS or srv.name in vpn.conn.busy() or srv.name in vpn.live_servers():
+                continue
+            try:
+                await vpn.conn.start_search(srv.name, self.sh.targets[next(iter(self.sh.targets))].host)
+            except (OSError, vpn.Unreachable):
+                if not self.key_tested and vpn.live_servers():
+                    self.key_tested = True
+                    if await self.key_test(srv.name):
+                        log.warning("VPN: %s answers alone only: one key on several servers does not work here",
+                                    srv.name)
+                        _undo(self.sh)
+                        self.sh.note = "conflict"
+                        vpn.update_conn(parallel_off={"at": time.time(), "why": t(
+                            "{server} gets a handshake only while no other server runs", server=srv.name)})
+                        return
+                self.store(srv)
+            except RuntimeError:
+                continue
+            else:
+                await vpn.conn.stop_search(srv.name)
+        self.unconfirmed.clear()
+
+
+def _wave(b: Board, s: str, inflight: set[str], waiting: set[str], blocked: set[str], soft: bool = False) -> list[str]:
     """The sites to ask through `s` now (fail fast): the ones without a server, all at once; else, while nothing is
-    known through `s`, the pickiest alone; once it answered, the rest at once (_retire() cancels a slow one when `s`
-    can no longer help)."""
-    unk = [pid for pid in b.pickiest(b.unknown(s)) if pid not in inflight]
-    if not unk or not b.could(s):
+    known through `s`, the pickiest alone (one whose budget makes it wait gives way to the next meanwhile); once
+    one answered, the rest at once (retire() cancels a slow one when `s` can no longer help)."""
+    unk = [pid for pid in b.pickiest(b.unknown(s, soft)) if pid not in inflight]
+    if not unk or not b.could(s, soft):
         return []
     without = b.full & ~b.best().covered
     if first := [pid for pid in unk if without & b.bit[pid]]:
         return first
     if not b.asked.get(s, 0) and not b.ok.get(s, 0):
-        return [] if inflight else unk[:1]
+        if inflight - waiting:
+            return []                             # the first one asks: its answer decides
+        free = [pid for pid in unk if pid not in blocked]
+        return free[:1] if free else ([] if inflight else unk[:1])
     return unk
 
 
-def _dispatch(sh: Search, b: Board, slots: dict[str, _Slot], asks: dict[asyncio.Task, tuple[_Slot, str]],
-              job: jobs.Job) -> None:
-    """Start the asks that may run now: live servers first (no new process), then the search's tunnels in the order
-    they started, ASK_PARALLEL of them at a time; a site asks through one server at a time."""
-    busy = {pid for _s, pid in asks.values()}
-    asking = sum(1 for n, s in slots.items() if s.asks and n not in b.live and not s.srv.live)
-    rank = {s.name: i for i, s in enumerate(sh.servers)}       # the search's order, not the order tunnels came up
-    names = [*b.live, *sorted((n for n, s in slots.items() if s.route is not None and n not in b.live),
-                              key=lambda n: rank.get(n, 0))]
-    for name in names:
-        slot = slots.get(name)
-        if name not in b.live and not slot.asks and asking >= ASK_PARALLEL:
-            continue
-        wave = [pid for pid in _wave(b, name, set(slot.asks) if slot else set()) if pid not in busy]
-        if not wave:
-            continue
-        if slot is None:
-            srv = Server(name, status="testing", live=True)
-            sh.servers.append(srv)
-            slot = slots[name] = _Slot(srv)
-        elif name not in b.live and not slot.asks:
-            asking += 1
-        for pid in wave:
-            task = asyncio.create_task(_ask_slot(sh, slot, sh.targets[pid], job))
-            asks[task], slot.asks[pid] = (slot, pid), task
-            busy.add(pid)
-
-
-def _start_more(sh: Search, b: Board, order: list[str], slots: dict[str, _Slot],
-                starts: dict[asyncio.Task, _Slot], asks: dict[asyncio.Task, tuple[_Slot, str]]) -> None:
-    """More servers on the search's tunnels while there is room (vpn.SEARCH_TUNNELS) and few started ones wait to be
-    asked: a dead server shows within seconds, and several at once hide that wait."""
-    if any(s.srv.live for s, _p in asks.values()):
-        return                               # a live server may settle it: no tunnel before its answer
-    ready = sum(1 for n, s in slots.items() if s.route is not None and not s.asks and n not in b.live
-                and not b.asked.get(n, 0))
-    while len(vpn.conn.testing()) + len(starts) - _starting(starts) < vpn.SEARCH_TUNNELS \
-            and ready + len(starts) < 2 * ASK_PARALLEL:
-        name = _candidate(sh, b, order)
-        if name is None:
-            return
-        pid = (_wave(b, name, set()) or b.pickiest(b.unknown(name)) or [None])[0]
-        slot = _Slot(Server(name))
-        sh.servers.append(slot.srv)
-        starts[asyncio.create_task(_start_slot(slot, sh.targets[pid].host if pid else "www.willhaben.at",
-                                               list(sh.targets)))] = slot
-
-
-def _starting(starts: dict[asyncio.Task, _Slot]) -> int:
-    """Starts already counted by vpn.conn.testing() (they reserved their server)."""
-    testing = set(vpn.conn.testing())
-    return sum(1 for s in starts.values() if s.srv.name in testing)
-
-
-def _candidate(sh: Search, b: Board, order: list[str]) -> str | None:
+def _candidate(sh: Search, b: Board, order: list[str]) -> tuple[str | None, bool]:
     """The next server to start: in vpn.order(), the ones a site without a server answered through lately first;
-    none already asked, live or whose answers could not help (sh.skipped counts those)."""
-    seen = {s.name for s in sh.servers} | set(b.live)
+    none already asked, with a process, or whose answers could not help (sh.skipped counts those). When every one
+    left is out only because it did not answer lately (unreachable, dead, broken marks), those are tried anyway
+    (soft=True), as the pick always did."""
+    seen = {s.name for s in sh.servers} | set(b.live) | vpn.conn.busy()
     without = b.full & ~b.best().covered
     liked = {n for pid in b.names(without) for n in vpn.oks(pid)}
+    ordered = sorted(order, key=lambda n: n not in liked)
     pick, skipped = None, 0
-    for name in sorted(order, key=lambda n: n not in liked):
+    for name in ordered:
         if name in seen:
             continue
         if not b.could(name):
@@ -735,32 +1093,37 @@ def _candidate(sh: Search, b: Board, order: list[str]) -> str | None:
         elif pick is None:
             pick = name
     sh.skipped = skipped
-    return pick
+    if pick is None:
+        for name in ordered:
+            if name not in seen and b.could(name, soft=True):
+                return name, True
+    return pick, False
 
 
-async def _start_slot(slot: _Slot, host: str, pids: list[str]) -> None:
-    """A tunnel of the search: started, the handshake there within seconds, `host` reachable through it. A dead one
-    is marked for every site (a day: stale configs drop out)."""
+async def _start_slot(slot: _Slot, host: str, pid: str | None, alone: bool = False) -> None:
+    """A tunnel of the search: started, the handshake there within seconds, `host` reachable through it (only that
+    site cannot use it when not). Alone: the live processes stop for it. Failures stay with this search (the
+    breaker and the confirmation decide about marks)."""
     srv = slot.srv
     try:
-        slot.route = await vpn.conn.start_search(srv.name, host)
-    except (OSError, vpn.Unreachable) as e:
-        srv.problem = "unreachable" if isinstance(e, vpn.Unreachable) else "broken"
-        srv.detail = e.detail if isinstance(e, vpn.Unreachable) else _short(e)
-        srv.status, srv.secs = "done", round(time.monotonic() - slot.t0, 1)
-        log.info("VPN search: %s %s: %s", srv.name, srv.problem, srv.detail)
-        for pid in pids:
-            vpn.mark(pid, srv.name, srv.problem)
+        if alone:
+            slot.route, reached = await vpn.conn.test_alone(srv.name, host)
+        else:
+            slot.route, reached = await vpn.conn.start_search(srv.name, host)
+    except vpn.Unreachable as e:
+        srv.problem, srv.detail = "dead", e.detail
+    except OSError as e:
+        srv.problem, srv.detail = "broken", _short(e)
+    except RuntimeError:                           # a process runs there (one still draining): not now
+        srv.status = "done"
         return
-    srv.status = "testing"
-
-
-def _started(sh: Search, slot: _Slot, task: asyncio.Task, slots: dict[str, _Slot]) -> None:
-    if not task.cancelled() and (e := task.exception()) is not None:
-        slot.srv.problem, slot.srv.detail, slot.srv.status = "broken", _short(e), "done"
-        log.warning("VPN search: %s did not start: %s", slot.srv.name, e)
-    elif slot.route is not None:
-        slots[slot.srv.name] = slot
+    else:
+        srv.status = "testing"
+        if not reached and pid:                   # this site's host is not reachable there: the others may be
+            srv.answers[pid] = Answer("unreachable", f"no connection to {host}")
+        return
+    srv.status, srv.secs = "done", round(time.monotonic() - slot.t0, 1)
+    log.info("VPN search: %s %s: %s", srv.name, srv.problem, srv.detail)
 
 
 def _asked(sh: Search, slot: _Slot, pid: str, task: asyncio.Task) -> None:
@@ -772,31 +1135,9 @@ def _asked(sh: Search, slot: _Slot, pid: str, task: asyncio.Task) -> None:
         slot.srv.answers[pid] = Answer("skipped", requests=tr.sent if tr else 0)
     elif not task.cancelled() and (e := task.exception()) is not None:
         slot.srv.answers[pid] = Answer("error", _short(e))
+        slot.srv.errors[pid] = slot.srv.errors.get(pid, 0) + 1
     if slot.srv.live and not slot.asks:
         slot.srv.status, slot.srv.secs = "done", round(time.monotonic() - slot.t0, 1)
-
-
-async def _retire(sh: Search, b: Board, slots: dict[str, _Slot]) -> None:
-    """A server that can no longer help (neither as the one server nor as the partner a site without a server needs:
-    Board.could): its slow asks stop (not sent yet, or eBay's warm-up; a single request under way ends within
-    TRIAL_TIMEOUT_S and is kept), and its tunnel stops once nothing runs there. One the best plan needs stays."""
-    keep = set(b.best().servers)
-    for name, slot in list(slots.items()):
-        if slot.route is None and not slot.srv.live or name in keep or b.could(name):
-            continue
-        for pid, task in slot.asks.items():
-            tr = slot.trials.get(pid)
-            if tr is None or not tr.wire or tr.limit > 1:
-                task.cancel()
-        if slot.asks:
-            continue
-        del slots[name]
-        if slot.srv.status != "done":
-            slot.srv.status, slot.srv.secs = "done", round(time.monotonic() - slot.t0, 1)
-        if not slot.srv.live:
-            await vpn.conn.stop_search(name)       # no-op for one that went live meanwhile
-            log.info("VPN search: %s (%s)", name,
-                     ", ".join(f"{p}: {a.verdict}" for p, a in slot.srv.answers.items()) or "-")
 
 
 async def _ask_slot(sh: Search, slot: _Slot, tg: Target, job: jobs.Job) -> None:
@@ -808,11 +1149,8 @@ async def _ask_slot(sh: Search, slot: _Slot, tg: Target, job: jobs.Job) -> None:
             try:
                 route = await vpn.conn.start_live(srv.name, tg.host)
             except (OSError, vpn.Unreachable) as e:
-                reason = "unreachable" if isinstance(e, vpn.Unreachable) else "broken"
-                log.warning("VPN search: %s in use %s: %s", srv.name, reason, e)
-                vpn.mark(tg.pid, srv.name, reason)
-                srv.answers[tg.pid] = Answer(reason, e.detail if isinstance(e, vpn.Unreachable) else _short(e))
-                await vpn.drop(srv.name, t("{server} {reason}", server=srv.name, reason=vpn.reason_label(reason)))
+                log.warning("VPN search: %s in use does not start: %s", srv.name, e)
+                srv.answers[tg.pid] = Answer("unreachable", e.detail if isinstance(e, vpn.Unreachable) else _short(e))
                 return
             if route is None:                 # no longer live: the next round sees it
                 srv.answers[tg.pid] = Answer("skipped")
@@ -825,8 +1163,9 @@ async def _ask_slot(sh: Search, slot: _Slot, tg: Target, job: jobs.Job) -> None:
 
 async def _ask_one(sh: Search, srv: Server, route: vpn.Route, tg: Target, job: jobs.Job,
                    trials: dict[str, Trial] | None = None) -> None:
-    """One site through `route`, once its budget allows it; what it says is noted (marks) and, when the site's own
-    server refused it, the site waits from now on."""
+    """One site through `route`, once its budget allows it. A site's refusal is marked (an answer through a server
+    is real, a missing one stays with this search) and, when the site's own server refused it, the site waits from
+    now on. An error (nothing sent) is asked once more."""
     while True:
         srv.answers[tg.pid] = Answer("waiting")
         if not await _pace(sh, tg, job):
@@ -843,10 +1182,12 @@ async def _ask_one(sh: Search, srv: Server, route: vpn.Route, tg: Target, job: j
         sh.wait = {"pid": tg.pid, "kind": "pause", "until": time.time() + WAIT_STEP_S}   # its limiter said no
         await _sleep(WAIT_STEP_S)
     srv.answers[tg.pid] = a
-    if a.verdict in REFUSED:
-        vpn.mark(tg.pid, srv.name, a.verdict)
+    if a.verdict == "error":
+        srv.errors[tg.pid] = srv.errors.get(tg.pid, 0) + 1
+    elif a.verdict in ("blocked", "rate", "botcheck"):
+        _mark(sh, tg.pid, srv.name, a.verdict)
         if vpn.server_for(tg.pid) == srv.name and not vpn.paused(tg.pid):
-            vpn.pause(tg.pid, a.verdict, a.detail)
+            _pause(sh, tg.pid, a.verdict, a.detail)
     elif a.verdict in ("ok", "site_error"):
         vpn.mark(tg.pid, srv.name, "ok")
 
@@ -936,22 +1277,50 @@ async def _improve(sh: Search) -> None:
 async def _finish(sh: Search) -> None:
     """The end: the sites no connection serves pause with a note until the next regular search; none served at all:
     no server, their requests fail closed."""
+    await vpn.prune()                                # a live server no site uses stops
     b = Board(sh, _refresh(sh))
     plan = b.current()
     uncovered = b.names(b.full & ~plan.covered)
     for pid in uncovered:
-        vpn.pause(pid, "none", f"{sh.checked()}/{sh.total}")
+        _pause(sh, pid, "none", f"{sh.checked()}/{sh.total}")
     st = vpn.conn_state()
     odd = sorted(set(sh.odd) | (set() if sh.trigger in REGULAR else set(st.get("odd") or [])))
     vpn.update_conn(odd=odd)
     sh.plan = {"servers": list(plan.servers), "uncovered": uncovered,
                "assign": {p: x for p, x in (st.get("assign") or {}).items() if x in plan.servers and p in b.bit}}
-    if plan.servers:
+    if plan.servers and plan.covered:
         sh.status = "done"
         return
     sh.status, sh.reason = "failed", "none" if sh.servers else "no_eu"
     vpn.update_conn(servers=[], assign={}, error=_failed_text(sh))
     await vpn.conn.disconnect()
+
+
+def _offline(sh: Search) -> None:
+    """The home network seems down: the search writes nothing (what it wrote goes), the sites that lost their
+    server to it (no answer through it) use it again, and the search runs again OFFLINE_RETRY_S later."""
+    _undo(sh)
+    st = vpn.conn_state()
+    for pid, _name in vpn.users():
+        p = vpn.paused(pid)
+        if p is not None and p[0] == "unreachable":
+            server = (st.get("assign") or {}).get(pid)
+            if server:
+                vpn.unmark(pid, server)
+            vpn.unpause(pid)
+    if not vpn.live_servers(st) and sh.before:      # a request dropped the server it could not start: no fault
+        vpn.update_conn(servers=sh.before, error="")
+        for pid, _name in vpn.users():
+            for server in sh.before:
+                if vpn.marks(pid).get(server, (0, ""))[1] == "unreachable":
+                    vpn.unmark(pid, server)
+        st = vpn.conn_state()
+    sh.status, sh.reason = "failed", "offline"
+    sh.plan = {"servers": vpn.live_servers(st), "assign": dict(st.get("assign") or {}), "uncovered": []}
+    vpn.update_conn(pending={"at": time.time() + OFFLINE_RETRY_S, "trigger": sh.trigger, "by": sh.by,
+                             "why": sh.why, "detail": sh.detail})
+    log.warning("VPN search: the network seems down (no handshake, the live server does not answer either); "
+                "nothing marked, again in %d s", OFFLINE_RETRY_S)
 
 
 async def _test_profile(sh: Search, job: jobs.Job) -> None:
@@ -969,11 +1338,11 @@ async def _test_profile(sh: Search, job: jobs.Job) -> None:
         if route is None:
             raise OSError(t("wireproxy did not open its port"))
     except (OSError, vpn.Unreachable) as e:
-        srv.problem = "unreachable" if isinstance(e, vpn.Unreachable) else "broken"
-        srv.detail = f"no connection to {e.host}" if isinstance(e, vpn.Unreachable) else _short(e)
+        srv.problem = "dead" if isinstance(e, vpn.Unreachable) and e.handshake else \
+            "unreachable" if isinstance(e, vpn.Unreachable) else "broken"
+        srv.detail = e.detail if isinstance(e, vpn.Unreachable) else _short(e)
         srv.status, srv.secs = "done", round(time.monotonic() - t0, 1)
         for tg in tgs:
-            vpn.mark(tg.pid, name, srv.problem)
             vpn.pause(tg.pid, srv.problem, srv.detail)
         sh.status, sh.reason = "failed", "profile"
         sh.plan = {"servers": [], "assign": {}, "uncovered": [tg.pid for tg in tgs]}
@@ -1054,7 +1423,7 @@ def _short(exc: BaseException | None) -> str:
 def _save(sh: Search) -> None:
     if sh.discarded:
         return
-    skip = ("task", "discarded", "streak", "targets", "wait")
+    skip = ("task", "discarded", "streak", "targets", "wait", "closing")
     d = {f.name: getattr(sh, f.name) for f in fields(sh) if f.name not in skip}
     d.update(sites=[asdict(s) for s in sh.sites], servers=[asdict(s) for s in sh.servers])
     set_setting(STATE_KEY, json.dumps(d, separators=(",", ":")))
@@ -1097,7 +1466,7 @@ def view() -> dict[str, Any]:
     conns = [{"name": s, "since": _dt(vpn.since(s, st)), "connected": vpn.conn.route(s) is not None,
               "sites": ", ".join(names.get(p, p) for p in on if vpn.server_for(p, st) == s and not vpn.paused(p))}
              for s in servers]
-    waiting = [{"name": names.get(p, p), "note": vpn.pause_note(pz, vpn.server_for(p, st)),
+    waiting = [{"name": names.get(p, p), "note": vpn.pause_note(pz, vpn.waits_on(p, st)),
                 "tone": "bad" if pz[0] == "none" else "warn"}
                for p in on if (pz := vpn.paused(p)) is not None]
     out: dict[str, Any] = {
@@ -1105,6 +1474,7 @@ def view() -> dict[str, Any]:
         "connections": conns, "two": len(conns) > 1, "waiting": waiting, "connected": bool(vpn.conn.routes()),
         "error": st.get("error") or "", "interval": interval_h(), "next_at": _dt(nxt),
         "next_due": nxt is not None and nxt <= time.time(), "pending": _pending_text(pend) if pend else "",
+        "single": _single_text(st),
         "run": sh is not None, "progress": "", "now": "", "best": "", "wait": "", "clock": "", "summary": "",
         "tone": "", "trigger": "", "finished_at": None, "rows": [], "servers": [], "more": 0}
     if sh is None:
@@ -1230,6 +1600,8 @@ def _progress(sh: Search) -> str:
     text = t("Checked {n} of {total} EU servers", n=sh.checked(), total=sh.total)
     if sh.skipped:
         text += " · " + t("{k} of them skipped: refused lately", k=sh.skipped)
+    if sh.mode != "parallel":
+        text += " · " + t("one server at a time")
     return text
 
 
@@ -1306,6 +1678,9 @@ def _failed_text(sh: Search) -> str:
         return t("The profile does not work for any site")
     if sh.reason == "none":
         return t("No server works: none of the {n} checked answers any site", n=sh.checked())
+    if sh.reason == "offline":
+        return t("Stopped: the internet connection seems down (no server and not the one in use answer); "
+                 "nothing was marked, it runs again in {m} min", m=OFFLINE_RETRY_S // 60)
     return t("The search failed: {error}", error=sh.reason)
 
 
@@ -1339,6 +1714,16 @@ def _reason_text(reason: str) -> str:
     return {"uploaded": t("Stopped: new configs were uploaded"), "removed": t("Stopped: the configs were removed"),
             "interrupted": t("Interrupted by a restart of the app"),
             "stopped": t("Stopped by you; the servers found so far stay")}.get(reason, t("Stopped"))
+
+
+def _single_text(st: dict[str, Any]) -> str:
+    """Why the VPN runs one server at a time (vpn.parallel_off()), for the page."""
+    p = vpn.parallel_off(st)
+    if not p:
+        return ""
+    return t("One key does not seem to run on several servers at once here ({why}). So one server at a time: while "
+             "the search tests one, the sites wait a few seconds, and there is no second server. \"Forget blocks\" "
+             "tries several again.", why=str(p.get("why") or "?"))
 
 
 def _clock_text(secs: int) -> str:
