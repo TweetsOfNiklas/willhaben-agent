@@ -14,3 +14,6 @@
 <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
 <link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+{# Opened from a Telegram button (a Mini App, telegram.open_button): tell Telegram the page is there (it hides its
+   placeholder) and take the full height. The bridge Telegram's app injects; nothing is loaded from telegram.org. #}
+<script>if (window.TelegramWebviewProxy) for (const e of ['web_app_ready', 'web_app_expand']) try { TelegramWebviewProxy.postEvent(e) } catch (_) {}</script>

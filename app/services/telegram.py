@@ -239,6 +239,15 @@ def _button(text: str, verb: str, ref: str) -> dict[str, str]:
     return {"text": text, "callback_data": f"t:{tok}"}
 
 
+def open_button(text: str, url: str) -> dict[str, Any]:
+    """A button that opens `url`. A page of the dashboard opens as a Mini App: in Telegram, full height, without a
+    browser, logged in with Telegram's signed launch data (/login/telegram). Other links (willhaben, eBay) and any
+    link in a group chat (Mini App buttons work in private chats only) stay ordinary links."""
+    base = get_settings().public_url.rstrip("/")
+    mine = base.startswith("https://") and (url == base or url.startswith(base + "/"))
+    return {"text": text, "web_app": {"url": url}} if mine and (chat_id() or 0) > 0 else {"text": text, "url": url}
+
+
 def _rows(buttons: list[dict[str, str]], per_row: int = 2) -> list[list[dict[str, str]]]:
     return [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
 
@@ -279,7 +288,7 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
             buttons.append(_button("🛒 " + t("Start purchase order"), "P_BUY", ad_id))
     rows += _rows(buttons)
     if url and url.startswith("https://"):
-        rows.append([{"text": "🔗 " + t("Open"), "url": url}])
+        rows.append([open_button("🔗 " + t("Open"), url)])
     return {"inline_keyboard": rows} if rows else None
 
 
@@ -689,7 +698,7 @@ async def _reply_in(conversation_id: str, draft_id: int | None, text: str, msg_i
     await _say("✅ " + t("Sent."), reply_to=msg_id)
 
 
-async def _swap_button(msg: dict[str, Any], pressed: str, new: dict[str, str]) -> None:
+async def _swap_button(msg: dict[str, Any], pressed: str, new: dict[str, Any]) -> None:
     """Replace the tapped button in the message's keyboard (the message itself stays)."""
     rows = [[new if b.get("callback_data") == pressed else b for b in row]
             for row in ((msg.get("reply_markup") or {}).get("inline_keyboard") or [])]
@@ -776,7 +785,7 @@ async def _start_purchase(cq_id: str | None, msg: dict[str, Any], pressed: str, 
     await _answer(cq_id, "🛒 " + t("Purchase order #{id} started", id=pid))
     url = push_url("purchase", f"/purchases/{pid}")
     if url and url.startswith("https://"):
-        await _swap_button(msg, pressed, {"text": "🛒 " + t("Purchase order #{id}", id=pid), "url": url})
+        await _swap_button(msg, pressed, open_button("🛒 " + t("Purchase order #{id}", id=pid), url))
     else:
         await _swap_button(msg, pressed, _button("🛒 " + t("Purchase order #{id}", id=pid), "P_NOOP", str(pid)))
 

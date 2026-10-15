@@ -342,6 +342,24 @@ async def login_submit(request: Request, username: str = Form(""), password: str
                                       status_code=401)
 
 
+@app.post("/login/telegram")
+async def login_telegram(request: Request, init_data: str = Form(""), next: str = Form("/")):
+    """The dashboard opened from a Telegram button (a Mini App: telegram.open_button) logs in with the launch data
+    Telegram signed (auth.telegram_user), for the linked chat's user only: a private chat's id is its user's id."""
+    from app.services import telegram
+
+    client = request.client.host if request.client else "?"
+    linked = telegram.chat_id()
+    if auth.locked_out(client) or linked is None or auth.telegram_user(init_data, telegram.token()) != linked:
+        auth.record_failure(client)
+        await asyncio.sleep(1)
+        return JSONResponse({"ok": False}, status_code=401)
+    r = JSONResponse({"ok": True, "next": auth.safe_next(next)})
+    r.set_cookie(auth.COOKIE, auth.make_token(True), max_age=auth.REMEMBER_S, httponly=True, samesite="lax",
+                 secure=_https(request))
+    return r
+
+
 @app.post("/logout")
 async def logout():
     r = back("/login")

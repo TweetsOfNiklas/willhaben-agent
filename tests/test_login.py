@@ -83,3 +83,55 @@ def test_the_home_screen_app_gets_its_manifest_and_icons_before_any_login(pw):
             assert '<link rel="manifest" href="/static/manifest.json">' in html
             assert 'name="apple-mobile-web-app-capable" content="yes"' in html and "viewport-fit=cover" in html
             assert 'rel="apple-touch-icon"' in html
+
+
+def _launch(token, user_id, at, **extra):
+    """Mini App launch data as Telegram signs it (core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app)."""
+    import hashlib
+    import hmac
+    import json
+    from urllib.parse import urlencode
+
+    fields = {"auth_date": str(int(at)), "query_id": "AAH", "user": json.dumps({"id": user_id, "first_name": "Owner"}),
+              **extra}
+    check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    return urlencode({**fields, "hash": hmac.new(key, check.encode(), hashlib.sha256).hexdigest()})
+
+
+def test_a_dashboard_opened_from_the_telegram_bot_logs_in_the_linked_user_only(pw, monkeypatch):
+    import time
+
+    from app.db import set_setting
+
+    monkeypatch.setattr(get_settings(), "telegram_bot_token", "123:secret")
+    set_setting("telegram_chat_id", "4242")
+    now = time.time()
+    assert auth.telegram_user(_launch("123:secret", 4242, now), "123:secret") == 4242
+    assert auth.telegram_user(_launch("123:other", 4242, now), "123:secret") is None          # another bot's
+    assert auth.telegram_user(_launch("123:secret", 4242, now - 2 * 86400), "123:secret") is None   # stale
+    forged = _launch("123:secret", 4242, now).replace("4242", "4243")
+    assert auth.telegram_user(forged, "123:secret") is None
+    with TestClient(app) as c:
+        page = c.get("/login?next=%2Fchats").text
+        assert "tgWebAppData" in page and "/login/telegram" in page
+        r = c.post("/login/telegram", data={"init_data": _launch("123:secret", 9999, now), "next": "/chats"})
+        assert r.status_code == 401 and c.get("/chats", headers={"accept": "text/html"}, follow_redirects=False).status_code == 303
+        r = c.post("/login/telegram", data={"init_data": _launch("123:secret", 4242, now), "next": "/chats"})
+        assert r.status_code == 200 and r.json() == {"ok": True, "next": "/chats"}
+        assert "max-age" in r.headers["set-cookie"].lower() and c.get("/chats").status_code == 200
+
+
+def test_dashboard_links_in_telegram_open_as_a_mini_app_other_links_stay_links(monkeypatch):
+    from app.db import set_setting
+    from app.services import telegram
+
+    monkeypatch.setattr(get_settings(), "public_url", "https://agent.example")
+    set_setting("telegram_chat_id", "4242")
+    assert telegram.open_button("Open", "https://agent.example/hits/1") == \
+        {"text": "Open", "web_app": {"url": "https://agent.example/hits/1"}}
+    assert telegram.open_button("Open", "https://www.willhaben.at/iad/object?adId=1") == \
+        {"text": "Open", "url": "https://www.willhaben.at/iad/object?adId=1"}
+    assert telegram.open_button("Open", "https://agent.example.evil/x")["url"]          # only the dashboard itself
+    set_setting("telegram_chat_id", "-100123")                                             # a group: links only
+    assert "url" in telegram.open_button("Open", "https://agent.example/hits/1")

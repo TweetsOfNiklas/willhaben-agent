@@ -2,26 +2,30 @@
 
 Active only when DASHBOARD_PASSWORD is set. Browsers get a cookie from /login; scripts, the MCP server and
 other API clients can keep sending HTTP Basic auth. Changing the password or user ends all sessions, because
-the cookie signature covers both.
+the cookie signature covers both. Opened from a Telegram button as a Mini App, the page logs in with Telegram's
+signed launch data instead (telegram_user(), /login/telegram): only the linked chat's user, no password.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from collections import defaultdict, deque
+from urllib.parse import parse_qsl
 
 from app.config import get_settings
 
 COOKIE = "wh_session"
 REMEMBER_S = 30 * 86400      # "stay logged in"
 SESSION_S = 12 * 3600        # otherwise: browser session, at most 12 h
-PUBLIC_PATHS = {"/healthz", "/login", "/lang"}    # /lang: the language switch on the login page
+PUBLIC_PATHS = {"/healthz", "/login", "/login/telegram", "/lang"}    # /lang: the language switch on the login page
 PUBLIC_PREFIXES = ("/static/",)    # stylesheets: the login page needs them before any login
 
 MAX_FAILS, FAIL_WINDOW_S = 10, 15 * 60
+TELEGRAM_MAX_AGE_S = 24 * 3600   # Telegram's launch data older than this logs in no more (a Mini App opened yesterday)
 _fails: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -98,3 +102,24 @@ def safe_next(target: str | None) -> str:
     if not target or not target.startswith("/") or target.startswith("//") or "\\" in target:
         return "/"
     return target
+
+
+def telegram_user(init_data: str | None, bot_token: str | None, now: float | None = None) -> int | None:
+    """The Telegram user of a Mini App launch (the URL fragment's tgWebAppData, Telegram.WebApp.initData), when Telegram
+    signed it with this bot's token and it is at most TELEGRAM_MAX_AGE_S old; None otherwise. The check of
+    core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app: HMAC-SHA256 over the other fields,
+    sorted, "key=value" per line, keyed with HMAC-SHA256("WebAppData", bot token)."""
+    if not init_data or not bot_token:
+        return None
+    fields = dict(parse_qsl(init_data, keep_blank_values=True))
+    sent = fields.pop("hash", "")
+    check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    if not sent or not hmac.compare_digest(hmac.new(key, check.encode(), hashlib.sha256).hexdigest(), sent):
+        return None
+    try:
+        signed_at = int(fields.get("auth_date", ""))
+        user = int(json.loads(fields.get("user") or "{}")["id"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    return user if abs((now or time.time()) - signed_at) <= TELEGRAM_MAX_AGE_S else None

@@ -16,6 +16,7 @@
         <div><div class="text-[17px] font-semibold tracking-tight">willhaben Agent</div><div class="text-[13px] text-muted">{{ _("Log in to the dashboard") }}</div></div>
       </div>
       {% if error %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-[13px] text-error">{{ error }}</div>{% endif %}
+      <div id="tg-login" role="status" hidden class="flex items-center gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]"><span class="loading loading-spinner loading-xs text-primary"></span><span>{{ _("Logging in with Telegram…") }}</span></div>
       <form method="post" action="/login" class="flex flex-col gap-3.5">
         <input type="hidden" name="next" value="{{ next }}">
         <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("User name") }}</span>
@@ -43,6 +44,15 @@
   <script>
     const pw = document.getElementById('pw'), b = document.getElementById('pw-toggle'), T = {show: {{ _("Show")|tojson }}, hide: {{ _("Hide")|tojson }}};
     b.addEventListener('click', () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; b.textContent = show ? T.hide : T.show; pw.focus(); });
+    // Opened from a Telegram button (a Mini App): Telegram puts its signed launch data into the URL's fragment, which
+    // the redirect to this page keeps. It logs in the linked chat's user (POST /login/telegram); else the form stays.
+    const tg = new URLSearchParams(location.hash.slice(1)).get('tgWebAppData'), box = document.getElementById('tg-login');
+    if (tg) {
+      box.hidden = false;
+      fetch('/login/telegram', {method: 'POST', body: new URLSearchParams({init_data: tg, next: {{ next|tojson }}})})
+        .then(r => r.ok ? r.json() : null).catch(() => null)
+        .then(d => { if (d && d.ok) location.replace(d.next); else { box.hidden = true; history.replaceState(null, '', location.pathname + location.search); } });
+    }
   </script>
 </body>
 </html>
