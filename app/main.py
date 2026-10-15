@@ -2085,6 +2085,13 @@ async def settings_vpn_search(request: Request):
     return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("Search started"))
 
 
+@app.post("/settings/vpn/retest")
+async def settings_vpn_retest(request: Request):
+    """"Test again": every site asks once through the server it uses now; nothing switches (vpn_check.retest)."""
+    why = vpn_check.retest()
+    return _vpn_test_panel(request, why) if _hx(request) else _vpn_back(why or t("Test started"))
+
+
 @app.post("/settings/vpn/stop")
 async def settings_vpn_stop(request: Request):
     """Stop the running search; the servers it switched to so far stay."""

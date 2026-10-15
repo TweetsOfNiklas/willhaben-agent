@@ -771,6 +771,25 @@ async def test_a_switch_turned_on_is_tested_on_the_server_in_use_first(sites, fa
     assert vpn_check.view()["trigger"] == "Geizhals switched on"
 
 
+
+async def test_test_again_asks_every_site_through_its_server_and_switches_nothing(sites, fake):
+    """"Test again": every site asks once through the server it uses (started again if its process is not up); no
+    other server starts, no search, no mark, the servers stay; the result shows per site."""
+    _collection(N(1), N(2))
+    sites({N(1): [PAGE]}, {N(1): [NO]})
+    _live(N(1), fake=N(1), fake2=N(1))
+    assert vpn_check.retest() is None and vpn_check.retest() == "A test is running"      # no second one meanwhile
+    await asyncio.wait_for(vpn_check._retest, 5)
+    assert fake.starts == [N(1)] and vpn_check._run is None                            # no other server, no search
+    assert vpn.live_servers() == [N(1)] and _reasons("fake2") == {} and vpn.paused("fake2") is None
+    rows = {r["name"]: (r["label"], r["server"]) for r in vpn_check.view()["retest"]["rows"]}
+    assert rows == {"Fake": ("Works", N(1)), "Fake 2": ("Refused", N(1))}
+    from app.main import templates
+    html = templates.get_template("settings/_vpn_test.html").render(vpn_note=None)
+    assert 'action="/settings/vpn/retest"' in html and "Test again" in html and "Tested again" in html
+    vpn.update_conn(servers=[])
+    assert vpn_check.retest() == "No server yet: the first search finds one."
+
 async def test_geizhals_refusing_the_server_in_use_gets_one_found_and_never_goes_direct(sites, fake, monkeypatch):
     _collection(N(1), N(2))
     (a,) = sites({N(1): [PAGE], N(2): [PAGE, PAGE]})

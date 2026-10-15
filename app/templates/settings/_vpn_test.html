@@ -37,8 +37,14 @@
     <form method="post" action="/settings/vpn/stop" hx-post="/settings/vpn/stop" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
       <button class="btn btn-sm max-sm:w-full">{{ ui.icon('x', 14) }}{{ _("Stop") }}</button></form>
     {% else %}
-    <form method="post" action="/settings/vpn/search" hx-post="/settings/vpn/search" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
-      <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.blocked %} disabled{% endif %}>{{ ui.icon('play' if vt.profile else 'search', 14) }}{{ _("Test now") if vt.profile else _("Search now") }}</button></form>
+    <div class="flex flex-wrap gap-2 max-sm:w-full">
+      {% if vt.connections and not vt.profile %}{# only the servers in use, asked once by every site: nothing switches #}
+      <form method="post" action="/settings/vpn/retest" hx-post="/settings/vpn/retest" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:flex-1">
+        <button class="btn btn-sm max-sm:w-full"{% if vt.blocked or vt.retesting %} disabled{% endif %}>{% if vt.retesting %}<span class="loading loading-spinner loading-xs"></span>{{ _("Testing…") }}{% else %}{{ ui.icon('refresh', 14) }}{{ _("Test again") }}{% endif %}</button></form>
+      {% endif %}
+      <form method="post" action="/settings/vpn/search" hx-post="/settings/vpn/search" hx-target="#vpn-test" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:flex-1">
+        <button class="btn btn-primary btn-sm max-sm:w-full"{% if vt.blocked or vt.retesting %} disabled{% endif %}>{{ ui.icon('play' if vt.profile else 'search', 14) }}{{ _("Test now") if vt.profile else _("Search now") }}</button></form>
+    </div>
     {% endif %}
   </div>
   {% if vt.blocked %}<small class="text-[12.5px] text-warning">{{ vt.blocked }}</small>{% endif %}
@@ -62,6 +68,14 @@
     <ul class="m-0 flex list-none flex-col gap-1 p-0">
       {% for w in vt.waiting %}<li class="min-w-0 break-words text-[12.5px] {{ 'text-error' if w.tone == 'bad' else 'text-warning' }}"><span class="font-medium">{{ w.name }}</span> · {{ w.note }}</li>{% endfor %}
     </ul>
+    {% endif %}
+    {% if vt.retest and not vt.live %}{# the last "Test again": each site through the server it used #}
+    <div class="flex flex-col gap-1.5 border-t border-base-300 pt-2">
+      <small class="text-[12px] text-muted">{{ _("Tested again {time}", time=vt.retest.at|ago) }}</small>
+      <ul class="m-0 flex list-none flex-wrap gap-x-4 gap-y-1.5 p-0">
+        {% for r in vt.retest.rows %}<li class="inline-flex min-w-0 flex-wrap items-center gap-1.5"><span class="font-medium">{{ r.name }}</span>{{ ui.pill(r.label, r.tone) }}{% if r.detail %}<span class="break-words text-[12px] text-muted">{{ r.detail }}</span>{% endif %}</li>{% endfor %}
+      </ul>
+    </div>
     {% endif %}
   </div>
 

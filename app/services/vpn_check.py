@@ -103,6 +103,7 @@ INTERVAL_H = 6            # default of the setting vpn_shuffle_h
 INTERVAL_KEY = "vpn_shuffle_h"
 STOP_WAIT_S = 10          # cancel(): longest wait for the search to end
 STATE_KEY = "vpn_test"
+RETEST_KEY = "vpn_retest"   # the last "Test again": per site, the server it used and what it answered
 REGULAR = ("schedule", "manual", "new")         # they look for another server: the change now and then
 ANSWERED = ("ok", "site_error", "odd_page")    # an "error" (nothing sent) says nothing: asked once more
 REFUSED = ("blocked", "rate", "unreachable", "botcheck")
@@ -400,9 +401,85 @@ def clear() -> None:
 
 def reset() -> None:
     """Tests: every test has its own event loop and database."""
-    global _run
-    _run = None
+    global _run, _retest
+    _run = _retest = None
     _spent.clear()
+
+
+# ------------------------------------------------------------------ "Test again": the connections in use, nothing else
+_retest: asyncio.Task | None = None
+
+
+def retesting() -> bool:
+    return _retest is not None and not _retest.done()
+
+
+def retest() -> str | None:
+    """"Test again": every site with its VPN on (Geizhals too) asks once through the server it uses now, as its own
+    visitor and judged like a search's ask; no other server starts, nothing switches, nothing is marked. In the
+    background (the header lists the job); None when it started, else why not."""
+    global _retest
+    if running():
+        return t("A VPN search is running")
+    if retesting():
+        return t("A test is running")
+    if reason := blocker():
+        return reason
+    if not vpn.live_servers():
+        return t("No server yet: the first search finds one.")
+    _retest = asyncio.create_task(_retest_all())
+    return None
+
+
+async def _retest_all() -> None:
+    tgs = [tg for tg in targets() if tg.on()]
+    sh = Search("retest", [Site(tg.pid, tg.name) for tg in tgs])    # only the bookkeeping _ask keeps
+    results: dict[str, dict[str, Any]] = {}
+    async with jobs.track("vpn-retest", t("VPN test"), lane="vpn", link="/settings/vpn", quiet=True) as job:
+        job.total = len(tgs)
+
+        async def one(tg: Target) -> None:
+            name = vpn.server_for(tg.pid)
+            if name is None:                             # it refused its server and waits for the next search
+                results[tg.pid] = {"server": vpn.waits_on(tg.pid) or "", "verdict": "waits", "detail": ""}
+                return
+            route = vpn.conn.route(name)
+            if route is None:                            # its process is not up (a restart): this server only
+                try:
+                    route = await vpn.conn.start_live(name, tg.host)
+                except (OSError, vpn.Unreachable) as e:
+                    results[tg.pid] = {"server": name, "verdict": "unreachable", "detail": _short(e)}
+                    return
+            if route is None:
+                results[tg.pid] = {"server": name, "verdict": "unreachable", "detail": ""}
+                return
+            a = await _ask(sh, route, tg)
+            results[tg.pid] = {"server": route.name, "verdict": a.verdict, "detail": a.detail, "secs": a.secs}
+            job.progress(len(results), t("{site} through {server}", site=tg.name, server=route.name))
+
+        await asyncio.gather(*(one(tg) for tg in tgs))
+        ok = sum(r["verdict"] in ANSWERED for r in results.values())
+        job.result = t("{ok} of {n} sites answer through their server", ok=ok, n=len(results))
+        if ok < len(results):
+            job.quiet = False
+    set_setting(RETEST_KEY, json.dumps({"at": time.time(), "results": results}, separators=(",", ":")))
+
+
+def _retest_view(names: dict[str, str]) -> dict[str, Any] | None:
+    """The last "Test again" for the page: when, and per site its server and answer (a chip, the reason below)."""
+    try:
+        d = json.loads(get_setting(RETEST_KEY) or "null")
+    except ValueError:
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("results"), dict):
+        return None
+    rows = []
+    for pid, r in d["results"].items():
+        v = str(r.get("verdict") or "")
+        label, tone = (t("Waits"), "warn") if v == "waits" else _pill(v)
+        rows.append({"name": names.get(pid, pid), "server": r.get("server") or "", "label": label, "tone": tone,
+                     "detail": vpn.describe(r.get("detail") or "") if v not in ANSWERED else ""})
+    return {"at": _dt(float(d.get("at") or 0)), "rows": rows}
 
 
 # ------------------------------------------------------------------ what the search knows, and the best plan
@@ -1379,7 +1456,8 @@ def view() -> dict[str, Any]:
         "error": st.get("error") or "", "interval": interval_h(), "next_at": _dt(nxt),
         "next_due": nxt is not None and nxt <= time.time(), "pending": _pending_text(pend) if pend else "",
         "run": sh is not None, "progress": "", "now": "", "best": "", "wait": "", "clock": "", "summary": "",
-        "tone": "", "trigger": "", "finished_at": None, "rows": [], "servers": [], "more": 0}
+        "tone": "", "trigger": "", "finished_at": None, "rows": [], "servers": [], "more": 0,
+        "retesting": retesting(), "retest": _retest_view(names)}
     if sh is None:
         return out
     testing = [s for s in sh.servers if s.status != "done"] if live else []

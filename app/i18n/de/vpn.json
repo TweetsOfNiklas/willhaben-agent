@@ -194,5 +194,13 @@
  "no WireGuard handshake": "kein WireGuard-Handshake",
  "Stopped: the internet connection seems down (no server and not the one in use answer); nothing was marked, it runs again in {m} min": "Abgebrochen: Die Internetverbindung scheint weg zu sein (kein Server antwortet, auch der genutzte nicht); nichts wurde markiert, sie läuft in {m} min wieder",
  "one server at a time": "ein Server nach dem anderen",
- "No server answers yet: the last servers tried gave no handshake; the search runs again in {m} min": "Noch antwortet kein Server: Die zuletzt probierten Server gaben keinen Handshake; die Suche läuft in {m} min wieder"
+ "No server answers yet: the last servers tried gave no handshake; the search runs again in {m} min": "Noch antwortet kein Server: Die zuletzt probierten Server gaben keinen Handshake; die Suche läuft in {m} min wieder",
+ "A test is running": "Ein Test läuft",
+ "{site} through {server}": "{site} über {server}",
+ "{ok} of {n} sites answer through their server": "{ok} von {n} Seiten antworten über ihren Server",
+ "Waits": "Wartet",
+ "Test again": "Erneut testen",
+ "Testing…": "Testet …",
+ "Tested again {time}": "Erneut getestet {time}",
+ "Test started": "Test gestartet"
 }
