@@ -277,6 +277,30 @@ def test_soft_mismatch_hint():
     assert few["basis"] == "geizhals" and few["mismatch"] is None and few["band"]["count"] == 3
 
 
+def test_a_few_comparables_far_below_the_new_price_draw_no_usual_range():
+    """A new Raspberry Pi 5 at 106 €, new from 158.82 €: the three ads the filters left at 15–18 € are accessories, not
+    its usual price. Five or more stay a range (their own rules handle a mismatch); far above it stays a hint."""
+    few = deals.position(106, deals.stats([15, 16.5, 18]), 158.82, "new")
+    assert few["basis"] == "geizhals" and few["band"] is None and few["level"] == "bargain"
+    fits = deals.position(106, deals.stats([90, 100, 110]), 158.82, "new")
+    assert fits["band"] == {"low": 95.0, "high": 105.0, "count": 3}
+    above = deals.position(60, deals.stats([300, 320, 340]), 100.0)
+    assert above["band"]["count"] == 3
+
+
+def test_foreign_titles_of_accessories_are_not_the_item():
+    """Vinted and eBay show ads from all of Europe: a case, power supply or fan in Italian, French or Spanish."""
+    m = deals.TitleMatch("Raspberry PI 5 2 GB di RAM e 64 GB di memoria rom")
+    for other in ("Custodia per Raspberry Pi 5", "Alimentatore ufficiale Raspberry Pi 5 27W", "Boîtier pour Raspberry Pi 5",
+                  "Ventola attiva Raspberry Pi 5", "Funda para Raspberry Pi 5", "Raspberry Pi 5 dissipatore",
+                  "Câble micro HDMI Raspberry Pi 5"):
+        assert m.check(other)[1] == "kind", other
+    assert m.check("Raspberry Pi 5 2GB")[1] is None
+    assert m.check("Raspberry Pi 5 2GB con alimentatore")[1] is None             # comes along: still the item
+    assert deals.TitleMatch("Custodia iPhone 13").check("Coque iPhone 13")[1] is None   # a case among cases
+    assert deals.TitleMatch("Raspberry Pi 5 4GB Active Cooler Set").check("Raspberry Pi 5 4GB")[1] is None
+
+
 def test_tied_quantiles_keep_the_ring_in_its_zone():
     p = deals.position(100, deals.stats([100] * 5 + [200]), None)
     assert p["level"] == "fair" and p["pos"] == pytest.approx(0.32) and 0.25 <= p["pos"] <= 0.75

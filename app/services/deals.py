@@ -325,7 +325,10 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
     new at 146 €, used ones at 75–79 €: 45 € read as a bargain). Otherwise, with a Geizhals new price (basis
     "geizhals"): the price as a share of it against the user's zones of the item's group (price_zones.group: "new"
     only for new items); "pos" is that share on a 0..axis % scale. "band" is p25..p75 of the comparable ads (a
-    cross-check drawn under the bar), "mismatch" their median in % of new when it is above MISMATCH_HINT × new. A new
+    cross-check drawn under the bar; from fewer than MIN_COMPARABLES not when their median is below MISMATCH_LOW of
+    the new price: three ads at a tenth of it are accessories the filters missed, not the item's usual price; far
+    above it, it stays as a hint that the new price may be another product's), "mismatch" their median in % of new
+    when it is above MISMATCH_HINT × new. A new
     price the comparables contradict hard (median outside MISMATCH_LOW..MISMATCH_HIGH × new) is named in
     "new_price_ignored". Without one, 5+ comparables decide; the ring is clamped into its label's segment, so tied
     quantiles never put it on another colour."""
@@ -353,7 +356,8 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
                 "condition": condition, "pct": price_zones.share(price, new_price), "new_price": new_price,
                 "zones": list(lim), "axis": axis,
                 "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]}
-                if comp and comp.get("p25") is not None else None,
+                if comp and comp.get("p25") is not None
+                and (scale or comp["median"] >= MISMATCH_LOW * new_price) else None,
                 "mismatch": round(comp["median"] * 100 / new_price)
                 if comp and scale and comp["median"] > MISMATCH_HINT * new_price else None,
                 "suspicious": exact < lim[0] / 2 or bool(comp and scale and price < 0.5 * comp["p25"])}
@@ -490,15 +494,28 @@ ACCESSORY_WORDS = (
     "fernbedienung", "attrappe", "dummy", "karton", "verpackung", "schachtel", "anleitung", "handbuch", "armband",
     "tastatur", "mainboard", "stecker", "ladeschale", "dockingstation", "sleeve", "halter", "ständer", "bezug",
     "wanne", "sitzeinheit", "fußsack",
+    # Vinted and eBay list ads of all Europe: the same things in English, Italian, French, Spanish, Dutch, Polish
+    # (not words German titles use for the item itself or its extras: "Active Cooler Set", "Gaming Keyboard")
+    "charger", "heatsink", "holder", "strap", "protector", "enclosure", "housing", "battery", "pouch", "custodia",
+    "alimentatore", "caricatore", "ventola", "dissipatore", "batteria", "pellicola", "adattatore", "telecomando",
+    "cinturino", "tastiera", "guscio", "involucro", "coque", "chargeur", "cable",
+    "alimentation", "ventilateur", "dissipateur", "boîtier", "housse", "adaptateur", "télécommande", "bracelet",
+    "clavier", "sacoche", "pochette", "funda", "carcasa", "cargador", "ventilador", "disipador", "batería",
+    "adaptador", "teclado", "oplader", "houder", "behuizing", "ładowarka", "zasilacz", "obudowa", "wentylator",
+    "pokrowiec",
 )
-_ACCESSORY_EXACT = {"spiel", "spiele", "game", "games", "räder", "reifen", "mount", "modul"}   # whole words only
+_ACCESSORY_EXACT = {"spiel", "spiele", "game", "games", "räder", "reifen", "mount", "modul",   # whole words only
+                    "cavo", "dock", "accu", "mando", "correa", "soporte", "supporto", "staffa", "uchwyt", "voeding",
+                    "hoes", "hoesje", "borsa"}
 PARTS_WORDS = {"display", "akku", "gehäuse", "platine", "batterie"}    # what a defective ad's comparables may be
 _BROKEN = ("defekt", "kaputt", "bastler")                              # word starts: "defektes", "kaputte"
 _NOT_BROKEN = {"kein", "keine", "keinen", "keinerlei", "nicht", "ohne"}   # "keine Defekte", "nicht kaputt"
 _LOT_WORDS = {"konvolut", "sammlung", "restposten", "sammelposten"}
 _BOX_WORDS = {"ovp", "box", "originalverpackung", "karton", "verpackung", "schachtel"}   # "nur OVP": the box alone
-_EXTRAS = {"mit", "inkl", "inklusive", "incl", "samt", "with", "+", "&", "und", "sowie", "zzgl"}   # what comes along
-_FOR = {"fuer", "for", "passend", "kompatibel", "compatible", "geeignet"}  # "Hülle für iPhone 13": made for the item
+_EXTRAS = {"mit", "inkl", "inklusive", "incl", "samt", "with", "+", "&", "und", "sowie", "zzgl",   # what comes along
+           "con", "avec", "met", "inclus", "incluso", "compreso"}
+_FOR = {"fuer", "for", "passend", "kompatibel", "compatible", "geeignet",   # "Hülle für iPhone 13": made for the item
+        "per", "pour", "para", "voor", "dla", "compatibile"}
 _BEFORE_NUMBER = {"model", "modell", "typ", "type", "version", "gen", "generation", "series", "serie", "nr", "no", "mk"}
 MATCH_MIN = 0.7          # similarity a comparable needs (TitleMatch.score)
 PENALTY = 0.5            # an accessory, part, lot, box, other line or model list: such an ad cannot reach MATCH_MIN
@@ -508,12 +525,17 @@ PLACEHOLDER = 0.1                     # below this share of the median a price i
 REFERENCE_MAX = 200                   # characters of the reference title compared (a typed term can be any length)
 
 _WORD_RE = re.compile(r"[^\W_]+(?:[.\-][^\W_]+)*\+*|[+&/,()]")
-_FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+_FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
+                       **{c: plain for plain, cs in (("a", "àáâãåą"), ("c", "çćč"), ("e", "èéêëęě"), ("i", "ìíîï"),
+                                                    ("l", "ł"), ("n", "ñńň"), ("o", "òóôõø"), ("s", "śš"),
+                                                    ("u", "ùúûů"), ("z", "źżž"), ("r", "ř"), ("y", "ý"))
+                          for c in cs}})
 _PLURAL = ("", "e", "n", "en", "s", "er", "es")
 
 
 def _fold(word: str) -> str:
-    """Lower case, umlauts spelled out ("weiß" = "weiss"), without a glued "+" ("PoE+"); "+" itself stays."""
+    """Lower case, umlauts spelled out ("weiß" = "weiss"), other accents dropped ("boîtier" = "boitier"), without a
+    glued "+" ("PoE+"); "+" itself stays."""
     w = word.lower().translate(_FOLD)
     return w.rstrip("+") or w
 
@@ -523,6 +545,20 @@ _ACC_KIND = {"case": "huelle", "cover": "huelle", "bumper": "huelle", "etui": "h
              "skin": "huelle", "sleeve": "huelle", "schutzglas": "panzerglas", "folie": "panzerglas",
              "netzteil": "ladegeraet", "ladestation": "ladegeraet", "ladeschale": "ladegeraet",
              "halter": "halterung"}                     # the same kind of accessory under another name
+_ACC_KIND.update({_fold(w): kind for kind, words in (
+    ("huelle", ("pouch", "custodia", "guscio", "coque", "housse", "sacoche", "pochette", "funda", "pokrowiec", "hoes",
+                "hoesje", "borsa")),
+    ("gehaeuse", ("enclosure", "housing", "involucro", "boîtier", "carcasa", "behuizing", "obudowa")),
+    ("ladegeraet", ("charger", "alimentatore", "caricatore", "chargeur", "alimentation", "cargador", "oplader",
+                    "ładowarka", "zasilacz", "voeding")),
+    ("kabel", ("cable", "cavo")), ("luefter", ("ventola", "ventilateur", "ventilador", "wentylator")),
+    ("kuehlkoerper", ("heatsink", "dissipatore", "dissipateur", "disipador")),
+    ("halterung", ("holder", "houder", "supporto", "soporte", "staffa", "uchwyt")),
+    ("akku", ("battery", "batteria", "batería", "accu")), ("adapter", ("adattatore", "adaptateur", "adaptador")),
+    ("fernbedienung", ("telecomando", "télécommande", "mando")),
+    ("armband", ("strap", "cinturino", "bracelet", "correa")),
+    ("tastatur", ("tastiera", "clavier", "teclado")), ("panzerglas", ("protector", "pellicola")),
+    ("dockingstation", ("dock",))) for w in words})
 _ACC_EXACT = {_fold(w) for w in _ACCESSORY_EXACT}
 _NOT_ACCESSORY = {"steelcase"}                    # a brand (office chairs), not a case
 _MATERIAL_VARIANTS = {"mesh"}                     # without a model a material ("Mesh-Rückenlehne"), not the U6 Mesh
@@ -585,7 +621,7 @@ def _accessory(word: str) -> str | None:
     if w in _NOT_ACCESSORY:
         return None
     if w in _ACC_EXACT:
-        return w
+        return _ACC_KIND.get(w, w)
     for a in _ACC:
         if any(w == a + p for p in _PLURAL) or (len(w) >= len(a) + 3 and w.endswith(a)):
             return _ACC_KIND.get(a, a)
