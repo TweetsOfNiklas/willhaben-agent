@@ -13,11 +13,11 @@ from typing import Any
 from sqlmodel import select
 
 from app.config import get_settings
-from app.db import AdDraft, get_setting, session, utcnow
+from app.db import AdDraft, MyAd, get_setting, session, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_prompt, ad_refine_prompt
-from app.services import geizhals, selling
+from app.services import geizhals, min_price, selling
 from app.willhaben.public import WillhabenError, get_public
 from app.services import timeline
 from app.services.shipping import clean_parcel
@@ -99,20 +99,29 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
         db.commit()
         db.refresh(draft)
     timeline.update_context(draft_id=draft.id)
-    paths = save_images(draft.id, files)
+    return await _write_draft(draft.id, notes, save_images(draft.id, files), owner_quantity)
+
+
+@timeline.scoped(draft_id="draft_id")
+async def retry_draft(draft_id: int) -> AdDraft:
+    """A draft Claude could not write (status "error"): the whole pipeline once more from the same notes and photos."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    timeline.update_context(batch_id=d.batch_id)
+    return await _write_draft(draft_id, d.input_text, d.image_paths, d.quantity)
+
+
+async def _write_draft(draft_id: int, notes: str, paths: list[str], owner_quantity: int | None = None) -> AdDraft:
+    """Claude writes the listing, then comparable ads and Geizhals. When Claude fails the draft keeps status "error"
+    and the message (retry_draft tries again); the photos are kept either way. owner_quantity: the owner's piece
+    count, which wins over Claude's (a retry uses the count stored at creation)."""
     rules = selling.append_to(get_setting("reply_rules"), for_ad=True)
     try:
         result = await get_backend("ads").complete(
             system=AD_SYSTEM, prompt=ad_prompt(notes, rules, len(paths), quantity=owner_quantity),
             schema=AD_SCHEMA, images=[Path(p) for p in paths])
     except LLMError as e:
-        with session() as db:
-            d = db.get(AdDraft, draft.id)
-            d.image_paths, d.status, d.error = paths, "error", str(e)
-            db.add(d)
-            db.commit()
-            db.refresh(d)
-        return d
+        return update_draft(draft_id, image_paths=paths, status="error", error=str(e))
 
     data = result.data
     stats, comparables = None, []
@@ -131,8 +140,10 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
     gh = await _geizhals_lookup(product_query)
 
     with session() as db:
-        d = db.get(AdDraft, draft.id)
-        d.image_paths = paths
+        d = db.get(AdDraft, draft_id)
+        d.image_paths, d.error = paths, None
+        if d.status == "error":          # a retry succeeded (a card discarded meanwhile stays discarded)
+            d.status = "draft"
         d.title, d.description = data.get("title"), data.get("description")
         d.category_hint, d.condition = data.get("category_hint"), data.get("condition")
         d.attributes = data.get("attributes") or []
@@ -179,28 +190,56 @@ def update_draft(draft_id: int, **fields: Any) -> AdDraft:
     return d
 
 
+_CURRENCY = re.compile(r"€|\bEUR\b|\bEuros?\b|,-$|\.-$", re.I)
+
+
 def parse_price(text: str | None) -> float | None:
-    try:
-        return float(text.replace(",", ".")) if (text or "").strip() else None
-    except ValueError:
+    """The price field as people type it: "12", "12,50", "12.50", "1.200" (thousands), "1.200,50", "12 €", "80 EUR",
+    "1 200". Blank -> None (no price). Raises ValueError for anything else (then the old price stays)."""
+    s = re.sub(r"\s+", "", _CURRENCY.sub("", text or ""))
+    if not s:
         return None
+    if not re.fullmatch(r"\d+(?:[.'’]\d{3})*(?:[.,]\d{1,2})?", s):
+        raise ValueError(text)
+    return min_price.to_float(s)
 
 
 REFINING_BUSY = "Claude is still revising this draft – save or publish again when it is done"
+PUBLISHED_READONLY = "Already published – edit the ad under My ads; here it stays as it was sent"
+PRICE_UNREADABLE = "Price not recognized: “{price}” – the old price stays"
 
 
 def save_fields(draft_id: int, title: str, description: str, price: str | None,
                 quantity: str | None = None) -> AdDraft:
     """The user's edits of title, description, price and piece count (form values; quantity None = the form did not
     send it, blank = one item). Refused while Claude revises the draft: its result would overwrite the edit (the
-    revision started from the text before it)."""
+    revision started from the text before it), and once the ad is published (the text lives on willhaben then).
+    A price that cannot be read keeps the old one; d.error says so."""
     with session() as db:
         d = db.get(AdDraft, draft_id)
     if d is not None and d.refining:
         return update_draft(draft_id, error=t(REFINING_BUSY))
-    extra = {} if quantity is None else {"quantity": pick_quantity(parse_quantity(quantity), None)}
-    return update_draft(draft_id, title=title.strip(), description=description.replace("\r\n", "\n").strip(),
-                        price_suggestion=parse_price(price), **extra)
+    if d is not None and d.status == "published":
+        return update_draft(draft_id, error=t(PUBLISHED_READONLY))
+    fields: dict[str, Any] = {"title": title.strip(), "description": description.replace("\r\n", "\n").strip()}
+    if quantity is not None:
+        fields["quantity"] = pick_quantity(parse_quantity(quantity), None)
+    try:
+        fields["price_suggestion"] = parse_price(price)
+    except ValueError:
+        fields["error"] = t(PRICE_UNREADABLE, price=(price or "").strip())
+    return update_draft(draft_id, **fields)
+
+
+def save_problem(d: AdDraft, price: str | None) -> str | None:
+    """After save_fields: why the edit was not (fully) taken over, or None when everything was saved."""
+    if d.refining or d.status == "published":
+        return d.error
+    try:
+        parse_price(price)
+    except ValueError:
+        return d.error
+    return None
 
 
 def photos_zip(d: AdDraft) -> bytes:
@@ -472,6 +511,43 @@ def enqueue_refine(draft_id: int, instruction: str) -> bool:
     return True
 
 
+def refine_refusal(draft_id: int) -> str:
+    """Why enqueue_refine queued nothing, for the page."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d.status == "published":
+        return t(PUBLISHED_READONLY)
+    if d.refining or d.publishing:
+        return t("Not revised: Claude is already revising or publishing this draft")
+    return t("Nothing to revise: say what Claude should change")
+
+
+def enqueue_retry(draft_id: int) -> bool:
+    """"Try again" on a draft Claude could not write (status "error"): the same pipeline as a new ad, as a background
+    job (lane claude). Meanwhile the draft counts as refining (no edit or publish, the card shows the spinner) and
+    swaps itself in when done. False: not such a draft, or already on its way."""
+    from app.services import jobs
+
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d is None or d.status != "error" or d.refining or d.publishing:
+        return False
+    update_draft(draft_id, refining=True, error=None)
+
+    async def run(job) -> str:
+        try:
+            d = await retry_draft(draft_id)
+        finally:
+            update_draft(draft_id, refining=None)
+        if d.error:
+            raise RuntimeError(d.error)
+        return t("Written: {title}", title=(d.title or "")[:60])
+
+    jobs.submit("refine", t("Claude writes draft #{id} again", id=draft_id), run, lane="claude",
+                current=f"refining:{draft_id}")
+    return True
+
+
 def recover_publishing() -> None:
     """After a restart the queue is gone. The willhaben draft id is remembered, so publishing again continues it."""
     with session() as db:
@@ -484,12 +560,30 @@ def recover_publishing() -> None:
         db.commit()
 
 
+GONE = ("expired", "sold", "deleted", "replaced")     # MyAd statuses of an ad that is no longer online
+
+
+def live_on_willhaben(d: AdDraft) -> MyAd | None:
+    """The willhaben ad this draft became, as long as My ads has not seen it go offline (a fresh "unknown" counts as
+    online: the app itself just published it). None: never published, or no longer online."""
+    if not d.wh_ad_id:
+        return None
+    with session() as db:
+        row = db.get(MyAd, d.wh_ad_id)
+    return row if row is not None and row.status not in GONE else None
+
+
 def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: dict[str, Any] | None):
     """Everything that can be checked without willhaben: (chosen option, attrs, labels, shipping) or InsertError."""
     from app.willhaben import insert
 
     if d.status == "published":
         raise insert.InsertError("Schon veröffentlicht")
+    live = live_on_willhaben(d)
+    if live is not None:           # the status was reset by hand, but the ad is online: publishing again would
+        raise insert.InsertError(  # re-save and re-activate the live ad (or make a public duplicate)
+            f"Ist auf willhaben schon online als {live.ad_id} ({live.status}) – unter „Meine Anzeigen“ (/myads) "
+            f"ändern oder löschen statt noch einmal veröffentlichen")
     plan = d.wh_plan or {}
     opts = plan.get("options") or []
     if not (0 <= option < len(opts)):
@@ -587,7 +681,6 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)
-    from app.db import MyAd
     from app.services import my_ads
     parcel_estimate = clean_parcel(d.parcel)       # source "claude": the shipping card says "estimated"
     with session() as db:                        # show up under "my ads" right away, status unknown yet
