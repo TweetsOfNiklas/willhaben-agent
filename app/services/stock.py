@@ -87,7 +87,9 @@ def sold_to(conversation_id: str) -> Sale | None:
 
 # ------------------------------------------------------------------ guard for automatic answers
 # German on purpose: the answers to buyers are German. Number words from two on (one piece is always fine).
-_WORDS = {"zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10}
+# Counts without a piece word ("3x", "noch 3 verfügbar") are not parsed: the prompt rule covers them.
+_WORDS = {"zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
+          "elf": 11, "zwölf": 12}
 _PIECES = re.compile(rf"(?<![\w.,])(\d{{1,4}}|{'|'.join(_WORDS)})\s*(?:stück(?:e|en)?|stk|teile?|exemplare?)(?!\w)", re.I)
 
 

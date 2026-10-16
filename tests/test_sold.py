@@ -453,6 +453,7 @@ async def test_one_buyer_takes_two_of_three_then_another_the_last(ad_with_chats)
     assert sold.undo_sale(AD, last.id) and not sold.undo_sale(AD, last.id)
     row = sold.ad_row(AD)
     assert row.sale_status is None and row.sale_conversation_id is None and stock.remaining(AD) == 1
+    assert row.last_action == "Sale undone (1 piece)"
     assert _sale_of("c-2") is None and not shipping._sold_to_buyer(ships["c-2"])
     sold.reset(AD)                                                      # an ad with a quantity keeps its ledger
     assert stock.pieces_sold(AD) == 2
@@ -515,6 +516,7 @@ def test_auto_ad_skips_deleted_and_given_away_ads(ad_with_chats):
 def test_piece_count_guard():
     from app.services import stock
     assert stock.piece_counts("Ja, 2 Stück sind da, drei Stk. gehen nicht, 4 Teile, zwei Exemplare") == [2, 3, 4, 2]
+    assert stock.piece_counts("Elf Stück oder zwölf Stk.?") == [11, 12]
     for text in ("Preis pro Stück 20 €", "Artikelnummer 06019H5202", "1,5 Stück", "Abholung in 1100 Wien"):
         assert stock.piece_counts(text) == [], text
     ad = MyAd(ad_id="x", quantity=3)
@@ -583,12 +585,14 @@ def test_telegram_switch_acts_on_the_live_copy(ad_with_chats):
         assert db.get(MyAd, "1000000009").auto_reply is False
 
 
-def test_stock_web_flow(ad_with_chats):
+def test_stock_web_flow(ad_with_chats, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app.db import Sale, Shipment
     from app.main import app
     auto = {"X-Autosave": "1"}
+    s = FakeSession(_page(_links("setAdSold")))
+    monkeypatch.setattr(sold, "get_session", lambda: s)
     with session() as db:
         db.add(Shipment(conversation_id="c-buyer", ad_id=AD, agreed_price=40.5))
         db.commit()
@@ -601,6 +605,7 @@ def test_stock_web_flow(ad_with_chats):
             assert c.post(f"/myads/{AD}/quantity", data={"quantity": bad}, headers=auto).json()["ok"] is False, bad
         myads = c.get(f"/myads?ad={AD}").text
         assert "3/3 pcs" in myads and "0 sold · 3 available" in myads and 'name="quantity"' in myads
+        assert "$event.detail.ok && refreshInPlace([document.getElementById('myads-detail')" in myads  # saved: stock line anew
 
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
         assert "3 of 3 pieces left" in page and 'name="pieces"' in page and 'value="40.5"' in page
@@ -609,10 +614,19 @@ def test_stock_web_flow(ad_with_chats):
 
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "pieces": "2", "price": "x"})
         assert "Price must be a number" in r.text
+        r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "pieces": ""})   # blank is no 1
+        assert "Pieces: a number from 1 to 3" in r.text and _sale_of("c-buyer") is None
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "pieces": "2", "price": "40,50",
                                                 "auto_off": "1"})
         assert "2 pieces sold (1 left)" in r.text and "1 of 3 pieces left" in r.text and "2 pcs" in r.text
         assert "€ 40,50" in r.text and sold.ad_row(AD).auto_reply is True
+        assert r.text.count("1 piece left – the ad stays online") == 2 and "keeps answering" in r.text
+
+        # a stale page with step 1 (pieces left): nothing is queued, nothing reaches willhaben
+        r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
+        assert "Pieces left: record the sale instead" in r.text
+        wait_jobs()
+        assert s.calls == [] and sold.ad_row(AD).pending_action is None
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-2", "pieces": "5"})
         assert "from 1 to 1" in r.text
 
@@ -637,7 +651,18 @@ def test_stock_web_flow(ad_with_chats):
         assert "to this buyer" in c.get("/chats/c-2").text and sold.ad_row(AD).auto_reply is False
         r = c.post(f"/sold/{AD}/reset", data={"kind": "sold", "buyer": "c-2"})                 # sold out: undo a sale
         assert sold.ad_row(AD).sale_status == "sold" and "Not sold after all" not in r.text
+        page = c.get(f"/sold/{AD}?kind=reserved").text                                         # nothing to reserve
+        assert "All pieces are sold" in page and "Save as reserved" not in page
 
+        # clearing the count would make it a single item, whose next sale undoes the whole ledger
+        r = c.post(f"/myads/{AD}/quantity", data={"quantity": ""}, headers=auto).json()
+        assert r["ok"] is False and "3 pieces are sold already – undo the sales first" in r["error"]
+        assert sold.ad_row(AD).quantity == 3
+
+        last = _sale_of("c-2")
+        r = c.post(f"/sold/{AD}/sales/{last.id}/undo", data={"kind": "sold", "buyer": "c-2"})
+        assert "automatic answers and auto-renew stay off until you switch them on again" in r.text
+        assert "The ad stays online while pieces are left" in r.text and "keeps answering" not in r.text
         assert c.post(f"/myads/{AD}/quantity", data={"quantity": ""}, headers=auto).json()["ok"] is True
     assert sold.ad_row(AD).quantity is None
 
@@ -653,3 +678,77 @@ def test_locally_sold_ad_shows_sold_in_my_ads(ad_with_chats):
     header = page[page.index('id="myads-detail"'):page.index("Open on willhaben")]
     for part in (row, header):
         assert 'rounded-full bg-current"></span>sold</span>' in part and "</span>active</span>" not in part
+
+
+async def test_set_quantity_follows_the_ledger(ad_with_chats):
+    """The piece count and the sale state agree: blank only without sales, lowering to the pieces sold sells the ad
+    out here, raising it again opens it; willhaben's status and the automatic answers stay as they are."""
+    from app.services import my_ads, stock
+    conv = Conversation(id="c-3", ad_id=AD, role="seller")
+    _stocked()
+    assert sold.finish(AD, "sold", "c-buyer", pieces=1).last_action == "1 piece sold (2 left)"
+    with pytest.raises(ValueError, match="1 piece is sold already – undo the sale first"):
+        my_ads.set_quantity(AD, None)
+    sold.finish(AD, "sold", "c-2", pieces=1)
+    with pytest.raises(ValueError, match="2 pieces are sold already – undo the sales first"):
+        my_ads.set_quantity(AD, None)
+    with pytest.raises(ValueError, match="the number cannot be lower"):
+        my_ads.set_quantity(AD, 1)
+
+    my_ads.set_quantity(AD, 2)                                          # sold out by lowering
+    row, newest = sold.ad_row(AD), _sale_of("c-2")
+    assert (row.quantity, row.sale_status, row.sale_conversation_id, row.sale_at) == (2, "sold", "c-2", newest.created_at)
+    assert (row.auto_renew, row.auto_reply, row.status, row.last_action) == (False, True, "active", "Sold")
+    assert my_ads.is_sold(row) and chats._auto_ad(conv) is None and stock.remaining(AD) == 0
+
+    my_ads.set_quantity(AD, 4)                                          # restocked
+    row = sold.ad_row(AD)
+    assert (row.quantity, row.sale_status, row.sale_conversation_id, row.sale_at) == (4, None, None, None)
+    assert (row.status, row.last_action) == ("active", "2 sold · 2 available") and stock.remaining(AD) == 2
+    assert not my_ads.is_sold(row) and chats._auto_ad(conv) is not None
+
+    for sale in stock.sales_of(AD):
+        sold.undo_sale(AD, sale.id)
+    my_ads.set_quantity(AD, 1)                                          # one piece, nothing sold: one item
+    assert sold.ad_row(AD).quantity is None
+
+
+async def test_willhaben_is_not_marked_sold_while_pieces_are_left(ad_with_chats, monkeypatch):
+    s = FakeSession(_page(_links("setAdSold", "markAdReserved")))
+    monkeypatch.setattr(sold, "get_session", lambda: s)
+    _stocked()
+    sold.finish(AD, "sold", "c-buyer", pieces=1)
+    with pytest.raises(sales.NotOffered, match="Pieces left: record the sale instead"):
+        await sold.on_willhaben(AD, "sold")
+    assert sold.enqueue_willhaben(AD, "sold")                         # a job queued from a stale page
+    await finish_jobs()
+    assert s.calls == [] and "Pieces left" in sold.ad_row(AD).last_error
+    await sold.on_willhaben(AD, "reserved")                             # a reservation stays ad-wide
+    assert s.writes == [("PUT", f"/webapi/iad/bap/updatesalesinfo/{AD}/5", None)]
+
+
+async def test_reserved_needs_a_piece_left(ad_with_chats):
+    from app.services import stock
+    _stocked()
+    sold.finish(AD, "sold", "c-buyer", pieces=2)
+    row = sold.finish(AD, "reserved", "c-2", pieces=5)                  # pieces do not matter for a reservation
+    assert (row.sale_status, row.last_action, stock.pieces_sold(AD)) == ("reserved", "Reserved", 2)
+    sold.finish(AD, "sold", "c-2", pieces=1)
+    with pytest.raises(ValueError, match="No pieces left"):
+        sold.finish(AD, "reserved", "c-3")
+    assert sold.ad_row(AD).sale_status == "sold"
+
+
+def test_api_lists_the_stock(ad_with_chats):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    _stocked()
+    sold.finish(AD, "sold", "c-buyer", pieces=1)
+    with session() as db:
+        db.add(MyAd(ad_id="1000000002", heading="Lampe", status="active"))
+        db.commit()
+    with TestClient(app) as c:
+        rows = {r["ad_id"]: r for r in c.get("/api/myads").json()}
+    assert rows[AD]["stock"] == {"quantity": 3, "sold": 1, "remaining": 2} and rows[AD]["heading"] == "Fahrrad"
+    assert rows["1000000002"]["stock"] is None

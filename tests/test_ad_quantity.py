@@ -33,11 +33,14 @@ def test_claude_schemas_stay_strict_and_carry_the_new_keys():
     assert "quantity" in SORT_SCHEMA["properties"]["groups"]["items"]["required"]
 
 
-def test_prompts_name_the_owners_count_only_above_one():
+def test_prompts_name_the_owners_count():
     line = "Stückzahl: 4 (Preis pro Stück) – erwähne im Text, dass 4 Stück verfügbar sind"
     assert line in ad_prompt("Stühle", "", 3, quantity=4)
-    for q in (None, 0, 1):
+    for q in (None, 0):
         assert "Stückzahl" not in ad_prompt("Stuhl", "", 3, quantity=q)
+    one = ad_prompt("Stuhl", "", 3, quantity=1)                         # the owner's explicit "one item"
+    assert "Stückzahl: 1 – ein einzelnes Stück, auch wenn auf den Fotos mehrere zu sehen sind" in one
+    assert "Preis pro Stück" not in one
     refine = dict(notes="", rules="", n_images=1, current={}, specs=None, product_name=None, instruction="kürzer")
     assert line in ad_refine_prompt(**refine, quantity=4) and "Stückzahl" not in ad_refine_prompt(**refine)
     groups = [{"photos": [1, 2], "product": "Stuhl", "quantity": 4}, {"photos": [3], "product": "Tisch", "quantity": None}]
@@ -77,7 +80,7 @@ async def test_create_draft_owners_count_wins(client):  # noqa: F811
             in client.fake.calls[-1]["prompt"])
 
     d = await ad_creator.create_draft("Kinderräder", [], quantity=1)      # the owner says: just one
-    assert d.quantity is None and "Stückzahl" not in client.fake.calls[-1]["prompt"]
+    assert d.quantity is None and "Stückzahl: 1 – ein einzelnes Stück" in client.fake.calls[-1]["prompt"]
 
 
 async def test_create_draft_parcel_that_claude_could_not_estimate(client):  # noqa: F811

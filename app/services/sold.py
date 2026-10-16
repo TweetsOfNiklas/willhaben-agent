@@ -114,9 +114,18 @@ def others(ad_id: str, buyer: str | None) -> list[Other]:
 
 
 # ------------------------------------------------------------------ step 1: willhaben (writes, after confirm)
+def pieces_left(ad_id: str) -> bool:
+    """An ad with a quantity that still has pieces: willhaben is marked sold only with the last one."""
+    return (stock.remaining(ad_id) or 0) > 0
+
+
 async def on_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: str | None = None) -> str:
-    """Mark sold / reserved (or remove "reserved") on willhaben. Raises sales.ReasonRequired, NotOffered, ..."""
+    """Mark sold / reserved (or remove "reserved") on willhaben. Raises sales.ReasonRequired, NotOffered, ...
+    An ad with pieces left is never marked sold (a stale page, e.g. from before a sale was undone, can still post
+    the form): only its last recorded piece leads there."""
     ad_id = current_id(ad_id)       # the live copy: an old one is passive on willhaben
+    if kind_of(kind) == "sold" and not undo and pieces_left(ad_id):
+        raise sales.NotOffered(t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"))
     s = get_session()
     if kind_of(kind) == "sold":
         if undo:
@@ -293,7 +302,8 @@ def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, p
     while pieces are left: online, automatic answers and auto-renew unchanged. The last piece, a single item and
     "reserved" (ad-wide) set the sale status: automatic answers off (instructions kept), sold never auto-renewed.
     A single item has one state: an earlier sale of it is replaced. Raises ValueError (message for the page) when
-    more pieces are asked for than are left."""
+    more pieces are asked for than are left, and when an ad with a quantity is sold out (nothing left to sell or
+    reserve)."""
     kind = kind_of(kind)
     with session() as db:
         row = current_ad(db, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
@@ -301,16 +311,19 @@ def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, p
         if row.quantity is None:
             pieces = 1
             _undo(db, stock.active_sales(db, row.ad_id))
-        elif kind == "sold":
-            left = max(row.quantity - sum(s.pieces for s in stock.active_sales(db, row.ad_id)), 0)
-            if left == 0:
+        else:
+            available = max(row.quantity - sum(s.pieces for s in stock.active_sales(db, row.ad_id)), 0)
+            if available == 0:
                 raise ValueError(t("No pieces left – undo a sale first"))
-            if not 1 <= pieces <= left:
-                raise ValueError(t("Pieces: a number from 1 to {max}", max=left))
+            if kind == "sold":
+                left = available
+                if not 1 <= pieces <= left:
+                    raise ValueError(t("Pieces: a number from 1 to {max}", max=left))
         if kind == "sold":
             db.add(Sale(ad_id=row.ad_id, conversation_id=buyer or None, pieces=pieces, price=price))
         if left is not None and left > pieces:
-            row.last_action = t("{n} pieces sold ({left} left)", n=pieces, left=left - pieces)
+            row.last_action = (t("{n} piece sold ({left} left)", n=pieces, left=left - pieces) if pieces == 1 else
+                               t("{n} pieces sold ({left} left)", n=pieces, left=left - pieces))
         else:
             if auto_off:
                 row.auto_reply = False
@@ -347,13 +360,15 @@ def reset(ad_id: str) -> None:
 
 def undo_sale(ad_id: str, sale_id: int) -> bool:
     """"Not sold after all" for one sale of the ad: the row stays (undone_at), its pieces are available again. An ad
-    it had sold out is no longer sold here (willhaben is not touched: a "sold" there stays). False: not a sale of
-    this ad, or undone already."""
+    it had sold out is no longer sold here (willhaben is not touched: a "sold" there stays); automatic answers and
+    auto-renew stay as the sell-out left them. False: not a sale of this ad, or undone already."""
     with session() as db:
         sale = db.get(Sale, sale_id)
         if sale is None or sale.undone_at is not None or sale.ad_id not in stock.ad_chain(ad_id):
             return False
-        row, note = current_ad(db, sale.ad_id), t("Sale undone ({n} pieces)", n=sale.pieces)   # reads before writing
+        row = current_ad(db, sale.ad_id)       # reads and texts before writing
+        note = (t("Sale undone ({n} piece)", n=sale.pieces) if sale.pieces == 1 else
+                t("Sale undone ({n} pieces)", n=sale.pieces))
         _undo(db, [sale])
         if row is not None:
             if row.sale_status == "sold":

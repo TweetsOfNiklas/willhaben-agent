@@ -227,9 +227,12 @@ AD_SCHEMA: dict[str, Any] = {
 
 
 def _piece_line(quantity: int | None) -> str | None:
-    """The owner's piece count for the prompts (only more than one piece changes the ad)."""
-    if not quantity or quantity < 2:
+    """The owner's piece count for the prompts. An explicit 1 (the batch review, a cleared count) says so, so
+    that Claude does not offer the several pieces it may see on the photos."""
+    if not quantity or quantity < 1:
         return None
+    if quantity == 1:
+        return "Stückzahl: 1 – ein einzelnes Stück, auch wenn auf den Fotos mehrere zu sehen sind"
     return f"Stückzahl: {quantity} (Preis pro Stück) – erwähne im Text, dass {quantity} Stück verfügbar sind"
 
 

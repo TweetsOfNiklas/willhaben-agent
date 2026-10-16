@@ -118,6 +118,31 @@ def test_batch_sort_review_and_create(client, monkeypatch):  # noqa: F811
     assert client.get(f"/new-ad/{drafts[0].id}").status_code == 200
 
 
+def test_batch_cleared_count_means_one_item(client, monkeypatch):  # noqa: F811
+    """Claude counts 4 chairs, the owner clears the field: one item, through a re-sort and into the draft."""
+    fake = _sorting_backend(client, monkeypatch)
+    photos = [("photos", (f"IMG_{i}.jpg", b"jpeg-bytes-%d" % i, "image/jpeg")) for i in range(3)]
+    r = client.post("/new-ad/batch", files=photos, follow_redirects=False)
+    batch_id = int(r.headers["location"].split("/")[-1].split("?")[0])
+    assert [g["quantity"] for g in _wait(batch_id, "review").groups] == [None, 4]
+
+    form = {"img_0": "g1", "img_1": "g1", "quantity_g1": "", "img_2": "g2", "include_g2": "1", "quantity_g2": ""}
+    client.post(f"/new-ad/batch/{batch_id}", data={**form, "action": "save"})
+    assert [g["quantity"] for g in ad_batch.get(batch_id).groups] == [None, 1]   # no count stays none; a cleared one is 1
+    assert 'name="quantity_g2" value="1"' in client.get(f"/new-ad/batch/{batch_id}").text
+
+    client.post(f"/new-ad/batch/{batch_id}", data={**form, "action": "resort"})  # Claude says 4 again
+    assert [g["quantity"] for g in _wait(batch_id, "review").groups] == [None, 1]
+
+    fake.ad_extra = {"quantity": 4}                                    # the draft answer counts 4 as well
+    client.post(f"/new-ad/batch/{batch_id}", data={**form, "action": "create"})
+    _wait(batch_id, "review")
+    with dbmod.session() as db:
+        draft = db.exec(select(dbmod.AdDraft)).one()
+    assert draft.quantity is None
+    assert "Stückzahl: 1 – ein einzelnes Stück" in fake.calls[-1]["prompt"]
+
+
 def test_batch_without_photos_and_recover(client):  # noqa: F811
     r = client.post("/new-ad/batch", data={"notes": "x"}, follow_redirects=False)
     assert r.headers["location"].startswith("/new-ad?msg=")

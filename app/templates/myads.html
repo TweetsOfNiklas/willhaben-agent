@@ -149,8 +149,10 @@
         </div>
       </form>
     </div>
-    {# several identical pieces in one ad (app/services/stock.py): the sold workflow counts them down #}
-    <form method="post" action="/myads/{{ a.ad_id }}/quantity" x-data="autosave" class="grid grid-cols-1 items-start gap-3 border-b border-base-300 px-5 py-4 sm:grid-cols-[1fr_180px]">
+    {# several identical pieces in one ad (app/services/stock.py): the sold workflow counts them down; a saved count
+       changes the stock line here and in the list (and may sell the ad out or open it again) #}
+    <form method="post" action="/myads/{{ a.ad_id }}/quantity" x-data="autosave"
+          @autosaved="$event.detail.ok && refreshInPlace([document.getElementById('myads-detail'), document.getElementById('myads-rows')])" class="grid grid-cols-1 items-start gap-3 border-b border-base-300 px-5 py-4 sm:grid-cols-[1fr_180px]">
       <div>{{ ui.eyebrow(_("Pieces"), 'mb-1') }}
         <div class="text-base">{{ stock_text(a) or _("One item") }}</div>
         <div class="text-[13px] text-muted">{{ _("Several identical pieces in this ad: the price is per piece, the ad stays online until the last one is sold.") }}</div></div>

@@ -184,7 +184,8 @@ def apply_review(batch_id: int, order: list[tuple[int, str]], fields: dict[str, 
 
     order:  (image index, target) in page order; target is a group id, "new" (all such photos form one new group)
             or "" (not used). Photo order inside a group follows page order, so the first one is the cover.
-    fields: group id -> {product, comment, include, quantity}; quantity only when the form sent it (blank = one item)
+    fields: group id -> {product, comment, include, quantity}; quantity only when the form sent it. Blank = one item:
+            a count the owner clears is kept as 1, so Claude's count (re-sort, draft) does not come back
     """
     b = get(batch_id)
     groups = {g["id"]: dict(g, photos=list(g["photos"]) if locked(g) else []) for g in b.groups}
@@ -211,7 +212,8 @@ def apply_review(batch_id: int, order: list[tuple[int, str]], fields: dict[str, 
         g["comment"] = (f.get("comment") or "").replace("\r\n", "\n").strip()
         g["include"] = bool(f.get("include"))
         if "quantity" in f:
-            g["quantity"] = ad_creator.parse_quantity(f["quantity"])
+            q = ad_creator.parse_quantity(f["quantity"])
+            g["quantity"] = q if q is not None else (1 if g.get("quantity") else None)
     kept = [g for g in groups.values() if g["photos"] or locked(g)]
     return _update(batch_id, groups=kept)
 

@@ -90,7 +90,8 @@ def save_images(draft_id: int, files: list[tuple[str, bytes]]) -> list[str]:
 @timeline.scoped(batch_id="batch_id")
 async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int | None = None,
                        quantity: int | None = None) -> AdDraft:
-    """quantity: the owner's piece count (the batch review); it wins over what Claude reads from notes and photos."""
+    """quantity: the owner's piece count (the batch review); it wins over what Claude reads from notes and photos,
+    an explicit 1 too (one item: the draft gets no count, the prompt says it is a single piece)."""
     owner_quantity = parse_quantity(quantity)
     with session() as db:
         draft = AdDraft(input_text=notes, batch_id=batch_id, quantity=pick_quantity(owner_quantity, None))

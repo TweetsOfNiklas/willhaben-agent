@@ -570,19 +570,42 @@ MAX_QUANTITY = 999
 
 
 def set_quantity(ad_id: str, quantity: int | None) -> None:
-    """Pieces offered in the ad (None = one item). Raises ValueError (message for the page) outside 1..999 or below
-    the pieces already sold."""
+    """Pieces offered in the ad (None = one item) and the sale state that follows from them. Raises ValueError
+    (message for the page) outside 1..999, below the pieces already sold, and blank while sales count: a single
+    item has one state, its next sale or reset would undo every sale in the ledger. 1 without sales is one item,
+    as on a new draft. Lowered to the pieces sold, the ad is sold out here as with its last piece (automatic answers
+    stay as the owner set them); raised again after that, it is open again here. willhaben's status is not touched."""
     if quantity is not None and not 1 <= quantity <= MAX_QUANTITY:
         raise ValueError(t("Pieces: a number from 1 to {max}", max=MAX_QUANTITY))
-    sold = stock.pieces_sold(ad_id)
-    if quantity is not None and quantity < sold:
-        raise ValueError(t("{n} pieces are sold already – the number cannot be lower", n=sold))
     with session() as db:
         row = current_ad(db, ad_id)
-        if row:
-            row.quantity = quantity
-            db.add(row)
-            db.commit()
+        if row is None:
+            return
+        sales = stock.active_sales(db, row.ad_id)          # newest first
+        sold = sum(s.pieces for s in sales)
+        if quantity is None and sold:
+            raise ValueError(t("{n} piece is sold already – undo the sale first to clear the count", n=sold)
+                             if sold == 1 else
+                             t("{n} pieces are sold already – undo the sales first to clear the count", n=sold))
+        if quantity is not None and quantity < sold:
+            raise ValueError(t("{n} pieces are sold already – the number cannot be lower", n=sold))
+        if quantity == 1 and not sold:
+            quantity = None
+        sold_out = quantity is not None and quantity == sold and row.sale_status != "sold"
+        restocked = quantity is not None and quantity > sold and row.sale_status == "sold"
+        # texts before the first change: t() opens a session of its own
+        note = (t("Sold") if sold_out else
+                t("{sold} sold · {left} available", sold=sold, left=quantity - sold) if restocked else None)
+        row.quantity = quantity
+        if sold_out:
+            row.sale_status, row.sale_conversation_id, row.sale_at = "sold", sales[0].conversation_id, sales[0].created_at
+            row.auto_renew = False    # sold: auto-renew must never reactivate or republish it
+        elif restocked:
+            row.sale_status = row.sale_conversation_id = row.sale_at = None
+        if note:
+            row.last_action = note
+        db.add(row)
+        db.commit()
 
 
 _KEEP: Any = object()

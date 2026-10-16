@@ -1319,6 +1319,9 @@ async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"),
     page offers them; the next confirm queues it again with the reason."""
     if sold.kind_of(kind) == "sold" and undo:
         return back(_sold_url(ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#step1"))
+    if sold.kind_of(kind) == "sold" and sold.pieces_left(ad_id):     # a stale page: on_willhaben refuses it too
+        return back(_sold_url(ad_id, kind, buyer or None,
+                              t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"), "#step1"))
     queued = sold.enqueue_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
     msg = t("On its way to willhaben – it runs in the background") if queued else t("Nothing queued: these ads are already being processed")
     return back(_sold_url(ad_id, kind, buyer or None, msg, "#step1"))
@@ -1354,8 +1357,9 @@ async def sold_notices_send(request: Request, ad_id: str):
 
 @app.post("/sold/{ad_id}/finish")
 async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), auto_off: str | None = Form(None),
-                      pieces: str = Form("1"), price: str = Form("")):
-    """`pieces` and `price` come from an ad with a quantity (sold.html); a single item sends neither."""
+                      pieces: str = Form(""), price: str = Form("")):
+    """`pieces` and `price` come from an ad with a quantity (sold.html); a single item sends neither (finish counts
+    it as one piece). A blank `pieces` is refused like any number out of range, not taken as one."""
     try:
         amount = min_price_svc.parse_form(price)
     except ValueError:
@@ -1374,7 +1378,18 @@ async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""
 
 @app.post("/sold/{ad_id}/sales/{sale_id}/undo")
 async def sold_undo_sale(ad_id: str, sale_id: int, kind: str = Form("sold"), buyer: str = Form("")):
-    msg = t("Sale undone here (willhaben unchanged)") if sold.undo_sale(ad_id, sale_id) else t("Sale not found")
+    row = sold.ad_row(ad_id)      # sold out before: open again here, but what the sell-out switched off stays off
+    reopened = row is not None and row.sale_status == "sold"
+    if not sold.undo_sale(ad_id, sale_id):
+        msg = t("Sale not found")
+    elif reopened and not row.auto_reply and not row.auto_renew:
+        msg = t("Sale undone here (willhaben unchanged); automatic answers and auto-renew stay off until you switch them on again")
+    elif reopened and not row.auto_renew:
+        msg = t("Sale undone here (willhaben unchanged); auto-renew stays off until you switch it on again")
+    elif reopened and not row.auto_reply:
+        msg = t("Sale undone here (willhaben unchanged); automatic answers stay off until you switch them on again")
+    else:
+        msg = t("Sale undone here (willhaben unchanged)")
     return back(_sold_url(ad_id, kind, buyer or None, msg, "#stock"))
 
 
@@ -2930,8 +2945,10 @@ async def api_draft_send(draft_id: int, payload: dict[str, Any]):
 
 @app.get("/api/myads")
 async def api_myads():
+    """Every own ad; `stock`: {quantity, sold, remaining} of an ad with several pieces, None for a single item."""
     with session() as db:
-        return [a.model_dump(mode="json") for a in db.exec(select(MyAd))]
+        ads = list(db.exec(select(MyAd)))
+    return [{**a.model_dump(mode="json"), "stock": stock.numbers(a)} for a in ads]
 
 
 @app.post("/api/myads")

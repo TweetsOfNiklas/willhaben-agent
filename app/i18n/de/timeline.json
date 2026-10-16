@@ -183,5 +183,7 @@
  "Requests to the sites are recorded from now on.": "Zugriffe auf die Seiten werden ab jetzt aufgezeichnet.",
  "Requests to the sites are no longer recorded.": "Zugriffe auf die Seiten werden nicht mehr aufgezeichnet.",
  "{n} entries deleted, {b} stored answers emptied.": "{n} Einträge gelöscht, {b} gespeicherte Antworten geleert.",
- "The whole entry with its steps, texts and the sites' answers as one file. It can contain chats and names.": "Der ganze Eintrag mit Schritten, Texten und den Antworten der Seiten als eine Datei. Sie kann Chats und Namen enthalten."
+ "The whole entry with its steps, texts and the sites' answers as one file. It can contain chats and names.": "Der ganze Eintrag mit Schritten, Texten und den Antworten der Seiten als eine Datei. Sie kann Chats und Namen enthalten.",
+ "Pieces changed": "Stückzahl geändert",
+ "Sale undone": "Verkauf rückgängig gemacht"
 }

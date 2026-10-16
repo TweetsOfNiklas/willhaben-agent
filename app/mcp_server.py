@@ -150,7 +150,8 @@ async def send_reply(draft_id: int, text: str) -> dict:
 
 @mcp.tool(annotations=READ)
 async def list_my_ads() -> list:
-    """Your own monitored ads with status, expiry date and auto-reactivation."""
+    """Your own monitored ads with status, expiry date and auto-reactivation; `stock` holds quantity, sold and
+    remaining pieces of an ad with several pieces (None for a single item)."""
     return await _call("GET", "/api/myads")
 
 
