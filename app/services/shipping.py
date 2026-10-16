@@ -448,11 +448,15 @@ def auto_blockers(s: Shipment) -> list[str]:
 
 
 def _sold_to_buyer(s: Shipment) -> bool:
-    from app.services import sold
+    """A sale recorded for this chat (app/services/stock.py), or the ad marked sold to it before there was a ledger.
+    A reservation is not enough."""
+    from app.services import stock
+    if stock.sold_to(s.conversation_id) is not None:
+        return True
     with session() as db:
         conv = db.get(Conversation, s.conversation_id)
-    state = sold.state_for(conv) if conv else None
-    return bool(state and state.get("is_buyer"))
+        ad = current_ad(db, conv.ad_id) if conv and conv.ad_id else None
+    return bool(ad and (ad.sale_status or ad.status) == "sold" and ad.sale_conversation_id == s.conversation_id)
 
 
 def _bought_today(exclude_id: int) -> int:

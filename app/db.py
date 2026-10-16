@@ -161,7 +161,8 @@ class MyAd(SQLModel, table=True):
     last_error: str | None = None
     auto_reply: bool | None = None                 # answer buyers of this ad automatically
     auto_reply_instructions: str | None = None     # ad-specific facts/limits for those answers
-    min_price: float | None = None                 # floor for automatic answers: never agree below this (€)
+    min_price: float | None = None                 # floor for automatic answers: never agree below this (€, per piece)
+    quantity: int | None = None                    # pieces offered in this ad; None = one item
     replaced_by: str | None = None    # republished (auto-renew) under this new ad id; old chats still point here
     parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # confirmed size/weight for shipping
     hidden: bool | None = None        # hidden from the list by the user; the import keeps it hidden
@@ -171,6 +172,18 @@ class MyAd(SQLModel, table=True):
     pending_action: str | None = None              # activate | deactivate | delete | edit | photos | sold | reserved |
     #                                                unreserve: queued as a background job
     pending_payload: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # what the job needs / left behind
+
+
+class Sale(SQLModel, table=True):
+    """One sale of an own ad (the ledger, app/services/stock.py): an ad with a quantity sells piece by piece."""
+    id: int | None = Field(default=None, primary_key=True)
+    ad_id: str = Field(index=True)                 # the MyAd it was recorded on (a renewed ad: any copy of the chain)
+    conversation_id: str | None = Field(default=None, index=True)   # the buyer's chat; None = sold outside willhaben
+    pieces: int = 1
+    price: float | None = None                     # total price of this sale (optional)
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    undone_at: datetime | None = None              # "not sold after all": the row stays, counts no longer
 
 
 class Shipment(SQLModel, table=True):

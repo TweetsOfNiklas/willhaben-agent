@@ -25,6 +25,7 @@ from app.llm.prompts import (
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
+from app.services import my_ads, stock
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -401,13 +402,14 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
                                   func.max(Message.read_at)).where(Message.conversation_id == conv.id)).one()   # seen ticks too
             drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent)
                              .where(Draft.conversation_id == conv.id)).all()
-            ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
+            ad = current_ad(db, conv.ad_id) if conv.ad_id else None      # the sale status lives on the live copy
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
             buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
             out["messages"] = fp(list(msgs))
             out["composer"] = fp([list(d) for d in drafts], conv.drafting, conv.draft_error)
             out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
-                                ad and [ad.sale_status, ad.sale_conversation_id], ships, buys)
+                                ad and [ad.sale_status, ad.sale_conversation_id, ad.status, stock.numbers(ad),
+                                        [s.id for s in stock.sales_to(conv.id)]], ships, buys)
     return out
 
 
@@ -493,11 +495,14 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         availability = None
         system, schema = (PURCHASE_SYSTEM, PURCHASE_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
         examples: list[str] = []
+        stock_now = None
     else:
         rules = get_setting("reply_rules")
         with session() as db:
             ad = current_ad(db, conv.ad_id) if conv.ad_id else None
         floor = ad.min_price if ad and conv.role == "seller" else None
+        numbers = stock.numbers(ad) if conv.role == "seller" else None    # several pieces: Claude knows how many are left
+        stock_now = {"quantity": numbers["quantity"], "remaining": numbers["remaining"]} if numbers else None
         asking = (conv.ad_context or {}).get("price")
         if auto:
             rules = f"{rules}\n\n{auto_rules(get_setting('auto_reply_rules'), ad.auto_reply_instructions if ad else None, floor, asking)}"
@@ -510,7 +515,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         examples = _style_examples()
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
-                          rules=rules, examples=examples, hint=hint, availability=availability)
+                          rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now)
     log.info("draft for %s: hint=%r, ad price=%s", conversation_id, hint, (ad_ctx or {}).get("price"))
     backend = get_backend("purchase" if buy is not None else "chat")   # chats of a purchase order: Settings → "Purchases"
     async with telegram.typing():                 # "typing…" in Telegram while Claude writes
@@ -702,8 +707,8 @@ def _auto_ad(conv: Conversation) -> MyAd | None:
         return None
     with session() as db:
         ad = current_ad(db, conv.ad_id)
-    if ad and "sold" in (ad.sale_status, ad.status):
-        return None   # sold: no automatic answers to further buyers (the sold workflow offers a polite "sold" draft)
+    if ad and (my_ads.is_sold(ad) or ad.status == "deleted"):
+        return None   # sold out / given away / gone: no automatic answers (the sold workflow offers a polite draft)
     return ad if ad and ad.auto_reply else None
 
 
@@ -734,6 +739,7 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
         why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text,
                                   asking=min_price.asking_value((conv.ad_context or {}).get("price") if conv else None),
                                   intent=d.intent)
+        why += stock.blockers(ad, d.text)   # never more pieces than are left (app/services/stock.py)
         why += topic.blockers(d.text)     # staying on topic: no instruction words or AI talk, no essays
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":

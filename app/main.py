@@ -38,6 +38,7 @@ from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hou
 from app.services import health, human_pace, jobs
 from app.services import min_price as min_price_svc
 from app.services import scam
+from app.services import stock
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app.services.search_agents import refile_screened, run_agent
@@ -967,6 +968,7 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 _MYADS_FILTERS = ("show_active", "show_inactive", "show_sold", "show_hidden")
+templates.env.globals.update(stock_of=stock.numbers, stock_text=stock.stock_text)   # ads with a quantity (myads.html)
 
 
 def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = None) -> RedirectResponse:
@@ -1070,6 +1072,20 @@ async def myads_auto_reply(request: Request, ad_id: str, on: str | None = Form(N
         task.add_done_callback(_background.discard)
     msg = error or (t('Automatic replies on') if on else t('Automatic replies off'))
     return _myads_back(request, msg, f"#ad-{ad_id}")
+
+
+@app.post("/myads/{ad_id}/quantity")
+async def myads_quantity(request: Request, ad_id: str, quantity: str = Form("")):
+    """Pieces offered in the ad (empty = one item); saved as you type (X-Autosave)."""
+    raw = quantity.strip()
+    try:
+        my_ads.set_quantity(ad_id, int(raw) if raw.isdigit() else (None if not raw else 0))
+        error = None
+    except ValueError as e:
+        error = str(e)
+    if request.headers.get("x-autosave"):
+        return JSONResponse({"ok": error is None, "error": error})
+    return _myads_back(request, error or t("Changes saved"), f"#ad-{ad_id}")
 
 
 @app.get("/myads/{ad_id}/edit", response_class=HTMLResponse)
@@ -1282,11 +1298,16 @@ async def sold_page(request: Request, ad_id: str, kind: str = "sold", buyer: str
 def _sold_render(request: Request, ad_id: str, kind: str, buyer: str | None, msg: str | None,
                  reasons: list | None = None) -> HTMLResponse:
     kind = sold.kind_of(kind)
+    ad_id = sold.current_id(ad_id)    # a chat of a renewed ad links the old id: the page works on the live copy
     convs = sold.seller_conversations(ad_id)
     buyer_conv = next((c for c in convs if c.id == buyer), None)
-    return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=sold.ad_row(ad_id), title=sold.title_of(ad_id),
+    ad = sold.ad_row(ad_id)
+    numbers = stock.numbers(ad)       # an ad with a quantity: the stock block, the sale's pieces and price
+    return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=ad, title=sold.title_of(ad_id),
                   convs=convs, buyer=buyer_conv, others=sold.others(ad_id, buyer_conv.id if buyer_conv else None),
-                  reasons=reasons or sold.pending_reasons(ad_id), msg=msg)   # reasons a background step left behind
+                  reasons=reasons or sold.pending_reasons(ad_id), msg=msg,   # reasons a background step left behind
+                  stock=numbers, sales=stock.sales_of(ad_id) if numbers else [], names={c.id: c.partner_name for c in convs},
+                  agreed_price=sold.agreed_price(buyer_conv.id if buyer_conv else None) if numbers else None)
 
 
 @app.post("/sold/{ad_id}/willhaben", response_class=HTMLResponse)
@@ -1330,10 +1351,29 @@ async def sold_notices_send(request: Request, ad_id: str):
 
 
 @app.post("/sold/{ad_id}/finish")
-async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), auto_off: str | None = Form(None)):
-    sold.finish(ad_id, kind, buyer or None, auto_off=bool(auto_off))
-    msg = t("Saved: {status}", status=t("sold") if sold.kind_of(kind) == "sold" else t("reserved"))
+async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), auto_off: str | None = Form(None),
+                      pieces: str = Form("1"), price: str = Form("")):
+    """`pieces` and `price` come from an ad with a quantity (sold.html); a single item sends neither."""
+    try:
+        amount = min_price_svc.parse_form(price)
+    except ValueError:
+        return back(_sold_url(ad_id, kind, buyer or None, t("Price must be a number, e.g. 25 or 25,50"), "#step3"))
+    try:
+        row = sold.finish(ad_id, kind, buyer or None, auto_off=bool(auto_off),
+                          pieces=int(pieces) if pieces.strip().isdigit() else 0, price=amount)
+    except ValueError as e:
+        return back(_sold_url(ad_id, kind, buyer or None, str(e), "#step3"))
+    if sold.kind_of(kind) == "sold" and row.sale_status != "sold":     # pieces left: the ad stays online
+        msg = row.last_action or ""
+    else:
+        msg = t("Saved: {status}", status=t("sold") if sold.kind_of(kind) == "sold" else t("reserved"))
     return back(_sold_url(ad_id, kind, buyer or None, msg, "#step3"))
+
+
+@app.post("/sold/{ad_id}/sales/{sale_id}/undo")
+async def sold_undo_sale(ad_id: str, sale_id: int, kind: str = Form("sold"), buyer: str = Form("")):
+    msg = t("Sale undone here (willhaben unchanged)") if sold.undo_sale(ad_id, sale_id) else t("Sale not found")
+    return back(_sold_url(ad_id, kind, buyer or None, msg, "#stock"))
 
 
 @app.post("/sold/{ad_id}/reset")

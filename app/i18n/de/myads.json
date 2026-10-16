@@ -7,5 +7,11 @@
  "republished (was {id})": "neu veröffentlicht (vorher {id})",
  "willhaben offers no reactivation for this ad (status: {status})": "willhaben bietet für diese Anzeige keine Reaktivierung an (Status: {status})",
  "willhaben returned no ad id for the republished ad": "willhaben hat für die neu veröffentlichte Anzeige keine ID geliefert",
- "renewed": "erneuert"
+ "renewed": "erneuert",
+ "{sold} sold · {left} available": "{sold} verkauft · {left} verfügbar",
+ "{n} pieces are sold already – the number cannot be lower": "{n} Stück sind schon verkauft – weniger geht nicht",
+ "{left}/{total} pcs": "{left}/{total} Stück",
+ "Several identical pieces in this ad: the price is per piece, the ad stays online until the last one is sold.": "Mehrere gleiche Stück in dieser Anzeige: Der Preis gilt pro Stück, die Anzeige bleibt online, bis das letzte verkauft ist.",
+ "Number of pieces": "Stückzahl",
+ "one item": "ein Artikel"
 }

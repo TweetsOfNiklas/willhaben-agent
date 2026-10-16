@@ -7,9 +7,9 @@ from typing import Any
 
 from sqlmodel import col, select
 
-from app.db import MyAd, get_setting, session, utcnow
+from app.db import MyAd, current_ad, get_setting, session, utcnow
 from app.i18n import t
-from app.services import jobs
+from app.services import jobs, stock
 from app.services.notify import notify
 from app.willhaben.account import ACTION_DELETE, AccountClient, AdvertList, EndpointUnknown, has_ended
 from app.willhaben.parse import extract_ad_id
@@ -33,7 +33,8 @@ def is_expired(ad: MyAd, cutoff_days: int | None = None) -> bool:
 
 
 def is_sold(ad: MyAd) -> bool:
-    """Sold on willhaben, given away ("Verschenkt") or marked sold in the app."""
+    """Sold on willhaben, given away ("Verschenkt") or marked sold in the app. An ad with a quantity is marked sold
+    only with its last piece (sold.finish), so this stays false while stock is left."""
     return ad.status in ("sold", "Verschenkt") or ad.sale_status == "sold"
 
 
@@ -562,6 +563,25 @@ def set_auto_renew(ad_id: str, on: bool) -> None:
             db.commit()
 
 
+MAX_QUANTITY = 999
+
+
+def set_quantity(ad_id: str, quantity: int | None) -> None:
+    """Pieces offered in the ad (None = one item). Raises ValueError (message for the page) outside 1..999 or below
+    the pieces already sold."""
+    if quantity is not None and not 1 <= quantity <= MAX_QUANTITY:
+        raise ValueError(t("Pieces: a number from 1 to {max}", max=MAX_QUANTITY))
+    sold = stock.pieces_sold(ad_id)
+    if quantity is not None and quantity < sold:
+        raise ValueError(t("{n} pieces are sold already – the number cannot be lower", n=sold))
+    with session() as db:
+        row = current_ad(db, ad_id)
+        if row:
+            row.quantity = quantity
+            db.add(row)
+            db.commit()
+
+
 _KEEP: Any = object()
 
 
@@ -703,7 +723,8 @@ def _move_to_new_id(old_id: str, new_id: str) -> MyAd:
     """A republished ad has a new willhaben id: copy the per-ad settings over. The old row stays (marked
     replaced, auto-renew off) because buyer chats keep pointing at the old id and still need its auto-reply
     settings."""
-    keep = ("heading", "image_url", "auto_renew", "auto_reply", "auto_reply_instructions", "published_at")
+    keep = ("heading", "image_url", "auto_renew", "auto_reply", "auto_reply_instructions", "published_at", "min_price",
+            "parcel", "quantity")
     with session() as db:
         old = db.get(MyAd, old_id)
         new = db.get(MyAd, new_id) or MyAd(ad_id=new_id)

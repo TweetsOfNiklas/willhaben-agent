@@ -135,5 +135,9 @@
  "Reserved notice": "Info: reserviert",
  "Claude's draft": "Entwurf von Claude",
  "Check before sending": "Vor dem Senden prüfen",
- "Seen {time}": "Gesehen {time}"
+ "Seen {time}": "Gesehen {time}",
+ "Answer offers {n} pieces, only {left} available": "Antwort sagt {n} Stück zu, verfügbar sind nur {left}",
+ "{n} piece sold to this person": "{n} Stück an diese Person verkauft",
+ "{n} pieces sold to this person": "{n} Stück an diese Person verkauft",
+ "{left} of {total} still available": "noch {left} von {total} verfügbar"
 }

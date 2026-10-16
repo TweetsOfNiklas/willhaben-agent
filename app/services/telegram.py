@@ -38,7 +38,9 @@ import httpx
 from sqlmodel import col, delete, select
 
 from app.config import get_settings
-from app.db import Conversation, Draft, Hit, MyAd, TelegramAction, TelegramMessage, get_setting, session, set_setting, utcnow
+from app.db import (
+    Conversation, Draft, Hit, MyAd, TelegramAction, TelegramMessage, current_ad, get_setting, session, set_setting, utcnow,
+)
 from app.i18n import t
 
 log = logging.getLogger(__name__)
@@ -739,9 +741,10 @@ def _resolve_draft(ref: str) -> Draft | None:
 
 
 def _set_auto(ad_id: str, on: bool) -> str:
-    """Only the switch; the per-ad instructions stay untouched."""
+    """Only the switch; the per-ad instructions stay untouched. A push about a renewed ad's chat names the old id:
+    the switch is on the live copy (chats._auto_ad reads that one)."""
     with session() as db:
-        ad = db.get(MyAd, ad_id)
+        ad = current_ad(db, ad_id)
         if ad is None:
             return ad_id
         ad.auto_reply = on

@@ -20,6 +20,8 @@ So arbeitest du:
 - Preise nie als Lücke: kein "[Betrag] €", kein "[Preis]". Entweder du nennst eine konkrete Zahl (aus Anzeige,
   Regeln, Preisrahmen oder dein eigenes Gegenangebot, dann auch in suggested_price) oder die Antwort kommt ganz
   ohne Zahl aus (beim Angebotspreis bleiben, nach dem Angebot des Partners fragen).
+- Steht bei der Anzeige eine Stückzahl, sag nie mehr Stück zu, als verfügbar sind; fragt jemand nach mehr, biete die
+  verfügbare Zahl an. Ohne Stückzahl gilt die Anzeige als ein Artikel.
 - So kurz wie möglich: ein bis zwei Sätze, nur die Sache selbst, wie eine echte Kleinanzeigen-Nachricht. Keine
   Begrüßung ("Hallo"), kein Einfühlen oder Einleiten ("ich verstehe, dass …", "danke für deine Nachricht"), keine
   Höflichkeitsfloskeln, keine Wiederholung dessen, was der Partner geschrieben hat. Kein Gruß mit Namen am Ende,
@@ -110,11 +112,17 @@ def _fmt_time(dt: datetime | None) -> str:
 def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | None,
                  messages: list[tuple[str, datetime | None, str]], rules: str,
                  examples: list[str], hint: str | None, availability: str | None = None,
-                 now: datetime | None = None) -> str:
-    """messages: (direction, created_at, text) oldest first; direction in/out/unknown."""
+                 now: datetime | None = None, stock: dict[str, int] | None = None) -> str:
+    """messages: (direction, created_at, text) oldest first; direction in/out/unknown.
+    stock: {"quantity", "remaining"} of my own ad with several pieces (app/services/stock.py), else None."""
     role_txt = {"seller": "Ich verkaufe den Artikel.", "buyer": "Ich interessiere mich für den Artikel (Käufer)."}.get(
         role or "", "Rolle unbekannt (aus dem Verlauf ableiten).")
     lines = [f"Jetzt: {_fmt_time(now or datetime.now(timezone.utc))} (Ortszeit Wien)", f"Meine Rolle: {role_txt}"]
+    pieces: list[str] = []
+    if stock:
+        left = stock.get("remaining") or 0
+        pieces = [f"- Stückzahl: noch {left} von {stock.get('quantity')} Stück verfügbar (Preis gilt pro Stück)"
+                  if left > 0 else "- Stückzahl: ausverkauft"]
     if ad:
         desc = (ad.get("description") or "")[:2500]
         lines += [
@@ -122,11 +130,14 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
             "Anzeige:",
             f"- Titel: {ad.get('title')}",
             f"- Preis: {ad.get('price') or 'unbekannt (nicht abrufbar): keinen Betrag und keinen Rabatt erfinden'}",
+            *pieces,
             f"- Ort: {ad.get('location')}",
             f"- Kategorie: {ad.get('category')}",
             f"- Status: {ad.get('status')}",
             f"- Beschreibung: {desc}",
         ]
+    elif pieces:
+        lines += ["", "Anzeige:", *pieces]
     lines += ["", f"Gesprächspartner: {partner or 'unbekannt'}", "", "Verlauf (älteste zuerst):"]
     who = {"in": "Partner", "out": "Ich", "unknown": "willhaben-Hinweis/unklar"}
     for direction, ts, text in messages[-30:]:

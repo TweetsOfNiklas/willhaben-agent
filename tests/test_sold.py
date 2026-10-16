@@ -391,3 +391,265 @@ async def test_running_auto_answer_stops_when_auto_off(ad_with_chats, monkeypatc
         sold.finish(AD, "reserved", "c-buyer")   # step 3 with "auto answers off"
         return True
     assert await chats.auto_reply("c-2", before_send=typing) is None and not account.sent
+
+
+# ------------------------------------------------------------------ stock: several pieces in one ad
+def _stocked(quantity=3, **kw):
+    with session() as db:
+        row = db.get(MyAd, AD)
+        row.quantity, row.auto_renew = quantity, True
+        for k, v in kw.items():
+            setattr(row, k, v)
+        db.add(row)
+        db.commit()
+
+
+def _sale_of(cid):
+    from app.services import stock
+    return stock.sold_to(cid)
+
+
+async def test_one_buyer_takes_two_of_three_then_another_the_last(ad_with_chats):
+    from app.services import my_ads, shipping, stock
+    from app.db import Shipment
+    _stocked()
+    row = sold.finish(AD, "sold", "c-buyer", pieces=2, price=40.0)
+    # pieces left: nothing ad-wide changes, the ad stays online and keeps answering
+    assert (row.sale_status, row.auto_reply, row.auto_renew) == (None, True, True)
+    assert row.last_action == "2 pieces sold (1 left)" and not my_ads.is_sold(row)
+    assert stock.remaining(AD) == 1 and stock.pieces_sold(AD) == 2
+    assert chats._auto_ad(Conversation(id="c-2", ad_id=AD, role="seller")) is not None
+    assert sold.state_for(Conversation(id="c-buyer", ad_id=AD)) == {
+        "kind": None, "buyer": None, "is_buyer": True, "pieces": 2, "quantity": 3, "remaining": 1}
+    assert sold.state_for(Conversation(id="c-2", ad_id=AD))["is_buyer"] is False
+    assert [o.conv.id for o in sold.others(AD, None)] == ["c-2", "c-3"]     # a piece buyer gets no "sold" notice
+
+    for bad in (2, 0):
+        with pytest.raises(ValueError, match="from 1 to 1"):
+            sold.finish(AD, "sold", "c-2", pieces=bad)
+
+    row = sold.finish(AD, "sold", "c-2", pieces=1, auto_off=True)      # the last piece: today's sold flow
+    assert (row.sale_status, row.sale_conversation_id, row.auto_reply, row.auto_renew) == ("sold", "c-2", False, False)
+    assert my_ads.is_sold(row) and stock.remaining(AD) == 0
+    with session() as db:                       # switched on again by hand: a sold-out ad still gets none
+        row.auto_reply = True
+        db.add(row)
+        db.commit()
+    assert chats._auto_ad(Conversation(id="c-3", ad_id=AD, role="seller")) is None
+    with pytest.raises(ValueError, match="No pieces left"):
+        sold.finish(AD, "sold", "c-3")
+
+    # label buying "only when sold to this buyer": every buyer of a piece, nobody else
+    with session() as db:
+        for cid in ("c-buyer", "c-2", "c-3"):
+            db.add(Shipment(conversation_id=cid, ad_id=AD))
+        db.commit()
+        ships = {s.conversation_id: s for s in db.exec(select(Shipment))}
+    assert [shipping._sold_to_buyer(ships[c]) for c in ("c-buyer", "c-2", "c-3")] == [True, True, False]
+
+    # undo the last sale: pieces back, sold status gone here (willhaben untouched)
+    last = _sale_of("c-2")
+    assert not sold.undo_sale("1000000002", last.id)                   # not a sale of that ad
+    assert sold.undo_sale(AD, last.id) and not sold.undo_sale(AD, last.id)
+    row = sold.ad_row(AD)
+    assert row.sale_status is None and row.sale_conversation_id is None and stock.remaining(AD) == 1
+    assert _sale_of("c-2") is None and not shipping._sold_to_buyer(ships["c-2"])
+    sold.reset(AD)                                                      # an ad with a quantity keeps its ledger
+    assert stock.pieces_sold(AD) == 2
+
+
+async def test_single_item_keeps_one_sale_and_a_reservation_is_no_sale(ad_with_chats):
+    from app.services import shipping, stock
+    from app.db import Shipment
+    sold.finish(AD, "sold", "c-buyer", pieces=5)
+    assert stock.sold_to("c-buyer").pieces == 1                         # one item: one piece, whatever is posted
+    sold.finish(AD, "sold", "c-2")                                      # sold to someone else after all
+    assert _sale_of("c-buyer") is None and _sale_of("c-2") is not None
+    assert sold.state_for(Conversation(id="c-2", ad_id=AD))["pieces"] == 1
+    sold.finish(AD, "reserved", "c-3")
+    assert stock.sales_of(AD) == [] and sold.ad_row(AD).sale_status == "reserved"
+    with session() as db:
+        db.add(Shipment(conversation_id="c-3", ad_id=AD))
+        db.commit()
+        s = db.exec(select(Shipment)).one()
+    assert not shipping._sold_to_buyer(s)                               # reserved for this buyer: not sold to them
+    sold.finish(AD, "sold", "c-3")
+    assert shipping._sold_to_buyer(s)
+    sold.reset(AD)
+    assert stock.sales_of(AD) == [] and sold.ad_row(AD).sale_status is None and not shipping._sold_to_buyer(s)
+
+
+async def test_renewal_keeps_stock_settings_and_sums_sales_over_the_chain(ad_with_chats):
+    from app.services import my_ads, stock
+    parcel = {"length_cm": 30, "width_cm": 20, "height_cm": 10, "weight_kg": 1.0, "source": "user"}
+    _stocked(min_price=15.0, parcel=parcel)
+    sold.finish(AD, "sold", "c-buyer", pieces=1)
+    new = my_ads._move_to_new_id(AD, "1000000009")
+    assert (new.quantity, new.min_price, new.parcel) == (3, 15.0, parcel)
+    assert set(stock.ad_chain(AD)) == set(stock.ad_chain("1000000009")) == {AD, "1000000009"}
+    assert stock.remaining("1000000009") == 2 and sold.current_id(AD) == "1000000009"
+
+    # the chats keep the old id: the sale from one of them lands on the live copy and counts for the chain
+    assert {c.id for c in sold.seller_conversations("1000000009")} == {"c-buyer", "c-2", "c-3"}
+    sold.finish(AD, "sold", "c-2", pieces=1)
+    assert _sale_of("c-2").ad_id == "1000000009" and stock.remaining(AD) == 1
+    assert sold.state_for(Conversation(id="c-2", ad_id=AD))["remaining"] == 1
+    sold.finish(AD, "sold", "c-3", pieces=1)
+    with session() as db:
+        old, live = db.get(MyAd, AD), db.get(MyAd, "1000000009")
+    assert live.sale_status == "sold" and live.sale_conversation_id == "c-3" and old.sale_status is None
+    assert chats._auto_ad(Conversation(id="c-3", ad_id=AD, role="seller")) is None
+
+
+def test_auto_ad_skips_deleted_and_given_away_ads(ad_with_chats):
+    conv = Conversation(id="c-2", ad_id=AD, role="seller")
+    for status in ("deleted", "Verschenkt", "sold"):
+        with session() as db:
+            row = db.get(MyAd, AD)
+            row.status = status
+            db.add(row)
+            db.commit()
+        assert chats._auto_ad(conv) is None, status
+
+
+def test_piece_count_guard():
+    from app.services import stock
+    assert stock.piece_counts("Ja, 2 Stück sind da, drei Stk. gehen nicht, 4 Teile, zwei Exemplare") == [2, 3, 4, 2]
+    for text in ("Preis pro Stück 20 €", "Artikelnummer 06019H5202", "1,5 Stück", "Abholung in 1100 Wien"):
+        assert stock.piece_counts(text) == [], text
+    ad = MyAd(ad_id="x", quantity=3)
+    assert stock.blockers(ad, "Klar, 4 Stück kannst du haben.") and stock.blockers(ad, "Klar, alle 3 Stück.") == []
+    assert stock.blockers(MyAd(ad_id="y"), "3 Stück") == []                       # one item: no count to check
+
+
+async def test_auto_answer_promising_more_pieces_is_held_back(ad_with_chats):
+    _stocked()
+    sold.finish(AD, "sold", "c-buyer", pieces=2)
+    d = Draft(conversation_id="c-2", text="Ja, zwei Stück kannst du haben.", auto_reason="✓ einfach", intent="availability")
+    why = chats._auto_blockers("c-2", d, chats.messages_of("c-2"))
+    assert why == ["Answer offers 2 pieces, only 1 available"]
+    d.text = "Ja, ein Stück ist noch da."
+    assert chats._auto_blockers("c-2", d, chats.messages_of("c-2")) == []
+
+
+async def test_reply_prompt_knows_the_stock(ad_with_chats, monkeypatch):
+    from app.llm.base import LLMResult
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, REPLY_SYSTEM, reply_prompt
+    args = dict(role="seller", ad={"title": "Rad", "price": "20 €"}, partner="Max", messages=[], rules="",
+                examples=[], hint=None, now=utcnow())
+    assert reply_prompt(**args) == reply_prompt(**args, stock=None)
+    assert "- Stückzahl: noch 1 von 3 Stück verfügbar (Preis gilt pro Stück)" in reply_prompt(**args, stock={"quantity": 3, "remaining": 1})
+    assert "- Stückzahl: ausverkauft" in reply_prompt(**args, stock={"quantity": 3, "remaining": 0})
+    assert "sag nie mehr Stück zu" in REPLY_SYSTEM and "sag nie mehr Stück zu" in AUTO_REPLY_SYSTEM
+
+    calls = []
+
+    class Backend:
+        model = "fake"
+
+        async def complete(self, *, system, prompt, schema, images=None):
+            calls.append(prompt)
+            return LLMResult(data={"reply": "Ja.", "intent": "availability", "needs_info": [], "suggested_price": None,
+                                   "note": ""}, model="fake")
+
+    async def no_ctx(cid):
+        with session() as db:
+            return db.get(Conversation, cid)
+    monkeypatch.setattr(chats, "get_backend", lambda *a: Backend())
+    monkeypatch.setattr(chats, "ensure_ad_context", no_ctx)
+    await chats.draft_reply("c-2")
+    assert "Stückzahl" not in calls[-1]                                 # one item: the prompt as before
+    _stocked()
+    sold.finish(AD, "sold", "c-buyer", pieces=1)
+    await chats.draft_reply("c-2")
+    assert "- Stückzahl: noch 2 von 3 Stück verfügbar" in calls[-1]
+
+
+def test_chat_context_refreshes_on_a_sale(ad_with_chats):
+    _stocked()
+    before = chats.live_state("c-2")["context"]
+    sold.finish(AD, "sold", "c-buyer", pieces=1)
+    after = chats.live_state("c-2")["context"]
+    assert before != after
+    assert sold.undo_sale(AD, _sale_of("c-buyer").id)
+    assert chats.live_state("c-2")["context"] == before
+
+
+def test_telegram_switch_acts_on_the_live_copy(ad_with_chats):
+    from app.services import my_ads, telegram
+    my_ads._move_to_new_id(AD, "1000000009")
+    telegram._set_auto(AD, False)
+    with session() as db:
+        assert db.get(MyAd, "1000000009").auto_reply is False
+
+
+def test_stock_web_flow(ad_with_chats):
+    from fastapi.testclient import TestClient
+
+    from app.db import Sale, Shipment
+    from app.main import app
+    auto = {"X-Autosave": "1"}
+    with session() as db:
+        db.add(Shipment(conversation_id="c-buyer", ad_id=AD, agreed_price=40.5))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        assert 'name="pieces"' not in page and "Save as sold" in page and "Stock" not in page   # one item: as before
+
+        assert c.post(f"/myads/{AD}/quantity", data={"quantity": "3"}, headers=auto).json() == {"ok": True, "error": None}
+        for bad in ("0", "1000", "abc", "-2"):
+            assert c.post(f"/myads/{AD}/quantity", data={"quantity": bad}, headers=auto).json()["ok"] is False, bad
+        myads = c.get(f"/myads?ad={AD}").text
+        assert "3/3 pcs" in myads and "0 sold · 3 available" in myads and 'name="quantity"' in myads
+
+        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        assert "3 of 3 pieces left" in page and 'name="pieces"' in page and 'value="40.5"' in page
+        assert "Record sale" in page and "Mark as sold on willhaben" not in page and 'name="conv"' not in page
+        assert page.count("the others are told only with the last piece") == 2
+
+        r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "pieces": "2", "price": "x"})
+        assert "Price must be a number" in r.text
+        r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "pieces": "2", "price": "40,50",
+                                                "auto_off": "1"})
+        assert "2 pieces sold (1 left)" in r.text and "1 of 3 pieces left" in r.text and "2 pcs" in r.text
+        assert "€ 40,50" in r.text and sold.ad_row(AD).auto_reply is True
+        r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-2", "pieces": "5"})
+        assert "from 1 to 1" in r.text
+
+        chat = c.get("/chats/c-buyer").text
+        assert "2 pieces sold to this person" in chat and "1 of 3 still available" in chat
+        assert "1 of 3 still available" in c.get("/chats/c-2").text and "sold to this person" not in c.get("/chats/c-2").text
+
+        r = c.post(f"/myads/{AD}/quantity", data={"quantity": "1"}, headers=auto).json()
+        assert r["ok"] is False and "2 pieces are sold already" in r["error"]
+        assert "2 sold · 1 available" in c.get(f"/myads?ad={AD}").text
+
+        with session() as db:
+            sale_id = db.exec(select(Sale)).one().id
+        r = c.post(f"/sold/{AD}/sales/{sale_id}/undo", data={"kind": "sold", "buyer": "c-buyer"})
+        assert "Sale undone here" in r.text and "3 of 3 pieces left" in r.text
+        assert "Sale not found" in c.post(f"/sold/{AD}/sales/{sale_id}/undo", data={"kind": "sold"}).text
+
+        # the last pieces: steps 1 and 2 as for a single item, the others minus the piece buyers
+        r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-2", "pieces": "3", "auto_off": "1"})
+        assert "Saved: sold" in r.text and "All pieces are sold" in r.text and 'name="pieces"' not in r.text
+        assert "Mark as sold on willhaben" in r.text and r.text.count('name="conv"') == 2      # c-buyer, c-3
+        assert "to this buyer" in c.get("/chats/c-2").text and sold.ad_row(AD).auto_reply is False
+        r = c.post(f"/sold/{AD}/reset", data={"kind": "sold", "buyer": "c-2"})                 # sold out: undo a sale
+        assert sold.ad_row(AD).sale_status == "sold" and "Not sold after all" not in r.text
+
+        assert c.post(f"/myads/{AD}/quantity", data={"quantity": ""}, headers=auto).json()["ok"] is True
+    assert sold.ad_row(AD).quantity is None
+
+
+def test_locally_sold_ad_shows_sold_in_my_ads(ad_with_chats):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    sold.finish(AD, "sold", "c-buyer")             # willhaben still says active
+    with TestClient(app) as c:
+        page = c.get(f"/myads?ad={AD}&show_sold=1").text
+    row = page[page.index(f'id="row-{AD}"'):page.index('id="myads-detail"')]
+    header = page[page.index('id="myads-detail"'):page.index("Open on willhaben")]
+    for part in (row, header):
+        assert 'rounded-full bg-current"></span>sold</span>' in part and "</span>active</span>" not in part
