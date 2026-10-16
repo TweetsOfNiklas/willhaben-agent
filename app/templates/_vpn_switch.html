@@ -6,7 +6,7 @@
 <section class="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <form method="post" action="/settings/vpn/site/{{ vs.id }}" class="m-0">
     <input type="hidden" name="next" value="/settings/{{ vs.id }}">
-    {{ ui.switch_row(_("Anonymous requests through the VPN"), _("Search agents, screening, price checks and the ad viewer use the shared WireGuard connection. Your login never does."), vs.on, 'name="enabled" value="1" onchange="this.form.submit()"') }}
+    {{ ui.switch_row(_("Anonymous requests through the VPN"), _("Search agents, screening, price checks and the ad viewer use the shared WireGuard connection. Your login never does."), vs.on, 'name="enabled" value="1" data-autosubmit') }}
   </form>
   <span class="text-[12.5px] {{ 'text-error' if vs.on and (not vpn.mode or (vs.paused and vs.paused.kind == 'none') or (vpn.error and not vs.server)) else 'text-warning' if vs.on and vs.paused else 'text-muted' }}">
     {%- if vs.on and not vpn.mode %}{{ _("No WireGuard config uploaded yet, so these requests pause.") }}

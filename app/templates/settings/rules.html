@@ -8,7 +8,7 @@
 </section>
 <form method="post" action="/settings/listings" class="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Always add the Geizhals spec sheet to new listings when the product is found") }}</span>
-    <input type="checkbox" class="toggle toggle-primary" name="geizhals_auto_specs" onchange="this.form.submit()" {% if geizhals_auto_specs %}checked{% endif %}></label>
+    <input type="checkbox" class="toggle toggle-primary" name="geizhals_auto_specs" data-autosubmit {% if geizhals_auto_specs %}checked{% endif %}></label>
   <small class="text-[12.5px] text-muted">{{ _("Otherwise you tick it per draft. The sheet is the manufacturer data from Geizhals, appended below the description.") }}</small>
   <noscript><button class="btn">{{ _("Save") }}</button></noscript>
 </form>

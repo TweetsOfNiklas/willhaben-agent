@@ -15,7 +15,7 @@
 {% macro site_row(s, title, desc='', first=false) -%}
 <div class="flex flex-col gap-1.5 py-3 {{ '' if first else 'border-t border-base-300' }}">
   <form method="post" action="/settings/vpn/site/{{ s.id }}" class="m-0">
-    {{ ui.switch_row(title, desc, s.on, 'name="enabled" value="1" onchange="this.form.submit()"') }}
+    {{ ui.switch_row(title, desc, s.on, 'name="enabled" value="1" data-autosubmit') }}
   </form>
   {% if s.on %}{{ site_state(s) }}{% endif %}
   {% if s.on and s.marks %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("{n} servers skipped for now", n=s.marks|length) }}</summary>

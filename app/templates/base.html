@@ -433,6 +433,26 @@
   }, {passive: true});
 })();
 </script>
+{# ---- a switch that saves at once (data-autosubmit on the input: its form posts, the page comes back with the new
+     state) keeps the page where it was instead of jumping to the top. ---- #}
+<script>
+(() => {
+  const KEY = 'keep-scroll';
+  addEventListener('change', e => {
+    const f = e.target.closest('[data-autosubmit]')?.form;
+    if (!f) return;
+    try { sessionStorage.setItem(KEY, JSON.stringify({path: location.pathname, y: scrollY, at: Date.now()})); } catch (_) {}
+    f.requestSubmit();
+  });
+  let keep = null;
+  try { keep = JSON.parse(sessionStorage.getItem(KEY) || 'null'); sessionStorage.removeItem(KEY); } catch (_) {}
+  if (!keep || keep.path !== location.pathname || Date.now() - keep.at > 15000) return;
+  const back = () => scrollTo({top: keep.y, behavior: 'instant'});
+  back();
+  addEventListener('DOMContentLoaded', back, {once: true});
+  addEventListener('load', back, {once: true});            // images and late parts may have moved the page
+})();
+</script>
 {% else %}
 <main class="min-w-0 px-2.5 pt-1.5">
   {% if msg %}{{ ui.msg(msg) }}{% endif %}
