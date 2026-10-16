@@ -502,6 +502,21 @@ async def test_a_paused_site_tries_the_standby_servers_again_while_its_search_wa
     assert (await tn.ensure()).name == "de-fra-wg-001"
 
 
+async def test_a_refused_site_fails_over_while_a_search_runs(fake, no_search, monkeypatch):
+    """A search may wait an hour for a site's budget: the others' failover does not wait for it."""
+    from app.services import vpn_check
+
+    monkeypatch.setattr(vpn_check, "running", lambda: True)
+    _collection("at-vie-wg-001", "de-fra-wg-001")
+    _on("willhaben")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    vpn.mark("willhaben", "de-fra-wg-001", "ok")
+    tn = vpn.tunnel_for("willhaben")
+    r = await tn.ensure()
+    assert await tn.failed(r, "blocked", "HTTP 403") is True
+    assert vpn.server_for("willhaben") == "de-fra-wg-001" and vpn.paused("willhaben") is None and no_search == []
+
+
 def test_working_lists_each_server_that_answered_lately_with_its_sites():
     _collection("at-vie-wg-001", "de-fra-wg-001", "de-ber-wg-001")
     _on("willhaben", "kleinanzeigen")

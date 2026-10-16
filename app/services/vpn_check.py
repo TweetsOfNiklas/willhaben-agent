@@ -59,7 +59,10 @@ servers at once works (see app/platforms/vpn.py).
 Pacing: every test request goes through the site's own client and limiter, so it counts towards the site's hourly
 budget. The search sends a site at most a quarter of that budget an hour (NO_BUDGET_PER_HOUR without one), never past
 BUDGET_FULL of it with the agents' requests, and nothing during a pause after a block: it waits for the site instead of
-skipping it, and the page says for which site and why. eBay's warm-up (vpn_test_requests: at most 3 requests per
+skipping it, and the page says for which site and why. Only a site refused GIVE_UP_REFUSALS times in this search whose
+wait would be longer than GIVE_UP_WAIT_S leaves it (`out`; one that blocks the VPN's servers would otherwise hold the
+search, and the other sites' searches, for hours): it waits for the next search. The sites' own failover
+(vpn.failover()) goes on while a search runs. eBay's warm-up (vpn_test_requests: at most 3 requests per
 server), Kleinanzeigen's credential errors (NotTheExit) and a site's own errors (5xx, a JSON error) are answers, not
 refusals; bot-check pages through BOTCHECK_STREAK servers in a row are the site's change, not the servers' (`odd`).
 
@@ -98,6 +101,8 @@ SHARE = 4                 # the search sends a site at most 1/SHARE of its hourl
 NO_BUDGET_PER_HOUR = 60   # ... and a site without a budget (Geizhals) at most this many
 BUDGET_FULL = 0.9         # no test request that could take a site past this share of its hourly budget
 WAIT_STEP_S = 30          # a wait for a site's budget looks again this often (the agents' requests change it)
+GIVE_UP_WAIT_S = 300      # a site refused GIVE_UP_REFUSALS times in this search whose budget makes it wait longer
+GIVE_UP_REFUSALS = 5      # ... leaves it (refused nearly everywhere, e.g. Facebook): the others are not held up
 BOTCHECK_STREAK = 3       # bot-check pages through this many servers in a row: the site changed, not the servers
 AUTO_GAP_S = 300          # an automatic search starts at least this long after the end of the last one
 AUTO_PER_HOUR = 3         # and at most this many an hour
@@ -186,6 +191,7 @@ class Search:
     streak: dict[str, int] = field(default_factory=dict, repr=False, compare=False)
     targets: dict[str, Target] = field(default_factory=dict, repr=False, compare=False)
     closing: bool = field(default=False, repr=False, compare=False)    # past its loop: takes in no new refusal
+    out: list[str] = field(default_factory=list)          # sites that left it: their budget would hold it up
 
     def site(self, pid: str) -> Site:
         return next(s for s in self.sites if s.pid == pid)
@@ -697,7 +703,7 @@ class Board:
 
 def _refresh(sh: Search) -> list[Target]:
     """The sites now: one switched on meanwhile joins the search, one switched off leaves it."""
-    tgs = targets()
+    tgs = [tg for tg in targets() if tg.pid not in sh.out]
     sh.targets = {tg.pid: tg for tg in tgs}
     for tg in tgs:
         if all(s.pid != tg.pid for s in sh.sites):
@@ -1276,6 +1282,11 @@ def _verdict(tg: Target, tr: Trial, exc: BaseException | None) -> str:
 
 async def _improve(sh: Search) -> None:
     """Switch over when what the search found beats the connections in use."""
+    async with vpn._lock("failover"):       # never against a site's failover (vpn.failover()) under way
+        await _improve_now(sh)
+
+
+async def _improve_now(sh: Search) -> None:
     b = Board(sh, _refresh(sh))
     plan, now = b.best(), b.current()        # what is known against what is live (not what is known of it)
     if not plan.servers or plan.key <= now.key:
@@ -1308,6 +1319,7 @@ async def _finish(sh: Search, retry: bool = False) -> None:
     b = Board(sh, _refresh(sh))
     plan = b.current()
     uncovered = b.names(b.full & ~plan.covered)
+    uncovered += [p for p in sh.out if p not in uncovered and vpn.enabled(p) and vpn.server_for(p) is None]
     if uncovered and retry:
         vpn.update_conn(pending={"at": time.time() + OFFLINE_RETRY_S, "trigger": sh.trigger, "by": sh.by,
                                  "why": sh.why, "detail": sh.detail})
@@ -1438,6 +1450,14 @@ async def _pace(sh: Search, tg: Target, job: jobs.Job) -> bool:
         if not why:
             sh.wait = {}
             return True
+        refused = sum(a.verdict in REFUSED for srv in sh.servers if (a := srv.answers.get(tg.pid)) is not None)
+        if secs > GIVE_UP_WAIT_S and refused >= GIVE_UP_REFUSALS:     # its hour used up on refusals: go on without it
+            if tg.pid not in sh.out:
+                sh.out.append(tg.pid)
+                log.warning("VPN search: %s leaves this search, its budget would hold it up %.0f min (%s)", tg.pid,
+                            secs / 60, why)
+            sh.wait = {}
+            return False
         lim = tg.limiter
         sh.wait = {"pid": tg.pid, "kind": why, "until": time.time() + secs, "per_hour": lim.per_hour,
                    "cap": _cap(lim, tg.cost), "used": lim.last_hour}
@@ -1548,6 +1568,11 @@ def _row(sh: Search, s: Site, srv: Server | None, live: bool) -> dict[str, Any]:
     plan = sh.plan or {}
     if sh.status in ("stopped", "interrupted") and not plan:
         return row                                           # the summary says it
+    if s.pid in sh.out and s.pid in (plan.get("uncovered") or []):
+        row.update(label=t("No server"), tone="bad",
+                   message=t("It used up the requests the search may send it this hour, so the search went on "
+                             "without it; the next search asks it again."))
+        return row
     if s.pid in (plan.get("uncovered") or []):
         said = [srv.answers[s.pid] for srv in sh.servers if s.pid in srv.answers]
         refused = sum(a.verdict in REFUSED for a in said)

@@ -915,6 +915,25 @@ async def test_the_search_waits_for_a_sites_budget_instead_of_skipping_it(sites,
     assert all(stamps[i + 2] - stamps[i] >= 3600 for i in range(len(stamps) - 2))   # never 3 within an hour
 
 
+async def test_a_site_refused_everywhere_leaves_the_search_once_its_budget_would_hold_it_up(sites, fake, serial,
+                                                                                            monkeypatch):
+    """A site that blocks the VPN's servers (Facebook) uses up its quarter of the hour on refusals: the search does not
+    wait an hour for it (and the others with it), it goes on without it; the site waits for the next search."""
+    clock = Clock(monkeypatch)
+    _collection(*(N(i) for i in range(1, 9)))
+    a, b = sites({}, {N(1): [PAGE]}, per_hour=(24, 0), default=NO)           # Fake: a quarter of 24, 6 an hour
+    _live(N(1), fake2=N(1))
+    assert vpn_check.start("manual") is None
+    sh = vpn_check._run
+    await asyncio.wait_for(sh.task, 5)
+    assert sh.out == ["fake"] and sum(clock.slept) < vpn_check.GIVE_UP_WAIT_S   # no hour's wait
+    assert sum(a.calls(N(i)) for i in range(1, 9)) == 6                      # its quarter, then it left
+    assert sh.plan["uncovered"] == ["fake"] and vpn.paused("fake")[0] == "none"
+    assert vpn.server_for("fake2") == N(1) and not vpn.paused("fake2")
+    row = next(r for r in vpn_check.view()["rows"] if r["pid"] == "fake")
+    assert "the search went on without it" in row["message"]
+
+
 async def test_the_search_never_takes_a_site_past_ninety_percent(sites, fake, serial, monkeypatch):
     clock = Clock(monkeypatch)
     clock.hold = asyncio.Event()

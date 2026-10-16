@@ -1021,12 +1021,11 @@ def _jobs_track(label: str) -> Any:
 async def failover(pid: str, host: str, label: str = "") -> str | None:
     """Move this site to a standby server (standby()) beside the live servers the other sites keep using: the first
     that starts and reaches `host` within STANDBY_TRIES. Returns its name, or None (no room beside two live servers
-    other sites use, none on the list, none started, or a search runs: it takes the site in). A server that does
+    other sites use, none on the list, none started). Also while a search runs: it may wait an hour for a site's
+    budget, and its switch-over at the end takes the site along anyway. A server that does
     not start or reach the host is marked for the site. Shown as a quiet job (lane "vpn": an open settings page
     refreshes)."""
-    from app.services import vpn_check
-
-    if vpn_check.running() or conn.closing:
+    if conn.closing:
         return None
     async with _lock("failover"):
         _retried[pid] = time.monotonic()
