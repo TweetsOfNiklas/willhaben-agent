@@ -4,7 +4,7 @@
    vt = vpn_test(): {live, blocked, profile, connections: [{name, since, connected, sites}], two, waiting: [{name,
    note, tone}], connected, error, interval, next_at, next_due, pending, run, progress, now, best, wait, clock,
    summary, tone, trigger, finished_at, rows: [{pid, name, label, tone, message, spinner, action: {label, href} or
-   None}], servers: [{name, label, tone, live, kept, parts, secs}], more}.
+   None}], servers: [{name, label, tone, live, kept, parts, secs}], more, working: [{name, sites, all, live, at}]}.
    While a search runs, #vpn-test-body asks for itself every 3 s and brings the progress, the clock and the live
    connections along (hx-select-oob, innerHTML): the header, its live region and the interval form stay in place. The
    first poll after the end swaps the whole panel (HX-Retarget, main.py). Live, the servers are a plain list of the
@@ -94,6 +94,19 @@
         <button class="btn btn-sm">{{ _("Save") }}</button>
       </form></dd>
   </dl>
+
+  {% if vt.working %}{# every server that answered lately (searches, "Test again"), with the sites it answered #}
+  <details class="text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("Working servers ({n})", n=vt.working|length) }}</summary>
+    <ul class="m-0 mt-1 flex list-none flex-col gap-1 p-0">
+      {% for w in vt.working %}
+      <li class="leading-6"><span class="break-all font-medium tabular-nums">{{ w.name }}</span>
+        {%- if w.live %} {{ ui.pill(_("in use"), 'brand', false) }}{% endif %}
+        {%- if w.all %} {{ ui.pill(_("all sites"), 'ok', false) }}{% else %} <span class="break-words">{{ w.sites }}</span>{% endif %}
+        {%- if w.at %} <span class="whitespace-nowrap">· {{ w.at|ago }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
 
   {% if vt.run %}
   <div id="vpn-test-body" class="flex flex-col gap-2 border-t border-base-300 pt-3"

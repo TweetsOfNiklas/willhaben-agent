@@ -475,6 +475,48 @@ async def test_without_a_standby_server_the_site_still_waits_for_a_search(fake, 
     assert vpn.marks("willhaben")["de-fra-wg-001"][1] == "unreachable" and vpn.standby("willhaben") == []
 
 
+async def test_a_paused_site_tries_the_standby_servers_again_while_its_search_waits(fake, no_search, monkeypatch):
+    """A site paused under a search held back by its back-off (or one paused before a restart) does not wait for
+    that search: every PAUSED_RETRY_S its next request tries the standby servers once more."""
+    _collection("at-vie-wg-001", "de-fra-wg-001")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(servers=["at-vie-wg-001"], assign={"willhaben": "at-vie-wg-001", "kleinanzeigen": "at-vie-wg-001"})
+    vpn.mark("willhaben", "at-vie-wg-001", "blocked")
+    vpn.pause("willhaben", "blocked", "HTTP 403")                      # paused, its search waits
+    vpn.mark("willhaben", "de-fra-wg-001", "ok")                       # ... a standby server answered it lately
+    tn = vpn.tunnel_for("willhaben")
+    assert (await tn.ensure()).name == "de-fra-wg-001"
+    assert vpn.paused("willhaben") is None and no_search == []
+    assert vpn.live_servers() == ["at-vie-wg-001", "de-fra-wg-001"]
+    assert vpn.server_for("kleinanzeigen") == "at-vie-wg-001"
+
+    vpn.mark("willhaben", "de-fra-wg-001", "blocked")                  # refused there too, nothing left: it waits
+    vpn.pause("willhaben", "blocked", "HTTP 403")
+    with pytest.raises(vpn.VpnWait):
+        await tn.ensure()
+    vpn.unmark("willhaben", "de-fra-wg-001")
+    vpn.mark("willhaben", "de-fra-wg-001", "ok")                       # answers again, but the last try was just now
+    with pytest.raises(vpn.VpnWait):
+        await tn.ensure()
+    monkeypatch.setattr(vpn, "PAUSED_RETRY_S", 0)
+    assert (await tn.ensure()).name == "de-fra-wg-001"
+
+
+def test_working_lists_each_server_that_answered_lately_with_its_sites():
+    _collection("at-vie-wg-001", "de-fra-wg-001", "de-ber-wg-001")
+    _on("willhaben", "kleinanzeigen")
+    vpn.mark("willhaben", "at-vie-wg-001", "ok", ttl=3600 - 60)
+    vpn.mark("kleinanzeigen", "at-vie-wg-001", "ok", ttl=3600 - 120)
+    vpn.mark("kleinanzeigen", "de-fra-wg-001", "ok", ttl=3600 - 10)
+    vpn.mark("willhaben", "de-ber-wg-001", "ok")
+    vpn.mark("willhaben", "de-ber-wg-001", "blocked")                  # refused since: no longer working for it
+    vpn.mark("shpock", "de-ber-wg-001", "ok")                          # its switch is off: not listed
+    w = vpn.working()
+    assert [(e["name"], e["sites"]) for e in w] == [("at-vie-wg-001", ["willhaben", "kleinanzeigen"]),
+                                                    ("de-fra-wg-001", ["kleinanzeigen"])]
+    assert time.time() - vpn.MARK_TTL_S["ok"] - 3600 < w[0]["at"] < w[1]["at"]   # its newest answer
+
+
 async def test_a_switch_over_lets_requests_in_flight_finish_first(fake, no_search, monkeypatch):
     monkeypatch.setattr(vpn, "DRAIN_S", 5)
     _collection("at-vie-wg-001", "at-vie-wg-002")

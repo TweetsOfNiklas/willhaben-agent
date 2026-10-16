@@ -1508,7 +1508,10 @@ def view() -> dict[str, Any]:
         "next_due": nxt is not None and nxt <= time.time(), "pending": _pending_text(pend) if pend else "",
         "run": sh is not None, "progress": "", "now": "", "best": "", "wait": "", "clock": "", "summary": "",
         "tone": "", "trigger": "", "finished_at": None, "rows": [], "servers": [], "more": 0,
-        "retesting": retesting(), "retest": _retest_view(names)}
+        "retesting": retesting(), "retest": _retest_view(names),
+        "working": [{"name": w["name"], "sites": ", ".join(names.get(p, p) for p in w["sites"]),
+                     "all": len(w["sites"]) == len(on), "live": w["name"] in servers, "at": _dt(w["at"])}
+                    for w in vpn.working()] if mode != "profile" else []}
     if sh is None:
         return out
     testing = [s for s in sh.servers if s.status != "done"] if live else []

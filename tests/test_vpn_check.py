@@ -1394,6 +1394,7 @@ def test_settings_page_search_now_interval_and_panel(fake):
             _wait_search()
             panel = c.get("/settings/vpn/test").text
             assert f"{N(1)} for Fake" in panel and "Servers asked (1)" in panel and "every 3s" not in panel
+            assert "Working servers (1)" in panel and "all sites" in panel             # what answered, per server
             poll = c.get("/settings/vpn/test", headers={"HX-Request": "true", "HX-Target": "vpn-test-body"})
             assert (poll.headers["HX-Retarget"], poll.headers["HX-Reselect"]) == ("#vpn-test", "#vpn-test")
             set_setting("ui_lang", "de")

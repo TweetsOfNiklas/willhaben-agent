@@ -205,5 +205,7 @@
  "Test started": "Test gestartet",
  "VPN: {site} moves to {server}": "VPN: {site} wechselt zu {server}",
  "{site} now through {server}": "{site} jetzt über {server}",
- "via {server}": "über {server}"
+ "via {server}": "über {server}",
+ "Working servers ({n})": "Funktionierende Server ({n})",
+ "all sites": "alle Seiten"
 }

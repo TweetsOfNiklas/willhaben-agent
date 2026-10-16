@@ -83,6 +83,7 @@ CONFIRM_WINDOW_S = 900         # older refusals no longer count
 CONFIRM_SPAN_S = 90            # ... and refusals (not network errors) count only when the run lasts this long: eBay
                                # refuses every other request for half a minute at a time, Geizhals a burst for a while
 STANDBY_TRIES = 3              # standby servers a site tries (start + reach its host) before it waits for a search
+PAUSED_RETRY_S = 120           # a paused site tries the standby servers again this often while its search waits
 SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
 DRAIN_S = 15                   # a server switched away from stops once its requests in flight ended, or after this
 HANDSHAKE_S = 5                # no WireGuard handshake within this: the server is dead (an answer takes < 1 s)
@@ -997,6 +998,20 @@ def standby(pid: str, exclude: Collection[str] = ()) -> list[str]:
             if n not in refused and n not in busy and n not in exclude and allowed(n)]
 
 
+def working() -> list[dict[str, Any]]:
+    """The servers that answered sites with the VPN on lately (oks(): the searches' and "Test again"'s answers, kept
+    MARK_TTL_S), each with those sites (in users() order) and when the newest answer came: the most sites first,
+    then the newest. For Settings → VPN; the same notes are the failover's standby list (standby())."""
+    by: dict[str, dict[str, Any]] = {}
+    for pid, _name in users():
+        for n, until in oks(pid).items():
+            if allowed(n):
+                e = by.setdefault(n, {"name": n, "sites": [], "at": 0.0})
+                e["sites"].append(pid)
+                e["at"] = max(e["at"], until - MARK_TTL_S["ok"])
+    return sorted(by.values(), key=lambda e: (-len(e["sites"]), -e["at"], e["name"]))
+
+
 def _jobs_track(label: str) -> Any:
     from app.services import jobs
 
@@ -1014,9 +1029,11 @@ async def failover(pid: str, host: str, label: str = "") -> str | None:
     if vpn_check.running() or conn.closing:
         return None
     async with _lock("failover"):
+        _retried[pid] = time.monotonic()
         st = conn_state()
         live, assign = live_servers(st), dict(st.get("assign") or {})
         if (own := server_for(pid, st)) is not None and own not in marks(pid) and conn.route(own) is not None:
+            unpause(pid)
             return own                                # another request of the site moved it meanwhile
         on = {p for p, _ in users()} - {pid}
         used = {server_for(p, st) for p in on if not paused(p)}
@@ -1050,6 +1067,7 @@ async def failover(pid: str, host: str, label: str = "") -> str | None:
 
 # ------------------------------------------------------------------ one site's view of the connections
 _strikes: dict[tuple[str, str], list[float]] = {}   # (site, server) -> its refusals in a row (Tunnel.refused())
+_retried: dict[str, float] = {}                      # site -> its last failover try (a paused one retries: ensure())
 
 
 class Tunnel:
@@ -1080,6 +1098,8 @@ class Tunnel:
         there and none comes (fail closed: the caller must not send)."""
         error = ""
         for _ in range(MAX_LIVE + 1):
+            if paused(self.pid) is not None and self._retry_due() and await failover(self.pid, self.host, self.label):
+                continue                              # a standby server took the paused site in
             self._check()
             name = server_for(self.pid)
             if name is None and await failover(self.pid, self.host, self.label):
@@ -1104,6 +1124,12 @@ class Tunnel:
         why = conn_state().get("error") or error
         raise PlatformError(t("No working VPN server for {name} right now", name=self.label)
                             + (f" ({why})" if why else ""))
+
+    def _retry_due(self) -> bool:
+        """A paused site tries the standby servers again every PAUSED_RETRY_S: the search it waits for may be held
+        back for an hour (its back-off), and the list changes meanwhile (a search's or "Test again"'s answers, a
+        restart that brought a site paused under the old rules)."""
+        return time.monotonic() - _retried.get(self.pid, -PAUSED_RETRY_S) >= PAUSED_RETRY_S
 
     def _check(self) -> None:
         if not source()[1]:
@@ -1266,6 +1292,7 @@ def reset() -> None:
     global _locks_, conn
     _tunnels.clear()
     _strikes.clear()
+    _retried.clear()
     conn = Connection()
     _locks_ = None
 
