@@ -21,11 +21,13 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlencode
 
 import httpx
+from sqlmodel import col, delete
 
+from app import db
 from app.config import get_settings
 from app.i18n import t
 from app.platforms import vpn
@@ -38,6 +40,8 @@ log = logging.getLogger(__name__)
 BASE = "https://geizhals.at"
 _limiter = RateLimiter(3.0, name="Geizhals")
 _transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock transport
+CACHE_DAYS = 7                # a cached search or product page is used this long, then fetched again; unused this
+                              # long, it is deleted (prune_cache())
 CHALLENGED_TTL_S = 6 * 3600   # a search Cloudflare challenges (not the server) is not asked again for this long
 _challenged: dict[str, float] = {}   # url -> until (_get_vpn_once())
 
@@ -256,15 +260,90 @@ async def _front_page_passes(tunnel: vpn.Tunnel, route: vpn.Route, headers: dict
     return r.status_code == 200 and r.headers.get("cf-mitigated", "").lower() != "challenge"
 
 
+_DIGITS_RE = re.compile(r"\d{4,}")
+
+
+def search_term(query: str) -> str:
+    """The search as sent: Cloudflare challenges every Geizhals search with four digits in a row ("RTX 4090",
+    "Gira 211100"), through every server, so a long number goes in thousands ("RTX 4.090", which Geizhals reads as
+    4090); one with a leading zero (no thousands) as its first three digits and a wildcard, the rest of that word
+    dropped ("JAL-0810D.02" -> "JAL-081*")."""
+    words = []
+    for w in query.split():
+        m = _DIGITS_RE.search(w)
+        while m is not None:
+            run = m.group()
+            if run.startswith("0"):
+                w = w[:m.start()] + run[:3] + "*"
+                break
+            dotted = f"{int(run):,}".replace(",", ".")
+            w = w[:m.start()] + dotted + w[m.end():]
+            m = _DIGITS_RE.search(w, m.start() + len(dotted))
+        words.append(w)
+    return " ".join(words)
+
+
+async def _cached(url: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
+    """`fetch()`'s answer for `url` (JSON-able), from the local cache while it is younger than CACHE_DAYS; an older
+    one is fetched again (and still used when that fails). Never under a Trial (the VPN search tests the server)."""
+    if current_trial() is not None:
+        return await fetch()
+    now = time.time()
+    with db.session() as ses:
+        row = ses.get(db.GeizhalsCache, url)
+        if row is not None:
+            row.used_at = now
+            ses.add(row)
+            ses.commit()
+            if now - row.fetched_at < CACHE_DAYS * 86400:
+                return row.data
+    try:
+        data = await fetch()
+    except GeizhalsError:
+        if row is not None:
+            log.info("Geizhals: %s could not be refreshed, the cached answer from %s stays", url,
+                     time.strftime("%Y-%m-%d", time.localtime(row.fetched_at)))
+            return row.data
+        raise
+    with db.session() as ses:
+        ses.merge(db.GeizhalsCache(url=url, data=data, fetched_at=now, used_at=now))
+        ses.commit()
+    return data
+
+
+def prune_cache() -> int:
+    """Delete the cached answers no lookup used for CACHE_DAYS; returns how many."""
+    with db.session() as ses:
+        n = ses.exec(delete(db.GeizhalsCache).where(
+            col(db.GeizhalsCache.used_at) < time.time() - CACHE_DAYS * 86400)).rowcount
+        ses.commit()
+    return n or 0
+
+
+async def prune_job() -> None:
+    if n := prune_cache():
+        log.info("Geizhals: %d cached answers unused for %d days deleted", n, CACHE_DAYS)
+
+
 async def search(query: str, limit: int = 5) -> list[Hit]:
-    page = await _get(f"{BASE}/?{urlencode({'fs': query, 'hloc': 'at'})}")
-    return parse_search(page)[:limit]
+    url = f"{BASE}/?{urlencode({'fs': search_term(query), 'hloc': 'at'})}"
+
+    async def fetch() -> list[dict[str, Any]]:
+        return [asdict(h) for h in parse_search(await _get(url))]
+
+    return [Hit(**h) for h in await _cached(url, fetch)][:limit]
 
 
 async def product(url: str) -> Product:
     if not re.fullmatch(r"https://geizhals\.at/[^\s\"<>]+-a\d+\.html", url):
         raise GeizhalsError(t("Not a Geizhals product page"))
-    return parse_product(await _get(url), url)
+
+    async def fetch() -> dict[str, Any]:
+        return asdict(parse_product(await _get(url), url))
+
+    d = await _cached(url, fetch)
+    return Product(name=d["name"], url=d["url"], price_from=d["price_from"],
+                   specs=[(k, v) for k, v in d.get("specs") or []])
 
 
 def glue_units(s: str) -> str:

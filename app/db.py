@@ -360,6 +360,15 @@ class Setting(SQLModel, table=True):
     value: str
 
 
+class GeizhalsCache(SQLModel, table=True):
+    """Geizhals answers kept locally (app/services/geizhals.py): a search's hits or a product page, by the URL asked.
+    Used for CACHE_DAYS after `fetched_at`, then fetched again on the next lookup; gone CACHE_DAYS after `used_at`."""
+    url: str = Field(primary_key=True)
+    data: Any = Field(sa_column=Column(JSON))
+    fetched_at: float = 0.0      # unix time of the last request to Geizhals for it
+    used_at: float = 0.0         # unix time of the last lookup
+
+
 class LLMCall(SQLModel, table=True):
     """One Claude call (one row per model it used), for the token usage table in Settings → Claude."""
     id: int | None = Field(default=None, primary_key=True)

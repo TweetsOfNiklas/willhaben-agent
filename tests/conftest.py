@@ -90,6 +90,13 @@ def quick_refusals(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_geizhals_cache(monkeypatch):
+    """Every Geizhals lookup asks again (the tests count requests); tests/test_geizhals.py checks the cache."""
+    from app.services import geizhals
+    monkeypatch.setattr(geizhals, "CACHE_DAYS", 0)
+
+
+@pytest.fixture(autouse=True)
 def fresh_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     dbmod.set_engine(engine)

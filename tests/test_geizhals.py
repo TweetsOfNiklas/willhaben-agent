@@ -211,3 +211,60 @@ def test_unconfirmed_variant_does_not_rewrite_the_draft(client, pi, monkeypatch)
     with session() as db:
         gh = db.get(AdDraft, draft_id).geizhals
     assert gh["verified"] is True and gh["match"]["url"] == PI4
+
+
+def test_search_terms_never_carry_four_digits_in_a_row():
+    """Cloudflare challenges every Geizhals search with four digits in a row, through every server."""
+    st = geizhals.search_term
+    assert st("RTX 4090") == "RTX 4.090" and st("Gira 211100") == "Gira 211.100"
+    assert st("CGM S9000DUAL") == "CGM S9.000DUAL" and st("Amazon Echo Show 8 2021") == "Amazon Echo Show 8 2.021"
+    assert st("MDT JAL-0810D.02") == "MDT JAL-081*"                 # a leading zero: no thousands, a wildcard
+    assert st("Raspberry Pi 5 8GB") == "Raspberry Pi 5 8GB" and st("Samsung 990 Pro") == "Samsung 990 Pro"
+    assert st("ABC1234567X") == "ABC1.234.567X"
+
+
+async def test_the_cache_answers_for_a_week_then_asks_again_and_forgets_what_nobody_looked_up(monkeypatch):
+    from app import db
+
+    monkeypatch.setattr(geizhals, "CACHE_DAYS", 7)
+    seen = []
+    card = ('<article class="galleryview__item x"><a class="galleryview__name-link" href="#">RTX 4090 FE</a>'
+            '<a href="https://geizhals.at/nvidia-rtx-4090-a1.html"></a><span class="price">€ 1.799,00</span></article>')
+
+    def handler(request):
+        seen.append(request.url.params.get("fs") or request.url.path)
+        if request.url.path == "/":
+            return httpx.Response(200, text=card)
+        return httpx.Response(200, text="<h1>NVIDIA RTX 4090 FE</h1><script>x={lowPrice: 1799.0}</script>")
+
+    monkeypatch.setattr(geizhals, "_transport", httpx.MockTransport(handler))
+    monkeypatch.setattr(geizhals, "_limiter", geizhals.RateLimiter(0, name="Geizhals"))
+    clock = [1_000_000.0]
+    monkeypatch.setattr(geizhals.time, "time", lambda: clock[0])
+    hits = await geizhals.search("RTX 4090")
+    assert seen == ["RTX 4.090"] and hits[0].price == 1799.0
+    p = await geizhals.product(hits[0].url)
+    assert p.name == "NVIDIA RTX 4090 FE" and len(seen) == 2
+
+    clock[0] += 6 * 86400                                         # six days later: from the cache, no request
+    assert (await geizhals.search("RTX 4090"))[0].url == hits[0].url
+    assert (await geizhals.product(hits[0].url)).price_from == 1799.0 and len(seen) == 2
+
+    clock[0] += 2 * 86400                                         # a week after the fetch: asked again
+    await geizhals.search("RTX 4090")
+    assert seen[-1] == "RTX 4.090" and len(seen) == 3
+
+    monkeypatch.setattr(geizhals, "_get", _fail)                  # a refresh that fails keeps the old answer
+    clock[0] += 8 * 86400
+    assert (await geizhals.search("RTX 4090"))[0].price == 1799.0
+
+    clock[0] += 6 * 86400                                         # unused for a week: deleted
+    assert geizhals.prune_cache() == 1                            # the product page; the search was used 6 days ago
+    clock[0] += 2 * 86400
+    assert geizhals.prune_cache() == 1
+    with db.session() as ses:
+        assert ses.exec(db.select(db.GeizhalsCache)).all() == []
+
+
+async def _fail(url):
+    raise geizhals.GeizhalsError("down")
