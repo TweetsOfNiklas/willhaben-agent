@@ -859,18 +859,79 @@ async def _process_pending_auto(ad_id: str | None) -> int:
         convs = list(db.exec(q))
     done = 0
     for conv in convs:
-        if _auto_mode(conv) is None or not _waiting_for_answer(conv.id):
+        if _auto_mode(conv) is None or not _waiting_for_answer(conv.id) or _auto_given_up(conv.id):
             continue
         if humanize.enabled():
             _schedule_humanized(conv.id)   # answers later in the background, sync goes on
             continue
         try:
             d = await auto_reply(conv.id)
-        except (LLMError, WillhabenError, NotLoggedIn, SessionUnavailable) as e:
-            log.warning("auto reply failed for %s: %s", conv.id, e)
+        except Exception as e:  # noqa: BLE001 - the owner is told (push, chat page); the other chats are still answered
+            await _auto_failed(conv.id, e)
             continue
         done += bool(d and d.status == "sent")
     return done
+
+
+AUTO_MAX_ATTEMPTS = 3   # tries per buyer message when writing or sending the automatic answer fails (Claude down, …)
+_auto_failures: dict[str, tuple[str, int]] = {}   # conversation id -> (buyer message ext_id, failed attempts)
+
+
+def _auto_given_up(conversation_id: str) -> bool:
+    """AUTO_MAX_ATTEMPTS automatic answers to the buyer's current message failed: the owner knows (_auto_failed),
+    the sync leaves the chat alone until the buyer writes again."""
+    ext, attempts = _auto_failures.get(conversation_id, ("", 0))
+    if attempts < AUTO_MAX_ATTEMPTS:
+        return False
+    last = _last_incoming_msg(conversation_id)
+    return last is not None and last.ext_id == ext
+
+
+async def _auto_failed(conversation_id: str, error: Exception) -> None:
+    """An automatic answer could not be written or sent (Claude or willhaben down, a bug): the chat page shows the
+    reason next to "Prepare answer" (Conversation.draft_error), and the owner gets one push per buyer message - the
+    question with the reason, so they answer themselves - instead of a silent retry at every sync."""
+    if isinstance(error, (LLMError, WillhabenError, NotLoggedIn, SessionUnavailable, EndpointUnknown, SendFailed)):
+        log.warning("auto reply failed for %s: %s", conversation_id, error)
+    else:
+        log.error("auto reply failed for %s: %s", conversation_id, error, exc_info=error)
+    last = _last_incoming_msg(conversation_id)
+    ext = last.ext_id if last else ""
+    prev_ext, attempts = _auto_failures.get(conversation_id, ("", 0))
+    attempts = attempts + 1 if prev_ext == ext else 1
+    _auto_failures[conversation_id] = (ext, attempts)
+    reason = t("Automatic answer failed: {error}", error=error)
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is None:
+            return
+        conv.draft_error = reason
+        db.add(conv)
+        db.commit()
+    if attempts > 1:
+        return                        # pushed for this message already
+    from app.config import get_settings
+    q = last.text if last else conv.last_message_text
+    await notify("auto_reply_pending", t("Not answered automatically: {name}", name=conv.partner_name or "").strip(),
+                 (t("Question: “{text}”", text=q[:120]) + "\n" if q else "") + f"{conv.ad_title or ''} · {reason}",
+                 url=f"{get_settings().public_url.rstrip('/')}/chats/{conv.id}",
+                 data={"conversation_id": conv.id, "ad_id": conv.ad_id}, tag=message_tag(conv.id))
+
+
+def _auto_recovered(conversation_id: str) -> None:
+    """Claude wrote the automatic answer: an earlier failure's note on the chat page goes."""
+    _auto_failures.pop(conversation_id, None)
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None and conv.draft_error:
+            conv.draft_error = None
+            db.add(conv)
+            db.commit()
+
+
+def reset() -> None:
+    """Tests: forget the failed answers of the previous test's conversations."""
+    _auto_failures.clear()
 
 
 # ------------------------------------------------------------------ human-like timing
@@ -943,8 +1004,8 @@ async def _humanized_auto(conversation_id: str) -> Draft | None:
                 continue
             return d
         return None
-    except Exception:  # noqa: BLE001 - a background answer must never take the app down
-        log.exception("humanized auto reply failed for %s", conversation_id)
+    except Exception as e:  # noqa: BLE001 - a background answer must never take the app down
+        await _auto_failed(conversation_id, e)
         return None
     finally:
         _humanized.pop(conversation_id, None)
@@ -960,8 +1021,10 @@ async def auto_reply(conversation_id: str, before_send=None) -> Draft | None:
     if conv is None or _auto_mode(conv) is None:
         return None
     d = await draft_reply(conversation_id, auto=True)
+    _auto_recovered(conversation_id)
     blockers = _auto_blockers(conversation_id, d, messages_of(conversation_id))
     title = conv.ad_title or ""
+    sent: Draft | None = None
     if not blockers and before_send is not None:
         _set_status(d.id, "pending")
         go = await before_send(d)
@@ -975,15 +1038,16 @@ async def auto_reply(conversation_id: str, before_send=None) -> Draft | None:
                 return None
             blockers = _auto_blockers(conversation_id, d, messages_of(conversation_id))
             if not blockers:
-                return await _send_auto(conv, d, conversation_id, title)
-    if not blockers and not _still_auto(conversation_id):   # changed while Claude was drafting
-        discard_draft(d.id)
-        return None
-    if not blockers:
+                sent = await _send_auto(conv, d, conversation_id, title)
+    elif not blockers:
+        if not _still_auto(conversation_id):   # changed while Claude was drafting
+            discard_draft(d.id)
+            return None
         sent = await _send_auto(conv, d, conversation_id, title)
+    if sent is not None:
         if sent.status == "sent":
             return sent
-        blockers = [sent.error or t("Sending failed")]
+        blockers = [sent.error or t("Sending failed")]   # the draft keeps its text: offered below with the reason
     with session() as db:
         row = db.get(Draft, d.id)
         row.auto_reason = f"{row.auto_reason or ''} · {t('not sent: {reasons}', reasons='; '.join(blockers))}".strip(" ·")
