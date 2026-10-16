@@ -77,6 +77,8 @@
  "“{text}” → ": "„{text}“ → ",
  "not sent: {reasons}": "nicht gesendet: {reasons}",
  "not sent automatically: {reason}": "nicht automatisch gesendet: {reason}",
+ "Automatic answer failed: {error}": "Automatische Antwort fehlgeschlagen: {error}",
+ "Not answered automatically: {name}": "Nicht automatisch beantwortet: {name}",
  "Approve answer? {name}": "Antwort freigeben? {name}",
  "Question: “{text}”": "Frage: „{text}“",
  "Suggestion: “{text}”": "Vorschlag: „{text}“",

@@ -5,8 +5,9 @@ from datetime import timedelta
 import pytest
 
 from app.db import Conversation, Draft, Message, MyAd, session, set_setting, utcnow
+from app.llm.base import LLMError, LLMResult
 from app.services import chats, humanize
-from app.willhaben.account import ChatMessage, parse_messages
+from app.willhaben.account import ChatMessage, SendFailed, parse_messages
 
 
 def test_plan_stays_in_window_and_reads_before_sending():
@@ -173,6 +174,78 @@ async def test_limits_are_checked_again_at_send_time(seller_chat, monkeypatch):
     d = await chats.auto_reply("c1", before_send=ok)
     assert sent == [("offer", "not sent automatically: hourly limit reached")]
     assert d.status == "draft"
+
+
+async def test_failed_send_after_the_typing_pause_offers_the_draft(seller_chat, monkeypatch):
+    """willhaben rejects the message once the human-like delay is over: the draft is offered with the reason, as
+    when a send fails without the delay - not dropped without a word."""
+    notes = []
+
+    async def fake_notify(kind, title, message, **kw):
+        notes.append((kind, title, message, kw))
+        return True
+
+    class Backend:
+        model = "fake"
+
+        async def complete(self, *, system, prompt, schema, images=None):
+            return LLMResult(data={"reply": "Ja, noch da.", "intent": "availability", "needs_info": [],
+                                   "suggested_price": None, "note": "", "auto_send": True, "auto_reason": "einfach"},
+                             model="fake")
+
+    class Account:
+        async def send_message(self, conversation_id, text):
+            raise SendFailed("willhaben rejected the message")
+
+    async def no_ctx(cid, force=False):
+        with session() as db:
+            return db.get(Conversation, cid)
+
+    async def ok(d):
+        return True
+
+    set_setting("send_verified", "1")
+    monkeypatch.setattr(chats, "get_backend", lambda *a: Backend())
+    monkeypatch.setattr(chats, "_account", lambda: Account())
+    monkeypatch.setattr(chats, "ensure_ad_context", no_ctx)
+    monkeypatch.setattr(chats, "notify", fake_notify)
+    d = await chats.auto_reply("c1", before_send=ok)
+    assert d.status == "draft" and d.text == "Ja, noch da." and "rejected" in d.error
+    assert d.auto_reason == "✓ einfach · not sent: Sending failed: willhaben rejected the message"
+    assert [n[0] for n in notes] == ["auto_reply_pending"] and "rejected" in notes[0][2]
+    assert notes[0][3]["tag"] == f"wh-draft-{d.id}" and "Send" in [a["title"] for a in notes[0][3]["actions"]]
+    with session() as db:
+        assert db.get(Draft, d.id).status == "draft"
+
+
+async def test_failure_during_the_delayed_answer_is_reported(seller_chat, monkeypatch):
+    """Claude fails when the human-like answer is due: the owner is told once (push, chat page), not left waiting."""
+    notes = []
+
+    async def fake_notify(kind, title, message, **kw):
+        notes.append((kind, title, message, kw))
+        return True
+
+    async def noop(*a, **k):
+        return 1
+
+    async def boom(cid, before_send=None):
+        raise LLMError("Claude antwortet nicht")
+
+    set_setting("reply_delay_min_s", "0")
+    set_setting("reply_delay_max_s", "0")
+    monkeypatch.setattr(humanize, "THINK_S", (0.0, 0.0))
+    monkeypatch.setattr(chats, "sync_messages", noop)
+    monkeypatch.setattr(chats, "mark_read", noop)
+    monkeypatch.setattr(chats, "auto_reply", boom)
+    monkeypatch.setattr(chats, "notify", fake_notify)
+    assert await chats._humanized_auto("c1") is None
+    assert [n[0] for n in notes] == ["auto_reply_pending"] and "Claude antwortet nicht" in notes[0][2]
+    assert notes[0][3]["tag"] == "wh-msg-c1" and "c1" not in chats._humanized
+    with session() as db:
+        assert db.get(Conversation, "c1").draft_error == "Automatic answer failed: Claude antwortet nicht"
+    assert await chats._humanized_auto("c1") is None and len(notes) == 1       # same message: no second push
+    assert chats._waiting_for_answer("c1")                                     # the sync tries again (a few times)
 
 
 def test_ongoing_chat_answers_within_seconds():

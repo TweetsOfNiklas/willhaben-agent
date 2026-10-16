@@ -734,7 +734,8 @@ async def _attach_chat(pid: int, cid: str, text: str, *, heading: str | None, se
         row = db.get(Purchase, pid)
         conv.ad_id, conv.ad_title, conv.role = row.ad_id if row else conv.ad_id, heading or conv.ad_title, "buyer"
         conv.partner_name = conv.partner_name or seller
-        conv.ad_context = context or conv.ad_context
+        if context:
+            conv.ad_context, conv.ad_context_at = context, utcnow()
         db.add(conv)
         ext_id = f"draft-purchase-{pid}"
         if db.exec(select(Message).where(Message.conversation_id == cid, Message.ext_id == ext_id)).first() is None:
