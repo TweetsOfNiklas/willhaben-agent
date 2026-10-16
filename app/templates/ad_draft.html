@@ -24,7 +24,10 @@
       {% endif %}
       {% set st = d.price_stats or {} %}
       <div class="grid grid-cols-1 items-start gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
-        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Price (€)") }}</span><input name="price" id="price" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}" class="input w-full bg-base-200 text-base font-semibold"></label>
+        <div class="flex gap-2">
+          <label class="flex min-w-0 flex-1 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Price (€)") }}</span><input name="price" id="price" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}" class="input w-full bg-base-200 text-base font-semibold"></label>
+          <label class="flex w-20 shrink-0 flex-col gap-1.5" title="{{ _('How many identical pieces this ad offers (the price counts per piece); empty = one item') }}"><span class="text-[12.5px] text-muted">{{ _("Pcs.") }}</span><input type="number" name="quantity" id="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="{{ d.quantity or '' }}" class="input w-full bg-base-200 text-base font-semibold"></label>
+        </div>
         <div class="flex min-w-0 flex-col gap-1.5 sm:pt-[22px]">
           {% if st.count %}{% with g = price_gauge(d.price_suggestion, st), basis = _("{n} comparable ads", n=st.count) %}{% include "_price_gauge.html" %}{% endwith %}
           <span class="text-[12.5px] text-muted">{{ _("{n} ads for “{q}”", n=st.count, q=d.search_keywords) }} · {{ _("Median") }} {{ st.median|eur }} · {{ _("middle 50 %") }} {{ st.p25|eur }} – {{ st.p75|eur }}{% if st.llm_estimate %} · {{ _("Claude estimates {price}.", price=st.llm_estimate|eur) }}{% endif %}</span>{% endif %}
@@ -56,13 +59,14 @@
           <small class="text-muted">{{ _("Runs in the background – you can leave this page. Progress in the sidebar.") }}</small></div>
       {% elif d.status == 'published' %}
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3.5 text-success">✓ <strong>{{ _("Published on willhaben") }}</strong><span class="text-[12.5px] text-muted">{{ _("New ads are checked by willhaben first and can take a few minutes to show up.") }}</span></div>
+        {% if d.wh_ad_id %}<div class="flex flex-wrap items-center gap-2 border-t border-base-300 px-5 py-3.5"><a class="btn btn-sm" href="/myads?ad={{ d.wh_ad_id }}">{{ _("My ad") }}</a><a class="btn btn-sm" href="/sold/{{ d.wh_ad_id }}?kind=sold">{{ _("Mark sold…") }}</a></div>{% endif %}
       {% else %}
         {% if plan.options is defined and not plan.options %}<p class="px-5 py-3.5 text-muted">{{ _("willhaben suggests no category for this title.") }}</p>{% endif %}
         {% if plan.options is defined %}
         {# sent in the background with the (maybe unsaved) title, description and price; only this card, the head and the
            error line are swapped, so edits in the fields stay #}
         <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" data-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}" class="flex flex-col"
-              hx-post="/new-ad/{{ d.id }}/willhaben/publish" hx-include="#title, #desc, #price" hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}"
+              hx-post="/new-ad/{{ d.id }}/willhaben/publish" hx-include="#title, #desc, #price, #quantity" hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}"
               hx-target="#willhaben" hx-select="#willhaben" hx-select-oob="#draft-error,#draft-head" hx-swap="outerHTML" hx-push-url="false">
           <div class="flex flex-col gap-2.5 border-b border-base-300 px-5 py-3.5">{{ ui.eyebrow(_("Category")) }}{% with pick_url="/new-ad/" ~ d.id ~ "/willhaben/category" %}{% include "_category_picker.html" %}{% endwith %}</div>
           {% if plan.options %}
@@ -73,7 +77,7 @@
         <script>(() => { const f = document.getElementById('wh-publish'); f.addEventListener('submit', e => {   // without htmx only
           if (window.htmx) return;
           if (!confirm(f.dataset.confirm)) { e.preventDefault(); return; }
-          for (const [name, id] of [['title', 'title'], ['description', 'desc'], ['price', 'price']])
+          for (const [name, id] of [['title', 'title'], ['description', 'desc'], ['price', 'price'], ['quantity', 'quantity']])
             f.append(Object.assign(document.createElement('input'), {type: 'hidden', name, value: document.getElementById(id).value})); }); })();</script>
         {% endif %}
       {% endif %}

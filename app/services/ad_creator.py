@@ -20,6 +20,7 @@ from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_prompt, ad_refine_prompt
 from app.services import geizhals
 from app.willhaben.public import WillhabenError, get_public
 from app.services import timeline
+from app.services.shipping import clean_parcel
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,35 @@ def price_stats(prices: list[float]) -> dict[str, Any] | None:
             "min": prices[0], "max": prices[-1]}
 
 
+MAX_QUANTITY = 999
+
+
+def parse_quantity(value: Any) -> int | None:
+    """Pieces from a form field or from Claude: a whole number 1..999; blank, text and zero are None."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    try:
+        n = int(str(value).strip())
+    except ValueError:
+        return None
+    return min(n, MAX_QUANTITY) if n >= 1 else None
+
+
+def pick_quantity(owner: int | None, claude: Any) -> int | None:
+    """What the draft offers: the owner's count wins; Claude's only fills in when the owner gave none and it saw more
+    than one piece. One piece is no stock (None = a single item, as on My ads)."""
+    n = owner if owner is not None else parse_quantity(claude)
+    return n if n and n > 1 else None
+
+
+def claude_parcel(raw: Any, title: str | None) -> dict[str, Any] | None:
+    """Claude's packed-size estimate (for one piece) as a shipping parcel; source "claude" keeps it an estimate
+    that the owner has to confirm before anything is bought. All zeros = could not estimate = None."""
+    if not isinstance(raw, dict):
+        return None
+    return clean_parcel({**raw, "contents": (title or "")[:60], "source": "claude"})
+
+
 def save_images(draft_id: int, files: list[tuple[str, bytes]]) -> list[str]:
     folder = get_settings().uploads_dir / str(draft_id)
     folder.mkdir(parents=True, exist_ok=True)
@@ -58,9 +88,12 @@ def save_images(draft_id: int, files: list[tuple[str, bytes]]) -> list[str]:
 
 
 @timeline.scoped(batch_id="batch_id")
-async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int | None = None) -> AdDraft:
+async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int | None = None,
+                       quantity: int | None = None) -> AdDraft:
+    """quantity: the owner's piece count (the batch review); it wins over what Claude reads from notes and photos."""
+    owner_quantity = parse_quantity(quantity)
     with session() as db:
-        draft = AdDraft(input_text=notes, batch_id=batch_id)
+        draft = AdDraft(input_text=notes, batch_id=batch_id, quantity=pick_quantity(owner_quantity, None))
         db.add(draft)
         db.commit()
         db.refresh(draft)
@@ -68,7 +101,7 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
     paths = save_images(draft.id, files)
     try:
         result = await get_backend("ads").complete(
-            system=AD_SYSTEM, prompt=ad_prompt(notes, get_setting("reply_rules"), len(paths)),
+            system=AD_SYSTEM, prompt=ad_prompt(notes, get_setting("reply_rules"), len(paths), quantity=owner_quantity),
             schema=AD_SCHEMA, images=[Path(p) for p in paths])
     except LLMError as e:
         with session() as db:
@@ -101,6 +134,8 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
         d.title, d.description = data.get("title"), data.get("description")
         d.category_hint, d.condition = data.get("category_hint"), data.get("condition")
         d.attributes = data.get("attributes") or []
+        d.quantity = pick_quantity(owner_quantity, data.get("quantity"))
+        d.parcel = claude_parcel(data.get("parcel"), d.title)
         d.search_keywords = keywords
         d.price_suggestion = suggestion
         d.price_stats = {**(stats or {}), "llm_estimate": data.get("price_estimate"), "note": data.get("note")}
@@ -152,15 +187,18 @@ def parse_price(text: str | None) -> float | None:
 REFINING_BUSY = "Claude is still revising this draft – save or publish again when it is done"
 
 
-def save_fields(draft_id: int, title: str, description: str, price: str | None) -> AdDraft:
-    """The user's edits of title, description and price (form values). Refused while Claude revises the draft: its
-    result would overwrite the edit (the revision started from the text before it)."""
+def save_fields(draft_id: int, title: str, description: str, price: str | None,
+                quantity: str | None = None) -> AdDraft:
+    """The user's edits of title, description, price and piece count (form values; quantity None = the form did not
+    send it, blank = one item). Refused while Claude revises the draft: its result would overwrite the edit (the
+    revision started from the text before it)."""
     with session() as db:
         d = db.get(AdDraft, draft_id)
     if d is not None and d.refining:
         return update_draft(draft_id, error=t(REFINING_BUSY))
+    extra = {} if quantity is None else {"quantity": pick_quantity(parse_quantity(quantity), None)}
     return update_draft(draft_id, title=title.strip(), description=description.replace("\r\n", "\n").strip(),
-                        price_suggestion=parse_price(price))
+                        price_suggestion=parse_price(price), **extra)
 
 
 def photos_zip(d: AdDraft) -> bytes:
@@ -238,7 +276,7 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
     trusted = (d.geizhals or {}).get("verified") is not False or instruction == RECONCILE_INSTRUCTION
     prompt = ad_refine_prompt(notes=d.input_text, rules=get_setting("reply_rules"), n_images=len(d.image_paths),
                               current=current, specs=match.get("specs") if trusted else None,
-                              product_name=match.get("name"), instruction=instruction)
+                              product_name=match.get("name"), instruction=instruction, quantity=d.quantity)
     try:
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA,
                                                    images=[Path(p) for p in d.image_paths])
@@ -543,10 +581,18 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)
     from app.db import MyAd
     from app.services import my_ads
+    parcel_estimate = clean_parcel(d.parcel)       # source "claude": the shipping card says "estimated"
     with session() as db:                        # show up under "my ads" right away, status unknown yet
-        if db.get(MyAd, res["ad_id"]) is None:
-            db.add(MyAd(ad_id=res["ad_id"], heading=d.title, url=res["url"], status="unknown", image_url=None))
-            db.commit()
+        row = db.get(MyAd, res["ad_id"])
+        if row is None:
+            row = MyAd(ad_id=res["ad_id"], heading=d.title, url=res["url"], status="unknown", image_url=None,
+                       published_at=utcnow(), parcel=parcel_estimate)
+        elif row.parcel is None:                 # the account import was faster than we were: fill the gaps only
+            row.parcel = parcel_estimate
+        if hasattr(row, "quantity") and row.quantity is None:     # MyAd.quantity arrives with the inventory change
+            row.quantity = d.quantity
+        db.add(row)
+        db.commit()
     try:                                         # willhaben's own status (new ads are reviewed before going online)
         await my_ads.import_from_account()
     except Exception as e:  # noqa: BLE001 - the ad is published either way
