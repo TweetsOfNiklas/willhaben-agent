@@ -19,6 +19,7 @@ class FakeBackend:
 
     def __init__(self):
         self.calls = []
+        self.ad_extra: dict = {}      # a test overrides single fields of the ad answer (quantity, parcel, ...)
 
     async def complete(self, *, system, prompt, schema, images=None):
         self.calls.append({"system": system, "prompt": prompt, "schema": schema, "images": images or []})
@@ -30,7 +31,8 @@ class FakeBackend:
         else:
             data = {"title": "KTM Kinderrad 20 Zoll blau", "description": "Gut erhalten.", "category_hint": "Sport",
                     "condition": "gebraucht", "attributes": [{"name": "Marke", "value": "KTM"}],
-                    "search_keywords": "ktm kinderrad 20", "price_estimate": 120, "note": ""}
+                    "search_keywords": "ktm kinderrad 20", "price_estimate": 120, "note": "", "quantity": 1,
+                    "parcel": {"length_cm": 120, "width_cm": 20, "height_cm": 70, "weight_kg": 14.2}, **self.ad_extra}
         return LLMResult(data=data, model=self.model)
 
 

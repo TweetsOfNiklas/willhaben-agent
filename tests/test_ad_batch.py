@@ -11,10 +11,11 @@ from tests.conftest import wait_jobs  # noqa: E402
 SORTED = {
     "groups": [
         {"photos": [2, 1], "product": "Bosch GSR 18V-55", "product_query": "Bosch GSR 18V-55",
-         "observations": "Akkuschrauber mit Koffer, Kratzer am Griff", "confidence": "hoch", "question": ""},
-        {"photos": [3], "product": "Holzstuhl braun", "product_query": "", "observations": "",
+         "observations": "Akkuschrauber mit Koffer, Kratzer am Griff", "quantity": 1, "confidence": "hoch",
+         "question": ""},
+        {"photos": [3], "product": "Holzstuhl braun", "product_query": "", "observations": "", "quantity": 4,
          "confidence": "niedrig", "question": "Gehört Foto 4 auch dazu?"},
-        {"photos": [3, 99], "product": "Doppelt", "product_query": "", "observations": "",
+        {"photos": [3, 99], "product": "Doppelt", "product_query": "", "observations": "", "quantity": 0,
          "confidence": "mittel", "question": ""},          # photo 3 is taken, 99 does not exist -> dropped
     ],
     "unassigned": [4, 5],
@@ -60,18 +61,21 @@ def test_batch_sort_review_and_create(client, monkeypatch):  # noqa: F811
     assert "Abholung Wien 15" in fake.calls[-1]["prompt"]
     assert [g["photos"] for g in b.groups] == [[1, 0], [2]]              # 1-based -> index, duplicate dropped
     assert ad_batch.unassigned(b) == [3, 4] and b.note == "Foto 5 ist unscharf."
+    assert [g["quantity"] for g in b.groups] == [None, 4]        # Claude's count; one piece is nothing to say
     page = client.get(f"/new-ad/batch/{batch_id}").text
     assert "Bosch GSR 18V-55" in page and "Gehört Foto 4 auch dazu?" in page and "do not use" in page
+    assert 'name="quantity_g2" value="4"' in page and 'name="quantity_g1" value=""' in page
 
     # user: photo 0 becomes the cover, photo 3 is a new article, chair is skipped, comment on the drill
     form = [("img_0", "g1"), ("img_1", "g1"), ("product_g1", "Bosch GSR 18V-55 solo"), ("comment_g1", "Akku fehlt"),
-            ("include_g1", "1"), ("img_2", "g2"), ("product_g2", "Holzstuhl"), ("img_3", "new"), ("img_4", ""),
+            ("include_g1", "1"), ("quantity_g1", "2"), ("img_2", "g2"), ("product_g2", "Holzstuhl"), ("img_3", "new"), ("img_4", ""),
             ("action", "save")]
     client.post(f"/new-ad/batch/{batch_id}", data=dict(form))
     b = ad_batch.get(batch_id)
     assert [(g["id"], g["photos"], g["include"]) for g in b.groups] == [("g1", [0, 1], True), ("g2", [2], False),
                                                                        ("g3", [3], True)]
     assert b.groups[0]["comment"] == "Akku fehlt" and b.groups[0]["product"] == "Bosch GSR 18V-55 solo"
+    assert [g["quantity"] for g in b.groups] == [2, 4, None]     # the owner's count; the new group has none
 
     # re-sort: Claude sees the corrections and the hint; the comment survives
     client.post(f"/new-ad/batch/{batch_id}", data=dict([*form[:-1], ("include_g3", "1"), ("hint", "Foto 4 ist ein Kabel"),
@@ -79,7 +83,9 @@ def test_batch_sort_review_and_create(client, monkeypatch):  # noqa: F811
     b = _wait(batch_id, "review")
     prompt = fake.calls[-1]["prompt"]
     assert "Kommentar der Person: Akku fehlt" in prompt and "Foto 4 ist ein Kabel" in prompt
+    assert "Bosch GSR 18V-55 solo (2 Stück)" in prompt           # Claude hears the corrected count
     assert b.groups[0]["comment"] == "Akku fehlt" and b.groups[1]["include"] is False  # carried by photo overlap
+    assert [g["quantity"] for g in b.groups] == [2, 4]          # Claude's re-sort says 1 for the drill: the owner's 2 stays
 
     client.post(f"/new-ad/batch/{batch_id}", data=dict([*form[:-1], ("include_g3", "1"), ("action", "create")]))
     b = _wait(batch_id, "review")
@@ -87,6 +93,11 @@ def test_batch_sort_review_and_create(client, monkeypatch):  # noqa: F811
         drafts = list(db.exec(select(dbmod.AdDraft).order_by(dbmod.AdDraft.id)))
     assert len(drafts) == 2 and all(d.batch_id == batch_id for d in drafts)
     assert "Akku fehlt" in drafts[0].input_text and "Artikel: Bosch GSR 18V-55 solo" in drafts[0].input_text
+    assert [d.quantity for d in drafts] == [2, None]
+    ad_prompts = [c["prompt"] for c in client.fake.calls if "Aufgabe: Erstelle das Inserat." in c["prompt"]]
+    assert len(ad_prompts) == 2 and sum("Stückzahl: 2 (Preis pro Stück)" in p for p in ad_prompts) == 1
+    assert 'name="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="2"' in \
+        client.get(f"/new-ad/batch/{batch_id}?step=review").text
     assert "Gilt für alle meine Artikel: Abholung Wien 15" in drafts[0].input_text
     assert len(drafts[0].image_paths) == 2 and len(drafts[1].image_paths) == 1
     assert [g.get("draft_id") for g in b.groups] == [drafts[0].id, None, drafts[1].id]

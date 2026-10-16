@@ -242,6 +242,8 @@ class AdDraft(SQLModel, table=True):
     status: str = "draft"  # draft | published | discarded
     error: str | None = None
     batch_id: int | None = None   # AdBatch this draft came from
+    quantity: int | None = None        # pieces offered in the ad (price per piece); None = one item
+    parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # Claude's packed-size estimate, shipping.clean_parcel shape
     publishing: bool | None = None     # queued/running as a background publish job
     refining: bool | None = None       # Claude revises it as a background job (ad_creator.enqueue_refine)
     created_at: datetime = Field(default_factory=utcnow)

@@ -1412,9 +1412,9 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 
 
 @app.post("/new-ad/{draft_id:int}")
-async def ad_draft_save(draft_id: int, title: str = Form(...), description: str = Form(...),
+async def ad_draft_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
-    d = ad_creator.save_fields(draft_id, title, description, price)
+    d = ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
     msg = d.error if d.refining else t('Changes saved')
     return back(f"/new-ad/{draft_id}?msg={quote(msg, safe='')}")
 
@@ -1451,10 +1451,18 @@ async def ad_draft_geizhals(draft_id: int, url: str = Form(""), query: str = For
     return back(f"/new-ad/{draft_id}#geizhals")
 
 
+def _posted_quantity(form: Any) -> str | None:
+    """The piece count of a draft form; None = the form has no such field (leave the saved count alone), blank = one
+    item. Read from the raw form: FastAPI's Form() turns a blank field into a missing one."""
+    quantity = form.get("quantity")
+    return None if quantity is None else str(quantity)
+
+
 def _save_posted_fields(draft_id: int, form: Any) -> None:
-    """Unsaved title/description/price that came along with a willhaben action: saved first."""
+    """Unsaved title/description/price/pieces that came along with a willhaben action: saved first."""
     if form.get("title") is not None and form.get("description") is not None:
-        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""),
+                               _posted_quantity(form))
 
 
 @app.post("/new-ad/{draft_id:int}/willhaben/prepare")
@@ -1566,7 +1574,7 @@ async def ad_batch_save(request: Request, batch_id: int):
         kind, _, ref = key.partition("_")
         if kind == "img" and ref.isdigit():
             order.append((int(ref), str(value)))
-        elif kind in ("product", "comment", "include"):
+        elif kind in ("product", "comment", "include", "quantity"):
             fields.setdefault(ref, {})[kind] = str(value)
     ad_batch.apply_review(batch_id, order, fields)
     action = form.get("action")
@@ -1616,7 +1624,8 @@ def _draft_card(request: Request, d: AdDraft, saved: bool = False) -> HTMLRespon
 async def ad_draft_inline_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                                price: str = Form("")):
     _draft_or_404(draft_id)
-    return _draft_card(request, ad_creator.save_fields(draft_id, title, description, price), saved=True)
+    quantity = _posted_quantity(await request.form())
+    return _draft_card(request, ad_creator.save_fields(draft_id, title, description, price, quantity), saved=True)
 
 
 @app.post("/ad-drafts/{draft_id}/inline/refine", response_class=HTMLResponse)
@@ -1625,7 +1634,7 @@ async def ad_draft_inline_refine(request: Request, draft_id: int, instruction: s
                                  price: str = Form("")):
     _draft_or_404(draft_id)
     if title is not None and description is not None:   # unsaved edits first, Claude works on the saved version
-        ad_creator.save_fields(draft_id, title, description, price)
+        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
     ad_creator.enqueue_refine(draft_id, instruction)      # background job: the card swaps itself in when done
     return _draft_card(request, _draft_or_404(draft_id))
 
@@ -1638,7 +1647,7 @@ async def ad_draft_inline_status(request: Request, draft_id: int, status: str = 
         raise HTTPException(400)
     _draft_or_404(draft_id)
     if title is not None and description is not None:
-        ad_creator.save_fields(draft_id, title, description, price)
+        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
     return _draft_card(request, ad_creator.update_draft(draft_id, status=status))
 
 
@@ -1649,7 +1658,7 @@ async def ad_draft_inline_prepare(request: Request, draft_id: int, title: str | 
     """Read-only: ask willhaben's insertion form for categories and required fields of this draft."""
     _draft_or_404(draft_id)
     if title is not None and description is not None:
-        ad_creator.save_fields(draft_id, title, description, price)
+        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
     try:
         d = await ad_creator.prepare_willhaben(draft_id, category_query.strip() or None)
     except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
@@ -1663,8 +1672,7 @@ async def ad_draft_inline_publish(request: Request, draft_id: int):
     Runs as a background job: the card comes back at once with a spinner and swaps itself in when done."""
     _draft_or_404(draft_id)
     form = await request.form()
-    if form.get("title") is not None and form.get("description") is not None:
-        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+    _save_posted_fields(draft_id, form)
     try:
         option = int(str(form.get("option", "")))
     except ValueError:

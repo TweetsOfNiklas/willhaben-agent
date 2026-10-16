@@ -425,3 +425,86 @@ def test_api_publish_rejects_non_object_shipping(client, wh, shipping):  # noqa:
     r = client.post(f"/api/ad-drafts/{d.id}/willhaben-publish", json={"shipping": shipping})
     assert r.status_code == 400 and "shipping must be an object" in r.text
     assert wh.published == []
+
+
+# ------------------------------------------------------------------ pieces and parcel estimate go to My ads
+PARCEL = {"length_cm": 40, "width_cm": 30, "height_cm": 20, "weight_kg": 3.0, "contents": "Stuhl", "source": "claude"}
+
+
+def _my_ad(ad_id="1000000001"):
+    with dbmod.session() as db:
+        return db.get(dbmod.MyAd, ad_id)
+
+
+def test_publish_hands_pieces_and_parcel_to_my_ads(client, wh):  # noqa: F811
+    d = _draft(quantity=4, parcel=PARCEL)
+    page = client.post(f"/new-ad/{d.id}/willhaben/prepare", data={}, follow_redirects=True).text
+    assert 'hx-include="#title, #desc, #price, #quantity"' in page
+
+    client.post(f"/new-ad/{d.id}/willhaben/publish",
+                data={"option": "0", "o0_Zustand": "gebraucht", "handover": "pickup", "title": "Stuhl", "quantity": "6",
+                      "description": "Gut erhalten.", "price": "15"})
+    wait_jobs()
+    assert _get(d.id).quantity == 6                                       # the unsaved count went along
+    row = _my_ad()
+    assert row.parcel == PARCEL and row.parcel["source"] == "claude"      # an estimate: the shipping card says so
+    assert row.published_at is not None and row.status in ("unknown", "active")
+    if "quantity" in dbmod.MyAd.model_fields:                             # MyAd.quantity comes with the stock change
+        assert row.quantity == 6
+
+    page = client.get(f"/new-ad/{d.id}").text
+    assert 'href="/myads?ad=1000000001"' in page and 'href="/sold/1000000001?kind=sold"' in page
+
+    # shipping takes the ad's parcel over as it is: still an estimate, so automatic buying holds back
+    from app.services import shipping
+    estimate = dbmod.Shipment(conversation_id="c1", ad_id=row.ad_id, parcel=row.parcel)
+    assert "the parcel size is only an estimate" in shipping.auto_blockers(estimate)
+    confirmed = dbmod.Shipment(conversation_id="c1", ad_id=row.ad_id, parcel={**row.parcel, "source": "user"})
+    assert "the parcel size is only an estimate" not in shipping.auto_blockers(confirmed)
+
+
+def test_publish_without_pieces_or_parcel_is_as_before(client, wh):  # noqa: F811
+    d = _draft()
+    client.post(f"/new-ad/{d.id}/willhaben/prepare", data={})
+    client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "0", "o0_Zustand": "gebraucht",
+                                                           "handover": "pickup"})
+    wait_jobs()
+    row = _my_ad()
+    assert row.parcel is None and row.published_at is not None
+    if "quantity" in dbmod.MyAd.model_fields:
+        assert row.quantity is None
+
+
+async def test_publish_fills_the_gaps_of_an_ad_the_import_created_first(wh):
+    from datetime import datetime, timezone
+    imported = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    with dbmod.session() as db:
+        db.add(dbmod.MyAd(ad_id="1000000001", heading="vom Import", status="active", published_at=imported))
+        db.commit()
+    d = _draft(quantity=3, parcel=PARCEL)
+    await ad_creator.prepare_willhaben(d.id)
+    await ad_creator.publish_willhaben(d.id, 0, {}, shipping={"handover": "pickup"})
+    row = _my_ad()
+    assert row.heading == "vom Import" and row.status == "active"        # the import's data stays
+    assert row.published_at.replace(tzinfo=timezone.utc) == imported
+    assert row.parcel == PARCEL
+    if "quantity" in dbmod.MyAd.model_fields:
+        assert row.quantity == 3
+
+
+def test_batch_card_links_to_the_published_ad(client, wh):  # noqa: F811
+    d = _draft()
+    ad_creator.update_draft(d.id, status="published", wh_ad_id="1000000001")
+    card = client.get(f"/ad-drafts/{d.id}/card").text
+    assert 'href="/myads?ad=1000000001"' in card and 'href="/sold/1000000001?kind=sold"' in card
+
+    marked = _draft()                                                    # "published" by hand: no willhaben ad id
+    ad_creator.update_draft(marked.id, status="published")
+    card = client.get(f"/ad-drafts/{marked.id}/card").text
+    assert "/myads?ad=" not in card and "/sold/" not in card
+
+
+def test_catalog_has_the_german_texts_of_the_new_links():
+    from app import i18n
+    de = i18n.catalog("de")
+    assert de["My ad"] == "Meine Anzeige" and de["Pcs."] == "Stück" and "Mark sold…" in de
