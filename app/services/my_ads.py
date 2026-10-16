@@ -9,7 +9,7 @@ from sqlmodel import col, select
 
 from app.db import MyAd, current_ad, get_setting, session, utcnow
 from app.i18n import t
-from app.services import jobs, stock
+from app.services import jobs, selling, stock
 from app.services.notify import notify
 from app.willhaben.account import ACTION_DELETE, AccountClient, AdvertList, EndpointUnknown, has_ended
 from app.willhaben.parse import extract_ad_id
@@ -526,7 +526,8 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
                 photos.append(p)
         with session() as db:                # the ad's piece count keeps "N Stück verfügbar" in a revised text
             row = db.get(MyAd, ad_id)
-        prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "", rules=get_setting("reply_rules"),
+        prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "",
+                                  rules=selling.append_to(get_setting("reply_rules"), for_ad=True),
                                   n_images=len(photos), current=current, specs=None, product_name=None,
                                   instruction=instruction, quantity=row.quantity if row else None)
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA, images=photos)

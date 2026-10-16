@@ -25,7 +25,7 @@ from app.llm.prompts import (
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, stock
+from app.services import my_ads, selling, stock
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -498,6 +498,8 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         stock_now = None
     else:
         rules = get_setting("reply_rules")
+        if conv.role == "seller":                     # Settings → Selling preferences, before the per-answer blocks
+            rules = selling.append_to(rules)
         with session() as db:
             ad = current_ad(db, conv.ad_id) if conv.ad_id else None
         floor = ad.min_price if ad and conv.role == "seller" else None
@@ -740,6 +742,8 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
                                   asking=min_price.asking_value((conv.ad_context or {}).get("price") if conv else None),
                                   intent=d.intent)
         why += stock.blockers(ad, d.text)   # never more pieces than are left (app/services/stock.py)
+        if selling.contact_hits(d.text):
+            why.append(t("Answer contains an e-mail address or link – willhaben censors them"))
         why += topic.blockers(d.text)     # staying on topic: no instruction words or AI talk, no essays
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":

@@ -29,7 +29,7 @@ from sqlmodel import select
 from app.db import Conversation, Shipment, current_ad, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services.shipping_tariffs import CARRIERS, Option, options_for
-from app.services import timeline
+from app.services import selling, timeline
 
 log = logging.getLogger(__name__)
 
@@ -117,10 +117,14 @@ def config() -> dict[str, Any]:
 
 # ------------------------------------------------------------------ quotes
 def quote(parcel: dict[str, Any] | None) -> list[Option]:
-    """Options of the enabled carriers that fit the parcel, cheapest first."""
+    """Options of the enabled carriers that fit the parcel: the owner's preferred carrier, then delivery type first
+    (Settings → Selling preferences), otherwise cheapest first. Without a preference: cheapest first."""
     if not parcel:
         return []
-    return options_for(parcel, enabled_carriers())
+    carrier, delivery = selling.shipping_preference()
+    return sorted(options_for(parcel, enabled_carriers()),
+                  key=lambda o: (bool(carrier) and o.carrier != carrier, delivery != "any" and o.delivery != delivery,
+                                 o.price, o.carrier))
 
 
 def all_options(parcel: dict[str, Any] | None) -> list[tuple[Option, str | None]]:
@@ -204,7 +208,7 @@ def set_parcel(shipment_id: int, parcel: dict[str, Any], remember: bool = True) 
 
 
 def _auto_option(s: Shipment) -> Shipment:
-    """Keep the chosen option if it still fits, else take the cheapest."""
+    """Keep the chosen option if it still fits, else the first online one of `quote` (preferred, else cheapest)."""
     opts = quote(s.parcel)
     if not opts:
         return update(s.id, option=None, price=None)
@@ -740,7 +744,9 @@ def offer_text(s: Shipment, conv_title: str | None) -> list[str]:
     r = s.recipient or {}
     lines = [f"{r.get('name', '')}, {r.get('zip', '')} {r.get('city', '')}", conv_title or ""]
     if o:
-        lines.append(t("Cheapest: {option} – {price}", option=o.label(), price=_eur(o.price)))
+        cheapest = min((x.price for x in quote(s.parcel) if x.online), default=o.price)
+        lines.append(t("Cheapest: {option} – {price}", option=o.label(), price=_eur(o.price)) if o.price <= cheapest
+                     else t("Preferred: {option} – {price}", option=o.label(), price=_eur(o.price)))
     if s.agreed_price:
         lines.append(t("Agreed price: {price}", price=_eur(s.agreed_price)))
     if s.payment_claimed_at:

@@ -37,7 +37,7 @@ from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import health, human_pace, jobs
 from app.services import min_price as min_price_svc
-from app.services import scam
+from app.services import scam, selling
 from app.services import stock
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
@@ -218,7 +218,8 @@ templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _payliver
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
-templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
+templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,
+                             sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
                              wh_budget=requests_per_hour, wh_popup=access_stats.popup,
@@ -882,9 +883,10 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
         _background.add(task)
         task.add_done_callback(_background.discard)
     drafts = chats.drafts_of(conversation_id)
+    open_draft = next((d for d in drafts if d.status == "draft"), None)    # the one the composer shows
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, live_state=chats.live_state(conversation_id), meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
-                  sale=sold.state_for(conv),
+                  sale=sold.state_for(conv), contact_warn=selling.contact_hits(open_draft.text) if open_draft else [],
                   gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort),
                   **_chat_list(show_hidden or bool(conv.hidden_at)))
 
@@ -906,7 +908,7 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
         far = 10 ** 9
         options = sorted(options, key=lambda o: ((near.get(o.carrier) or [{}])[0].get("dist_m") or far, o.price))
     return {"shipment": s, "ship_options": options, "ship_near": near, "ship_sort": sort,
-            "fmt_dist": dropoff.fmt_dist,
+            "ship_pref": selling.preference_text(), "fmt_dist": dropoff.fmt_dist,
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
             "ship_all": shipping.all_options(s.parcel) if s else [], **(shipping.page_state(s) if s else {}),
@@ -1823,7 +1825,7 @@ async def capture_download(name: str):
 
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
-                     "claude", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
+                     "claude", "selling", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
                      "prices")   # settings.html groups
 
 
@@ -1992,6 +1994,8 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
+                  **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
+                      "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),
                   **({"site": _platform_row(sites[section])} if section in sites else {}),
                   **({"vpn": vpn.status()} if section == "vpn" or section == "willhaben" or section in sites else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
@@ -2239,14 +2243,17 @@ async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01
 
 @app.post("/settings")
 async def settings_save(request: Request):
-    """The general settings. Each section posts only its own fields (hidden "section"); without it, all of them."""
+    """The general settings. Each section posts only its own fields (hidden "section"); an unknown or missing section
+    saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
-    groups = {"rules": ("reply_rules",),
+    groups = {"rules": ("reply_rules",), "selling": selling.KEYS,
               "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
     section = str(form.get("section") or "")
-    todo = set(groups.get(section) or [k for g in groups.values() for k in g])
+    if section not in groups:
+        return back("/settings")
+    todo = set(groups[section])
 
     def num(key: str, default: int) -> int:
         try:
@@ -2278,7 +2285,9 @@ async def settings_save(request: Request):
     if "expiry_warn_days" in todo:
         set_setting("expiry_warn_days", str(max(0, num("expiry_warn_days", 3))))
         set_setting("myads_expired_days", str(max(0, num("myads_expired_days", 30))))
-    return back(f"/settings{'/' + section if section in groups else ''}?msg={quote(t('Changes saved'), safe='')}")
+    if "sell_handover" in todo:
+        selling.save(form)
+    return back(f"/settings/{section}?msg={quote(t('Changes saved'), safe='')}")
 
 
 def _alias(model: str) -> str:

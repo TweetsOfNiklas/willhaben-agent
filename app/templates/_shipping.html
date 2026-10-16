@@ -1,5 +1,5 @@
 {% import "_ui.html" as ui %}
-{# Shipping card on the chat page — same context as before (shipment, ship_options, ship_all, ship_near, ship_ask, ship_option, ship_blockers, ship_grace_left, ship_sender_ok, ship_sort, ship_carriers, ship_buy_title, fmt_dist). #}
+{# Shipping card on the chat page — same context as before (shipment, ship_options, ship_all, ship_near, ship_ask, ship_option, ship_blockers, ship_grace_left, ship_sender_ok, ship_sort, ship_carriers, ship_buy_title, fmt_dist, ship_pref = the owner's carrier/delivery preference). #}
 {% macro opt_action(o, primary, r) %}
   {% if shipment.status == 'draft' and o.online %}<form method="post" action="/shipments/{{ shipment.id }}/label"><input type="hidden" name="key" value="{{ o.key }}"><button class="btn btn-xs {{ 'btn-primary' if primary else '' }}" {% if not ship_sender_ok or not r.name %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button></form>
   {% elif shipment.status == 'awaiting' and o.online and o.key != shipment.option %}<form method="post" action="/shipments/{{ shipment.id }}/option"><input type="hidden" name="key" value="{{ o.key }}"><button class="btn btn-xs">{{ _("Use") }}</button></form>
@@ -51,6 +51,7 @@
     {% if shipment.status in ('buying', 'failed') %}<div class="flex flex-wrap gap-1.5"><form method="post" action="/shipments/{{ shipment.id }}/retry"><button class="btn btn-primary btn-sm" onclick="this.setAttribute('aria-busy','true')">{{ _("Retry") }}</button></form>{% if not shipment.label_path %}<form method="post" action="/shipments/{{ shipment.id }}/label"><button class="btn btn-sm">{{ _("Finish in browser") }}</button></form>{% endif %}</div>{% endif %}
     {% if ship_options %}
     <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted">{{ _("Sort:") }} <a href="?sort=price#shipping" class="hover:underline {{ 'font-semibold text-base-content' if ship_sort == 'price' else '' }}">{{ _("cheapest") }}</a> · <a href="?sort=near#shipping" class="hover:underline {{ 'font-semibold text-base-content' if ship_sort == 'near' else '' }}">{{ _("nearest drop-off") }}</a>{% if not ship_near %} <span>· {{ _("drop-off points need your sender address") }}</span>{% endif %}</div>
+    {% if ship_pref %}<div class="text-xs text-muted" data-ship-pref>{{ _("Preference: {pref}", pref=ship_pref) }} · <a href="/settings/selling" class="hover:underline">{{ _("Selling preferences") }}</a></div>{% endif %}
     <div class="flex flex-col text-[12.5px]">
       {% set cheapest = ship_options|map(attribute='price')|min %}
       {% for o in ship_options %}

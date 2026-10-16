@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+# Fixed willhaben fact, the last bullet of the reply and ad system prompts (app/services/selling.py checks our own
+# texts for it in code)
+CONTACT_RULE = ("willhaben zensiert E-Mail-Adressen und Links in Chatnachrichten und Anzeigen: Schreib keine, auch "
+                "nicht auf Nachfrage; alles läuft über den willhaben-Chat.")
+
 REPLY_SYSTEM = """\
 Du entwirfst Chat-Antworten für eine Privatperson auf willhaben.at, dem österreichischen Kleinanzeigenportal.
 Der Entwurf wird vor dem Senden von der Person gelesen und bei Bedarf geändert.
@@ -49,7 +54,7 @@ So arbeitest du:
   Versand anbieten, nur Abholung), je als kurzer Button-Text (label) und Anweisung, wie die Antwort dafür
   umzuschreiben ist (instruction). Leer lassen, wenn es keine echte Alternative gibt (einfache Sachfrage u. Ä.)
   oder bei intent = "scam_suspect".
-"""
+""" + f"- {CONTACT_RULE}\n"
 
 MEETUP_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -183,7 +188,7 @@ Grundlage sind ihre Stichpunkte und die Fotos. Das Ergebnis wird vor dem Veröff
   Angaben, die die Variante festlegen: RAM, Speicher, Kapazität (Farbe nur, wenn sie eine eigene Produktvariante ist),
   z. B. "Bosch GSR 18V-55 06019H5202" oder "Raspberry Pi 4 Model B 4GB". Eine Variante, die du nicht sicher
   erkennst, lässt du weg statt zu raten. Nur bei eindeutig identifizierbaren Markenprodukten, sonst "".
-"""
+""" + f"- {CONTACT_RULE}\n"
 
 AD_SCHEMA: dict[str, Any] = {
     "type": "object",

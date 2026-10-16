@@ -75,7 +75,7 @@
       {% if d.auto %}<span class="whitespace-nowrap"><span class="mr-2" aria-hidden="true">·</span>{{ _("automatic") }}</span>{% endif %}
     </div>
     {# 2 · what to read before sending #}
-    {% if scam or check.notes or check.missing %}
+    {% if scam or check.notes or check.missing or contact_warn %}
     <div role="{{ 'alert' if scam else 'note' }}" data-draft-check
          class="flex gap-2.5 rounded-[10px] border px-3.5 py-2.5 text-[13px] {{ 'border-error/30 bg-bad-soft' if scam else 'border-warning/30 bg-warn-soft' }}">
       <span class="mt-px {{ 'text-error' if scam else 'text-warning' }}">{{ ui.icon('alert', 16) }}</span>
@@ -83,6 +83,7 @@
         <div class="font-semibold {{ 'text-error' if scam else 'text-warning' }}">{{ _("Caution: possible scam attempt.") if scam else _("Check before sending") }}</div>
         {% for n in check.notes %}<p class="break-words">{{ n }}</p>{% endfor %}
         {% if check.missing %}<p class="break-words">{{ _("Claude needs info: {items}", items=check.missing|join(', ')) }}</p>{% endif %}
+        {% if contact_warn %}<p class="break-words" data-contact-warn>{{ _("willhaben censors e-mail addresses and links – remove: {hits}", hits=contact_warn|join(', ')) }}</p>{% endif %}
       </div>
     </div>
     {% endif %}

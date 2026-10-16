@@ -17,7 +17,7 @@ from app.db import AdDraft, get_setting, session, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_prompt, ad_refine_prompt
-from app.services import geizhals
+from app.services import geizhals, selling
 from app.willhaben.public import WillhabenError, get_public
 from app.services import timeline
 from app.services.shipping import clean_parcel
@@ -99,9 +99,10 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
         db.refresh(draft)
     timeline.update_context(draft_id=draft.id)
     paths = save_images(draft.id, files)
+    rules = selling.append_to(get_setting("reply_rules"), for_ad=True)
     try:
         result = await get_backend("ads").complete(
-            system=AD_SYSTEM, prompt=ad_prompt(notes, get_setting("reply_rules"), len(paths), quantity=owner_quantity),
+            system=AD_SYSTEM, prompt=ad_prompt(notes, rules, len(paths), quantity=owner_quantity),
             schema=AD_SCHEMA, images=[Path(p) for p in paths])
     except LLMError as e:
         with session() as db:
@@ -274,7 +275,8 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
         current["description"] = (d.description or "").replace(block, "").rstrip()
     # an unconfirmed variant's sheet is no "reliable" data for a plain revision; the explicit check still uses it
     trusted = (d.geizhals or {}).get("verified") is not False or instruction == RECONCILE_INSTRUCTION
-    prompt = ad_refine_prompt(notes=d.input_text, rules=get_setting("reply_rules"), n_images=len(d.image_paths),
+    prompt = ad_refine_prompt(notes=d.input_text, rules=selling.append_to(get_setting("reply_rules"), for_ad=True),
+                              n_images=len(d.image_paths),
                               current=current, specs=match.get("specs") if trusted else None,
                               product_name=match.get("name"), instruction=instruction, quantity=d.quantity)
     try:
@@ -369,13 +371,14 @@ async def add_manual_category(draft_id: int, code: str) -> AdDraft:
 
 
 def parse_shipping(form: Any) -> dict[str, Any]:
-    """Übergabe fields of the publish form → {"handover", "paylivery", "size", "carrier"}; default pickup.
+    """Übergabe fields of the publish form → {"handover", "paylivery", "size", "carrier"}; without a valid handover the
+    owner's usual one (Settings → Selling preferences, pickup unless changed there).
     Everything but pickup NEEDS LIVE VERIFICATION (insert.set_delivery)."""
     from app.willhaben import insert
 
-    handover = str(form.get("handover") or "pickup")
+    handover = str(form.get("handover") or "")
     if handover not in insert.HANDOVERS:
-        handover = "pickup"
+        handover = selling.handover()
     if handover == "pickup":
         return {"handover": "pickup"}
     size = str(form.get("parcel_size") or "").upper()
@@ -391,7 +394,8 @@ _publishing: set[int] = set()     # drafts with a publish in flight (double clic
 async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None = None,
                             shipping: dict[str, Any] | None = None, job: Any = None):
     """Publish the saved draft as free private ad: the chosen category option and field values from the form.
-    shipping: parse_shipping() result; None = pickup only (the live-verified path). job: jobs.Job for progress."""
+    shipping: parse_shipping() result; None = the owner's usual handover (Settings → Selling preferences; pickup, the
+    live-verified path, unless changed there). job: jobs.Job for progress."""
     from app.willhaben import insert
 
     if draft_id in _publishing:
@@ -491,6 +495,9 @@ def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: d
         raise insert.InsertError("Bitte zuerst eine Kategorie wählen")
     if not (d.title or "").strip() or not (d.description or "").strip():
         raise insert.InsertError("Titel und Beschreibung dürfen nicht leer sein")
+    if hits := selling.contact_hits(f"{d.title}\n{d.description}"):
+        raise insert.InsertError(f"willhaben zensiert E-Mail-Adressen und Links – bitte „{hits[0]}“ aus Titel und "
+                                 "Beschreibung entfernen")
     chosen = opts[option]
     attrs, labels = {}, {}
     for f in chosen["fields"]:
@@ -500,7 +507,7 @@ def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: d
             raise insert.InsertError(f"Pflichtfeld „{f['label']}“ fehlt")
         attrs[f["code"]], labels[f["code"]] = (code, allowed[code]), f["label"]
 
-    shipping = shipping if shipping and shipping.get("handover") in insert.HANDOVERS else {"handover": "pickup"}
+    shipping = shipping if shipping and shipping.get("handover") in insert.HANDOVERS else parse_shipping({})
     if shipping.get("paylivery") and not shipping.get("size"):
         raise insert.InsertError("Bitte eine Paketgröße für PayLivery wählen")
     if shipping != plan.get("shipping") or plan.get("selected") != option:   # remembered for the form

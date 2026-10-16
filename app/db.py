@@ -591,6 +591,13 @@ DEFAULT_SETTINGS: dict[str, str] = {
         "- Keine Termine, Adressen oder Telefonnummern zusagen, die nicht in der Anweisung zur Anzeige stehen."
     ),
     "send_verified": "0",
+    # Settings → Selling preferences (app/services/selling.py): what Claude tells buyers and writes into new ads
+    "sell_handover": "pickup",          # pickup | shipping | both
+    "sell_shipping_cost": "buyer",      # buyer | included (in the price)
+    "sell_delivery": "any",             # any | shop (parcel shop/locker) | home
+    "sell_carrier": "",                 # shipping_tariffs.CARRIERS key; "" = cheapest
+    "sell_payment": "transfer,paylivery,cash",
+    "sell_notes": "",
     "reply_humanize": "1",      # auto replies: read receipt + randomized delay (app/services/humanize.py)
     "reply_delay_min_s": "40",
     "reply_delay_max_s": "180",
