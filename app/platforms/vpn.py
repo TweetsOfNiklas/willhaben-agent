@@ -33,8 +33,11 @@ Failover (Tunnel.refused() → failed()): a site's refusal of its live server co
 (network errors: CONFIRM_UNREACHABLE), with no answer the site accepted in between; until then the request asks again
 through the same server. Sites like eBay (Akamai) refuse at random now and then: one 403 says little about the
 server. A refusal that counts marks the server for the site; the site moves to the other live server when it has
-not refused that one too (no pause, no search: untested there until a search asks it), else it waits (VpnWait) for a
-search (vpn_check.trigger(): a site that refuses again gets one after a growing back-off, never only the regular one).
+not refused that one too (no pause, no search: untested there until a search asks it), else to a standby server: one
+it answered through lately (the `ok` notes of the searches and of "Test again", standby()), started in seconds
+(failover(): STANDBY_TRIES at most). Only when none of them starts does it wait (VpnWait) for a search
+(vpn_check.trigger(): a site that refuses again gets one after a growing back-off, never only the regular one). The
+same holds for a site whose only live server no longer starts (Tunnel.ensure()).
 
 Fail closed: with the switch on and no working server, or for a site whose server refused it (it waits for the search:
 VpnWait), `Tunnel.ensure()` raises; nothing falls back to the home IP.
@@ -76,6 +79,7 @@ MAX_LIVE = 2                   # live connections at most (the search's tunnels 
 CONFIRM = 3                    # refusals in a row (403/429/bot check) before a site leaves its live server
 CONFIRM_UNREACHABLE = 2        # ... network errors in a row (a single timeout is no dead server)
 CONFIRM_WINDOW_S = 900         # older refusals no longer count
+STANDBY_TRIES = 3              # standby servers a site tries (start + reach its host) before it waits for a search
 SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
 DRAIN_S = 15                   # a server switched away from stops once its requests in flight ended, or after this
 HANDSHAKE_S = 5                # no WireGuard handshake within this: the server is dead (an answer takes < 1 s)
@@ -981,6 +985,66 @@ async def prune() -> None:
             await conn.drop(s)
 
 
+def standby(pid: str, exclude: Collection[str] = ()) -> list[str]:
+    """The servers this site answered through lately (oks(): a search's or "Test again"'s answer, kept MARK_TTL_S),
+    newest first: the ones the source allows, the site has not refused since, and no process runs on (never two
+    on one server). The quick failover's candidates."""
+    ok, refused, busy = oks(pid), marks(pid), conn.busy() | set(live_servers())
+    return [n for n in sorted(ok, key=ok.get, reverse=True)
+            if n not in refused and n not in busy and n not in exclude and allowed(n)]
+
+
+def _jobs_track(label: str) -> Any:
+    from app.services import jobs
+
+    return jobs.track("vpn-failover", label, lane="vpn", link="/settings/vpn", quiet=True)
+
+
+async def failover(pid: str, host: str, label: str = "") -> str | None:
+    """Move this site to a standby server (standby()) beside the live servers the other sites keep using: the first
+    that starts and reaches `host` within STANDBY_TRIES. Returns its name, or None (no room beside two live servers
+    other sites use, none on the list, none started, or a search runs: it takes the site in). A server that does
+    not start or reach the host is marked for the site. Shown as a quiet job (lane "vpn": an open settings page
+    refreshes)."""
+    from app.services import vpn_check
+
+    if vpn_check.running() or conn.closing:
+        return None
+    async with _lock("failover"):
+        st = conn_state()
+        live, assign = live_servers(st), dict(st.get("assign") or {})
+        if (own := server_for(pid, st)) is not None and own not in marks(pid) and conn.route(own) is not None:
+            return own                                # another request of the site moved it meanwhile
+        on = {p for p, _ in users()} - {pid}
+        used = {server_for(p, st) for p in on if not paused(p)}
+        keep = [s for s in live if s in used]
+        if len(keep) >= MAX_LIVE:
+            return None
+        tried: list[str] = []
+        for name in standby(pid)[:STANDBY_TRIES]:
+            tried.append(name)
+            servers = [*keep, name]
+            new = {p: s for p, s in assign.items() if p != pid and s in keep} | {pid: name}
+            try:
+                async with _jobs_track(t("VPN: {site} moves to {server}", site=label or pid, server=name)) as job:
+                    await switch(servers, new, {name: host})
+                    job.result = t("{site} now through {server}", site=label or pid, server=name)
+            except Unreachable as e:
+                log.warning("VPN %s: standby server %s %s", pid, name, e)
+                mark(pid, name, "unreachable")       # not "dead": that one a search confirms on its own
+                continue
+            except OSError as e:
+                log.warning("VPN %s: standby server %s does not start: %s", pid, name, e)
+                mark(pid, name, "broken")
+                continue
+            unpause(pid)
+            log.warning("VPN %s: failover to standby server %s (live now %s)", pid, name, " + ".join(servers))
+            return name
+        if tried:
+            log.warning("VPN %s: no standby server started (%s)", pid, ", ".join(tried))
+        return None
+
+
 # ------------------------------------------------------------------ one site's view of the connections
 _strikes: dict[tuple[str, str], list[float]] = {}   # (site, server) -> its refusals in a row (Tunnel.refused())
 
@@ -1015,6 +1079,8 @@ class Tunnel:
         for _ in range(MAX_LIVE + 1):
             self._check()
             name = server_for(self.pid)
+            if name is None and await failover(self.pid, self.host, self.label):
+                continue                              # a standby server took over
             if name is None:
                 break
             if (route := conn.route(name)) is not None:
@@ -1082,7 +1148,8 @@ class Tunnel:
     async def failed(self, route: Route | None, reason: str, detail: str = "") -> bool:
         """The site refused its server (`blocked`, `rate`, `botcheck`) or got no answer through it (`unreachable`):
         mark the server for the site. When the other live server is one the site has not refused, the site moves
-        there (untested there until a search asks it; no pause, no search); else it pauses (its requests wait) and
+        there (untested there until a search asks it; no pause, no search); else to a standby server it answered
+        through lately (failover()); else it pauses (its requests wait) and
         asks for a search, whose guards may let it wait; the other sites go on. Nothing for a route that is no
         longer the site's (a switch-over, a dead process: ensure() starts it again), for a site paused already, or
         for the bot checks of a site a search found changed. `detail` ("HTTP 403", the network error) goes to the log
@@ -1091,12 +1158,28 @@ class Tunnel:
             return False
         assert route is not None
         mark(self.pid, route.name, reason)
+        if reason == "unreachable" and not await conn.reach(route.name, self.host):
+            # the tunnel itself no longer gets through: the server is down for every site, not only this one.
+            # It leaves (drop()), so its sites take the other live server or a standby one (ensure() → failover())
+            # and its place is free for a standby server.
+            log.warning("VPN %s: server %s does not get through any more (%s), it leaves", self.pid, route.name,
+                        detail or "-")
+            await drop(route.name, t("{server} {reason}", server=route.name, reason=reason_label(reason)))
+            if server_for(self.pid) is not None or await failover(self.pid, self.host, self.label):
+                return True
+            pause(self.pid, reason, detail)
+            _search(self.pid, reason, detail)
+            return True
         st = conn_state()
         refused = marks(self.pid)
         if (other := next((s for s in live_servers(st) if s != route.name and s not in refused), None)) is not None:
             update_conn(assign={p: s for p, s in (st.get("assign") or {}).items() if p != self.pid})
             log.warning("VPN %s: server %s %s (%s), moved to %s", self.pid, route.name, reason, detail or "-", other)
             await prune()                        # the refused server stops once no site uses it
+            return True
+        if (spare := await failover(self.pid, self.host, self.label)) is not None:
+            log.warning("VPN %s: server %s %s (%s), moved to standby %s", self.pid, route.name, reason, detail or "-",
+                        spare)
             return True
         pause(self.pid, reason, detail)
         log.warning("VPN %s: server %s %s (%s), asking for a search", self.pid, route.name, reason, detail or "-")

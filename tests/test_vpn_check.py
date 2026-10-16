@@ -979,8 +979,10 @@ async def test_a_block_between_searches_triggers_one_search_not_a_storm(sites, f
     assert vpn.conn_state()["pending"] is None and len(vpn.conn_state()["auto"]) == 2
 
 
-async def test_a_site_that_refuses_again_gets_its_next_search_after_a_growing_back_off(sites, fake):
-    """Not only the regular search hours later: a site whose new server refuses it too waits RETRY_S, longer each time."""
+async def test_a_site_that_refuses_again_gets_its_next_search_after_a_growing_back_off(sites, fake, monkeypatch):
+    """Not only the regular search hours later: a site whose new server refuses it too waits RETRY_S, longer each time
+    (with no standby server to take: tests/test_vpn.py has those)."""
+    monkeypatch.setattr(vpn, "STANDBY_TRIES", 0)
     _collection(N(1), N(2), N(3))
     a, b = sites({N(1): [NO] * vpn.CONFIRM, N(2): [PAGE] + [NO] * vpn.CONFIRM, N(3): [PAGE, PAGE]},
                  {N(1): [PAGE], N(2): [PAGE], N(3): [PAGE, PAGE]})

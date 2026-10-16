@@ -202,5 +202,8 @@
  "Test again": "Erneut testen",
  "Testing…": "Testet …",
  "Tested again {time}": "Erneut getestet {time}",
- "Test started": "Test gestartet"
+ "Test started": "Test gestartet",
+ "VPN: {site} moves to {server}": "VPN: {site} wechselt zu {server}",
+ "{site} now through {server}": "{site} jetzt über {server}",
+ "via {server}": "über {server}"
 }

@@ -403,6 +403,60 @@ async def test_a_site_does_not_move_to_a_live_server_it_refused_lately(fake, no_
     assert vpn.paused("willhaben") == ("blocked", "HTTP 403") and len(no_search) == 1
 
 
+async def test_a_refusal_with_nowhere_left_moves_the_site_to_a_standby_server_it_answered_lately(fake, no_search):
+    """The searches note the servers each site answered through: a refused site takes one of them in seconds, the
+    newest first, instead of waiting for a search; one that does not start is marked and the next one tried."""
+    _collection("at-vie-wg-001", "at-vie-wg-002", "de-fra-wg-001", "de-fra-wg-002", "de-ber-wg-001")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    for name, age in (("de-ber-wg-001", 30), ("de-fra-wg-001", 20), ("de-fra-wg-002", 10), ("at-vie-wg-002", 5)):
+        vpn.mark("willhaben", name, "ok", ttl=3600 - age)               # answered lately, newest last
+    vpn.mark("willhaben", "at-vie-wg-002", "blocked")                  # ... and refused since: not a standby
+    fake.unreachable = {"de-fra-wg-002"}                               # starts, but does not reach the site
+    assert vpn.standby("willhaben") == ["de-fra-wg-002", "de-fra-wg-001", "de-ber-wg-001"]
+    wh, ka = vpn.tunnel_for("willhaben"), vpn.tunnel_for("kleinanzeigen")
+    r = await wh.ensure()
+    await ka.ensure()
+    assert await wh.failed(r, "blocked", "HTTP 403") is True
+    assert vpn.paused("willhaben") is None and no_search == []          # no pause, no search
+    assert vpn.server_for("willhaben") == "de-fra-wg-001" and vpn.conn_state()["assign"]["willhaben"] == "de-fra-wg-001"
+    assert vpn.marks("willhaben")["de-fra-wg-002"][1] == "unreachable"
+    assert vpn.live_servers() == ["at-vie-wg-001", "de-fra-wg-001"]     # the other site keeps its server
+    assert vpn.server_for("kleinanzeigen") == "at-vie-wg-001"
+    assert (await wh.ensure()).name == "de-fra-wg-001"
+    assert "de-fra-wg-002" not in fake.running()
+
+
+async def test_a_server_that_stops_answering_leaves_and_every_site_on_it_fails_over(fake, no_search):
+    _collection("at-vie-wg-001", "de-fra-wg-001", "de-fra-wg-002")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    for pid in ("willhaben", "kleinanzeigen"):
+        vpn.mark(pid, "de-fra-wg-001", "ok")
+    wh, ka = vpn.tunnel_for("willhaben"), vpn.tunnel_for("kleinanzeigen")
+    r = await wh.ensure()
+    assert (await ka.ensure()) == r
+    fake.down = {"at-vie-wg-001"}                                      # the tunnel no longer gets through
+    assert await wh.refused(r, "unreachable", "timed out") is False
+    assert await wh.refused(r, "unreachable", "timed out") is True
+    assert vpn.live_servers() == ["de-fra-wg-001"] and "at-vie-wg-001" not in fake.running()
+    assert (await wh.ensure()).name == "de-fra-wg-001" and (await ka.ensure()).name == "de-fra-wg-001"
+    assert vpn.paused("willhaben") is None and vpn.paused("kleinanzeigen") is None and no_search == []
+
+
+async def test_without_a_standby_server_the_site_still_waits_for_a_search(fake, no_search):
+    _collection("at-vie-wg-001", "de-fra-wg-001")
+    _on("willhaben")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    vpn.mark("willhaben", "de-fra-wg-001", "ok")
+    fake.dead = {"de-fra-wg-001"}                                      # no handshake: marked, not taken
+    tn = vpn.tunnel_for("willhaben")
+    r = await tn.ensure()
+    assert await tn.failed(r, "blocked", "HTTP 403") is True
+    assert vpn.paused("willhaben") == ("blocked", "HTTP 403") and no_search == [("willhaben", "blocked", "HTTP 403")]
+    assert vpn.marks("willhaben")["de-fra-wg-001"][1] == "unreachable" and vpn.standby("willhaben") == []
+
+
 async def test_a_switch_over_lets_requests_in_flight_finish_first(fake, no_search, monkeypatch):
     monkeypatch.setattr(vpn, "DRAIN_S", 5)
     _collection("at-vie-wg-001", "at-vie-wg-002")

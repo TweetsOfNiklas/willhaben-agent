@@ -462,7 +462,8 @@ def retesting() -> bool:
 
 def retest() -> str | None:
     """"Test again": every site with its VPN on (Geizhals too) asks once through the server it uses now, as its own
-    visitor and judged like a search's ask; no other server starts, nothing switches, nothing is marked. In the
+    visitor and judged like a search's ask; no other server starts, nothing switches, no refusal is marked (an
+    answer is: it keeps the server on the site's standby list, vpn.standby()). In the
     background (the header lists the job); None when it started, else why not."""
     global _retest
     if running():
@@ -500,6 +501,8 @@ async def _retest_all() -> None:
                 results[tg.pid] = {"server": name, "verdict": "unreachable", "detail": ""}
                 return
             a = await _ask(sh, route, tg)
+            if a.verdict in ("ok", "site_error"):        # it answers there: kept on the site's standby list
+                vpn.mark(tg.pid, route.name, "ok")
             results[tg.pid] = {"server": route.name, "verdict": a.verdict, "detail": a.detail, "secs": a.secs}
             job.progress(len(results), t("{site} through {server}", site=tg.name, server=route.name))
 
@@ -1052,6 +1055,8 @@ class _Walk:
                 break
             if srv.confirmed or srv.name in vpn.conn.busy() or srv.name in vpn.live_servers():
                 continue
+            if srv.name in self.sh.before:            # in use until it went down (maintenance): its sites' marks
+                continue                              # ("unreachable", an hour) are enough, not a day
             try:
                 await vpn.conn.start_search(srv.name, self.host_for(srv.name))
             except (OSError, vpn.Unreachable):
