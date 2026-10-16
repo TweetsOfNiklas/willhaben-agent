@@ -42,6 +42,7 @@ from app.services import scam, selling
 from app.services import stock
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
+from app.services import search_agents as search_agents_svc
 from app.services.search_agents import refile_screened, run_agent
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
@@ -211,6 +212,7 @@ from app.services.price_gauge import gauge as _price_gauge  # noqa: E402
 from app.services.deals import level_label as _level_label  # noqa: E402
 
 templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_label)
+templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)   # the agent drawer's Geizhals rule
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -622,7 +624,8 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
                       screen_hide: list[str] = Form([]), drop_query: list[int] = Form([]), drop_term: list[str] = Form([]),
                       sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: list[str] = Form([]),
                       add_price_from: list[str] = Form([]), add_price_to: list[str] = Form([]),
-                      gh_on: str | None = Form(None), gh_pct: str = Form(""), gh_check: str | None = Form(None)):
+                      gh_on: str | None = Form(None), gh_pct: str = Form(""), gh_level: str = Form("pct"),
+                      gh_check: str | None = Form(None)):
     from app.services import search_agents
 
     # the drawer's searches: terms to add (each added row and the add row send keyword, from and to, so the three
@@ -641,8 +644,10 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         a.name = name.strip() or a.name
         a.interval_s = search_agents.agent_interval(a, interval_min * 60)
         a.notify, a.notify_price_drops = bool(notify_on), bool(drops_on)
-        pct = _num_or_none(gh_pct)
-        a.geizhals_pct = min(max(int(pct if pct is not None else 30), 1), 95) if gh_on else None
+        pct = _num_or_none(gh_pct)     # the rule: a price zone or cheaper (gh_level), or at least gh_pct % below
+        level = gh_level if gh_on and gh_level in search_agents.LEVELS else None
+        a.geizhals_level = level
+        a.geizhals_pct = min(max(int(pct if pct is not None else 30), 1), 95) if gh_on and not level else None
         db.add(a)
         db.commit()
         db.refresh(a)

@@ -41,6 +41,9 @@ class SearchAgent(SQLModel, table=True):
     screen_min: str | None = None       # match | fair | good: lowest result that still pushes
     screen_hide: str | None = None      # comma list of screening issues that keep a hit from pushing; None = defaults, "-" = none
     geizhals_pct: int | None = None     # push only ads at least this many % below the Geizhals new price; None = off
+    # or: push only ads in this price zone or a cheaper one (bargain | cheap | fair, app/services/price_zones.py);
+    # set instead of geizhals_pct, never both
+    geizhals_level: str | None = None
     geizhals_check: bool | None = None  # with Claude screening: Claude checks each new hit's Geizhals product and
                                         # looks for the right one (app/services/geizhals_check.py)
     # created from a product search: several keyword searches per check (source_url/webapi_url mirror the first)

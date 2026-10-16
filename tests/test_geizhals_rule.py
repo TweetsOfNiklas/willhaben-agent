@@ -303,3 +303,43 @@ def test_settings_drawer_and_pages(fake):
         assert 'title="By the Geizhals new price alone; the price check of the ad also weighs comparable ads."' in page
         assert "new from €\xa0500 · 80\xa0% less" in page              # no badge for a defective item: the saving
         assert '>Defekt</span>' in page and "bg-bad-soft text-error" in page     # its condition as a pill
+
+
+def test_the_price_zone_rule():
+    """A price zone instead of a %: the zones of Settings → Prices (used 35/55/75/90, new 70/85/100/115 % of new)."""
+    a = SearchAgent(name="x", source_url="x", webapi_url="x", geizhals_level="cheap")
+    hit = lambda price, cond=None: Hit(agent_id=1, ad_id="1", heading="iPhone", url="x", price=price,  # noqa: E731
+                                       geizhals=dict(GH), item_condition=cond)
+    assert search_agents.geizhals_rule(a)
+    assert geizhals_passes(a, hit(150.0)) and geizhals_passes(a, hit(274.99))       # bargain, cheap: used below 55 %
+    assert not geizhals_passes(a, hit(275.0)) and not geizhals_passes(a, hit(400.0))  # fair, expensive
+    assert geizhals_passes(a, hit(400.0, "new")) and not geizhals_passes(a, hit(425.0, "new"))   # new: below 85 %
+    assert geizhals_passes(a, hit(450.0, "defect"))                                  # nothing to compare
+    assert geizhals_passes(a, Hit(agent_id=1, ad_id="1", heading="x", url="x", price=450.0, geizhals={}))
+    a.geizhals_level = "bargain"
+    assert geizhals_passes(a, hit(174.99)) and not geizhals_passes(a, hit(175.0))
+    a.geizhals_level = "fair"
+    assert geizhals_passes(a, hit(374.99)) and not geizhals_passes(a, hit(375.0))
+
+
+def test_the_drawer_saves_a_price_zone(fake):
+    from app.main import app
+
+    a = create_agent("https://fake.example/s/iphone")
+    with TestClient(app) as c:
+        form = {"name": a.name, "interval_min": "10", "gh_pct": "25"}
+        page = c.get("/agents").text
+        assert 'name="gh_level"' in page and "Bargain (used below 35 %, new below 70 % of the new price)" in page
+        c.post(f"/agents/{a.id}/edit", data={**form, "gh_on": "on", "gh_level": "bargain"})
+        with session() as db:
+            row = db.get(SearchAgent, a.id)
+            assert (row.geizhals_level, row.geizhals_pct) == ("bargain", None)
+        assert "Geizhals: bargain or cheaper" in c.get("/agents").text
+        c.post(f"/agents/{a.id}/edit", data={**form, "gh_on": "on", "gh_level": "pct"})      # own percentage
+        with session() as db:
+            row = db.get(SearchAgent, a.id)
+            assert (row.geizhals_level, row.geizhals_pct) == (None, 25)
+        c.post(f"/agents/{a.id}/edit", data={**form, "gh_level": "cheap"})                  # switch off
+        with session() as db:
+            row = db.get(SearchAgent, a.id)
+            assert (row.geizhals_level, row.geizhals_pct) == (None, None)

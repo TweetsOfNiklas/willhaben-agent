@@ -624,7 +624,7 @@ async def _run_agent(agent_id: int) -> RunResult:
 
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
     gh_check = bool(agent.screen and agent.geizhals_check)
-    if (agent.geizhals_pct or agent.screen) and to_notify:   # the screening rates against the new price too
+    if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
     # Claude checks the products before the rule and the screening use their prices (and, with room to spare, older
     # unchecked hits of the agent: no Claude call when there are none)
@@ -640,7 +640,7 @@ async def _run_agent(agent_id: int) -> RunResult:
     asked: set[int] = set()
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         asked = await screening.screen_all(agent_id, to_screen)
-    if (agent.screen or agent.geizhals_pct) and to_notify:
+    if (agent.screen or geizhals_rule(agent)) and to_notify:
         _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
@@ -691,12 +691,40 @@ def _geizhals_cents(hit: Hit) -> tuple[int, int] | None:
     return None if new_price <= 0 or hit.price is None else (round(hit.price * 100), new_price)
 
 
+LEVELS = ("bargain", "cheap", "fair")     # the zones an agent's Geizhals rule can ask for (price_zones.NAMES order)
+
+
+def level_choices() -> list[tuple[str, str]]:
+    """The price zones the agent drawer offers, with where each ends now: [("cheap", "cheap (used below 75 %, new
+    below 100 % of the new price)"), ...]. The limits are Settings → Prices → Price rating."""
+    from app.services import deals, price_zones
+
+    z = price_zones.config()
+    def cap(s: str) -> str:
+        return s[:1].upper() + s[1:]
+
+    return [(lvl, t("{level} (used below {used} %, new below {new} % of the new price)", level=cap(deals.level_label(lvl)),
+                    used=z["used"][i], new=z["new"][i])) for i, lvl in enumerate(LEVELS)]
+
+
+def geizhals_rule(agent: SearchAgent) -> bool:
+    """Does the agent hold back ads by their Geizhals new price (a % or a price zone)?"""
+    return bool(agent.geizhals_pct or agent.geizhals_level in LEVELS)
+
+
 def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
-    """The agent's Geizhals rule: the price is at least `geizhals_pct` % below the Geizhals new price. Without the rule,
-    a known product (not found, Geizhals unreachable) or a price there is nothing to compare: the hit passes."""
+    """The agent's Geizhals rule: the price is at least `geizhals_pct` % below the Geizhals new price, or its price zone
+    (Settings → Prices → Price rating, used or new by the item's condition) is `geizhals_level` or cheaper. Without the
+    rule, a known product (not found, Geizhals unreachable), a price or, for a zone, with a defective item there is
+    nothing to compare: the hit passes."""
     cents = _geizhals_cents(hit)
-    if not agent.geizhals_pct or cents is None:
+    if not geizhals_rule(agent) or cents is None:
         return True
+    if agent.geizhals_level in LEVELS:
+        from app.services import deals, price_zones
+
+        lvl = deals.hit_level(hit)
+        return lvl is None or price_zones.NAMES.index(lvl) <= price_zones.NAMES.index(agent.geizhals_level)
     price, new_price = cents
     return price * 100 <= new_price * (100 - agent.geizhals_pct)
 

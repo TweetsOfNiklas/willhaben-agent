@@ -17,7 +17,6 @@
  "Choose at least one site.": "Wähle mindestens eine Seite.",
  "The searches have no search term to use on {name}.": "Die Suchen haben keinen Suchbegriff, der sich auf {name} verwenden lässt.",
  "Below the Geizhals price": "Unter dem Geizhals-Preis",
- "Only push ads at least this much cheaper than the lowest new price on Geizhals. Ads Geizhals does not know are pushed as usual; the others are filtered out.": "Nur Anzeigen pushen, die mindestens so viel billiger sind als der niedrigste Neupreis auf Geizhals. Anzeigen, die Geizhals nicht kennt, werden wie gewohnt gepusht; die anderen kommen zu „Aussortiert“.",
  "% below the Geizhals new price": "% unter dem Geizhals-Neupreis",
  "{pct} % below Geizhals": "{pct} % unter Geizhals",
  "Geizhals new from {price}": "Geizhals neu ab {price}",
@@ -33,5 +32,10 @@
  "Keep after all": "Doch behalten",
  "new": "neu",
  "Changes apply when you save.": "Änderungen gelten erst nach dem Speichern.",
- "Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.": "Jeder Suchbegriff läuft auf jeder angehakten Seite. Neue Suchen starten leise: was sie bei der ersten Prüfung finden, gilt als gesehen."
+ "Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.": "Jeder Suchbegriff läuft auf jeder angehakten Seite. Neue Suchen starten leise: was sie bei der ersten Prüfung finden, gilt als gesehen.",
+ "Only show and push ads in this price range, measured against the lowest new price on Geizhals. Dearer ones go to “Filtered” without a push; ads Geizhals does not know are pushed as usual.": "Nur Anzeigen in dieser Preisklasse anzeigen und pushen, gemessen am niedrigsten Neupreis auf Geizhals. Teurere kommen ohne Push zu „Aussortiert“; Anzeigen, die Geizhals nicht kennt, werden wie gewohnt gepusht.",
+ "Price range": "Preisklasse",
+ "Own percentage": "Eigener Prozentsatz",
+ "{level} (used below {used} %, new below {new} % of the new price)": "{level} (gebraucht unter {used} %, neu unter {new} % des Neupreises)",
+ "Geizhals: {level} or cheaper": "Geizhals: {level} oder billiger"
 }
