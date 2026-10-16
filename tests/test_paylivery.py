@@ -78,7 +78,7 @@ def _notice(ext_id: str, text: str, kind: str = "integration", minutes_ago: int 
 async def test_paid_notice_marks_shipment_and_runs_after_paid(seller_chat, monkeypatch):
     calls = []
 
-    async def fake_after(shipment_id):
+    async def fake_after(shipment_id, **kw):
         calls.append(shipment_id)
 
     monkeypatch.setattr(shipping, "after_paid", fake_after)
@@ -107,7 +107,7 @@ async def test_paid_notice_creates_shipment_when_none_is_open(monkeypatch):
             db.refresh(s)
             return s
 
-    async def fake_after(shipment_id):
+    async def fake_after(shipment_id, **kw):
         calls.append(shipment_id)
 
     monkeypatch.setattr(shipping, "detect", fake_detect)
@@ -120,7 +120,7 @@ async def test_paid_notice_creates_shipment_when_none_is_open(monkeypatch):
 async def test_old_notice_is_only_marked_seen(seller_chat, monkeypatch):
     calls = []
 
-    async def fake_after(shipment_id):
+    async def fake_after(shipment_id, **kw):
         calls.append(shipment_id)
 
     monkeypatch.setattr(shipping, "after_paid", fake_after)
@@ -216,7 +216,7 @@ async def test_paid_then_label_in_one_scan_without_shipment(monkeypatch):
 
     calls = []
 
-    async def fake_after(shipment_id):
+    async def fake_after(shipment_id, **kw):
         calls.append(shipment_id)
 
     monkeypatch.setattr(shipping, "detect", fake_detect)

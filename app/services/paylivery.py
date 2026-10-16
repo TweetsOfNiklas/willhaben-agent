@@ -948,7 +948,7 @@ async def _record_paid(conversation_id: str, text: str) -> Shipment | None:
     was_paid = s.paid_at is not None
     s = shipping.mark_paid(s.id, "paylivery", parse_amount(text))
     if not was_paid:
-        await shipping.after_paid(s.id)
+        await shipping.after_paid(s.id, quiet_paylivery=True)    # the notice's own push says it
     log.info("PayLivery payment recorded for shipment %s", s.id)
     return s
 

@@ -464,16 +464,19 @@ def _bought_today(exclude_id: int) -> int:
 
 
 # ------------------------------------------------------------------ after payment: ask or buy
-async def after_paid(shipment_id: int) -> None:
+async def after_paid(shipment_id: int, *, quiet_paylivery: bool = False) -> None:
     """Payment arrived: ask the user for the go, or buy automatically when the rules allow it.
 
     Callers (chat page, push buttons) run this after `mark_paid`. Does nothing once a decision exists.
+    `quiet_paylivery`: a PayLivery notice marked it paid, and its own push ("PayLivery: Paid") says so already.
     """
     s = get(shipment_id)
     if s is None or not s.paid_at or s.status not in ("draft", "awaiting") or s.approval is not None:
         return                                   # asked, decided or counting down already
     if s.paid_via == "paylivery":
-        await _notify(s, t("Paid via willhaben PayLivery"), t("willhaben makes the label – nothing to buy here."))
+        if not quiet_paylivery:
+            await _notify(s, t("Paid via willhaben PayLivery"),
+                          t("willhaben makes the label – nothing to buy here."))
         return
     if auto_blockers(s):
         await _ask(update(s.id, status="awaiting", approval="pending"))
