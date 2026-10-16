@@ -318,7 +318,8 @@ def test_chat_sync_and_reload_answer_htmx_at_once(monkeypatch):
         ran.append(("reload", cid))
         return "full"
 
-    async def fake_context(cid):
+    async def fake_context(cid, force=False):
+        ran.append(("context", cid, force))
         return None
 
     monkeypatch.setattr(chats, "sync", fake_sync)
@@ -331,7 +332,7 @@ def test_chat_sync_and_reload_answer_htmx_at_once(monkeypatch):
         r = c.post("/chats/sync", follow_redirects=False)                     # without htmx: back to the list
         assert r.status_code == 303 and r.headers["location"].startswith("/chats?msg=")
         wait_jobs()
-    assert ("reload", "c1") in ran and ("sync", True) in ran
+    assert ("reload", "c1") in ran and ("context", "c1", True) in ran and ("sync", True) in ran   # Reload: fresh ad data
 
 
 async def test_other_actions_keep_an_unsaved_edit_text(monkeypatch):

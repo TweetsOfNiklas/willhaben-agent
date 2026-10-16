@@ -316,16 +316,35 @@ async def sync_messages(conversation_id: str) -> str:
     return mode
 
 
-async def ensure_ad_context(conversation_id: str) -> Conversation | None:
+AD_CONTEXT_MAX_AGE = timedelta(minutes=30)   # a price change, reservation or sale on willhaben reaches Claude within this
+
+
+def _ad_context_fresh(conv: Conversation) -> bool:
+    """The stored ad context still serves a draft: the public page's data (it carries the PayLivery flags) younger
+    than AD_CONTEXT_MAX_AGE, or the ad is gone - that only changes when the owner reloads the chat. The editor
+    fallback (_own_ad_context) and contexts stored before they carried a time are fetched again."""
+    ctx = conv.ad_context or {}
+    if ctx.get("status") == "nicht mehr online":
+        return True
+    if "paylivery" not in ctx or conv.ad_context_at is None:
+        return False
+    return utcnow() - _aware(conv.ad_context_at) < AD_CONTEXT_MAX_AGE
+
+
+async def ensure_ad_context(conversation_id: str, force: bool = False) -> Conversation | None:
+    """The ad as Claude sees it (title, price, description, status, PayLivery flags) from the public ad page, kept
+    for AD_CONTEXT_MAX_AGE so a draft sees today's price and status; `force` (the chat's Reload) fetches it again
+    at once, also for an ad stored as gone."""
     with session() as db:
         conv = db.get(Conversation, conversation_id)
-    ctx = conv.ad_context if conv else None
-    if conv is None or not conv.ad_id or (ctx and ("paylivery" in ctx or ctx.get("status") == "nicht mehr online")):
-        return conv                       # contexts stored before the PayLivery flags existed are fetched once more
+    if conv is None or not conv.ad_id or (not force and _ad_context_fresh(conv)):
+        return conv
     try:
         detail = await get_public().get_detail(conv.ad_id)
     except WillhabenError as e:
         log.info("ad context for %s failed: %s", conv.ad_id, e)
+        if "paylivery" in (conv.ad_context or {}):
+            return conv                   # a refresh that failed: the page data from before stays, tried again next time
         return await _own_ad_context(conv)
     me = get_session().user or {}
     with session() as db:
@@ -338,6 +357,7 @@ async def ensure_ad_context(conversation_id: str) -> Conversation | None:
             mine = {str(v) for v in (me.get("id"), me.get("uuid")) if v}
             if mine:
                 conv.role = "seller" if {detail.seller_login_id, detail.seller_uuid} & mine else "buyer"
+        conv.ad_context_at = utcnow()
         db.add(conv)
         db.commit()
         db.refresh(conv)
@@ -368,7 +388,7 @@ async def _own_ad_context(conv: Conversation) -> Conversation:
            "status": "aktiv (eigene Anzeige, Daten aus dem Anzeigen-Editor)", "source": "own_ad"}
     with session() as db:
         conv = db.get(Conversation, conv.id)
-        conv.ad_context = ctx
+        conv.ad_context, conv.ad_context_at = ctx, utcnow()
         conv.role = conv.role or "seller"
         db.add(conv)
         db.commit()
@@ -679,10 +699,11 @@ def enqueue_sync() -> jobs.Job:
 
 
 def enqueue_reload(conversation_id: str) -> jobs.Job:
-    """"Reload" of one chat as a background job (lane chat); the thread updates itself (live view)."""
+    """"Reload" of one chat as a background job (lane chat); the thread updates itself (live view). The ad's data
+    (price, status) is fetched again too, whatever its age."""
     async def run(job: jobs.Job) -> str:
         mode = await sync_messages(conversation_id)
-        await ensure_ad_context(conversation_id)
+        await ensure_ad_context(conversation_id, force=True)
         return "" if mode == "full" else t("Only the last message is available (messages endpoint not verified yet).")
 
     with session() as db:

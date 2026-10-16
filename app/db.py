@@ -96,6 +96,7 @@ class Conversation(SQLModel, table=True):
     last_message_at: datetime | None = None
     role: str | None = None  # seller | buyer
     ad_context: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    ad_context_at: datetime | None = None   # when ad_context was fetched (chats.ensure_ad_context refreshes it after a while)
     synced_at: datetime | None = None
     messages_synced_at: datetime | None = None
     # appointment agreed in this chat: {start (local ISO), minutes, location, summary, event_id?, event_link?}
