@@ -524,9 +524,11 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
             # through the shared downloader: counted in the access log and recorded like every willhaben request
             if p := await ad_images.download(url, Path(tmp), f"foto{i}"):
                 photos.append(p)
+        with session() as db:                # the ad's piece count keeps "N Stück verfügbar" in a revised text
+            row = db.get(MyAd, ad_id)
         prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "", rules=get_setting("reply_rules"),
                                   n_images=len(photos), current=current, specs=None, product_name=None,
-                                  instruction=instruction)
+                                  instruction=instruction, quantity=row.quantity if row else None)
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA, images=photos)
     d = result.data
     return {"heading": (d.get("title") or heading).strip()[:80], "description": (d.get("description") or description).strip(),

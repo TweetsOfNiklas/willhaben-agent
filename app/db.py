@@ -164,7 +164,7 @@ class MyAd(SQLModel, table=True):
     min_price: float | None = None                 # floor for automatic answers: never agree below this (€, per piece)
     quantity: int | None = None                    # pieces offered in this ad; None = one item
     replaced_by: str | None = None    # republished (auto-renew) under this new ad id; old chats still point here
-    parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # confirmed size/weight for shipping
+    parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # size/weight for shipping; source "user" = confirmed, "claude" = estimate
     hidden: bool | None = None        # hidden from the list by the user; the import keeps it hidden
     sale_status: str | None = None                 # sold | reserved, set by the sold workflow (/sold/{ad_id}); sticky locally
     sale_conversation_id: str | None = None        # the buyer's conversation

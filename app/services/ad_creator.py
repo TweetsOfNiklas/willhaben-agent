@@ -589,7 +589,7 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
                        published_at=utcnow(), parcel=parcel_estimate)
         elif row.parcel is None:                 # the account import was faster than we were: fill the gaps only
             row.parcel = parcel_estimate
-        if hasattr(row, "quantity") and row.quantity is None:     # MyAd.quantity arrives with the inventory change
+        if row.quantity is None:                 # the draft's piece count becomes the ad's stock (app/services/stock.py)
             row.quantity = d.quantity
         db.add(row)
         db.commit()
