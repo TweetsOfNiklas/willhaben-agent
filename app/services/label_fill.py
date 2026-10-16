@@ -75,6 +75,9 @@ Du bekommst die sichtbaren Formularfelder (idx, Typ, Beschriftung, name, Optione
 - type "choice" sind Auswahl-Kacheln/Knöpfe (z. B. "XS Ab 3,20 €", "PaketShop/PaketBox"): value = "click" nur für
   die Kachel der gewählten Paketgröße und der gewählten Zustellart, und nur wenn sie noch nicht "checked" ist.
   Niemals Warenkorb, Kasse, Kaufen, Bezahlen, Weiter, Anmelden, Registrieren oder Navigation.
+- empfaenger.paketshop (nur bei Zustellung an Paketshop/Paketbox): genau dieser Shop ist das Ziel. Ein Suchfeld für
+  den Shop bekommt seine PLZ oder Adresse; die Kachel/Option mit diesem Namen und dieser Adresse bekommt "click".
+  Nie einen anderen Shop wählen.
 - Felder, die schon den richtigen Wert haben oder zu nichts passen, lässt du weg. Erfinde keine Daten.
 - Länderfelder: Österreich. Name ggf. in Vor- und Nachname aufteilen (letztes Wort = Nachname).
 - note: kurz, was noch fehlt oder was die Person selbst wählen muss, sonst "".
@@ -116,11 +119,16 @@ async def dismiss_consent(page) -> bool:
 
 
 def _data_for(s) -> dict[str, Any]:
+    """The shipment as Claude and the playbooks see it. A "→ Shop" option adds the buyer's parcel shop as
+    empfaenger.paketshop (the carrier's shop choice; `shipping.ensure_shop` picked it before the form opened)."""
     o = shipping.by_key(s.option)
     p = s.parcel or {}
+    recipient = {**{k: v for k, v in (s.recipient or {}).items() if k != "shop"}, "country": "Österreich"}
+    if shop := shipping.shop_for(s):
+        recipient["paketshop"] = {k: shop[k] for k in ("name", "address", "id") if shop.get(k)}
     return {
         "absender": shipping.sender(),
-        "empfaenger": {**(s.recipient or {}), "country": "Österreich"},
+        "empfaenger": recipient,
         "paket": {"laenge_cm": p.get("length_cm"), "breite_cm": p.get("width_cm"), "hoehe_cm": p.get("height_cm"),
                   "gewicht_kg": p.get("weight_kg"), "inhalt": p.get("contents") or "Gebrauchtware",
                   "groesse": o.size if o else None, "zustellung": o.delivery if o else None,
@@ -334,6 +342,8 @@ async def start(shipment_id: int) -> str:
     o = shipping.by_key(s.option)
     if o is None or not o.online:
         raise shipping.ShippingError(t("This option has no online label – buy it at the counter"))
+    if o.delivery == "shop":
+        await shipping.ensure_shop(shipment_id)     # the nearest shop unless the owner picked one on the chat page
     sess = get_session()
     if not sess.started:
         raise shipping.ShippingError(t("Browser session is not running"))
@@ -380,6 +390,8 @@ async def _fill_current() -> str:
         fills = _heuristic(data, fields)
     n = await _apply(fields, where, fills)
     msg = t("{n} fields filled – check them, then continue on the carrier's page", n=n)
+    if o and o.delivery == "shop" and shipping.shop_for(s) is None:
+        note = f"{note}\n".lstrip("\n") + t("No parcel shop found near the buyer – pick one on the carrier's page")
     return f"{msg}\n{note}" if note else msg
 
 

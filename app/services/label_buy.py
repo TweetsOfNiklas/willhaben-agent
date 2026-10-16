@@ -26,7 +26,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.config import get_settings
-from app.db import Shipment, get_setting, utcnow
+from app.db import Shipment, utcnow
 from app.i18n import t
 from app.services import label_fill, shipping
 from app.services.shipping_tariffs import CARRIERS
@@ -191,12 +191,10 @@ def _eur(x: float) -> str:
     return f"{x:.2f}".replace(".", ",")
 
 
-def _cap() -> float | None:
-    try:
-        v = float(get_setting("ship_auto_max_price") or 0)
-    except ValueError:
-        return None
-    return v if v > 0 else None
+def _cap() -> float:
+    """The price limit of the automatic rules (Settings → Shipping, default 10 €): the same number as in
+    `shipping.auto_blockers`, checked again on the carrier's page before the purchase click."""
+    return float(shipping.auto_config()["max_price"])
 
 
 # ------------------------------------------------------------------ playbooks (learned checkouts)
@@ -251,6 +249,9 @@ diese Sendung und lädst ihn herunter. Pro Schritt siehst du die Formularfelder 
   Erfinde keine Daten. Felder mit bereits richtigem Wert lässt du weg.
 - click: idx der Schaltfläche oder des Links für den nächsten Schritt (z. B. "Weiter", "Kostenpflichtig kaufen",
   "Paketschein herunterladen"). 0, wenn nichts geklickt werden soll.
+- empfaenger.paketshop (nur bei Zustellung an Paketshop/Paketbox): genau dieser Shop ist das Ziel. Ein Suchfeld für
+  den Shop bekommt seine PLZ oder Adresse; die Kachel/Option mit diesem Namen und dieser Adresse wählst du.
+  Nie einen anderen Shop wählen.
 - Kartendaten, Zahlungsfelder und Bankbestätigungen füllst du nie; die App trägt die Karte selbst ein.
   Wenn Zahlungsarten angeboten werden, wähle Kreditkarte.
 - Hake nie Versicherung, Newsletter, Werbung, Abo oder geänderte AGB an. Ändere nie das Konto, lösche nichts,
@@ -565,7 +566,7 @@ async def _check_price(page, s: Shipment) -> float:
     if total > s.price + PRICE_TOLERANCE_EUR:
         raise BuyError(t("price on the page €{page} > expected €{expected}", page=_eur(total), expected=_eur(s.price)))
     cap = _cap() if s.approval == "auto" else None        # the limit is a rule for automatic buying only
-    if cap and total > cap:
+    if cap is not None and total > cap:
         raise BuyError(t("price on the page €{page} > limit €{limit}", page=_eur(total), limit=_eur(cap)))
     return total
 
@@ -881,6 +882,8 @@ async def _open(sid: int):
     o = shipping.by_key(s.option) if s else None
     if s is None or o is None or not o.online or not s.recipient:
         raise BuyError(t("Address and parcel option needed first"))
+    if o.delivery == "shop" and await shipping.ensure_shop(sid) is None:   # the checkout needs a target shop
+        raise BuyError(t("no parcel shop found near the buyer – choose a door option or finish in the browser"))
     sess = get_session()
     if not sess.started:
         raise BuyError(t("Browser session is not running"))

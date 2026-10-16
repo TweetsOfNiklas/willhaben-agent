@@ -110,7 +110,11 @@ It runs on your own server, from your home internet connection, and you control 
   the nearest drop-off points. The label is bought only after the buyer has paid: you mark the payment (a buyer's
   "I have paid" only becomes a reminder to check your account), then approve the purchase on the chat page or with a
   push button, or let the app buy automatically under your rules (ad marked sold to this buyer, confirmed parcel size,
-  price cap, chosen carriers, a grace period to cancel, a daily limit). The purchase runs in the app's own browser with
+  price cap of 10 € unless you change it, chosen carriers, a stored payment card, a grace period to cancel, a daily
+  limit; never an option against your delivery preference). A "→ Shop" option delivers to a parcel shop or locker near
+  the buyer: the chat page lists the carrier's shops around the buyer's address, you pick one (the nearest unless you
+  choose another) and it goes into the carrier's form; such labels are never bought automatically until the shop choice
+  in the carrier's form is confirmed live. The purchase runs in the app's own browser with
   your stored payment card, a per-carrier playbook learned from the first run, code guards (price check, never
   insurance/newsletter/account changes) and a stop for bank confirmations. The label goes to a label printer
   (100×150 / 100×200 mm) or a normal printer over IPP, per carrier, with tray and crop settings; the carrier form in the
@@ -367,7 +371,7 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Price check and product search (Produktsuche) | done (comparables of the same item by title, category selectable) |
 | Home Assistant events, pushes with action buttons | done |
 | Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
-| Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet** |
+| Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet**; the parcel shop for "→ Shop" labels is looked up and passed to the form, but whether the carrier form takes it is **not live-tested** (so shop labels stay manual) |
 | Purchase orders (buyer side): contact, negotiation, PayLivery offer, pay-now push, pickup appointments | built and tested with fakes; **not yet live-tested** |
 | PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → Platforms → willhaben → Advanced → API recording) |
 | Connection watchdog, backup, bug report, request statistics | done |

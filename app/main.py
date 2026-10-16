@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
@@ -907,8 +908,12 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
     if sort == "near" and near:
         far = 10 ** 9
         options = sorted(options, key=lambda o: ((near.get(o.carrier) or [{}])[0].get("dist_m") or far, o.price))
+    # "→ Shop" option: the parcel shops near the buyer; the stored pick, else the nearest, is the target
+    shops = await shipping.shops_near(s) if s and conv.role == "seller" else []
+    stored = shipping.shop_for(s) if s else None
     return {"shipment": s, "ship_options": options, "ship_near": near, "ship_sort": sort,
             "ship_pref": selling.preference_text(), "fmt_dist": dropoff.fmt_dist,
+            "ship_shops": shops, "ship_shop": stored or (shops[0] if shops else None), "ship_shop_stored": bool(stored),
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
             "ship_all": shipping.all_options(s.parcel) if s else [], **(shipping.page_state(s) if s else {}),
@@ -2585,7 +2590,7 @@ async def shipment_save(request: Request, shipment_id: int):
     f = await request.form()
     addr = shipping.clean_address({k: str(f.get(k) or "") for k in shipping.ADDRESS_FIELDS})
     if addr:
-        shipping.update(shipment_id, recipient=addr)
+        shipping.set_recipient(shipment_id, addr)
     try:
         shipping.set_parcel(shipment_id, {k: f.get(k) for k in ("length_cm", "width_cm", "height_cm", "weight_kg", "contents")})
     except shipping.ShippingError as e:
@@ -2601,6 +2606,19 @@ async def shipment_option(shipment_id: int, key: str = Form(...)):
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
     return _chat_back(s.conversation_id)
+
+
+@app.post("/shipments/{shipment_id}/shop")
+async def shipment_shop(shipment_id: int, shop: str = Form("")):
+    """The owner's parcel shop for a "→ Shop" option (one of the shops the card listed, as JSON)."""
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.set_shop(shipment_id, json.loads(shop or "null"))
+    except ValueError:
+        return _chat_back(s.conversation_id, t("Parcel shop incomplete: name and address are needed"))
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Parcel shop saved"))
 
 
 @app.post("/shipments/{shipment_id}/label")

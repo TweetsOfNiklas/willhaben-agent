@@ -28,6 +28,19 @@
         <div class="col-span-full flex flex-wrap items-center gap-2"><button class="btn btn-xs">{{ _("Save") }}</button><small class="text-xs text-muted">{{ _("Size and weight are remembered for this ad.") }}</small></div>
       </form>
     </details>
+    {% if ship_option and ship_option.delivery == 'shop' and shipment.status not in ('sent', 'discarded') %}
+    <div class="flex flex-col gap-1.5 text-[12.5px]" data-ship-shop>
+      {% if ship_shop %}<span class="break-words">{{ _("Parcel shop for the buyer:") }} <strong>{{ ship_shop.name }}</strong>, {{ ship_shop.address }}{% if not ship_shop_stored %} <span class="text-muted">({{ _("the nearest – picked unless you choose another") }})</span>{% endif %}</span>
+      {% else %}<span class="text-warning">{{ _("No parcel shop found near the buyer – choose a door option, or pick the shop on the carrier's page.") }}</span>{% endif %}
+      {% if ship_shops|length > 1 and shipment.status in ('draft', 'awaiting', 'failed') %}
+      <form method="post" action="/shipments/{{ shipment.id }}/shop" class="flex flex-wrap items-center gap-1.5">
+        <select name="shop" aria-label="{{ _('Parcel shop') }}" class="select select-sm min-w-0 flex-1 bg-base-200 text-[12.5px]">{% for sh in ship_shops %}<option value='{{ {'name': sh.name, 'address': sh.address, 'id': sh.id or ''}|tojson }}' {% if ship_shop and sh.name == ship_shop.name and sh.address == ship_shop.address %}selected{% endif %}>{{ sh.name }}, {{ sh.address }}{% if sh.dist_m is not none %} · {{ fmt_dist(sh.dist_m) }}{% endif %}</option>{% endfor %}</select>
+        <button class="btn btn-xs">{{ _("Use") }}</button>
+      </form>
+      {% endif %}
+      <small class="text-xs text-muted">{{ _("Shop delivery is never bought automatically yet – you approve each such label; the carrier's form shows the shop before you pay.") }}</small>
+    </div>
+    {% endif %}
     {% set via = {'manual': _('by hand'), 'paylivery': _('willhaben PayLivery'), 'email': _('e-mail'), 'bank': _('bank')} %}
     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
       {% if shipment.paid_at %}{{ ui.icon('check', 14, 2.5, 'text-success') }}<span>{{ _("Paid") }} <span class="text-muted">{{ shipment.paid_at|ago }} ({{ via.get(shipment.paid_via, shipment.paid_via) }})</span></span>

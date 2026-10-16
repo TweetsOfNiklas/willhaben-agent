@@ -69,5 +69,13 @@
   "This shipment already has a label or a purchase is running": "Diese Sendung hat schon ein Etikett oder ein Kauf läuft gerade",
   "A label purchase is running – cancel it in the browser window first": "Ein Etikettkauf läuft gerade – brich ihn zuerst im Browserfenster ab",
   "Buy label": "Paketschein kaufen",
-  "Printing: one switch for all labels under Settings → Printers.": "Drucken: ein Schalter für alle Paketscheine unter Einstellungen → Drucker."
+  "Printing: one switch for all labels under Settings → Printers.": "Drucken: ein Schalter für alle Paketscheine unter Einstellungen → Drucker.",
+  "shop delivery needs a manual purchase": "Zustellung in den Shop braucht einen Kauf von Hand",
+  "delivers to a parcel shop, but you prefer the door": "liefert in einen Paketshop, du bevorzugst aber die Haustür",
+  "delivers to the door, but you prefer a parcel shop": "liefert an die Haustür, du bevorzugst aber einen Paketshop",
+  "no payment card stored": "keine Zahlungskarte gespeichert",
+  "Payment card: •••• {last4}": "Zahlungskarte: •••• {last4}",
+  "No payment card stored – nothing is bought automatically until you add one below.": "Keine Zahlungskarte gespeichert – automatisch gekauft wird erst, wenn du unten eine hinterlegst.",
+  "default 10 €": "Standard 10 €",
+  "Not automatic in any case: “→ Shop” options (the carrier form's shop choice is not confirmed live yet) and options against your delivery preference under Settings → Selling.": "Nie automatisch: „→ Shop“-Optionen (die Shop-Auswahl im Formular des Paketdienstes ist noch nicht live bestätigt) und Optionen gegen deine Zustell-Vorgabe unter Einstellungen → Verkaufen."
 }

@@ -76,5 +76,14 @@
   "unknown carrier": "unbekannter Paketdienst",
   "{carrier}: logged in – the browser remembers it": "{carrier}: eingeloggt – der Browser merkt es sich",
   "{carrier}: page opened – log in there once (no login form found or no login stored)": "{carrier}: Seite geöffnet – dort einmal einloggen (kein Login-Formular gefunden oder kein Login gespeichert)",
-  "unknown payment source": "unbekannte Zahlungsquelle"
+  "unknown payment source": "unbekannte Zahlungsquelle",
+  "The chosen option delivers to the door – no parcel shop needed": "Die gewählte Option liefert an die Haustür – kein Paketshop nötig",
+  "Parcel shop incomplete: name and address are needed": "Paketshop unvollständig: Name und Adresse sind nötig",
+  "Parcel shop saved": "Paketshop gespeichert",
+  "Parcel shop for the buyer:": "Paketshop für den Käufer:",
+  "the nearest – picked unless you choose another": "der nächste – wird genommen, wenn du keinen anderen wählst",
+  "No parcel shop found near the buyer – choose a door option, or pick the shop on the carrier's page.": "Kein Paketshop beim Käufer gefunden – wähle eine Haustür-Option oder den Shop auf der Seite des Paketdienstes.",
+  "Parcel shop": "Paketshop",
+  "Shop delivery is never bought automatically yet – you approve each such label; the carrier's form shows the shop before you pay.": "Zustellung in den Shop wird noch nie automatisch gekauft – du bestätigst jeden solchen Paketschein; das Formular des Paketdienstes zeigt den Shop vor dem Bezahlen.",
+  "No parcel shop found near the buyer – pick one on the carrier's page": "Kein Paketshop beim Käufer gefunden – auf der Seite des Paketdienstes einen wählen"
 }

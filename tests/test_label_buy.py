@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.db import Conversation, MyAd, Shipment, session
 from app.llm.base import LLMError, LLMResult
 from app.main import app
-from app.services import label_buy, shipping
+from app.services import label_buy, label_fill, shipping
 from app.services.shipping_tariffs import CARRIERS  # noqa: F401 - module is imported for its side effects
 
 ADDR = {"name": "Max Muster", "street": "Hauptstraße", "house_no": "12", "extra": "", "zip": "1150",
@@ -268,15 +268,15 @@ async def _serve(ctx, h: Harness) -> None:
     await ctx.route("https://www.gls-one.at/**", handle)
 
 
-def _seed() -> int:
-    o = shipping.by_key("gls:S:home")
+def _seed(option: str = "gls:S:home", approval: str | None = None) -> int:
+    o = shipping.by_key(option)
     assert o and o.online and CARRIERS["gls"].label_url.startswith("https://www.gls-one.at/")
     with session() as db:
         db.add(MyAd(ad_id="77", heading="Kinderbuch"))
         db.add(Conversation(id="c1", ad_id="77", ad_title="Kinderbuch", partner_name="Max", role="seller",
                             last_message_text=""))
         db.commit()
-        s = Shipment(conversation_id="c1", ad_id="77", status="buying", recipient=ADDR,
+        s = Shipment(conversation_id="c1", ad_id="77", status="buying", recipient=ADDR, approval=approval,
                      parcel={"length_cm": 30, "width_cm": 20, "height_cm": 5, "weight_kg": 1.0},
                      option=o.key, price=o.price)
         db.add(s)
@@ -364,6 +364,54 @@ async def test_auto_limit_only_applies_to_automatic_purchases(checkout, claude):
     claude(_script())
     with pytest.raises(label_buy.BuyError, match="limit"):
         await label_buy.buy(sid)
+
+
+async def test_price_cap_is_the_shared_default_of_ten_euro():
+    """`_cap` reads the same setting as `shipping.auto_blockers`: 10 € when nothing was ever saved."""
+    from app.db import set_setting
+
+    class Page:
+        def __init__(self, text):
+            self.text = text
+
+        async def inner_text(self, selector):
+            return self.text
+
+    assert label_buy._cap() == 10.0 == shipping.auto_config()["max_price"]
+    sid = _seed(approval="auto")
+    shipping.update(sid, price=12.0)
+    s = shipping.get(sid)
+    with pytest.raises(label_buy.BuyError, match="limit €10,00"):
+        await label_buy._check_price(Page("Gesamt 12,00 €"), s)
+    shipping.update(sid, approval="approved")
+    assert await label_buy._check_price(Page("Gesamt 12,00 €"), shipping.get(sid)) == 12.0   # by hand: no cap
+    set_setting("ship_auto_max_price", "7.5")
+    assert label_buy._cap() == 7.5
+    set_setting("ship_auto_max_price", "0")
+    assert label_buy._cap() == 0.0                                                  # 0 = nothing automatic
+    with pytest.raises(label_buy.BuyError, match="limit €0,00"):
+        await label_buy._check_price(Page("Gesamt 4,90 €"), shipping.update(sid, approval="auto", price=4.9))
+
+
+async def test_shop_option_needs_a_parcel_shop_before_the_checkout(monkeypatch):
+    """GLS S → Shop without a shop near the buyer: refused before any page opens; with one, the checkout data
+    names it as empfaenger.paketshop (the playbooks key it like every other field)."""
+    lookups = []
+
+    async def no_shops(s):
+        lookups.append(s.option)
+        return []
+
+    monkeypatch.setattr(shipping, "shops_near", no_shops)
+    sid = _seed("gls:S:shop")
+    with pytest.raises(label_buy.BuyError, match="no parcel shop found near the buyer"):
+        await label_buy.buy(sid)
+    assert lookups == ["gls:S:shop"] and shipping.get(sid).status == "failed"
+    assert label_buy.active() is None
+    shipping.set_shop(sid, {"name": "Trafik", "address": "C 3, 1150 Wien", "id": "AT-1001"})
+    flat = label_buy._flat(label_fill._data_for(shipping.get(sid)))
+    assert flat["empfaenger.paketshop.name"] == "Trafik" and flat["empfaenger.paketshop.id"] == "AT-1001"
+    assert "empfaenger.shop" not in " ".join(flat) and flat["paket.zustellung"] == "shop"
 
 
 async def test_retry_resumes_the_open_checkout(monkeypatch):
