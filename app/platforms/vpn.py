@@ -80,8 +80,9 @@ MAX_LIVE = 2                   # live connections at most (the search's tunnels 
 CONFIRM = 3                    # refusals in a row (403/429/bot check) before a site leaves its live server
 CONFIRM_UNREACHABLE = 2        # ... network errors in a row (a single timeout is no dead server)
 CONFIRM_WINDOW_S = 900         # older refusals no longer count
-CONFIRM_SPAN_S = 90            # ... and refusals (not network errors) count only when the run lasts this long: eBay
-                               # refuses every other request for half a minute at a time, Geizhals a burst for a while
+CONFIRM_SPAN_S = 90            # ... and refusals (403, bot checks) count only when the run lasts this long: eBay
+                               # refuses every other request for half a minute at a time. Not a 429 ("rate"): the site
+                               # says outright it wants fewer requests from that IP (Geizhals' limit per server)
 STANDBY_TRIES = 3              # standby servers a site tries (start + reach its host) before it waits for a search
 PAUSED_RETRY_S = 120           # a paused site tries the standby servers again this often while its search waits
 SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
@@ -1151,7 +1152,8 @@ class Tunnel:
 
     async def refused(self, route: Route | None, reason: str, detail: str = "") -> bool:
         """A refusal through the site's server, or no answer (`unreachable`): it counts (failed()) once it came CONFIRM
-        times in a row over at least CONFIRM_SPAN_S (CONFIRM_UNREACHABLE times for network errors, no span) within
+        times in a row over at least CONFIRM_SPAN_S (a 429: no span; CONFIRM_UNREACHABLE times for network errors, no
+        span) within
         CONFIRM_WINDOW_S, with no answer the site accepted in between (answered()). Before that the caller asks again through the same server. True when it
         counted and the server was marked."""
         if not self._concerns(route) or (reason == "botcheck" and self.odd()):
@@ -1159,7 +1161,8 @@ class Tunnel:
         assert route is not None
         now, key = time.monotonic(), (self.pid, route.name)
         seen = [x for x in _strikes.get(key, []) if now - x < CONFIRM_WINDOW_S] + [now]
-        need, span = (CONFIRM_UNREACHABLE, 0) if reason == "unreachable" else (CONFIRM, CONFIRM_SPAN_S)
+        need, span = ((CONFIRM_UNREACHABLE, 0) if reason == "unreachable" else (CONFIRM, 0) if reason == "rate"
+                      else (CONFIRM, CONFIRM_SPAN_S))
         if len(seen) < need or seen[-1] - seen[0] < span:
             _strikes[key] = seen
             log.info("VPN %s: server %s %s (%s), %d of %d in a row: asking again", self.pid, route.name, reason,

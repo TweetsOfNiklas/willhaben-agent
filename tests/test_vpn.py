@@ -359,9 +359,24 @@ async def test_a_refusal_counts_only_after_several_in_a_row_and_an_answer_starts
     assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "blocked"
 
 
+async def test_a_run_of_429s_counts_at_once(fake, no_search, monkeypatch):
+    """A 429 is the site's own word that it wants fewer requests from that IP (Geizhals limits each server after a
+    few minutes): CONFIRM in a row count without waiting for CONFIRM_SPAN_S, so the site moves on within seconds."""
+    monkeypatch.setattr(vpn, "CONFIRM_SPAN_S", 90)
+    _collection("at-vie-wg-001")
+    _on("willhaben")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    tn = vpn.tunnel_for("willhaben")
+    r = await tn.ensure()
+    for _ in range(vpn.CONFIRM - 1):
+        assert await tn.refused(r, "rate", "HTTP 429") is False
+    assert await tn.refused(r, "rate", "HTTP 429") is True
+    assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "rate"
+
+
 async def test_a_run_of_refusals_within_seconds_keeps_the_server(fake, no_search, monkeypatch):
-    """eBay refuses every other request for half a minute right after a search found it answering; Geizhals a burst:
-    a run of refusals counts only once it lasted CONFIRM_SPAN_S (a server that is blocked refuses on and on)."""
+    """eBay refuses every other request for half a minute right after a search found it answering: a run of refusals
+    counts only once it lasted CONFIRM_SPAN_S (a server that is blocked refuses on and on)."""
     monkeypatch.setattr(vpn, "CONFIRM_SPAN_S", 90)
     _collection("at-vie-wg-001")
     _on("ebay")
