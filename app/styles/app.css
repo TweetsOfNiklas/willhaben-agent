@@ -136,11 +136,10 @@
   h3 { font-size: 15px; font-weight: 650; }
   [x-cloak] { display: none !important; }
   /* touch and the home-screen app (_app_head.html): no grey flash on a tap, no wait for a double tap, the notch kept
-     clear in landscape; in its own window (no browser around it) the page does not rubber-band at its ends: a pull at
-     the top reloads instead (base.html) */
+     clear in landscape. The page rubber-bands at its ends as in Safari, also in its own window, where a pull at the
+     top reloads it (base.html) */
   html { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
-  @media (display-mode: standalone) { html, body { overscroll-behavior-y: none; } }
   [data-tabbar] { -webkit-touch-callout: none; }      /* a long press on a tab: no link preview, as in an app */
 }
 
