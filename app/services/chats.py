@@ -132,8 +132,9 @@ async def sync(force: bool = False) -> dict[str, Any]:
             except (LLMError, WillhabenError) as e:
                 log.warning("auto draft failed for %s: %s", row.id, e)
                 continue
-            if notify_on:    # the notification turns into the draft offer: one message, one tap to send
-                await offer_draft(row, d, t("drafted automatically"), replaces=tag)
+            # the message push turns into the draft offer: one message, one tap to send; with message pushes off,
+            # the offer is the one push for this message
+            await offer_draft(row, d, t("drafted automatically"), replaces=tag if notify_on else None)
     last_sync_at[0] = utcnow()
     answered = await process_pending_auto()
     return {"conversations": len(convs), "changed": len(changed), "incoming": len(incoming), "auto": answered}

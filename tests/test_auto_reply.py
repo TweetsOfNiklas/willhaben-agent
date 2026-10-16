@@ -477,7 +477,9 @@ async def test_auto_draft_turns_the_message_push_into_the_offer(env, monkeypatch
     assert retags == [("wh-msg-c1", f"wh-draft-{d.id}")] and cleared == ["wh-msg-c1"]
     assert not account.sent                                               # never sent automatically
 
-    notes.clear()                                                         # no message push: silent draft as before
+    notes.clear()                                                         # message pushes off: the offer alone
+    retags.clear()
+    cleared.clear()
     set_setting("notify_messages", "0")
     with session() as db:
         c = db.get(Conversation, "c1")
@@ -485,7 +487,11 @@ async def test_auto_draft_turns_the_message_push_into_the_offer(env, monkeypatch
         db.add(c)
         db.commit()
     await chats.sync()
-    assert notes == [] and len(backend.calls) == 2
+    assert [n[0] for n in notes] == ["auto_reply_pending"] and len(backend.calls) == 2
+    with session() as db:
+        d2 = db.exec(select(Draft).where(Draft.status == "draft").order_by(Draft.id.desc())).first()
+    assert d2.id != d.id and notes[0][3]["tag"] == f"wh-draft-{d2.id}" and "drafted automatically" in notes[0][2]
+    assert retags == [] and cleared == [] and not account.sent                # no message push to take over
 
 
 def test_sent_message_not_duplicated_by_history():
