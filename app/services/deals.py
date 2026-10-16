@@ -210,7 +210,8 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     "18V-55", an order code like "UAP-AC-PRO") and the variant words and identifiers right after it ("iPhone 16 Pro",
     "MacBook Air M1 8GB 256GB"); of a long lead-in the first two words, its variant words and the word before the
     model ("Ubiquiti UniFi USW Pro PoE 48" -> "Ubiquiti UniFi Pro PoE 48"). Capacities, wattages and order codes
-    further on are added ("4GB", "500W", "USW-24-POE": they make the variant), max 7 words. "4 GB" is one word;
+    further on are added ("4GB", "500W", "USW-24-POE": they make the variant), also a capacity right after "mit"
+    ("Raspberry Pi5 mit 1gb und Netzteil" -> "Raspberry Pi5 1gb"), max 7 words. "4 GB" is one word;
     counts ("4x", "16-Port", "Lot 2", "2 ×") are left out, and so is what comes along ("+ Samsung 980 SSD 500 GB",
     ", Netzteil"; an order code there still counts). A title without a model names a brand's product by its first
     words ("Ubiquiti UniFi Cloud Gateway Max"); without a brand of BRANDS it is too generic: None."""
@@ -234,6 +235,10 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     codes = [w for w in tokens(geizhals.glue_units(title or "")) if geizhals.is_code(w)]   # a code after a list too
     extra = [w for w in toks[end:] if geizhals.CAPACITY_RE.fullmatch(w) or _WATTS_RE.fullmatch(w)] \
         + [w for w in codes if w not in toks[:end]]
+    nxt = t.extras_at + 1          # "Pi5 mit 1gb und Netzteil": a capacity right after "mit" is the variant's own
+    if t.extras_at < len(t.raw) and t.low[t.extras_at] in _WITH and nxt < len(t.raw) \
+            and geizhals.CAPACITY_RE.fullmatch(t.raw[nxt]) and t.raw[nxt] not in extra:
+        extra.insert(0, t.raw[nxt])
     kinds = TitleMatch(title).acc                 # an accessory ad's kind ("PI4, Joy-it, Aluminiumgehäuse"), not a
     acc = [w for w in toks if _accessory(_fold(w)) in kinds and w not in core][:1]    # broken item's part ("Display")
     picked = list(dict.fromkeys(core + acc + extra))[:7]
@@ -514,6 +519,7 @@ _LOT_WORDS = {"konvolut", "sammlung", "restposten", "sammelposten"}
 _BOX_WORDS = {"ovp", "box", "originalverpackung", "karton", "verpackung", "schachtel"}   # "nur OVP": the box alone
 _EXTRAS = {"mit", "inkl", "inklusive", "incl", "samt", "with", "+", "&", "und", "sowie", "zzgl",   # what comes along
            "con", "avec", "met", "inclus", "incluso", "compreso"}
+_WITH = {"mit", "with", "con", "avec", "met"}   # "mit 1gb": a capacity right after it names the variant
 _FOR = {"fuer", "for", "passend", "kompatibel", "compatible", "geeignet",   # "Hülle für iPhone 13": made for the item
         "per", "pour", "para", "voor", "dla", "compatibile"}
 _BEFORE_NUMBER = {"model", "modell", "typ", "type", "version", "gen", "generation", "series", "serie", "nr", "no", "mk"}

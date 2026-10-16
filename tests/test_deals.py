@@ -180,6 +180,10 @@ def test_geizhals_query_only_for_products():
     ("Raspberry Pi 4 Model B 4 GB", "Raspberry Pi 4 4GB"),                      # "4 GB" is one word, not a 2nd "4"
     ("Neuwertiger Raspberry Pi 4 (4 GB)", "Raspberry Pi 4 4GB"),
     ("MacBook Air M1 8GB 256GB", "MacBook Air M1 8GB 256GB"),
+    ("Raspberry Pi5 mit 1gb und Netzteil", "Raspberry Pi5 1gb"),                # right after "mit": the variant
+    ("Raspberry Pi 5 mit 8 GB RAM", "Raspberry Pi 5 8GB"),
+    ("Raspberry Pi 5 8GB mit Netzteil", "Raspberry Pi 5 8GB"),
+    ("Pi 5 8GB + Samsung SSD 500 GB", "Pi 5 8GB"),                              # after "+": what comes along
 ])
 def test_geizhals_query_keeps_the_variant(title, query):
     assert deals.geizhals_query(title) == query
