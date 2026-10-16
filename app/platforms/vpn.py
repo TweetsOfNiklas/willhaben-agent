@@ -1035,11 +1035,14 @@ async def failover(pid: str, host: str, label: str = "") -> str | None:
         if (own := server_for(pid, st)) is not None and own not in marks(pid) and conn.route(own) is not None:
             unpause(pid)
             return own                                # another request of the site moved it meanwhile
-        on = {p for p, _ in users()} - {pid}
-        used = {server_for(p, st) for p in on if not paused(p)}
-        keep = [s for s in live if s in used]
-        if len(keep) >= MAX_LIVE:
+        on = {p for p in (p for p, _ in users()) if p != pid and not paused(p)}
+        # the servers other sites are on stay; one a site without its own only borrows (server_for()'s fallback: one
+        # switched on lately, or one no server answers) stays only while there is room beside the standby server
+        firm = [s for s in live if s in {assign[p] for p in on if assign.get(p) in live}]
+        if len(firm) >= MAX_LIVE:
             return None
+        loose = [s for s in live if s not in firm and s in {server_for(p, st) for p in on}]
+        keep = [s for s in live if s in firm or s in loose[:MAX_LIVE - 1 - len(firm)]]
         tried: list[str] = []
         for name in standby(pid)[:STANDBY_TRIES]:
             tried.append(name)

@@ -517,6 +517,24 @@ async def test_a_paused_site_tries_the_standby_servers_again_while_its_search_wa
     assert (await tn.ensure()).name == "de-fra-wg-001"
 
 
+async def test_a_site_that_only_borrows_the_refused_server_does_not_block_the_failover(fake, no_search):
+    """A site with no server of its own (refused everywhere) borrows whichever live server it has not refused: that
+    is no reason to keep the server the failing site refused; it borrows another."""
+    _collection("at-vie-wg-001", "de-fra-wg-001", "de-ber-wg-001", "de-ber-wg-002")
+    _on("willhaben", "kleinanzeigen", "shpock")
+    vpn.update_conn(servers=["at-vie-wg-001", "de-fra-wg-001"],
+                    assign={"willhaben": "at-vie-wg-001", "kleinanzeigen": "de-fra-wg-001"})
+    vpn.mark("kleinanzeigen", "at-vie-wg-001", "blocked")
+    vpn.mark("shpock", "at-vie-wg-001", "blocked")                     # shpock borrows de-fra-wg-001
+    assert vpn.server_for("shpock") == "de-fra-wg-001"
+    vpn.mark("kleinanzeigen", "de-ber-wg-001", "ok")
+    tn = vpn.tunnel_for("kleinanzeigen")
+    r = await tn.ensure()
+    assert await tn.failed(r, "rate", "HTTP 429") is True
+    assert vpn.live_servers() == ["at-vie-wg-001", "de-ber-wg-001"] and vpn.paused("kleinanzeigen") is None
+    assert vpn.server_for("kleinanzeigen") == "de-ber-wg-001" and no_search == []
+
+
 async def test_a_refused_site_fails_over_while_a_search_runs(fake, no_search, monkeypatch):
     """A search may wait an hour for a site's budget: the others' failover does not wait for it."""
     from app.services import vpn_check
