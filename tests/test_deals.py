@@ -184,6 +184,10 @@ def test_geizhals_query_only_for_products():
     ("Raspberry Pi 5 mit 8 GB RAM", "Raspberry Pi 5 8GB"),
     ("Raspberry Pi 5 8GB mit Netzteil", "Raspberry Pi 5 8GB"),
     ("Pi 5 8GB + Samsung SSD 500 GB", "Pi 5 8GB"),                              # after "+": what comes along
+    ("Raspberry Pi 5 mit 64GB SD-Karte", "Raspberry Pi 5"),                     # the card's, not the Pi's
+    ("Raspberry Pi 5, 64GB microSD, Netzteil, Gehäuse", "Raspberry Pi 5"),
+    ("2 Stk. Raspberry Pi 4 Modell B, 8GB RAM + Joy-iT Aluminiumgehäuse + 64GB microSDXC + Netzteil",
+     "Raspberry Pi 4 8GB"),                                                     # after the list's comma, a count
 ])
 def test_geizhals_query_keeps_the_variant(title, query):
     assert deals.geizhals_query(title) == query

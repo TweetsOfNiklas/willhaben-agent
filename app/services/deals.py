@@ -202,7 +202,8 @@ def _model_token(toks: list[str], i: int) -> bool:
 
 _WATTS_RE = re.compile(r"\d+w", re.I)
 _COUNT_RE = re.compile(r"\d+(x|er|stk|stück)", re.I)     # "4x Ubiquiti …", "3er Set": how many, not which
-_LOT_COUNT_RE = re.compile(r"\blots?\s+(?:de\s+|of\s+)?\d+\b|(?<![\w.,])\d+\s*[x×](?=\s)", re.I)
+_LOT_COUNT_RE = re.compile(r"\blots?\s+(?:de\s+|of\s+)?\d+\b|(?<![\w.,])\d+\s*[x×](?=\s)"
+                           r"|(?<![\w.,])\d+\s*(?:stk|stück)\b\.?", re.I)    # "2 Stk. Raspberry Pi 4"
 
 
 def geizhals_query(title: str | None, category_path: list[str] | None = None) -> str | None:
@@ -235,10 +236,16 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     codes = [w for w in tokens(geizhals.glue_units(title or "")) if geizhals.is_code(w)]   # a code after a list too
     extra = [w for w in toks[end:] if geizhals.CAPACITY_RE.fullmatch(w) or _WATTS_RE.fullmatch(w)] \
         + [w for w in codes if w not in toks[:end]]
-    nxt = t.extras_at + 1          # "Pi5 mit 1gb und Netzteil": a capacity right after "mit" is the variant's own
-    if t.extras_at < len(t.raw) and t.low[t.extras_at] in _WITH and nxt < len(t.raw) \
-            and geizhals.CAPACITY_RE.fullmatch(t.raw[nxt]) and t.raw[nxt] not in extra:
-        extra.insert(0, t.raw[nxt])
+    # "Pi5 mit 1gb und Netzteil", "Pi 4 Modell B, 8GB RAM + Gehäuse": a capacity right after "mit" or the comma of
+    # what comes along is the item's own when RAM or nothing more follows it, not a card's or a disk's ("mit 64GB
+    # SD-Karte", ", 64GB microSD", "mit SSD 512gb")
+    for cut in (t.extras_at if t.extras_at < len(t.raw) and t.low[t.extras_at] in _WITH else None,
+                t.list_at if t.list_at < len(t.raw) else None):
+        if cut is None or cut + 1 >= len(t.raw) or not geizhals.CAPACITY_RE.fullmatch(t.raw[cut + 1]):
+            continue
+        after = t.low[cut + 2] if cut + 2 < len(t.low) else ""
+        if (after in _RAM_WORDS or after in _EXTRAS or after in {"", ","}) and t.raw[cut + 1] not in extra:
+            extra.insert(0, t.raw[cut + 1])
     kinds = TitleMatch(title).acc                 # an accessory ad's kind ("PI4, Joy-it, Aluminiumgehäuse"), not a
     acc = [w for w in toks if _accessory(_fold(w)) in kinds and w not in core][:1]    # broken item's part ("Display")
     picked = list(dict.fromkeys(core + acc + extra))[:7]
@@ -519,6 +526,7 @@ _LOT_WORDS = {"konvolut", "sammlung", "restposten", "sammelposten"}
 _BOX_WORDS = {"ovp", "box", "originalverpackung", "karton", "verpackung", "schachtel"}   # "nur OVP": the box alone
 _EXTRAS = {"mit", "inkl", "inklusive", "incl", "samt", "with", "+", "&", "und", "sowie", "zzgl",   # what comes along
            "con", "avec", "met", "inclus", "incluso", "compreso"}
+_RAM_WORDS = {"ram", "arbeitsspeicher", "memory", "speicher", "ddr3", "ddr4", "ddr5", "lpddr4", "lpddr4x", "lpddr5"}
 _WITH = {"mit", "with", "con", "avec", "met"}   # "mit 1gb": a capacity right after it names the variant
 _FOR = {"fuer", "for", "passend", "kompatibel", "compatible", "geeignet",   # "Hülle für iPhone 13": made for the item
         "per", "pour", "para", "voor", "dla", "compatibile"}
