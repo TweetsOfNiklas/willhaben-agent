@@ -425,3 +425,140 @@ def test_api_publish_rejects_non_object_shipping(client, wh, shipping):  # noqa:
     r = client.post(f"/api/ad-drafts/{d.id}/willhaben-publish", json={"shipping": shipping})
     assert r.status_code == 400 and "shipping must be an object" in r.text
     assert wh.published == []
+
+
+# ------------------------------------------------------------------ the price field: German formats, junk keeps the old price
+@pytest.mark.parametrize("raw,want", [
+    ("12", 12.0), ("12,50", 12.5), ("12.50", 12.5), ("1.200", 1200.0), ("1.200,50", 1200.5), ("1 200", 1200.0),
+    ("12 €", 12.0), ("€ 12", 12.0), ("12€", 12.0), ("80 EUR", 80.0), ("80 Euro", 80.0), ("25,-", 25.0), ("25.-", 25.0),
+    ("", None), ("  ", None), (None, None),
+])
+def test_parse_price_german_formats(raw, want):
+    assert ad_creator.parse_price(raw) == want
+
+
+@pytest.mark.parametrize("raw", ["abc", "12 Stück", "-5", "1,200", "12..5", "1.2.3"])
+def test_parse_price_rejects_junk(raw):
+    with pytest.raises(ValueError):
+        ad_creator.parse_price(raw)
+
+
+def test_unreadable_price_keeps_the_old_one(client, wh):  # noqa: F811
+    from urllib.parse import unquote
+    d = _draft()                                                              # price 12
+    r = client.post(f"/new-ad/{d.id}", data={"title": "Neu", "description": "Text", "price": "zwölf"},
+                    follow_redirects=False)
+    msg = unquote(r.headers["location"])
+    assert "Price not recognized" in msg and "zwölf" in msg and "Changes saved" not in msg
+    d2 = _get(d.id)
+    assert (d2.title, d2.description, d2.price_suggestion) == ("Neu", "Text", 12) and "zwölf" in d2.error
+
+    r = client.post(f"/new-ad/{d.id}", data={"title": "Neu", "description": "Text", "price": "1.200,50"},
+                    follow_redirects=False)
+    assert "Changes saved" in unquote(r.headers["location"]) and _get(d.id).price_suggestion == 1200.5
+
+    card = client.post(f"/ad-drafts/{d.id}/inline", data={"title": "Neu", "description": "Text", "price": "80 EUR"}).text
+    assert "saved ✓" in card and _get(d.id).price_suggestion == 80
+    card = client.post(f"/ad-drafts/{d.id}/inline", data={"title": "Neu", "description": "Text", "price": "viel"}).text
+    assert "Price not recognized" in card and "saved ✓" not in card and _get(d.id).price_suggestion == 80
+
+    # publishing with a price that was not understood does not go out with the old one
+    client.post(f"/new-ad/{d.id}/willhaben/prepare", data={})
+    r = client.post(f"/new-ad/{d.id}/willhaben/publish", follow_redirects=False,
+                    data={"option": "0", "handover": "pickup", "title": "Neu", "description": "Text", "price": "abc"})
+    assert r.status_code == 303 and "msg=" not in r.headers["location"]
+    wait_jobs()
+    assert wh.published == [] and "Price not recognized" in _get(d.id).error and _get(d.id).publishing is None
+    card = client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "handover": "pickup", "title": "Neu",
+                                                                  "description": "Text", "price": "abc"}).text
+    assert "data-pending-key" not in card and "Price not recognized" in card
+    wait_jobs()
+    assert wh.published == []
+
+
+# ------------------------------------------------------------------ a published draft stays published while the ad is online
+def _myad(ad_id, status):
+    with dbmod.session() as db:
+        row = db.get(dbmod.MyAd, ad_id) or dbmod.MyAd(ad_id=ad_id)
+        row.status = status
+        db.add(row)
+        db.commit()
+
+
+def test_no_reset_to_draft_while_the_ad_is_online(client, wh):  # noqa: F811
+    d = _draft()
+    client.post(f"/ad-drafts/{d.id}/inline/prepare", data={})
+    client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "o0_Zustand": "gebraucht", "handover": "pickup"})
+    wait_jobs()
+    assert (_get(d.id).status, _get(d.id).wh_ad_id) == ("published", "1000000001")
+    with dbmod.session() as db:
+        assert db.get(dbmod.MyAd, "1000000001").status == "unknown"        # just published, import not run yet
+
+    card = client.post(f"/ad-drafts/{d.id}/inline/status", data={"status": "draft"}).text
+    assert "online on willhaben as 1000000001" in card and "/myads" in card and "Not published after all" in card
+    assert _get(d.id).status == "published"
+    _myad("1000000001", "active")
+    client.post(f"/ad-drafts/{d.id}/inline/status", data={"status": "draft"})
+    assert _get(d.id).status == "published" and len(wh.published) == 1
+
+    _myad("1000000001", "deleted")                                           # gone from willhaben: the reset is fine
+    card = client.post(f"/ad-drafts/{d.id}/inline/status", data={"status": "draft"}).text
+    assert "/inline/publish" in card and (_get(d.id).status, _get(d.id).wh_ad_id) == ("draft", "1000000001")
+    client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "o0_Zustand": "gebraucht", "handover": "pickup"})
+    wait_jobs()
+    assert len(wh.published) == 2 and wh.published[-1]["existing"] == "1000000001"
+
+    # a manually marked draft (no willhaben id) can always be taken back
+    d2 = _draft()
+    client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "published"})
+    client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "draft"})
+    assert _get(d2.id).status == "draft"
+
+
+def test_publish_refused_while_the_ad_is_online(client, wh):  # noqa: F811
+    """Old data or a reset that slipped through: the publish itself checks My ads before touching willhaben."""
+    d = _draft(wh_ad_id="1000000001")                                        # status draft, ad id of a live ad
+    _myad("1000000001", "active")
+    client.post(f"/new-ad/{d.id}/willhaben/prepare", data={})
+    r = client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "0", "handover": "pickup"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and "msg=" not in r.headers["location"]
+    wait_jobs()
+    err = _get(d.id).error
+    assert wh.published == [] and "1000000001" in err and "/myads" in err and _get(d.id).publishing is None
+    assert ad_creator.live_on_willhaben(_get(d.id)).status == "active"
+    for status in ("expired", "sold", "deleted", "replaced"):
+        _myad("1000000001", status)
+        assert ad_creator.live_on_willhaben(_get(d.id)) is None, status
+
+
+# ------------------------------------------------------------------ a published draft is read-only on its page
+def test_published_draft_page_is_read_only(client, wh):  # noqa: F811
+    from urllib.parse import unquote
+    d = _draft()
+    client.post(f"/new-ad/{d.id}/willhaben/prepare", data={})
+    client.post(f"/new-ad/{d.id}/willhaben/publish", data={"option": "0", "handover": "pickup"})
+    wait_jobs()
+    page = client.get(f"/new-ad/{d.id}").text
+    assert page.count(" readonly") == 3 and 'href="/myads/1000000001/edit"' in page
+    assert f'action="/new-ad/{d.id}/refine"' not in page and 'form="draft-form"' not in page
+    assert "/willhaben/publish" not in page and "Edit on willhaben" in page
+
+    r = client.post(f"/new-ad/{d.id}/refine", data={"instruction": "kürzer"}, follow_redirects=False)
+    assert "Already published" in unquote(r.headers["location"])
+    wait_jobs()
+    assert not any("kürzer" in c["prompt"] for c in client.fake.calls)
+    r = client.post(f"/new-ad/{d.id}", data={"title": "Anders", "description": "Anders", "price": "99"},
+                    follow_redirects=False)
+    assert "Already published" in unquote(r.headers["location"]) and "Changes saved" not in r.headers["location"]
+    d2 = _get(d.id)
+    assert (d2.title, d2.price_suggestion) == ("Logitech S125i", 12)
+
+    # a draft Claude still works on cannot be revised twice; an empty instruction is nothing to do
+    d3 = _draft()
+    ad_creator.update_draft(d3.id, refining=True)
+    r = client.post(f"/new-ad/{d3.id}/refine", data={"instruction": "kürzer"}, follow_redirects=False)
+    assert "Not revised" in unquote(r.headers["location"])
+    ad_creator.update_draft(d3.id, refining=None)
+    r = client.post(f"/new-ad/{d3.id}/refine", data={"instruction": "  "}, follow_redirects=False)
+    assert "Nothing to revise" in unquote(r.headers["location"])

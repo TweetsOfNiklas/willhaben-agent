@@ -190,3 +190,59 @@ def test_category_queries_order():
     assert q == ["Lautsprecher", "Logitech Rechargeable Speaker S715i, schwarz, iPod-Dock",
                  "Logitech Rechargeable Speaker S715i", "Logitech Rechargeable Speaker", "Logitech S715i"]
     assert category_queries("Rad", None, "rad") == ["Rad"]
+
+
+def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypatch):  # noqa: F811
+    """Claude down while the batch wrote its drafts: the group keeps its (empty) draft; "Try again" on the card runs the
+    whole pipeline again – text, comparable prices, Geizhals – on that draft, so the batch link stays."""
+    from app.llm.base import LLMError
+    from app.services import ad_creator
+
+    fake = _sorting_backend(client, monkeypatch)
+    sorting_aware = fake.complete
+    down = [True]
+
+    async def complete(**kw):
+        if down[0] and "title" in kw["schema"]["properties"]:
+            raise LLMError("Claude nicht erreichbar (529)")
+        return await sorting_aware(**kw)
+    monkeypatch.setattr(fake, "complete", complete)
+
+    photos = [("photos", (f"IMG_{i}.jpg", b"jpeg-bytes-%d" % i, "image/jpeg")) for i in range(3)]
+    r = client.post("/new-ad/batch", data={"notes": "Abholung Wien"}, files=photos, follow_redirects=False)
+    batch_id = int(r.headers["location"].split("/")[-1].split("?")[0])
+    _wait(batch_id, "review")
+    client.post(f"/new-ad/batch/{batch_id}", data={"img_0": "g1", "img_1": "g1", "include_g1": "1", "img_2": "",
+                                                   "action": "create"})
+    end = time.monotonic() + 5
+    while not ad_batch.get(batch_id).groups[0].get("draft_id") and time.monotonic() < end:
+        time.sleep(0.02)
+    b = _wait(batch_id, "review")
+    g = b.groups[0]
+    with dbmod.session() as db:
+        d = db.get(dbmod.AdDraft, g["draft_id"])
+    assert (d.status, d.title, len(d.image_paths)) == ("error", None, 2) and "529" in d.error and "529" in g["error"]
+    assert ad_batch.locked(g) and ad_batch.pending(b) == []                    # no second draft for the group
+
+    card = client.get(f"/ad-drafts/{d.id}/card").text
+    assert f'hx-post="/ad-drafts/{d.id}/retry"' in card and "Try again" in card
+    assert f'hx-post="/ad-drafts/{d.id}/retry"' in client.get(f"/new-ad/batch/{batch_id}").text
+    assert f'action="/new-ad/{d.id}/retry"' in client.get(f"/new-ad/{d.id}").text
+
+    down[0] = False
+    card = client.post(f"/ad-drafts/{d.id}/retry").text
+    assert f'data-pending-key="refining:{d.id}"' in card and "Claude is writing the draft" in card
+    assert "/retry" not in card                                                # no second click while it runs
+    assert ad_creator.enqueue_retry(d.id) is False
+    wait_jobs()
+    with dbmod.session() as db:
+        d = db.get(dbmod.AdDraft, d.id)
+    assert (d.status, d.error, d.title) == ("draft", None, "KTM Kinderrad 20 Zoll blau")
+    assert d.price_stats["count"] == 3 and len(d.comparables) == 3            # comparable ads were searched
+    assert d.search_keywords == "ktm kinderrad 20" and len(d.image_paths) == 2 and d.batch_id == batch_id
+    prompt = fake.calls[-1]["prompt"]
+    assert "Abholung Wien" in prompt and len(fake.calls[-1]["images"]) == 2  # the same notes and photos
+    assert ad_batch.get(batch_id).groups[0]["draft_id"] == d.id               # the batch still points at it
+    card = client.get(f"/ad-drafts/{d.id}/card").text
+    assert "/retry" not in card and "KTM Kinderrad 20 Zoll blau" in card and "data-pending-key" not in card
+    assert ad_creator.enqueue_retry(d.id) is False                            # nothing to retry on a written draft

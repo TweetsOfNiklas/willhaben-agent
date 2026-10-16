@@ -1375,7 +1375,7 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 async def ad_draft_save(draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
     d = ad_creator.save_fields(draft_id, title, description, price)
-    msg = d.error if d.refining else t('Changes saved')
+    msg = ad_creator.save_problem(d, price) or t('Changes saved')
     return back(f"/new-ad/{draft_id}?msg={quote(msg, safe='')}")
 
 
@@ -1383,7 +1383,16 @@ async def ad_draft_save(draft_id: int, title: str = Form(...), description: str 
 async def ad_draft_refine(draft_id: int, instruction: str = Form(...)):
     """Background job (lane claude): the draft shows "Claude is revising…" and swaps itself in when done."""
     _draft_or_404(draft_id)
-    ad_creator.enqueue_refine(draft_id, instruction)
+    if not ad_creator.enqueue_refine(draft_id, instruction):
+        return back(f"/new-ad/{draft_id}?msg={quote(ad_creator.refine_refusal(draft_id), safe='')}")
+    return back(f"/new-ad/{draft_id}")
+
+
+@app.post("/new-ad/{draft_id:int}/retry")
+async def ad_draft_retry(draft_id: int):
+    """A draft Claude could not write: the same notes and photos once more, as a background job."""
+    _draft_or_404(draft_id)
+    ad_creator.enqueue_retry(draft_id)
     return back(f"/new-ad/{draft_id}")
 
 
@@ -1411,10 +1420,14 @@ async def ad_draft_geizhals(draft_id: int, url: str = Form(""), query: str = For
     return back(f"/new-ad/{draft_id}#geizhals")
 
 
-def _save_posted_fields(draft_id: int, form: Any) -> None:
-    """Unsaved title/description/price that came along with a willhaben action: saved first."""
+def _save_posted_fields(draft_id: int, form: Any) -> str | None:
+    """Unsaved title/description/price that came along with a willhaben action: saved first. Returns the problem
+    (it is on the draft as d.error too) when the edit was not taken over, e.g. a price that could not be read."""
     if form.get("title") is not None and form.get("description") is not None:
-        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+        price = str(form.get("price") or "")
+        return ad_creator.save_problem(ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]),
+                                                              price), price)
+    return None
 
 
 @app.post("/new-ad/{draft_id:int}/willhaben/prepare")
@@ -1449,7 +1462,8 @@ async def ad_draft_wh_publish(request: Request, draft_id: int):
     publish_willhaben check the status)."""
     _draft_or_404(draft_id)
     form = await request.form()
-    _save_posted_fields(draft_id, form)
+    if _save_posted_fields(draft_id, form):                  # e.g. an unreadable price: not published with the old one
+        return back(f"/new-ad/{draft_id}#willhaben")
     try:
         option = int(str(form.get("option", "")))
     except ValueError:
@@ -1576,7 +1590,8 @@ def _draft_card(request: Request, d: AdDraft, saved: bool = False) -> HTMLRespon
 async def ad_draft_inline_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                                price: str = Form("")):
     _draft_or_404(draft_id)
-    return _draft_card(request, ad_creator.save_fields(draft_id, title, description, price), saved=True)
+    d = ad_creator.save_fields(draft_id, title, description, price)
+    return _draft_card(request, d, saved=ad_creator.save_problem(d, price) is None)
 
 
 @app.post("/ad-drafts/{draft_id}/inline/refine", response_class=HTMLResponse)
@@ -1596,9 +1611,14 @@ async def ad_draft_inline_status(request: Request, draft_id: int, status: str = 
                                  price: str = Form("")):
     if status not in ("draft", "published", "discarded"):
         raise HTTPException(400)
-    _draft_or_404(draft_id)
+    d = _draft_or_404(draft_id)
     if title is not None and description is not None:
         ad_creator.save_fields(draft_id, title, description, price)
+    live = ad_creator.live_on_willhaben(d) if status == "draft" and d.status == "published" else None
+    if live is not None:          # "not published after all" while the ad is online would let it be published twice
+        return _draft_card(request, ad_creator.update_draft(draft_id, error=t(
+            "The ad is online on willhaben as {id} – change or delete it under My ads (/myads); the draft stays published",
+            id=live.ad_id)))
     return _draft_card(request, ad_creator.update_draft(draft_id, status=status))
 
 
@@ -1623,8 +1643,8 @@ async def ad_draft_inline_publish(request: Request, draft_id: int):
     Runs as a background job: the card comes back at once with a spinner and swaps itself in when done."""
     _draft_or_404(draft_id)
     form = await request.form()
-    if form.get("title") is not None and form.get("description") is not None:
-        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+    if _save_posted_fields(draft_id, form):                  # e.g. an unreadable price: not published with the old one
+        return _draft_card(request, _draft_or_404(draft_id))
     try:
         option = int(str(form.get("option", "")))
     except ValueError:
@@ -1632,6 +1652,14 @@ async def ad_draft_inline_publish(request: Request, draft_id: int):
     prefix = f"o{option}_"
     values = {k[len(prefix):]: str(v) for k, v in form.multi_items() if k.startswith(prefix) and v}
     ad_creator.enqueue_publish(draft_id, option, values, shipping=ad_creator.parse_shipping(form))
+    return _draft_card(request, _draft_or_404(draft_id))
+
+
+@app.post("/ad-drafts/{draft_id}/retry", response_class=HTMLResponse)
+async def ad_draft_inline_retry(request: Request, draft_id: int):
+    """Batch card "Try again" on a draft Claude could not write: background job, the card swaps itself in when done."""
+    _draft_or_404(draft_id)
+    ad_creator.enqueue_retry(draft_id)
     return _draft_card(request, _draft_or_404(draft_id))
 
 

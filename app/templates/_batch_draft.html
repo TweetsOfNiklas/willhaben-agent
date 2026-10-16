@@ -13,6 +13,9 @@
   <div class="flex min-w-0 flex-col gap-2.5">
     <div class="flex flex-wrap items-center gap-2"><span class="text-[12.5px] text-muted">#{{ d.id }}</span>{{ ui.pill(_("published") if d.status == 'published' else _("discarded") if d.status == 'discarded' else _("Error") if d.error else _("draft"), tone) }}<span class="min-w-0 text-[12.5px] text-muted">{{ d.category_hint or '' }}{% if d.condition %} · {{ d.condition }}{% endif %}</span><a href="/new-ad/{{ d.id }}" class="ml-auto text-[12.5px] text-primary hover:underline">{{ _("Details, Geizhals, undo") }} →</a></div>
     {% if d.error %}<small class="text-error">{{ d.error }}</small>{% endif %}
+    {% if d.status == 'error' and not d.refining and not d.publishing %}{# Claude failed (outage, limit): the same notes and photos once more, in the background #}
+    <form hx-post="/ad-drafts/{{ d.id }}/retry" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 flex flex-wrap items-center gap-2"><button class="btn btn-sm"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Try again") }}</button><small class="text-muted">{{ _("Claude writes the draft once more from the same notes and photos") }}</small></form>
+    {% endif %}
     {% if d.status == 'discarded' %}
       <div class="flex flex-wrap items-center gap-2.5"><span class="min-w-0 truncate text-muted">{{ d.title or _('Untitled') }}</span><form hx-post="/ad-drafts/{{ d.id }}/inline/status" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" class="m-0"><input type="hidden" name="status" value="draft"><button class="btn btn-xs">{{ _("Restore") }}</button></form></div>
     {% elif d.publishing %}
@@ -35,8 +38,8 @@
         {% if st.note %}<small><strong>Claude:</strong> {{ st.note }}</small>{% endif %}
         <div class="flex flex-wrap items-center gap-2"><button class="btn btn-sm">{{ _("Save") }}</button>{% if saved %}<small class="text-muted">{{ _("saved") }} ✓</small>{% endif %}</div>
       </form>
-      {% if d.refining %}{# Claude revises in the background: the card swaps itself in when done #}
-      <div>{{ ui.pending('refining:' ~ d.id, _("Claude is revising the text…"), _("Queued: Claude revises the text")) }}</div>
+      {% if d.refining %}{# Claude revises (or, after a failed first attempt, writes) in the background: the card swaps itself in when done #}
+      <div>{% if d.status == 'error' %}{{ ui.pending('refining:' ~ d.id, _("Claude is writing the draft…"), _("Queued: Claude writes the draft")) }}{% else %}{{ ui.pending('refining:' ~ d.id, _("Claude is revising the text…"), _("Queued: Claude revises the text")) }}{% endif %}</div>
       {% else %}
       <form class="bdraft-refine flex items-center gap-1.5" hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/refine" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" hx-disabled-elt="find button">
         <input name="instruction" required placeholder="{{ _('Revise with Claude, e.g. “shorter”, “mention the new battery from 2024”') }}" class="input input-sm min-w-0 flex-1 bg-base-200"><button class="btn btn-sm shrink-0"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Revise") }}</button></form>
