@@ -1,0 +1,16 @@
+{
+ "Cached lookups": "Gespeicherte Abfragen",
+ "Searches and product pages from Geizhals are kept here: a lookup within {d} days of the last fetch sends no request, an older one fetches again. An entry no lookup used for {d} days is deleted.": "Suchen und Produktseiten von Geizhals werden hier gespeichert: Eine Abfrage innerhalb von {d} Tagen nach dem letzten Abruf schickt keine Anfrage, eine ältere ruft neu ab. Ein Eintrag, den {d} Tage lang keine Abfrage gebraucht hat, wird gelöscht.",
+ "Delete all cached Geizhals lookups? The next lookups ask Geizhals again.": "Alle gespeicherten Geizhals-Abfragen löschen? Die nächsten Abfragen fragen Geizhals wieder.",
+ "Clear cache": "Speicher leeren",
+ "Search results": "Suche",
+ "Product page": "Produktseite",
+ "{n} hits": "{n} Treffer",
+ "{n} specs": "{n} Datenblatt-Einträge",
+ "fetched {time}": "abgerufen {time}",
+ "used {time}": "gebraucht {time}",
+ "fetched again on the next lookup": "wird bei der nächsten Abfrage neu abgerufen",
+ "… and {n} more": "… und {n} weitere",
+ "Nothing cached yet.": "Noch nichts gespeichert.",
+ "{n} cached answers deleted": "{n} gespeicherte Abfragen gelöscht"
+}

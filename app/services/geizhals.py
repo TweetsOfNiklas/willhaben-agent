@@ -20,12 +20,13 @@ import logging
 import re
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlencode
 
 import httpx
-from sqlmodel import col, delete
+from sqlmodel import col, delete, func, select
 
 from app import db
 from app.config import get_settings
@@ -316,6 +317,38 @@ def prune_cache() -> int:
     with db.session() as ses:
         n = ses.exec(delete(db.GeizhalsCache).where(
             col(db.GeizhalsCache.used_at) < time.time() - CACHE_DAYS * 86400)).rowcount
+        ses.commit()
+    return n or 0
+
+
+def cache_view(limit: int = 300) -> dict[str, Any]:
+    """Settings → Prices → Geizhals: the cached answers, the last used first: {count, rows: [{kind, label, href,
+    result, fetched, used, stale}]}; `label`: the search term as sent, or the product's name."""
+    from urllib.parse import parse_qs, urlparse
+
+    with db.session() as ses:
+        count = ses.exec(select(func.count()).select_from(db.GeizhalsCache)).one()
+        found = ses.exec(select(db.GeizhalsCache).order_by(col(db.GeizhalsCache.used_at).desc()).limit(limit)).all()
+    now, rows = time.time(), []
+    for r in found:
+        d = r.data
+        if isinstance(d, list):          # a search: its hits
+            top = d[0] if d else None
+            rows.append({"kind": "search", "label": parse_qs(urlparse(r.url).query).get("fs", [""])[0], "href": r.url,
+                         "result": t("{n} hits", n=len(d)) if d else t("nothing found"),
+                         "top": top.get("name") if top else "", "price": top.get("price") if top else None})
+        else:                            # a product page
+            rows.append({"kind": "product", "label": d.get("name") or r.url, "href": r.url,
+                         "result": t("{n} specs", n=len(d.get("specs") or [])), "top": "", "price": d.get("price_from")})
+        rows[-1].update(fetched=datetime.fromtimestamp(r.fetched_at, timezone.utc),
+                        used=datetime.fromtimestamp(r.used_at, timezone.utc), stale=now - r.fetched_at >= CACHE_DAYS * 86400)
+    return {"count": count, "rows": rows, "days": CACHE_DAYS, "more": max(0, count - len(rows))}
+
+
+def clear_cache() -> int:
+    """Delete every cached answer ("Clear cache"); returns how many."""
+    with db.session() as ses:
+        n = ses.exec(delete(db.GeizhalsCache)).rowcount
         ses.commit()
     return n or 0
 

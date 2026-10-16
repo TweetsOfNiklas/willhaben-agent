@@ -268,3 +268,25 @@ async def test_the_cache_answers_for_a_week_then_asks_again_and_forgets_what_nob
 
 async def _fail(url):
     raise geizhals.GeizhalsError("down")
+
+
+def test_settings_lists_the_cache_and_clears_it(client):  # noqa: F811
+    import time
+
+    from app import db
+
+    now = time.time()
+    with db.session() as ses:
+        ses.add(db.GeizhalsCache(url="https://geizhals.at/?fs=RTX+4.090&hloc=at", fetched_at=now - 3600, used_at=now,
+                                 data=[{"name": "NVIDIA RTX 4090 FE", "url": "https://geizhals.at/x-a1.html",
+                                        "price": 1799.0, "image": None}]))
+        ses.add(db.GeizhalsCache(url="https://geizhals.at/x-a1.html", fetched_at=now - 8 * 86400, used_at=now - 60,
+                                 data={"name": "NVIDIA RTX 4090 Founders Edition", "url": "https://geizhals.at/x-a1.html",
+                                       "price_from": 1799.0, "specs": [["Chip", "AD102"]]}))
+        ses.commit()
+    page = client.get("/settings/geizhals").text
+    assert "Cached lookups" in page and "RTX 4.090" in page and "NVIDIA RTX 4090 Founders Edition" in page
+    assert "1 hits" in page and "fetched again on the next lookup" in page        # the product page is over a week old
+    r = client.post("/settings/geizhals/clear", follow_redirects=False)
+    assert r.status_code == 303 and "2%20cached%20answers%20deleted" in r.headers["location"]
+    assert "Nothing cached yet." in client.get("/settings/geizhals").text

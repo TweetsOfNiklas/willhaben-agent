@@ -1874,7 +1874,7 @@ async def capture_download(name: str):
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
                      "claude", "selling", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
-                     "prices")   # settings.html groups
+                     "prices", "geizhals")   # settings.html groups
 
 
 def _site_sections() -> dict[str, Any]:
@@ -2125,6 +2125,7 @@ def _vpn_back(msg: str, next_url: str = "") -> RedirectResponse:
 from app.services import vpn_check  # noqa: E402
 
 templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → the connection (settings/_vpn_test.html)
+templates.env.globals.update(geizhals_cache=geizhals.cache_view)   # Settings → Prices → Geizhals
 
 
 def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
@@ -2177,6 +2178,13 @@ async def settings_vpn_clear():
     finally:
         await vpn.source_changed()
     return _vpn_back(t("WireGuard configs removed; sites with the VPN on pause until you upload new ones"))
+
+
+@app.post("/settings/geizhals/clear")
+async def settings_geizhals_clear():
+    """Settings → Prices → Geizhals: delete every cached search and product page (the next lookups ask again)."""
+    n = geizhals.clear_cache()
+    return back(f"/settings/geizhals?msg={quote(t('{n} cached answers deleted', n=n), safe='')}")
 
 
 @app.post("/settings/vpn/site/{pid}")

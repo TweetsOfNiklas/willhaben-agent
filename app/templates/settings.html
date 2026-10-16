@@ -13,7 +13,7 @@
 {% set _x = sites.append(("vpn", _("VPN"), ('bad' if vpn_health()[0] == 'problem' else ''))) %}
 {% set groups = [
   (_("Platforms"), sites),
-  (_("Prices"), [("prices", _("Price rating"), '')]),
+  (_("Prices"), [("prices", _("Price rating"), ''), ("geizhals", "Geizhals", '')]),
   (_("Shipping & pickup"), [("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("printers", _("Printers"), ''), ("calendar", "Google Calendar", '')]),
   (_("Selling"), [("selling", _("Selling preferences"), ''), ("rules", _("My rules"), '')]),
   (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else ''))]),
