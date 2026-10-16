@@ -207,5 +207,6 @@
  "{site} now through {server}": "{site} jetzt über {server}",
  "via {server}": "über {server}",
  "Working servers ({n})": "Funktionierende Server ({n})",
- "all sites": "alle Seiten"
+ "all sites": "alle Seiten",
+ "Geizhals shows a browser check for this search (not because of the VPN server); it is tried again in a few hours": "Geizhals zeigt für diese Suche eine Browser-Prüfung (nicht wegen des VPN-Servers); sie wird in ein paar Stunden wieder versucht"
 }

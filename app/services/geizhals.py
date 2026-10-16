@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
 from typing import Any
@@ -37,6 +38,8 @@ log = logging.getLogger(__name__)
 BASE = "https://geizhals.at"
 _limiter = RateLimiter(3.0, name="Geizhals")
 _transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock transport
+CHALLENGED_TTL_S = 6 * 3600   # a search Cloudflare challenges (not the server) is not asked again for this long
+_challenged: dict[str, float] = {}   # url -> until (_get_vpn_once())
 
 _CARD_RE = re.compile(r'<article class="galleryview__item[^"]*"(.*?)</article>', re.S)
 _NAME_RE = re.compile(r'class="galleryview__name-link"[^>]*>(.*?)</a>', re.S)
@@ -158,7 +161,8 @@ class _AskAgain(GeizhalsError):
 
 async def _get_vpn(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str:
     """Through Geizhals' VPN server; no route: GeizhalsError, never a direct request. A 403/429, Cloudflare's
-    challenge or no answer is a refusal (Tunnel.refused()): asked again through the same server until the refusals
+    challenge or no answer is a refusal (Tunnel.refused()), except a challenge for this search only (the front page
+    passes through the same server: the lookup fails, CHALLENGED_TTL_S long): asked again through the same server until the refusals
     in a row count (vpn.CONFIRM), then Geizhals moves to the other live server or waits for the search to find it
     another one. A refusal does not penalize the limiter, whose pause is for blocks of the home IP. Under a Trial
     (the VPN search) once, through its server only, and what it met is noted there."""
@@ -174,6 +178,8 @@ async def _get_vpn(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str
 
 async def _get_vpn_once(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -> str:
     tr = current_trial()
+    if tr is None and _challenged.get(url, 0) > time.time():
+        raise GeizhalsError(_challenged_text())
     try:
         route = tr.route if tr is not None else await tunnel.ensure()
     except PlatformError as e:
@@ -212,6 +218,12 @@ async def _get_vpn_once(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -
         if tr is not None:
             tr.refused, tr.detail = reason, f"HTTP {r.status_code}"
             raise GeizhalsError(t("Geizhals refused the VPN server (HTTP {status})", status=r.status_code))
+        if challenge and await _front_page_passes(tunnel, route, headers):
+            # Cloudflare challenges some searches (model numbers, mostly) through every server while the others
+            # pass: the search, not the server. Not asked again for a while, no strike against the server.
+            _challenged[url] = time.time() + CHALLENGED_TTL_S
+            log.info("Geizhals: a challenge for %s only, the front page passes through %s", url, route.name)
+            raise GeizhalsError(_challenged_text())
         await tunnel.refused(route, reason, f"HTTP {r.status_code}")
         raise _AskAgain(t("Geizhals refused the VPN server (HTTP {status})", status=r.status_code))
     if tr is None:
@@ -221,6 +233,27 @@ async def _get_vpn_once(tunnel: vpn.Tunnel, url: str, headers: dict[str, str]) -
     if r.status_code != 200:
         raise GeizhalsError(t("Geizhals answered HTTP {status}", status=r.status_code))
     return r.text
+
+
+def _challenged_text() -> str:
+    return t("Geizhals shows a browser check for this search (not because of the VPN server); it is tried again in a "
+             "few hours")
+
+
+async def _front_page_passes(tunnel: vpn.Tunnel, route: vpn.Route, headers: dict[str, str]) -> bool:
+    """After a challenge: does Geizhals' front page answer through the same server? Then the search was challenged,
+    not the server."""
+    try:
+        async with _limiter:
+            if tunnel.current() != route:
+                _limiter.refund()
+                return False
+            with tunnel.hold(route):
+                async with _client(route.proxy) as c:
+                    r = await c.get(f"{BASE}/", headers=headers)
+    except (Blocked, httpx.HTTPError):
+        return False
+    return r.status_code == 200 and r.headers.get("cf-mitigated", "").lower() != "challenge"
 
 
 async def search(query: str, limit: int = 5) -> list[Hit]:

@@ -168,7 +168,7 @@ def sites(fake):
 
 
 def gz(monkeypatch, runner, answers):
-    """Geizhals with its VPN switch on, answering per server: {server: [(status, text) or an Exception]}; requests
+    """Geizhals with its VPN switch on, answering per server: {server: [(status, text[, headers]) or an Exception]}; requests
     without a proxy are noted as "direct". Returns what was asked, in order."""
     seen = []
 
@@ -180,7 +180,7 @@ def gz(monkeypatch, runner, answers):
             a = answers[name].pop(0)
             if isinstance(a, Exception):
                 raise a
-            return httpx.Response(a[0], text=a[1], headers={"content-type": "text/html"})
+            return httpx.Response(a[0], text=a[1], headers={"content-type": "text/html", **(a[2] if len(a) > 2 else {})})
 
         return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
@@ -770,6 +770,28 @@ async def test_a_switch_turned_on_is_tested_on_the_server_in_use_first(sites, fa
     assert await geizhals.search("x") == [] and seen == [N(1), N(1)]
     assert vpn_check.view()["trigger"] == "Geizhals switched on"
 
+
+
+CHALLENGE = (403, "<html>check</html>", {"cf-mitigated": "challenge"})
+
+
+async def test_a_challenge_for_one_geizhals_search_is_the_searchs_not_the_servers(fake, monkeypatch):
+    """Cloudflare challenges some searches (model numbers) through every server while the others pass: when the front
+    page answers through the same server, the lookup fails at once, the server gets no strike, and that search is
+    not asked again for a while. A challenge on the front page too is the server's: a refusal as before."""
+    _collection(N(1))
+    _live(N(1), geizhals=N(1))
+    seen = gz(monkeypatch, fake, {N(1): [CHALLENGE, (200, "<html></html>"), CHALLENGE, CHALLENGE, CHALLENGE, CHALLENGE,
+                                         CHALLENGE, CHALLENGE]})
+    with pytest.raises(geizhals.GeizhalsError, match="browser check for this search"):
+        await geizhals.search("Gira 211100")
+    assert seen == [N(1), N(1)] and vpn._strikes == {}               # the search, then the front page
+    with pytest.raises(geizhals.GeizhalsError, match="browser check for this search"):
+        await geizhals.search("Gira 211100")
+    assert seen == [N(1), N(1)]                                      # not asked again
+    with pytest.raises(geizhals.GeizhalsError):
+        await geizhals.search("Raspberry Pi 5")                      # the front page is challenged too: the server's
+    assert vpn.marks(vpn.GEIZHALS)[N(1)][1] == "blocked"                # counted against the server
 
 
 async def test_test_again_asks_every_site_through_its_server_and_switches_nothing(sites, fake):

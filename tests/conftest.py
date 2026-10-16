@@ -98,6 +98,7 @@ def fresh_db():
     from app.services import chats, geizhals, jobs, vpn_check
     from app.willhaben import public, recorder
     vpn.reset()                 # VPN tunnels and their (fake) processes are per test
+    geizhals._challenged.clear()
     vpn_check.reset()           # so is the VPN test (its task belongs to the test's event loop)
     for mod in (public, ebay, kleinanzeigen, preisjaeger, shpock, vinted, geizhals):
         if mod._limiter is not None:     # module-wide: one test's block (429 -> pause) must not pause the next test
