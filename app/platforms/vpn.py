@@ -30,9 +30,10 @@ MARK_TTL_S: a dead server only once it failed again on its own) and the ones it 
 steer the order of a search).
 
 Failover (Tunnel.refused() → failed()): a site's refusal of its live server counts once it came CONFIRM times in a row
-(network errors: CONFIRM_UNREACHABLE), with no answer the site accepted in between; until then the request asks again
-through the same server. Sites like eBay (Akamai) refuse at random now and then: one 403 says little about the
-server. A refusal that counts marks the server for the site; the site moves to the other live server when it has
+over at least CONFIRM_SPAN_S (network errors: CONFIRM_UNREACHABLE times, at once), with no answer the site accepted in
+between; until then the request asks again through the same server. Sites refuse a server that works now and then:
+eBay (Akamai) answers every other request with a 403 for half a minute at a time, Geizhals refuses a burst, both
+right after a search found them answering there; a run of refusals within seconds says little about the server. A refusal that counts marks the server for the site; the site moves to the other live server when it has
 not refused that one too (no pause, no search: untested there until a search asks it), else to a standby server: one
 it answered through lately (the `ok` notes of the searches and of "Test again", standby()), started in seconds
 (failover(): STANDBY_TRIES at most). Only when none of them starts does it wait (VpnWait) for a search
@@ -79,6 +80,8 @@ MAX_LIVE = 2                   # live connections at most (the search's tunnels 
 CONFIRM = 3                    # refusals in a row (403/429/bot check) before a site leaves its live server
 CONFIRM_UNREACHABLE = 2        # ... network errors in a row (a single timeout is no dead server)
 CONFIRM_WINDOW_S = 900         # older refusals no longer count
+CONFIRM_SPAN_S = 90            # ... and refusals (not network errors) count only when the run lasts this long: eBay
+                               # refuses every other request for half a minute at a time, Geizhals a burst for a while
 STANDBY_TRIES = 3              # standby servers a site tries (start + reach its host) before it waits for a search
 SEARCH_TUNNELS = 8             # servers the search starts at the same time at most (no site request to start one)
 DRAIN_S = 15                   # a server switched away from stops once its requests in flight ended, or after this
@@ -1123,16 +1126,16 @@ class Tunnel:
 
     async def refused(self, route: Route | None, reason: str, detail: str = "") -> bool:
         """A refusal through the site's server, or no answer (`unreachable`): it counts (failed()) once it came CONFIRM
-        times in a row (CONFIRM_UNREACHABLE for network errors) within CONFIRM_WINDOW_S, with no answer the site
-        accepted in between (answered()). Before that the caller asks again through the same server. True when it
+        times in a row over at least CONFIRM_SPAN_S (CONFIRM_UNREACHABLE times for network errors, no span) within
+        CONFIRM_WINDOW_S, with no answer the site accepted in between (answered()). Before that the caller asks again through the same server. True when it
         counted and the server was marked."""
         if not self._concerns(route) or (reason == "botcheck" and self.odd()):
             return False
         assert route is not None
         now, key = time.monotonic(), (self.pid, route.name)
         seen = [x for x in _strikes.get(key, []) if now - x < CONFIRM_WINDOW_S] + [now]
-        need = CONFIRM_UNREACHABLE if reason == "unreachable" else CONFIRM
-        if len(seen) < need:
+        need, span = (CONFIRM_UNREACHABLE, 0) if reason == "unreachable" else (CONFIRM, CONFIRM_SPAN_S)
+        if len(seen) < need or seen[-1] - seen[0] < span:
             _strikes[key] = seen
             log.info("VPN %s: server %s %s (%s), %d of %d in a row: asking again", self.pid, route.name, reason,
                      detail or "-", len(seen), need)

@@ -359,6 +359,24 @@ async def test_a_refusal_counts_only_after_several_in_a_row_and_an_answer_starts
     assert vpn.marks("willhaben")["at-vie-wg-001"][1] == "blocked"
 
 
+async def test_a_run_of_refusals_within_seconds_keeps_the_server(fake, no_search, monkeypatch):
+    """eBay refuses every other request for half a minute right after a search found it answering; Geizhals a burst:
+    a run of refusals counts only once it lasted CONFIRM_SPAN_S (a server that is blocked refuses on and on)."""
+    monkeypatch.setattr(vpn, "CONFIRM_SPAN_S", 90)
+    _collection("at-vie-wg-001")
+    _on("ebay")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    tn = vpn.tunnel_for("ebay")
+    r = await tn.ensure()
+    for _ in range(vpn.CONFIRM + 3):
+        assert await tn.refused(r, "blocked", "HTTP 403") is False       # five 403s within seconds
+    assert vpn.marks("ebay") == {} and vpn.paused("ebay") is None and no_search == []
+    key = ("ebay", r.name)
+    vpn._strikes[key] = [x - 100 for x in vpn._strikes[key]]            # ... the run began 100 s ago
+    assert await tn.refused(r, "blocked", "HTTP 403") is True           # still refusing: it counts
+    assert vpn.marks("ebay")["at-vie-wg-001"][1] == "blocked"
+
+
 async def test_network_errors_count_after_two_and_old_refusals_no_longer_count(fake, no_search):
     _collection("at-vie-wg-001")
     _on("willhaben")

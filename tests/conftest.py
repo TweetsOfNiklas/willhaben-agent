@@ -83,6 +83,13 @@ async def finish_jobs() -> None:
 
 
 @pytest.fixture(autouse=True)
+def quick_refusals(monkeypatch):
+    """A run of refusals counts at once (tests send them within milliseconds); tests/test_vpn.py checks the span."""
+    from app.platforms import vpn
+    monkeypatch.setattr(vpn, "CONFIRM_SPAN_S", 0)
+
+
+@pytest.fixture(autouse=True)
 def fresh_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     dbmod.set_engine(engine)
