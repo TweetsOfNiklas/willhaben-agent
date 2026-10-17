@@ -416,3 +416,31 @@ def test_chats_older_than_the_window_leave_the_list():
     page = client.get("/chats").text
     assert "Neues Gespräch" in page and "Altes Gespräch" not in page and "Show 1 hidden or older chats" in page
     assert "Altes Gespräch" in client.get("/chats?show_hidden=1").text
+
+
+def test_reply_system_answers_what_was_asked_and_keeps_rules_as_boundaries():
+    """The two failures of 2026-10-18: a draft asked „Hast du noch Interesse?“ after the buyer wrote „Hätte Interesse!“,
+    and „Ja, sie funktioniert. Ist aber ein Privatverkauf, also ohne Garantie oder Rücknahme.“ recited a rule nobody
+    asked about. The system prompt now says what to answer, that rules are boundaries, how far a hint binds and that
+    alternatives name the decision only; the automatic and the buyer prompts inherit it."""
+    from app.db import DEFAULT_SETTINGS
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM
+
+    for text in ("Antworte auf das, was der Partner zuletzt geschrieben hat, und nicht mehr",
+                 "fragst du nicht noch einmal danach",
+                 "Eine Schlussfrage stellst du nur, wenn der nächste Schritt die Entscheidung des Partners braucht",
+                 "sind aber Grenzen und kein\n  Text zum Aufsagen",
+                 "Garantie, Rücknahme, Privatverkauf oder „wie gesehen“ schreibst du nie von\n  dir aus",
+                 "Abweichend davon nennst du Abholung, Versand und Zahlungsweg (auch PayLivery)",
+                 "Vorrang vor allem anderen", "die\n  Formulierung folgt weiter den Regeln hier",
+                 "Absicherungen (Garantie, Privatverkauf) nennst du nur", "ein Stichwort reicht nicht",
+                 "instruction, die nur die Entscheidung\n  in einem Satz nennt",
+                 "keine Garantie- oder\n  Privatverkaufshinweise, keine schon beantworteten Fragen"):
+        assert text in REPLY_SYSTEM, text
+        assert text in AUTO_REPLY_SYSTEM and text in PURCHASE_SYSTEM, text
+    assert "Setz sie genau so um, wie sie dasteht" not in REPLY_SYSTEM
+    assert "Automatischer Modus: Deine Antwort wird ohne weitere Prüfung gesendet" in AUTO_REPLY_SYSTEM   # the .replace() still hits
+    desc = REPLY_SCHEMA["properties"]["alternatives"]["items"]["properties"]["instruction"]["description"]
+    assert desc.startswith("Nur die Entscheidung in einem kurzen Satz") and "keine schon beantworteten Fragen" in desc
+    first = DEFAULT_SETTINGS["reply_rules"].splitlines()[0]
+    assert first == "- Privatverkauf, daher keine Garantie oder Rücknahme (nur erwähnen, wenn jemand danach fragt)."

@@ -637,7 +637,7 @@ def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | N
 
 DEFAULT_SETTINGS: dict[str, str] = {
     "reply_rules": (
-        "- Ich verkaufe privat, keine Garantie oder Rücknahme.\n"
+        "- Privatverkauf, daher keine Garantie oder Rücknahme (nur erwähnen, wenn jemand danach fragt).\n"
         "- Abholung bevorzugt, Versand nur gegen Vorauskasse oder mit willhaben PayLivery.\n"
         "- Bei Preisverhandlung höchstens 10 % Nachlass, sonst freundlich ablehnen.\n"
         "- Du-Form, freundlich, kurz, keine Emojis."
