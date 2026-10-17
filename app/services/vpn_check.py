@@ -1110,6 +1110,9 @@ def _wave(b: Board, s: str, inflight: set[str], waiting: set[str], blocked: set[
     return unk
 
 
+COUNTRY_REFUSALS = 2
+
+
 def _candidate(sh: Search, b: Board, order: list[str]) -> tuple[str | None, bool]:
     """The next server to start: in vpn.order(), the ones a site without a server answered through lately first;
     none already asked, with a process, or whose answers could not help (sh.skipped counts those). When every one
@@ -1118,7 +1121,14 @@ def _candidate(sh: Search, b: Board, order: list[str]) -> tuple[str | None, bool
     seen = {s.name for s in sh.servers} | set(b.live) | vpn.conn.busy()
     without = b.full & ~b.best().covered
     liked = {n for pid in b.names(without) for n in vpn.oks(pid)}
-    ordered = sorted(order, key=lambda n: n not in liked)
+    # a country where a site without a server was already refused on COUNTRY_REFUSALS servers goes to the back: a
+    # site that refuses whole providers or regions (Facebook) gets to other countries instead of the next server of
+    # the same city each time its marks expire
+    spent: dict[str, int] = {}
+    for name, bits in b.no.items():
+        if bits & without & ~b.soft.get(name, 0):
+            spent[vpn.country(name)] = spent.get(vpn.country(name), 0) + 1
+    ordered = sorted(order, key=lambda n: (n not in liked, spent.get(vpn.country(n), 0) >= COUNTRY_REFUSALS))
     pick, skipped = None, 0
     for name in ordered:
         if name in seen:

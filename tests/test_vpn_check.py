@@ -287,6 +287,18 @@ async def test_the_pickiest_site_is_asked_first_and_a_server_it_refuses_costs_on
     assert sh.plan["servers"] == [N(3)] and _reasons("fake3")[N(2)] == "blocked"
 
 
+async def test_a_site_refused_across_a_country_tries_other_countries_first(sites, fake, serial):
+    """Facebook refuses whole providers: once a site without a server was refused on two servers of a country, the
+    other countries' servers come first, not the next one of the same city each time the marks expire."""
+    _collection(*(N(i) for i in range(1, 6)), "pl-waw-wg-001")
+    (a,) = sites({"pl-waw-wg-001": [PAGE, PAGE]}, default=NO)
+    for old in (N(90), N(91)):
+        vpn.mark("fake", old, "blocked")
+    sh = await _search()
+    assert fake.starts[0] == "pl-waw-wg-001" and sh.plan["servers"] == ["pl-waw-wg-001"]
+    assert not {N(i) for i in range(1, 6)} & set(fake.starts)       # found before any of the refused country
+
+
 async def test_every_eu_server_is_searched_no_cap(sites, fake):
     _collection(*(N(i) for i in range(1, 16)), "ch-zrh-wg-001", "gb-lon-wg-001")
     a, b = sites({N(i): [NO] for i in range(1, 14)} | {N(14): [PAGE, PAGE]}, {}, default=PAGE)
