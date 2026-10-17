@@ -587,7 +587,8 @@ async def _on_callback(cq: dict[str, Any]) -> None:
         await _answer(cq_id, "✍️ " + label)
         if tag:
             await progress(tag, "✍️ " + t("Claude is revising: {what} …", what=label))
-        res = await ha_actions.handle({"action": ha_actions.action_id("REVISE", int(draft_id)), "reply_text": instruction})
+        res = await ha_actions.handle({"action": ha_actions.action_id("REVISE", int(draft_id)), "reply_text": instruction,
+                                       "chosen": True})
         if res is None:
             await _say("ℹ️ " + t("Already done."), reply_to=msg.get("message_id"))
             await _drop_buttons(msg)

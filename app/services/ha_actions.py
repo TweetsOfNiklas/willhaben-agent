@@ -180,8 +180,9 @@ async def _handle(event_data: dict[str, Any]) -> str | None:
     if verb == "DISCARD":
         chats.discard_draft(draft_id)
         return "discarded"
-    if verb == "REVISE":
-        new = await chats.revise_and_offer(draft_id, str(event_data.get("reply_text") or ""))
+    if verb == "REVISE":        # typed instruction, or one of Claude's alternatives tapped ("chosen")
+        new = await chats.revise_and_offer(draft_id, str(event_data.get("reply_text") or ""),
+                                           chosen=bool(event_data.get("chosen")))
         return f"revised -> draft {new.id}" if new else None
     text = d.text if verb == "SEND" else str(event_data.get("reply_text") or "").strip()
     if not text:

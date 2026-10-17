@@ -1173,9 +1173,12 @@ async def offer_draft(conv: Conversation, d: Draft, reason: str, replaces: str |
                  actions=ha_actions.draft_actions(d.id, can_send), tag=ha_actions.tag_for(d.id))
 
 
-async def revise(draft_id: int, instruction: str) -> Draft | None:
-    """New draft from an instruction about the old one (Telegram alternative / button on the chat page); the old
-    draft is dropped. None when it is not an open draft any more."""
+async def revise(draft_id: int, instruction: str, *, chosen: bool = False) -> Draft | None:
+    """New draft from an instruction about the old one; the old draft is dropped. None when it is not an open draft
+    any more. `chosen`: the instruction is one of Claude's own alternatives the owner tapped (Telegram button, button
+    on the chat page), so it names the decision only: the wording follows the rules, and nothing the alternative or
+    the old draft added unasked (a question the partner already answered, "keine Garantie") survives. An
+    instruction the owner typed ("Mit Claude überarbeiten") stays binding as it stands."""
     with session() as db:
         old = db.get(Draft, draft_id)
         conv = db.get(Conversation, old.conversation_id) if old else None
@@ -1183,7 +1186,14 @@ async def revise(draft_id: int, instruction: str) -> Draft | None:
         return None
     # German on purpose: both texts go into the prompt
     instruction = instruction.strip() or "Formuliere die Antwort neu."
-    hint = f"Mein bisheriger Entwurf war: „{old.text}“. Überarbeite ihn so: {instruction}"
+    if chosen:
+        hint = (f"Meine Entscheidung für diese Antwort (einer deiner eigenen Vorschläge, den ich angetippt habe): "
+                f"{instruction}\nMein bisheriger Entwurf war: „{old.text}“ – nur zum Vergleich. Setz die Entscheidung um "
+                "und formuliere sie nach den Regeln oben; übernimm aus dem Vorschlag und dem alten Entwurf nichts, was "
+                "der Partner nicht verlangt hat (keine Rückfrage zu Gesagtem, kein Hinweis auf Garantie, Rücknahme oder "
+                "Privatverkauf).")
+    else:
+        hint = f"Mein bisheriger Entwurf war: „{old.text}“. Überarbeite ihn so: {instruction}"
     new = await draft_reply(conv.id, hint=hint, auto=bool(old.auto))
     discard_draft(draft_id)
     with session() as db:
@@ -1195,11 +1205,12 @@ async def revise(draft_id: int, instruction: str) -> Draft | None:
     return row
 
 
-async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
-    """"Revise with Claude" from the push: new draft from the instruction, old one dropped, same push updated."""
+async def revise_and_offer(draft_id: int, instruction: str, *, chosen: bool = False) -> Draft | None:
+    """"Revise with Claude" (typed) or an alternative button (chosen) from the push: new draft from the instruction,
+    old one dropped, same push updated."""
     from app.services import ha_actions
 
-    row = await revise(draft_id, instruction)
+    row = await revise(draft_id, instruction, chosen=chosen)
     if row is None:
         return None
     with session() as db:
@@ -1222,7 +1233,7 @@ def enqueue_revise(draft_id: int, instruction: str) -> bool:
 
     async def run(job: jobs.Job) -> str:
         try:
-            await revise(draft_id, instruction)
+            await revise(draft_id, instruction, chosen=True)
         except Exception as e:               # the reason shows in the chat, next to the draft
             _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
             raise

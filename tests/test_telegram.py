@@ -306,8 +306,8 @@ async def test_alternative_button_revises_in_place(tg, monkeypatch):
         db.commit()
     revised = []
 
-    async def fake_revise(draft_id, instruction):
-        revised.append((draft_id, instruction))
+    async def fake_revise(draft_id, instruction, *, chosen=False):
+        revised.append((draft_id, instruction, chosen))
         from app.services import chats
         with session() as db:
             conv = db.get(Conversation, "c1")
@@ -326,7 +326,7 @@ async def test_alternative_button_revises_in_place(tg, monkeypatch):
     b = _buttons(tg[-1][1])
     n = len(tg)
     await telegram.handle_update(_press(b["💶 Preis halten"], msg_id=offer_id))
-    assert revised == [(11, "Bleib beim Preis, geh nicht runter.")]
+    assert revised == [(11, "Bleib beim Preis, geh nicht runter.", True)]      # chosen: Claude's own alternative
     edits = [c for c in tg[n:] if c[0] == "editMessageText"]
     # 1. progress line into the same message (buttons gone), 2. the new draft replaces it, still the same message
     assert "Claude is revising: 💶 Preis halten" in edits[0][1]["text"]
