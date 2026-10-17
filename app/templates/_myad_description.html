@@ -8,10 +8,28 @@
 {% else %}
 <div class="flex flex-wrap items-baseline gap-2.5" data-myad-price><span class="text-xl font-bold">{{ d.price_display or (d.price|eur) }}</span>{{ ui.condition_pill(d.item_condition, d.item_condition_label, d.platform, 'self-center') }}{% if d.category_path %}<span class="text-[12.5px] text-muted">{{ d.category_path|join(' › ') }}</span>{% endif %}</div>
 {% if d.images %}
-<div class="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-1.5" data-myad-photos>
-  {% for src in d.images %}<a href="{{ src }}" target="_blank" rel="noopener" class="block overflow-hidden rounded-md border border-base-300" title="{{ _('Photo {n} of {total}', n=loop.index, total=d.images|length) }}"><img src="{{ src }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="aspect-square w-full object-cover"></a>{% endfor %}
+{# a gallery like the ad viewer's: the large photo (click: full size), arrows and keys, a strip of thumbnails #}
+<div class="flex flex-col gap-2" data-myad-photos
+     x-data="{ i: 0, n: {{ d.images|length }}, src: {{ d.images|tojson|forceescape }}, go(d) { this.i = (this.i + d + this.n) % this.n } }"
+     @keydown.left.prevent="go(-1)" @keydown.right.prevent="go(1)" tabindex="0">
+  <div class="group relative grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-[10px] bg-[#111] text-[#aaa]">
+    {{ ui.icon('image', 28, 1.5) }}
+    <a :href="src[i]" target="_blank" rel="noopener" class="absolute inset-0" title="{{ _('Open in full size') }}">
+      <img :src="src[i]" src="{{ d.images[0] }}" alt="" referrerpolicy="no-referrer" class="size-full object-contain"></a>
+    <span x-show="i === 0" class="absolute top-2 left-2">{{ ui.pill(_("Cover"), 'ok', false) }}</span>
+    <span class="absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12px] text-white tabular-nums" x-text="(i + 1) + ' / ' + n">1 / {{ d.images|length }}</span>
+    {% if d.images|length > 1 %}
+    <button type="button" @click="go(-1)" class="btn btn-circle btn-sm absolute top-1/2 left-2 -translate-y-1/2 border-0 bg-black/55 text-white opacity-80 hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100" aria-label="{{ _('Previous photo') }}">{{ ui.icon('back', 16, 2.5) }}</button>
+    <button type="button" @click="go(1)" class="btn btn-circle btn-sm absolute top-1/2 right-2 -translate-y-1/2 border-0 bg-black/55 text-white opacity-80 hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100" aria-label="{{ _('Next photo') }}">{{ ui.icon('chevron-right', 16, 2.5) }}</button>
+    {% endif %}
+  </div>
+  {% if d.images|length > 1 %}
+  <div class="flex gap-1.5 overflow-x-auto pb-1">
+    {% for img in d.images %}<button type="button" @click="i = {{ loop.index0 }}" class="shrink-0 overflow-hidden rounded-md border-2 transition" :class="i === {{ loop.index0 }} ? 'border-primary' : 'border-transparent opacity-70 hover:opacity-100'" aria-label="{{ _('Photo {n} of {total}', n=loop.index, total=d.images|length) }}"><img src="{{ img }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="size-14 object-cover"></button>{% endfor %}
+  </div>
+  {% endif %}
+  <small class="text-[12px] text-muted">{{ _("{n} photos · the first is the cover", n=d.images|length) }} · <a class="link link-primary no-underline" href="/myads/{{ a.ad_id }}/edit#photos">{{ _("Change photos") }}</a></small>
 </div>
-<small class="text-[12px] text-muted">{{ _("{n} photos · the first is the cover", n=d.images|length) }} · <a class="link link-primary no-underline" href="/myads/{{ a.ad_id }}/edit#photos">{{ _("Change photos") }}</a></small>
 {% endif %}
 <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]" data-myad-delivery>
   <span class="text-muted">{{ _("Pickup") }}</span><span>{{ d.location or d.place or _("no place given") }}</span>

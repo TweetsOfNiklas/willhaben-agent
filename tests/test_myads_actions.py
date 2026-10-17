@@ -719,7 +719,7 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
         assert 'hx-get="/myads/1/description"' in c.get("/myads?ad=1").text
         frag = c.get("/myads/1/description").text
         assert "Erste Zeile\nZweite &lt;Zeile&gt;" in frag and 'href="/myads/1/edit"' in frag
-        assert frag.count('<img src="https://img.example/') == 2 and "€ 40" in frag and "1040 Wien" in frag
+        assert frag.count('<img src="https://img.example/') == 2 and 'x-text="(i + 1)' in frag and "€ 40" in frag and "1040 Wien" in frag
         assert "PayLivery Post" in frag and "€ 3,49" in frag and "€ 5,70" in frag
         assert 'hx-get="/hits/ad/1/deal"' in frag                                # the price check with Geizhals
         assert "HTTP 500" in c.get("/myads/2/description").text
