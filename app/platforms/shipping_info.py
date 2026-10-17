@@ -4,9 +4,9 @@ hits, for the label every price shows it with ("+ € 5,00 shipping", "free ship
 line Claude's prompts get.
 
 Where it comes from: eBay's result list (calculated by eBay for the owner's postcode, Settings → Shipping address)
-and its item page, Preisjäger's deal, willhaben's PayLivery price and Kleinanzeigen's shipping option on the ad page,
-Shpock's "shippable" and Facebook's delivery types in the list. An ad page is loaded for that only for hits that
-pass an agent's checks (before their push), when the ad is opened and on "Sync".
+and its item page, Preisjäger's deal, willhaben's PayLivery price, Kleinanzeigen's shipping option and Vinted's
+cheapest option on the ad page, Shpock's "shippable" and Facebook's delivery types in the list. An ad page is loaded
+for that only for hits that pass an agent's checks (before their push), when the ad is opened and on "Sync".
 """
 from __future__ import annotations
 

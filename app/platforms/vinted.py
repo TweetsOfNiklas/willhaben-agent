@@ -12,7 +12,8 @@ A search link keeps every filter of the website (category path, brand, size, con
 session values; the agents always ask for the newest items first. Vinted's search is loose: with the newest first,
 most of a page names none of the search words (shoes and make-up for "Raspberry pi 5", 10-14), so a result is kept
 only when its title and brand/size line hold every word. Listings come without date and place; opening an ad reads
-"uploaded 6 min. ago" from its page.
+"uploaded 6 min. ago" from its page, and the shipping to Austria ("pricingServices": the cheapest option, as the
+site's "Versand ab € 5,95", or pickup only).
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.i18n import t
-from app.platforms import condition
+from app.platforms import condition, shipping_info
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -44,6 +45,7 @@ _ITEMS = '"items":{"items":['
 _PAGINATION = '"pagination":{'
 _PLUGINS = re.compile(r'\{"plugins":\s*\[')
 _PRICE = re.compile(r'"price":\s*\{"amount":\s*"([\d.]+)",\s*"currency_code":\s*"([A-Z]{3})"\}')
+_PRICING = '"pricingServices":{'
 _dec = json.JSONDecoder()
 
 # "6 Min.", "2 Std.", "3 Tage", "1 Woche", "vor 2 Monaten", "Hochgeladen 6 min.", "just now" -> an age
@@ -134,6 +136,26 @@ def _plugins(text: str) -> dict[str, dict[str, Any]]:
     return {}
 
 
+def _shipping(text: str) -> tuple[float | None, str | None]:
+    """The item's own pricing block -> (price, kind); (None, None) when the page has none."""
+    i = (text or "").find(_PRICING)
+    if i < 0:
+        return None, None
+    try:
+        pricing, _ = _dec.raw_decode(text, i + len(_PRICING) - 1)
+    except ValueError:
+        return None, None
+    services = pricing.get("services") or {}
+    if services.get("isPickUpOnly"):
+        return None, shipping_info.PICKUP
+    ship = services.get("shipping")
+    if not isinstance(ship, dict):
+        return None, None
+    if ship.get("isFree"):
+        return 0.0, shipping_info.SHIP
+    return _money(ship.get("finalPrice")), shipping_info.SHIP
+
+
 def parse_item(text: str, ad_id: str, host: str = HOST, now: datetime | None = None) -> AdDetail | None:
     plugins = _plugins(text)
     if not plugins:
@@ -156,12 +178,14 @@ def parse_item(text: str, ad_id: str, host: str = HOST, now: datetime | None = N
     business = seller.get("business", offer.get("business"))
     uploaded = parse_age((attrs.get("upload_date") or {}).get("value"), now)
     item_condition, item_condition_label = condition.vinted_item(attrs)
+    shipping_price, shipping = _shipping(text)
     return AdDetail(ad_id=ad_id, heading=one_line(title) or "", description=description or None, price=price,
                     price_display=euro(price) if price is not None else None, status="active", published_at=uploaded,
                     first_published_at=uploaded, end_date=None, url=f"https://{host}/items/{ad_id}", images=photos,
                     seller_name=one_line(seller.get("name")),
                     is_private=(not business) if isinstance(business, bool) else None, platform="vinted",
-                    item_condition=item_condition, item_condition_label=item_condition_label)
+                    item_condition=item_condition, item_condition_label=item_condition_label,
+                    shipping_price=shipping_price, shipping=shipping)
 
 
 # ------------------------------------------------------------------ the client
