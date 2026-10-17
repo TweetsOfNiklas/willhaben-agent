@@ -649,8 +649,11 @@ SEARCH_PLAN_SCHEMA: dict[str, Any] = {
 
 
 def search_plan_prompt(*, description: str, max_queries: int, unusual_names: bool, other_categories: bool,
-                       ask: bool = True) -> str:
+                       ask: bool = True, condition: str | None = None) -> str:
+    """condition: the person's choice in the form ("nur neu", "nur gebraucht"), None = either."""
     lines = ["Beschreibung der Person:", description.strip(), "", f"Höchstzahl an Suchen: {max_queries}"]
+    if condition:
+        lines.append(f"Zustand laut Formular: {condition}. Frag nicht nach Zustand oder neu/gebraucht.")
     if not ask:
         lines.append("Stelle keine Rückfragen: questions = [].")
     if unusual_names:

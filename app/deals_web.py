@@ -285,11 +285,14 @@ async def search_alias():
 @router.post("/deals/search")
 async def product_search_start(description: str = Form(""), depth: str = Form("normal"), unusual: str = Form(""),
                                categories: str = Form(""), sort: str = Form("relevance"), photos: str = Form(""),
-                               ask: str = Form(""), sites: list[str] = Form([])):
+                               ask: str = Form(""), sites: list[str] = Form([]), cond_new: str = Form(""),
+                               cond_used: str = Form(""), cond_shown: str = Form("")):
     if not description.strip():
         return RedirectResponse("/deals?msg=empty", status_code=303)
+    # an older form without the boxes searches both
+    condition = product_search.condition_wanted(bool(cond_new), bool(cond_used)) if cond_shown else "any"
     settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask),
-                                            sites=sites)
+                                            sites=sites, condition=condition)
     try:
         sid = product_search.start(description, settings)
     except product_search.Busy:

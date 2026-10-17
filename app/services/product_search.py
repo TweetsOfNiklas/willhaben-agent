@@ -56,7 +56,7 @@ from app.llm.prompts import (
     search_plan_prompt,
     search_rank_prompt,
 )
-from app.services import ad_images, deals, geo, scam
+from app.services import ad_images, deals, geo, price_zones, scam
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, shipping_info
 from app.platforms.text import mentions
@@ -114,15 +114,38 @@ def search_platforms() -> list[platforms.Platform]:
     return out or [platforms.get("willhaben")]
 
 
+CONDITIONS_WANTED = ("any", "new", "used")
+
+
+def condition_wanted(new: bool, used: bool) -> str:
+    """The form's two boxes: one ticked = only that, both or none = any."""
+    return "new" if new and not used else "used" if used and not new else "any"
+
+
 def make_settings(depth: str | None = "normal", unusual: bool = False, categories: bool = False,
                   sort: str | None = "relevance", photos: bool = True, ask: bool = True,
-                  sites: list[str] | None = None) -> dict[str, Any]:
-    """The search's options; `sites` = platform ids to search on (default: search_platforms())."""
+                  sites: list[str] | None = None, condition: str = "any") -> dict[str, Any]:
+    """The search's options; `sites` = platform ids to search on (default: search_platforms()); `condition`: any,
+    new or used (the person said it in the form: Claude does not ask, offers stating the other one are left out)."""
     usable = {p.id for p in platforms.all() if p.can("keyword_search")}
     chosen = [s for s in dict.fromkeys(sites or []) if s in usable] or [p.id for p in search_platforms()]
     return {"depth": depth if depth in DEPTHS else "normal", "unusual": bool(unusual), "categories": bool(categories),
             "sort": sort if sort in SORTS else "relevance", "photos": bool(photos), "ask": bool(ask),
-            "platforms": chosen}
+            "platforms": chosen, "condition": condition if condition in CONDITIONS_WANTED else "any"}
+
+
+def condition_note(settings: dict[str, Any] | None) -> tuple[str, str] | None:
+    """The form's new/used choice as a question with its answer for Claude's prompts; None for any."""
+    c = (settings or {}).get("condition") or "any"
+    return None if c == "any" else ("Neu oder gebraucht?", "nur neu" if c == "new" else "nur gebraucht")
+
+
+def condition_fits(ad: Listing, settings: dict[str, Any] | None) -> bool:
+    """An offer whose stated condition is the other one is no candidate; one stating none stays."""
+    c = (settings or {}).get("condition") or "any"
+    if c == "any" or not ad.item_condition:
+        return True
+    return price_zones.group(ad.item_condition) == c
 
 
 def max_queries(settings: dict[str, Any] | None) -> int:
@@ -206,7 +229,8 @@ async def make_plan(description: str, settings: dict[str, Any]) -> tuple[dict[st
     n = max_queries(settings)
     ask = bool(settings.get("ask"))
     prompt = search_plan_prompt(description=description, max_queries=n, unusual_names=bool(settings.get("unusual")),
-                                other_categories=bool(settings.get("categories")), ask=ask)
+                                other_categories=bool(settings.get("categories")), ask=ask,
+                                condition=(condition_note(settings) or (None, None))[1])
     out = await get_backend("search").complete(system=SEARCH_PLAN_SYSTEM, prompt=prompt, schema=SEARCH_PLAN_SCHEMA)
     plan = normalize_plan(out.data or {}, n)
     if not ask:
@@ -227,9 +251,11 @@ def clean_answers(plan: dict[str, Any] | None, raw: dict[str, Any] | None) -> di
     return out
 
 
-def answer_pairs(plan: dict[str, Any] | None, answers: dict[str, Any] | None) -> list[tuple[str, str]]:
-    """(question text, answer) in question order; unanswered questions are left out."""
-    out = []
+def answer_pairs(plan: dict[str, Any] | None, answers: dict[str, Any] | None,
+                 settings: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    """(question text, answer) in question order; unanswered questions are left out. With `settings` the form's
+    new/used choice comes first (condition_note)."""
+    out = [note] if (note := condition_note(settings)) else []
     for q in (plan or {}).get("questions") or []:
         if not isinstance(q, dict):
             continue
@@ -449,7 +475,7 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             if not ad.ad_id or ad.ref in seen:
                 continue
             seen.add(ad.ref)
-            if drop_reason(ad, plan, q) is None and _on_topic(p, ad, q):
+            if drop_reason(ad, plan, q) is None and _on_topic(p, ad, q) and condition_fits(ad, settings):
                 pools[i].append(ad)
                 new += 1
         entry["kept"] = new
@@ -874,7 +900,7 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                            reserve: list[dict[str, Any]] | None = None) -> None:
     """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped. The offers not shown stay
     in `pool` for "load more": the unseen reserve first, then the cards Claude passed over."""
-    pairs = answer_pairs(plan, answers)
+    pairs = answer_pairs(plan, answers, settings)
     note = ""
     unseen: list[dict[str, Any]] = []     # cards Claude never ranked (its call failed): they keep their turn
     if not cards:
@@ -939,7 +965,7 @@ async def _more(search_id: int) -> None:
         progress = dict(row.progress or {})
         plan, settings, pool = row.plan or {}, row.settings or make_settings(), list(row.pool or [])
         batch, rest = pool[:MAX_CANDIDATES], pool[MAX_CANDIDATES:]
-        pairs = answer_pairs(plan, row.answers)
+        pairs = answer_pairs(plan, row.answers, settings)
         warning, unseen = None, []
         try:
             more, _note, _model = await rank(row.description, plan, batch, answers=pairs)
