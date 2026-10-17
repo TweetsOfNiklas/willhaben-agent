@@ -281,7 +281,8 @@ from app.services.search_agents import agent_search_items as _agent_search_items
 from app.services.search_agents import geizhals_below_pct as _geizhals_below_pct  # noqa: E402
 
 templates.env.globals.update(agent_sites=_agent_platforms, agent_search_items=_agent_search_items,
-                             geizhals_below_pct=_geizhals_below_pct)
+                             geizhals_below_pct=_geizhals_below_pct,
+                             held_back_reasons=search_agents_svc.held_back_reasons)   # Filtered out: why
 from app.services import geo as _geo  # noqa: E402
 
 templates.env.globals.update(home_point=_geo.home_cached, home_address=_geo.home_address,   # distance from home to ads

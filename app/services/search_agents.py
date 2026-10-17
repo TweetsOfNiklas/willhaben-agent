@@ -691,6 +691,11 @@ async def _run_agent(agent_id: int) -> RunResult:
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
     if pickup_limit(agent) and to_notify:
         await _locate(to_notify)
+        from app.services import geo
+
+        # a list that says nothing about shipping (Kleinanzeigen) is no "pickup only": the ad page tells, before
+        # the distance holds a far hit back
+        await _shipping_pages([h for h in to_notify if h.shipping is None and geo.too_far(h, pickup_limit(agent))])
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
@@ -1142,14 +1147,39 @@ def site_status(detail: Any) -> str:
 
 def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None) -> None:
     """The status the site just gave for an ad, and the shipping its page states, on every hit of it (several agents
-    may hold it)."""
+    may hold it). A hit held back only for its distance that turns out to ship goes back to New."""
     with session() as db:
+        agents = {}
         for h in db.exec(select(Hit).where(Hit.platform == platform_id, Hit.ad_id == ad_id)):
             h.site_status, h.status_checked_at = status, utcnow()
             if detail is not None:
+                was_far = h.state == "filtered" and not ships(h)
                 apply_shipping(h, detail)
+                if was_far and ships(h) and status == "active":
+                    agent = agents.get(h.agent_id) or db.get(SearchAgent, h.agent_id)
+                    agents[h.agent_id] = agent
+                    if agent is not None and passes(agent, h):
+                        h.state = "new"
             db.add(h)
         db.commit()
+
+
+def held_back_reasons(agent: SearchAgent | None, h: Hit) -> list[str]:
+    """Why a hit is under Filtered out (its card says it): Claude's screening, the Geizhals rule, the distance."""
+    if agent is None:
+        return []
+    out = []
+    if not screening.passes(agent, h):
+        out.append(t("Claude's screening"))
+    if not geizhals_passes(agent, h):
+        from app.services.deals import level_label
+
+        rule = t("{level} or cheaper", level=level_label(agent.geizhals_level)) if agent.geizhals_level \
+            else t("{pct} % below", pct=agent.geizhals_pct)
+        out.append(t("Geizhals rule: {rule}", rule=rule))
+    if not distance_passes(agent, h):
+        out.append(t("pickup only, farther than {n} km", n=pickup_limit(agent)))
+    return out
 
 
 WATCH_EVERY_H = 20            # a saved hit's ad is loaded about once a day

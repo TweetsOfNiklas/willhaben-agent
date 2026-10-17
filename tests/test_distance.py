@@ -216,3 +216,59 @@ def test_global_pickup_radius_hides_far_pickup_only_ads():
     cards = [{"lat": 47.48, "lon": 9.73, "shipping": None}, {"postcode": "1150", "shipping": "pickup"},
              {"lat": 47.48, "lon": 9.73, "shipping_price": 4.9}]
     assert [geo.too_far(x, 100, (48.19, 16.33)) for x in cards] == [True, False, False]   # 1150: not located yet
+
+
+def test_a_far_hit_that_ships_comes_back_and_reasons_are_shown():
+    from app.db import Hit, SearchAgent, session
+    from app.main import app
+    from app.services import search_agents as sa
+
+    _home()
+    with session() as db:
+        a = SearchAgent(name="Switch", source_url="x", webapi_url="x", max_km=30)
+        db.add(a)
+        db.commit()
+        db.add(Hit(agent_id=a.id, platform="kleinanzeigen", ad_id="9", heading="Switch Pro", url="u", lat=47.48,
+                   lon=9.73, state="filtered"))
+        db.commit()
+        agent = db.get(SearchAgent, a.id)
+        h = db.exec(select(Hit)).one()
+    assert sa.held_back_reasons(agent, h) == ["pickup only, farther than 30 km"]
+    with TestClient(app) as c:
+        assert "Held back: pickup only, farther than 30 km" in c.get("/hits?state=filtered").text
+    page = type("D", (), {"shipping": "ship", "shipping_price": None})()
+    sa.record_status("kleinanzeigen", "9", "active", page)                 # the ad page: shipping possible
+    with session() as db:
+        assert db.exec(select(Hit)).one().state == "new"
+
+
+
+async def test_an_agent_checks_the_ad_page_before_holding_a_far_hit_back(nominatim):
+    """A Kleinanzeigen list says nothing about shipping: before the distance holds a far hit back, its ad page is
+    asked; one that ships passes."""
+    from app import platforms
+    from app.db import Hit, SearchAgent, session
+    from app.services.search_agents import create_agent, run_agent
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    _home()
+    far_ships, far_pickup = listing("1", "Switch", 500.0, lat=47.48, lon=9.73), listing("2", "Switch", 400.0, lat=47.48, lon=9.73)
+    d1, d2 = detail_of(far_ships), detail_of(far_pickup)
+    d1.shipping, d2.shipping = "ship", "pickup"
+    fake = FakePlatform(pages=[[]], details={"1": d1, "2": d2})
+    platforms.set_platform("fake", fake)
+    try:
+        a = create_agent("https://fake.example/s/switch")
+        await run_agent(a.id)                                          # baseline
+        with session() as db:
+            row = db.get(SearchAgent, a.id)
+            row.max_km = 30
+            db.add(row)
+            db.commit()
+        fake.pages = [[far_ships, far_pickup]]
+        await run_agent(a.id)
+    finally:
+        platforms.reset()
+    with session() as db:
+        states = {h.ad_id: h.state for h in db.exec(select(Hit))}
+    assert states == {"1": "new", "2": "filtered"} and set(fake.detail_calls) == {"1", "2"}
