@@ -1,7 +1,7 @@
 """Price check (Produktsuche tab, ad viewer): is a willhaben ad cheap or expensive?
 
 Three sources, all cached so reopening an ad costs nothing within the cache time:
-- comparables: keyword searches (rows 50, relevance) on willhaben and on the ad's own site when that is another one,
+- comparables: keyword searches (rows 50, relevance) on the ad's own site, willhaben and every other site switched on,
   first for the model as sellers write it ("USW Pro Max 24"), then, when that leaves too few, for the title's first
   words; only the ads whose title is the same item (TitleMatch: model, variant, size, no accessories), the ad itself
   and "Suche …" ads left out, price percentiles p10..p90 (cached 1 h per site and query)
@@ -19,6 +19,7 @@ The label is never read from storage: rerate() recomputes it on every read, so a
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import re
@@ -53,12 +54,13 @@ RESULT_TTL_S = 3600
 GEIZHALS_FAIL_TTL_S = 900    # Geizhals blocking/down: don't retry on every open
 MIN_COMPARABLES = 5          # fewer: no comparables scale (their rule, the cross-check and the mismatch need it)
 QUERY_WORDS = 3              # willhaben keyword search is AND: short queries find enough comparables
-FILTERS = 5                  # version of the comparable filters (4: title similarity, condition, zone rating; 5: the
-                             # model query, the ad's own site, a comma ends the item); older results are recomputed
+FILTERS = 6                  # version of the comparable filters (4: title similarity, condition, zone rating; 5: the
+                             # model query, the ad's own site, a comma ends the item; 6: every site); older results
+                             # are recomputed
 # Brands sellers often leave out ("U6 Mesh", "iPhone 13", "Echo Show 8"): in an AND search they lose those ads
 # (willhaben 10/2026: "Ubiquiti UniFi U6 Mesh" 0 ads, "U6 Mesh" 13; "UniFi U7 Pro" 1, "U7 Pro" 89)
 BRANDS = geizhals.BRANDS
-NO_MARKET = {"preisjaeger"}  # sites without a used market of their own: their ads compare on willhaben only
+NO_MARKET = {"preisjaeger"}  # sites without a used market of their own: their ads compare on the others
 _DEVICE_WORDS = {"point", "access", "accesspoint", "wlan", "wifi", "router", "repeater"}   # "Access Point U6 Lite"
 CLOSEST = 10
 RECENT = 10
@@ -1197,10 +1199,18 @@ def _condition_kept(other: str | None, mine: str | None) -> bool:
 
 
 def comparable_sites(platform: str | None) -> list[str]:
-    """Where an ad's comparables are searched: willhaben, and the ad's own site when that is another one with a used
-    market (a Kleinanzeigen ad among Kleinanzeigen ads too: the same item is often listed there only)."""
+    """Where an ad's comparables are searched: the ad's own site when it has a used market, willhaben, then every
+    other site switched on in Settings → Platforms that has one and a keyword search (the same item is often listed
+    on one site only, and a single site's few ads make a thin scale)."""
+    from app import platforms
+
     own = platform or "willhaben"
-    return ["willhaben"] if own == "willhaben" or own in NO_MARKET else [own, "willhaben"]
+    sites = [own] if own not in NO_MARKET else []
+    sites.append("willhaben")
+    for p in platforms.all():
+        if p.id not in NO_MARKET and p.can("keyword_search"):
+            sites.append(p.id)
+    return list(dict.fromkeys(sites))
 
 
 async def _search(site: str, query: str) -> dict[str, Any]:
@@ -1270,14 +1280,16 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
     for q, sites in plan:
         if out["searches"] and titled >= MIN_COMPARABLES:     # the item's own ads, whatever their condition
             break
-        for site in sites:
-            try:
-                data = await (search_category(q) if category_url else _search(site, q))
-            except (WillhabenError, InvalidSearchUrl, PlatformError) as e:
-                log.info("comparable search on %s failed for %r: %s", site, q, e)
-                errors.append((site, e))
-                out["searches"].append({"site": site, "query": q, "error": str(e)})
+        answers = await asyncio.gather(*(search_category(q) if category_url else _search(site, q) for site in sites),
+                                       return_exceptions=True)      # the sites at once, each at its own pace
+        for site, data in zip(sites, answers):
+            if isinstance(data, (WillhabenError, InvalidSearchUrl, PlatformError)):
+                log.info("comparable search on %s failed for %r: %s", site, q, data)
+                errors.append((site, data))
+                out["searches"].append({"site": site, "query": q, "error": str(data)})
                 continue
+            if isinstance(data, BaseException):
+                raise data
             out["searches"].append({"site": site, "query": q, "rows_found": data["rows_found"]})
             out["rows_found"] += data["rows_found"]
             for a in data["ads"]:
@@ -1646,7 +1658,7 @@ def _site_names(comp: dict[str, Any]) -> str:
             names.append(platforms.get(pid).name)
         except platforms.UnknownPlatform:
             names.append(pid)
-    return " und ".join(names) or "willhaben"
+    return (", ".join(names[:-1]) + " und " + names[-1] if len(names) > 1 else "".join(names)) or "willhaben"
 
 
 @timeline.scoped(ad_id=lambda a: a["ad"].ad_id)
