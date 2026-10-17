@@ -193,3 +193,22 @@ async def test_willhaben_agents_take_the_largest_page_once_quietly(responses, mo
         states = {h.ad_id: h.state for h in db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id.like("888%")))}
     assert states == {"888000": "new", "888001": "seen", "888002": "seen"}
     assert get_setting(sa._wh_rows_key(agent.id)) == "1"
+
+
+async def test_a_running_check_shows_in_the_background_work(responses):
+    from app.services import jobs
+
+    queue, _calls = responses
+    agent = create_agent(URL)
+    seen = []
+    real = public_mod.get_public().search
+
+    async def search(url, cache_s=0):
+        seen.append([j["label"] for j in jobs.snapshot()["active"]])
+        return await real(url, cache_s=cache_s)
+    public_mod.get_public().search = search
+    queue.append(load("search_fahrrad_rows3.json"))
+    await run_agent(agent.id)
+    assert seen and any(label.startswith("Search agent") for label in seen[0])
+    done = [j for j in jobs.snapshot()["recent"] if j["label"].startswith("Search agent")]
+    assert done and done[0]["status"] == "done" and "first check" in done[0]["result"]

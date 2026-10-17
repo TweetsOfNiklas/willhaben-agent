@@ -621,6 +621,45 @@ async def agents_run(agent_id: int):
     return back(f"/hits?agent_id={agent_id}")
 
 
+@app.post("/agents/bulk")
+async def agents_bulk(request: Request):
+    """Several agents at once (the agents page's selection): each field left empty stays as it is per agent."""
+    from app.services import search_agents
+
+    form = await request.form()
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    flag = lambda k: {"1": True, "0": False}.get(str(form.get(k) or ""))   # noqa: E731 - None: unchanged
+    enabled, notify_on, drops, screen = flag("enabled"), flag("notify"), flag("drops"), flag("screen")
+    minutes = str(form.get("interval_min") or "").strip()
+    km_mode, km = str(form.get("km_mode") or ""), _num_or_none(str(form.get("max_km") or ""))
+    changed = []
+    with session() as db:
+        for a in db.exec(select(SearchAgent).where(col(SearchAgent.id).in_(ids))):
+            if enabled is not None:
+                a.enabled = enabled
+            if notify_on is not None:
+                a.notify = notify_on
+            if drops is not None:
+                a.notify_price_drops = drops
+            if screen is not None:
+                a.screen = screen
+                a.geizhals_check = a.geizhals_check and screen
+            if minutes.isdigit() and int(minutes) > 0:
+                a.interval_s = search_agents.agent_interval(a, int(minutes) * 60)
+            if km_mode == "off":
+                a.max_km = None
+            elif km_mode == "set" and km is not None:
+                a.max_km = min(max(int(km), 1), 2000)
+            db.add(a)
+            changed.append(a)
+        db.commit()
+        for a in changed:
+            db.refresh(a)
+    for a in changed:
+        scheduler.schedule_agent(a, run_soon=False)
+    return back(f"/agents?msg={quote(t('{n} search agents changed', n=len(changed)), safe='')}")
+
+
 @app.post("/agents/{agent_id}/toggle")
 async def agents_toggle(agent_id: int):
     with session() as db:

@@ -23,11 +23,30 @@
 </div>
 {% endif %}
 {% if agents %}
+{# several agents at once: the cards' boxes belong to this form; each field left at "unchanged" stays as it is #}
+<div x-data="{ n: 0, count() { this.n = document.querySelectorAll('input[form=agents-bulk][name=ids]:checked').length }, all(on) { document.querySelectorAll('input[form=agents-bulk][name=ids]').forEach(c => c.checked = on); this.count() } }" @change="count()">
+<form id="agents-bulk" method="post" action="/agents/bulk" x-show="n" x-cloak data-bulk-bar
+      class="sticky top-2 z-20 mb-4 flex flex-col gap-3 rounded-box border border-primary bg-base-100 px-4 py-3 shadow-lg">
+  <div class="flex flex-wrap items-center gap-2"><strong x-text="{{ _('{n} selected')|tojson|forceescape }}.replace('{n}', n)"></strong>
+    <span class="ml-auto flex gap-1.5"><button type="button" class="btn btn-sm btn-ghost" @click="all(true)">{{ _("Select all") }}</button><button type="button" class="btn btn-sm btn-ghost" @click="all(false)">{{ _("Cancel") }}</button></span></div>
+  {% set keep = _("unchanged") %}
+  <div class="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-3">
+    {% for name, label, on, off in [('enabled', _("Running"), _("Resume"), _("Pause")), ('notify', _("Push"), _("on"), _("off")), ('drops', _("Report price drops"), _("on"), _("off")), ('screen', _("Claude screening"), _("on"), _("off"))] %}
+    <label class="flex min-w-0 flex-col gap-1"><span class="text-muted">{{ label }}</span><select name="{{ name }}" class="select select-sm w-full bg-base-200"><option value="">{{ keep }}</option><option value="1">{{ on }}</option><option value="0">{{ off }}</option></select></label>
+    {% endfor %}
+    <label class="flex min-w-0 flex-col gap-1"><span class="text-muted">{{ _("Check every (min)") }}</span><input name="interval_min" type="number" min="1" step="1" placeholder="{{ keep }}" class="input input-sm w-full bg-base-200"></label>
+    <div class="flex min-w-0 flex-col gap-1" x-data="{ km: '' }"><span class="text-muted">{{ _("Pickup only nearby") }}</span>
+      <span class="flex gap-1.5"><select name="km_mode" x-model="km" class="select select-sm min-w-0 flex-1 bg-base-200"><option value="">{{ keep }}</option><option value="set">{{ _("within …") }}</option><option value="off">{{ _("any distance") }}</option></select>
+        <input name="max_km" type="number" min="1" max="2000" step="1" x-show="km === 'set'" x-cloak placeholder="30" class="input input-sm w-20 bg-base-200" aria-label="{{ _('km from home') }}"></span></div>
+  </div>
+  <div><button class="btn btn-primary btn-sm">{{ _("Apply to the selected agents") }}</button></div>
+</form>
 <div class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
   {% for a in agents %}
   {# the card and its settings dialog; the dialog is opened and closed from Alpine (x-ref dlg) #}
   <div x-data class="flex min-w-0 flex-col">
-    <article class="flex flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 {{ '' if a.enabled else 'opacity-70' }}">
+    <article class="relative flex flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 {{ '' if a.enabled else 'opacity-70' }}">
+      <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="agents-bulk" name="ids" value="{{ a.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}: {{ a.name }}"></label>
       {# phone: a shorter strip, and a slim one when no hit has a picture #}
       {% set has_pics = thumbs.get(a.id, [])|selectattr('image_url')|list|length > 0 %}
       <div class="grid shrink-0 grid-cols-4 gap-px bg-base-300 sm:h-24 {{ 'h-16' if has_pics else 'h-9' }}">
@@ -182,6 +201,7 @@
     </dialog>
   </div>
   {% endfor %}
+</div>
 </div>
 {% else %}
 {% call ui.empty(_("No search agents yet"), _("Type what you are looking for or paste a search link – the agent reports new ads and price drops faster than the sites' own e-mail alerts.")) %}

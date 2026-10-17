@@ -530,15 +530,30 @@ async def run_agent(agent_id: int) -> RunResult:
         with session() as db:
             agent = db.get(SearchAgent, agent_id)
             title = agent.name if agent else t("Agent {id}", id=agent_id)
-        async with timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
+        from app.services import jobs
+
+        # in the header's background work while it runs (no notice when done: the hits and pushes tell)
+        async with jobs.track("agent-run", t("Search agent „{name}“", name=title), lane="agents",
+                              link=f"/hits?agent_id={agent_id}", quiet=True, current=f"agent:{agent_id}") as job, \
+                timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
             res = await _run_agent(agent_id)
             tl.finish(not res.error, res.error, payload={k: v for k, v in {
                 "rows_found": res.rows_found, "new": len(res.new), "price_drops": len(res.price_drops),
                 "bumped": res.bumped, "baseline": res.baseline or None}.items() if v is not None})
+            job.result = res.error or _run_summary(res)
+            if res.error:
+                job.status = "failed"
     finally:
         del _checking[agent_id]
         done.set_result(None)
     return res
+
+
+def _run_summary(res: RunResult) -> str:
+    parts = [t("{n} new", n=len(res.new))] if res.new else []
+    if res.price_drops:
+        parts.append(t("{n} price drops", n=len(res.price_drops)))
+    return " · ".join(parts) or (t("first check: everything counts as seen") if res.baseline else t("nothing new"))
 
 
 async def _run_agent(agent_id: int) -> RunResult:
