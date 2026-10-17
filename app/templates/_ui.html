@@ -70,6 +70,14 @@
 {%- set text = shipping_label(x) %}{% if text %}<span class="text-[12.5px] font-normal tracking-normal whitespace-nowrap text-muted {{ cls }}" title="{{ _('Shipping as the site states it (eBay: to your postcode)') }}">{{ text }}</span>{% endif %}
 {%- endmacro %}
 
+{# a result card's shipping: what the list stated, or, when it stated no price and the site's ad page may, that page
+   loaded once the card is in view (GET /ship/<site>/<id>: one request per card seen, kept for hours) #}
+{% macro ship_lazy(r, cls='') -%}
+{%- set pid = r.get('platform') or 'willhaben' %}
+{%- if r.get('shipping_price') is none and r.get('shipping') != 'pickup' and site_can_detail(pid) %}<span hx-get="/ship/{{ pid }}/{{ r.ad_id }}" hx-trigger="revealed" hx-swap="outerHTML">{{ ship(r, cls) }}</span>
+{%- else %}{{ ship(r, cls) }}{% endif %}
+{%- endmacro %}
+
 {% macro condition_pill(value, label, platform, cls='', named=false) -%}
 {%- set text = condition_text(value, label, platform) %}{% if text %}{% set text = text|truncate(24, true, '…') %}{{ pill(_("Condition: {label}", label=text) if named else text, condition_tone(value), false, cls, _('Condition according to the ad') if label else _('Condition assumed (Preisjäger lists shop deals)')) }}{% endif -%}
 {%- endmacro %}

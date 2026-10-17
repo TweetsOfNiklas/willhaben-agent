@@ -96,3 +96,44 @@ async def test_a_pushed_hit_gets_its_shipping_from_the_ad_page(monkeypatch):
             assert db.exec(select(Hit)).one().shipping_price == 4.9
     finally:
         platforms.reset()
+
+
+def test_search_cards_load_the_shipping_once_in_view(monkeypatch):
+    """A result whose list stated no price loads its ad page when the card is in view; kept for hours."""
+    from fastapi.testclient import TestClient
+
+    from app import platforms
+    from app.main import _ship_cache, app
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    fake = FakePlatform()
+    platforms.set_platform("fake", fake)
+    _ship_cache.clear()
+    try:
+        d = detail_of(listing("5", "Rad", 50.0))
+        d.shipping_price = 6.0
+        fake.details = {"5": d}
+        with TestClient(app) as c:
+            assert "+ € 6,00 shipping" in c.get("/ship/fake/5").text
+            assert "+ € 6,00 shipping" in c.get("/ship/fake/5").text
+            assert fake.detail_calls == ["5"]                                # the second from the cache
+            assert c.get("/ship/nosuchsite/5").text == ""
+        from app.main import templates
+        ui = templates.get_template("_ui.html").module
+        assert 'hx-get="/ship/fake/7"' in str(ui.ship_lazy({"platform": "fake", "ad_id": "7"}))
+        assert "hx-get" not in str(ui.ship_lazy({"platform": "fake", "ad_id": "7", "shipping": "pickup"}))
+        assert "free shipping" in str(ui.ship_lazy({"platform": "fake", "ad_id": "7", "shipping_price": 0.0}))
+    finally:
+        platforms.reset()
+        _ship_cache.clear()
+
+
+def test_willhaben_lists_say_paylivery_ships():
+    from app.willhaben.parse import parse_search
+    from tests.conftest import load
+
+    data = load("search_fahrrad_rows3.json")
+    first = data["advertSummaryList"]["advertSummary"][0]
+    next(a for a in first["attributes"]["attribute"] if a["name"] == "p2penabled")["values"] = ["true"]
+    ads = parse_search(data).ads
+    assert ads[0].shipping == "ship" and ads[1].shipping is None

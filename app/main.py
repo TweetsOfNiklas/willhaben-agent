@@ -215,7 +215,17 @@ templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_l
 templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)
 templates.env.globals.update(hit_can_sync=lambda h: _can_sync(h))     # the hit cards' sync button
 from app.platforms import shipping_info as _shipping_info  # noqa: E402
-templates.env.globals.update(shipping_label=_shipping_info.label_of)    # ui.ship(): shipping next to every price   # the agent drawer's Geizhals rule
+templates.env.globals.update(shipping_label=_shipping_info.label_of)    # ui.ship(): shipping next to every price
+
+
+def _site_can_detail(pid: str) -> bool:
+    try:
+        return platforms.get(pid).can("detail")
+    except platforms.UnknownPlatform:
+        return False
+
+
+templates.env.globals.update(site_can_detail=_site_can_detail)          # ui.ship_lazy()   # the agent drawer's Geizhals rule
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -802,6 +812,37 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
     if request.headers.get("hx-request"):
         return HTMLResponse("")
     return back("/hits")
+
+
+_SHIP_TTL_S = 6 * 3600
+_ship_cache: dict[tuple[str, str], tuple[float, float | None, str | None]] = {}   # (site, ad) -> (at, price, kind)
+
+
+@app.get("/ship/{pid}/{ad_id}", response_class=HTMLResponse)
+async def ad_shipping(request: Request, pid: str, ad_id: str):
+    """The shipping of a result whose list stated no price (product and direct search cards load it once they are
+    in view, ui.ship_lazy): the ad page, one request through the site's limiter and VPN, kept for _SHIP_TTL_S.
+    Every hit of the ad keeps it too. Empty when the page states nothing or the site cannot be asked."""
+    import time as _time
+
+    from app.platforms import shipping_info
+
+    key = (pid, ad_id)
+    got = _ship_cache.get(key)
+    if got is None or _time.monotonic() - got[0] > _SHIP_TTL_S:
+        try:
+            p = platforms.get(pid)
+            d = await p.detail(ad_id) if p.can("detail") else None
+        except (platforms.UnknownPlatform, PlatformError) as e:
+            log.info("shipping of %s %s not loaded: %s", pid, ad_id, e)
+            return HTMLResponse("")
+        if d is not None:
+            search_agents_svc.record_status(pid, ad_id, search_agents_svc.site_status(d), d)
+        got = (_time.monotonic(), d.shipping_price if d else None, d.shipping if d else None)
+        _ship_cache[key] = got
+    text = shipping_info.label(got[1], got[2])
+    return HTMLResponse(templates.get_template("_ui.html").module.ship({"shipping_price": got[1], "shipping": got[2]})
+                        if text else "")
 
 
 @app.post("/hits/{hit_id}/sync", response_class=HTMLResponse)
