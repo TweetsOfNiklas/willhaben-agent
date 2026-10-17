@@ -168,5 +168,17 @@
   "The app writes its answer…": "Die App schreibt ihre Antwort…",
   "Model for the answers": "Modell für die Antworten",
   "Model for the other side": "Modell für die Gegenseite",
-  "As in the settings ({model})": "Wie in den Einstellungen ({model})"
+  "As in the settings ({model})": "Wie in den Einstellungen ({model})",
+  "Handover in the ad": "Übergabe laut Inserat",
+  "not stated": "nicht angegeben",
+  "pickup or shipping with PayLivery": "Abholung oder Versand mit PayLivery",
+  "pickup or shipping": "Abholung oder Versand",
+  "Shipping costs in the ad (€)": "Versandkosten laut Inserat (€)",
+  "No prompt stored for this message (written before prompts were kept, or by you).": "Für diese Nachricht ist kein Prompt gespeichert (vor dieser Funktion entstanden oder von dir geschrieben).",
+  "Model: {model}": "Modell: {model}",
+  "System prompt": "System-Prompt",
+  "Prompt": "Prompt",
+  "Show prompt": "Prompt anzeigen",
+  "Delete the selected test chats?": "Die ausgewählten Testchats löschen?",
+  "{n} test chats deleted": "{n} Testchats gelöscht"
 }

@@ -169,3 +169,12 @@ def test_shipping_price_of_a_live_paylivery_ad():
     d = parse_detail(nd["props"]["pageProps"])
     assert d.paylivery_enabled and d.buy_now and d.shipping_price == 6.9 and d.price == 100.0
     assert d.shipping_options == [{"name": "Post", "home": 7.9, "point": 6.9}]
+
+
+def test_detail_handover_from_the_ad_page():
+    from app.willhaben.parse import _handover
+
+    assert parse_detail(load("detail_1662146981_nextdata.json")).shipping == "ship"   # "Selbstabholung", "Versand"
+    assert _handover({"advertisingParameters": {"Uebergabe": ["Selbstabholung"]}}) == "pickup"
+    assert _handover({"advertisingParameters": {"Uebergabe": ["Selbstabholung"], "payliveryEnabled": ["true"]}}) == "ship"
+    assert _handover({"advertisingParameters": {}}) is None

@@ -114,6 +114,20 @@ def _fmt_time(dt: datetime | None) -> str:
     return f"{_WEEKDAYS[dt.weekday()]} {dt:%Y-%m-%d %H:%M}"
 
 
+def _delivery_lines(ad: dict[str, Any]) -> list[str]:
+    """What the ad itself offers for the handover (its page's PayLivery flag and shipping), when known: it wins over
+    the general selling preferences."""
+    price = ad.get("shipping_price")
+    cost = f", Versandkosten {_eur(float(price))}" if isinstance(price, (int, float)) and price > 0 else ""
+    if ad.get("shipping") == "pickup":
+        return ["- Übergabe laut Anzeige: nur Abholung"]
+    if ad.get("paylivery"):
+        return [f"- Übergabe laut Anzeige: Abholung oder Versand mit willhaben PayLivery{cost}"]
+    if ad.get("shipping") == "ship" or cost:
+        return [f"- Übergabe laut Anzeige: Abholung oder Versand{cost}"]
+    return []
+
+
 def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | None,
                  messages: list[tuple[str, datetime | None, str]], rules: str,
                  examples: list[str], hint: str | None, availability: str | None = None,
@@ -137,6 +151,7 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
             f"- Preis: {ad.get('price') or 'unbekannt (nicht abrufbar): keinen Betrag und keinen Rabatt erfinden'}",
             *pieces,
             f"- Ort: {ad.get('location')}",
+            *_delivery_lines(ad),
             f"- Kategorie: {ad.get('category')}",
             f"- Status: {ad.get('status')}",
             f"- Beschreibung: {desc}",

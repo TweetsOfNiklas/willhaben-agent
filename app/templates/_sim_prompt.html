@@ -1,0 +1,14 @@
+{# Chat simulator: the whole prompt of one message (GET /simulator/<id>/prompt/<i>), loaded when opened #}
+{% if not p %}<p class="m-0 text-[12px] text-muted">{{ _("No prompt stored for this message (written before prompts were kept, or by you).") }}</p>
+{% else %}
+<div class="mt-1.5 flex flex-col gap-2 text-left" x-data>
+  {% if model %}<div class="text-[11.5px] text-muted">{{ _("Model: {model}", model=model) }}</div>{% endif %}
+  {% for key, label in [('system', _('System prompt')), ('user', _('Prompt'))] if p.get(key) %}
+  <div>
+    <div class="mb-1 flex items-center justify-between gap-2 text-[11.5px] font-semibold text-muted">{{ label }}
+      <button type="button" class="btn btn-ghost btn-xs" @click="navigator.clipboard.writeText($el.closest('div').nextElementSibling.textContent)">{{ _("Copy") }}</button></div>
+    <pre class="max-h-[50vh] overflow-auto rounded-md bg-base-200 p-2.5 font-mono text-[11.5px] leading-snug whitespace-pre-wrap text-base-content [overflow-wrap:anywhere]">{{ p.get(key) }}</pre>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

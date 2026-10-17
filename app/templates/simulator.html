@@ -6,6 +6,13 @@
 {% set layout = "split" %}
 {% set has_detail = sim is not none %}
 {% block content %}
+{# the whole prompt of one message, loaded when opened (run: "" = the chat, "last" = the last run) #}
+{% macro prompt_details(sid, i, run='') -%}
+<details class="chat-footer mt-0.5 w-full max-w-[85%] text-[11.5px] md:max-w-[72%]" data-prompt>
+  <summary class="cursor-pointer text-muted hover:text-base-content">{{ _("Show prompt") }}</summary>
+  <div hx-get="/simulator/{{ sid }}/prompt/{{ i }}{{ '?run=' ~ run if run else '' }}" hx-trigger="toggle from:closest details once" hx-swap="innerHTML"><span class="loading loading-spinner loading-xs"></span></div>
+</details>
+{%- endmacro %}
 {% macro sim_badge(s) -%}
 {% if s.busy %}{{ ui.pill(_("running"), 'brand') }}
 {% elif s.scenario and s.last_run %}{% if s.last_run.passed %}{{ ui.pill(_("passed"), 'ok') }}{% else %}{{ ui.pill(_("failed"), 'bad') }}{% endif %}
@@ -48,22 +55,42 @@
     {% endfor %}
   </div>
 
+  <div x-data="{ selecting: false, picked: [] }">
   <div class="flex items-center gap-2 px-5 pt-3 pb-2">
     <span class="flex-1 text-[12.5px] font-semibold text-muted">{{ _("Test chats") }}</span>
-    <form method="post" action="/simulator-run-all"><input type="hidden" name="back_to" value="{{ sim.id if sim else '' }}">
+    {% if sims %}<button type="button" class="btn btn-ghost btn-sm" @click="selecting = !selecting; picked = []" x-text="selecting ? {{ _('Done')|tojson|forceescape }} : {{ _('Select')|tojson|forceescape }}">{{ _("Select") }}</button>{% endif %}
+    <form method="post" action="/simulator-run-all" x-show="!selecting"><input type="hidden" name="back_to" value="{{ sim.id if sim else '' }}">
       <button class="btn btn-sm" {% if not sims|selectattr('scenario')|list %}disabled{% endif %}>{{ ui.icon('play', 13) }}{{ _("Run all scenarios") }}</button></form>
   </div>
+  {# selection mode: tick test chats, delete them together #}
+  <form method="post" action="/simulator-delete" id="sim-bulk" x-show="selecting" x-cloak
+        class="mx-5 mb-2 flex flex-wrap items-center gap-2 rounded-[10px] bg-brand-soft px-2.5 py-2 text-[13px]"
+        @submit="if (!confirm({{ _('Delete the selected test chats?')|tojson|forceescape }})) $event.preventDefault()">
+    <input type="hidden" name="back_to" value="{{ sim.id if sim else '' }}">
+    <label class="flex items-center gap-2"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm"
+           :checked="picked.length && picked.length === {{ sims|length }}"
+           @change="picked = $event.target.checked ? {{ sims|map(attribute='id')|map('string')|list|tojson|forceescape }} : []">
+      <span class="font-semibold text-primary" x-text="picked.length ? {{ _('{n} selected')|tojson|forceescape }}.replace('{n}', picked.length) : {{ _('Select all')|tojson|forceescape }}">{{ _("Select all") }}</span></label>
+    <span class="flex-1"></span>
+    <button class="btn btn-xs hover:bg-bad-soft hover:text-error" :disabled="!picked.length">{{ ui.icon('trash', 13) }}{{ _("Delete") }}</button>
+  </form>
   <div id="sim-list" class="flex flex-col gap-0.5 px-2.5">
     {% for s in sims %}
     <a href="/simulator?id={{ s.id }}" id="sim-row-{{ s.id }}"{% if s.busy %} data-pending-key="sim:{{ s.id }}"{% endif %}
-       class="flex min-w-0 flex-col gap-0.5 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if sim and sim.id == s.id else '' }}">
+       @click="if (selecting && $event.target.tagName !== 'INPUT') { $event.preventDefault(); const v = '{{ s.id }}'; picked = picked.includes(v) ? picked.filter(x => x !== v) : [...picked, v] }"
+       class="flex min-w-0 items-start gap-2.5 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if sim and sim.id == s.id else '' }}">
+      <input type="checkbox" name="ids" value="{{ s.id }}" form="sim-bulk" x-show="selecting" x-cloak x-model="picked"
+             class="checkbox checkbox-primary checkbox-sm mt-0.5" aria-label="{{ _('Select') }}">
+      <span class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span class="flex min-w-0 items-center justify-between gap-2"><span class="truncate font-semibold">{{ s.title }}</span>{{ sim_badge(s) }}</span>
       <span class="flex min-w-0 items-center gap-1.5 text-[12px] text-muted">{{ ui.tag(_("Selling") if s.role == 'seller' else _("Buying"), s.role == 'buyer') }}<span>{{ platforms[s.platform] }}</span><span aria-hidden="true">·</span><span class="truncate">{{ persona_label(s) }}</span><span aria-hidden="true">·</span><span class="whitespace-nowrap">{{ _("{n} messages", n=(s.turns or [])|length) }}</span></span>
       {% if s.proposal_run %}<span class="text-[11.5px] {{ 'text-success' if s.proposal_run.passed else 'text-error' }}">{{ _("with proposal: passed") if s.proposal_run.passed else _("with proposal: failed") }}</span>{% endif %}
+      </span>
     </a>
     {% else %}
     <p class="px-2.5 py-3 text-[13px] text-muted">{{ _("No test chats yet. Start one below.") }}</p>
     {% endfor %}
+  </div>
   </div>
 
   {# new test chat #}
@@ -155,6 +182,10 @@
       <label class="flex flex-col gap-1">{{ _("Price (€)") }}<input name="price" value="{{ s.get('price') if s.get('price') is not none else '' }}" inputmode="decimal" class="input input-sm w-full"></label>
       <label class="flex flex-col gap-1 sm:col-span-2">{{ _("Description") }}<textarea name="description" rows="3" class="textarea textarea-sm w-full">{{ s.get('description') or '' }}</textarea></label>
       <label class="flex flex-col gap-1">{{ _("Location") }}<input name="location" value="{{ s.get('location') or '' }}" class="input input-sm w-full"></label>
+      {# what the ad offers for the handover (Claude gets it as part of the ad; it wins over the selling preferences) #}
+      <label class="flex flex-col gap-1">{{ _("Handover in the ad") }}<select name="delivery" class="select select-sm w-full">
+        {% for k, label in [('', _('not stated')), ('pickup', _('pickup only')), ('paylivery', _('pickup or shipping with PayLivery')), ('ship', _('pickup or shipping'))] if k != 'paylivery' or sim.platform == 'willhaben' %}<option value="{{ k }}" {% if (s.get('delivery') or '') == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      {% if selling %}<label class="flex flex-col gap-1">{{ _("Shipping costs in the ad (€)") }}<input name="ad_shipping" value="{{ s.get('ad_shipping') if s.get('ad_shipping') is not none else '' }}" inputmode="decimal" class="input input-sm w-full"></label>{% endif %}
       {% if selling %}
       {% set live = live_ad %}
       <label class="flex flex-col gap-1">{{ _("Minimum price (€)") }}<input name="min_price" value="{{ s.get('min_price') if s.get('min_price') is not none else '' }}" inputmode="decimal" class="input input-sm w-full" placeholder="{{ (_('from the ad: {v}', v=live.min_price|eur) if live and live.min_price else _('none')) }}"></label>
@@ -190,6 +221,7 @@
     <div class="chat chat-start" id="turn-{{ i }}">
       <div class="chat-header mb-0.5 text-[11.5px] text-muted">{{ _("Played by Claude") if x.get('played') else _("Written by you") }}{% if x.get('model') %} · {{ model_label(x.get('model')) }}{% endif %}{% if x.get('done') %} · {{ _("ends the conversation") }}{% endif %}</div>
       <div class="chat-bubble max-w-[85%] border border-base-300 bg-base-100 whitespace-pre-wrap text-base-content [overflow-wrap:anywhere] md:max-w-[72%]">{{ x.get('text') }}</div>
+      {% if x.get('played') %}{{ prompt_details(sim.id, i) }}{% endif %}
     </div>
     {% else %}
     <div class="chat chat-end" id="turn-{{ i }}" data-auto="{{ 1 if x.get('auto') else 0 }}">
@@ -207,6 +239,7 @@
         {% for b in x.get('blockers') or [] %}<span class="text-right text-warning">{{ ui.icon('alert', 12, 2, 'inline -mt-px') }} {{ b }}</span>{% endfor %}
         {% for n in x.get('notes') or [] %}<span class="text-right {{ 'text-muted' if n.startswith('Hinweis:') else 'text-warning' }}">{{ n[8:]|trim if n.startswith('Hinweis:') else _("Claude needs info: {items}", items=n) }}</span>{% endfor %}
         {% if x.get('meetup') %}<span class="text-right text-primary">{{ ui.icon('calendar', 12, 2, 'inline -mt-px') }} {{ x.get('meetup').start.replace('T', ' ') }}{% if x.get('meetup').location %} · {{ x.get('meetup').location }}{% endif %}</span>{% endif %}
+        {{ prompt_details(sim.id, i) }}
         <form method="post" action="/simulator/{{ sim.id }}/rate/{{ i }}" class="flex flex-wrap items-center justify-end gap-1" x-data="{ open: {{ 'true' if x.get('rating') == 'down' or x.get('note') else 'false' }} }">
           <button name="rating" value="{{ '' if x.get('rating') == 'up' else 'up' }}" class="btn btn-xs {{ 'btn-success' if x.get('rating') == 'up' else 'btn-ghost' }}" title="{{ _('Good answer') }}">👍</button>
           <button type="button" @click="open = !open" class="btn btn-xs {{ 'btn-error' if x.get('rating') == 'down' else 'btn-ghost' }}" title="{{ _('Bad answer') }}">👎</button>
@@ -291,8 +324,9 @@
     {% if sim.last_run %}
     <details class="mt-3"><summary class="cursor-pointer text-[12.5px] text-muted">{{ _("Last run {time}: the answers", time=sim.last_run.at|local) }}</summary>
       <div class="mt-2 flex flex-col gap-1.5 text-[12.5px]">
-        {% for x in sim.last_run.turns %}<div class="{{ 'ml-8 rounded-md bg-brand-soft px-2.5 py-1.5' if x.get('who') == 'me' else 'mr-8 rounded-md bg-base-200 px-2.5 py-1.5' }}">
+        {% for x in sim.last_run.turns %}{% set ri = loop.index0 %}<div class="{{ 'ml-8 rounded-md bg-brand-soft px-2.5 py-1.5' if x.get('who') == 'me' else 'mr-8 rounded-md bg-base-200 px-2.5 py-1.5' }}">
           <span class="whitespace-pre-wrap">{{ x.get('text') }}</span>
+          {% if x.get('prompt') %}{{ prompt_details(sim.id, ri, 'last') }}{% endif %}
           {% if x.get('who') == 'me' %}<span class="block text-[11.5px] {{ 'text-success' if x.get('auto') else 'text-warning' }}">{{ _("would go out automatically") if x.get('auto') else (x.get('blockers') or [_("held back for approval")])|join('; ') }}</span>{% endif %}
         </div>{% endfor %}
       </div>

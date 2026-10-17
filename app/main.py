@@ -1240,8 +1240,9 @@ def _sim_or_404(sim_id: int):
     return sim
 
 
-SIM_TEXT_FIELDS = ("title_ad", "description", "location", "seller_name", "instructions", "pickup_window", "mode")
-SIM_NUMBER_FIELDS = ("price", "min_price", "max_price", "wish_price", "shipping_cost", "quantity")
+SIM_TEXT_FIELDS = ("title_ad", "description", "location", "seller_name", "instructions", "pickup_window", "mode",
+                   "delivery")
+SIM_NUMBER_FIELDS = ("price", "min_price", "max_price", "wish_price", "shipping_cost", "quantity", "ad_shipping")
 
 
 @app.post("/simulator/{sim_id}/setup")
@@ -1309,6 +1310,19 @@ async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: 
     return back(_sim_url(sim_id, msg, "#sim-end"))
 
 
+@app.get("/simulator/{sim_id}/prompt/{index}", response_class=HTMLResponse)
+async def simulator_prompt(request: Request, sim_id: int, index: int, run: str = ""):
+    """The whole prompt Claude got for one message (of the chat, or of its last run / the proposal's run)."""
+    sim = _sim_or_404(sim_id)
+    turns = (sim.last_run or {}).get("turns") if run == "last" else \
+        (sim.proposal_run or {}).get("turns") if run == "proposal" else sim.turns
+    turns = turns or []
+    if not 0 <= index < len(turns):
+        raise HTTPException(404)
+    return templates.TemplateResponse(request, "_sim_prompt.html", {"p": turns[index].get("prompt") or {},
+                                                                      "model": turns[index].get("model")})
+
+
 @app.post("/simulator/{sim_id}/expect/{index}/remove")
 async def simulator_expect_remove(sim_id: int, index: int):
     chat_sim.remove_expectation(sim_id, index)
@@ -1319,6 +1333,17 @@ async def simulator_expect_remove(sim_id: int, index: int):
 async def simulator_rate(sim_id: int, index: int, rating: str = Form(""), note: str | None = Form(None)):
     chat_sim.rate(sim_id, index, rating or None, note)
     return back(_sim_url(sim_id, anchor=f"#turn-{index}"))
+
+
+@app.post("/simulator-delete")
+async def simulator_delete_many(request: Request):
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("ids") if str(v).isdigit()]
+    for sid in ids:
+        chat_sim.delete(sid)
+    back_to = str(form.get("back_to") or "")
+    keep = int(back_to) if back_to.isdigit() and int(back_to) not in ids else None
+    return back(_sim_url(keep, t("{n} test chats deleted", n=len(ids))))
 
 
 @app.post("/simulator-run-all")

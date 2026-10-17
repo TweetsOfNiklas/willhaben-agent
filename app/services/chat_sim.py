@@ -14,13 +14,15 @@ answers and checks them. From the owner's 👍/👎 notes and failed scenarios C
 
 Turns (SimChat.turns), oldest first: {"who": "partner" | "me", "text", "at"} and for mine also "auto" (would have
 gone out), "reason" (Claude's auto_reason), "blockers", "intent", "price", "notes", "purchase" (the purchase state
-of a buyer answer), "opener" (a purchase's first message), "rating" ("up" | "down"), "note".
+of a buyer answer), "opener" (a purchase's first message), "rating" ("up" | "down"), "note"; every message Claude
+wrote also "model" and "prompt" ({system, user}: exactly what Claude got, for debugging).
 """
 from __future__ import annotations
 
 import difflib
 import logging
 import random
+from types import SimpleNamespace
 from datetime import datetime
 from typing import Any
 
@@ -156,9 +158,19 @@ def ad_view(sim: SimChat) -> dict[str, Any]:
     """The ad as both sides see it: {title, price ("€ 120"), description, location, seller_name}."""
     s = sim.setup or {}
     price = s.get("price")
+    delivery = s.get("delivery") or ""              # "" unknown | pickup | paylivery | ship
     return {"title": s.get("title") or "", "price": f"€ {float(price):g}" if price not in (None, "") else None,
             "description": s.get("description") or "", "location": s.get("location") or "",
-            "seller_name": s.get("seller_name") or None}
+            "seller_name": s.get("seller_name") or None,
+            "paylivery": delivery == "paylivery", "shipping": {"pickup": "pickup", "paylivery": "ship", "ship": "ship"}.get(delivery),
+            "shipping_price": _number(s.get("ad_shipping")) if delivery in ("paylivery", "ship") else None}
+
+
+def delivery_of(detail: Any) -> dict[str, Any]:
+    """An ad page's handover as setup fields: delivery ("pickup" | "paylivery" | "ship" | "") and its shipping price."""
+    pay, kind = getattr(detail, "paylivery_enabled", None), getattr(detail, "shipping", None)
+    delivery = "paylivery" if pay else "ship" if kind == "ship" else "pickup" if kind == "pickup" else ""
+    return {"delivery": delivery, "ad_shipping": getattr(detail, "shipping_price", None) or None}
 
 
 async def create(role: str, platform: str = "willhaben", ad_id: str | None = None, purchase_id: int | None = None,
@@ -190,6 +202,10 @@ async def create(role: str, platform: str = "willhaben", ad_id: str | None = Non
                 conv = db.get(Conversation, p.conversation_id)
             ctx = (conv.ad_context or {}) if conv else {}
             setup.update({k: ctx.get(k) for k in ("description", "location") if ctx.get(k)})
+            if ctx:
+                setup.update(delivery_of(SimpleNamespace(paylivery_enabled=ctx.get("paylivery"),
+                                                         shipping=ctx.get("shipping"),
+                                                         shipping_price=ctx.get("shipping_price"))))
         ad_id = p.ad_id
     elif role == "buyer":
         setup = {"mode": "pickup" if platform != "willhaben" else "paylivery"}
@@ -219,7 +235,7 @@ async def _public_ad(ad_id: str) -> dict[str, Any]:
     if d is None:
         return {}
     return {"title": d.heading or "", "price": d.price, "description": d.description or "",
-            "location": d.location or ""}
+            "location": d.location or "", **delivery_of(d)}
 
 
 def update_setup(sim_id: int, values: dict[str, Any], persona: str | None = None, persona_text: str | None = None,
@@ -415,7 +431,7 @@ async def answer(sim: SimChat, turns: list[dict[str, Any]], overrides: dict[str,
     return {"who": "me", "text": d.text, "at": utcnow().isoformat(), "auto": not blockers,
             "reason": (d.auto_reason or "").lstrip("✓✗ ").strip(), "blockers": blockers, "intent": d.intent,
             "price": d.suggested_price, "notes": [n for n in d.needs_info or []], "purchase": d.purchase,
-            "meetup": d.meetup, "model": result.model}
+            "meetup": d.meetup, "model": result.model, "prompt": {"system": req["system"], "user": req["prompt"]}}
 
 
 async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[str, Any]:
@@ -441,7 +457,7 @@ async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[
     return {"who": "me", "text": text, "at": utcnow().isoformat(), "auto": not problems, "opener": True,
             "reason": t("Opening message of the purchase"), "blockers": problems, "intent": None,
             "price": (out.data or {}).get("opening_offer"), "notes": [], "purchase": None, "meetup": None,
-            "model": out.model}
+            "model": out.model, "prompt": {"system": PURCHASE_OPENER_SYSTEM, "user": prompt}}
 
 
 async def partner(sim: SimChat, turns: list[dict[str, Any]]) -> dict[str, Any]:
@@ -461,7 +477,7 @@ async def partner(sim: SimChat, turns: list[dict[str, Any]]) -> dict[str, Any]:
     if not text:
         raise LLMError(t("Claude wrote no message for the other side"))
     return {"who": "partner", "text": text[:2000], "at": utcnow().isoformat(), "done": bool(data.get("done")),
-            "played": True, "model": out.model}
+            "played": True, "model": out.model, "prompt": {"system": SIM_PARTNER_SYSTEM, "user": prompt}}
 
 
 # ------------------------------------------------------------------ actions (background jobs, lane "sim")
@@ -811,7 +827,7 @@ def _random_setup(setup: dict[str, Any], role: str, platform: str, detail: Any) 
     below."""
     setup = dict(setup)
     setup.update({"title": detail.heading or "", "price": detail.price, "description": detail.description or "",
-                  "location": detail.location or "", "url": detail.url})
+                  "location": detail.location or "", "url": detail.url, **delivery_of(detail)})
     setup.pop("script", None)
     if role == "buyer":
         setup.update({"seller_name": detail.seller_name or "", "max_price": detail.price,

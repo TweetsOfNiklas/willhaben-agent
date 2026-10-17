@@ -311,3 +311,48 @@ async def test_custom_models_per_test_chat(backend):
     assert backend.models[-2:] == [haiku, opus]                                # the other side, then my answer
     chat_sim.update_setup(sim.id, {}, model="")
     assert chat_sim.get(sim.id).model is None
+
+
+def test_reply_prompt_names_the_ads_handover():
+    from app.llm.prompts import reply_prompt
+
+    def p(ad):
+        return reply_prompt(role="seller", ad={"title": "X", **ad}, partner=None, messages=[], rules="", examples=[], hint=None)
+    assert "Abholung oder Versand mit willhaben PayLivery, Versandkosten 3,49 €" in p({"paylivery": True, "shipping_price": 3.49})
+    assert "Übergabe laut Anzeige: nur Abholung" in p({"shipping": "pickup"})
+    assert "Übergabe laut Anzeige" not in p({})
+
+
+async def test_setup_takes_the_handover_and_answers_keep_their_prompt(backend, monkeypatch):
+    async def public(ad_id):
+        return {"price": 20.0, **chat_sim.delivery_of(type("D", (), {"paylivery_enabled": True, "shipping": "ship",
+                                                                      "shipping_price": 4.5})())}
+    monkeypatch.setattr(chat_sim, "_public_ad", public)
+    sim = await chat_sim.create("seller", ad_id="111")
+    assert sim.setup["delivery"] == "paylivery" and sim.setup["ad_shipping"] == 4.5
+    chat_sim.say(sim.id, "Verschickst du?")
+    await _done()
+    me = chat_sim.get(sim.id).turns[-1]
+    assert "Versand mit willhaben PayLivery, Versandkosten 4,50 €" in me["prompt"]["user"] and me["prompt"]["system"]
+    from app.main import app
+
+    with TestClient(app) as c:
+        frag = c.get(f"/simulator/{sim.id}/prompt/1").text
+        assert "System prompt" in frag and "Verschickst du?" in frag
+        assert "No prompt stored" in c.get(f"/simulator/{sim.id}/prompt/0").text     # written by me
+        assert c.get(f"/simulator/{sim.id}/prompt/9").status_code == 404
+
+
+def test_delete_several_test_chats(backend):
+    from app.main import app
+
+    with session() as db:
+        for n in range(3):
+            db.add(SimChat(title=f"T{n}", turns=[], expectations=[]))
+        db.commit()
+    ids = [s.id for s in chat_sim.all_chats()]
+    with TestClient(app) as c:
+        r = c.post("/simulator-delete", data={"ids": [str(i) for i in ids[:2]], "back_to": str(ids[0])},
+                   follow_redirects=False)
+        assert r.status_code == 303 and f"id={ids[0]}" not in r.headers["location"]
+    assert [s.id for s in chat_sim.all_chats()] == ids[2:]
