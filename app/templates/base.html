@@ -567,7 +567,7 @@ document.addEventListener('alpine:init', () => {
       if (this.live && data.events && data.events.length) {
         data.events.forEach(e => { const l = e.link || {};
           this.notice({key: 'e' + e.id, title: e.title, text: e.text, href: l.href, ad: l.ad, external: l.external});
-          if (document.hidden && ['hit', 'price_drop'].includes(e.kind)) browserNotify.show(e); });
+          if (document.hidden && ['hit', 'price_drop', 'saved'].includes(e.kind)) browserNotify.show(e); });
         const box = document.getElementById('inbox-box');
         if (box) refreshInPlace([box]);
       }

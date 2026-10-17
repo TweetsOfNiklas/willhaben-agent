@@ -1,4 +1,13 @@
 {
+ "Saved ad: price dropped": "Gemerkte Anzeige: Preis gesenkt",
+ "Saved ad sold": "Gemerkte Anzeige verkauft",
+ "Saved ad reserved": "Gemerkte Anzeige reserviert",
+ "Saved ad no longer online": "Gemerkte Anzeige nicht mehr online",
+ "Saved ad expired": "Gemerkte Anzeige abgelaufen",
+ "Saved ad available again": "Gemerkte Anzeige wieder verfügbar",
+ "Saved ads: price drops, sold or reserved": "Gemerkte Anzeigen: Preissenkung, verkauft oder reserviert",
+ "Saved ad": "Gemerkte Anzeige",
+ "Check saved ads once a day and notify on a price drop or when one is sold, reserved or gone": "Gemerkte Anzeigen täglich prüfen und bei Preissenkung, Verkauf, Reservierung oder Löschung benachrichtigen",
  "Notify me about new messages": "Bei neuen Nachrichten benachrichtigen",
  "Push notifications via": "Push-Benachrichtigungen per",
  "Automatic: Telegram if linked, otherwise Home Assistant": "Automatisch: Telegram, wenn verbunden, sonst Home Assistant",

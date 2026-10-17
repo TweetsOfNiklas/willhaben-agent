@@ -43,7 +43,7 @@ def app_path(kind: str, url: str | None, ad_id: Any = None, conversation_id: Any
     if conversation_id:
         return f"/chats/{conversation_id}"
     ad_id = str(ad_id) if ad_id else (m.group(1) if (m := _WH_AD_ID.search(url)) else None)
-    if ad_id and kind in ("hit", "price_drop"):
+    if ad_id and kind in ("hit", "price_drop", "saved"):
         return f"/hits?view={ad_id}"
     if ad_id and kind.startswith("ad_"):
         return f"/myads?ad={ad_id}"

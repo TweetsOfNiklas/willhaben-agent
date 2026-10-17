@@ -810,6 +810,7 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=view.state,
                   state_counts=state_counts, platform=platform, platform_ids=used if len(used) > 1 else [],
                   filter_platform_ids=filter_ids if len(filter_ids) > 1 or platform else [], view=view,
+                  watch_saved=search_agents_svc.watch_saved_on(),
                   keep_days=search_agents_svc.keep_days())
 
 
@@ -981,6 +982,14 @@ async def hits_keep_days(request: Request):
     view = _view_form(form)
     view.state = view.state if view.state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
     return back(view.url())
+
+
+@app.post("/hits/watch-saved")
+async def hits_watch_saved(request: Request):
+    """Hits → Saved: whether saved ads are loaded about once a day for price drops and status changes."""
+    form = await request.form()
+    set_setting("watch_saved", "1" if form.get("on") else "0")
+    return back(_view_form(form, "saved").url())
 
 
 @app.post("/hits/bulk")
@@ -2101,7 +2110,7 @@ async def settings_page(request: Request, msg: str | None = None):
     return await settings_section(request, "willhaben", msg)
 
 
-INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "message": "New message", "auto_reply": "Answered automatically",
+INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "saved": "Saved ad", "message": "New message", "auto_reply": "Answered automatically",
                "auto_reply_pending": "Reply waiting for you", "ad_expiring": "Ad expiring soon", "ad_expired": "Ad expired",
                "ad_renewed": "Ad renewed", "paylivery": "Pay now!", "purchase": "Purchase order", "health": "Connections", "test": "Test"}
 

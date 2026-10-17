@@ -77,6 +77,7 @@ def kinds() -> dict[str, str]:
         "auto_reply": t("Automatic answers sent"),
         "hit": t("New search hits"),
         "price_drop": t("Price drops"),
+        "saved": t("Saved ads: price drops, sold or reserved"),
         "ad_expiring": t("Own ads about to expire"),
         "ad_expired": t("Own ads expired"),
         "ad_renewed": t("Own ads renewed automatically"),

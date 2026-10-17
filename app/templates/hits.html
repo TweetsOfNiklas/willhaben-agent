@@ -38,6 +38,13 @@
     {% for v, label in [('', _('Any price')), ('bargain', _('Bargains only')), ('cheap', _('Cheap or better')), ('fair', _('Fair or better'))] %}<option value="{{ v }}" {% if v == view.level %}selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
 </form>
+{% if state == 'saved' %}
+<form method="post" action="/hits/watch-saved" class="-mt-1.5 mb-2 flex flex-wrap items-center gap-2 text-[13px] text-muted">
+  {{ view_fields() }}
+  <label class="flex cursor-pointer items-center gap-2"><input type="checkbox" name="on" value="1" data-autosubmit class="toggle toggle-xs toggle-primary" {% if watch_saved %}checked{% endif %}>{{ _("Check saved ads once a day and notify on a price drop or when one is sold, reserved or gone") }}</label>
+  <noscript><button class="btn btn-xs">{{ _("Save") }}</button></noscript>
+</form>
+{% endif %}
 {# the retention: cleared hits are shown nowhere, their ads never come back as new; saved ones are kept #}
 <form method="post" action="/hits/keep-days" class="-mt-1.5 mb-3.5 flex flex-wrap items-center gap-2 text-[13px] text-muted">
   {{ view_fields() }}

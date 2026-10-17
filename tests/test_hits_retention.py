@@ -164,3 +164,46 @@ def test_the_ad_viewer_shows_the_status_it_just_loaded():
         assert 'hx-target="closest [data-hit-status]"' in pane
     finally:
         platforms.reset()
+
+
+async def test_saved_hits_are_watched_for_drops_and_status(monkeypatch):
+    """Saved hits: about once a day their ad page; a price drop or a new status is told (kind "saved"), a gone ad is
+    no longer asked."""
+    from app import platforms
+    from app.db import EventLog
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    fake = FakePlatform()
+    platforms.set_platform("fake", fake)
+    try:
+        a, _ = _agents()
+        with session() as db:
+            db.add(Hit(agent_id=a, platform="fake", ad_id="7", heading="Ad 7", url="https://fake.example/ad/7",
+                       state="saved", price=100.0, site_status="active"))
+            db.add(Hit(agent_id=a, platform="fake", ad_id="8", heading="Ad 8", url="https://fake.example/ad/8",
+                       state="seen", price=50.0))
+            db.commit()
+        d = detail_of(listing("7", "Ad 7", 80.0))
+        d.status = "reserved"
+        fake.details = {"7": d, "8": detail_of(listing("8", "Ad 8", 10.0))}
+        await sa.watch_saved_job()
+        with session() as db:
+            h = db.exec(select(Hit).where(Hit.ad_id == "7")).one()
+            assert (h.price, h.old_price, h.site_status) == (80.0, 100.0, "reserved")
+            assert db.exec(select(Hit).where(Hit.ad_id == "8")).one().status_checked_at is None   # only saved ones
+            events = [(e.kind, e.message) for e in db.exec(select(EventLog))]
+        assert [k for k, _ in events] == ["saved", "saved"]
+        assert events[0][1].startswith("Saved ad: price dropped") and "100 → 80" in events[0][1]
+        assert events[1][1].startswith("Saved ad reserved")
+        fake.detail_calls.clear()
+        await sa.watch_saved_job()
+        assert fake.detail_calls == []                                    # checked today already
+        with session() as db:
+            h = db.exec(select(Hit).where(Hit.ad_id == "7")).one()
+            h.status_checked_at, h.site_status = utcnow() - timedelta(days=2), "gone"
+            db.add(h)
+            db.commit()
+        await sa.watch_saved_job()
+        assert fake.detail_calls == []                                    # gone: not asked again
+    finally:
+        platforms.reset()

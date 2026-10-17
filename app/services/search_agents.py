@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 
+from sqlalchemy import or_
 from sqlmodel import col, select
 
 from app.config import get_settings
@@ -1104,6 +1105,79 @@ def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None)
                 apply_shipping(h, detail)
             db.add(h)
         db.commit()
+
+
+WATCH_EVERY_H = 20            # a saved hit's ad is loaded about once a day
+WATCH_PER_RUN = 15            # the job runs every 2 h: a few ad pages each time, not a burst
+_STATUS_NEWS = {"sold": "Saved ad sold", "reserved": "Saved ad reserved", "gone": "Saved ad no longer online",
+                "expired": "Saved ad expired"}
+
+
+def watch_saved_on() -> bool:
+    return get_setting("watch_saved") != "0"
+
+
+async def watch_saved_job() -> None:
+    """Saved hits: their ad pages, about once a day, for a price drop or a new status (sold, reserved, gone, available
+    again), each told with a notification of the kind "saved". Ads that are gone are no longer asked."""
+    if not watch_saved_on():
+        return
+    due = utcnow() - timedelta(hours=WATCH_EVERY_H)
+    with session() as db:
+        rows = list(db.exec(select(Hit).where(Hit.state == "saved", or_(col(Hit.site_status).is_(None),
+                                                                         Hit.site_status != "gone"),
+                                              or_(col(Hit.status_checked_at).is_(None), Hit.status_checked_at < due))
+                            .order_by(col(Hit.status_checked_at).asc().nulls_first()).limit(WATCH_PER_RUN * 3)))
+    seen: set[tuple[str, str]] = set()
+    asked = 0
+    for h in rows:
+        key = (h.platform or "willhaben", h.ad_id)
+        if key in seen or not _site(h.platform).can("detail"):
+            continue
+        seen.add(key)
+        if asked >= WATCH_PER_RUN:
+            break
+        asked += 1
+        try:
+            await _watch_one(h)
+        except Exception as e:  # noqa: BLE001 - one ad must not stop the others; the next run asks again
+            log.info("saved hit %s: ad page not loaded: %s", h.id, e)
+
+
+async def _watch_one(h: Hit) -> None:
+    p = _site(h.platform)
+    d = await p.detail(h.ad_id, url=h.url)
+    status, before = site_status(d), h.site_status
+    record_status(h.platform or "willhaben", h.ad_id, status, d)
+    news: list[tuple[str, str]] = []
+    price = getattr(d, "price", None) if d is not None else None
+    if price is not None and h.price is not None and p.price_dropped(h.price, price):
+        with session() as db:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.old_price, row.price, row.price_dropped_at = row.price, price, utcnow()
+                row.price_display = getattr(d, "price_display", None) or row.price_display
+                db.add(row)
+                db.commit()
+        news.append((t("Saved ad: price dropped"), f"{h.heading}: {h.price:g} → {price:g} {p.currency}"))
+    elif price is not None and h.price != price:
+        with session() as db:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.price = price
+                row.price_display = getattr(d, "price_display", None) or row.price_display
+                db.add(row)
+                db.commit()
+    if before is not None and status != before:
+        if status in _STATUS_NEWS:
+            news.append((t(_STATUS_NEWS[status]), h.heading))
+        elif status == "active" and before in ("reserved", "sold"):
+            news.append((t("Saved ad available again"), h.heading))
+    for title, text in news:
+        await notify("saved", f"{p.name} · {title}" if platforms.multi() else title, text + _ship_suffix(h),
+                     url=h.url, image=h.image_url,
+                     data={"platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
+                           "price": price if price is not None else h.price, "status": status})
 
 
 async def check_hit(hit_id: int) -> Hit | None:

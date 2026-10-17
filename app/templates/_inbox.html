@@ -1,7 +1,7 @@
 {# The inbox popover's content (base.html; alone from GET /inbox/items when new events come in).
    inbox_items = [{kind, title, text, time, link, unread}] (link = main.event_link), inbox_unread #}
 {% import "_ui.html" as ui %}
-{% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
+{% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'saved': ('star', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
                 'auto_reply_pending': ('bot', 'bg-ok-soft text-success'), 'auto_reply': ('bot', 'bg-ok-soft text-success'), 'pay': ('cart', 'bg-warn-soft text-warning'),
                 'ad_expiring': ('tag', 'bg-warn-soft text-warning'), 'ad_expired': ('tag', 'bg-bad-soft text-error'), 'health': ('bell', 'bg-bad-soft text-error')} %}
 <div id="inbox-box" data-refresh="/inbox/items" class="flex min-h-0 flex-1 flex-col">
