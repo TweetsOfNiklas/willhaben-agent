@@ -12,7 +12,7 @@ from sqlmodel import select
 from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
-from app.services import chats, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
+from app.services import adaptive_pace, chats, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
 from app.services.search_agents import is_checking, retention_job, run_agent
 from app.willhaben import access_log
 from app.willhaben.session import get_session
@@ -34,6 +34,9 @@ async def _run_agent_job(agent_id: int) -> None:
         return
     if quiet_hours.should_skip(agent):
         log.debug("agent %s: quiet hours, skipped", agent_id)
+        return
+    if adaptive_pace.should_skip(agent):
+        log.debug("agent %s: a slow hour for new ads, skipped", agent_id)
         return
     if human_pace.take_break():
         log.info("agent %s: skipping this check (human-like break)", agent_id)

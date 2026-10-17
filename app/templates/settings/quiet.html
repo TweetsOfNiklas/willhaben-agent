@@ -12,5 +12,18 @@
   <small class="text-[12.5px] text-muted">{% if quiet %}{% if quiet.active %}{{ _("Active until {time}.", time=quiet.end.strftime('%H:%M')) }}{% else %}{{ _("Next quiet hours {start}–{end}.", start=quiet.start.strftime('%d.%m. %H:%M'), end=quiet.end.strftime('%H:%M')) }}{% endif %}{% endif %} {{ _("Start and end shift randomly by up to 20 minutes every night. “Check now” always works.") }} {{ _("The login check and the chat sync follow the same rule; new chat messages still arrive through the live chat.") }}</small>
   <label class="flex cursor-pointer items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="min-w-0"><span class="block font-medium">{{ _("Human-like timing") }}</span><span class="block text-[12.5px] text-muted">{{ _("Random ±{n} % jitter on every interval so checks don't look automated.", n=human.variance_pct or 30) }}</span></span><input type="checkbox" class="toggle toggle-primary" name="jitter" {% if human.variance_pct %}checked{% endif %}></label>
   <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Take a break now and then (skip about one check in twelve)") }}</span><input type="checkbox" class="toggle toggle-primary" name="breaks" {% if human.breaks %}checked{% endif %}></label>
+  <label class="flex cursor-pointer items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="min-w-0"><span class="block font-medium">{{ _("Adaptive polling") }}</span><span class="block text-[12.5px] text-muted">{{ _("Agents check less often in the hours that rarely bring new ads, learned from the hits of the last 4 weeks. Never faster than an agent's own interval.") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="adaptive" {% if adaptive_on %}checked{% endif %}></label>
+  <label class="flex max-w-60 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Slowest pace in quiet hours of the day") }}</span><select name="adaptive_max" class="select w-full min-w-0 bg-base-200">{% for n in adaptive_choices %}<option value="{{ n }}" {% if n == adaptive_max %}selected{% endif %}>{{ _("up to {n}× the interval", n=n) }}</option>{% endfor %}</select></label>
+  {% if adaptive.samples %}
+  {# the learned profile of all agents: bar height = the hour's share of new ads, the label under it = the slow-down #}
+  <div data-adaptive-profile>
+    <div class="flex h-16 items-end gap-[3px]">
+      {% set peak = adaptive.shares|max or 1 %}
+      {% for s in adaptive.shares %}<div class="flex-1 rounded-t-sm {{ 'bg-primary' if adaptive.factors[loop.index0] <= 1 else 'bg-base-300' }} {{ 'outline outline-2 outline-offset-1 outline-warning' if loop.index0 == adaptive_hour else '' }}" style="height: {{ [4, (s / peak * 100)|round|int]|max }}%" title="{{ '%02d' % loop.index0 }}:00 · {{ _('every {n}× the interval', n=adaptive.factors[loop.index0]) if adaptive.factors[loop.index0] > 1 else _('own interval') }}"></div>{% endfor %}
+    </div>
+    <div class="mt-1 flex justify-between text-[11px] text-muted"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+    <small class="mt-1 block text-[12.5px] text-muted">{{ _("New ads per hour of the day, from {n} hits of all agents. Dark bars: the agents' own interval; light ones: slower, up to {max}× (hover for the factor). Each agent uses its own profile once it has enough hits.", n=adaptive.samples, max=adaptive_max) }}</small>
+  </div>
+  {% else %}<small class="text-[12.5px] text-muted">{{ _("Not enough hits yet to learn from; agents keep their own interval.") }}</small>{% endif %}
   <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
 </form>

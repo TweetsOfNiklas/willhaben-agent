@@ -102,7 +102,7 @@ def fresh_db():
     dbmod.set_engine(engine)
     dbmod.init_db()
     from app.platforms import ebay, kleinanzeigen, preisjaeger, shpock, vinted, vpn
-    from app.services import chats, geizhals, jobs, vpn_check
+    from app.services import adaptive_pace, chats, geizhals, jobs, vpn_check
     from app.willhaben import public, recorder
     vpn.reset()                 # VPN tunnels and their (fake) processes are per test
     geizhals._challenged.clear()
@@ -112,6 +112,7 @@ def fresh_db():
             mod._limiter.reset()
     jobs.reset()                # background jobs are per event loop
     chats.reset()               # failed automatic answers are per test
+    adaptive_pace.reset()       # the learned hourly profiles belong to the test's hits
     recorder.sync_writes = True  # one in-memory connection: willhaben recordings are written right away
     yield
     recorder.reset()

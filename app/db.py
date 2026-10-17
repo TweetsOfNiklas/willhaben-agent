@@ -632,6 +632,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "quiet_end": "07:00",
     "quiet_mode": "slow",
     "quiet_interval_min": "60",
+    # adaptive polling: fewer checks in the hours that rarely bring new ads (app/services/adaptive_pace.py)
+    "adaptive_enabled": "1",
+    "adaptive_max_factor": "4",
     # timeline (/timeline) and willhaben request recording: both opt-in (Settings → Timeline); entries are kept
     # forever unless pruning is switched on there
     "timeline_enabled": "0",

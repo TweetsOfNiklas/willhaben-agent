@@ -36,7 +36,7 @@ from app.llm.claude_login import claude_token, forget_token, get_login, token_so
 from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
-from app.services import health, human_pace, jobs
+from app.services import adaptive_pace, health, human_pace, jobs
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
 from app.services import stock
@@ -2169,6 +2169,9 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **(await _gcal_ctx() if section == "calendar" else {}),
                   ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
+                  **({"adaptive": adaptive_pace.profile(None), "adaptive_on": adaptive_pace.enabled(),
+                      "adaptive_max": adaptive_pace.max_factor(), "adaptive_choices": adaptive_pace.MAX_FACTORS,
+                      "adaptive_hour": utcnow().astimezone(quiet_hours.VIENNA).hour} if section == "quiet" else {}),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings/willhaben", backup=backup_routes.panel(),
                   web=_web_address(), **label_buy_routes.panel(), **printing_routes.panel())
@@ -2402,11 +2405,13 @@ async def set_language(request: Request, lang: str = Form("auto"), next: str = F
 @app.post("/settings/quiet")
 async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01:00"), end: str = Form("07:00"),
                          mode: str = Form("slow"), interval_min: int = Form(60), jitter: str | None = Form(None),
-                         breaks: str | None = Form(None), pace: str | None = Form(None)):
+                         breaks: str | None = Form(None), pace: str | None = Form(None),
+                         adaptive: str | None = Form(None), adaptive_max: int = Form(4)):
     quiet_hours.save(bool(enabled), start, end, mode, interval_min)
-    if pace:      # the section's "Human-like timing" switches (Settings → Quiet hours)
+    if pace:      # the section's "Human-like timing" and adaptive polling switches (Settings → Quiet hours)
         cur = human_pace.config()
         human_pace.save((cur["variance_pct"] or 30) if jitter else 0, bool(breaks))
+        adaptive_pace.save(bool(adaptive), adaptive_max)
         scheduler.reschedule_agents()
     return back(f"/settings/quiet?msg={quote(t('Quiet hours saved'), safe='')}")
 
