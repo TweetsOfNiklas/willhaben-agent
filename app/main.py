@@ -983,6 +983,24 @@ async def hits_keep_days(request: Request):
     return back(view.url())
 
 
+@app.post("/hits/bulk")
+async def hits_bulk(request: Request):
+    """The hits page's selection: save, mark as seen, ignore or clear the ticked hits."""
+    form = await request.form()
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    action = str(form.get("action") or "")
+    view = _view_form(form)
+    if ids and action == "clear":
+        search_agents_svc.clear_hits(search_agents_svc.EXPIRING, ids=ids)
+    elif ids and action in ("saved", "seen", "ignored"):
+        with session() as db:
+            for h in db.exec(select(Hit).where(col(Hit.id).in_(ids), Hit.state != search_agents_svc.CLEARED)):
+                h.state = action
+                db.add(h)
+            db.commit()
+    return back(view.url())
+
+
 @app.post("/hits/mark-seen")
 async def hits_mark_seen(request: Request):
     """New → Mark all as seen: the hits the page shows (agent, site, filters)."""

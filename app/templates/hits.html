@@ -51,6 +51,15 @@
 </form>
 
 {% if hits %}
+{# bulk actions: the cards' checkboxes belong to this form (form="hits-bulk"), the bar appears once one is ticked #}
+<div x-data="{ n: 0, count() { this.n = document.querySelectorAll('input[form=hits-bulk][name=ids]:checked').length }, all(on) { document.querySelectorAll('input[form=hits-bulk][name=ids]').forEach(c => c.checked = on); this.count() } }" @change="count()">
+<form id="hits-bulk" method="post" action="/hits/bulk" x-show="n" x-cloak class="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-box border border-primary bg-base-100 px-3 py-2 shadow-lg" data-bulk-bar>
+  {{ view_fields() }}
+  <span class="mr-1 text-[13px] font-semibold" x-text="{{ _('{n} selected')|tojson|forceescape }}.replace('{n}', n)"></span>
+  {% for v, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}<button name="action" value="{{ v }}" class="btn btn-sm">{{ label }}</button>{% endfor %}
+  <button name="action" value="clear" class="btn btn-sm btn-ghost text-error" onclick="return confirm({{ _('Clear the selected hits? Saved ones are kept.')|tojson|forceescape }})">{{ _("Clear") }}</button>
+  <span class="ml-auto flex gap-1.5"><button type="button" class="btn btn-sm btn-ghost" @click="all(true)">{{ _("Select all") }}</button><button type="button" class="btn btn-sm btn-ghost" @click="all(false)">{{ _("Cancel") }}</button></span>
+</form>
 <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
 {% set home = home_point() %}{# distance from home on each card (geo.hit_km: no request) #}
 {% set pz = price_zone_config() %}{# the zone label of a hit with a Geizhals new price (deals.hit_level), read once #}
@@ -58,10 +67,11 @@
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
-  <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') else '' }}" id="hit-{{ h.id }}">
+  <article class="relative flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') else '' }}" id="hit-{{ h.id }}">
+    <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="hits-bulk" name="ids" value="{{ h.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}"></label>
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block">
       {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
-      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-2 block max-w-[calc(100%-16px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
+      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-10 block max-w-[calc(100%-48px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
       {% if platform_ids %}<span class="badge badge-sm absolute max-sm:hidden top-2 right-2 block max-w-[38%] truncate border-0 bg-black/55 font-medium leading-5 text-white">{{ platform_name(h.platform) }}</span>{% endif %}
     </a>
     <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-2.5">
@@ -105,6 +115,7 @@
     </div>
   </article>
 {% endfor %}
+</div>
 </div>
 {% else %}
 {% call ui.empty(_("No hits in this view."), _("New ads appear here within minutes of being published; you get a push if the agent has it switched on.")) %}

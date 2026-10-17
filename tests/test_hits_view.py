@@ -43,3 +43,23 @@ def test_sort_and_filters():
         assert r.headers["location"] == "/hits?sort=total&ship=pickup"
     with session() as db:
         assert {h.ad_id: h.state for h in db.exec(select(Hit))} == {"1": "new", "2": "new", "3": "seen", "4": "new"}
+
+
+def test_bulk_actions_on_the_ticked_hits():
+    from app.main import app
+
+    _setup()
+    with session() as db:
+        ids = {h.ad_id: h.id for h in db.exec(select(Hit))}
+    with TestClient(app) as c:
+        page = c.get("/hits").text
+        assert 'id="hits-bulk"' in page and f'form="hits-bulk" name="ids" value="{ids["1"]}"' in page
+        r = c.post("/hits/bulk", data={"ids": [ids["1"], ids["2"]], "action": "saved", "sort": "price"},
+                   follow_redirects=False)
+        assert r.headers["location"] == "/hits?state=new&sort=price"
+        c.post("/hits/bulk", data={"ids": [ids["3"]], "action": "ignored"})
+        c.post("/hits/bulk", data={"ids": [ids["1"], ids["4"]], "action": "clear"})     # the saved one stays
+        c.post("/hits/bulk", data={"ids": [ids["2"]], "action": "bogus"})
+    with session() as db:
+        assert {h.ad_id: h.state for h in db.exec(select(Hit))} == {"1": "saved", "2": "saved", "3": "ignored",
+                                                                    "4": "cleared"}
