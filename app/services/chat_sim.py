@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import random
 from datetime import datetime
 from typing import Any
 
@@ -765,6 +766,49 @@ def next_script(sim: SimChat) -> str:
     script = (sim.setup or {}).get("script") or []
     sent = sum(1 for x in sim.turns or [] if x.get("who") == "partner")
     return script[sent] if sent < len(script) else ""
+
+
+# ------------------------------------------------------------------ a random willhaben ad
+RANDOM_KEYWORDS = ("fahrrad", "iphone", "sofa", "kinderwagen", "playstation", "lego", "nähmaschine", "monitor",
+                   "kaffeemaschine", "winterreifen", "gitarre", "schreibtisch", "laptop", "ski", "kamera", "tisch",
+                   "bluetooth lautsprecher", "staubsauger", "drucker", "e-scooter", "rasenmäher", "uhr", "jacke", "tv")
+
+
+async def create_random(role: str, platform: str = "willhaben", persona: str | None = None,
+                        rng: random.Random | None = None) -> SimChat:
+    """A test chat about a random current willhaben ad (anonymous search for a random everyday word, one ad with
+    a price picked at random): its title, price, text and place as the setup; as buyer also a maximum (the asking
+    price) and a wish price 15 % below."""
+    from app.willhaben.public import WillhabenError, get_public
+
+    rng = rng or random.Random()
+    words = list(RANDOM_KEYWORDS)
+    rng.shuffle(words)
+    detail = None
+    try:
+        for word in words[:3]:
+            page = await get_public().search_keyword(word, rows=30)
+            ads = [a for a in page.ads if a.price]
+            if ads:
+                detail = await get_public().get_detail(rng.choice(ads).ad_id)
+                if detail is not None and detail.price:
+                    break
+    except WillhabenError as e:
+        raise ValueError(t("No random ad: willhaben did not answer ({error})", error=e)) from e
+    if detail is None:
+        raise ValueError(t("No random ad found – try again"))
+    sim = await create(role, platform, persona=persona,
+                       title=t("Random: {title}", title=detail.heading or "")[:120])
+    setup = dict(sim.setup or {})
+    setup.update({"title": detail.heading or "", "price": detail.price, "description": detail.description or "",
+                  "location": detail.location or "", "url": detail.url})
+    if role == "buyer":
+        setup.update({"seller_name": detail.seller_name or "", "max_price": detail.price,
+                      "wish_price": round(detail.price * 0.85),
+                      "shipping_cost": detail.shipping_price if detail.shipping_price else None})
+        if platform == "willhaben":
+            setup["mode"] = "paylivery" if detail.paylivery_enabled else "pickup"
+    return _save(sim.id, setup=setup)
 
 
 # ------------------------------------------------------------------ proposals

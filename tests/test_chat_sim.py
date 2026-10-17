@@ -241,3 +241,36 @@ def test_all_templates_from_the_page(backend):
     first = next(s for s in chat_sim.all_chats() if s.title.startswith("“Still available?”"))
     with TestClient(app) as c:
         assert ">Noch da?</textarea>" in c.get(f"/simulator?id={first.id}").text
+
+
+async def test_random_ad_fills_the_setup(backend, monkeypatch):
+    import random
+    from types import SimpleNamespace
+
+    class _Public:
+        async def search_keyword(self, word, rows=30):
+            return SimpleNamespace(ads=[SimpleNamespace(ad_id="1", price=None), SimpleNamespace(ad_id="2", price=200.0)])
+
+        async def get_detail(self, ad_id):
+            assert ad_id == "2"
+            return SimpleNamespace(ad_id="2", heading="Sofa grau", price=200.0, description="Bequem", location="Graz",
+                                   url="https://www.willhaben.at/iad/2", seller_name="Verkäufer", paylivery_enabled=True,
+                                   shipping_price=None)
+
+    monkeypatch.setattr("app.willhaben.public.get_public", lambda: _Public())
+    sim = await chat_sim.create_random("buyer", rng=random.Random(1))
+    s = sim.setup
+    assert s["title"] == "Sofa grau" and s["max_price"] == 200.0 and s["wish_price"] == 170 and s["mode"] == "paylivery"
+    assert sim.title == "Random: Sofa grau" and sim.role == "buyer"
+
+
+def test_old_run_time_renders(backend):
+    from app.main import app
+
+    with session() as db:
+        db.add(SimChat(title="Alt", role="seller", scenario=True, turns=[], expectations=[],
+                       last_run={"at": "2026-10-17T20:00:00+00:00", "passed": True, "results": [], "turns": []}))
+        db.commit()
+        sid = db.exec(select(SimChat.id)).first()
+    with TestClient(app) as c:
+        assert c.get(f"/simulator?id={sid}").status_code == 200

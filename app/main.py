@@ -166,7 +166,12 @@ async def ui_language(request: Request, call_next):
 
 
 # ------------------------------------------------------------------ template helpers
-def _local(dt: datetime | None, fmt: str = "%d.%m. %H:%M") -> str:
+def _local(dt: datetime | str | None, fmt: str = "%d.%m. %H:%M") -> str:
+    if isinstance(dt, str):          # ISO times kept in JSON columns (e.g. the chat simulator's runs)
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            return dt
     if not dt:
         return "–"
     if dt.tzinfo is None:
@@ -1184,6 +1189,15 @@ async def simulator_new(role: str = Form("seller"), platform: str = Form("willha
         sim = await chat_sim.create(role, platform, ad_id=ad_id or None,
                                     purchase_id=int(purchase_id) if purchase_id.isdigit() else None,
                                     persona=persona or None, title=title)
+    except ValueError as e:
+        return back(_sim_url(msg=str(e)))
+    return back(_sim_url(sim.id))
+
+
+@app.post("/simulator/random")
+async def simulator_random(role: str = Form("seller"), platform: str = Form("willhaben"), persona: str = Form("")):
+    try:
+        sim = await chat_sim.create_random(role, platform, persona=persona or None)
     except ValueError as e:
         return back(_sim_url(msg=str(e)))
     return back(_sim_url(sim.id))

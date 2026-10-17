@@ -155,5 +155,10 @@
   "Quick start: ready scenarios": "Schnellstart: fertige Szenarien",
   "All of them": "Alle",
   "{n} scenarios set up – send their messages or run them when you like": "{n} Szenarien vorbereitet – sende ihre Nachrichten oder führ sie aus, wann du willst",
-  "For the ad or purchase chosen above (a sample article without one). Fills in the other side, the setup and the expectations; the messages wait in the input field until you send them.": "Für das oben gewählte Inserat bzw. den Kauf (ohne Auswahl ein Beispielartikel). Füllt Gegenseite, Setup und Erwartungen aus; die Nachrichten warten im Eingabefeld, bis du sie sendest."
+  "For the ad or purchase chosen above (a sample article without one). Fills in the other side, the setup and the expectations; the messages wait in the input field until you send them.": "Für das oben gewählte Inserat bzw. den Kauf (ohne Auswahl ein Beispielartikel). Füllt Gegenseite, Setup und Erwartungen aus; die Nachrichten warten im Eingabefeld, bis du sie sendest.",
+  "No random ad: willhaben did not answer ({error})": "Keine Zufallsanzeige: willhaben hat nicht geantwortet ({error})",
+  "No random ad found – try again": "Keine Zufallsanzeige gefunden – bitte nochmal versuchen",
+  "Random: {title}": "Zufall: {title}",
+  "A random current willhaben ad as the article": "Eine zufällige aktuelle willhaben-Anzeige als Artikel",
+  "Random ad": "Zufallsanzeige"
 }

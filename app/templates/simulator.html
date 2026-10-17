@@ -67,7 +67,7 @@
   </div>
 
   {# new test chat #}
-  <form method="post" action="/simulator/new" x-data="{ role: 'seller' }" class="mx-5 mt-3 mb-5 flex flex-col gap-2 rounded-[10px] bg-base-200 p-3.5 text-[13px]" id="sim-new">
+  <form method="post" action="/simulator/new" x-data="{ role: 'seller' }" class="mx-5 mt-4 mb-5 flex flex-col gap-2 rounded-[10px] border border-base-300 bg-base-100 p-3.5 text-[13px]" id="sim-new">
     <div class="font-semibold">{{ _("New test chat") }}</div>
     <div class="flex flex-wrap gap-x-5 gap-y-1.5">
       <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" name="role" value="seller" x-model="role" class="radio radio-primary radio-xs" checked>{{ _("I sell") }}</label>
@@ -88,7 +88,11 @@
       {% for k, (r, label, desc) in personas.items() %}<option value="{{ k }}" data-role="{{ r }}" x-show="role === '{{ r }}'" :disabled="role !== '{{ r }}'" title="{{ desc }}">{{ label }}</option>{% endfor %}
     </select>
     <input name="title" class="input input-sm w-full" placeholder="{{ _('Name (optional)') }}">
-    <button class="btn btn-primary btn-sm">{{ ui.icon('plus', 14) }}{{ _("Start") }}</button>
+    <div class="grid grid-cols-2 gap-1.5">
+      <button class="btn btn-primary btn-sm">{{ ui.icon('plus', 14) }}{{ _("Start") }}</button>
+      {# a random current willhaben ad as the article (title, price, text, place) #}
+      <button formaction="/simulator/random" class="btn btn-sm" title="{{ _('A random current willhaben ad as the article') }}">🎲 {{ _("Random ad") }}</button>
+    </div>
     {# templates: a ready scenario (persona, setup, expectations; the other side's messages wait in the composer) for
        the ad or purchase chosen above, a sample article without one; nothing is sent until the owner does #}
     <div class="mt-1.5 border-t border-base-300 pt-2.5" id="sim-templates">
@@ -131,7 +135,7 @@
 
   {# the ad / purchase as simulated #}
   <details class="border-b border-base-300 px-4 py-2.5 text-[13px] md:px-5" id="sim-setup" {% if not sim.turns %}open{% endif %}>
-    <summary class="cursor-pointer font-semibold">{{ _("Setup") }} <span class="font-normal text-muted">· {{ ad.title or '–' }}{% if ad.price %} · {{ ad.price }}{% endif %}</span></summary>
+    <summary class="cursor-pointer font-semibold">{{ _("Setup") }} <span class="font-normal text-muted">· {{ ad.title or '–' }}{% if ad.price %} · {{ ad.price }}{% endif %}</span>{% if s.get('url') %} <a href="{{ s.get('url') }}" target="_blank" rel="noopener" class="link link-primary text-[12px] font-normal no-underline">willhaben{{ ui.icon('external', 11) }}</a>{% endif %}</summary>
     <form method="post" action="/simulator/{{ sim.id }}/setup" class="mt-2.5 grid gap-2 sm:grid-cols-2">
       <label class="flex flex-col gap-1 sm:col-span-2">{{ _("Name") }}<input name="title" value="{{ sim.title }}" class="input input-sm w-full"></label>
       <label class="flex flex-col gap-1">{{ _("Platform") }}<select name="platform" class="select select-sm w-full">{% for k, name in platforms.items() %}<option value="{{ k }}" {% if k == sim.platform %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
@@ -184,7 +188,7 @@
       <div class="chat-footer mt-1 flex max-w-[85%] flex-col items-end gap-1 text-[12px] md:max-w-[72%]">
         {% if x.get('reason') %}<span class="text-right text-muted">{{ _("Claude: {reason}", reason=x.get('reason')) }}</span>{% endif %}
         {% for b in x.get('blockers') or [] %}<span class="text-right text-warning">{{ ui.icon('alert', 12, 2, 'inline -mt-px') }} {{ b }}</span>{% endfor %}
-        {% for n in x.get('notes') or [] %}<span class="text-right text-muted">{{ n }}</span>{% endfor %}
+        {% for n in x.get('notes') or [] %}<span class="text-right {{ 'text-muted' if n.startswith('Hinweis:') else 'text-warning' }}">{{ n[8:]|trim if n.startswith('Hinweis:') else _("Claude needs info: {items}", items=n) }}</span>{% endfor %}
         {% if x.get('meetup') %}<span class="text-right text-primary">{{ ui.icon('calendar', 12, 2, 'inline -mt-px') }} {{ x.get('meetup').start.replace('T', ' ') }}{% if x.get('meetup').location %} · {{ x.get('meetup').location }}{% endif %}</span>{% endif %}
         <form method="post" action="/simulator/{{ sim.id }}/rate/{{ i }}" class="flex flex-wrap items-center justify-end gap-1" x-data="{ open: {{ 'true' if x.get('rating') == 'down' or x.get('note') else 'false' }} }">
           <button name="rating" value="{{ '' if x.get('rating') == 'up' else 'up' }}" class="btn btn-xs {{ 'btn-success' if x.get('rating') == 'up' else 'btn-ghost' }}" title="{{ _('Good answer') }}">👍</button>
@@ -215,13 +219,13 @@
       <button class="btn btn-primary">{{ ui.icon('send', 15) }}<span class="max-sm:sr-only">{{ _("Send") }}</span></button>
     </form>
     <form method="post" class="flex flex-wrap items-center gap-1.5">
-      <button class="btn btn-sm" formaction="/simulator/{{ sim.id }}/partner">{{ ui.icon('bot', 14) }}{{ _("Claude writes as the other side") }}</button>
+      <button class="btn btn-sm max-sm:px-2.5" formaction="/simulator/{{ sim.id }}/partner" title="{{ _('Claude writes as the other side') }}">{{ ui.icon('bot', 14) }}<span class="max-sm:sr-only">{{ _("Claude writes as the other side") }}</span></button>
       <span class="inline-flex items-center gap-1">
-        <button class="btn btn-sm" formaction="/simulator/{{ sim.id }}/play">{{ ui.icon('play', 14) }}{{ _("Play automatically") }}</button>
+        <button class="btn btn-sm max-sm:px-2.5" formaction="/simulator/{{ sim.id }}/play" title="{{ _('Play automatically') }}">{{ ui.icon('play', 14) }}<span class="max-sm:sr-only">{{ _("Play automatically") }}</span></button>
         <select name="rounds" class="select select-sm w-auto" aria-label="{{ _('Rounds') }}">{% for n in [1, 2, 3, 4, 6, 8] %}<option value="{{ n }}" {% if n == 3 %}selected{% endif %}>{{ _("{n} rounds", n=n) }}</option>{% endfor %}</select>
       </span>
-      <button class="btn btn-ghost btn-sm" formaction="/simulator/{{ sim.id }}/reply" title="{{ _('Write my last answer again, e.g. after changing the setup') }}">{{ ui.icon('refresh', 14) }}{{ _("Answer again") if (sim.turns or []) else (_("Opening message") if not selling else _("Answer")) }}</button>
-      {% if can_suggest(sim.role) %}<button class="btn btn-ghost btn-sm" formaction="/simulator/{{ sim.id }}/suggest" title="{{ _('From your 👍/👎 notes and failed scenarios') }}">{{ ui.icon('sparkle', 14) }}{{ _("Propose a rule change") }}</button>{% endif %}
+      <button class="btn btn-ghost btn-sm" formaction="/simulator/{{ sim.id }}/reply" title="{{ _('Write my last answer again, e.g. after changing the setup') }}">{{ ui.icon('refresh', 14) }}<span class="max-sm:sr-only">{{ _("Answer again") if (sim.turns or []) else (_("Opening message") if not selling else _("Answer")) }}</span></button>
+      {% if can_suggest(sim.role) %}<button class="btn btn-ghost btn-sm" formaction="/simulator/{{ sim.id }}/suggest" title="{{ _('From your 👍/👎 notes and failed scenarios') }}">{{ ui.icon('sparkle', 14) }}<span class="max-sm:sr-only">{{ _("Propose a rule change") }}</span></button>{% endif %}
     </form>
     {% endif %}
   </div>
