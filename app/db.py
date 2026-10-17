@@ -356,6 +356,41 @@ class Purchase(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class SimChat(SQLModel, table=True):
+    """A test chat of the chat simulator (app/services/chat_sim.py): never sent, never pushed, no limits counted."""
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = ""
+    role: str = "seller"                   # seller: my ad, the partner buys | buyer: my purchase, the partner sells
+    platform: str = "willhaben"            # willhaben | kleinanzeigen | vinted
+    ad_id: str | None = None               # seller: the own ad (min. price, instructions, stock read live from it)
+    purchase_id: int | None = None         # buyer: the purchase it was copied from
+    setup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the ad / purchase as simulated
+    persona: str | None = None             # chat_sim.PERSONAS key, "custom" (persona_text) or None
+    persona_text: str | None = None
+    turns: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # see chat_sim
+    scenario: bool = False                 # kept as a repeatable test with expectations
+    expectations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # [{kind, value}]
+    last_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {at, passed, results, turns, variant}
+    proposal_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the same with the open proposal
+    busy: str | None = None                # what runs in the background right now (pending marker "sim:<id>")
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SimProposal(SQLModel, table=True):
+    """A rule change Claude proposes from the simulator's ratings and failed scenarios, applied only on request."""
+    id: int | None = Field(default=None, primary_key=True)
+    role: str = "seller"
+    target: str = "auto_reply_rules"       # auto_reply_rules | ad_instructions | purchase_rules
+    ad_id: str | None = None               # ad_instructions: the ad
+    old_text: str = ""
+    new_text: str = ""
+    summary: str = ""
+    status: str = "open"                   # open | applied | discarded
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class TelegramAction(SQLModel, table=True):
     """What a Telegram button does: callback_data is `t:<token>` (Telegram allows only 64 bytes)."""
     token: str = Field(primary_key=True)

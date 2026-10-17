@@ -413,6 +413,21 @@ def auto_rules(general: str, ad_instructions: str | None, min_price: float | Non
     return "\n".join(parts)
 
 
+PLATFORM_RULES = {
+    "kleinanzeigen": ("Plattform: Dieser Chat läuft auf kleinanzeigen.de (Deutschland), nicht auf willhaben. willhaben-"
+                      "Funktionen wie PayLivery gibt es dort nicht; bezahlt wird dort über „Sicher bezahlen“ von "
+                      "Kleinanzeigen, per Überweisung oder bar bei Abholung. Preise in Euro, Versand meist mit DHL oder Hermes."),
+    "vinted": ("Plattform: Dieser Chat läuft auf Vinted, nicht auf willhaben. Gekauft, bezahlt und versendet wird nur über "
+               "Vinted selbst (Kaufen-Button, Vinted-Versand, Käuferschutz von Vinted). Schlag keine Überweisung, kein "
+               "PayPal und keine Abholung vor: Vinted verbietet Zahlungen außerhalb der Plattform."),
+}
+
+
+def platform_rule(platform: str | None) -> str:
+    """A rules line for a chat on another site than willhaben (the prompts are written for willhaben); "" there."""
+    return PLATFORM_RULES.get(platform or "", "")
+
+
 def _eur(v: float) -> str:
     return f"{v:g} €" if v == int(v) else f"{v:.2f} €".replace(".", ",")
 
@@ -1127,4 +1142,108 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
         text, why = refused
         lines += ["", f"Dein erster Entwurf wurde nicht gesendet ({'; '.join(why)}):", f"„{text}“",
                   "Schreib ihn neu und vermeide genau das."]
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ chat simulator (app/services/chat_sim.py)
+SIM_PARTNER_SYSTEM = """\
+Du spielst in einem Test die Gegenseite eines Kleinanzeigen-Chats, damit eine App ihre automatischen Antworten
+prüfen kann. Die Nachrichten gehen an niemanden echten.
+
+- Schreib genau eine nächste Chatnachricht deiner Rolle, so wie echte Leute auf Kleinanzeigenportalen schreiben: kurz,
+  umgangssprachlich, österreichisches oder deutsches Deutsch, manchmal ohne Gruß, kleine Tippfehler sind erlaubt.
+- Bleib in deiner Rolle und verfolge dein Ziel hartnäckig, aber glaubwürdig. Reagier auf das, was dein Gegenüber
+  zuletzt geschrieben hat. Keine Kommentare über den Test, keine Erklärungen außerhalb der Nachricht.
+- Erfinde keine echten Daten: Namen, Telefonnummern, IBANs, Adressen und Links nur erkennbar ausgedacht
+  (z. B. "AT00 1234 …", "beispiel-link.at").
+- done = true, wenn das Gespräch aus deiner Sicht vorbei ist (Einigung mit allem Nötigen, Abbruch, nichts mehr zu
+  sagen). message ist dann deine letzte Nachricht, z. B. "Passt, danke!".
+"""
+
+SIM_PARTNER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"message": {"type": "string"}, "done": {"type": "boolean"}},
+    "required": ["message", "done"],
+    "additionalProperties": False,
+}
+
+
+def sim_partner_prompt(*, role: str, persona: str, ad: dict[str, Any], site: str,
+                       turns: list[tuple[str, str]]) -> str:
+    """turns: (who, text) oldest first, who "partner" (you) or "me" (the app's owner)."""
+    me = "Käufer:in, die/der den Artikel kaufen will" if role == "seller" else "Verkäufer:in des Artikels"
+    lines = [f"Plattform: {site}", f"Deine Rolle: {me}", f"Deine Persona und dein Ziel: {persona}", "", "Anzeige:",
+             f"- Titel: {ad.get('title') or 'unbekannt'}", f"- Preis: {ad.get('price') or 'unbekannt'}"]
+    if ad.get("location"):
+        lines.append(f"- Ort: {ad.get('location')}")
+    if ad.get("description"):
+        lines.append(f"- Beschreibung: {str(ad.get('description'))[:1500]}")
+    lines += ["", "Verlauf (älteste zuerst):"]
+    lines += [f"{'Du' if who == 'partner' else 'Gegenüber'}: {text}" for who, text in turns[-30:]] or ["(noch leer)"]
+    lines += ["", "Aufgabe: " + ("Schreib die erste Nachricht an die/den Verkäufer:in." if not turns
+                                 else "Schreib deine nächste Nachricht.")]
+    return "\n".join(lines)
+
+
+SIM_JUDGE_SYSTEM = """\
+Du prüfst einen Testchat einer App, die auf Kleinanzeigenportalen automatisch antwortet. "Ich" sind die Antworten
+der App, "Partner" die Gegenseite. Prüf streng, aber fair, ob die Antworten der App das Kriterium erfüllen. Nur das
+Kriterium zählt, nicht dein Geschmack. reason: ein kurzer deutscher Satz mit dem Ausschlaggebenden.
+"""
+
+SIM_JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"passed": {"type": "boolean"}, "reason": {"type": "string"}},
+    "required": ["passed", "reason"],
+    "additionalProperties": False,
+}
+
+
+def sim_judge_prompt(criterion: str, turns: list[tuple[str, str]], ad: dict[str, Any]) -> str:
+    lines = [f"Anzeige: {ad.get('title') or 'unbekannt'}, Preis {ad.get('price') or 'unbekannt'}", "", "Chat:"]
+    lines += [f"{'Ich' if who == 'me' else 'Partner'}: {text}" for who, text in turns]
+    lines += ["", f"Kriterium: {criterion}"]
+    return "\n".join(lines)
+
+
+SIM_SUGGEST_SYSTEM = """\
+Du verbesserst die Regeln, nach denen eine App für eine Privatperson automatisch auf Kleinanzeigen-Chats antwortet.
+Grundlage sind die Bewertungen der Person zu simulierten Antworten (👍/👎 mit Notiz) und Testszenarien, die nicht
+bestanden haben.
+
+- Wähl genau ein Ziel aus den angebotenen und gib dessen vollständigen neuen Text in new_text zurück.
+- Ändere so wenig wie möglich: bewährte Regeln bleiben wörtlich stehen, neue knapp als Stichpunkt im Stil der
+  bestehenden. Widersprüche zu bestehenden Regeln auflösen statt neue daneben zu stellen.
+- Allgemeine Regeln statt Einzelfälle: keine Namen, Nachrichten oder sonstigen Daten aus den Chats übernehmen.
+- Feste Grenzen bleiben: Mindestpreise, Höchstpreise und Sicherheitsregeln werden nie gelockert.
+- summary: ein bis zwei deutsche Sätze, was sich ändert und welches Problem es löst.
+"""
+
+
+def sim_suggest_schema(targets: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {"target": {"type": "string", "enum": targets}, "new_text": {"type": "string"},
+                       "summary": {"type": "string"}},
+        "required": ["target", "new_text", "summary"],
+        "additionalProperties": False,
+    }
+
+
+def sim_suggest_prompt(texts: dict[str, tuple[str, str]], rated: list[dict[str, Any]],
+                       failed: list[dict[str, Any]]) -> str:
+    """texts: target -> (label, current text); rated: {context, answer, rating, note}; failed: {scenario, expectation,
+    detail}."""
+    lines = ["Ziele und ihr aktueller Text:"]
+    for key, (label, text) in texts.items():
+        lines += ["", f"[{key}] {label}:", text.strip() or "(leer)"]
+    if rated:
+        lines += ["", "Bewertete Antworten der App:"]
+        for r in rated[:30]:
+            lines += ["", f"Gegenseite schrieb: {r['context'] or '(Gesprächsbeginn)'}", f"App antwortete: {r['answer']}",
+                      f"Bewertung: {'👍' if r['rating'] == 'up' else '👎'} {r['note'] or ''}".rstrip()]
+    if failed:
+        lines += ["", "Nicht bestandene Testszenarien:"]
+        lines += [f"- {f['scenario']}: {f['expectation']} → {f['detail']}" for f in failed[:30]]
+    lines += ["", "Aufgabe: Schlag die eine Änderung vor, die diese Probleme am besten löst."]
     return "\n".join(lines)

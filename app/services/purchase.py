@@ -787,8 +787,10 @@ async def _find_unconfirmed_chat(pid: int, text: str) -> None:
 
 
 # ------------------------------------------------------------------ prompts, guards
-def rules_block(p: Purchase, conv: Conversation | None = None, availability: str | None = None) -> str:
-    """Prompt block of one purchase: prices, mode, what may be disclosed, the user's rules."""
+def rules_block(p: Purchase, conv: Conversation | None = None, availability: str | None = None,
+                user_rules: str | None = None) -> str:
+    """Prompt block of one purchase: prices, mode, what may be disclosed, the user's rules (`user_rules`: other
+    rules for a test run in the chat simulator)."""
     sender = None
     if p.mode == "direct" and p.status in AFTER_AGREEMENT:
         s = sender_address()
@@ -799,7 +801,8 @@ def rules_block(p: Purchase, conv: Conversation | None = None, availability: str
     cost, src = shipping_of(p)
     return purchase_rules(asking=p.asking_price, target=target_price(p), max_price=p.max_price,
                           mode=p.mode, sender_address=sender, stage=p.status,
-                          user_rules=get_setting(SETTING_RULES) or DEFAULT_RULES, note=p.note,
+                          user_rules=user_rules if user_rules is not None else (get_setting(SETTING_RULES) or DEFAULT_RULES),
+                          note=p.note,
                           pickup_window=p.pickup_window, availability=availability, seller_name=seller,
                           shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p),
                           fee=fee_rule() if p.mode == "paylivery" else None, questions=p.questions)

@@ -62,7 +62,8 @@ class Job:
                 "link": self.link, "quiet": self.quiet, "finished_at": self.finished_at.isoformat() if self.finished_at else None}
 
 
-LANES = ("ads", "chat", "claude")   # claude: drafts and revisions (no willhaben account request, can take a minute)
+LANES = ("ads", "chat", "claude", "sim")   # claude: drafts and revisions (no willhaben account request, can take a minute);
+#   sim: the chat simulator's test chats (never in the way of real answers)
 
 _ids = itertools.count(1)
 _locks: dict[str, asyncio.Lock] = {}

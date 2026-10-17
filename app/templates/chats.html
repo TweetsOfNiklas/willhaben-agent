@@ -19,6 +19,7 @@
     <div class="mb-2.5 flex items-center justify-between gap-2">
       <h1 class="text-xl">{{ _("Chats") }}</h1>
       <div class="flex shrink-0 gap-1.5">
+        <a href="/simulator" class="btn btn-sm" title="{{ _('Test the automatic answers') }}">{{ ui.icon('bot', 14) }}<span class="max-sm:sr-only">{{ _("Simulator") }}</span></a>
         <button type="button" class="btn btn-sm" id="chat-select" @click="mode(!selecting)">{{ _("Select") }}</button>
         {# background job (lane chat): the list updates itself as conversations come in #}
         <form method="post" action="/chats/sync" x-data="{ busy: false }" @submit="busy = true"

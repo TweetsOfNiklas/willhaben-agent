@@ -28,14 +28,14 @@ from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
 from app.config import address_check, get_settings
 from app.db import (
-    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, Message, MyAd, Purchase, SearchAgent, apply_public_url,
-    get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
+    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, Message, MyAd, Purchase, SearchAgent, SimChat, apply_public_url,
+    current_ad, get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage
 from app.llm import models as llm_models
 from app.llm.base import PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
-from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
+from app.services import access_stats, ad_batch, ad_creator, chat_sim, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones, site_accounts
@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
     my_ads.recover()                               # queued jobs died with the last process: unmark what they held
     ad_creator.recover_publishing()
     chats.recover_sending()
+    chat_sim.recover()
     deals_web.product_search.recover()
     purchase_svc.recover()
     try:
@@ -1148,6 +1149,154 @@ async def chats_sync(request: Request):
     return back(f"/chats?msg={quote(t('Sync started – it runs in the background'), safe='')}")
 
 
+# ------------------------------------------------------------------ chat simulator (app/services/chat_sim.py)
+def _sim_url(sim_id: int | None = None, msg: str | None = None, anchor: str = "") -> str:
+    q = [f"id={sim_id}"] if sim_id else []
+    if msg:
+        q.append(f"msg={quote(msg, safe='')}")
+    return "/simulator" + (f"?{'&'.join(q)}" if q else "") + anchor
+
+
+@app.get("/simulator", response_class=HTMLResponse)
+async def simulator_page(request: Request, id: int | None = None, msg: str | None = None):
+    sim = chat_sim.get(id) if id else None
+    with session() as db:
+        ads = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.hidden).is_not(True))
+                           .order_by(col(MyAd.heading))))
+    live_ad = None
+    if sim is not None and sim.ad_id:
+        with session() as db:
+            live_ad = current_ad(db, sim.ad_id)
+    return render(request, "simulator.html", msg=msg, sims=chat_sim.all_chats(), sim=sim, ads=ads, live_ad=live_ad,
+                  purchases=purchase_svc.recent(20), personas=chat_sim.PERSONAS, platforms=chat_sim.PLATFORMS,
+                  expectations=chat_sim.EXPECTATIONS, proposals=chat_sim.open_proposals(), sim_diff=chat_sim.diff,
+                  targets=chat_sim.TARGETS, expectation_label=chat_sim.expectation_label,
+                  persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
+                  can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
+                  purchase_status=purchase_svc.status_label)
+
+
+@app.post("/simulator/new")
+async def simulator_new(role: str = Form("seller"), platform: str = Form("willhaben"), ad_id: str = Form(""),
+                        purchase_id: str = Form(""), persona: str = Form(""), title: str = Form("")):
+    try:
+        sim = await chat_sim.create(role, platform, ad_id=ad_id or None,
+                                    purchase_id=int(purchase_id) if purchase_id.isdigit() else None,
+                                    persona=persona or None, title=title)
+    except ValueError as e:
+        return back(_sim_url(msg=str(e)))
+    return back(_sim_url(sim.id))
+
+
+def _sim_or_404(sim_id: int):
+    sim = chat_sim.get(sim_id)
+    if sim is None:
+        raise HTTPException(404)
+    return sim
+
+
+SIM_TEXT_FIELDS = ("title_ad", "description", "location", "seller_name", "instructions", "pickup_window", "mode")
+SIM_NUMBER_FIELDS = ("price", "min_price", "max_price", "wish_price", "shipping_cost", "quantity")
+
+
+@app.post("/simulator/{sim_id}/setup")
+async def simulator_setup(request: Request, sim_id: int):
+    _sim_or_404(sim_id)
+    form = await request.form()
+    values: dict[str, Any] = {}
+    for k in SIM_TEXT_FIELDS:
+        if k in form:
+            values["title" if k == "title_ad" else k] = str(form[k]).strip()[:4000]
+    for k in SIM_NUMBER_FIELDS:
+        if k in form:
+            raw = str(form[k]).strip()
+            n = chat_sim._number(raw) if raw else None
+            values[k] = (int(n) if k == "quantity" and n else n)
+    if "questions" in form:
+        values["questions"] = [q.strip()[:300] for q in str(form["questions"]).splitlines() if q.strip()][:8]
+    chat_sim.update_setup(sim_id, values, persona=str(form.get("persona") or "") or None,
+                          persona_text=str(form["persona_text"]) if "persona_text" in form else None,
+                          title=str(form.get("title") or ""), platform=str(form.get("platform") or "") or None)
+    return back(_sim_url(sim_id, t("Saved")))
+
+
+@app.post("/simulator/{sim_id}/say")
+async def simulator_say(sim_id: int, text: str = Form("")):
+    _sim_or_404(sim_id)
+    ok = chat_sim.say(sim_id, text)
+    return back(_sim_url(sim_id, None if ok else t("Busy or empty message"), "#sim-end"))
+
+
+@app.post("/simulator/{sim_id}/{action}")
+async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: str = Form(""),
+                           kind: str = Form(""), value: str = Form("")):
+    _sim_or_404(sim_id)
+    msg = None
+    if action == "reply":
+        ok = chat_sim.reply(sim_id)
+    elif action == "partner":
+        ok = chat_sim.partner_once(sim_id)
+    elif action == "play":
+        ok = chat_sim.play(sim_id, rounds)
+    elif action == "suggest":
+        ok = chat_sim.suggest(sim_id)
+    elif action == "run":
+        ok = chat_sim.run_scenarios([sim_id]) > 0
+        msg = None if ok else t("Nothing to run: the scenario needs messages and is not running already")
+    elif action == "clear":
+        chat_sim.clear(sim_id)
+        ok = True
+    elif action == "delete":
+        chat_sim.delete(sim_id)
+        return back(_sim_url(msg=t("Test chat deleted")))
+    elif action == "scenario":
+        chat_sim.set_scenario(sim_id, on == "1")
+        ok = True
+    elif action == "expect":
+        ok = chat_sim.add_expectation(sim_id, kind, value)
+        msg = None if ok else t("Expectation not added: it needs a value")
+    else:
+        raise HTTPException(404)
+    if not ok and msg is None:
+        msg = t("The test chat is busy – wait until it is done")
+    return back(_sim_url(sim_id, msg, "#sim-end"))
+
+
+@app.post("/simulator/{sim_id}/expect/{index}/remove")
+async def simulator_expect_remove(sim_id: int, index: int):
+    chat_sim.remove_expectation(sim_id, index)
+    return back(_sim_url(sim_id, anchor="#sim-expect"))
+
+
+@app.post("/simulator/{sim_id}/rate/{index}")
+async def simulator_rate(sim_id: int, index: int, rating: str = Form(""), note: str | None = Form(None)):
+    chat_sim.rate(sim_id, index, rating or None, note)
+    return back(_sim_url(sim_id, anchor=f"#turn-{index}"))
+
+
+@app.post("/simulator-run-all")
+async def simulator_run_all(back_to: str = Form("")):
+    n = chat_sim.run_scenarios()
+    sid = int(back_to) if back_to.isdigit() else None
+    return back(_sim_url(sid, t("{n} scenarios are running", n=n) if n else t("No scenarios to run")))
+
+
+@app.post("/simulator-proposal/{pid}/{action}")
+async def simulator_proposal(pid: int, action: str, text: str | None = Form(None), back_to: str = Form("")):
+    sid = int(back_to) if back_to.isdigit() else None
+    if action == "try":
+        n = chat_sim.run_scenarios(proposal_id=pid)
+        msg = t("{n} scenarios are running with the proposal", n=n) if n else t("No scenarios to run")
+    elif action == "apply":
+        msg = t("Rule change applied") if chat_sim.apply_proposal(pid, text) else t("Proposal not open any more")
+    elif action == "discard":
+        chat_sim.discard_proposal(pid)
+        msg = t("Proposal discarded")
+    else:
+        raise HTTPException(404)
+    return back(_sim_url(sid, msg))
+
+
 @app.get("/chats/{conversation_id}", response_class=HTMLResponse)
 async def chat_page(request: Request, conversation_id: str, msg: str | None = None, sort: str | None = None,
                     show_hidden: bool = False):
@@ -1583,6 +1732,7 @@ async def jobs_status(since: int | None = None):
         pending += [f"addraft:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.publishing == True))]  # noqa: E712
         pending += [f"refining:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.refining == True))]  # noqa: E712
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
+        pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
