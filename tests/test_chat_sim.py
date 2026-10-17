@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from app.db import Conversation, Draft, MyAd, SimChat, SimProposal, get_setting, session, set_setting
 from app.llm.base import LLMResult
-from app.services import chat_sim, chats, jobs
+from app.services import chat_sim, jobs
 
 
 class _Backend:

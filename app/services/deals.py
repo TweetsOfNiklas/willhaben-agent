@@ -1282,7 +1282,7 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
             break
         answers = await asyncio.gather(*(search_category(q) if category_url else _search(site, q) for site in sites),
                                        return_exceptions=True)      # the sites at once, each at its own pace
-        for site, data in zip(sites, answers):
+        for site, data in zip(sites, answers, strict=True):
             if isinstance(data, (WillhabenError, InvalidSearchUrl, PlatformError)):
                 log.info("comparable search on %s failed for %r: %s", site, q, data)
                 errors.append((site, data))

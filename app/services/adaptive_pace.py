@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlmodel import col, select
+from sqlmodel import select
 
 from app.db import Hit, SearchAgent, get_setting, session, set_setting, utcnow
 
