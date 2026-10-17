@@ -485,7 +485,7 @@ class HttpPlatformClient:
         logged-in session on the home IP, which the refusal says nothing about. No route: PlatformError, never a
         direct request. Under a Trial (the VPN search) one try through its server only (_send_trial)."""
         if (tr := _trial.get()) is not None:
-            return await self._send_trial(tunnel, tr, full, kind, headers)
+            return await self._send_trial(tunnel, tr, full, kind, headers, valid)
         last: PlatformError | None = None
         exits: set[Route] = set()
         for _ in range(VPN_TRIES):
@@ -522,8 +522,8 @@ class HttpPlatformClient:
         assert last is not None
         raise last
 
-    async def _send_trial(self, tunnel: Tunnel, tr: Trial, full: str, kind: str,
-                          headers: dict[str, str] | None) -> FetchResponse:
+    async def _send_trial(self, tunnel: Tunnel, tr: Trial, full: str, kind: str, headers: dict[str, str] | None,
+                          valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
         """The test's request: through tr.route once. ExitMoved when that server stopped (nothing sent); a refused or
         unreachable server ends the try, noted in `tr` (the search marks it). A try that already sent tr.limit
         requests without an answer the site accepted (eBay: warm-up 403s, however often its client starts a new
@@ -543,7 +543,8 @@ class HttpPlatformClient:
             tr.sent, tr.refused, tr.detail = tr.sent + 1, "unreachable", str(e)[:160]
             raise PlatformError(t("Network error through the VPN: {error}", error=e)) from e
         tr.sent, tr.status = tr.sent + 1, r.status_code
-        tr.ctype, tr.challenge = r.header("content-type").lower(), is_challenge(r)
+        tr.ctype = r.header("content-type").lower()
+        tr.challenge = is_challenge(r) or (r.status_code == 200 and valid is not None and not valid(r))
         if self._exit_blocked(r):
             tr.refused, tr.detail = ("rate" if r.status_code == 429 else "blocked"), f"HTTP {r.status_code}"
             self.new_anonymous_session()

@@ -103,6 +103,40 @@ async def test_errors_and_missing_items():
     assert await c.item(ITEM) is None and await c.item("asGONE0000000000") is None
 
 
+def _decoy(n=3):
+    """The bot trap's answer, made up here the same way: padded ids, photo ids padded with zeros."""
+    items = [{"__typename": "ItemSummary", "id": f"AHf{i}tAAAAAAAAAAA", "title": "Lorem ipsum", "price": 400,
+              "locality": "1758 Est quis", "path": f"/en-gb/i/AHf{i}tAAAAAAAAAAA/lorem", "isSold": False,
+              "isExpired": False, "media": [{"id": f"0077{i}cc60000000000000000"}]} for i in range(n)]
+    return {"data": {"itemSearch": {"__typename": "FetchItemsResponse", "total": None,
+                                    "itemResults": [{"distanceGroup": "ungrouped", "items": items}]}}}
+
+
+async def test_the_bot_traps_made_up_ads_are_no_hits():
+    assert not sh.is_decoy(load("shpock_search.json")) and not sh.is_decoy({}) and not sh.is_decoy(None)
+    assert sh.is_decoy(_decoy())
+    one_real = _decoy(1)
+    one_real["data"]["itemSearch"]["itemResults"][0]["items"] += load("shpock_search.json")["data"]["itemSearch"][
+        "itemResults"][0]["items"]
+    assert not sh.is_decoy(one_real)                         # one odd id among real ones: a real answer
+    c = sh.ShpockClient(transport=Queue([(200, json.dumps(_decoy()).encode())]))
+    c.limiter = RateLimiter(0, name="Shpock")
+    with pytest.raises(PlatformError, match="made-up ads"):
+        await c.search_items({"q": "x"}, 5)
+
+
+async def test_the_bot_trap_through_the_vpn_is_a_bot_check():
+    from app.platforms.httpclient import Trial, trial
+    from tests.test_httpclient import FakeTunnel, _vpn_client
+
+    tunnel = FakeTunnel()
+    c, _, _ = _vpn_client({"http://exit1": [(200, json.dumps(_decoy()).encode())]}, tunnel)
+    tr = Trial(await tunnel.ensure())
+    with trial(tr):
+        r = await c._get("https://fake.example/api", valid=sh._real_answer)
+    assert r.status_code == 200 and tr.challenge                # the VPN search: "botcheck", the server is marked
+
+
 async def test_agent_end_to_end(platform, client):
     a = create_agent("https://www.shpock.com/de-at/results?q=iphone+15+pro")
     assert a.platform == "shpock" and a.name == "iphone 15 pro"

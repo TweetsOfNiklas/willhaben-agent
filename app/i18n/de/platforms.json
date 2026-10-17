@@ -112,5 +112,6 @@
  "{platform} could not be reached ({error}); this is what the list showed.": "{platform} war nicht erreichbar ({error}); das hier zeigte die Liste.",
  "eBay answered without the item page": "eBay antwortete ohne die Artikelseite",
  "eBay ad {id}: HTTP {status}": "eBay-Anzeige {id}: HTTP {status}",
- "Pickup possible": "Abholung möglich"
+ "Pickup possible": "Abholung möglich",
+ "Shpock answered with made-up ads (its bot trap); nothing was taken over": "Shpock hat mit erfundenen Anzeigen geantwortet (seine Bot-Falle); nichts wurde übernommen"
 }

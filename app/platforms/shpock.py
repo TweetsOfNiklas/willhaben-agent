@@ -79,6 +79,34 @@ def parse_listing(item: dict[str, Any]) -> Listing:
                    status="active", platform="shpock")
 
 
+# Shpock's bot trap (since 2026-10-17): a search answered with generated ads, lorem-ipsum titles and places, ids
+# "AHfutAAAAAAAAAAA" (a small number padded with A) and photo ids padded with zeros that do not exist (404)
+_DECOY_ID = re.compile(r"[A-Za-z0-9_-]{4,8}A{8,}")
+_DECOY_MEDIA = re.compile(r"[0-9a-f]{8}0{16}")
+
+
+def is_decoy(data: Any) -> bool:
+    """A search answer of made-up ads: at least half of its items carry a padded id or a padded photo id. A real
+    answer's ids are random ("atFLVeGnI_SaCFKQ")."""
+    res = ((data.get("data") or {}).get("itemSearch") or {}) if isinstance(data, dict) else {}
+    items = [i for g in res.get("itemResults") or [] for i in (g or {}).get("items") or [] if isinstance(i, dict)]
+
+    def fake(i: dict[str, Any]) -> bool:
+        media = [m.get("id") for m in i.get("media") or [] if isinstance(m, dict)]
+        return bool(_DECOY_ID.fullmatch(str(i.get("id") or ""))
+                    or any(_DECOY_MEDIA.fullmatch(str(m or "")) for m in media))
+
+    return bool(items) and sum(map(fake, items)) * 2 >= len(items)
+
+
+def _real_answer(r: Any) -> bool:
+    """`valid` of a search: False for the bot trap's made-up ads (the VPN takes it as a bot check)."""
+    try:
+        return not is_decoy(r.json())
+    except ValueError:
+        return True             # no JSON: search_items says so
+
+
 def parse_search(data: dict[str, Any]) -> SearchPage:
     """The GraphQL answer -> SearchPage; sold and expired items are left out."""
     if not isinstance(data, dict):
@@ -182,13 +210,16 @@ class ShpockClient(HttpPlatformClient):
                      "pagination": {"limit": limit}, "trackingSource": "Search"}
         r = await self._get(GRAPHQL, params={"operationName": "ItemSearch", "query": SEARCH_QUERY,
                                              "variables": json.dumps(variables, separators=(",", ":"), ensure_ascii=False)},
-                            headers=GRAPHQL_HEADERS, cache_s=cache_s, kind="search")
+                            headers=GRAPHQL_HEADERS, cache_s=cache_s, kind="search", valid=_real_answer)
         if r.status_code != 200:
             raise PlatformError(t("Shpock search returned HTTP {status}", status=r.status_code))
         try:
-            return parse_search(r.json())
+            data = r.json()
         except ValueError as e:
             raise PlatformError(t("Shpock search returned no JSON")) from e
+        if is_decoy(data):      # never a hit, never a Claude call: the made-up ads of its bot trap
+            raise PlatformError(t("Shpock answered with made-up ads (its bot trap); nothing was taken over"))
+        return parse_search(data)
 
     async def item(self, ad_id: str) -> AdDetail | None:
         r = await self._get(f"{WEB}/{LOCALE}/i/{ad_id}", headers=PAGE_HEADERS, cache_s=300, kind="detail")
