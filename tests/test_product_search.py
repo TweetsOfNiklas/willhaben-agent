@@ -1035,14 +1035,16 @@ async def test_load_more_ranks_the_next_offers(wh, claude, monkeypatch):
 
 
 async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch):
-    """An offer Claude ranked never goes back into the pool, also when it was passed over: "load more" runs out."""
+    """An offer Claude ranked never goes back into the pool, also when it was passed over: "load more" offers only
+    those it has not seen and runs out."""
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
     await _finish()
     row = ps.get(sid)
     first, pool = list(row.results), list(row.pool)
-    passed_over = pool[-1]                                                     # ranked once, not picked
-    assert len(pool) > 4 and passed_over["title"] in claude.calls[-1]["prompt"]
+    seen_titles = claude.calls[-1]["prompt"]
+    assert len(pool) > 4 and not any(f'] {c["title"]} ·' in seen_titles for c in pool)  # passed over: not again
+    assert f'] {first[0]["title"]} ·' in seen_titles                         # (the prompt names its offers so)
     claude.rank = {"results": []}                                              # nothing fits any more
     loads = 0
     while ps.load_more(sid):
@@ -1052,7 +1054,6 @@ async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch
         row = ps.get(sid)
         assert len(row.pool or []) == max(0, len(pool) - 4 * loads)            # the whole batch leaves the pool
     assert loads == -(-len(pool) // 4) and row.results == first and not row.pool
-    assert passed_over["title"] in claude.calls[-1]["prompt"]                  # its one more look, at the end
     assert row.candidates == 4 + len(pool) and row.progress["more"] == loads
 
 
@@ -1127,7 +1128,7 @@ def test_load_more_on_the_page(app_client, monkeypatch):
     ps._active.add(row.id)                                                     # the task that loads them runs
     frag = app_client.get(f"/deals/search/{row.id}").text
     ps._active.discard(row.id)
-    assert "Claude is ranking 2 more offers" in frag and "Spüler 0" in frag and 'hx-trigger="every 2s"' in frag
+    assert "ranks 2 offers" in frag and "Loading ads" in frag and "Spüler 0" in frag and 'hx-trigger="every 2s"' in frag
     assert 'name="interval_min"' not in frag                                   # no form in a box that refreshes itself
     assert "Loading more offers failed" not in frag and "Search warning." in frag
     ps._update(row.id, status="done", pool=None)

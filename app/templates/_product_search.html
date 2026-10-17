@@ -30,6 +30,11 @@
 {%- elif r.skipped %}<span title="{{ _('Not run: the site paused the search before or its hourly request limit was used up') }}">{{ _("skipped") }}</span>
 {%- else %}–{% endif -%}
 {%- endmacro %}
+{# one labelled progress bar: a moving stripe while its part works, full when done #}
+{% macro stage(label, pct, active, detail) -%}
+<div class="flex flex-col gap-1"><div class="flex items-baseline justify-between gap-3 text-[13px]"><span class="font-semibold">{{ label }}{% if active %} <span class="loading loading-dots loading-xs align-middle text-primary"></span>{% endif %}</span><span class="truncate text-[12.5px] text-muted">{{ detail }}</span></div>
+{{ ui.bar(pct, 'brand' if pct < 100 else 'ok', 'h-1.5' ~ (' animate-pulse' if active else '')) }}</div>
+{%- endmacro %}
 {% set live = ps_is_running(ps) %}{% set plan = ps.plan or {} %}{% set st = ps.settings or {} %}
 <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="ps-box" data-search="{{ ps.id }}"{% if live %} hx-get="/deals/search/{{ ps.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <header class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-base-300 px-4 py-3 font-semibold"><span>{{ _("Search #{id}", id=ps.id) }} <span class="text-[12.5px] font-normal text-muted">· {{ (ps.started_at or ps.created_at)|ago }} · {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}{% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}{% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}</span></span>
@@ -37,8 +42,22 @@
   <div class="flex flex-col gap-3 px-4 py-3.5">
     <p class="italic text-muted">„{{ ps.description }}“</p>
     {% if live and ps.status != 'more' %}{% set pr = ps.progress or {} %}
-    <div class="flex items-center gap-2.5"><div class="min-w-0 flex-1"><div class="font-semibold">{% if ps.status == 'planning' %}{{ _("Claude is planning the searches …") }}{% elif ps.status == 'searching' and pr.step == 'details' %}{{ _("Loading the descriptions of the shortlisted Facebook offers: {done} of {total} …", done=pr.done or 0, total=pr.total or 0) }}{% elif ps.status == 'searching' %}{{ _("Searching: {done} of {total} searches done …", done=pr.done or 0, total=pr.total or 0) }}{% if pr.bands %} <span class="font-normal text-muted">{{ _("(incl. {n} Facebook price bands)", n=pr.bands) }}</span>{% endif %}{% elif ps.status == 'photos' %}{{ _("Claude is looking at the photos …") }}{% else %}{{ _("Claude is picking the best offers …") }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div></div><span class="loading loading-spinner loading-sm shrink-0 text-primary"></span></div>
-    {{ ui.bar(((pr.done or 0) * 100 / pr.total)|round|int if ps.status == 'searching' and pr.total else (20 if ps.status == 'planning' else 85), 'brand', 'h-1') }}
+    {# two bars: the sites' searches (the ads), and Claude's steps (plan, ranking, photos: one call each) #}
+    {% set loading = ps.status == 'searching' %}{% set loaded = ps.status in ('ranking', 'photos') %}
+    <div class="flex flex-col gap-2.5" data-ps-progress>
+      {% set ads_pct = 100 if loaded else (((pr.done or 0) * 100 / pr.total)|round|int if loading and pr.total else 0) %}
+      {{ stage(_("Loading ads"), ads_pct, loading,
+               _("waits for Claude's plan") if ps.status == 'planning'
+               else _("Descriptions of the shortlisted Facebook offers: {done} of {total}", done=pr.done or 0, total=pr.total or 0) if loading and pr.step == 'details'
+               else _("{done} of {total} searches", done=pr.done or 0, total=pr.total or 0) ~ ((' · ' ~ _("{n} sites at once", n=st.platforms|length)) if (st.platforms or [])|length > 1 else '') ~ ((' · ' ~ _("incl. {n} Facebook price bands", n=pr.bands)) if pr.bands else '') if loading
+               else _("{n} searches, {c} offers to rank", n=ps.requests or 0, c=ps.candidates or 0)) }}
+      {% set steps = [('planning', _("plans the searches")), ('ranking', _("ranks {n} offers", n=ps.candidates or 0)), ('photos', _("checks the photos of the best ones"))] if st.photos else [('planning', _("plans the searches")), ('ranking', _("ranks {n} offers", n=ps.candidates or 0))] %}
+      {% set at = {'planning': 0, 'searching': 1, 'ranking': 1, 'photos': 2}.get(ps.status, 0) %}
+      {{ stage(_("Claude"), ((at + (0 if ps.status == 'searching' else 0.5)) * 100 / steps|length)|round|int, ps.status != 'searching',
+               _("plan done, waits for the ads") if ps.status == 'searching'
+               else steps[at][1] ~ ' · ' ~ _("step {i} of {n}", i=at + 1, n=steps|length)) }}
+      <div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div>
+    </div>
     {% elif ps.status == 'asking' %}{% set qs = plan.questions or [] %}
     <form method="post" action="/deals/search/{{ ps.id }}/answers" id="ps-ask-{{ ps.id }}" class="flex flex-col gap-3 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-3">
       <strong>{% if qs|length == 1 %}{{ _("Claude has one short question") }}{% else %}{{ _("Claude has {n} short questions", n=qs|length) }}{% endif %}</strong>
@@ -83,7 +102,7 @@
       {# more offers: the search found more than Claude ranked; the next ones are ranked on request and added below #}
       {% set left = (ps.pool or [])|length %}{% set more_warning = (ps.progress or {}).more_warning %}
       {% if more_warning and ps.status == 'done' %}{{ ui.msg(more_warning, 'warn') }}{% endif %}
-      {% if ps.status == 'more' %}<div id="ps-more" class="flex items-center gap-2.5 text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span>{{ _("Claude is ranking {n} more offers …", n=[left, 40]|min) }}</div>
+      {% if ps.status == 'more' %}<div id="ps-more" class="flex flex-col gap-2.5" data-ps-progress>{{ stage(_("Loading ads"), 100, false, _("{n} more offers from this search, no new requests", n=[left, 40]|min)) }}{{ stage(_("Claude"), 50, true, _("ranks {n} offers", n=[left, 40]|min) ~ (' · ' ~ _("then checks the photos") if st.photos else '')) }}</div>
       {% elif left %}<form id="ps-more" method="post" action="/deals/search/{{ ps.id }}/more" x-data="{ busy: false }" @submit="busy = true" class="flex flex-wrap items-center gap-2.5"><button class="btn btn-sm" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Load more offers") }}</button><small class="text-[12.5px] text-muted">{{ _("{n} more offers found; Claude ranks the next {k} and adds the best below.", n=left, k=[left, 40]|min) }}</small></form>
       {% elif ps.results %}<p id="ps-more" class="text-[12.5px] text-muted">{{ _("No more offers in this search.") }}</p>{% endif %}
       </div>

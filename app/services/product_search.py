@@ -59,6 +59,7 @@ from app.llm.prompts import (
 from app.services import ad_images, deals, geo, scam
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, shipping_info
+from app.platforms.text import mentions
 from app.services import timeline
 
 log = logging.getLogger(__name__)
@@ -266,6 +267,15 @@ def drop_reason(ad: Listing, plan: dict[str, Any], q: dict[str, Any] | None = No
     return None
 
 
+LOOSE_SITES = ("shpock",)   # a page full of anything near one word (10/2026: "UCG Fiber" -> 30 ads, none of them one);
+                            # Vinted filters its own results, Facebook's search is semantic ("Mountainbike" finds MTB)
+
+
+def _on_topic(p: platforms.Platform, ad: Listing, q: dict[str, Any]) -> bool:
+    """On a loose site an offer is a candidate only when its title and text mention every word of the search."""
+    return p.id not in LOOSE_SITES or mentions(f"{ad.heading} {ad.body or ''}", q.get("keyword") or "")
+
+
 def _remaining_budget(p: platforms.Platform) -> int | None:
     lim = p.limiter
     return max(0, lim.per_hour - lim.last_hour) if lim.per_hour else None
@@ -401,33 +411,36 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             warnings.append(t("Hourly request limit of {platform} almost used up: only {n} of {total} searches run.",
                               platform=p.name, n=budget, total=wanted))
     stopped: set[str] = set()
-    for n, (i, k) in enumerate(jobs):
+    count = {"done": 0, "requests": 0}
+
+    async def one(i: int, k: int | None) -> None:
         _qi, q, p = runs[i]
         entry = per_query[i] if k is None else per_query[i]["bands"][k]
         if p.id in stopped or (left[p.id] is not None and left[p.id] <= 0) \
                 or (k is not None and per_query[i]["found"] is None):
             entry["skipped"] = True
-            continue
+            return
         if left[p.id] is not None:
             left[p.id] -= 1
         try:
             page = await p.search(SearchSpec.from_json(entry["spec"]), rows=ROWS)   # uncached: real requests
-            requests += 1
+            count["requests"] += 1
         except Blocked as e:
-            requests += int(getattr(e, "sent", False))      # False: refused by the limiter, nothing was sent
+            count["requests"] += int(getattr(e, "sent", False))   # False: refused by the limiter, nothing was sent
             entry["error"] = str(e)
             stopped.add(p.id)
-            done = sum(1 for m in range(n) if runs[jobs[m][0]][2].id == p.id)
+            done = sum(1 for e2 in per_query if e2["platform"] == p.id and e2["found"] is not None)
             warnings.append(t("{platform} paused the search ({error}): stopped after {n} searches there, the offers "
                               "found so far are ranked.", platform=p.name, error=e, n=done))
-            continue
+            return
         except PlatformError as e:
-            requests += 1                                   # went through the limiter (network error / HTTP status)
+            count["requests"] += 1                          # went through the limiter (network error / HTTP status)
             entry["error"] = str(e)
-            continue
+            return
         finally:
+            count["done"] += 1
             if on_progress:
-                on_progress(n + 1, len(jobs), requests)
+                on_progress(count["done"], len(jobs), count["requests"])
         entry["found"] = page.rows_found
         new = 0
         for ad in page.ads:
@@ -436,13 +449,23 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             if not ad.ad_id or ad.ref in seen:
                 continue
             seen.add(ad.ref)
-            if drop_reason(ad, plan, q) is None:
+            if drop_reason(ad, plan, q) is None and _on_topic(p, ad, q):
                 pools[i].append(ad)
                 new += 1
         entry["kept"] = new
         if k is not None:
             per_query[i]["found"] += page.rows_found
         per_query[i]["kept"] = len(pools[i])
+
+    async def site(pid: str) -> None:
+        """One site's searches in their order (its limiter paces them; bands after the whole-range searches)."""
+        for i, k in jobs:
+            if runs[i][2].id == pid:
+                await one(i, k)
+
+    # the sites at once: each answers at its own pace, so a search takes as long as its slowest site, not their sum
+    await asyncio.gather(*(site(p.id) for p in sites))
+    requests = count["requests"]
     for e in per_query:
         e.pop("spec", None)
         for b in e.get("bands") or []:
@@ -850,13 +873,14 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
     in `pool` for "load more": the unseen reserve first, then the cards Claude passed over."""
     pairs = answer_pairs(plan, answers)
     note = ""
+    unseen: list[dict[str, Any]] = []     # cards Claude never ranked (its call failed): they keep their turn
     if not cards:
         results = []
     else:
         try:
             results, note, _model = await rank(description, plan, cards, answers=pairs)
         except LLMError as e:
-            results = unranked(cards)
+            results, unseen = unranked(cards), cards
             msg = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
             warning = f"{warning} {msg}" if warning else msg
         else:
@@ -867,17 +891,18 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                     warning = f"{warning} {msg}" if warning else msg
     await geo.locate(results)           # coordinates from postcodes, home geocoded once: the list can sort by distance
     _update(search_id, status="done", results=results, note=note or None, warning=warning, finished_at=utcnow(),
-            cards=None, pool=_pool(reserve or [], cards, results))
+            cards=None, pool=_pool(reserve or [], unseen, results))
 
 
 def _key(c: dict[str, Any]) -> tuple[str, str]:
     return c.get("platform") or "willhaben", str(c.get("ad_id"))
 
 
-def _pool(fresh: list[dict[str, Any]], seen: list[dict[str, Any]], shown: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-    """What "load more" can still show: the unseen offers first, then those Claude saw and passed over."""
+def _pool(fresh: list[dict[str, Any]], unranked_: list[dict[str, Any]], shown: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """What "load more" can still show: offers Claude has not ranked yet (the unseen reserve, and a batch whose
+    ranking failed). Those it saw and passed over are not offered again: ranking them twice only costs time."""
     taken = {_key(c) for c in shown}
-    out = [c for c in fresh + seen if _key(c) not in taken]
+    out = [c for c in fresh + unranked_ if _key(c) not in taken]
     return out[:MAX_POOL] or None
 
 
