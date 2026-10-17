@@ -34,10 +34,10 @@ from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
     PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, SIM_JUDGE_SCHEMA, SIM_JUDGE_SYSTEM, SIM_PARTNER_SCHEMA,
-    SIM_PARTNER_SYSTEM, SIM_SUGGEST_SYSTEM, purchase_opener_prompt, sim_judge_prompt, sim_partner_prompt,
-    sim_suggest_prompt, sim_suggest_schema,
+    SIM_REVIEW_SCHEMA, SIM_REVIEW_SYSTEM, SIM_SUGGEST_SYSTEM, purchase_opener_prompt, sim_judge_prompt, sim_partner_prompt,
+    sim_review_prompt, sim_suggest_prompt, sim_suggest_schema,
 )
-from app.services import jobs, min_price
+from app.services import jobs, min_price, system_prompts
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +102,10 @@ EXPECTATIONS: dict[str, tuple[str, str | None, tuple[str, ...]]] = {
     "judge": (_("Claude checks: {value}"), "text", ("seller", "buyer")),
 }
 
-TARGETS = {"auto_reply_rules": _("Rules for automatic answers (Settings → Chats)"),
+TARGETS = {"auto_reply_system": _("System prompt of automatic answers when selling"),
+           "purchase_system": _("System prompt of automatic answers when buying"),
+           "sim_partner_system": _("System prompt of the other side in the simulator"),
+           "auto_reply_rules": _("Rules for automatic answers (Settings → Chats)"),
            "ad_instructions": _("Instructions for automatic answers of this ad"),
            "purchase_rules": _("Your rules for purchases (Settings → Purchases)")}
 # German on purpose: part of the proposal prompt
@@ -470,14 +473,15 @@ async def partner(sim: SimChat, turns: list[dict[str, Any]]) -> dict[str, Any]:
         desc = "Ganz normale Person ohne Besonderheiten."
     prompt = sim_partner_prompt(role=sim.role, persona=desc, ad=ad_view(sim), site=PLATFORMS[sim.platform],
                                 turns=[(x["who"], x["text"]) for x in turns])
-    out = await get_backend("chat", model=sim.partner_model).complete(system=SIM_PARTNER_SYSTEM, prompt=prompt,
+    system = system_prompts.get("sim_partner")
+    out = await get_backend("chat", model=sim.partner_model).complete(system=system, prompt=prompt,
                                                                     schema=SIM_PARTNER_SCHEMA)
     data = out.data or {}
     text = str(data.get("message") or "").strip()
     if not text:
         raise LLMError(t("Claude wrote no message for the other side"))
     return {"who": "partner", "text": text[:2000], "at": utcnow().isoformat(), "done": bool(data.get("done")),
-            "played": True, "model": out.model, "prompt": {"system": SIM_PARTNER_SYSTEM, "user": prompt}}
+            "played": True, "model": out.model, "prompt": {"system": system, "user": prompt}}
 
 
 # ------------------------------------------------------------------ actions (background jobs, lane "sim")
@@ -876,6 +880,8 @@ def open_proposals() -> list[SimProposal]:
 def current_text(target: str, ad_id: str | None = None) -> str:
     from app.services import purchase
 
+    if target.endswith("_system"):
+        return system_prompts.get(target.removesuffix("_system"))
     if target == "auto_reply_rules":
         return get_setting("auto_reply_rules") or ""
     if target == "purchase_rules":
@@ -962,6 +968,63 @@ def suggest(sim_id: int) -> bool:
     return _start(sim_id, "suggest", t("Simulator: proposal"), run)
 
 
+def _open_proposal(role: str, target: str, old: str, new: str, summary: str, ad_id: str | None = None) -> None:
+    with session() as db:
+        for row in db.exec(select(SimProposal).where(SimProposal.status == "open", SimProposal.role == role,
+                                                     SimProposal.target == target)):
+            row.status = "discarded"                         # one open proposal per role and target
+            db.add(row)
+        db.add(SimProposal(role=role, target=target, ad_id=ad_id, old_text=old, new_text=new, summary=summary[:3000]))
+        db.commit()
+
+
+def review(kind: str, focus: str | None = None, model: str | None = None) -> bool:
+    """Claude reviews one system prompt (with the simulator's ratings and failed scenarios of its role) and proposes
+    an improved version: a proposal like a rule change (diff, test with scenarios, apply or discard). `model`: another
+    Claude model for the review (None: the chat replies' model of the settings)."""
+    from app.llm import models as llm_models
+
+    model = llm_models.resolve_alias(model) if model else None
+    if model and model not in llm_models.ids():
+        model = None
+    if kind not in system_prompts.KINDS or jobs.busy(f"sim-review-{kind}"):
+        return False
+    label, role, _default = system_prompts.KINDS[kind]
+
+    async def run(job: jobs.Job) -> str:
+        job.progress(0, t("Claude reviews the system prompt…"), f"simreview:{kind}")
+        text = system_prompts.get(kind)
+        rated, failed = (_rated(role), _failed(role)) if role else ([], [])
+        out = await get_backend("chat", model=model).complete(
+            system=SIM_REVIEW_SYSTEM, prompt=sim_review_prompt(t(label), text, rated, failed, focus),
+            schema=SIM_REVIEW_SCHEMA)
+        data = out.data or {}
+        new = str(data.get("new_text") or "").strip()
+        if not new or new == text.strip():
+            raise LLMError(t("Claude found nothing to improve"))
+        findings = [str(f).strip() for f in data.get("findings") or [] if str(f).strip()]
+        summary = "\n".join([str(data.get("summary") or "").strip(), *(f"• {f}" for f in findings[:12])]).strip()
+        _open_proposal(role or "seller", f"{kind}_system", text, new, summary)
+        return t("Improved system prompt proposed")
+
+    jobs.submit(f"sim-review-{kind}", t("Simulator: review of the system prompt"), run, lane="sim",
+                current=f"simreview:{kind}")
+    return True
+
+
+def propose_text(kind: str, text: str) -> bool:
+    """The owner's edited system prompt as a proposal, to try on the scenarios before it applies."""
+    if kind not in system_prompts.KINDS:
+        return False
+    text = (text or "").replace("\r\n", "\n").strip()
+    cur = system_prompts.get(kind)
+    if not text or text == cur.strip():
+        return False
+    role = system_prompts.KINDS[kind][1] or "seller"
+    _open_proposal(role, f"{kind}_system", cur, text, t("Your edited system prompt, to test before it applies."))
+    return True
+
+
 def apply_proposal(pid: int, text: str | None = None) -> SimProposal | None:
     """Take the proposal over into the real rules (the owner may have edited the text)."""
     from app.services import purchase
@@ -970,7 +1033,9 @@ def apply_proposal(pid: int, text: str | None = None) -> SimProposal | None:
     if p is None or p.status != "open":
         return None
     new = (text if text is not None else p.new_text).strip()
-    if p.target == "auto_reply_rules":
+    if p.target.endswith("_system"):
+        system_prompts.save(p.target.removesuffix("_system"), new)
+    elif p.target == "auto_reply_rules":
         set_setting("auto_reply_rules", new)
     elif p.target == "purchase_rules":
         set_setting(purchase.SETTING_RULES, new)

@@ -42,7 +42,7 @@ from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zon
 from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
-from app.services import stock
+from app.services import stock, system_prompts
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app.services import search_agents as search_agents_svc
@@ -1180,7 +1180,8 @@ async def simulator_page(request: Request, id: int | None = None, msg: str | Non
                   can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
                   purchase_status=purchase_svc.status_label, sim_templates=chat_sim.templates_for,
                   next_script=chat_sim.next_script, model_choices=llm_models.choices(),
-                  model_label=llm_models.label, default_model=model_for)
+                  model_label=llm_models.label, default_model=model_for, system_prompts=system_prompts,
+                  reviewing=jobs.current_keys("simreview:"))
 
 
 @app.post("/simulator/new")
@@ -1344,6 +1345,30 @@ async def simulator_delete_many(request: Request):
     back_to = str(form.get("back_to") or "")
     keep = int(back_to) if back_to.isdigit() and int(back_to) not in ids else None
     return back(_sim_url(keep, t("{n} test chats deleted", n=len(ids))))
+
+
+@app.post("/simulator-prompts/{kind}/{action}")
+async def simulator_prompts(kind: str, action: str, text: str = Form(""), focus: str = Form(""),
+                            model: str = Form(""), back_to: str = Form("")):
+    """System prompts: save (applies to real answers), test as a proposal, Claude review, reset to the default."""
+    if kind not in system_prompts.KINDS:
+        raise HTTPException(404)
+    sid = int(back_to) if back_to.isdigit() else None
+    if action == "save":
+        system_prompts.save(kind, text)
+        msg = t("System prompt saved – it applies to automatic answers now")
+    elif action == "propose":
+        msg = t("Proposal created – test it with the scenarios, then apply it") if chat_sim.propose_text(kind, text) \
+            else t("Nothing changed")
+    elif action == "review":
+        msg = t("Claude reviews the system prompt – the proposal appears above") if chat_sim.review(kind, focus, model or None) \
+            else t("A review of this prompt is already running")
+    elif action == "reset":
+        system_prompts.reset(kind)
+        msg = t("System prompt reset to the default")
+    else:
+        raise HTTPException(404)
+    return back(_sim_url(sid, msg, "#sim-prompts"))
 
 
 @app.post("/simulator-run-all")
@@ -1805,6 +1830,7 @@ async def jobs_status(since: int | None = None):
         pending += [f"refining:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.refining == True))]  # noqa: E712
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
         pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
+        pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))

@@ -26,6 +26,9 @@ class _Backend:
             return LLMResult(data={"message": "Was ist der letzte Preis? 5 €?", "done": False}, model=self.model)
         if "passed" in props:
             return LLMResult(data={"passed": "Abholung" in prompt, "reason": "geprüft"}, model=self.model)
+        if "findings" in props:
+            return LLMResult(data={"findings": ["Zu lang"], "new_text": "Kürzerer System-Prompt.", "summary": "Kürzer."},
+                             model=self.model)
         if "target" in props:
             return LLMResult(data={"target": props["target"]["enum"][0], "new_text": "- Nie unter 15 € gehen.",
                                    "summary": "Klare Untergrenze."}, model=self.model)
@@ -356,3 +359,53 @@ def test_delete_several_test_chats(backend):
                    follow_redirects=False)
         assert r.status_code == 303 and f"id={ids[0]}" not in r.headers["location"]
     assert [s.id for s in chat_sim.all_chats()] == ids[2:]
+
+
+async def test_system_prompt_edit_review_and_reset(backend):
+    from app.llm import models as llm_models
+    from app.llm.prompts import AUTO_REPLY_SYSTEM
+    from app.services import system_prompts, topic
+
+    assert system_prompts.get("auto_reply") == AUTO_REPLY_SYSTEM and not system_prompts.custom("auto_reply")
+    system_prompts.save("auto_reply", "Mein eigener System-Prompt für automatische Antworten, bitte sehr knapp.")
+    assert system_prompts.custom("auto_reply")
+    assert topic.leaks_prompt("eigener System-Prompt für automatische Antworten, bitte sehr knapp")   # leak check knows it
+    sim = await chat_sim.create("seller", ad_id="111")
+    chat_sim.say(sim.id, "Noch da?")
+    await _done()
+    assert backend.calls[-1]["system"].startswith("Mein eigener System-Prompt")
+    opus = llm_models.newest("opus")
+    assert chat_sim.review("auto_reply", "kürzer", opus)
+    await _done()
+    assert backend.models[-1] == opus and "kürzer" in backend.calls[-1]["prompt"]
+    [p] = [x for x in chat_sim.open_proposals() if x.target == "auto_reply_system"]
+    assert p.new_text == "Kürzerer System-Prompt." and "• Zu lang" in p.summary
+    chat_sim.add_expectation(sim.id, "auto", None)
+    chat_sim.run_scenarios(proposal_id=p.id)                                  # tried without changing the real prompt
+    await _done()
+    assert backend.calls[-1]["system"] == "Kürzerer System-Prompt."
+    assert system_prompts.get("auto_reply").startswith("Mein eigener")
+    chat_sim.apply_proposal(p.id)
+    assert system_prompts.get("auto_reply") == "Kürzerer System-Prompt."
+    system_prompts.reset("auto_reply")
+    assert system_prompts.get("auto_reply") == AUTO_REPLY_SYSTEM and not system_prompts.custom("auto_reply")
+    system_prompts.save("auto_reply", AUTO_REPLY_SYSTEM)                      # the default itself: stays the default
+    assert not system_prompts.custom("auto_reply")
+
+
+def test_system_prompt_routes(backend):
+    from app.main import app
+    from app.services import system_prompts
+
+    with TestClient(app) as c:
+        page = c.get("/simulator").text
+        assert "System prompts" in page and "Claude review" in page and 'data-prompt-kind="purchase"' in page
+        c.post("/simulator-prompts/sim_partner/save", data={"text": "Spiel die Gegenseite sehr kurz."})
+        assert system_prompts.get("sim_partner") == "Spiel die Gegenseite sehr kurz."
+        assert "Reset to default" in c.get("/simulator").text
+        c.post("/simulator-prompts/purchase/propose", data={"text": "Neuer Kauf-Prompt"})
+        assert [p.target for p in chat_sim.open_proposals()] == ["purchase_system"]
+        assert system_prompts.custom("purchase") is False
+        c.post("/simulator-prompts/sim_partner/reset")
+        assert not system_prompts.custom("sim_partner")
+        assert c.post("/simulator-prompts/nope/save", data={"text": "x"}).status_code == 404

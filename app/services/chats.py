@@ -20,12 +20,12 @@ from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, 
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
-    AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM,
+    AUTO_REPLY_SCHEMA, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, REPLY_SCHEMA, REPLY_SYSTEM,
     auto_rules, platform_rule,
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, selling, stock
+from app.services import my_ads, selling, stock, system_prompts
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -529,8 +529,10 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
                   overrides: dict[str, str] | None = None, platform: str | None = None) -> dict[str, Any]:
     """What Claude gets for one answer: {system, schema, prompt, backend, ad_ctx}. Reads settings, the calendar and
     the owner's own messages (style), writes nothing: the chat simulator (app/services/chat_sim.py) builds its
-    answers here too, with unsaved rows. `overrides` replaces the owner's rules for a test run: "auto_reply_rules",
-    "purchase_rules", "ad_instructions"; `platform` names a site other than willhaben."""
+    answers here too, with unsaved rows. The system prompts of automatic answers are the owner's edited ones, if any
+    (app/services/system_prompts.py). `overrides` replaces them or the owner's rules for a test run:
+    "auto_reply_system", "purchase_system", "auto_reply_rules", "purchase_rules", "ad_instructions"; `platform`
+    names a site other than willhaben."""
     overrides = overrides or {}
     cal = gcal.config()
     if buy is not None:                           # buyer: the purchase's rules replace the seller's rules
@@ -539,7 +541,8 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         if auto and (lessons := feedback.prompt_block()):
             rules = f"{rules}\n\n{lessons}"
         availability = None
-        system, schema = (PURCHASE_SYSTEM, PURCHASE_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
+        system, schema = ((overrides.get("purchase_system") or system_prompts.get("purchase"), PURCHASE_SCHEMA)
+                          if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
         examples: list[str] = []
         stock_now = None
     else:
@@ -559,7 +562,8 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         elif floor is not None:                       # manual drafts of my own ad: same negotiation range
             rules = f"{rules}\n\n{price_floor(floor, asking)}"
         availability = await gcal.availability_text() if (cal["in_auto"] if auto else cal["in_drafts"]) else None
-        system, schema = (AUTO_REPLY_SYSTEM, AUTO_REPLY_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
+        system, schema = ((overrides.get("auto_reply_system") or system_prompts.get("auto_reply"), AUTO_REPLY_SCHEMA)
+                          if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
         examples = _style_examples()
     if line := platform_rule(platform):
         rules = f"{rules}\n\n{line}"

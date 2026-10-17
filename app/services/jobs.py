@@ -160,6 +160,11 @@ def working() -> set[str]:
     return {j.current for j in _active if j.status == "running" and j.current}
 
 
+def current_keys(prefix: str) -> list[str]:
+    """Marker keys of queued or running jobs starting with `prefix` (pages wait for them like for DB markers)."""
+    return [j.current for j in _active if j.current and j.current.startswith(prefix)]
+
+
 def busy(kind_prefix: str = "") -> bool:
     return any(j.kind.startswith(kind_prefix) for j in _active)
 

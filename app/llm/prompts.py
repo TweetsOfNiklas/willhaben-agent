@@ -1262,3 +1262,43 @@ def sim_suggest_prompt(texts: dict[str, tuple[str, str]], rated: list[dict[str, 
         lines += [f"- {f['scenario']}: {f['expectation']} → {f['detail']}" for f in failed[:30]]
     lines += ["", "Aufgabe: Schlag die eine Änderung vor, die diese Probleme am besten löst."]
     return "\n".join(lines)
+
+
+SIM_REVIEW_SYSTEM = """\
+Du prüfst und verbesserst einen System-Prompt, mit dem eine App Claude für eine Privatperson automatisch auf
+Kleinanzeigen-Chats antworten lässt (oder im Test die Gegenseite spielen lässt).
+
+- findings: die wichtigsten konkreten Probleme, je ein kurzer deutscher Satz: Widersprüche, Unklarheiten, fehlende
+  Fälle, Regeln, die zu den Bewertungen oder nicht bestandenen Tests geführt haben, unnötige Länge. Nichts erfinden;
+  ist der Prompt gut, wenige oder keine.
+- new_text: die vollständige verbesserte Fassung. Ändere nur, was die findings lösen; Aufbau, Ton und alle
+  Sicherheitsregeln (Betrug, Preisgrenzen, keine Kontaktdaten, nichts erfinden) bleiben. Die Felder des
+  Antwortschemas, die der Prompt nennt (z. B. auto_send, auto_reason, intent, needs_info, purchase_state), müssen
+  weiter genauso erklärt sein. Keine Namen oder Daten aus den Chats übernehmen.
+- summary: ein bis zwei deutsche Sätze, was sich ändert.
+"""
+
+SIM_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"findings": {"type": "array", "items": {"type": "string"}}, "new_text": {"type": "string"},
+                   "summary": {"type": "string"}},
+    "required": ["findings", "new_text", "summary"],
+    "additionalProperties": False,
+}
+
+
+def sim_review_prompt(label: str, text: str, rated: list[dict[str, Any]], failed: list[dict[str, Any]],
+                      focus: str | None = None) -> str:
+    lines = [f"System-Prompt: {label}", "", "<<<", text.strip(), ">>>"]
+    if rated:
+        lines += ["", "Bewertete Antworten aus dem Simulator:"]
+        for r in rated[:20]:
+            lines += [f"- Gegenseite: {r['context'] or '(Beginn)'} | App: {r['answer']} | "
+                      f"{'👍' if r['rating'] == 'up' else '👎'} {r['note'] or ''}".rstrip()]
+    if failed:
+        lines += ["", "Nicht bestandene Testszenarien:"]
+        lines += [f"- {f['scenario']}: {f['expectation']} → {f['detail']}" for f in failed[:20]]
+    if focus:
+        lines += ["", "Worauf die Person besonders achten will:", focus.strip()]
+    lines += ["", "Aufgabe: Prüf den System-Prompt und schlag die verbesserte Fassung vor."]
+    return "\n".join(lines)

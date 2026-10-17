@@ -28,12 +28,56 @@
     <p class="text-[12.5px] text-muted">{{ _("Test the automatic answers: the same rules and checks as in real chats, but nothing is sent.") }}</p>
   </div>
 
-  {# proposals: one open per role #}
+  {# the system prompts: edit (applies to real automatic answers), test as a proposal, Claude review, reset #}
+  <details id="sim-prompts" class="mx-5 mb-3 rounded-[10px] border border-base-300 text-[13px]" x-data="{ kind: 'auto_reply' }"
+           {% if reviewing or (msg and 'System' in msg) %}open{% endif %}>
+    <summary class="flex cursor-pointer items-center gap-1.5 px-3.5 py-2.5 font-semibold">{{ ui.icon('settings', 14) }}{{ _("System prompts") }}
+      {% for k in system_prompts.KINDS if system_prompts.custom(k) %}{% if loop.first %}{{ ui.pill(_("edited"), 'brand', dot=false, cls='ml-auto') }}{% endif %}{% endfor %}</summary>
+    <div class="flex flex-col gap-2.5 border-t border-base-300 px-3.5 py-3">
+      <div class="flex flex-wrap gap-1">
+        {% for k, (label, role, _d) in system_prompts.KINDS.items() %}
+        <button type="button" @click="kind = '{{ k }}'" class="rounded-full border px-2.5 py-0.5 text-[12px]"
+                :class="kind === '{{ k }}' ? 'border-primary bg-brand-soft text-primary' : 'border-base-300 text-muted hover:text-base-content'">{{ _(label) }}{% if system_prompts.custom(k) %} ●{% endif %}</button>
+        {% endfor %}
+      </div>
+      {% for k, (label, role, _d) in system_prompts.KINDS.items() %}
+      <form method="post" class="flex flex-col gap-2" x-show="kind === '{{ k }}'"{% if not loop.first %} x-cloak{% endif %} data-prompt-kind="{{ k }}">
+        <input type="hidden" name="back_to" value="{{ sim.id if sim else '' }}">
+        <div class="flex flex-wrap items-center gap-1.5 text-[12px] text-muted">
+          {% if system_prompts.custom(k) %}{{ ui.pill(_("your version"), 'brand', dot=false) }}{% else %}{{ ui.pill(_("default"), '', dot=false) }}{% endif %}
+          <span>{{ _("Applies to real automatic answers once saved.") if k != 'sim_partner' else _("Only used in the simulator.") }}</span>
+          <span id="sim-review-{{ k }}"{% if ('simreview:' ~ k) in reviewing %} data-pending-key="simreview:{{ k }}" data-refresh-also="sim-proposals"{% endif %}>
+            {% if ('simreview:' ~ k) in reviewing %}{{ ui.pending('simreview:' ~ k, _("Claude reviews the system prompt…"), _("Queued")) }}{% endif %}</span>
+        </div>
+        <textarea name="text" rows="14" spellcheck="false" class="textarea w-full bg-base-200 font-mono text-[11.5px] leading-snug">{{ system_prompts.get(k) }}</textarea>
+        <div class="flex flex-wrap gap-1.5">
+          <button class="btn btn-primary btn-sm" formaction="/simulator-prompts/{{ k }}/save"
+                  {% if k != 'sim_partner' %}onclick="return confirm({{ _('Save? Real automatic answers use this system prompt from now on.')|tojson|forceescape }})"{% endif %}>{{ _("Save") }}</button>
+          {% if k != 'sim_partner' %}<button class="btn btn-sm" formaction="/simulator-prompts/{{ k }}/propose" title="{{ _('Try the edited text on the scenarios first, without changing the real answers') }}">{{ ui.icon('play', 13) }}{{ _("Test first") }}</button>{% endif %}
+          {% if system_prompts.custom(k) %}<button class="btn btn-ghost btn-sm" formaction="/simulator-prompts/{{ k }}/reset"
+                  onclick="return confirm({{ _('Reset this system prompt to the default? Your version is lost.')|tojson|forceescape }})">{{ ui.icon('undo', 13) }}{{ _("Reset to default") }}</button>{% endif %}
+        </div>
+        <div class="flex flex-col gap-1.5 border-t border-base-300 pt-2.5">
+          <input name="focus" class="input input-sm w-full" placeholder="{{ _('Review focus (optional), e.g. shorter answers, shipping questions') }}">
+          <div class="flex items-center gap-1.5">
+          <select name="model" class="select select-sm min-w-0 flex-1" aria-label="{{ _('Model for the review') }}">
+            <option value="" selected>{{ _("As in the settings ({model})", model=model_label(default_model('chat'))) }}</option>
+            {% for mid, name in model_choices %}<option value="{{ mid }}">{{ name }}</option>{% endfor %}</select>
+          <button class="btn btn-sm shrink-0" formaction="/simulator-prompts/{{ k }}/review" {% if ('simreview:' ~ k) in reviewing %}disabled{% endif %}
+                  title="{{ _('Claude reviews the saved prompt with your ratings and failed scenarios and proposes an improved version') }}">{{ ui.icon('sparkle', 13) }}{{ _("Claude review") }}</button>
+          </div>
+        </div>
+      </form>
+      {% endfor %}
+    </div>
+  </details>
+
+  {# proposals: one open per role and target #}
   <div id="sim-proposals" class="flex flex-col gap-2 px-5 empty:hidden">
     {% for p in proposals %}
     <div class="rounded-[10px] border border-primary/30 bg-brand-soft px-3.5 py-3 text-[13px]" data-proposal="{{ p.id }}">
-      <div class="mb-1 flex items-center gap-1.5 font-semibold text-primary">{{ ui.icon('sparkle', 14) }}{{ _("Proposed rule change") }} · {{ _("Selling") if p.role == 'seller' else _("Buying") }}</div>
-      <p class="mb-1.5">{{ p.summary }}</p>
+      <div class="mb-1 flex items-center gap-1.5 font-semibold text-primary">{{ ui.icon('sparkle', 14) }}{{ _("Proposed change") }}{% if p.target != 'sim_partner_system' %} · {{ _("Selling") if p.role == 'seller' else _("Buying") }}{% endif %}</div>
+      <p class="mb-1.5 whitespace-pre-line">{{ p.summary }}</p>
       <div class="mb-1.5 text-[12px] text-muted">{{ _(targets[p.target]) }}</div>
       <details class="mb-2">
         <summary class="cursor-pointer text-[12.5px] text-primary">{{ _("Show changes") }}</summary>
@@ -46,7 +90,7 @@
         <details><summary class="cursor-pointer text-[12.5px] text-muted">{{ _("Edit before applying") }}</summary>
           <textarea name="text" rows="6" class="textarea mt-1.5 w-full bg-base-100 text-[12.5px]">{{ p.new_text }}</textarea></details>
         <div class="flex flex-wrap gap-1.5">
-          <button class="btn btn-sm" formaction="/simulator-proposal/{{ p.id }}/try">{{ ui.icon('play', 13) }}{{ _("Test with scenarios") }}</button>
+          {% if p.target != 'sim_partner_system' %}<button class="btn btn-sm" formaction="/simulator-proposal/{{ p.id }}/try">{{ ui.icon('play', 13) }}{{ _("Test with scenarios") }}</button>{% endif %}
           <button class="btn btn-primary btn-sm" formaction="/simulator-proposal/{{ p.id }}/apply" onclick="return confirm({{ _('Apply this change to the real rules?')|tojson|forceescape }})">{{ ui.icon('check', 13) }}{{ _("Apply") }}</button>
           <button class="btn btn-ghost btn-sm" formaction="/simulator-proposal/{{ p.id }}/discard">{{ _("Discard") }}</button>
         </div>
