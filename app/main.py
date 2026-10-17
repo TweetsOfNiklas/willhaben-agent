@@ -772,6 +772,8 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
         _keep_condition(platform.id, ad_id, d, h)
     if h is not None and not reduced and error is None:     # the ad page just loaded: its status for the hit cards
         search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d))
+        with session() as db:
+            h = db.get(Hit, h.id) or h                       # the pane shows the status just loaded
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,

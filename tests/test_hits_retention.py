@@ -139,3 +139,28 @@ def test_browser_notifications_page_and_poll():
         log_event("hit", "Agent: 20 €", "https://example.invalid/ad/1")
         events = c.get(f"/jobs?since={cursor}").json()["events"]
         assert [e["kind"] for e in events] == ["hit"]
+
+
+def test_the_ad_viewer_shows_the_status_it_just_loaded():
+    from app import platforms
+    from app.main import app
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    fake = FakePlatform()
+    platforms.set_platform("fake", fake)
+    try:
+        a, _ = _agents()
+        with session() as db:
+            h = Hit(agent_id=a, platform="fake", ad_id="8", heading="Ad 8", url="https://fake.example/ad/8", state="seen")
+            db.add(h)
+            db.commit()
+            hid = h.id
+        d = detail_of(listing("8", "Ad 8", 10.0))
+        d.status = "sold"
+        fake.details = {"8": d}
+        with TestClient(app) as c:
+            pane = c.get(f"/hits/ad/fake/8?hit={hid}").text
+        assert 'data-hit-status="%d"' % hid in pane and "sold" in pane and "checked" in pane
+        assert 'hx-target="closest [data-hit-status]"' in pane
+    finally:
+        platforms.reset()
