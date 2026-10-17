@@ -137,3 +137,52 @@ def test_willhaben_lists_say_paylivery_ships():
     next(a for a in first["attributes"]["attribute"] if a["name"] == "p2penabled")["values"] = ["true"]
     ads = parse_search(data).ads
     assert ads[0].shipping == "ship" and ads[1].shipping is None
+
+
+def test_claudes_unclear_shipping_flag_is_dropped():
+    from app.services.product_search import red_flags
+
+    flags = ["Versand möglich, Kosten unklar", "nur Versand", "Preis unrealistisch niedrig", "Versandkosten unbekannt"]
+    assert red_flags(flags) == ["nur Versand", "Preis unrealistisch niedrig"]
+
+
+async def test_the_best_offers_get_their_shipping_before_the_photo_check():
+    from app import platforms
+    from app.services.product_search import fill_shipping
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    fake = FakePlatform()
+    d = detail_of(listing("1", "Lautsprecher", 25.0))
+    d.shipping_price, d.shipping_options = 3.49, [{"name": "Post", "home": 5.7, "point": 3.49}]
+    fake.details = {"1": d}
+    platforms.set_platform("fake", fake)
+    try:
+        rs = [{"platform": "fake", "ad_id": "1", "shipping": "ship"}, {"platform": "fake", "ad_id": "2"},
+              {"platform": "fake", "ad_id": "3", "shipping": "ship", "shipping_price": 4.0}]
+        await fill_shipping(rs)
+    finally:
+        platforms.reset()
+    assert rs[0]["shipping_price"] == 3.49 and rs[0]["shipping_options"][0]["home"] == 5.7
+    assert fake.detail_calls == ["1"]                     # the list said nothing / the price was known: no request
+
+
+def test_the_ad_viewer_breaks_the_price_down():
+    from fastapi.testclient import TestClient
+
+    from app import platforms
+    from app.main import app
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    fake = FakePlatform()
+    d = detail_of(listing("1", "Lautsprecher", 25.0))
+    d.shipping_price, d.shipping_options, d.paylivery_enabled = 3.49, [{"name": "Post", "home": 5.7, "point": 3.49}], True
+    fake.details = {"1": d}
+    platforms.set_platform("fake", fake)
+    try:
+        with TestClient(app) as c:
+            frag = c.get("/hits/ad/fake/1").text
+    finally:
+        platforms.reset()
+    box = frag.split("data-price-breakdown")[1].split("</div>")[0]
+    assert "Shipping Post to a pickup point" in box and "€ 3,49" in box and "€ 5,70" in box
+    assert "Total from" in box and "€ 28,49" in box and "buyer protection" in box

@@ -112,7 +112,8 @@ class AdDetail:
     category_id: str | None = None     # leaf category (same id space as Listing.category_ids)
     paylivery_enabled: bool = False    # the ad offers willhaben PayLivery (attribute payliveryEnabled)
     buy_now: bool = False              # "Sofort kaufen" (p2ppOptions.buyNowInformationDto.isBuyNowAd)
-    shipping_price: float | None = None  # cheapest PayLivery delivery price for the buyer (p2ppOptions.deliveryOptions[].price)
+    shipping_price: float | None = None  # cheapest PayLivery delivery price for the buyer (pickup point or door)
+    shipping_options: list[dict[str, Any]] | None = None   # willhaben: [{name, home, point}] (parse.shipping_options)
     place: str | None = None           # pickup place for a map search: "postcode municipality, country" (advertAddressDetails)
     is_vb: bool | None = None          # kleinanzeigen: price is negotiable ("VB")
     platform: str = DEFAULT_PLATFORM

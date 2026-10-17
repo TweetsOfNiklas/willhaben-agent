@@ -609,6 +609,35 @@ def _rank_line(nr: int, c: dict[str, Any]) -> dict[str, Any]:
             "scam": [f["label"] for f in scam.warnings(c["scam_flags"])]}
 
 
+_SHIP_UNKNOWN = re.compile(r"versand\w*\W.*(unklar|unbekannt|nicht angegeben)|(unklar|unbekannt)\w*\W.*versand", re.I)
+
+
+async def fill_shipping(results: list[dict[str, Any]]) -> None:
+    """The best offers that ship but whose list named no price (willhaben, Vinted): their ad page, one request each
+    through the site's limiter, so the photo check and the cards know the shipping (in place; failures stay open)."""
+    for r in results:
+        if r.get("shipping_price") is not None or r.get("shipping") != shipping_info.SHIP:
+            continue                        # price known, pickup only, or the list says nothing: no request
+        try:
+            p = platforms.get(r.get("platform") or "willhaben")
+            if not p.can("detail"):
+                continue
+            d = await p.detail(str(r["ad_id"]), url=r.get("url"))
+        except Exception as e:  # noqa: BLE001 - the card loads it later (ship_lazy) or shows none
+            log.info("shipping of %s %s not loaded: %s", r.get("platform"), r.get("ad_id"), e)
+            continue
+        if d is not None and (d.shipping_price is not None or d.shipping):
+            r["shipping_price"], r["shipping"] = d.shipping_price, d.shipping or r.get("shipping")
+            if getattr(d, "shipping_options", None):
+                r["shipping_options"] = d.shipping_options
+
+
+def red_flags(flags: Any) -> list[str]:
+    """Claude's concerns about an offer, without "shipping costs unclear": the app loads them itself (also for
+    results stored before the prompt said so)."""
+    return [f for f in flags or [] if isinstance(f, str) and not _SHIP_UNKNOWN.search(f)]
+
+
 def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int = TOP_N) -> list[dict[str, Any]]:
     """Claude's picks joined with the app's cards (unknown or repeated nr ignored), best fit first."""
     out, used = [], set()
@@ -622,7 +651,7 @@ def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int 
         fit = r.get("fit")
         fit = max(0, min(100, int(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else None
         out.append({**cards[nr - 1], "fit": fit, "reason": str(r.get("reason") or "").strip()[:500],
-                    "red_flags": _texts(r.get("red_flags"), limit=5, chars=80)})
+                    "red_flags": red_flags(_texts(r.get("red_flags"), limit=5, chars=80))})
     out.sort(key=lambda c: -(c["fit"] if c["fit"] is not None else -1))
     return out[:top_n]
 
@@ -913,6 +942,7 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
             msg = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
             warning = f"{warning} {msg}" if warning else msg
         else:
+            await fill_shipping(results)        # before the photo check: Claude then knows what shipping costs
             if results and settings.get("photos"):
                 _update(search_id, status="photos")
                 results, msg = await check_photos(description, plan, results, answers=pairs)
@@ -973,6 +1003,7 @@ async def _more(search_id: int) -> None:
             more, unseen = unranked(batch), batch       # Claude never ranked them: those not shown keep their turn
             warning = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
         else:
+            await fill_shipping(more)
             if more and settings.get("photos"):
                 more, warning = await check_photos(row.description, plan, more, answers=pairs)
         await geo.locate(more)

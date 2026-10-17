@@ -685,7 +685,7 @@ die besten Angebote für ihren Bedarf aus.
   Gebrauchtpreis, Zustand, Ort). 90+ = genau das Gesuchte zu gutem Preis.
 - reason: 1 bis 2 Sätze auf Deutsch (max. 300 Zeichen): warum diese Anzeige und was sie zum guten Angebot macht.
 - red_flags: kurze deutsche Stichworte zu Bedenken (z. B. "Preis unrealistisch niedrig", "nur Versand",
-  "Zustand unklar", "Händler"), sonst leer.
+  "Zustand unklar", "Händler"), sonst leer. Fehlende Versandkosten sind kein Bedenken: die App lädt sie selbst.
 - note: ein kurzer deutscher Satz zum Gesamtbild (z. B. "Unter 300 € gibt es kaum gute Angebote") oder "".
 - Die Preis-Einordnung (billig … teuer) vergleicht jede Anzeige mit den anderen Ergebnissen derselben Suche; sie
   ist ein Hinweis, kein Urteil. Nutze auch dein Wissen über Neu- und Gebrauchtpreise.

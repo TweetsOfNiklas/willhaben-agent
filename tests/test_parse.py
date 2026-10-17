@@ -160,10 +160,12 @@ def test_shipping_price_none_without_p2pp_options():
 
 
 def test_shipping_price_of_a_live_paylivery_ad():
-    """Recorded on 2026-10-10 from a real PayLivery ad (Post, parcel size M): the buyer's delivery price is 7.90."""
+    """Recorded on 2026-10-10 from a real PayLivery ad (Post, parcel size M): 7.90 to the door, 6.90 to a pickup
+    point (depositoryPrice): the cheaper one is "Versand ab", both are options."""
     from app.willhaben.parse import parse_detail
     from tests.conftest import load
 
     nd = load("detail_922008415_nextdata.json")
     d = parse_detail(nd["props"]["pageProps"])
-    assert d.paylivery_enabled and d.buy_now and d.shipping_price == 7.9 and d.price == 100.0
+    assert d.paylivery_enabled and d.buy_now and d.shipping_price == 6.9 and d.price == 100.0
+    assert d.shipping_options == [{"name": "Post", "home": 7.9, "point": 6.9}]

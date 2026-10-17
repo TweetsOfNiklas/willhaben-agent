@@ -92,5 +92,5 @@ def prompt_line(price: float | None, kind: str | None) -> str:
     if price is not None:
         return "Versand: kostenlos" if price <= 0 else f"Versand: {price:g} € (Gesamtpreis mit Versand höher)"
     if kind == SHIP:
-        return "Versand: möglich, Kosten nicht angegeben"
+        return "Versand: möglich (die Kosten lädt die App selbst, kein Bedenken)"
     return "Versand: nicht angegeben"
