@@ -149,7 +149,7 @@ async def test_a_hit_beyond_the_screening_limit_gets_no_push(responses, ha, imag
     await run_agent(agent.id)
     assert len(fake.calls) == 1 and len(_pushes(ha)) == 1          # before: the other one was pushed unjudged
     unjudged = next(h for h in (_hit("999000111"), _hit("999000112")) if h.screen_relevant is None)
-    assert unjudged.state == "filtered"
+    assert unjudged.state == "pending"                              # the next check judges it first
     assert len([b for p, b in ha if p == "/api/events/willhaben_hit"]) == 2      # HA still sees both
 
 
@@ -163,7 +163,7 @@ async def test_a_failed_call_ends_the_round_its_hits_fail_open(responses, ha, im
     monkeypatch.setattr(screening, "get_backend", lambda *a: fake)
     await run_agent(agent.id)
     assert len(fake.calls) == 1 and len(_pushes(ha)) == 1
-    assert sorted([_hit("999000111").state, _hit("999000112").state]) == ["filtered", "new"]
+    assert sorted([_hit("999000111").state, _hit("999000112").state]) == ["new", "pending"]
 
 
 def test_refile_screened_moves_held_back_new_hits_once(client):  # noqa: F811

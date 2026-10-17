@@ -172,7 +172,7 @@ async def test_a_held_back_hit_returns_only_screened(fake, world, monkeypatch):
 async def test_a_held_back_hit_claude_was_not_sent_stays_filtered(fake, world, monkeypatch):
     """Claude sees MAX_PER_RUN hits per check, held-back hits first: one that did not fit stays filtered and gets no
     push, though its drop is under the line now (it has no verdict, and Claude was not asked); a new hit that did not
-    fit goes to filtered too instead of being pushed unjudged."""
+    fit stays pending (the next check judges it) instead of being pushed unjudged."""
     lookups, sent = world
     screened = []
 
@@ -195,7 +195,7 @@ async def test_a_held_back_hit_claude_was_not_sent_stays_filtered(fake, world, m
                    listing("3", "Handyhülle", 10.0)]]
     await run_agent(a.id)                                                     # both under the line now
     assert screened == ["1"]                                                  # before the new hit
-    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "filtered"}
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "pending"}
     assert {(m["kind"], m["ad"]): m["push"] for m in sent} == {("price_drop", "1"): True, ("price_drop", "2"): False,
                                                                ("hit", "3"): False}
 
@@ -345,12 +345,22 @@ def test_the_drawer_saves_a_price_zone(fake):
             assert (row.geizhals_level, row.geizhals_pct) == (None, None)
 
 
-async def test_a_new_hit_waits_out_of_new_until_judged(fake, world, monkeypatch):
-    """New never shows a hit the rule or Claude then takes away: it waits in "filtered" while it is judged."""
-    states = []
+async def test_a_new_hit_is_pending_until_it_passed(fake, world, monkeypatch):
+    """New shows only hits that passed the rule and the screening: meanwhile they are pending (their own tab); one
+    Claude was not sent stays pending and is judged first in the next check."""
+    states, sent_to_claude = [], []
 
     async def screen_all(agent_id, hits):
         states.extend(h.state for h in _hits(agent_id).values())      # what the hits page shows meanwhile
+        hits = hits[:1]                                               # MAX_PER_RUN: one
+        sent_to_claude.append([h.ad_id for h in hits])
+        with session() as db:
+            for h in hits:
+                row = db.get(Hit, h.id)
+                row.screen_relevant, row.screen_deal = True, "great"
+                h.screen_relevant, h.screen_deal = True, "great"
+                db.add(row)
+            db.commit()
         return {h.id for h in hits}
 
     monkeypatch.setattr(screening, "screen_all", screen_all)
@@ -358,9 +368,20 @@ async def test_a_new_hit_waits_out_of_new_until_judged(fake, world, monkeypatch)
     fake.pages = [[]]
     await run_agent(a.id)
     _set(a.id, geizhals_level="bargain", screen=True)
-    fake.pages = [[listing("1", "iPhone 13 128GB", 100.0), listing("2", "iPhone 13 128GB", 400.0)]]
+    fake.pages = [[listing("1", "iPhone 13 128GB", 100.0), listing("2", "iPhone 13 128GB", 400.0),
+                   listing("3", "iPhone 13 128GB", 110.0)]]
     await run_agent(a.id)
-    assert states == ["filtered", "filtered"]
-    hits = _hits(a.id)
-    assert hits["2"].state == "filtered"                              # 80 % of new: not a bargain
-    assert hits["1"].state in ("new", "filtered")                     # Claude's verdict decides (mocked: none)
+    assert states == ["pending"] * 3
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "pending"}
+    from fastapi.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as c:
+        assert "Being checked" in c.get("/hits").text
+    fake.pages = [[listing("1", "iPhone 13 128GB", 100.0), listing("2", "iPhone 13 128GB", 400.0),
+                   listing("3", "iPhone 13 128GB", 110.0), listing("4", "iPhone 13 128GB", 90.0)]]
+    await run_agent(a.id)
+    assert sent_to_claude[-1] == ["3"]                                # the one left over first
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "new", "4": "pending"}
+    _set(a.id, geizhals_level=None, screen=False)                     # switched off: what waits is simply new
+    await run_agent(a.id)
+    assert _hits(a.id)["4"].state == "new"

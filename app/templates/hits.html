@@ -4,7 +4,8 @@
 <div class="mb-4 flex items-start justify-between gap-3 sm:mb-5 sm:gap-6">
   <div class="min-w-0">
     <h1>{{ _("Hits") }}{% if agent_id and agents.get(agent_id) %} <span class="text-base font-normal text-muted">· {{ agents[agent_id].name }}</span>{% endif %}</h1>
-    {% if state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening or the agent's Geizhals rule held back: no push, kept here in case you want a look.") }}</p>
+    {% if state == 'pending' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("New hits the Geizhals rule and Claude's screening are still checking. Those that pass move to New with a push, the others to Filtered out.") }}</p>
+    {% elif state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening or the agent's Geizhals rule held back: no push, kept here in case you want a look.") }}</p>
     {% else %}<p class="mt-1 max-w-[640px] text-muted max-sm:hidden">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.") }}</p>{% endif %}
   </div>
   {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" onsubmit="return confirm({{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?'))|tojson|forceescape }})"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
@@ -12,7 +13,8 @@
 </div>
 <form method="get" action="/hits" class="mb-3.5 flex flex-wrap items-center gap-2.5">
   {% set seg_items = [] %}
-  {% for s, label in [('new', _('New')), ('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
+  {% set tabs = [('new', _('New'))] + ([('pending', _('Being checked'))] if state == 'pending' or state_counts.get('pending') else []) + [('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
+  {% for s, label in tabs %}
     {% set added = seg_items.append(('/hits?state=' ~ s ~ ('&agent_id=' ~ agent_id if agent_id else ''), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
   {% endfor %}
   {{ ui.seg(seg_items, 'max-sm:w-full') }}
@@ -41,7 +43,7 @@
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
-  <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered') else '' }}" id="hit-{{ h.id }}">
+  <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') else '' }}" id="hit-{{ h.id }}">
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block">
       {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
       {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-2 block max-w-[calc(100%-16px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
