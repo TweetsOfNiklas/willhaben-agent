@@ -718,6 +718,7 @@ def _geizhals_cents(hit: Hit) -> tuple[int, int] | None:
 
 
 LEVELS = ("bargain", "cheap", "fair")     # the zones an agent's Geizhals rule can ask for (price_zones.NAMES order)
+LEVEL_DEAL = {"bargain": "great", "cheap": "good", "fair": "fair"}   # the same in Claude's price verdict (screening)
 
 
 def level_choices() -> list[tuple[str, str]]:
@@ -740,12 +741,16 @@ def geizhals_rule(agent: SearchAgent) -> bool:
 
 def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
     """The agent's Geizhals rule: the price is at least `geizhals_pct` % below the Geizhals new price, or its price zone
-    (Settings → Prices → Price rating, used or new by the item's condition) is `geizhals_level` or cheaper. Without the
-    rule, a known product (not found, Geizhals unreachable), a price or, for a zone, with a defective item there is
-    nothing to compare: the hit passes."""
+    (Settings → Prices → Price rating, used or new by the item's condition) is `geizhals_level` or cheaper. Without a
+    Geizhals price (not found, Geizhals unreachable) a zone takes Claude's price verdict (LEVEL_DEAL) when the
+    screening gave one. Without the rule, any price to compare or, for a zone, with a defective item: it passes."""
     cents = _geizhals_cents(hit)
-    if not geizhals_rule(agent) or cents is None:
+    if not geizhals_rule(agent):
         return True
+    if cents is None:            # no Geizhals price: a price zone asks Claude's price verdict instead, if there is one
+        need = LEVEL_DEAL.get(agent.geizhals_level or "")
+        return need is None or hit.screen_deal in (None, "unknown") or \
+            screening.DEAL_RANK.get(hit.screen_deal, 1) >= screening.DEAL_RANK[need]
     if agent.geizhals_level in LEVELS:
         from app.services import deals, price_zones
 

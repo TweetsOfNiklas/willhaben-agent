@@ -243,3 +243,21 @@ async def test_agent_run_checks_before_the_rule(monkeypatch):
         assert len(fake.calls) == 2                                          # switched off: no check
     finally:
         platforms.reset()
+
+
+async def test_a_product_geizhals_lists_without_a_price_is_a_final_answer(agent, monkeypatch):
+    """The UniFi Dream Router, no longer sold: Claude picks its entry without a price; not asked again every check."""
+    h = _hit(agent, 1, "Ubiquiti UniFi UDR Wifi 6 Router", {})
+    old = GHit(name="Ubiquiti UniFi Dream Router, UniFi Cloud Gateway", url="https://geizhals.at/udr-a1.html", price=None)
+
+    async def candidates(queries):
+        return [GHit(name="Ubiquiti UniFi Dream Router 7", url="https://geizhals.at/udr7-a2.html", price=292.9), old]
+
+    monkeypatch.setattr(geizhals_check, "_candidates", candidates)
+    fake = Script({"results": [{"nr": 1, "ok": False, "product": "Ubiquiti UniFi Dream Router (UDR)",
+                                "queries": ["Ubiquiti UniFi Dream Router UDR"]}]},
+                  {"results": [{"nr": 1, "pick": 2}]})
+    monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: fake)
+    assert await geizhals_check.check(agent, [h]) == 1
+    assert _stored(h) == {"name": old.name, "url": old.url, "by": "claude", "checked": True}
+    assert geizhals_check.backlog(agent, set()) == []                  # final: not asked again

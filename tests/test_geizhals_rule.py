@@ -385,3 +385,18 @@ async def test_a_new_hit_is_pending_until_it_passed(fake, world, monkeypatch):
     _set(a.id, geizhals_level=None, screen=False)                     # switched off: what waits is simply new
     await run_agent(a.id)
     assert _hits(a.id)["4"].state == "new"
+
+
+def test_without_a_geizhals_price_the_zone_asks_claudes_verdict():
+    a = SearchAgent(name="x", source_url="x", webapi_url="x", geizhals_level="bargain")
+    h = Hit(agent_id=1, ad_id="1", heading="UniFi Dream Router", url="x", price=200.0, geizhals={})
+    assert geizhals_passes(a, h)                                         # not screened yet: nothing to compare
+    for deal, ok in (("overpriced", False), ("fair", False), ("good", False), ("great", True), ("unknown", True)):
+        h.screen_deal = deal
+        assert geizhals_passes(a, h) is ok, deal
+    a.geizhals_level = "cheap"
+    h.screen_deal = "good"
+    assert geizhals_passes(a, h)
+    a.geizhals_level, a.geizhals_pct = None, 30                         # an own % keeps passing unknown products
+    h.screen_deal = "overpriced"
+    assert geizhals_passes(a, h)

@@ -33,9 +33,9 @@
  "new": "neu",
  "Changes apply when you save.": "Änderungen gelten erst nach dem Speichern.",
  "Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.": "Jeder Suchbegriff läuft auf jeder angehakten Seite. Neue Suchen starten leise: was sie bei der ersten Prüfung finden, gilt als gesehen.",
- "Only show and push ads in this price range, measured against the lowest new price on Geizhals. Dearer ones go to “Filtered” without a push; ads Geizhals does not know are pushed as usual.": "Nur Anzeigen in dieser Preisklasse anzeigen und pushen, gemessen am niedrigsten Neupreis auf Geizhals. Teurere kommen ohne Push zu „Aussortiert“; Anzeigen, die Geizhals nicht kennt, werden wie gewohnt gepusht.",
  "Price range": "Preisklasse",
  "Own percentage": "Eigener Prozentsatz",
  "{level} (used below {used} %, new below {new} % of the new price)": "{level} (gebraucht unter {used} %, neu unter {new} % des Neupreises)",
- "Geizhals: {level} or cheaper": "Geizhals: {level} oder billiger"
+ "Geizhals: {level} or cheaper": "Geizhals: {level} oder billiger",
+ "Only show and push ads in this price range, measured against the lowest new price on Geizhals. Dearer ones go to “Filtered” without a push. For ads Geizhals does not know, Claude's price verdict counts (with the screening on); without one they are pushed as usual.": "Nur Anzeigen in dieser Preisklasse anzeigen und pushen, gemessen am niedrigsten Neupreis auf Geizhals. Teurere kommen ohne Push zu „Aussortiert“. Bei Anzeigen, die Geizhals nicht kennt, zählt Claudes Preisurteil (mit eingeschalteter Prüfung); ohne eines werden sie wie gewohnt gepusht."
 }

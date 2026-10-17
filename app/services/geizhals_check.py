@@ -7,8 +7,9 @@ searches, the app runs them (the first that finds something counts, at most MAX_
 picks the product. Two Claude calls per check however many hits (model purpose "screen").
 
 The result is stored on the hit, "checked": True only for a final answer: the product (with "by": "claude" when
-Claude chose it), or {"checked": True} = no fitting product (no price: the rule lets the hit through, as for an
-unknown product). A check that could not finish (Geizhals blocked, the search cap, nothing found, Claude failing)
+Claude chose it; without "price_from" when Geizhals lists it without a price, e.g. no longer sold), or
+{"checked": True} = no fitting product. Without a price the rule has nothing to compare: an own % lets the hit
+through, a price zone takes Claude's price verdict (search_agents.geizhals_passes). A check that could not finish (Geizhals blocked, the search cap, nothing found, Claude failing)
 leaves the hit unchecked – {} when Claude called the automatic product wrong, so its price is not used – and a later
 check asks again: each check also takes up to MAX_BACKLOG unchecked hits of the agent that are still listed (only
 their product is updated: no push, no new filing). That also corrects products found before the switch was on.
@@ -212,9 +213,10 @@ async def check(agent: SearchAgent, hits: list[Hit], with_backlog: bool = True) 
             pick = picks.get(nr)
             if not isinstance(pick, int):
                 continue                                # no answer: unchecked
-            if 1 <= pick <= len(cands) and cands[pick - 1].price:
-                c = cands[pick - 1]
-                result[nr] = {"name": c.name, "url": c.url, "price_from": c.price, "by": "claude", "checked": True}
+            if 1 <= pick <= len(cands):
+                c = cands[pick - 1]     # without a price (no longer sold): final too, nothing to compare
+                result[nr] = {"name": c.name, "url": c.url, **({"price_from": c.price} if c.price else {}),
+                              "by": "claude", "checked": True}
             elif pick == 0:
                 result[nr] = {"checked": True}          # Claude saw the results: none is this product
     with session() as db:
