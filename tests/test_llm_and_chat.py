@@ -372,4 +372,4 @@ def test_style_examples_put_the_profiles_examples_first():
     assert ex[:2] == ["eigene nachricht nummer 2", "passt so"] and len(ex) == 8 and len(set(ex)) == 8
     assert ex[2] == "eigene nachricht nummer 9" and "eigene nachricht nummer 2" not in ex[2:]
     set_setting("reply_style_meta", "not json")
-    assert style.meta() == {} and style.panel() == {"profile": "- kurz und per Du", "meta": {}}
+    assert style.meta() == {} and style.panel()["profile"] == "- kurz und per Du" and style.panel()["meta"] == {}

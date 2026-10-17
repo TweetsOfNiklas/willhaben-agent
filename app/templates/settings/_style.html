@@ -1,1 +1,26 @@
-{# Settings → Selling → My rules → Writing style (app/services/style.py, app/style_routes.py): the profile textarea (saved by the rules form), when it was derived, the derive button. #}
+{# Settings → Selling → My rules → Writing style (app/services/style.py, app/style_routes.py): the profile textarea (saved by the rules form #general via form="general"), when it was derived, the derive button. While the derivation runs the card carries data-pending-key="style" (base.html refreshes it when the job ends). sp = style_panel(): {profile, meta, at, count, min, enough, running}. #}
+{% import "_ui.html" as ui %}
+{% set sp = style_panel() %}
+<section id="style-card"{% if sp.running %} data-pending-key="style"{% endif %} class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="flex min-w-0 flex-1 basis-[260px] flex-col gap-0.5">
+      <span class="font-medium">{{ _("Writing style") }}</span>
+      <small class="text-[12.5px] text-muted">{{ _("How you write, derived from your own willhaben messages. Claude follows it in every reply draft, on top of the examples it always gets. You can edit it.") }}</small>
+    </div>
+    <form method="post" action="/settings/style/derive" hx-post="/settings/style/derive" hx-target="#style-card" hx-swap="outerHTML" hx-disabled-elt="find button" class="m-0 max-sm:w-full">
+      <button class="btn btn-sm max-sm:w-full"{% if sp.running or not sp.enough %} disabled{% endif %}>
+        {%- if sp.running %}<span class="loading loading-spinner loading-xs"></span>{{ _("Deriving…") }}{% else %}{{ _("Derive from my messages") }}{% endif -%}
+      </button>
+    </form>
+  </div>
+  {% if sp.running %}
+  <div role="status">{{ ui.pending('style', _("Claude is reading your messages…"), _("queued")) }}</div>
+  {% endif %}
+  <small class="text-[12.5px] text-muted">
+    {%- if not sp.enough %}{{ _("Only {n} of your own messages so far – at least {min} are needed", n=sp.count, min=sp.min) }}
+    {%- elif sp.at %}{{ _("Derived {time} from {n} messages", time=sp.at|local, n=sp.meta.count) }}
+    {%- else %}{{ _("Not derived yet") }}{% endif %}
+    {%- if sp.meta.note %} · <span class="break-words">{{ sp.meta.note }}</span>{% endif %}</small>
+  <textarea name="reply_style" form="general" rows="8" aria-label="{{ _('Writing style') }}" placeholder="{{ _('One line per point, e.g. - short, per Du, no greeting') }}" class="textarea w-full min-w-0 bg-base-200">{{ sp.profile }}</textarea>
+  <div><button type="submit" form="general" formaction="/settings" class="btn btn-primary">{{ _("Save") }}</button></div>
+</section>
