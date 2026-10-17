@@ -697,7 +697,14 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
         async def get_detail(self, ad_id):
             if ad_id == "2":
                 raise public.WillhabenError("HTTP 500")
-            return None if ad_id == "3" else type("D", (), {"description": "Erste Zeile\nZweite <Zeile>"})()
+            if ad_id == "3":
+                return None
+            from app.platforms.types import AdDetail
+            return AdDetail(ad_id=ad_id, heading="Kamera", description="Erste Zeile\nZweite <Zeile>", price=40.0,
+                            price_display="€ 40", status="active", published_at=None, first_published_at=None,
+                            end_date=None, url="u", images=["https://img.example/1.jpg", "https://img.example/2.jpg"],
+                            location="1040 Wien", paylivery_enabled=True,
+                            shipping_options=[{"name": "Post", "home": 5.7, "point": 3.49}])
 
         async def aclose(self):
             pass
@@ -712,6 +719,9 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
         assert 'hx-get="/myads/1/description"' in c.get("/myads?ad=1").text
         frag = c.get("/myads/1/description").text
         assert "Erste Zeile\nZweite &lt;Zeile&gt;" in frag and 'href="/myads/1/edit"' in frag
+        assert frag.count('<img src="https://img.example/') == 2 and "€ 40" in frag and "1040 Wien" in frag
+        assert "PayLivery Post" in frag and "€ 3,49" in frag and "€ 5,70" in frag
+        assert 'hx-get="/hits/ad/1/deal"' in frag                                # the price check with Geizhals
         assert "HTTP 500" in c.get("/myads/2/description").text
         assert "shows no text" in c.get("/myads/3/description").text
         assert c.get("/myads/9/description").status_code == 404

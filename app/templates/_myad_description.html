@@ -1,6 +1,27 @@
-{# My ads → panel: the ad's text as willhaben shows it (GET /myads/<id>/description, swapped into #myad-description) #}
+{# My ads → panel: the ad as buyers see it on willhaben (GET /myads/<id>/description, swapped into #myad-description):
+   price and condition, every photo, pickup and delivery options, the text, then the price check with its Geizhals
+   rating (the ad viewer's price section, loaded after this). d: the public ad page (anonymous, cached briefly). #}
 {% import "_ui.html" as ui %}
-<div class="flex items-center justify-between gap-2">{{ ui.eyebrow(_("Description")) }}<a class="link link-primary text-[12.5px] no-underline" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a></div>
+<div class="flex items-center justify-between gap-2">{{ ui.eyebrow(_("As buyers see it")) }}<a class="link link-primary text-[12.5px] no-underline" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a></div>
 {% if error %}<p class="m-0 text-[13px] text-error">{{ error }}</p>
-{% elif text %}<p class="m-0 whitespace-pre-line text-[13.5px] leading-relaxed">{{ text }}</p>
-{% else %}<p class="m-0 text-[13px] text-muted">{{ _("willhaben shows no text for this ad (offline or under review).") }}</p>{% endif %}
+{% elif not d %}<p class="m-0 text-[13px] text-muted">{{ _("willhaben shows no text for this ad (offline or under review).") }}</p>
+{% else %}
+<div class="flex flex-wrap items-baseline gap-2.5" data-myad-price><span class="text-xl font-bold">{{ d.price_display or (d.price|eur) }}</span>{{ ui.condition_pill(d.item_condition, d.item_condition_label, d.platform, 'self-center') }}{% if d.category_path %}<span class="text-[12.5px] text-muted">{{ d.category_path|join(' › ') }}</span>{% endif %}</div>
+{% if d.images %}
+<div class="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-1.5" data-myad-photos>
+  {% for src in d.images %}<a href="{{ src }}" target="_blank" rel="noopener" class="block overflow-hidden rounded-md border border-base-300" title="{{ _('Photo {n} of {total}', n=loop.index, total=d.images|length) }}"><img src="{{ src }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="aspect-square w-full object-cover"></a>{% endfor %}
+</div>
+<small class="text-[12px] text-muted">{{ _("{n} photos · the first is the cover", n=d.images|length) }} · <a class="link link-primary no-underline" href="/myads/{{ a.ad_id }}/edit#photos">{{ _("Change photos") }}</a></small>
+{% endif %}
+<div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]" data-myad-delivery>
+  <span class="text-muted">{{ _("Pickup") }}</span><span>{{ d.location or d.place or _("no place given") }}</span>
+  <span class="text-muted">{{ _("Delivery") }}</span>
+  <span>{% if d.shipping_options %}{% for o in d.shipping_options %}<span class="block">PayLivery {{ o.name }}{% if o.point is not none %} · {{ _("pickup point {price}", price=o.point|eur) }}{% endif %}{% if o.home is not none %} · {{ _("to the door {price}", price=o.home|eur) }}{% endif %}</span>{% endfor %}<span class="block text-[12px] text-muted">{{ _("The buyer pays shipping and the buyer protection fee.") }}</span>
+    {% elif d.paylivery_enabled %}PayLivery{% else %}{{ _("pickup only (no PayLivery)") }}{% endif %}</span>
+</div>
+{% if d.description %}<p class="m-0 whitespace-pre-line text-[13.5px] leading-relaxed">{{ d.description }}</p>{% endif %}
+{# the price check of the ad viewer: comparable ads, Geizhals' new price and the rating #}
+<section class="flex flex-col gap-2" hx-get="/hits/ad/{{ a.ad_id }}/deal" hx-trigger="load" hx-swap="outerHTML">
+  <span class="text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Price is being checked …") }}</span>
+</section>
+{% endif %}
