@@ -1173,7 +1173,7 @@ async def simulator_page(request: Request, id: int | None = None, msg: str | Non
                   targets=chat_sim.TARGETS, expectation_label=chat_sim.expectation_label,
                   persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
                   can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
-                  purchase_status=purchase_svc.status_label)
+                  purchase_status=purchase_svc.status_label, sim_templates=chat_sim.templates_for)
 
 
 @app.post("/simulator/new")
@@ -1186,6 +1186,25 @@ async def simulator_new(role: str = Form("seller"), platform: str = Form("willha
     except ValueError as e:
         return back(_sim_url(msg=str(e)))
     return back(_sim_url(sim.id))
+
+
+@app.post("/simulator/template")
+async def simulator_template(role: str = Form("seller"), template: str = Form(""), platform: str = Form("willhaben"),
+                             ad_id: str = Form(""), purchase_id: str = Form("")):
+    """One template, or "all" of the role's: scenarios created and run at once."""
+    keys = [k for k, _l in chat_sim.templates_for(role)] if template == "all" else [template]
+    keys = [k for k in keys if k in chat_sim.TEMPLATES]
+    if not keys:
+        raise HTTPException(404)
+    sim = None
+    try:
+        for k in keys:
+            sim = await chat_sim.create_from_template(k, platform, ad_id=ad_id or None,
+                                                      purchase_id=int(purchase_id) if purchase_id.isdigit() else None)
+    except ValueError as e:
+        return back(_sim_url(msg=str(e)))
+    msg = t("{n} scenarios created – they run now", n=len(keys)) if len(keys) > 1 else None
+    return back(_sim_url(sim.id, msg))
 
 
 def _sim_or_404(sim_id: int):

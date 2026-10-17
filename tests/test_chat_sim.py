@@ -204,3 +204,33 @@ def test_simulator_page(backend):
                    follow_redirects=False)
         page = c.get(r.headers["location"]).text
         assert "Your maximum incl. shipping" in page and "kleinanzeigen.de" in page and "PayLivery</option>" not in page
+
+
+async def test_template_creates_and_runs_a_scenario(backend):
+    sim = await chat_sim.create_from_template("lowball", ad_id="111")
+    assert sim.scenario and sim.persona == "lowball"
+    assert sim.turns[0]["text"].startswith("Hallo, würde dir 10 €")             # half of the ad's 20 €
+    assert {"kind": "floor", "value": 15} in sim.expectations                  # the ad's minimum
+    await _done()
+    s = chat_sim.get(sim.id)
+    assert [x["who"] for x in s.turns] == ["partner", "me", "partner", "me"] and s.last_run is not None
+
+
+async def test_buyer_template_without_purchase_uses_the_sample(backend):
+    sim = await chat_sim.create_from_template("price_fixed")
+    assert sim.setup["title"] == chat_sim.SAMPLE_BUY["title"] and {"kind": "ceiling", "value": 140.0} in sim.expectations
+    await _done()
+    turns = chat_sim.get(sim.id).turns
+    assert turns[0].get("opener") and [x["who"] for x in turns[1:]] == ["partner", "me", "partner", "me"]
+
+
+def test_all_templates_from_the_page(backend):
+    from app.main import app
+
+    with TestClient(app) as c:
+        assert "Quick start: ready scenarios" in c.get("/simulator").text
+        r = c.post("/simulator/template", data={"role": "seller", "template": "all", "ad_id": "111"},
+                   follow_redirects=False)
+        assert r.status_code == 303
+    seller = [k for k, _l in chat_sim.templates_for("seller")]
+    assert len([s for s in chat_sim.all_chats() if s.scenario]) == len(seller)

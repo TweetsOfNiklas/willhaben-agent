@@ -89,6 +89,18 @@
     </select>
     <input name="title" class="input input-sm w-full" placeholder="{{ _('Name (optional)') }}">
     <button class="btn btn-primary btn-sm">{{ ui.icon('plus', 14) }}{{ _("Start") }}</button>
+    {# templates: a ready scenario (the other side's messages and expectations) for the ad or purchase chosen above,
+       a sample article without one; created and run at once #}
+    <div class="mt-1.5 border-t border-base-300 pt-2.5" id="sim-templates">
+      <div class="mb-1 font-semibold">{{ _("Quick start: ready scenarios") }}</div>
+      <p class="mb-2 text-[12px] text-muted">{{ _("For the ad or purchase chosen above (a sample article without one). Created as a scenario and run right away.") }}</p>
+      {% for r in ('seller', 'buyer') %}
+      <div class="flex flex-wrap gap-1.5" x-show="role === '{{ r }}'"{% if r == 'buyer' %} x-cloak{% endif %}>
+        {% for k, label in sim_templates(r) %}<button name="template" value="{{ k }}" formaction="/simulator/template" class="btn btn-xs rounded-full font-normal">{{ _(label) }}</button>{% endfor %}
+        <button name="template" value="all" formaction="/simulator/template" class="btn btn-xs btn-ghost rounded-full text-primary">{{ ui.icon('play', 12) }}{{ _("All of them") }}</button>
+      </div>
+      {% endfor %}
+    </div>
   </form>
 </div>
 

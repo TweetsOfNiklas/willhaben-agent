@@ -138,5 +138,22 @@
   "{n} scenarios are running": "{n} Szenarien laufen",
   "{n} turns simulated": "{n} Nachrichten simuliert",
   "{passed} of {n} scenarios passed": "{passed} von {n} Szenarien bestanden",
-  "„{text}“": "„{text}“"
+  "„{text}“": "„{text}“",
+  "“Still available?”": "„Noch da?“",
+  "Lowball offer": "Viel zu niedriges Angebot",
+  "Fair offer above the minimum": "Faires Angebot über dem Mindestpreis",
+  "Courier scam": "Kurier-Betrug",
+  "Manipulation attempt": "Manipulationsversuch",
+  "Pickup appointment": "Abholtermin",
+  "Shipping question": "Versandfrage",
+  "Asks for the phone number": "Fragt nach der Handynummer",
+  "Already sold": "Schon verkauft",
+  "Price is fixed": "Preis ist fix",
+  "PayPal “friends” payment": "PayPal „Freunde“-Zahlung",
+  "Expensive shipping": "Teurer Versand",
+  "Seller agrees": "Verkäufer:in sagt zu",
+  "Quick start: ready scenarios": "Schnellstart: fertige Szenarien",
+  "For the ad or purchase chosen above (a sample article without one). Created as a scenario and run right away.": "Für das oben gewählte Inserat bzw. den Kauf (ohne Auswahl ein Beispielartikel). Wird als Szenario angelegt und gleich ausgeführt.",
+  "All of them": "Alle",
+  "{n} scenarios created – they run now": "{n} Szenarien angelegt – sie laufen jetzt"
 }
