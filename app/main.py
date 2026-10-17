@@ -2063,8 +2063,10 @@ async def session_check(next: str = Form("/session")):
 
 @app.post("/session/open")
 async def session_open(url: str = Form(...), next: str = Form("/session")):
-    if not url.startswith("https://www.willhaben.at/"):
-        return _session_back(next, t('Only willhaben.at URLs'))
+    from app.willhaben.session import _other_site
+
+    if not (url.startswith("https://www.willhaben.at/") or (url.startswith("https://") and _other_site(url))):
+        return _session_back(next, t('Only willhaben, Kleinanzeigen and Vinted URLs'))
     await get_session().open_url(url)
     return _session_back(next)
 

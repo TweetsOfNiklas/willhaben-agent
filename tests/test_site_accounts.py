@@ -21,6 +21,9 @@ class _Sess:
     async def open_url(self, url):
         self.opened.append(url)
 
+    async def stop(self):
+        pass
+
 
 async def test_check_reads_the_redirect(monkeypatch):
     sess = _Sess("https://www.kleinanzeigen.de/m-nachrichten.html")
@@ -59,3 +62,17 @@ def test_capture_keeps_the_sites_requests():
     assert session_mod._other_site("https://gateway.kleinanzeigen.de/messagebox/api/x")
     assert session_mod._other_site("https://www.vinted.at/api/v2/inbox")
     assert not session_mod._other_site("https://www.example.com/kleinanzeigen.de")
+
+
+def test_the_browser_window_opens_the_sites_message_pages(monkeypatch):
+    from app.main import app
+
+    sess = _Sess("")
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "get_session", lambda: sess)
+    with TestClient(app) as c:
+        for url in ("https://www.kleinanzeigen.de/m-nachrichten.html", "https://www.vinted.at/inbox"):
+            c.post("/session/open", data={"url": url}, follow_redirects=False)
+        r = c.post("/session/open", data={"url": "https://evil.example/"}, follow_redirects=False)
+        assert "msg=Only" in r.headers["location"]
+    assert sess.opened == ["https://www.kleinanzeigen.de/m-nachrichten.html", "https://www.vinted.at/inbox"]
