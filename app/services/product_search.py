@@ -832,6 +832,9 @@ async def run(search_id: int, replan: bool = True) -> None:
             if msg:
                 found["warning"] = f"{found['warning']} {msg}" if found["warning"] else msg
         cards = [card(found["query_of"][pi], ad, plan, found["prices"][pi]) for pi, ad in picked]
+        if radius := geo.pickup_radius():   # Settings → Shipping & pickup: far pickup-only offers never reach Claude
+            await geo.locate(cards)
+            cards = [c for c in cards if not geo.too_far(c, radius)]
         cards, reserve = cards[:MAX_CANDIDATES], cards[MAX_CANDIDATES:]      # the reserve is for "load more"
         searched = {"queries": found["per_query"], "requests": found["requests"], "candidates": len(cards),
                     "warning": found["warning"]}

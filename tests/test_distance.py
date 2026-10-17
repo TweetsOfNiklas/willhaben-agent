@@ -6,6 +6,7 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import select
 
 from app import db as dbmod
 from app.db import get_setting, set_setting
@@ -181,3 +182,37 @@ def test_hit_cards_show_the_distance_and_sort_by_it():
         page = c.get("/hits?sort=distance").text
         assert page.index(">Ad 2<") < page.index(">Ad 1<") < page.index(">Ad 3<")
         assert "Nearest first" in page and 'class="text-warning">499 km' in page    # over the agent's 100
+
+
+def test_global_pickup_radius_hides_far_pickup_only_ads():
+    from app.db import Hit, SearchAgent, session
+    from app.main import app
+    from app.services import search_agents as sa
+
+    _home()
+    with TestClient(app) as c:
+        c.post("/settings/shipping", data={**HOME, "pickup_max_km": "100"})
+        assert geo.pickup_radius() == 100 and 'name="pickup_max_km" type="number" min="1" max="2000" step="1" value="100"' \
+            in c.get("/settings/shipping").text
+        with session() as db:
+            a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
+            db.add(a)
+            db.commit()
+            for ad_id, lat, lon, ship in (("1", 47.48, 9.73, None), ("2", 47.48, 9.73, "ship"), ("3", 48.2, 16.4, None),
+                                          ("4", None, None, None)):
+                db.add(Hit(agent_id=a.id, ad_id=ad_id, heading=f"Ad {ad_id}", url=f"u{ad_id}", lat=lat, lon=lon,
+                           shipping=ship))
+            db.commit()
+            far = db.exec(select(Hit).where(Hit.ad_id == "1")).one()
+            agent = db.get(SearchAgent, a.id)
+        assert sa.pickup_limit(agent) == 100 and sa._holds(agent) and not sa.distance_passes(agent, far)
+        agent.max_km = 600                                             # the agent's own limit comes first
+        assert sa.distance_passes(agent, far)
+        page = c.get("/hits").text
+        assert ">Ad 1<" not in page and all(f">Ad {n}<" in page for n in "234")   # ships, near, place unknown
+        assert ">Ad 1<" in c.get("/hits?state=all").text                         # "All" keeps it
+        c.post("/settings/shipping", data={**HOME, "pickup_max_km": ""})
+        assert geo.pickup_radius() is None and ">Ad 1<" in c.get("/hits").text
+    cards = [{"lat": 47.48, "lon": 9.73, "shipping": None}, {"postcode": "1150", "shipping": "pickup"},
+             {"lat": 47.48, "lon": 9.73, "shipping_price": 4.9}]
+    assert [geo.too_far(x, 100, (48.19, 16.33)) for x in cards] == [True, False, False]   # 1150: not located yet

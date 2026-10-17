@@ -674,7 +674,7 @@ async def _run_agent(agent_id: int) -> RunResult:
     if widen and any(_old_rows(s) is not None and q in ok for s, q in usable):
         set_setting(_wh_rows_key(agent_id), "1")                # its searches ran with the larger page
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
-    if agent.max_km and to_notify:
+    if pickup_limit(agent) and to_notify:
         await _locate(to_notify)
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
@@ -805,14 +805,18 @@ def ships(hit: Hit) -> bool:
     return hit.shipping == shipping_info.SHIP or hit.shipping_price is not None
 
 
-def distance_passes(agent: SearchAgent, hit: Hit) -> bool:
-    """The agent's "pickup within N km": an ad that ships always passes, so does one whose place is not known."""
-    if not agent.max_km or ships(hit):
-        return True
+def pickup_limit(agent: SearchAgent) -> int | None:
+    """The agent's own "pickup within N km", else the one of Settings → Shipping & pickup."""
     from app.services import geo
 
-    km = geo.hit_km(hit)
-    return km is None or km <= agent.max_km
+    return agent.max_km or geo.pickup_radius()
+
+
+def distance_passes(agent: SearchAgent, hit: Hit) -> bool:
+    """Pickup only within the limit: an ad that ships always passes, so does one whose place is not known."""
+    from app.services import geo
+
+    return not geo.too_far(hit, pickup_limit(agent))
 
 
 async def _locate(hits: list[Hit]) -> None:
@@ -899,7 +903,7 @@ def _unjudged(agent: SearchAgent, h: Hit, asked: set[int]) -> bool:
 def _holds(agent: SearchAgent) -> bool:
     """New hits of this agent are pending until judged: it pushes, and screens, has a Geizhals rule or a distance
     limit."""
-    return bool(agent.notify and (agent.screen or geizhals_rule(agent) or agent.max_km))
+    return bool(agent.notify and (agent.screen or geizhals_rule(agent) or pickup_limit(agent)))
 
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:

@@ -767,9 +767,13 @@ class HitView:
             q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0)).asc(), col(Hit.id).desc())
         else:
             q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
-        if not self.level and self.sort != "distance":
+        radius = geo.pickup_radius() if self.state not in ("filtered", "all") else None
+        if not self.level and self.sort != "distance" and not radius:
             return list(db.exec(q.limit(limit)))
         rows = list(db.exec(q.limit(max(limit * 10, 2000))))
+        if radius:                        # Settings → Shipping & pickup: far pickup-only ads are not shown
+            home = geo.home_cached()
+            rows = [h for h in rows if not geo.too_far(h, radius, home)]
         if self.level:
             zones, top = price_zones.config(), _LEVEL_RANK[self.level]
             rows = [h for h in rows if _LEVEL_RANK.get(hit_label(h, zones) or "", 9) <= top]
@@ -2312,7 +2316,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **(await _gcal_ctx() if section == "calendar" else {}),
-                  ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
+                  ship=shipping.config(), pickup_max_km=_geo.pickup_radius(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   **({"adaptive": adaptive_pace.profile(None), "adaptive_on": adaptive_pace.enabled(),
                       "adaptive_max": adaptive_pace.max_factor(), "adaptive_choices": adaptive_pace.MAX_FACTORS,
@@ -2830,6 +2834,8 @@ async def settings_shipping(request: Request):
         task.add_done_callback(_background.discard)
     shipping.save_carriers([str(c) for c in f.getlist("carrier")])
     set_setting("ship_detect", "1" if f.get("detect") else "0")
+    km = str(f.get("pickup_max_km") or "").strip()
+    set_setting("pickup_max_km", str(min(int(km), 2000)) if km.isdigit() and int(km) > 0 else "")
     return back(f"/settings/shipping?msg={quote(t('Changes saved'), safe='')}")
 
 

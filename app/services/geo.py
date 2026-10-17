@@ -148,6 +148,26 @@ async def locate(results: list[dict[str, Any]]) -> None:
         log.warning("locating results failed: %s", e)
 
 
+def pickup_radius() -> int | None:
+    """Settings → Shipping & pickup: pickup-only ads farther from home than this are not shown (None: no limit)."""
+    raw = (get_setting("pickup_max_km") or "").strip()
+    return int(raw) if raw.isdigit() and int(raw) > 0 else None
+
+
+def ships(x: Any) -> bool:
+    """The ad states shipping (a hit, listing or result dict); an ad that says nothing counts as pickup."""
+    get = x.get if isinstance(x, dict) else (lambda k: getattr(x, k, None))
+    return get("shipping") == "ship" or get("shipping_price") is not None
+
+
+def too_far(x: Any, limit: int | None, origin: tuple[float, float] | None = None) -> bool:
+    """A pickup-only ad farther from home than `limit` km; False when it ships, its place or home is unknown."""
+    if not limit or ships(x):
+        return False
+    km = hit_km(x, origin)
+    return km is not None and km > limit
+
+
 def postcode_of(postcode: str | None, location: str | None) -> str | None:
     """The postcode an ad states, or the one its place line starts with ("1100 Wien")."""
     return postcode or (m.group(1) if (m := re.match(r"(\d{4,5})\b", location or "")) else None)
@@ -161,13 +181,15 @@ def point_cached(postcode: str | None) -> tuple[float, float] | None:
 
 
 def hit_km(h: Any, origin: tuple[float, float] | None = None) -> float | None:
-    """Distance from home to a hit: its coordinates, else its postcode's centre if known already; None otherwise."""
+    """Distance from home to a hit (or a listing, or a result dict): its coordinates, else its postcode's centre if
+    known already; None otherwise."""
     origin = origin or home_cached()
     if origin is None:
         return None
-    lat, lon = getattr(h, "lat", None), getattr(h, "lon", None)
+    get = h.get if isinstance(h, dict) else (lambda k: getattr(h, k, None))
+    lat, lon = get("lat"), get("lon")
     if lat is None or lon is None:
-        p = point_cached(postcode_of(getattr(h, "postcode", None), getattr(h, "location", None)))
+        p = point_cached(postcode_of(get("postcode"), get("location")))
         if p is None:
             return None
         lat, lon = p

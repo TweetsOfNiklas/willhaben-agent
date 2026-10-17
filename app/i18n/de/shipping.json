@@ -1,4 +1,5 @@
 {
+ "Ads that can only be picked up are hidden beyond this distance from the address above: in the search agents' hits (they go to “Filtered out”), in the hit list and in the product search. Ads that ship always show, so do ads without a known place; an ad that says nothing about shipping counts as pickup. An agent's own limit comes first.": "Anzeigen, die nur abgeholt werden können, werden jenseits dieser Entfernung von der Adresse oben ausgeblendet: bei den Treffern der Suchagenten (sie landen unter „Aussortiert“), in der Trefferliste und in der Produktsuche. Anzeigen mit Versand werden immer angezeigt, ebenso Anzeigen ohne bekannten Ort; eine Anzeige ohne Angabe zum Versand gilt als Abholung. Die eigene Grenze eines Agenten hat Vorrang.",
  "Address and parcel option needed first": "Zuerst Adresse und Paketoption festlegen",
  "Enter your sender address in Settings → Shipping first": "Trag zuerst deine Absenderadresse unter Einstellungen → Versand ein",
  "Page opened – fill it with “Fill this page” once the form is visible": "Seite geöffnet – mit „Diese Seite ausfüllen“ befüllen, sobald das Formular sichtbar ist",

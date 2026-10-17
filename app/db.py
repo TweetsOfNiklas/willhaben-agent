@@ -638,7 +638,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "quiet_interval_min": "60",
     # adaptive polling: fewer checks in the hours that rarely bring new ads (app/services/adaptive_pace.py)
     "adaptive_enabled": "1",
-    "watch_saved": "1",         # saved hits: their ad pages about once a day (search_agents.watch_saved_job)
+    "watch_saved": "1",
+    "pickup_max_km": "",        # pickup-only ads farther from home are not shown anywhere ("" = no limit; geo.py)         # saved hits: their ad pages about once a day (search_agents.watch_saved_job)
     "adaptive_max_factor": "4",
     # timeline (/timeline) and willhaben request recording: both opt-in (Settings → Timeline); entries are kept
     # forever unless pruning is switched on there
