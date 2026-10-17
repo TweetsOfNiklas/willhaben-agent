@@ -178,7 +178,7 @@ async def _handle(event_data: dict[str, Any]) -> str | None:
         return None            # already handled (second tap, or done in the dashboard)
     await clear_push(tag_for(draft_id))
     if verb == "DISCARD":
-        chats.discard_draft(draft_id)
+        chats.discard_draft(draft_id, by_owner=True)
         return "discarded"
     if verb == "REVISE":
         new = await chats.revise_and_offer(draft_id, str(event_data.get("reply_text") or ""))

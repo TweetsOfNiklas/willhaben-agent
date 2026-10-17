@@ -808,7 +808,9 @@ def _aware(dt):
 
 
 def _waiting_for_answer(conv_id: str) -> bool:
-    """Buyer's last message is recent and nobody (me or the app) has drafted or sent anything since."""
+    """Buyer's last message is recent and nobody (me or the app) has drafted or sent anything since. A draft the
+    owner discarded counts too: they decided not to answer that message, so no new answer is written and offered at
+    every sync (the next message from the buyer is answered again)."""
     msgs = messages_of(conv_id)
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in" or last.created_at is None:
@@ -817,7 +819,8 @@ def _waiting_for_answer(conv_id: str) -> bool:
     if utcnow() - since > AUTO_MAX_AGE:
         return False
     with session() as db:
-        later = db.exec(select(Draft).where(Draft.conversation_id == conv_id, Draft.status != "discarded")).all()
+        later = db.exec(select(Draft).where(Draft.conversation_id == conv_id,
+                                            (Draft.status != "discarded") | (Draft.dismissed == True))).all()  # noqa: E712
     alive = conv_id in _humanized
     # "pending" = a human-like answer still "typing"; after a restart its task is gone and it must not block
     return not any(_aware(d.created_at) >= since for d in later if d.status != "pending" or alive)
@@ -1226,11 +1229,16 @@ def mark_sent(draft_id: int, text: str | None = None) -> Draft:
     return draft
 
 
-def discard_draft(draft_id: int) -> None:
+def discard_draft(draft_id: int, by_owner: bool = False) -> None:
+    """A draft goes. `by_owner`: the owner discarded it (chat page, push or Telegram button), so the buyer's message
+    counts as handled and no automatic answer is written for it again; the app's own discards (a new draft replaces
+    it, the buyer wrote again while "typing") leave the message waiting."""
     with session() as db:
         draft = db.get(Draft, draft_id)
         if draft:
             draft.status = "discarded"
+            if by_owner:
+                draft.dismissed = True
             db.add(draft)
             db.commit()
 

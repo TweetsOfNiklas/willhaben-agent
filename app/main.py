@@ -990,7 +990,7 @@ async def draft_mark_sent(draft_id: int, text: str = Form("")):
 async def draft_discard(draft_id: int):
     with session() as db:
         d = db.get(Draft, draft_id)
-    chats.discard_draft(draft_id)
+    chats.discard_draft(draft_id, by_owner=True)
     return back(f"/chats/{d.conversation_id}")
 
 

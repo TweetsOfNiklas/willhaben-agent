@@ -139,6 +139,7 @@ class Draft(SQLModel, table=True):
     model: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     status: str = "draft"  # draft | pending (auto reply "typing") | sending (queued send job) | sent | discarded
+    dismissed: bool | None = None     # discarded by the owner (not by the app): the buyer's message counts as handled
     sent_at: datetime | None = None
     error: str | None = None
     auto: bool | None = None          # created by the auto-reply job

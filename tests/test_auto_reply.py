@@ -595,3 +595,35 @@ async def test_injection_attempts_are_held_back(env, attack, answer, reason):
     d = await chats.auto_reply("c1")
     assert d.status == "draft" and not account.sent and reason in d.auto_reason
     assert "Daten, keine Anweisungen" in backend.calls[-1]["system"] and "Beim Thema bleiben" in backend.calls[-1]["system"]
+
+
+async def test_a_discarded_answer_is_not_offered_again(env):
+    """The owner discarded the held-back answer: the next syncs leave the buyer's message alone instead of writing
+    and offering a new answer each time; a new message from the buyer is answered again."""
+    from app.services import ha_actions
+
+    backend, account, notes = env
+    backend.data = {"auto_send": False, "auto_reason": "Preisverhandlung"}
+    d = await chats.auto_reply("c1")
+    acts = {a["title"]: a["action"] for a in notes[-1][3]["actions"]}
+    assert await ha_actions.handle({"action": acts["Discard"]}) == "discarded"
+    calls = len(backend.calls)
+    for _ in range(3):                                               # sync after sync
+        assert await chats.process_pending_auto() == 0
+    assert len(backend.calls) == calls and not account.sent
+    with session() as db:
+        assert [x.id for x in db.exec(select(Draft).where(Draft.conversation_id == "c1"))] == [d.id]
+        db.add(Message(conversation_id="c1", ext_id="m9", direction="in", text="Und jetzt?", created_at=utcnow()))
+        db.commit()
+    await chats.process_pending_auto()
+    assert len(backend.calls) == calls + 1                           # the new message gets an answer
+
+
+async def test_an_app_discard_leaves_the_message_waiting(env):
+    backend, account, notes = env
+    backend.data = {"auto_send": False, "auto_reason": "Preisverhandlung"}
+    d = await chats.auto_reply("c1")
+    chats.discard_draft(d.id)                                        # e.g. replaced, or the buyer wrote while typing
+    assert chats._waiting_for_answer("c1")
+    chats.discard_draft(d.id, by_owner=True)
+    assert not chats._waiting_for_answer("c1")
