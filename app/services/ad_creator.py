@@ -144,7 +144,8 @@ async def _write_draft(draft_id: int, notes: str, paths: list[str], owner_quanti
         d.image_paths, d.error = paths, None
         if d.status == "error":          # a retry succeeded (a card discarded meanwhile stays discarded)
             d.status = "draft"
-        d.title, d.description = data.get("title"), data.get("description")
+        d.title, d.description = data.get("title"), clean_text(data.get("description"))
+        d.questions = questions_of(data)
         d.category_hint, d.condition = data.get("category_hint"), data.get("condition")
         d.attributes = data.get("attributes") or []
         d.quantity = pick_quantity(owner_quantity, data.get("quantity"))
@@ -163,6 +164,31 @@ async def _write_draft(draft_id: int, notes: str, paths: list[str], owner_quanti
         d = await reconcile_with_geizhals(d.id)
         d = attach_specs_if_wanted(d.id)
     return d
+
+
+_CHECK_MARK = re.compile(r"\s*[\(\[](?:bitte\s+)?(?:prüfen|überprüfen|checken|nachprüfen)[\)\]]", re.I)
+
+
+def clean_text(text: str | None) -> str | None:
+    """A "(bitte prüfen)" Claude wrote anyway is dropped: open points are questions on the draft page."""
+    return _CHECK_MARK.sub("", text) if text else text
+
+
+def questions_of(data: dict[str, Any]) -> list[dict[str, Any]] | None:
+    from app.services.product_search import normalize_questions
+
+    return normalize_questions(data.get("questions")) or None
+
+
+def answers_instruction(questions: list[dict[str, Any]], answers: dict[str, str]) -> str | None:
+    """The owner's answers to the draft's questions as the revision instruction; None when none was answered."""
+    pairs = [(q["text"], (answers.get(q["id"]) or "").strip()[:200]) for q in questions or []]
+    pairs = [(q, a) for q, a in pairs if a]
+    if not pairs:
+        return None
+    lines = "\n".join(f"- {q} → {a}" for q, a in pairs)
+    return ("Antworten der Person auf deine offenen Fragen. Arbeite sie als normale Angaben in Titel und Beschreibung "
+            "ein, wo sie Käufern helfen (nicht als Frage und Antwort zitieren):\n" + lines)
 
 
 def auto_specs() -> bool:
@@ -292,8 +318,8 @@ _VERSION_FIELDS = ("title", "description", "category_hint", "condition", "attrib
 
 RECONCILE_INSTRUCTION = (
     "Gleiche das Inserat mit den Herstellerdaten von Geizhals ab: Korrigiere Angaben, die dem Datenblatt "
-    "widersprechen, und entferne „(bitte prüfen)“ bei allem, was das Datenblatt bestätigt. Angaben, die das "
-    "Datenblatt nicht klärt (z. B. Akku, Zustand), bleiben als normaler Satz mit „(bitte prüfen)“ stehen. "
+    "widersprechen, und übernimm, was das Datenblatt bestätigt. Was es nicht klärt (z. B. Akku, Zustand) und du "
+    "nicht sicher weißt, lässt du im Text weg und fragst es unter questions. "
     "Entferne eine selbst geschriebene Liste technischer Daten aus der Beschreibung, das Datenblatt hänge ich an."
 )
 
@@ -325,7 +351,7 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
     except LLMError as e:
         return update_draft(draft_id, error=t("Revision failed: {error}", error=e))
     data = result.data
-    description = (data.get("description") or "").rstrip()
+    description = (clean_text(data.get("description")) or "").rstrip()
     if had_block:
         description = f"{description}\n\n{block}"
     revisions = list(d.revisions or [])
@@ -334,7 +360,8 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
     return update_draft(draft_id, title=data.get("title"), description=description,
                         category_hint=data.get("category_hint"), condition=data.get("condition"),
                         attributes=data.get("attributes") or [], revisions=revisions[-20:], model=result.model,
-                        error=None, price_stats={**(d.price_stats or {}), "note": data.get("note")})
+                        error=None, price_stats={**(d.price_stats or {}), "note": data.get("note")},
+                        questions=questions_of(data))
 
 
 def undo_revision(draft_id: int) -> AdDraft:
@@ -486,7 +513,21 @@ def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping
     return True
 
 
-def enqueue_refine(draft_id: int, instruction: str) -> bool:
+def enqueue_answers(draft_id: int, answers: dict[str, str]) -> bool:
+    """The draft page's questionnaire: the answers go into the text as a background revision; False when none was
+    answered (or a revision is already on its way)."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    instruction = answers_instruction((d.questions if d else None) or [], answers)
+    if not instruction:
+        return False
+    if not enqueue_refine(draft_id, instruction, label=t("Your answers")):
+        return False
+    update_draft(draft_id, questions=None)    # answered; the revision may ask anew
+    return True
+
+
+def enqueue_refine(draft_id: int, instruction: str, label: str | None = None) -> bool:
     """"Revise with Claude" as a background job (lane claude, 10–60 s): the draft shows "Claude is revising…" and
     swaps itself in when done. False: nothing to do or already on its way."""
     from app.services import jobs
@@ -499,7 +540,7 @@ def enqueue_refine(draft_id: int, instruction: str) -> bool:
 
     async def run(job) -> str:
         try:
-            d = await refine_draft(draft_id, instruction)
+            d = await refine_draft(draft_id, instruction, label=label)
         finally:
             update_draft(draft_id, refining=None)
         if d.error:                       # refine_draft keeps Claude's errors on the draft

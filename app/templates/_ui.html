@@ -171,3 +171,8 @@
   <span x-show="!$store.jobs.isWorking(k)" class="inline-flex items-center gap-1.5 text-muted">{{ icon('clock', 13) }}{{ queued_text }}</span>
 </span>
 {%- endmacro %}
+
+{# one of Claude's questions ({id, text, options}): option chips (radio q_<id>) and an own answer (t_<id>, wins) #}
+{% macro question(q) -%}
+<fieldset class="m-0 flex flex-col gap-1.5 border-0 p-0"><legend class="mb-1 font-semibold">{{ q.text }}</legend><div class="flex flex-wrap gap-1.5">{% for o in q.options %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary"><input type="radio" name="q_{{ q.id }}" value="{{ o }}" class="radio radio-primary radio-xs">{{ o }}</label>{% endfor %}</div><input type="text" name="t_{{ q.id }}" maxlength="200" placeholder="{{ _('other answer') }}" aria-label="{{ q.text }} – {{ _('other answer') }}" class="input input-sm w-full max-w-[420px] bg-base-100"></fieldset>
+{%- endmacro %}

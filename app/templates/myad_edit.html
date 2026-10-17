@@ -41,6 +41,17 @@
     </div>
     <small class="text-xs text-muted">{{ _("Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.") }}</small>
 
+    {% if proposal and proposal.questions %}
+    {# what Claude could not tell from text and photos: answered here, sent back with the text as the next revision #}
+    <fieldset class="flex flex-col gap-3 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-3" data-ad-questions>
+      <legend class="sr-only">{{ _("Claude's questions") }}</legend>
+      <strong>{{ _("Claude has one short question") if proposal.questions|length == 1 else _("Claude has {n} short questions", n=proposal.questions|length) }}</strong>
+      <input type="hidden" name="questions" value="{{ proposal.questions|tojson|forceescape }}">
+      {% for q in proposal.questions %}{{ ui.question(q) }}{% endfor %}
+      <div><button type="submit" class="btn btn-primary btn-sm" formaction="/myads/{{ a.ad_id }}/edit/ai" formnovalidate
+              hx-post="/myads/{{ a.ad_id }}/edit/ai" hx-target="#edit-main" hx-select="#edit-main" hx-swap="outerHTML"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Work the answers in") }}</button></div>
+    </fieldset>
+    {% endif %}
     <fieldset class="flex flex-col gap-2 border-t border-base-300 pt-4">
       <legend class="text-sm font-semibold">{{ _("Revise with Claude") }}</legend>
       <div class="join w-full">

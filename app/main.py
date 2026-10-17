@@ -1357,6 +1357,15 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
     except ValueError:
         value = None
     cur = {"heading": heading, "description": description, "price": value}
+    form = await request.form()
+    try:                               # answers to the questions of the last proposal, as the instruction
+        asked = json.loads(str(form.get("questions") or "[]"))
+    except ValueError:
+        asked = []
+    answers = {k[2:]: str(v) for k, v in form.items() if k.startswith("q_") and str(v).strip()}
+    answers.update({k[2:]: str(v) for k, v in form.items() if k.startswith("t_") and str(v).strip()})
+    if from_answers := ad_creator.answers_instruction(asked if isinstance(asked, list) else [], answers):
+        instruction = f"{instruction.strip()}\n\n{from_answers}".strip()
     try:
         prop = await my_ads.ai_revise(ad_id, heading, description, value, instruction)
     except LLMError as e:   # shown inside the part htmx swaps (#edit-main), not in the page head
@@ -1680,6 +1689,23 @@ async def ad_draft_refine(draft_id: int, instruction: str = Form(...)):
     _draft_or_404(draft_id)
     if not ad_creator.enqueue_refine(draft_id, instruction):
         return back(f"/new-ad/{draft_id}?msg={quote(ad_creator.refine_refusal(draft_id), safe='')}")
+    return back(f"/new-ad/{draft_id}")
+
+
+@app.post("/new-ad/{draft_id:int}/answers")
+async def ad_draft_answers(request: Request, draft_id: int):
+    """The draft's questionnaire: a chosen option or own text per question; "skip" just closes it."""
+    _draft_or_404(draft_id)
+    form = await request.form()
+    if form.get("skip"):
+        ad_creator.update_draft(draft_id, questions=None)
+        return back(f"/new-ad/{draft_id}")
+    answers = {k[2:]: str(v) for k, v in form.items() if k.startswith("q_") and str(v).strip()}
+    for k, v in form.items():          # own text wins over a chosen option
+        if k.startswith("t_") and str(v).strip():
+            answers[k[2:]] = str(v)
+    if not ad_creator.enqueue_answers(draft_id, answers):
+        return back(f"/new-ad/{draft_id}?msg={quote(t('Choose or write at least one answer.'), safe='')}")
     return back(f"/new-ad/{draft_id}")
 
 

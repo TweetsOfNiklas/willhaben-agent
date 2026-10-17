@@ -167,7 +167,12 @@ Grundlage sind ihre Stichpunkte und die Fotos. Das Ergebnis wird vor dem Veröff
 - title: prägnant, max. 60 Zeichen, mit Marke/Modell/Größe wenn bekannt, ohne Großbuchstaben-Geschrei.
 - description: Fließtext in kurzen Absätzen, österreichisches Deutsch. Zustand ehrlich, sichtbare Mängel
   aus den Fotos nennen. Am Ende Übergabe/Versand laut den Regeln der Person. Keine Emojis, kein Preis im Text.
-- Erfinde keine technischen Daten. Unsicheres markierst du mit "(bitte prüfen)".
+- Erfinde keine technischen Daten. Was du aus Stichpunkten, Fotos und mitgelieferten Daten nicht sicher weißt, lässt du
+  im Text weg. Schreib nie "(bitte prüfen)", "(prüfen)", Platzhalter wie "[…]" oder Fragen an die Person in den Text.
+- questions: stattdessen bis zu 3 kurze Fragen an die Person zu Angaben, die Käufern wichtig sind und die du nicht
+  sicher weißt (z. B. Reichweite, Akkuzustand, Zubehör, Grund für Mängel), je mit 2 bis 4 knappen Antwortoptionen;
+  id als kurzes Wort (a-z). Nichts Offenes oder Unwichtiges: leere Liste. Frag nichts, was Stichpunkte, Fotos oder
+  frühere Antworten schon klären.
 - Du hast keinen Internetzugriff und musst das auch nicht erwähnen: Herstellerdaten von Geizhals liefert dir die
   App mit, wenn es welche gibt. Gib nie etwas als "laut Geizhals" oder "laut Hersteller" aus, das nicht mitgeliefert wurde.
 - Schreib keine eigene Liste "Technische Daten" in die Beschreibung; das Datenblatt hängt die App auf Wunsch an.
@@ -219,9 +224,19 @@ AD_SCHEMA: dict[str, Any] = {
             "additionalProperties": False,
         },
         "note": {"type": "string"},
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "text": {"type": "string"},
+                               "options": {"type": "array", "items": {"type": "string"}}},
+                "required": ["id", "text", "options"],
+                "additionalProperties": False,
+            },
+        },
     },
     "required": ["title", "description", "category_hint", "condition", "attributes",
-                 "search_keywords", "price_estimate", "product_query", "quantity", "parcel", "note"],
+                 "search_keywords", "price_estimate", "product_query", "quantity", "parcel", "note", "questions"],
     "additionalProperties": False,
 }
 

@@ -500,7 +500,8 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
     """Claude revises title and description of a live ad by one instruction (nothing is saved).
 
     Gets the current text from the edit form, the ad's photos (up to 4) and category from the public page.
-    Returns {heading, description, price_estimate, note} as a proposal for the form.
+    Returns {heading, description, price_estimate, note, questions} as a proposal for the form (questions: what
+    Claude could not tell, answered in the form and sent back as the next instruction).
     """
     import tempfile
     from pathlib import Path
@@ -531,9 +532,13 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
                                   n_images=len(photos), current=current, specs=None, product_name=None,
                                   instruction=instruction, quantity=row.quantity if row else None)
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA, images=photos)
+    from app.services.ad_creator import clean_text, questions_of
+
     d = result.data
-    return {"heading": (d.get("title") or heading).strip()[:80], "description": (d.get("description") or description).strip(),
-            "price_estimate": d.get("price_estimate"), "note": (d.get("note") or "").strip()}
+    return {"heading": (d.get("title") or heading).strip()[:80],
+            "description": (clean_text(d.get("description")) or description).strip(),
+            "price_estimate": d.get("price_estimate"), "note": (d.get("note") or "").strip(),
+            "questions": questions_of(d) or []}
 
 
 async def edit(ad_id: str, heading: str, description: str, price: float | None) -> MyAd | None:

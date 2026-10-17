@@ -41,6 +41,14 @@
     <section id="draft-refine" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4"
              {% if d.refining %}data-pending-key="refining:{{ d.id }}" data-refresh-also="draft-form draft-head draft-error"{% endif %}>
       <div class="font-semibold">{{ _("Improve the listing") }}</div>
+      {% if d.questions and not d.refining and not published %}
+      {# what Claude could not tell from notes and photos (instead of a "(bitte prüfen)" in the text) #}
+      <form method="post" action="/new-ad/{{ d.id }}/answers" class="m-0 flex flex-col gap-3 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-3" data-ad-questions>
+        <strong>{{ _("Claude has one short question") if d.questions|length == 1 else _("Claude has {n} short questions", n=d.questions|length) }}</strong>
+        {% for q in d.questions %}{{ ui.question(q) }}{% endfor %}
+        <div class="flex flex-wrap items-center gap-2"><button class="btn btn-primary btn-sm">{{ _("Work the answers in") }}</button><button name="skip" value="1" class="btn btn-sm">{{ _("Skip questions") }}</button><small class="text-muted">{{ _("Claude adds the answers to title and description (one revision, can be undone).") }}</small></div>
+      </form>
+      {% endif %}
       {% if d.refining %}
       <div>{% if d.status == 'error' %}{{ ui.pending('refining:' ~ d.id, _("Claude is writing the draft…"), _("Queued: Claude writes the draft")) }}{% else %}{{ ui.pending('refining:' ~ d.id, _("Claude is revising the text…"), _("Queued: Claude revises the text")) }}{% endif %}</div>
       {% elif published %}

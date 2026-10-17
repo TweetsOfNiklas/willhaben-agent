@@ -262,6 +262,9 @@ class AdDraft(SQLModel, table=True):
     parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # Claude's packed-size estimate, shipping.clean_parcel shape
     publishing: bool | None = None     # queued/running as a background publish job
     refining: bool | None = None       # Claude revises it as a background job (ad_creator.enqueue_refine)
+    # what Claude could not tell from notes and photos: [{id, text, options}], answered on the draft page (never a
+    # "(bitte prüfen)" in the text); None = nothing open
+    questions: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
 
 
