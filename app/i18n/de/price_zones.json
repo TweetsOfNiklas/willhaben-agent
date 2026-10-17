@@ -51,5 +51,6 @@
  "The badges compare each ad with the other results of this search: the middle half counts as fair.": "Die Markierungen vergleichen jede Anzeige mit den anderen Ergebnissen dieser Suche: die mittlere Hälfte gilt als fair.",
  "{price}: {level}, {n} % of the new price": "{price}: {level}, {n} % vom Neupreis",
  "{price}: {level} among the comparable ads": "{price}: {level} unter den Vergleichsanzeigen",
- "By the Geizhals new price alone; the price check of the ad also weighs comparable ads.": "Nur nach dem Geizhals-Neupreis; die Preisprüfung der Anzeige bezieht auch Vergleichsanzeigen ein."
+ "By the Geizhals new price alone; the price check of the ad also weighs comparable ads.": "Nur nach dem Geizhals-Neupreis; die Preisprüfung der Anzeige bezieht auch Vergleichsanzeigen ein.",
+ "This ad costs {pct} % of the lowest new price, so it counts as expensive at best, however dear the other ads are.": "Diese Anzeige kostet {pct} % des niedrigsten Neupreises und gilt deshalb höchstens als teuer, egal wie teuer die anderen Anzeigen sind."
 }

@@ -242,6 +242,22 @@ def test_enough_comparables_rate_a_used_item_the_zones_a_new_one():
     assert few["basis"] == "geizhals" and few["level"] == "expensive"
 
 
+def test_a_used_item_dearer_than_new_is_expensive_at_best():
+    """Comparable ads as dear as this one (bundles, a market above new) do not make a used item above the lowest new
+    price fair: new costs no more and comes with warranty and returns."""
+    st = deals.stats(PRICES)
+    p = deals.position(105, st, 90.0, "used")                  # fair among the comparables, 116 % of new
+    assert p["basis"] == "comparables" and p["level"] == "expensive" and p["above_new"] == 116
+    lo, hi = deals.QUANTILE_SEGMENTS["expensive"]
+    assert lo <= p["pos"] <= hi
+    assert deals.position(105, st, 105.0)["level"] == "expensive"                  # exactly the new price too
+    q = deals.position(105, st, 105.01)                                             # a cent below new: the market
+    assert q["level"] == "fair" and q["above_new"] is None
+    assert deals.position(105, st, 90.0, "new")["basis"] == "geizhals"              # new items: the zones anyway
+    r = deals.position(max(PRICES) + 50, st, 90.0)                                  # dearer than all: no note
+    assert r["level"] == "very_expensive" and r["above_new"] is None
+
+
 def test_new_items_use_the_new_zones():
     assert deals.position(195.02, None, 199.0, "new")["level"] == "cheap"      # 98 %: below the lowest shop price
     p = deals.position(205, None, 199.0, "new")

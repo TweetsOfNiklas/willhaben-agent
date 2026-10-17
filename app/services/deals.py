@@ -356,8 +356,14 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
             and not MISMATCH_LOW <= comp["median"] / new_price <= MISMATCH_HIGH:
         ignored, new_price = round(comp["median"] * 100 / new_price), None
     market = bool(new_price and comp and scale and price_zones.group(condition) == "used")
+    above_new = None
     if market:
-        new_price = None                  # a used item with a market of its own: the comparables decide
+        # a used item with a market of its own: the comparables decide, but one at or above the lowest new price is
+        # expensive at best, however dear the other ads are (new costs no more and comes with warranty and returns);
+        # unless they cost far more than it (MISMATCH_HINT): then the new price is more likely another product's
+        if price_zones._cents(price) >= price_zones._cents(new_price) and comp["median"] <= MISMATCH_HINT * new_price:
+            above_new = price_zones.share(price, new_price)
+        new_price = None
     if new_price and new_price > 0 and price_zones._cents(new_price) > 0:
         g = price_zones.group(condition)
         lim = tuple((zones or price_zones.config())[g])
@@ -375,6 +381,10 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
                 "suspicious": exact < lim[0] / 2 or bool(comp and scale and price < 0.5 * comp["p25"])}
     if comp and scale:
         lvl = comparables_level(price, comp)
+        if above_new is not None and LEVEL_NAMES.index(lvl) < LEVEL_NAMES.index("expensive"):
+            lvl = "expensive"
+        else:
+            above_new = None              # the comparables alone already say expensive: nothing to explain
         lo, hi = QUANTILE_SEGMENTS[lvl]
         pos = min(hi, max(lo, _interp(price, scale)))
         ticks: list[list[float]] = []      # the marks at the fair segment's ends and the middle, equal € once
@@ -388,7 +398,7 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
                     ticks.append([at, v])
         return {"pos": round(pos, 3), "level": lvl, "basis": "comparables", "condition": condition, "ticks": ticks,
                 "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]}, "market": market,
-                "new_price_ignored": ignored, "suspicious": price < 0.5 * comp["p25"]}
+                "above_new": above_new, "new_price_ignored": ignored, "suspicious": price < 0.5 * comp["p25"]}
     return {"pos": None, "reason": "few_data"}
 
 
@@ -1612,7 +1622,9 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
         lines.append(f"Einordnung der App: {LEVEL_DE[pos['level']]} unter den Vergleichsanzeigen "
                      "(die mittlere Hälfte gilt als fair)"
                      + ("; bei Gebrauchtem mit genug Vergleichsanzeigen zählen diese, der Neupreis ist nur Information"
-                        if pos.get("market") else ""))
+                        if pos.get("market") else "")
+                     + (f"; sie kostet aber {pos['above_new']} % des Geizhals-Neupreises und gilt deshalb höchstens "
+                        "als teuer" if pos.get("above_new") else ""))
         if pos.get("new_price_ignored"):
             lines.append(f"Der Geizhals-Neupreis passt wohl nicht: die Vergleichsanzeigen kosten im Mittel "
                          f"{pos['new_price_ignored']} % davon.")
