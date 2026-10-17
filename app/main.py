@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from pathlib import Path
-from urllib.parse import parse_qsl, quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -722,9 +722,16 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
         state_counts = dict(db.exec(counts_q).all())
         state_counts.pop(search_agents_svc.CLEARED, None)
         used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
+        # the sites to filter by: those the agents search and those hits came from (an agent's sites may change)
+        shown_q = select(Hit.platform).where(Hit.state != search_agents_svc.CLEARED).distinct()
+        if aid:
+            shown_q = shown_q.where(Hit.agent_id == aid)
+        with_hits = {p for p in db.exec(shown_q).all() if p}
     state_counts["all"] = sum(state_counts.values())
+    filter_ids = sorted(with_hits | set(used) | ({platform} if platform else set()), key=_platform_name)
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
                   platform=platform, platform_ids=used if len(used) > 1 else [],
+                  filter_platform_ids=filter_ids if len(filter_ids) > 1 or platform else [],
                   keep_days=search_agents_svc.keep_days())
 
 
@@ -868,32 +875,42 @@ def _can_sync(h: Hit) -> bool:
         return False
 
 
+def _hits_url(state: str | None, agent_id: int | None, platform: str | None) -> str:
+    """The hits page with the tab, agent and site it was left on."""
+    query = urlencode({k: v for k, v in (("state", state), ("agent_id", agent_id), ("platform", platform)) if v})
+    return "/hits" + (f"?{query}" if query else "")
+
+
 @app.post("/hits/clear-filtered")
-async def hits_clear_filtered(agent_id: int | None = Form(None)):
-    """Hits → Filtered out → Clear: those of the chosen agent, or all."""
-    search_agents_svc.clear_hits(("filtered",), agent_id or None)
-    return back(f"/hits?state=filtered&agent_id={agent_id}" if agent_id else "/hits?state=filtered")
+async def hits_clear_filtered(agent_id: int | None = Form(None), platform: str = Form("")):
+    """Hits → Filtered out → Clear: those of the chosen agent and site, or all."""
+    search_agents_svc.clear_hits(("filtered",), agent_id or None, platform=platform.strip().lower() or None)
+    return back(_hits_url("filtered", agent_id, platform.strip().lower()))
 
 
 @app.post("/hits/keep-days")
-async def hits_keep_days(days: str = Form(""), agent_id: int | None = Form(None), state: str = Form("new")):
+async def hits_keep_days(days: str = Form(""), agent_id: int | None = Form(None), state: str = Form("new"),
+                         platform: str = Form("")):
     """Hits: after how many days they are cleared by themselves, all but saved ones (0 = never)."""
     search_agents_svc.set_keep_days(int(days) if days.strip().isdigit() else 0)
     state = state if state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
-    return back(f"/hits?state={state}" + (f"&agent_id={agent_id}" if agent_id else ""))
+    return back(_hits_url(state, agent_id, platform.strip().lower()))
 
 
 @app.post("/hits/mark-seen")
-async def hits_mark_seen(agent_id: int | None = Form(None)):
+async def hits_mark_seen(agent_id: int | None = Form(None), platform: str = Form("")):
+    platform = platform.strip().lower()
     with session() as db:
         q = select(Hit).where(Hit.state == "new")
         if agent_id:
             q = q.where(Hit.agent_id == agent_id)
+        if platform:
+            q = q.where(Hit.platform == platform)
         for h in db.exec(q):
             h.state = "seen"
             db.add(h)
         db.commit()
-    return back(f"/hits?agent_id={agent_id}" if agent_id else "/hits")
+    return back(_hits_url(None, agent_id, platform))
 
 
 # ------------------------------------------------------------------ chats

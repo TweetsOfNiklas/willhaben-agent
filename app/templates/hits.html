@@ -8,14 +8,14 @@
     {% elif state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening or the agent's Geizhals rule held back: no push, kept here in case you want a look.") }}</p>
     {% else %}<p class="mt-1 max-w-[640px] text-muted max-sm:hidden">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.") }}</p>{% endif %}
   </div>
-  {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" onsubmit="return confirm({{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?'))|tojson|forceescape }})"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
-  {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" class="m-0 shrink-0"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Mark all as seen') }}" aria-label="{{ _('Mark all as seen') }}">{{ ui.icon('check', 15, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Mark all as seen") }}</span></button></form>{% endif %}
+  {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" onsubmit="return confirm({{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?'))|tojson|forceescape }})"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
+  {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" class="m-0 shrink-0"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Mark all as seen') }}" aria-label="{{ _('Mark all as seen') }}">{{ ui.icon('check', 15, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Mark all as seen") }}</span></button></form>{% endif %}
 </div>
 <form method="get" action="/hits" class="mb-3.5 flex flex-wrap items-center gap-2.5">
   {% set seg_items = [] %}
   {% set tabs = [('new', _('New'))] + ([('pending', _('Being checked'))] if state == 'pending' or state_counts.get('pending') else []) + [('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
   {% for s, label in tabs %}
-    {% set added = seg_items.append(('/hits?state=' ~ s ~ ('&agent_id=' ~ agent_id if agent_id else ''), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
+    {% set added = seg_items.append(('/hits?state=' ~ s ~ ('&agent_id=' ~ agent_id if agent_id else '') ~ ('&platform=' ~ platform|urlencode if platform else ''), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
   {% endfor %}
   {{ ui.seg(seg_items, 'max-sm:w-full') }}
   <input type="hidden" name="state" value="{{ state }}">
@@ -23,10 +23,14 @@
     <option value="">{{ _("All search agents") }}</option>
     {% for a in agents.values() %}<option value="{{ a.id }}" {% if a.id == agent_id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
   </select>
+  {% if filter_platform_ids %}<select name="platform" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Platform') }}">
+    <option value="">{{ _("All platforms") }}</option>
+    {% for pid in filter_platform_ids %}<option value="{{ pid }}" {% if pid == platform %}selected{% endif %}>{{ platform_name(pid) }}</option>{% endfor %}
+  </select>{% endif %}
 </form>
 {# the retention: cleared hits are shown nowhere, their ads never come back as new; saved ones are kept #}
 <form method="post" action="/hits/keep-days" class="-mt-1.5 mb-3.5 flex flex-wrap items-center gap-2 text-[13px] text-muted">
-  <input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="state" value="{{ state }}">
+  <input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="state" value="{{ state }}"><input type="hidden" name="platform" value="{{ platform }}">
   <label class="flex items-center gap-2">{{ _("Clear hits automatically") }}
     <select name="days" data-autosubmit class="select select-xs w-auto bg-base-100">
       {% for d in ([7, 14, 30, 90] + ([keep_days] if keep_days not in (0, 7, 14, 30, 90) else []))|sort %}<option value="{{ d }}" {% if d == keep_days %}selected{% endif %}>{{ _("after {n} days", n=d) }}</option>{% endfor %}
@@ -93,7 +97,7 @@
 </div>
 {% else %}
 {% call ui.empty(_("No hits in this view."), _("New ads appear here within minutes of being published; you get a push if the agent has it switched on.")) %}
-  <div class="mt-1.5 flex flex-wrap justify-center gap-2"><a class="btn" href="/agents">{{ _("Search agents") }}</a>{% if state != 'all' %}<a class="btn btn-ghost" href="/hits?state=all{% if agent_id %}&agent_id={{ agent_id }}{% endif %}">{{ _("Show all hits") }}</a>{% endif %}</div>
+  <div class="mt-1.5 flex flex-wrap justify-center gap-2"><a class="btn" href="/agents">{{ _("Search agents") }}</a>{% if state != 'all' %}<a class="btn btn-ghost" href="/hits?state=all{% if agent_id %}&agent_id={{ agent_id }}{% endif %}{% if platform %}&platform={{ platform|urlencode }}{% endif %}">{{ _("Show all hits") }}</a>{% endif %}</div>
 {% endcall %}
 {% endif %}
 {% endblock %}

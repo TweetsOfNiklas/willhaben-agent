@@ -960,14 +960,16 @@ def set_keep_days(days: int) -> int:
 
 
 def clear_hits(states: Iterable[str] = ("filtered",), agent_id: int | None = None,
-               older_than_days: int | None = None) -> int:
-    """Hits in `states` (of one agent, first seen more than `older_than_days` ago) become cleared: shown nowhere, their
+               older_than_days: int | None = None, platform: str | None = None) -> int:
+    """Hits in `states` (of one agent or site, first seen more than `older_than_days` ago) become cleared: shown nowhere, their
     texts dropped. The row stays so a search that still lists the ad does not find it new (and screen it again)."""
     states = [x for x in states if x in EXPIRING]       # never saved ones
     with session() as db:
         q = select(Hit).where(col(Hit.state).in_(states))
         if agent_id:
             q = q.where(Hit.agent_id == agent_id)
+        if platform:
+            q = q.where(Hit.platform == platform)
         if older_than_days is not None:
             q = q.where(Hit.first_seen_at < utcnow() - timedelta(days=older_than_days))
         n = 0
