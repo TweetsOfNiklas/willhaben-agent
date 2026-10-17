@@ -70,7 +70,7 @@
     {% else %}
     <p class="px-2.5 py-3.5 text-muted">{{ _("No conversations synced yet.") }}</p>
     {% endfor %}
-    {% if hidden_count %}<a href="/chats?{% if not show_hidden %}show_hidden=1{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}" class="p-2.5 text-[12.5px] text-muted no-underline hover:underline">{{ _("Hide hidden chats") if show_hidden else _("Show {n} hidden chats", n=hidden_count) }}</a>{% endif %}
+    {% if hidden_count %}<a href="/chats?{% if not show_hidden %}show_hidden=1{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}" class="p-2.5 text-[12.5px] text-muted no-underline hover:underline">{{ _("Hide hidden and older chats") if show_hidden else _("Show {n} hidden or older chats", n=hidden_count) }}</a>{% endif %}
   </div>
 </div>
 

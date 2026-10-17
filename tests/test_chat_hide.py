@@ -82,7 +82,7 @@ def test_chat_list_hides_and_removes():
     with TestClient(app) as c:
         page = c.get("/chats").text
         assert "Sichtbar" in page and "Versteckt" not in page and "Entfernt" not in page
-        assert "Show 1 hidden chats" in page
+        assert "Show 1 hidden or older chats" in page
         page = c.get("/chats?show_hidden=1").text
         assert "Versteckt" in page and "Entfernt" not in page
         c.post("/chats/a/hide", data={"hidden": "1"})

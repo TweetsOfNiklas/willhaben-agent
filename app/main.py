@@ -860,9 +860,14 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
         convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
                              .order_by(col(Conversation.last_message_at).desc().nulls_last())))
         open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
-    hidden_count = sum(1 for c in convs if c.hidden_at)
+    # older than the sync's window (Settings → Automatic answers: the last N days): out of the list like hidden ones,
+    # which the sync no longer updates anyway; "Show hidden chats" brings both back
+    since = chats.sync_window()[1]
+    old = {c.id for c in convs if since is not None and c.last_message_at is not None
+           and chats._aware(c.last_message_at) < since}
+    hidden_count = sum(1 for c in convs if c.hidden_at or c.id in old)
     if not show_hidden:
-        convs = [c for c in convs if not c.hidden_at]
+        convs = [c for c in convs if not c.hidden_at and c.id not in old]
     return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden}
 
 

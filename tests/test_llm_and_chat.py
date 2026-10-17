@@ -318,3 +318,24 @@ def test_the_chat_settings_save_the_days():
     assert get_setting("chat_sync_days") == "30"                      # not a number: kept
     client.post("/settings", data={"section": "chats", "chat_sync_limit": "10", "chat_sync_days": ""})
     assert get_setting("chat_sync_days") == ""
+
+
+def test_chats_older_than_the_window_leave_the_list():
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from app.db import Conversation, session, set_setting, utcnow
+    from app.main import app
+
+    with session() as db:
+        db.add(Conversation(id="new1", ad_title="Neues Gespräch", partner_name="A", last_message_at=utcnow()))
+        db.add(Conversation(id="old1", ad_title="Altes Gespräch", partner_name="B",
+                            last_message_at=utcnow() - timedelta(days=120)))
+        db.commit()
+    client = TestClient(app)
+    assert "Altes Gespräch" in client.get("/chats").text                  # no limit set
+    set_setting("chat_sync_days", "90")
+    page = client.get("/chats").text
+    assert "Neues Gespräch" in page and "Altes Gespräch" not in page and "Show 1 hidden or older chats" in page
+    assert "Altes Gespräch" in client.get("/chats?show_hidden=1").text
