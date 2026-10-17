@@ -71,6 +71,26 @@ def reschedule_agents() -> None:
         schedule_agent(a, run_soon=False)
 
 
+FOLLOW_UP_S = 120
+
+
+def follow_up(agent_id: int) -> None:
+    """A check left hits pending (Claude screens at most screening.MAX_PER_RUN per check): one more check of the
+    agent shortly, which judges them first (quiet hours and adaptive polling do not apply)."""
+    if not scheduler.running:
+        return
+    log.info("agent %s: hits still pending, another check in %s s", agent_id, FOLLOW_UP_S)
+    scheduler.add_job(_follow_up_job, "date", run_date=datetime.now().astimezone() + timedelta(seconds=FOLLOW_UP_S),
+                      args=[agent_id], id=f"{_agent_job(agent_id)}-follow-up", replace_existing=True)
+
+
+async def _follow_up_job(agent_id: int) -> None:
+    if is_checking(agent_id):
+        return
+    with timeline.fresh(actor="scheduler"):
+        await run_agent(agent_id)
+
+
 def unschedule_agent(agent_id: int) -> None:
     if scheduler.get_job(_agent_job(agent_id)):
         scheduler.remove_job(_agent_job(agent_id))

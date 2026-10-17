@@ -364,6 +364,9 @@ async def test_a_new_hit_is_pending_until_it_passed(fake, world, monkeypatch):
         return {h.id for h in hits}
 
     monkeypatch.setattr(screening, "screen_all", screen_all)
+    from app import scheduler
+    follow_ups = []
+    monkeypatch.setattr(scheduler, "follow_up", follow_ups.append)
     a = create_agent("https://fake.example/s/iphone")
     fake.pages = [[]]
     await run_agent(a.id)
@@ -373,6 +376,7 @@ async def test_a_new_hit_is_pending_until_it_passed(fake, world, monkeypatch):
     await run_agent(a.id)
     assert states == ["pending"] * 3
     assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "pending"}
+    assert follow_ups == [a.id]                                       # the one left gets a check soon
     from fastapi.testclient import TestClient
     from app.main import app
     with TestClient(app) as c:
@@ -384,7 +388,7 @@ async def test_a_new_hit_is_pending_until_it_passed(fake, world, monkeypatch):
     assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "new", "2": "filtered", "3": "new", "4": "pending"}
     _set(a.id, geizhals_level=None, screen=False)                     # switched off: what waits is simply new
     await run_agent(a.id)
-    assert _hits(a.id)["4"].state == "new"
+    assert _hits(a.id)["4"].state == "new" and follow_ups == [a.id, a.id]
 
 
 def test_without_a_geizhals_price_the_zone_asks_claudes_verdict():

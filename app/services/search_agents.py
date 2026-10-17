@@ -56,6 +56,7 @@ class RunResult:
     bumped: int = 0
     baseline: bool = False
     error: str | None = None
+    pending_left: int = 0       # hits still pending after the check (more than one check screens): a follow-up comes
 
 
 def _interval(platform: platforms.Platform, interval_s: int | None) -> int:
@@ -676,6 +677,12 @@ async def _run_agent(agent_id: int) -> RunResult:
         asked = await screening.screen_all(agent_id, to_screen)
     if _holds(agent) and to_notify:
         _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
+    if agent.screen and _holds(agent):
+        res.pending_left = sum(1 for h in res.new if h.state == PENDING)
+        if res.pending_left:            # judged in a follow-up check soon, not only at the next regular one
+            from app import scheduler
+
+            scheduler.follow_up(agent_id)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
     multi = platforms.multi()
