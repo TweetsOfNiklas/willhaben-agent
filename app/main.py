@@ -2131,11 +2131,14 @@ templates.env.globals.update(event_link=event_link)
 
 
 def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
-    """The inbox popover (base.html): the latest events, unread = newer than the last "Mark all read"."""
+    """The inbox popover (base.html): the events since its last "Clear" (Home's activity keeps them all); unread =
+    newer than the last clear."""
     seen = _inbox_seen_at()
     out = []
     for e in recent_events(limit):
         ts = e.ts if e.ts.tzinfo else e.ts.replace(tzinfo=timezone.utc)
+        if ts <= seen:
+            break                        # newest first: the rest was cleared
         out.append({"kind": "pay" if e.kind == "paylivery" else e.kind, "title": t(INBOX_KINDS.get(e.kind, "Notification")),
                     "text": e.message, "time": _ago(ts), "link": event_link(e), "unread": ts > seen})
     return out
@@ -2183,6 +2186,7 @@ async def inbox_items(request: Request):
 
 @app.post("/inbox/read-all")
 async def inbox_read_all(request: Request):
+    """The inbox's "Clear": all read, and the popover starts empty again."""
     set_setting("inbox_seen_at", utcnow().isoformat())
     ref = request.headers.get("referer") or "/"
     return back(ref if ref.startswith(str(request.base_url)) or ref.startswith("/") else "/")

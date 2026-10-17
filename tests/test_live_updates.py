@@ -132,3 +132,16 @@ def test_page_carries_the_cursor_badge_keys_and_the_inbox_fragment(client):
     assert 'id="inbox-box" data-refresh="/inbox/items"' in page
     frag = client.get("/inbox/items").text
     assert frag.lstrip().startswith("<div id=\"inbox-box\"") and "Neuer Treffer: Rad" in frag and "<html" not in frag
+
+
+def test_clearing_the_inbox_empties_the_popover(client):
+    from app.db import log_event
+
+    log_event("hit", "Neuer Treffer: Rad", "https://example.invalid/ad/1")
+    assert "Neuer Treffer: Rad" in client.get("/inbox/items").text
+    client.post("/inbox/read-all")
+    frag = client.get("/inbox/items").text
+    assert "Neuer Treffer: Rad" not in frag and "Nothing new" in frag
+    assert "Neuer Treffer: Rad" in client.get("/").text.split('id="activity"')[1]     # Home's activity keeps it
+    log_event("hit", "Neuer Treffer: Lampe", "https://example.invalid/ad/2")
+    assert "Neuer Treffer: Lampe" in client.get("/inbox/items").text
