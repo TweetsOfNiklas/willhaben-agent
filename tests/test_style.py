@@ -272,3 +272,38 @@ def test_rules_save_stores_the_profile_and_a_post_without_it_keeps_it(client):
     assert get_setting("reply_style") == ""            # an emptied textarea clears it
     client.post("/settings", data={"section": "rules", "reply_rules": "x", "reply_style": "y" * (style.MAX_PROFILE + 50)})
     assert len(get_setting("reply_style")) == style.MAX_PROFILE
+
+
+# ------------------------------------------------------------------ the page refreshes itself, no reload
+async def test_jobs_report_the_style_marker_while_the_job_runs(backend):
+    """base.html refreshes an element with data-pending-key once its key left GET /jobs' pending list: the running
+    derivation must be in it, else the card would refetch the page on every poll instead of once at the end."""
+    from app.main import jobs_status
+
+    _messages(8)
+    backend.gate = asyncio.Event()
+    style.start()
+    assert "style" in (await jobs_status())["pending"]
+    backend.gate.set()
+    await finish_jobs()
+    assert "style" not in (await jobs_status())["pending"]
+
+
+def test_card_refreshes_on_the_claude_lane_and_waits_for_its_job(client, backend, monkeypatch):
+    card = _card(client.get("/settings/rules", headers=EN).text)
+    assert 'data-refresh-on-lane="claude"' in card and "data-pending-key" not in card     # another tab: fresh profile when a job ends
+    monkeypatch.setattr(style.jobs, "busy", lambda prefix="": prefix == "style-derive")
+    card = _card(client.get("/settings/rules", headers=EN).text)
+    assert 'data-refresh-on-lane="claude"' in card and 'data-pending-key="style"' in card
+
+
+def test_sent_drafts_with_line_breaks_are_no_style_examples():
+    """A sent draft is Claude's voice, also when it had line breaks: both selections compare normalised text."""
+    with session() as db:
+        db.add(Conversation(id="c1", role="seller"))
+        chats._upsert_message(db, "c1", "m1", "out", "Gerne, der Artikel ist noch da. Abholung geht heute ab 18 Uhr.", T0)
+        chats._upsert_message(db, "c1", "m2", "out", "passt, bis später dann", T0 + timedelta(minutes=1))
+        db.add(Draft(conversation_id="c1", text="Gerne, der Artikel ist noch da.\nAbholung geht heute ab 18 Uhr.", status="sent", sent_at=T0))
+        db.commit()
+    assert style.own_messages() == ["passt, bis später dann"]
+    assert chats._style_examples() == ["passt, bis später dann"]

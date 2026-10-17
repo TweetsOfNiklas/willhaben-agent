@@ -16,15 +16,16 @@ router = APIRouter()
 async def style_derive(request: Request):
     """Start the derivation in the background. The card (htmx) comes back at once with its running state and
     refreshes itself when the job ends; without JavaScript the page reloads with a short message."""
-    sp = style.panel()
-    if not sp["enough"]:
-        note = t("Only {n} of your own messages so far – at least {min} are needed", n=sp["count"], min=sp["min"])
-    elif style.start() is None:
-        note = t("Claude is already deriving your writing style")     # the card shows the running state anyway
-    else:
-        note = t("Claude derives your writing style in the background")
+    count = len(style.own_messages())
+    started = count >= style.MIN_MESSAGES and style.start() is not None
     if request.headers.get("hx-request"):
         from app.main import templates
 
-        return templates.TemplateResponse(request, "settings/_style.html", {})
+        return templates.TemplateResponse(request, "settings/_style.html", {})   # the card reads the state itself
+    if count < style.MIN_MESSAGES:
+        note = t("Only {n} of your own messages so far – at least {min} are needed", n=count, min=style.MIN_MESSAGES)
+    elif not started:
+        note = t("Claude is already deriving your writing style")
+    else:
+        note = t("Claude derives your writing style in the background")
     return RedirectResponse(f"/settings/rules?msg={quote(note, safe='')}", status_code=303)

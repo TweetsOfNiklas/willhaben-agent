@@ -1,7 +1,7 @@
-{# Settings → Selling → My rules → Writing style (app/services/style.py, app/style_routes.py): the profile textarea (saved by the rules form #general via form="general"), when it was derived, the derive button. While the derivation runs the card carries data-pending-key="style" (base.html refreshes it when the job ends). sp = style_panel(): {profile, meta, at, count, min, enough, running}. #}
+{# Settings → Selling → My rules → Writing style (app/services/style.py, app/style_routes.py): the profile textarea (saved by the rules form #general via form="general"), when it was derived, the derive button. While the derivation runs the card carries data-pending-key="style" (base.html refreshes it when the job ends); data-refresh-on-lane="claude" refreshes a card that was loaded before the job started. sp = style_panel(): {profile, meta, at, count, min, enough, running}. #}
 {% import "_ui.html" as ui %}
 {% set sp = style_panel() %}
-<section id="style-card"{% if sp.running %} data-pending-key="style"{% endif %} class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="style-card" data-refresh-on-lane="claude"{% if sp.running %} data-pending-key="style"{% endif %} class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="flex min-w-0 flex-1 basis-[260px] flex-col gap-0.5">
       <span class="font-medium">{{ _("Writing style") }}</span>

@@ -1823,7 +1823,8 @@ def _live_event(e: EventLog) -> dict[str, Any]:
 async def jobs_status(since: int | None = None):
     """Background jobs for the jobs indicator, plus every element still waiting for one (spinners on the page):
     keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published),
-    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer).
+    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer), "style"
+    (Claude derives the writing style, Settings → My rules).
     Every open page also asks now and then for what happened meanwhile: the sidebar badges ("counts") and the inbox
     events after `since` (its last known event id), shown as notices – not the ones sent without a push. Without
     `since` only "last_event", the page's starting point."""
@@ -1835,6 +1836,7 @@ async def jobs_status(since: int | None = None):
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
         pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
         pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
+        pending += jobs.current_keys("style")              # Claude derives the writing style (app/services/style.py)
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))

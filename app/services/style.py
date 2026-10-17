@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlmodel import col, select
 
-from app.db import Draft, Message, get_setting, session, set_setting, utcnow
+from app.db import Draft, Message, Setting, get_setting, session, utcnow
 from app.i18n import t
 from app.llm import prompts
 from app.llm.base import LLMError, get_backend
@@ -86,6 +86,7 @@ def examples(limit: int | None = None) -> list[str]:
 
 
 def _norm(text: str) -> str:
+    """One line, single spaces: how a message is compared and shown (chats._style_examples uses it too)."""
     return " ".join(text.split())
 
 
@@ -137,8 +138,14 @@ async def derive() -> dict[str, Any]:
             chosen.append(e)
     info = {"at": utcnow().isoformat(), "count": len(msgs), "examples": chosen[:prompts.MAX_STYLE_EXAMPLES],
             "model": result.model, "note": str(data.get("note") or "").strip()[:MAX_NOTE]}
-    set_setting("reply_style", text)
-    set_setting("reply_style_meta", json.dumps(info, ensure_ascii=False))
+    with session() as db:                     # both or neither: the profile never gets another run's meta
+        for key, value in (("reply_style", text), ("reply_style_meta", json.dumps(info, ensure_ascii=False))):
+            row = db.get(Setting, key)
+            if row is None:
+                db.add(Setting(key=key, value=value))
+            else:
+                row.value = value
+        db.commit()
     return info
 
 
