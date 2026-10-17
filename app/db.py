@@ -687,10 +687,13 @@ def platform_per_hour(platform: str) -> int:
 
 
 def platform_own_per_hour(platform: str) -> int | None:
-    """A site's own hourly budget (Settings → Platforms, else PLATFORM_<ID>_PER_HOUR); None: it follows willhaben's."""
+    """A site's own hourly budget (Settings → Platforms, else PLATFORM_<ID>_PER_HOUR); None: it follows willhaben's.
+    "-": the field was left empty there, so willhaben's, even for a site with a default of its own (Facebook)."""
     raw = get_setting(f"platform_{platform}_per_hour")
     if raw.isdigit():
         return int(raw)
+    if raw == "-":
+        return None
     own = getattr(get_settings(), f"platform_{platform}_per_hour", None)
     return None if own is None else int(own)
 

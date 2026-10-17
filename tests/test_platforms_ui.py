@@ -270,3 +270,15 @@ def test_screening_prompt_names_the_site():
 
     assert "willhaben.at (österreichisches" in SCREEN_SYSTEM
     assert "kleinanzeigen.de (deutsches" in screen_system("kleinanzeigen.de", "DE")
+
+
+def test_an_empty_budget_follows_willhaben_even_for_a_site_with_a_default(client):
+    """Facebook's own default (60 an hour) came back when the field was left empty: empty is willhaben's now."""
+    from app.db import platform_own_per_hour, platform_per_hour, requests_per_hour
+
+    assert platform_own_per_hour("facebook") == 60                    # never saved: the site's default
+    client.post("/settings/platform/facebook", data={"enabled": "on", "budget": ""}, follow_redirects=False)
+    assert platform_own_per_hour("facebook") is None and platform_per_hour("facebook") == requests_per_hour()
+    assert "value=\"\"" in client.get("/settings/facebook").text.split('name="budget"')[1][:40]
+    client.post("/settings/platform/facebook", data={"enabled": "on", "budget": "20"}, follow_redirects=False)
+    assert platform_per_hour("facebook") == 20

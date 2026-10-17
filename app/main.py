@@ -2116,7 +2116,7 @@ async def settings_platform(request: Request, pid: str):
     gap = str(form.get("gap") or "").strip().replace(",", ".")
     budget = str(form.get("budget") or "").strip()
     set_setting(f"platform_{p.id}_min_gap_s", gap if re.fullmatch(r"\d+(\.\d+)?", gap) else "")
-    set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "")
+    set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "-")     # empty: as willhaben
     p.limiter.min_gap_s, p.limiter.per_hour = platform_min_gap_s(p.id), platform_per_hour(p.id)
     if p.id == "kleinanzeigen":
         from app.platforms import kleinanzeigen as ka
