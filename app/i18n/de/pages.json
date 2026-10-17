@@ -132,8 +132,9 @@
  "Ad {id}: no __NEXT_DATA__ found": "Anzeige {id}: keine __NEXT_DATA__ gefunden",
  "Clear these {n} filtered hits?": "Diese {n} aussortierten Treffer leeren?",
  "Clear the filtered hits of this agent?": "Die aussortierten Treffer dieses Agenten leeren?",
- "Clear filtered hits automatically": "Aussortierte Treffer automatisch leeren",
  "after {n} days": "nach {n} Tagen",
  "Clear": "Leeren",
- "never": "nie"
+ "never": "nie",
+ "Clear hits automatically": "Treffer automatisch leeren",
+ "· saved ones are kept": "· gemerkte bleiben"
 }

@@ -712,7 +712,7 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
     state_counts["all"] = sum(state_counts.values())
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
                   platform=platform, platform_ids=used if len(used) > 1 else [],
-                  filtered_days=search_agents_svc.filtered_days() if state == "filtered" else None)
+                  keep_days=search_agents_svc.keep_days())
 
 
 def _keep_condition(platform_id: str, ad_id: str, d: platforms.AdDetail, h: Hit) -> None:
@@ -800,15 +800,16 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
 @app.post("/hits/clear-filtered")
 async def hits_clear_filtered(agent_id: int | None = Form(None)):
     """Hits → Filtered out → Clear: those of the chosen agent, or all."""
-    search_agents_svc.clear_filtered(agent_id or None)
+    search_agents_svc.clear_hits(("filtered",), agent_id or None)
     return back(f"/hits?state=filtered&agent_id={agent_id}" if agent_id else "/hits?state=filtered")
 
 
-@app.post("/hits/filtered-days")
-async def hits_filtered_days(days: str = Form(""), agent_id: int | None = Form(None)):
-    """Hits → Filtered out: after how many days they are cleared by themselves (0 = never)."""
-    search_agents_svc.set_filtered_days(int(days) if days.strip().isdigit() else 0)
-    return back(f"/hits?state=filtered&agent_id={agent_id}" if agent_id else "/hits?state=filtered")
+@app.post("/hits/keep-days")
+async def hits_keep_days(days: str = Form(""), agent_id: int | None = Form(None), state: str = Form("new")):
+    """Hits: after how many days they are cleared by themselves, all but saved ones (0 = never)."""
+    search_agents_svc.set_keep_days(int(days) if days.strip().isdigit() else 0)
+    state = state if state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
+    return back(f"/hits?state={state}" + (f"&agent_id={agent_id}" if agent_id else ""))
 
 
 @app.post("/hits/mark-seen")

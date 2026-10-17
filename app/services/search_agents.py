@@ -32,13 +32,15 @@ log = logging.getLogger(__name__)
 MAX_PUSH_PER_RUN = 5
 NAME_CHARS = 60
 SETTING_REFILED = "hits_filtered_refiled"    # refile_screened() ran
-# "Filtered out": cleared hits keep a bare row (state "cleared", shown nowhere) so the ad never comes back as new while
-# a search still lists it; that row goes once no search has seen the ad for GONE_DAYS. FILTERED_DAYS_KEY: filtered
-# hits older than that many days are cleared by themselves ("0" = never; unset = FILTERED_DAYS_DEFAULT)
+# cleared hits keep a bare row (state "cleared", shown nowhere) so the ad never comes back as new while a search still
+# lists it; that row goes once no search has seen the ad for GONE_DAYS. KEEP_DAYS_KEY: hits first seen more than that
+# many days ago are cleared by themselves, all but saved ones ("0" = never; unset = KEEP_DAYS_DEFAULT)
 CLEARED = "cleared"
 GONE_DAYS = 30
-FILTERED_DAYS_KEY = "hits_filtered_days"
-FILTERED_DAYS_DEFAULT = 30
+KEEP_DAYS_KEY = "hits_keep_days"
+KEEP_DAYS_DEFAULT = 30
+OLD_KEEP_DAYS_KEY = "hits_filtered_days"     # the same setting while it cleared filtered hits only: still read
+EXPIRING = ("new", "seen", "ignored", "filtered")     # the states the retention clears: never "saved"
 
 
 @dataclass
@@ -902,23 +904,25 @@ def _scam_data(h: Hit) -> dict:
     return {"scam_flags": [f["code"] for f in w], "scam_level": scam.level(w)} if w else {}
 
 
-def filtered_days() -> int:
-    """Settings: after how many days a filtered hit is cleared by itself; 0 = never."""
-    raw = (get_setting(FILTERED_DAYS_KEY) or "").strip()
-    return int(raw) if raw.isdigit() else FILTERED_DAYS_DEFAULT
+def keep_days() -> int:
+    """Settings: after how many days a hit (all but saved ones) is cleared by itself; 0 = never."""
+    raw = (get_setting(KEEP_DAYS_KEY) or get_setting(OLD_KEEP_DAYS_KEY) or "").strip()
+    return int(raw) if raw.isdigit() else KEEP_DAYS_DEFAULT
 
 
-def set_filtered_days(days: int) -> int:
+def set_keep_days(days: int) -> int:
     days = min(max(int(days), 0), 3650)
-    set_setting(FILTERED_DAYS_KEY, str(days))
+    set_setting(KEEP_DAYS_KEY, str(days))
     return days
 
 
-def clear_filtered(agent_id: int | None = None, older_than_days: int | None = None) -> int:
-    """Filtered hits (of one agent, first seen more than `older_than_days` ago) become cleared: shown nowhere, their
+def clear_hits(states: Iterable[str] = ("filtered",), agent_id: int | None = None,
+               older_than_days: int | None = None) -> int:
+    """Hits in `states` (of one agent, first seen more than `older_than_days` ago) become cleared: shown nowhere, their
     texts dropped. The row stays so a search that still lists the ad does not find it new (and screen it again)."""
+    states = [x for x in states if x in EXPIRING]       # never saved ones
     with session() as db:
-        q = select(Hit).where(Hit.state == "filtered")
+        q = select(Hit).where(col(Hit.state).in_(states))
         if agent_id:
             q = q.where(Hit.agent_id == agent_id)
         if older_than_days is not None:
@@ -943,14 +947,14 @@ def prune_cleared() -> int:
     return len(rows)
 
 
-async def filtered_job() -> None:
-    """Scheduler (every 6 h): the filtered hits' retention, then the rows of ads gone for good."""
+async def retention_job() -> None:
+    """Scheduler (every 6 h): the hits' retention (all but saved ones), then the rows of ads gone for good."""
     try:
-        days = filtered_days()
-        cleared = clear_filtered(older_than_days=days) if days else 0
+        days = keep_days()
+        cleared = clear_hits(EXPIRING, older_than_days=days) if days else 0
         gone = prune_cleared()
     except Exception as e:  # noqa: BLE001 - keep the scheduler job alive
-        log.warning("filtered hits cleanup failed: %s", e)
+        log.warning("hits cleanup failed: %s", e)
         return
     if cleared or gone:
-        log.info("filtered hits: %d cleared, %d rows of gone ads deleted", cleared, gone)
+        log.info("hits: %d cleared, %d rows of gone ads deleted", cleared, gone)
