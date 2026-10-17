@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from pathlib import Path
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
+from sqlalchemy import or_
 from sqlmodel import col, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -36,7 +38,8 @@ from app.llm.claude_login import claude_token, forget_token, get_login, token_so
 from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
-from app.services import adaptive_pace, health, human_pace, jobs
+from app.services import adaptive_pace, health, human_pace, jobs, price_zones
+from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
 from app.services import stock
@@ -701,24 +704,97 @@ async def agents_delete(agent_id: int):
     return back("/agents")
 
 
+HIT_SORTS = ("newest", "price", "price_desc", "total")
+HIT_SHIP = ("ship", "pickup")
+HIT_LEVELS = ("bargain", "cheap", "fair")       # "this or better"
+_LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expensive": 4}
+_SCREEN_LEVEL = {"great": "bargain", "good": "cheap", "fair": "fair", "overpriced": "expensive"}
+
+
+@dataclass
+class HitView:
+    """What the hits page shows: tab, agent, site and the sort and filters; also what its bulk buttons act on."""
+    state: str = "new"
+    agent_id: int | None = None
+    platform: str = ""
+    sort: str = "newest"
+    ship: str = ""
+    level: str = ""
+
+    @classmethod
+    def of(cls, state: str = "new", agent_id: Any = None, platform: str = "", sort: str = "", ship: str = "",
+           level: str = "") -> "HitView":
+        aid = agent_id if isinstance(agent_id, int) else (int(agent_id) if str(agent_id or "").strip().isdigit() else None)
+        return cls(state=state or "new", agent_id=aid or None, platform=(platform or "").strip().lower(),
+                   sort=sort if sort in HIT_SORTS else "newest", ship=ship if ship in HIT_SHIP else "",
+                   level=level if level in HIT_LEVELS else "")
+
+    def params(self, **change: Any) -> dict[str, Any]:
+        d = {"state": self.state, "agent_id": self.agent_id, "platform": self.platform,
+             "sort": "" if self.sort == "newest" else self.sort, "ship": self.ship, "level": self.level, **change}
+        return {k: v for k, v in d.items() if v}
+
+    def url(self, **change: Any) -> str:
+        query = urlencode(self.params(**change))
+        return "/hits" + (f"?{query}" if query else "")
+
+    @property
+    def filtered(self) -> bool:
+        return bool(self.ship or self.level)
+
+    def where(self, q, *, state: bool = True):
+        if self.agent_id:
+            q = q.where(Hit.agent_id == self.agent_id)
+        if self.platform:
+            q = q.where(Hit.platform == self.platform)
+        if self.ship == "ship":
+            q = q.where(or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None)))
+        elif self.ship == "pickup":
+            q = q.where(Hit.shipping == "pickup")
+        if state:
+            q = q.where(Hit.state == self.state) if self.state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
+        return q
+
+    def hits(self, db, limit: int = 200) -> list[Hit]:
+        q = self.where(select(Hit))
+        if self.sort == "price":
+            q = q.order_by(col(Hit.price).asc().nulls_last(), col(Hit.id).desc())
+        elif self.sort == "price_desc":
+            q = q.order_by(col(Hit.price).desc().nulls_last(), col(Hit.id).desc())
+        elif self.sort == "total":
+            q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0)).asc(), col(Hit.id).desc())
+        else:
+            q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
+        if not self.level:
+            return list(db.exec(q.limit(limit)))
+        zones, top = price_zones.config(), _LEVEL_RANK[self.level]
+        out = []
+        for h in db.exec(q.limit(limit * 10)):
+            lvl = hit_label(h, zones)
+            if lvl is not None and _LEVEL_RANK.get(lvl, 9) <= top:
+                out.append(h)
+                if len(out) >= limit:
+                    break
+        return out
+
+
+def hit_label(h: Hit, zones: dict[str, Any] | None = None) -> str | None:
+    """The price label a hit card shows: the zone from Geizhals' new price, else Claude's verdict."""
+    lvl = deals_svc.hit_level(h, zones) if search_agents_svc.geizhals_below_pct(h) is not None else None
+    if lvl is None and h.screen_relevant and h.screen_deal in _SCREEN_LEVEL:
+        lvl = _SCREEN_LEVEL[h.screen_deal]
+    return lvl
+
+
 @app.get("/hits", response_class=HTMLResponse)
-async def hits_page(request: Request, agent_id: str = "", state: str = "new", platform: str = ""):
-    aid = int(agent_id) if agent_id.strip().isdigit() else None   # "All search agents" sends an empty value
-    platform = platform.strip().lower()
+async def hits_page(request: Request, agent_id: str = "", state: str = "new", platform: str = "", sort: str = "",
+                    ship: str = "", level: str = ""):
+    view = HitView.of(state, agent_id, platform, sort, ship, level)   # "All search agents" sends an empty agent_id
+    aid, platform = view.agent_id, view.platform
     with session() as db:
-        q = select(Hit)
-        if aid:
-            q = q.where(Hit.agent_id == aid)
-        if platform:
-            q = q.where(Hit.platform == platform)
-        q = q.where(Hit.state == state) if state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
-        hits = list(db.exec(q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc()).limit(200)))
+        hits = view.hits(db)
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
-        counts_q = select(Hit.state, func.count()).group_by(Hit.state)
-        if aid:
-            counts_q = counts_q.where(Hit.agent_id == aid)
-        if platform:
-            counts_q = counts_q.where(Hit.platform == platform)
+        counts_q = view.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
         state_counts = dict(db.exec(counts_q).all())
         state_counts.pop(search_agents_svc.CLEARED, None)
         used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
@@ -729,9 +805,9 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
         with_hits = {p for p in db.exec(shown_q).all() if p}
     state_counts["all"] = sum(state_counts.values())
     filter_ids = sorted(with_hits | set(used) | ({platform} if platform else set()), key=_platform_name)
-    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
-                  platform=platform, platform_ids=used if len(used) > 1 else [],
-                  filter_platform_ids=filter_ids if len(filter_ids) > 1 or platform else [],
+    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=view.state,
+                  state_counts=state_counts, platform=platform, platform_ids=used if len(used) > 1 else [],
+                  filter_platform_ids=filter_ids if len(filter_ids) > 1 or platform else [], view=view,
                   keep_days=search_agents_svc.keep_days())
 
 
@@ -875,42 +951,46 @@ def _can_sync(h: Hit) -> bool:
         return False
 
 
-def _hits_url(state: str | None, agent_id: int | None, platform: str | None) -> str:
-    """The hits page with the tab, agent and site it was left on."""
-    query = urlencode({k: v for k, v in (("state", state), ("agent_id", agent_id), ("platform", platform)) if v})
-    return "/hits" + (f"?{query}" if query else "")
+def _view_form(form: Any, state: str | None = None) -> HitView:
+    """The hits page's view as its forms send it (hidden fields of the same names)."""
+    return HitView.of(state or form.get("state") or "new", form.get("agent_id"), form.get("platform") or "",
+                      form.get("sort") or "", form.get("ship") or "", form.get("level") or "")
 
 
 @app.post("/hits/clear-filtered")
-async def hits_clear_filtered(agent_id: int | None = Form(None), platform: str = Form("")):
-    """Hits → Filtered out → Clear: those of the chosen agent and site, or all."""
-    search_agents_svc.clear_hits(("filtered",), agent_id or None, platform=platform.strip().lower() or None)
-    return back(_hits_url("filtered", agent_id, platform.strip().lower()))
+async def hits_clear_filtered(request: Request):
+    """Hits → Filtered out → Clear: those the page shows (agent, site, filters), or all."""
+    view = _view_form(await request.form(), "filtered")
+    if view.filtered:
+        with session() as db:
+            ids = [h.id for h in view.hits(db, limit=100000)]
+        search_agents_svc.clear_hits(("filtered",), ids=ids)
+    else:
+        search_agents_svc.clear_hits(("filtered",), view.agent_id, platform=view.platform or None)
+    return back(view.url())
 
 
 @app.post("/hits/keep-days")
-async def hits_keep_days(days: str = Form(""), agent_id: int | None = Form(None), state: str = Form("new"),
-                         platform: str = Form("")):
+async def hits_keep_days(request: Request):
     """Hits: after how many days they are cleared by themselves, all but saved ones (0 = never)."""
+    form = await request.form()
+    days = str(form.get("days") or "")
     search_agents_svc.set_keep_days(int(days) if days.strip().isdigit() else 0)
-    state = state if state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
-    return back(_hits_url(state, agent_id, platform.strip().lower()))
+    view = _view_form(form)
+    view.state = view.state if view.state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
+    return back(view.url())
 
 
 @app.post("/hits/mark-seen")
-async def hits_mark_seen(agent_id: int | None = Form(None), platform: str = Form("")):
-    platform = platform.strip().lower()
+async def hits_mark_seen(request: Request):
+    """New → Mark all as seen: the hits the page shows (agent, site, filters)."""
+    view = _view_form(await request.form(), "new")
     with session() as db:
-        q = select(Hit).where(Hit.state == "new")
-        if agent_id:
-            q = q.where(Hit.agent_id == agent_id)
-        if platform:
-            q = q.where(Hit.platform == platform)
-        for h in db.exec(q):
+        for h in view.hits(db, limit=100000):
             h.state = "seen"
             db.add(h)
         db.commit()
-    return back(_hits_url(None, agent_id, platform))
+    return back(view.url(state=""))
 
 
 # ------------------------------------------------------------------ chats
