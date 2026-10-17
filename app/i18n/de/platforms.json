@@ -1,4 +1,6 @@
 {
+ "You log in once in the app's browser window; the session stays in its profile and is renewed automatically. It is used for your chats, your ads and purchases: search agents, price checks and the product search stay anonymous.": "Du meldest dich einmal im Browserfenster der App an; die Sitzung bleibt im Profil gespeichert und wird automatisch erneuert. Sie wird für deine Chats, Anzeigen und Käufe verwendet: Suchagenten, Preisprüfung und Produktsuche bleiben anonym.",
+ "Browser window and request recording": "Browserfenster und Anfragen-Aufzeichnung",
  "{site} account": "{site}-Konto",
  "not checked yet": "noch nicht geprüft",
  "You log in once in the app's browser window; the session stays in its profile like willhaben's. It is used for your messages on {site} only: search agents, price checks and the product search stay anonymous.": "Du meldest dich einmal im Browserfenster der App an; die Sitzung bleibt wie bei willhaben im Profil gespeichert. Sie wird nur für deine Nachrichten auf {site} verwendet: Suchagenten, Preisprüfung und Produktsuche bleiben anonym.",

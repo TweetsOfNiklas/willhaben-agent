@@ -1344,6 +1344,22 @@ async def myads_edit_page(request: Request, ad_id: str, msg: str | None = None):
     return render(request, "myad_edit.html", a=row, cur=cur, msg=msg, unsaved=bool(unsaved))
 
 
+@app.get("/myads/{ad_id}/description", response_class=HTMLResponse)
+async def myads_description(request: Request, ad_id: str):
+    """My ads → the ad's panel: its text from the public page (anonymous, cached a few minutes)."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    if row is None:
+        raise HTTPException(404)
+    error = text = None
+    try:
+        d = await get_public().get_detail(ad_id)
+        text = d.description if d else None
+    except WillhabenError as e:
+        error = t("Could not load the ad from willhaben: {error}", error=e)
+    return templates.TemplateResponse(request, "_myad_description.html", {"a": row, "text": text, "error": error})
+
+
 @app.post("/myads/{ad_id}/edit/ai", response_class=HTMLResponse)
 async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), description: str = Form(""),
                         price: str = Form(""), instruction: str = Form("")):

@@ -684,3 +684,34 @@ def test_cleanup_marks_only_its_own_ads():
         assert db.get(MyAd, "21").pending_action == "delete" and db.get(MyAd, "22").pending_action == "edit"
     assert seen and "1" in seen[0][1]
 
+
+
+def test_the_panel_loads_the_ads_text(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.db import MyAd, session
+    from app.main import app
+    from app.willhaben import public
+
+    class _Pub:
+        async def get_detail(self, ad_id):
+            if ad_id == "2":
+                raise public.WillhabenError("HTTP 500")
+            return None if ad_id == "3" else type("D", (), {"description": "Erste Zeile\nZweite <Zeile>"})()
+
+        async def aclose(self):
+            pass
+
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "get_public", lambda: _Pub())
+    with session() as db:
+        for i in "123":
+            db.add(MyAd(ad_id=i, heading=f"Ad {i}", status="active"))
+        db.commit()
+    with TestClient(app) as c:
+        assert 'hx-get="/myads/1/description"' in c.get("/myads?ad=1").text
+        frag = c.get("/myads/1/description").text
+        assert "Erste Zeile\nZweite &lt;Zeile&gt;" in frag and 'href="/myads/1/edit"' in frag
+        assert "HTTP 500" in c.get("/myads/2/description").text
+        assert "shows no text" in c.get("/myads/3/description").text
+        assert c.get("/myads/9/description").status_code == 404

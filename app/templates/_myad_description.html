@@ -1,0 +1,6 @@
+{# My ads → panel: the ad's text as willhaben shows it (GET /myads/<id>/description, swapped into #myad-description) #}
+{% import "_ui.html" as ui %}
+<div class="flex items-center justify-between gap-2">{{ ui.eyebrow(_("Description")) }}<a class="link link-primary text-[12.5px] no-underline" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a></div>
+{% if error %}<p class="m-0 text-[13px] text-error">{{ error }}</p>
+{% elif text %}<p class="m-0 whitespace-pre-line text-[13.5px] leading-relaxed">{{ text }}</p>
+{% else %}<p class="m-0 text-[13px] text-muted">{{ _("willhaben shows no text for this ad (offline or under review).") }}</p>{% endif %}
