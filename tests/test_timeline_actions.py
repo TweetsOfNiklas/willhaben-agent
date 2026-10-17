@@ -76,6 +76,16 @@ def test_redirect_message_and_failures_are_kept(client):
     assert bad.ok is False and bad.error == "HTTP 404"
 
 
+def test_stock_actions_have_labels(client):
+    from app.db import MyAd
+    with session() as db:
+        db.add(MyAd(ad_id="7", heading="Stuhl", status="active"))
+        db.commit()
+    client.post("/myads/7/quantity", data={"quantity": "3"}, headers={"X-Autosave": "1"})
+    client.post("/sold/7/sales/1/undo", data={"kind": "sold"})
+    assert [timeline.action_label(a.name) for a in _all("action")] == ["Pieces changed", "Sale undone"]
+
+
 def test_reads_and_skipped_routes_are_not_actions(client):
     client.get("/timeline")
     client.post("/lang", data={"lang": "en"})

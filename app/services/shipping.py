@@ -6,6 +6,10 @@ cheapest: …". On the chat page the user checks size/weight (remembered per ad)
 `label_fill` opens that carrier's online form in the remote browser and fills it. The user only pays.
 Carriers have no label API for private customers, so prices come from their published tariffs
 (app/services/shipping_tariffs.py).
+A "→ Shop" option delivers to a parcel shop or locker near the buyer: `shops_near` finds them with the carrier's shop
+finder (app/services/dropoff.py), the owner picks one on the chat page (default: the nearest, stored by `ensure_shop`
+right before the form is filled or the label bought), and `recipient["shop"]` = {carrier, name, address, id?} goes to
+the form filler and the checkout. Shop options are never bought automatically until the carrier form is confirmed live.
 
 Status model (Shipment.status): draft -> awaiting -> buying -> labelled -> printed -> sent, plus failed and discarded.
 A label is only bought once the buyer has paid (`mark_paid`: by hand on the chat page or a push button, from a
@@ -29,7 +33,7 @@ from sqlmodel import select
 from app.db import Conversation, Shipment, current_ad, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.services.shipping_tariffs import CARRIERS, Option, options_for
-from app.services import timeline
+from app.services import selling, timeline
 
 log = logging.getLogger(__name__)
 
@@ -117,10 +121,14 @@ def config() -> dict[str, Any]:
 
 # ------------------------------------------------------------------ quotes
 def quote(parcel: dict[str, Any] | None) -> list[Option]:
-    """Options of the enabled carriers that fit the parcel, cheapest first."""
+    """Options of the enabled carriers that fit the parcel: the owner's preferred carrier, then delivery type first
+    (Settings → Selling preferences), otherwise cheapest first. Without a preference: cheapest first."""
     if not parcel:
         return []
-    return options_for(parcel, enabled_carriers())
+    carrier, delivery = selling.shipping_preference()
+    return sorted(options_for(parcel, enabled_carriers()),
+                  key=lambda o: (bool(carrier) and o.carrier != carrier, delivery != "any" and o.delivery != delivery,
+                                 o.price, o.carrier))
 
 
 def all_options(parcel: dict[str, Any] | None) -> list[tuple[Option, str | None]]:
@@ -187,6 +195,90 @@ def clean_address(raw: dict[str, Any] | None) -> dict[str, str] | None:
     return a
 
 
+def _with_shop(old: dict[str, Any] | None, new: dict[str, str]) -> dict[str, Any]:
+    """A new buyer address keeps the parcel shop picked for the buyer while postcode and city are the same."""
+    shop = (old or {}).get("shop")
+    if isinstance(shop, dict) and old and all(old.get(k) == new.get(k) for k in ("zip", "city")):
+        return {**new, "shop": shop}
+    return new
+
+
+def set_recipient(shipment_id: int, addr: dict[str, str]) -> Shipment:
+    """The address form on the chat page (a cleaned address)."""
+    s = _require(shipment_id)
+    return update(shipment_id, recipient=_with_shop(s.recipient, addr))
+
+
+# ------------------------------------------------------------------ "→ Shop": the parcel shop near the buyer
+SHOP_FIELDS = ("carrier", "name", "address", "id")
+
+
+def clean_shop(raw: Any, carrier: str) -> dict[str, str] | None:
+    if not isinstance(raw, dict):
+        return None
+    shop = {k: str(raw.get(k) or "").strip()[:120] for k in SHOP_FIELDS}
+    shop["carrier"] = carrier
+    if not (shop["name"] and shop["address"]):
+        return None
+    if not shop["id"]:
+        del shop["id"]
+    return shop
+
+
+def shop_for(s: Shipment) -> dict[str, str] | None:
+    """The parcel shop stored for the buyer, when the chosen option delivers to a shop of that carrier."""
+    o = by_key(s.option)
+    shop = (s.recipient or {}).get("shop")
+    if o is None or o.delivery != "shop" or not isinstance(shop, dict) or shop.get("carrier") != o.carrier:
+        return None
+    return shop
+
+
+async def shops_near(s: Shipment) -> list[dict[str, Any]]:
+    """Parcel shops of the option's carrier near the buyer's address, nearest first (with dist_m); [] for a door
+    option, without an address, or when the carrier's finder fails."""
+    from app.services import dropoff
+    o = by_key(s.option)
+    if o is None or o.delivery != "shop" or not s.recipient:
+        return []
+    try:
+        found = await asyncio.wait_for(dropoff.nearest(s.recipient, [o.carrier], per_carrier=5, purpose="delivery"), 10)
+    except Exception as e:  # noqa: BLE001 - the card and the purchase must not fall over a finder
+        log.warning("parcel shop lookup for shipment %s failed: %s", s.id, e)
+        return []
+    out = []
+    for p in found.get(o.carrier) or []:
+        if shop := clean_shop(p, o.carrier):
+            out.append({**shop, "dist_m": p.get("dist_m")})
+    return out
+
+
+def set_shop(shipment_id: int, raw: Any) -> Shipment:
+    """The owner's pick on the chat page."""
+    s = _require(shipment_id)
+    o = by_key(s.option)
+    if o is None or o.delivery != "shop" or not s.recipient:
+        raise ShippingError(t("The chosen option delivers to the door – no parcel shop needed"))
+    shop = clean_shop(raw, o.carrier)
+    if shop is None:
+        raise ShippingError(t("Parcel shop incomplete: name and address are needed"))
+    return update(shipment_id, recipient={**s.recipient, "shop": shop})
+
+
+async def ensure_shop(shipment_id: int) -> dict[str, str] | None:
+    """Right before a "→ Shop" label is filled or bought: the stored shop, else the nearest one to the buyer (stored
+    now). None for a door option or when no shop was found."""
+    s = _require(shipment_id)
+    if shop := shop_for(s):
+        return shop
+    shops = await shops_near(s)
+    if not shops:
+        return None
+    shop = {k: v for k, v in shops[0].items() if k in SHOP_FIELDS}
+    update(s.id, recipient={**s.recipient, "shop": shop})
+    return shop
+
+
 def set_parcel(shipment_id: int, parcel: dict[str, Any], remember: bool = True) -> Shipment:
     """User-confirmed size/weight; also remembered on the ad for the next buyer."""
     p = clean_parcel({**parcel, "source": "user"})
@@ -204,7 +296,7 @@ def set_parcel(shipment_id: int, parcel: dict[str, Any], remember: bool = True) 
 
 
 def _auto_option(s: Shipment) -> Shipment:
-    """Keep the chosen option if it still fits, else take the cheapest."""
+    """Keep the chosen option if it still fits, else the first online one of `quote` (preferred, else cheapest)."""
     opts = quote(s.parcel)
     if not opts:
         return update(s.id, option=None, price=None)
@@ -293,7 +385,8 @@ async def detect(conversation_id: str, force: bool = False) -> Shipment | None:
     parcel = (ad.parcel if ad and ad.parcel else None) or clean_parcel(d.get("parcel"))
     note = (d.get("note") or "").strip() or None
     if existing and existing.status == "draft":
-        s = update(existing.id, recipient=addr or existing.recipient, parcel=existing.parcel or parcel,
+        s = update(existing.id, recipient=_with_shop(existing.recipient, addr) if addr else existing.recipient,
+                   parcel=existing.parcel or parcel,
                    note=note, agreed_price=agreed or existing.agreed_price)
     elif existing and not force:                 # paid/labelled/sent: a new address needs a new shipment by hand
         return claim_payment(existing.id) if claimed else None
@@ -432,8 +525,18 @@ def auto_blockers(s: Shipment) -> list[str]:
     o = by_key(s.option)
     if o is None or not o.online or not s.recipient:
         out.append(t("no online label for this address and option"))
-    elif o.carrier not in cfg["carriers"]:
-        out.append(t("{carrier} is not allowed for automatic buying", carrier=CARRIERS[o.carrier].name))
+    else:
+        if o.carrier not in cfg["carriers"]:
+            out.append(t("{carrier} is not allowed for automatic buying", carrier=CARRIERS[o.carrier].name))
+        if o.delivery == "shop":            # the carrier form's shop choice is not live-tested yet
+            out.append(t("shop delivery needs a manual purchase"))
+        _, wanted = selling.shipping_preference()
+        if wanted == "home" and o.delivery == "shop":
+            out.append(t("delivers to a parcel shop, but you prefer the door"))
+        elif wanted == "shop" and o.delivery == "home":
+            out.append(t("delivers to the door, but you prefer a parcel shop"))
+    if _card() is None:
+        out.append(t("no payment card stored"))
     if s.price is None:
         out.append(t("label price unknown"))
     elif s.price > cfg["max_price"]:
@@ -447,12 +550,21 @@ def auto_blockers(s: Shipment) -> list[str]:
     return out
 
 
+def _card() -> dict[str, str] | None:
+    from app.services import label_buy
+    return label_buy.card()
+
+
 def _sold_to_buyer(s: Shipment) -> bool:
-    from app.services import sold
+    """A sale recorded for this chat (app/services/stock.py), or the ad marked sold to it before there was a ledger.
+    A reservation is not enough."""
+    from app.services import stock
+    if stock.sold_to(s.conversation_id) is not None:
+        return True
     with session() as db:
         conv = db.get(Conversation, s.conversation_id)
-    state = sold.state_for(conv) if conv else None
-    return bool(state and state.get("is_buyer"))
+        ad = current_ad(db, conv.ad_id) if conv and conv.ad_id else None
+    return bool(ad and (ad.sale_status or ad.status) == "sold" and ad.sale_conversation_id == s.conversation_id)
 
 
 def _bought_today(exclude_id: int) -> int:
@@ -704,6 +816,8 @@ def _summary(s: Shipment) -> str:
     r = s.recipient or {}
     lines = [f"{o.label()} – {_eur(o.price)}"] if o else []
     lines.append(f"{r.get('name', '')}, {r.get('zip', '')} {r.get('city', '')}".strip(" ,"))
+    if shop := shop_for(s):
+        lines.append(f"→ {shop['name']}, {shop['address']}")
     return "\n".join(lines)
 
 
@@ -736,7 +850,9 @@ def offer_text(s: Shipment, conv_title: str | None) -> list[str]:
     r = s.recipient or {}
     lines = [f"{r.get('name', '')}, {r.get('zip', '')} {r.get('city', '')}", conv_title or ""]
     if o:
-        lines.append(t("Cheapest: {option} – {price}", option=o.label(), price=_eur(o.price)))
+        cheapest = min((x.price for x in quote(s.parcel) if x.online), default=o.price)
+        lines.append(t("Cheapest: {option} – {price}", option=o.label(), price=_eur(o.price)) if o.price <= cheapest
+                     else t("Preferred: {option} – {price}", option=o.label(), price=_eur(o.price)))
     if s.agreed_price:
         lines.append(t("Agreed price: {price}", price=_eur(s.agreed_price)))
     if s.payment_claimed_at:

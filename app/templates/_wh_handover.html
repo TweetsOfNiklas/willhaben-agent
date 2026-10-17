@@ -1,5 +1,6 @@
-{# Handover inside a publish form. Same names: handover, paylivery, parcel_size, parcel_carrier. #}
-{% set sh = plan.shipping or {} %}{% set ho = sh.handover or 'pickup' %}
+{# Handover inside a publish form. Same names: handover, paylivery, parcel_size, parcel_carrier. Until the draft has
+   a handover of its own: the owner's usual one (Settings → Selling preferences). #}
+{% set sh = plan.shipping or {} %}{% set ho = sh.handover or sell_handover_default() %}
 <fieldset class="wh-handover m-0 flex flex-col gap-2.5 border-0 p-0" x-data="{ ho: '{{ ho }}' }">
   <div class="flex flex-wrap gap-1.5">
     {% for v, lbl in [('pickup', _("Self pickup")), ('shipping', _("Shipping")), ('both', _("Self pickup or shipping"))] %}

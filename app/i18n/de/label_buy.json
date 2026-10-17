@@ -46,5 +46,6 @@
   "last success": "letzter Erfolg",
   "not learned yet": "noch nicht gelernt",
   "Reset playbook": "Ablauf zurücksetzen",
-  "Playbook reset – the next purchase asks Claude again": "Ablauf zurückgesetzt – der nächste Kauf fragt Claude erneut"
+  "Playbook reset – the next purchase asks Claude again": "Ablauf zurückgesetzt – der nächste Kauf fragt Claude erneut",
+  "no parcel shop found near the buyer – choose a door option or finish in the browser": "kein Paketshop beim Käufer gefunden – Haustür-Option wählen oder im Browser fertigstellen"
 }

@@ -251,9 +251,11 @@ def finders(monkeypatch):
             assert request.headers["apikey"]
             return httpx.Response(200, json=[
                 {"name": "Trafik", "type": "SHOPINSHOP", "street": "C", "houseNumber": "3", "zipCode": "1160",
-                 "city": "Wien", "latitude": 48.2105, "longitude": 16.3300, "offersPrepaidParcelDropOff": True},
+                 "city": "Wien", "latitude": 48.2105, "longitude": 16.3300, "offersPrepaidParcelDropOff": True,
+                 "parcelShopId": "AT-1001"},
                 {"name": "Nur Abholung", "type": "LOCKER", "street": "D", "houseNumber": "4", "zipCode": "1160",
-                 "city": "Wien", "latitude": 48.2100, "longitude": 16.3300, "offersPrepaidParcelDropOff": False}])
+                 "city": "Wien", "latitude": 48.2100, "longitude": 16.3300, "offersPrepaidParcelDropOff": False,
+                 "parcelShopId": "AT-1002"}])
         if host == "www.mydpd.at":
             return httpx.Response(403, text="captcha")                         # bot protection: no DPD data
         if host == "wsfinder.hlg.at":
@@ -274,6 +276,88 @@ async def test_nearest_dropoff_points(finders):
     assert res["dpd"] == [] and res["hermes"][0]["dist_m"] > 2000
     assert finders.fmt_dist(55) == "55 m" and finders.fmt_dist(2224) == "2,2 km"
     assert await finders.nearest({"street": "", "zip": ""}, ["post"]) == {}
+
+
+async def test_delivery_lookup_lists_every_shop_and_keeps_the_sender_geo(finders):
+    """A buyer's "→ Shop" target: lockers and shops that take no drop-offs count too, the carrier's id comes along,
+    and the buyer's geocode never replaces the sender's cached one."""
+    from app.db import get_setting
+    buyer = {"street": "Hauptstraße", "house_no": "12", "zip": "1150", "city": "Wien"}
+    res = await finders.nearest(buyer, ["gls"], per_carrier=5, purpose="delivery")
+    assert [(p["name"], p["id"]) for p in res["gls"]] == [("Nur Abholung", "AT-1002"), ("Trafik", "AT-1001")]
+    assert get_setting("ship_sender_geo") == ""                                  # nothing written for a buyer
+    assert [p["name"] for p in (await finders.nearest(buyer, ["gls"]))["gls"]] == ["Trafik"]   # drop-off: as before
+    assert "1150 Wien" in get_setting("ship_sender_geo")                          # the sender's lookup does cache
+    with pytest.raises(ValueError):
+        await finders.nearest(buyer, ["gls"], purpose="pickup")
+
+
+async def test_shop_option_gets_a_parcel_shop_for_the_buyer(chat, finders):
+    """GLS S → Shop: the nearest shop is stored right before the form is filled, the owner may pick another, the pick
+    survives a re-read of the same address and a door option, and goes to the form filler as empfaenger.paketshop."""
+    s = await shipping.detect("c1")
+    assert s.option == "gls:S:shop" and shipping.shop_for(s) is None
+    shops = await shipping.shops_near(s)
+    assert [(sh["name"], sh["carrier"], sh["id"]) for sh in shops] == [("Nur Abholung", "gls", "AT-1002"),
+                                                                       ("Trafik", "gls", "AT-1001")]
+    assert shops[0]["dist_m"] < shops[1]["dist_m"]
+    assert await shipping.ensure_shop(s.id) == {"carrier": "gls", "name": "Nur Abholung", "address": "D 4, 1160 Wien",
+                                                "id": "AT-1002"}
+    assert shipping.shop_for(shipping.get(s.id))["name"] == "Nur Abholung"
+    data = label_fill._data_for(shipping.get(s.id))
+    assert data["empfaenger"]["paketshop"] == {"name": "Nur Abholung", "address": "D 4, 1160 Wien", "id": "AT-1002"}
+    assert "shop" not in data["empfaenger"] and data["empfaenger"]["name"] == "Max Muster"
+    assert data["paket"]["zustellung"] == "shop"
+
+    shipping.set_shop(s.id, {"name": "Trafik", "address": "C 3, 1160 Wien", "id": "AT-1001", "dist_m": 55})
+    assert shipping.shop_for(shipping.get(s.id)) == {"carrier": "gls", "name": "Trafik", "address": "C 3, 1160 Wien",
+                                                     "id": "AT-1001"}
+    assert await shipping.ensure_shop(s.id) == shipping.shop_for(shipping.get(s.id))   # the pick stays
+    s = await shipping.detect("c1")                                                 # Claude re-reads the same address
+    assert shipping.shop_for(s)["name"] == "Trafik"
+    shipping.choose(s.id, "gls:S:home")
+    s = shipping.get(s.id)
+    assert shipping.shop_for(s) is None and "paketshop" not in label_fill._data_for(s)["empfaenger"]
+    assert await shipping.shops_near(s) == [] and await shipping.ensure_shop(s.id) is None
+    with pytest.raises(shipping.ShippingError, match="door"):
+        shipping.set_shop(s.id, {"name": "Trafik", "address": "C 3, 1160 Wien"})
+    shipping.choose(s.id, "dpd:S:shop")                                             # another carrier: its own shop
+    assert shipping.shop_for(shipping.get(s.id)) is None
+    shipping.choose(s.id, "gls:S:shop")
+    assert shipping.shop_for(shipping.get(s.id))["name"] == "Trafik"
+    with pytest.raises(shipping.ShippingError, match="incomplete"):
+        shipping.set_shop(s.id, {"name": "", "address": "C 3"})
+    shipping.set_recipient(s.id, {**ADDR, "house_no": "14"})                       # same postcode and city: kept
+    assert shipping.shop_for(shipping.get(s.id))["name"] == "Trafik"
+    shipping.set_recipient(s.id, {**ADDR, "zip": "8010", "city": "Graz"})          # moved: the shop no longer fits
+    assert shipping.shop_for(shipping.get(s.id)) is None
+
+
+async def test_chat_page_offers_the_buyers_parcel_shops(chat, finders):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    shipping.save_sender({**ADDR, "name": "Max Muster"})
+    s = await shipping.detect("c1")
+    with TestClient(app) as c:
+        page = c.get("/chats/c1").text
+        card = page.split("data-ship-shop")[1].split("</div>")[0]
+        assert "Parcel shop for the buyer:" in card and "<strong>Nur Abholung</strong>" in card
+        assert "the nearest – picked unless you choose another" in card
+        assert 'action="/shipments/%d/shop"' % s.id in card and card.count("<option") == 2
+        assert "Shop delivery is never bought automatically yet" in card
+        assert shipping.shop_for(shipping.get(s.id)) is None                        # a page view stores nothing
+        r = c.post(f"/shipments/{s.id}/shop", data={"shop": '{"name": "Trafik", "address": "C 3, 1160 Wien", "id": "AT-1001"}'},
+                   follow_redirects=False)
+        assert r.status_code == 303 and "Parcel%20shop%20saved" in r.headers["location"]
+        assert shipping.shop_for(shipping.get(s.id))["id"] == "AT-1001"
+        card = c.get("/chats/c1").text.split("data-ship-shop")[1].split("</div>")[0]
+        assert "<strong>Trafik</strong>" in card and "picked unless" not in card
+        assert "selected>Trafik, C 3, 1160 Wien" in card
+        r = c.post(f"/shipments/{s.id}/shop", data={"shop": "not json"}, follow_redirects=False)
+        assert r.status_code == 303 and "incomplete" in r.headers["location"]
+        c.post(f"/shipments/{s.id}/option", data={"key": "gls:S:home"})
+        assert "data-ship-shop" not in c.get("/chats/c1").text
 
 
 async def test_chat_page_sorted_by_nearest(chat, finders):

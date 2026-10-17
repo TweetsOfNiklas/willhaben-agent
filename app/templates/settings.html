@@ -15,7 +15,8 @@
   (_("Platforms"), sites),
   (_("Prices"), [("prices", _("Price rating"), '')]),
   (_("Shipping & pickup"), [("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("printers", _("Printers"), ''), ("calendar", "Google Calendar", '')]),
-  (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else '')), ("rules", _("My rules"), '')]),
+  (_("Selling"), [("selling", _("Selling preferences"), ''), ("rules", _("My rules"), '')]),
+  (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else ''))]),
   (_("Notifications"), [("ha", "Home Assistant", ''), ("telegram", "Telegram", ''), ("quiet", _("Quiet hours"), '')]),
   (_("System"), [("backup", _("Backup & restore"), ''), ("timeline", _("Timeline"), ''), ("web", _("Web address"), ('' if web is not defined or web.reachable else 'warn')), ("language", _("Language & appearance"), '')]),
 ] %}

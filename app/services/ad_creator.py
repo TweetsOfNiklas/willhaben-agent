@@ -13,13 +13,14 @@ from typing import Any
 from sqlmodel import select
 
 from app.config import get_settings
-from app.db import AdDraft, get_setting, session, utcnow
+from app.db import AdDraft, MyAd, get_setting, session, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_prompt, ad_refine_prompt
-from app.services import geizhals
+from app.services import geizhals, min_price, selling
 from app.willhaben.public import WillhabenError, get_public
 from app.services import timeline
+from app.services.shipping import clean_parcel
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,35 @@ def price_stats(prices: list[float]) -> dict[str, Any] | None:
             "min": prices[0], "max": prices[-1]}
 
 
+MAX_QUANTITY = 999
+
+
+def parse_quantity(value: Any) -> int | None:
+    """Pieces from a form field or from Claude: a whole number 1..999; blank, text and zero are None."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    try:
+        n = int(str(value).strip())
+    except ValueError:
+        return None
+    return min(n, MAX_QUANTITY) if n >= 1 else None
+
+
+def pick_quantity(owner: int | None, claude: Any) -> int | None:
+    """What the draft offers: the owner's count wins; Claude's only fills in when the owner gave none and it saw more
+    than one piece. One piece is no stock (None = a single item, as on My ads)."""
+    n = owner if owner is not None else parse_quantity(claude)
+    return n if n and n > 1 else None
+
+
+def claude_parcel(raw: Any, title: str | None) -> dict[str, Any] | None:
+    """Claude's packed-size estimate (for one piece) as a shipping parcel; source "claude" keeps it an estimate
+    that the owner has to confirm before anything is bought. All zeros = could not estimate = None."""
+    if not isinstance(raw, dict):
+        return None
+    return clean_parcel({**raw, "contents": (title or "")[:60], "source": "claude"})
+
+
 def save_images(draft_id: int, files: list[tuple[str, bytes]]) -> list[str]:
     folder = get_settings().uploads_dir / str(draft_id)
     folder.mkdir(parents=True, exist_ok=True)
@@ -58,26 +88,40 @@ def save_images(draft_id: int, files: list[tuple[str, bytes]]) -> list[str]:
 
 
 @timeline.scoped(batch_id="batch_id")
-async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int | None = None) -> AdDraft:
+async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int | None = None,
+                       quantity: int | None = None) -> AdDraft:
+    """quantity: the owner's piece count (the batch review); it wins over what Claude reads from notes and photos,
+    an explicit 1 too (one item: the draft gets no count, the prompt says it is a single piece)."""
+    owner_quantity = parse_quantity(quantity)
     with session() as db:
-        draft = AdDraft(input_text=notes, batch_id=batch_id)
+        draft = AdDraft(input_text=notes, batch_id=batch_id, quantity=pick_quantity(owner_quantity, None))
         db.add(draft)
         db.commit()
         db.refresh(draft)
     timeline.update_context(draft_id=draft.id)
-    paths = save_images(draft.id, files)
+    return await _write_draft(draft.id, notes, save_images(draft.id, files), owner_quantity)
+
+
+@timeline.scoped(draft_id="draft_id")
+async def retry_draft(draft_id: int) -> AdDraft:
+    """A draft Claude could not write (status "error"): the whole pipeline once more from the same notes and photos."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    timeline.update_context(batch_id=d.batch_id)
+    return await _write_draft(draft_id, d.input_text, d.image_paths, d.quantity)
+
+
+async def _write_draft(draft_id: int, notes: str, paths: list[str], owner_quantity: int | None = None) -> AdDraft:
+    """Claude writes the listing, then comparable ads and Geizhals. When Claude fails the draft keeps status "error"
+    and the message (retry_draft tries again); the photos are kept either way. owner_quantity: the owner's piece
+    count, which wins over Claude's (a retry uses the count stored at creation)."""
+    rules = selling.append_to(get_setting("reply_rules"), for_ad=True)
     try:
         result = await get_backend("ads").complete(
-            system=AD_SYSTEM, prompt=ad_prompt(notes, get_setting("reply_rules"), len(paths)),
+            system=AD_SYSTEM, prompt=ad_prompt(notes, rules, len(paths), quantity=owner_quantity),
             schema=AD_SCHEMA, images=[Path(p) for p in paths])
     except LLMError as e:
-        with session() as db:
-            d = db.get(AdDraft, draft.id)
-            d.image_paths, d.status, d.error = paths, "error", str(e)
-            db.add(d)
-            db.commit()
-            db.refresh(d)
-        return d
+        return update_draft(draft_id, image_paths=paths, status="error", error=str(e))
 
     data = result.data
     stats, comparables = None, []
@@ -96,11 +140,15 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
     gh = await _geizhals_lookup(product_query)
 
     with session() as db:
-        d = db.get(AdDraft, draft.id)
-        d.image_paths = paths
+        d = db.get(AdDraft, draft_id)
+        d.image_paths, d.error = paths, None
+        if d.status == "error":          # a retry succeeded (a card discarded meanwhile stays discarded)
+            d.status = "draft"
         d.title, d.description = data.get("title"), data.get("description")
         d.category_hint, d.condition = data.get("category_hint"), data.get("condition")
         d.attributes = data.get("attributes") or []
+        d.quantity = pick_quantity(owner_quantity, data.get("quantity"))
+        d.parcel = claude_parcel(data.get("parcel"), d.title)
         d.search_keywords = keywords
         d.price_suggestion = suggestion
         d.price_stats = {**(stats or {}), "llm_estimate": data.get("price_estimate"), "note": data.get("note")}
@@ -142,25 +190,56 @@ def update_draft(draft_id: int, **fields: Any) -> AdDraft:
     return d
 
 
+_CURRENCY = re.compile(r"€|\bEUR\b|\bEuros?\b|,-$|\.-$", re.I)
+
+
 def parse_price(text: str | None) -> float | None:
-    try:
-        return float(text.replace(",", ".")) if (text or "").strip() else None
-    except ValueError:
+    """The price field as people type it: "12", "12,50", "12.50", "1.200" (thousands), "1.200,50", "12 €", "80 EUR",
+    "1 200". Blank -> None (no price). Raises ValueError for anything else (then the old price stays)."""
+    s = re.sub(r"\s+", "", _CURRENCY.sub("", text or ""))
+    if not s:
         return None
+    if not re.fullmatch(r"\d+(?:[.'’]\d{3})*(?:[.,]\d{1,2})?", s):
+        raise ValueError(text)
+    return min_price.to_float(s)
 
 
 REFINING_BUSY = "Claude is still revising this draft – save or publish again when it is done"
+PUBLISHED_READONLY = "Already published – edit the ad under My ads; here it stays as it was sent"
+PRICE_UNREADABLE = "Price not recognized: “{price}” – the old price stays"
 
 
-def save_fields(draft_id: int, title: str, description: str, price: str | None) -> AdDraft:
-    """The user's edits of title, description and price (form values). Refused while Claude revises the draft: its
-    result would overwrite the edit (the revision started from the text before it)."""
+def save_fields(draft_id: int, title: str, description: str, price: str | None,
+                quantity: str | None = None) -> AdDraft:
+    """The user's edits of title, description, price and piece count (form values; quantity None = the form did not
+    send it, blank = one item). Refused while Claude revises the draft: its result would overwrite the edit (the
+    revision started from the text before it), and once the ad is published (the text lives on willhaben then).
+    A price that cannot be read keeps the old one; d.error says so."""
     with session() as db:
         d = db.get(AdDraft, draft_id)
     if d is not None and d.refining:
         return update_draft(draft_id, error=t(REFINING_BUSY))
-    return update_draft(draft_id, title=title.strip(), description=description.replace("\r\n", "\n").strip(),
-                        price_suggestion=parse_price(price))
+    if d is not None and d.status == "published":
+        return update_draft(draft_id, error=t(PUBLISHED_READONLY))
+    fields: dict[str, Any] = {"title": title.strip(), "description": description.replace("\r\n", "\n").strip()}
+    if quantity is not None:
+        fields["quantity"] = pick_quantity(parse_quantity(quantity), None)
+    try:
+        fields["price_suggestion"] = parse_price(price)
+    except ValueError:
+        fields["error"] = t(PRICE_UNREADABLE, price=(price or "").strip())
+    return update_draft(draft_id, **fields)
+
+
+def save_problem(d: AdDraft, price: str | None) -> str | None:
+    """After save_fields: why the edit was not (fully) taken over, or None when everything was saved."""
+    if d.refining or d.status == "published":
+        return d.error
+    try:
+        parse_price(price)
+    except ValueError:
+        return d.error
+    return None
 
 
 def photos_zip(d: AdDraft) -> bytes:
@@ -236,9 +315,10 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
         current["description"] = (d.description or "").replace(block, "").rstrip()
     # an unconfirmed variant's sheet is no "reliable" data for a plain revision; the explicit check still uses it
     trusted = (d.geizhals or {}).get("verified") is not False or instruction == RECONCILE_INSTRUCTION
-    prompt = ad_refine_prompt(notes=d.input_text, rules=get_setting("reply_rules"), n_images=len(d.image_paths),
+    prompt = ad_refine_prompt(notes=d.input_text, rules=selling.append_to(get_setting("reply_rules"), for_ad=True),
+                              n_images=len(d.image_paths),
                               current=current, specs=match.get("specs") if trusted else None,
-                              product_name=match.get("name"), instruction=instruction)
+                              product_name=match.get("name"), instruction=instruction, quantity=d.quantity)
     try:
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA,
                                                    images=[Path(p) for p in d.image_paths])
@@ -331,13 +411,14 @@ async def add_manual_category(draft_id: int, code: str) -> AdDraft:
 
 
 def parse_shipping(form: Any) -> dict[str, Any]:
-    """Übergabe fields of the publish form → {"handover", "paylivery", "size", "carrier"}; default pickup.
+    """Übergabe fields of the publish form → {"handover", "paylivery", "size", "carrier"}; without a valid handover the
+    owner's usual one (Settings → Selling preferences, pickup unless changed there).
     Everything but pickup NEEDS LIVE VERIFICATION (insert.set_delivery)."""
     from app.willhaben import insert
 
-    handover = str(form.get("handover") or "pickup")
+    handover = str(form.get("handover") or "")
     if handover not in insert.HANDOVERS:
-        handover = "pickup"
+        handover = selling.handover()
     if handover == "pickup":
         return {"handover": "pickup"}
     size = str(form.get("parcel_size") or "").upper()
@@ -353,7 +434,8 @@ _publishing: set[int] = set()     # drafts with a publish in flight (double clic
 async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None = None,
                             shipping: dict[str, Any] | None = None, job: Any = None):
     """Publish the saved draft as free private ad: the chosen category option and field values from the form.
-    shipping: parse_shipping() result; None = pickup only (the live-verified path). job: jobs.Job for progress."""
+    shipping: parse_shipping() result; None = the owner's usual handover (Settings → Selling preferences; pickup, the
+    live-verified path, unless changed there). job: jobs.Job for progress."""
     from app.willhaben import insert
 
     if draft_id in _publishing:
@@ -429,6 +511,43 @@ def enqueue_refine(draft_id: int, instruction: str) -> bool:
     return True
 
 
+def refine_refusal(draft_id: int) -> str:
+    """Why enqueue_refine queued nothing, for the page."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d.status == "published":
+        return t(PUBLISHED_READONLY)
+    if d.refining or d.publishing:
+        return t("Not revised: Claude is already revising or publishing this draft")
+    return t("Nothing to revise: say what Claude should change")
+
+
+def enqueue_retry(draft_id: int) -> bool:
+    """"Try again" on a draft Claude could not write (status "error"): the same pipeline as a new ad, as a background
+    job (lane claude). Meanwhile the draft counts as refining (no edit or publish, the card shows the spinner) and
+    swaps itself in when done. False: not such a draft, or already on its way."""
+    from app.services import jobs
+
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d is None or d.status != "error" or d.refining or d.publishing:
+        return False
+    update_draft(draft_id, refining=True, error=None)
+
+    async def run(job) -> str:
+        try:
+            d = await retry_draft(draft_id)
+        finally:
+            update_draft(draft_id, refining=None)
+        if d.error:
+            raise RuntimeError(d.error)
+        return t("Written: {title}", title=(d.title or "")[:60])
+
+    jobs.submit("refine", t("Claude writes draft #{id} again", id=draft_id), run, lane="claude",
+                current=f"refining:{draft_id}")
+    return True
+
+
 def recover_publishing() -> None:
     """After a restart the queue is gone. The willhaben draft id is remembered, so publishing again continues it."""
     with session() as db:
@@ -441,18 +560,39 @@ def recover_publishing() -> None:
         db.commit()
 
 
+GONE = ("expired", "sold", "deleted", "replaced")     # MyAd statuses of an ad that is no longer online
+
+
+def live_on_willhaben(d: AdDraft) -> MyAd | None:
+    """The willhaben ad this draft became, as long as My ads has not seen it go offline (a fresh "unknown" counts as
+    online: the app itself just published it). None: never published, or no longer online."""
+    if not d.wh_ad_id:
+        return None
+    with session() as db:
+        row = db.get(MyAd, d.wh_ad_id)
+    return row if row is not None and row.status not in GONE else None
+
+
 def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: dict[str, Any] | None):
     """Everything that can be checked without willhaben: (chosen option, attrs, labels, shipping) or InsertError."""
     from app.willhaben import insert
 
     if d.status == "published":
         raise insert.InsertError("Schon veröffentlicht")
+    live = live_on_willhaben(d)
+    if live is not None:           # the status was reset by hand, but the ad is online: publishing again would
+        raise insert.InsertError(  # re-save and re-activate the live ad (or make a public duplicate)
+            f"Ist auf willhaben schon online als {live.ad_id} ({live.status}) – unter „Meine Anzeigen“ (/myads) "
+            f"ändern oder löschen statt noch einmal veröffentlichen")
     plan = d.wh_plan or {}
     opts = plan.get("options") or []
     if not (0 <= option < len(opts)):
         raise insert.InsertError("Bitte zuerst eine Kategorie wählen")
     if not (d.title or "").strip() or not (d.description or "").strip():
         raise insert.InsertError("Titel und Beschreibung dürfen nicht leer sein")
+    if hits := selling.contact_hits(f"{d.title}\n{d.description}"):
+        raise insert.InsertError(f"willhaben zensiert E-Mail-Adressen und Links – bitte „{hits[0]}“ aus Titel und "
+                                 "Beschreibung entfernen")
     chosen = opts[option]
     attrs, labels = {}, {}
     for f in chosen["fields"]:
@@ -462,7 +602,7 @@ def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: d
             raise insert.InsertError(f"Pflichtfeld „{f['label']}“ fehlt")
         attrs[f["code"]], labels[f["code"]] = (code, allowed[code]), f["label"]
 
-    shipping = shipping if shipping and shipping.get("handover") in insert.HANDOVERS else {"handover": "pickup"}
+    shipping = shipping if shipping and shipping.get("handover") in insert.HANDOVERS else parse_shipping({})
     if shipping.get("paylivery") and not shipping.get("size"):
         raise insert.InsertError("Bitte eine Paketgröße für PayLivery wählen")
     if shipping != plan.get("shipping") or plan.get("selected") != option:   # remembered for the form
@@ -541,12 +681,19 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)
-    from app.db import MyAd
     from app.services import my_ads
+    parcel_estimate = clean_parcel(d.parcel)       # source "claude": the shipping card says "estimated"
     with session() as db:                        # show up under "my ads" right away, status unknown yet
-        if db.get(MyAd, res["ad_id"]) is None:
-            db.add(MyAd(ad_id=res["ad_id"], heading=d.title, url=res["url"], status="unknown", image_url=None))
-            db.commit()
+        row = db.get(MyAd, res["ad_id"])
+        if row is None:
+            row = MyAd(ad_id=res["ad_id"], heading=d.title, url=res["url"], status="unknown", image_url=None,
+                       published_at=utcnow(), parcel=parcel_estimate)
+        elif row.parcel is None:                 # the account import was faster than we were: fill the gaps only
+            row.parcel = parcel_estimate
+        if row.quantity is None:                 # the draft's piece count becomes the ad's stock (app/services/stock.py)
+            row.quantity = d.quantity
+        db.add(row)
+        db.commit()
     try:                                         # willhaben's own status (new ads are reviewed before going online)
         await my_ads.import_from_account()
     except Exception as e:  # noqa: BLE001 - the ad is published either way

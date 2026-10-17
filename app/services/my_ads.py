@@ -7,9 +7,9 @@ from typing import Any
 
 from sqlmodel import col, select
 
-from app.db import MyAd, get_setting, session, utcnow
+from app.db import MyAd, current_ad, get_setting, session, utcnow
 from app.i18n import t
-from app.services import jobs
+from app.services import jobs, selling, stock
 from app.services.notify import notify
 from app.willhaben.account import ACTION_DELETE, AccountClient, AdvertList, EndpointUnknown, has_ended
 from app.willhaben.parse import extract_ad_id
@@ -33,7 +33,8 @@ def is_expired(ad: MyAd, cutoff_days: int | None = None) -> bool:
 
 
 def is_sold(ad: MyAd) -> bool:
-    """Sold on willhaben, given away ("Verschenkt") or marked sold in the app."""
+    """Sold on willhaben, given away ("Verschenkt") or marked sold in the app. An ad with a quantity is marked sold
+    only with its last piece (sold.finish), so this stays false while stock is left."""
     return ad.status in ("sold", "Verschenkt") or ad.sale_status == "sold"
 
 
@@ -523,9 +524,12 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
             # through the shared downloader: counted in the access log and recorded like every willhaben request
             if p := await ad_images.download(url, Path(tmp), f"foto{i}"):
                 photos.append(p)
-        prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "", rules=get_setting("reply_rules"),
+        with session() as db:                # the ad's piece count keeps "N Stück verfügbar" in a revised text
+            row = db.get(MyAd, ad_id)
+        prompt = ad_refine_prompt(notes=f"Aktueller Preis: {price:g} €" if price else "",
+                                  rules=selling.append_to(get_setting("reply_rules"), for_ad=True),
                                   n_images=len(photos), current=current, specs=None, product_name=None,
-                                  instruction=instruction)
+                                  instruction=instruction, quantity=row.quantity if row else None)
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA, images=photos)
     d = result.data
     return {"heading": (d.get("title") or heading).strip()[:80], "description": (d.get("description") or description).strip(),
@@ -560,6 +564,48 @@ def set_auto_renew(ad_id: str, on: bool) -> None:
             row.auto_renew = on
             db.add(row)
             db.commit()
+
+
+MAX_QUANTITY = 999
+
+
+def set_quantity(ad_id: str, quantity: int | None) -> None:
+    """Pieces offered in the ad (None = one item) and the sale state that follows from them. Raises ValueError
+    (message for the page) outside 1..999, below the pieces already sold, and blank while sales count: a single
+    item has one state, its next sale or reset would undo every sale in the ledger. 1 without sales is one item,
+    as on a new draft. Lowered to the pieces sold, the ad is sold out here as with its last piece (automatic answers
+    stay as the owner set them); raised again after that, it is open again here. willhaben's status is not touched."""
+    if quantity is not None and not 1 <= quantity <= MAX_QUANTITY:
+        raise ValueError(t("Pieces: a number from 1 to {max}", max=MAX_QUANTITY))
+    with session() as db:
+        row = current_ad(db, ad_id)
+        if row is None:
+            return
+        sales = stock.active_sales(db, row.ad_id)          # newest first
+        sold = sum(s.pieces for s in sales)
+        if quantity is None and sold:
+            raise ValueError(t("{n} piece is sold already – undo the sale first to clear the count", n=sold)
+                             if sold == 1 else
+                             t("{n} pieces are sold already – undo the sales first to clear the count", n=sold))
+        if quantity is not None and quantity < sold:
+            raise ValueError(t("{n} pieces are sold already – the number cannot be lower", n=sold))
+        if quantity == 1 and not sold:
+            quantity = None
+        sold_out = quantity is not None and quantity == sold and row.sale_status != "sold"
+        restocked = quantity is not None and quantity > sold and row.sale_status == "sold"
+        # texts before the first change: t() opens a session of its own
+        note = (t("Sold") if sold_out else
+                t("{sold} sold · {left} available", sold=sold, left=quantity - sold) if restocked else None)
+        row.quantity = quantity
+        if sold_out:
+            row.sale_status, row.sale_conversation_id, row.sale_at = "sold", sales[0].conversation_id, sales[0].created_at
+            row.auto_renew = False    # sold: auto-renew must never reactivate or republish it
+        elif restocked:
+            row.sale_status = row.sale_conversation_id = row.sale_at = None
+        if note:
+            row.last_action = note
+        db.add(row)
+        db.commit()
 
 
 _KEEP: Any = object()
@@ -703,7 +749,8 @@ def _move_to_new_id(old_id: str, new_id: str) -> MyAd:
     """A republished ad has a new willhaben id: copy the per-ad settings over. The old row stays (marked
     replaced, auto-renew off) because buyer chats keep pointing at the old id and still need its auto-reply
     settings."""
-    keep = ("heading", "image_url", "auto_renew", "auto_reply", "auto_reply_instructions", "published_at")
+    keep = ("heading", "image_url", "auto_renew", "auto_reply", "auto_reply_instructions", "published_at", "min_price",
+            "parcel", "quantity")
     with session() as db:
         old = db.get(MyAd, old_id)
         new = db.get(MyAd, new_id) or MyAd(ad_id=new_id)

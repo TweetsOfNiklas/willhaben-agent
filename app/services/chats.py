@@ -25,6 +25,7 @@ from app.llm.prompts import (
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
+from app.services import my_ads, selling, stock
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -132,8 +133,9 @@ async def sync(force: bool = False) -> dict[str, Any]:
             except (LLMError, WillhabenError) as e:
                 log.warning("auto draft failed for %s: %s", row.id, e)
                 continue
-            if notify_on:    # the notification turns into the draft offer: one message, one tap to send
-                await offer_draft(row, d, t("drafted automatically"), replaces=tag)
+            # the message push turns into the draft offer: one message, one tap to send; with message pushes off,
+            # the offer is the one push for this message
+            await offer_draft(row, d, t("drafted automatically"), replaces=tag if notify_on else None)
     last_sync_at[0] = utcnow()
     answered = await process_pending_auto()
     return {"conversations": len(convs), "changed": len(changed), "incoming": len(incoming), "auto": answered}
@@ -316,16 +318,35 @@ async def sync_messages(conversation_id: str) -> str:
     return mode
 
 
-async def ensure_ad_context(conversation_id: str) -> Conversation | None:
+AD_CONTEXT_MAX_AGE = timedelta(minutes=30)   # a price change, reservation or sale on willhaben reaches Claude within this
+
+
+def _ad_context_fresh(conv: Conversation) -> bool:
+    """The stored ad context still serves a draft: the public page's data (it carries the PayLivery flags) younger
+    than AD_CONTEXT_MAX_AGE, or the ad is gone - that only changes when the owner reloads the chat. The editor
+    fallback (_own_ad_context) and contexts stored before they carried a time are fetched again."""
+    ctx = conv.ad_context or {}
+    if ctx.get("status") == "nicht mehr online":
+        return True
+    if "paylivery" not in ctx or conv.ad_context_at is None:
+        return False
+    return utcnow() - _aware(conv.ad_context_at) < AD_CONTEXT_MAX_AGE
+
+
+async def ensure_ad_context(conversation_id: str, force: bool = False) -> Conversation | None:
+    """The ad as Claude sees it (title, price, description, status, PayLivery flags) from the public ad page, kept
+    for AD_CONTEXT_MAX_AGE so a draft sees today's price and status; `force` (the chat's Reload) fetches it again
+    at once, also for an ad stored as gone."""
     with session() as db:
         conv = db.get(Conversation, conversation_id)
-    ctx = conv.ad_context if conv else None
-    if conv is None or not conv.ad_id or (ctx and ("paylivery" in ctx or ctx.get("status") == "nicht mehr online")):
-        return conv                       # contexts stored before the PayLivery flags existed are fetched once more
+    if conv is None or not conv.ad_id or (not force and _ad_context_fresh(conv)):
+        return conv
     try:
         detail = await get_public().get_detail(conv.ad_id)
     except WillhabenError as e:
         log.info("ad context for %s failed: %s", conv.ad_id, e)
+        if "paylivery" in (conv.ad_context or {}):
+            return conv                   # a refresh that failed: the page data from before stays, tried again next time
         return await _own_ad_context(conv)
     me = get_session().user or {}
     with session() as db:
@@ -338,6 +359,7 @@ async def ensure_ad_context(conversation_id: str) -> Conversation | None:
             mine = {str(v) for v in (me.get("id"), me.get("uuid")) if v}
             if mine:
                 conv.role = "seller" if {detail.seller_login_id, detail.seller_uuid} & mine else "buyer"
+        conv.ad_context_at = utcnow()
         db.add(conv)
         db.commit()
         db.refresh(conv)
@@ -368,7 +390,7 @@ async def _own_ad_context(conv: Conversation) -> Conversation:
            "status": "aktiv (eigene Anzeige, Daten aus dem Anzeigen-Editor)", "source": "own_ad"}
     with session() as db:
         conv = db.get(Conversation, conv.id)
-        conv.ad_context = ctx
+        conv.ad_context, conv.ad_context_at = ctx, utcnow()
         conv.role = conv.role or "seller"
         db.add(conv)
         db.commit()
@@ -401,13 +423,14 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
                                   func.max(Message.read_at)).where(Message.conversation_id == conv.id)).one()   # seen ticks too
             drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent)
                              .where(Draft.conversation_id == conv.id)).all()
-            ad = db.get(MyAd, conv.ad_id) if conv.ad_id else None
+            ad = current_ad(db, conv.ad_id) if conv.ad_id else None      # the sale status lives on the live copy
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
             buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
             out["messages"] = fp(list(msgs))
             out["composer"] = fp([list(d) for d in drafts], conv.drafting, conv.draft_error)
             out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
-                                ad and [ad.sale_status, ad.sale_conversation_id], ships, buys)
+                                ad and [ad.sale_status, ad.sale_conversation_id, ad.status, stock.numbers(ad),
+                                        [s.id for s in stock.sales_to(conv.id)]], ships, buys)
     return out
 
 
@@ -493,11 +516,16 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         availability = None
         system, schema = (PURCHASE_SYSTEM, PURCHASE_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
         examples: list[str] = []
+        stock_now = None
     else:
         rules = get_setting("reply_rules")
+        if conv.role == "seller":                     # Settings → Selling preferences, before the per-answer blocks
+            rules = selling.append_to(rules)
         with session() as db:
             ad = current_ad(db, conv.ad_id) if conv.ad_id else None
         floor = ad.min_price if ad and conv.role == "seller" else None
+        numbers = stock.numbers(ad) if conv.role == "seller" else None    # several pieces: Claude knows how many are left
+        stock_now = {"quantity": numbers["quantity"], "remaining": numbers["remaining"]} if numbers else None
         asking = (conv.ad_context or {}).get("price")
         if auto:
             rules = f"{rules}\n\n{auto_rules(get_setting('auto_reply_rules'), ad.auto_reply_instructions if ad else None, floor, asking)}"
@@ -510,7 +538,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         examples = _style_examples()
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
-                          rules=rules, examples=examples, hint=hint, availability=availability)
+                          rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now)
     log.info("draft for %s: hint=%r, ad price=%s", conversation_id, hint, (ad_ctx or {}).get("price"))
     backend = get_backend("purchase" if buy is not None else "chat")   # chats of a purchase order: Settings → "Purchases"
     async with telegram.typing():                 # "typing…" in Telegram while Claude writes
@@ -679,10 +707,11 @@ def enqueue_sync() -> jobs.Job:
 
 
 def enqueue_reload(conversation_id: str) -> jobs.Job:
-    """"Reload" of one chat as a background job (lane chat); the thread updates itself (live view)."""
+    """"Reload" of one chat as a background job (lane chat); the thread updates itself (live view). The ad's data
+    (price, status) is fetched again too, whatever its age."""
     async def run(job: jobs.Job) -> str:
         mode = await sync_messages(conversation_id)
-        await ensure_ad_context(conversation_id)
+        await ensure_ad_context(conversation_id, force=True)
         return "" if mode == "full" else t("Only the last message is available (messages endpoint not verified yet).")
 
     with session() as db:
@@ -702,8 +731,8 @@ def _auto_ad(conv: Conversation) -> MyAd | None:
         return None
     with session() as db:
         ad = current_ad(db, conv.ad_id)
-    if ad and "sold" in (ad.sale_status, ad.status):
-        return None   # sold: no automatic answers to further buyers (the sold workflow offers a polite "sold" draft)
+    if ad and (my_ads.is_sold(ad) or ad.status == "deleted"):
+        return None   # sold out / given away / gone: no automatic answers (the sold workflow offers a polite draft)
     return ad if ad and ad.auto_reply else None
 
 
@@ -734,6 +763,9 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
         why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text,
                                   asking=min_price.asking_value((conv.ad_context or {}).get("price") if conv else None),
                                   intent=d.intent)
+        why += stock.blockers(ad, d.text)   # never more pieces than are left (app/services/stock.py)
+        if selling.contact_hits(d.text):
+            why.append(t("Answer contains an e-mail address or link – willhaben censors them"))
         why += topic.blockers(d.text)     # staying on topic: no instruction words or AI talk, no essays
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":
@@ -838,18 +870,79 @@ async def _process_pending_auto(ad_id: str | None) -> int:
         convs = list(db.exec(q))
     done = 0
     for conv in convs:
-        if _auto_mode(conv) is None or not _waiting_for_answer(conv.id):
+        if _auto_mode(conv) is None or not _waiting_for_answer(conv.id) or _auto_given_up(conv.id):
             continue
         if humanize.enabled():
             _schedule_humanized(conv.id)   # answers later in the background, sync goes on
             continue
         try:
             d = await auto_reply(conv.id)
-        except (LLMError, WillhabenError, NotLoggedIn, SessionUnavailable) as e:
-            log.warning("auto reply failed for %s: %s", conv.id, e)
+        except Exception as e:  # noqa: BLE001 - the owner is told (push, chat page); the other chats are still answered
+            await _auto_failed(conv.id, e)
             continue
         done += bool(d and d.status == "sent")
     return done
+
+
+AUTO_MAX_ATTEMPTS = 3   # tries per buyer message when writing or sending the automatic answer fails (Claude down, …)
+_auto_failures: dict[str, tuple[str, int]] = {}   # conversation id -> (buyer message ext_id, failed attempts)
+
+
+def _auto_given_up(conversation_id: str) -> bool:
+    """AUTO_MAX_ATTEMPTS automatic answers to the buyer's current message failed: the owner knows (_auto_failed),
+    the sync leaves the chat alone until the buyer writes again."""
+    ext, attempts = _auto_failures.get(conversation_id, ("", 0))
+    if attempts < AUTO_MAX_ATTEMPTS:
+        return False
+    last = _last_incoming_msg(conversation_id)
+    return last is not None and last.ext_id == ext
+
+
+async def _auto_failed(conversation_id: str, error: Exception) -> None:
+    """An automatic answer could not be written or sent (Claude or willhaben down, a bug): the chat page shows the
+    reason next to "Prepare answer" (Conversation.draft_error), and the owner gets one push per buyer message - the
+    question with the reason, so they answer themselves - instead of a silent retry at every sync."""
+    if isinstance(error, (LLMError, WillhabenError, NotLoggedIn, SessionUnavailable, EndpointUnknown, SendFailed)):
+        log.warning("auto reply failed for %s: %s", conversation_id, error)
+    else:
+        log.error("auto reply failed for %s: %s", conversation_id, error, exc_info=error)
+    last = _last_incoming_msg(conversation_id)
+    ext = last.ext_id if last else ""
+    prev_ext, attempts = _auto_failures.get(conversation_id, ("", 0))
+    attempts = attempts + 1 if prev_ext == ext else 1
+    _auto_failures[conversation_id] = (ext, attempts)
+    reason = t("Automatic answer failed: {error}", error=error)
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is None:
+            return
+        conv.draft_error = reason
+        db.add(conv)
+        db.commit()
+    if attempts > 1:
+        return                        # pushed for this message already
+    from app.config import get_settings
+    q = last.text if last else conv.last_message_text
+    await notify("auto_reply_pending", t("Not answered automatically: {name}", name=conv.partner_name or "").strip(),
+                 (t("Question: “{text}”", text=q[:120]) + "\n" if q else "") + f"{conv.ad_title or ''} · {reason}",
+                 url=f"{get_settings().public_url.rstrip('/')}/chats/{conv.id}",
+                 data={"conversation_id": conv.id, "ad_id": conv.ad_id}, tag=message_tag(conv.id))
+
+
+def _auto_recovered(conversation_id: str) -> None:
+    """Claude wrote the automatic answer: an earlier failure's note on the chat page goes."""
+    _auto_failures.pop(conversation_id, None)
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None and conv.draft_error:
+            conv.draft_error = None
+            db.add(conv)
+            db.commit()
+
+
+def reset() -> None:
+    """Tests: forget the failed answers of the previous test's conversations."""
+    _auto_failures.clear()
 
 
 # ------------------------------------------------------------------ human-like timing
@@ -922,8 +1015,8 @@ async def _humanized_auto(conversation_id: str) -> Draft | None:
                 continue
             return d
         return None
-    except Exception:  # noqa: BLE001 - a background answer must never take the app down
-        log.exception("humanized auto reply failed for %s", conversation_id)
+    except Exception as e:  # noqa: BLE001 - a background answer must never take the app down
+        await _auto_failed(conversation_id, e)
         return None
     finally:
         _humanized.pop(conversation_id, None)
@@ -939,8 +1032,10 @@ async def auto_reply(conversation_id: str, before_send=None) -> Draft | None:
     if conv is None or _auto_mode(conv) is None:
         return None
     d = await draft_reply(conversation_id, auto=True)
+    _auto_recovered(conversation_id)
     blockers = _auto_blockers(conversation_id, d, messages_of(conversation_id))
     title = conv.ad_title or ""
+    sent: Draft | None = None
     if not blockers and before_send is not None:
         _set_status(d.id, "pending")
         go = await before_send(d)
@@ -954,15 +1049,16 @@ async def auto_reply(conversation_id: str, before_send=None) -> Draft | None:
                 return None
             blockers = _auto_blockers(conversation_id, d, messages_of(conversation_id))
             if not blockers:
-                return await _send_auto(conv, d, conversation_id, title)
-    if not blockers and not _still_auto(conversation_id):   # changed while Claude was drafting
-        discard_draft(d.id)
-        return None
-    if not blockers:
+                sent = await _send_auto(conv, d, conversation_id, title)
+    elif not blockers:
+        if not _still_auto(conversation_id):   # changed while Claude was drafting
+            discard_draft(d.id)
+            return None
         sent = await _send_auto(conv, d, conversation_id, title)
+    if sent is not None:
         if sent.status == "sent":
             return sent
-        blockers = [sent.error or t("Sending failed")]
+        blockers = [sent.error or t("Sending failed")]   # the draft keeps its text: offered below with the reason
     with session() as db:
         row = db.get(Draft, d.id)
         row.auto_reason = f"{row.auto_reason or ''} · {t('not sent: {reasons}', reasons='; '.join(blockers))}".strip(" ·")

@@ -1,5 +1,8 @@
-"""Nearest places to hand in a parcel, per carrier, from the sender's address.
+"""Nearest parcel shops per carrier: where the sender hands in a parcel, or where a buyer picks one up.
 
+`purpose` = "dropoff" (the sender's address: shops that take prepaid parcels; the geocode is kept in the setting
+`ship_sender_geo`) or "delivery" (a buyer's address for a "→ Shop" option: every public shop or locker of the
+carrier; nothing is written to the settings).
 The carriers' own shop finders answer JSON without a login (found via their finder pages, 2026-10-09):
   Post    api.post.at GraphQL `branches` in a bounding box (post offices, Post Partner, stations with
           service 534 "Versandstation"; pickup-only stations are skipped)
@@ -43,13 +46,16 @@ def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
 
 
 def _point(name: str, street: str, zip_: str, city: str, lat: float | None, lon: float | None, kind: str,
-           origin: tuple[float, float], hours: str = "") -> dict[str, Any]:
+           origin: tuple[float, float], hours: str = "", shop_id: Any = None) -> dict[str, Any]:
     d = _dist_m(origin[0], origin[1], lat, lon) if lat is not None and lon is not None else None
     name, street = " ".join((name or "").split()), " ".join((street or "").split())
     if street and street in name:      # Post: "Abholstation A 1160 Wien, Rankgasse 13" already says where
         name = name.replace(street, "").strip(" ,")
-    return {"name": name, "address": f"{street}, {zip_} {city}".strip(", "),
-            "lat": lat, "lon": lon, "dist_m": d, "kind": kind, "hours": hours}
+    out = {"name": name, "address": f"{street}, {zip_} {city}".strip(", "),
+           "lat": lat, "lon": lon, "dist_m": d, "kind": kind, "hours": hours}
+    if shop_id not in (None, ""):
+        out["id"] = str(shop_id)       # the carrier's own shop id, when its finder gives one
+    return out
 
 
 def address_line(a: dict[str, str]) -> str:
@@ -57,7 +63,8 @@ def address_line(a: dict[str, str]) -> str:
 
 
 # ------------------------------------------------------------------ geocoding
-async def geocode(c: httpx.AsyncClient, addr: str) -> tuple[float, float] | None:
+async def geocode(c: httpx.AsyncClient, addr: str, persist: bool = True) -> tuple[float, float] | None:
+    """`persist`: remember the result as the sender's location (only for the sender's own address)."""
     try:
         cached = json.loads(get_setting("ship_sender_geo") or "{}")
     except ValueError:
@@ -70,7 +77,8 @@ async def geocode(c: httpx.AsyncClient, addr: str) -> tuple[float, float] | None
     if not hits:
         return None
     lat, lon = float(hits[0]["lat"]), float(hits[0]["lon"])
-    set_setting("ship_sender_geo", json.dumps({"addr": addr, "lat": lat, "lon": lon}))
+    if persist:
+        set_setting("ship_sender_geo", json.dumps({"addr": addr, "lat": lat, "lon": lon}))
     return lat, lon
 
 
@@ -79,7 +87,7 @@ _POST_QUERY = """query($filter: BranchFilterType){branches(filter:$filter){type 
  postalcode city coordinates{latitudewgs84 longitudewgs84}} openinghourformatted services{serviceid}}}"""
 
 
-async def _post(c: httpx.AsyncClient, origin: tuple[float, float], addr: str) -> list[dict[str, Any]]:
+async def _post(c: httpx.AsyncClient, origin: tuple[float, float], addr: str, purpose: str) -> list[dict[str, Any]]:
     lat, lon = origin
     box = {"coordinatesnw": {"latitudewgs84": lat + 0.02, "longitudewgs84": lon - 0.03},
            "coordinatesso": {"latitudewgs84": lat - 0.02, "longitudewgs84": lon + 0.03}}
@@ -100,18 +108,20 @@ async def _post(c: httpx.AsyncClient, origin: tuple[float, float], addr: str) ->
     return out
 
 
-async def _gls(c: httpx.AsyncClient, origin: tuple[float, float], addr: str) -> list[dict[str, Any]]:
+async def _gls(c: httpx.AsyncClient, origin: tuple[float, float], addr: str, purpose: str) -> list[dict[str, Any]]:
     r = await c.get("https://api.gls-group.net/parcel-shop-management/v2/available-public-parcel-shops-pse-bulk",
                     headers={"apikey": GLS_KEY, "User-Agent": BROWSER_UA},
                     params={"latitude": origin[0], "longitude": origin[1], "distance": 3})
     r.raise_for_status()
+    # drop-off needs a shop that takes prepaid parcels; a buyer can pick up at any shop or locker (PaketBox)
     return [_point(s.get("name"), f"{s.get('street', '')} {s.get('houseNumber', '')}", s.get("zipCode", ""),
                    s.get("city", ""), s.get("latitude"), s.get("longitude"),
-                   "locker" if s.get("type") == "LOCKER" else "shop", origin)
-            for s in r.json() if s.get("offersPrepaidParcelDropOff") and not s.get("isTodayOnVacation")]
+                   "locker" if s.get("type") == "LOCKER" else "shop", origin, shop_id=s.get("parcelShopId"))
+            for s in r.json() if (purpose != "dropoff" or s.get("offersPrepaidParcelDropOff"))
+            and not s.get("isTodayOnVacation")]
 
 
-async def _dpd(c: httpx.AsyncClient, origin: tuple[float, float], addr: str) -> list[dict[str, Any]]:
+async def _dpd(c: httpx.AsyncClient, origin: tuple[float, float], addr: str, purpose: str) -> list[dict[str, Any]]:
     r = await c.post("https://www.mydpd.at/jws.php/shop/findByAddr",
                      headers={"User-Agent": BROWSER_UA, "X-Requested-With": "XMLHttpRequest",
                               "Content-Type": "application/json"},
@@ -119,11 +129,12 @@ async def _dpd(c: httpx.AsyncClient, origin: tuple[float, float], addr: str) -> 
     r.raise_for_status()
     shops = ((r.json() or {}).get("data") or {}).get("shops") or []
     return [_point(s.get("name1"), s.get("street", ""), s.get("postcode", ""), s.get("city", ""),
-                   _f(s.get("lat")), _f(s.get("lng")), "locker" if s.get("type") == "LOCKER" else "shop", origin)
+                   _f(s.get("lat")), _f(s.get("lng")), "locker" if s.get("type") == "LOCKER" else "shop", origin,
+                   shop_id=s.get("id"))
             for s in shops if "WEB" in (s.get("services") or []) and s.get("is_full") != "Y" and s.get("active", True)]
 
 
-async def _hermes(c: httpx.AsyncClient, origin: tuple[float, float], addr: str) -> list[dict[str, Any]]:
+async def _hermes(c: httpx.AsyncClient, origin: tuple[float, float], addr: str, purpose: str) -> list[dict[str, Any]]:
     r = await c.get("https://wsfinder.hlg.at/api//FindPS", headers={"User-Agent": BROWSER_UA}, params={
         "lat": origin[0], "lng": origin[1], "acceptsSuitcases": "false", "hasBoxes": "false", "openAtDayOfWeek": "",
         "openAtTime": "", "maxResult": 10, "maxDist": 15000, "searchTerm": "", "typeId": " ", "countries": "AT"})
@@ -143,28 +154,35 @@ def _f(v: Any) -> float | None:
 FINDERS = {"post": _post, "gls": _gls, "dpd": _dpd, "hermes": _hermes}
 
 
-async def nearest(sender: dict[str, str], carriers: list[str], per_carrier: int = 3) -> dict[str, list[dict[str, Any]]]:
-    """{carrier: [closest drop-off points]} for the sender's address; {} when the address is unknown."""
-    addr = address_line(sender)
-    if not (sender.get("street") and sender.get("zip")):
+PURPOSES = ("dropoff", "delivery")
+
+
+async def nearest(address: dict[str, str], carriers: list[str], per_carrier: int = 3, *,
+                  purpose: str = "dropoff") -> dict[str, list[dict[str, Any]]]:
+    """{carrier: [closest shops]} for an address (the sender's for "dropoff", a buyer's for "delivery");
+    {} when the address is unknown."""
+    if purpose not in PURPOSES:
+        raise ValueError(f"unknown purpose {purpose!r}")
+    addr = address_line(address)
+    if not (address.get("street") and address.get("zip")):
         return {}
-    key = f"{addr}|{','.join(sorted(carriers))}"
+    key = f"{purpose}|{addr}|{','.join(sorted(carriers))}|{per_carrier}"
     hit = _cache.get(key)
     if hit and time.monotonic() - hit[0] < TTL_S:
         return hit[1]
     async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=_transport, follow_redirects=True) as c:
         try:
-            origin = await geocode(c, addr)
+            origin = await geocode(c, addr, persist=purpose == "dropoff")
         except (httpx.HTTPError, ValueError) as e:
-            log.warning("geocoding the sender address failed: %s", e)
+            log.warning("geocoding the %s address failed: %s", purpose, e)
             return {}
         if origin is None:
-            log.warning("sender address not found by the geocoder: %s", addr)
+            log.warning("%s address not found by the geocoder: %s", purpose, addr)
             return {}
 
         async def one(carrier: str) -> list[dict[str, Any]]:
             try:
-                pts = await FINDERS[carrier](c, origin, addr)
+                pts = await FINDERS[carrier](c, origin, addr, purpose)
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
                 log.info("drop-off finder %s failed: %s", carrier, e)
                 return []

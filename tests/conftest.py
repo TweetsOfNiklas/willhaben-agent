@@ -88,7 +88,7 @@ def fresh_db():
     dbmod.set_engine(engine)
     dbmod.init_db()
     from app.platforms import ebay, kleinanzeigen, preisjaeger, shpock, vinted, vpn
-    from app.services import geizhals, jobs, vpn_check
+    from app.services import chats, geizhals, jobs, vpn_check
     from app.willhaben import public, recorder
     vpn.reset()                 # VPN tunnels and their (fake) processes are per test
     vpn_check.reset()           # so is the VPN test (its task belongs to the test's event loop)
@@ -96,6 +96,7 @@ def fresh_db():
         if mod._limiter is not None:     # module-wide: one test's block (429 -> pause) must not pause the next test
             mod._limiter.reset()
     jobs.reset()                # background jobs are per event loop
+    chats.reset()               # failed automatic answers are per test
     recorder.sync_writes = True  # one in-memory connection: willhaben recordings are written right away
     yield
     recorder.reset()

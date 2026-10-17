@@ -450,7 +450,7 @@ def build_anonymizer() -> Anonymizer:
                 texts += address(sender)
         except ValueError:
             pass
-        for k in ("reply_rules", "auto_reply_rules", "ship_sender_geo", "gcal_calendars", "gcal_target"):
+        for k in ("reply_rules", "auto_reply_rules", "sell_notes", "ship_sender_geo", "gcal_calendars", "gcal_target"):
             texts += [line for line in _setting(db, k).splitlines() if len(line.strip()) >= 6]
         for cid, partner, title, last, meet in db.exec(select(
                 Conversation.id, Conversation.partner_name, Conversation.ad_title, Conversation.last_message_text,
@@ -633,6 +633,7 @@ SAFE_SETTINGS = {
     "gcal_in_drafts", "gcal_window_end", "gcal_window_start", "geizhals_auto_specs", "health_disk_min_mb", "llm_model",
     "notify_messages", "push_channel", "quiet_enabled", "quiet_end", "quiet_interval_min", "quiet_mode", "quiet_start",
     "reply_delay_max_s", "reply_delay_min_s", "reply_fast_max_s", "reply_fast_min_s", "reply_humanize", "send_verified",
+    "sell_carrier", "sell_delivery", "sell_handover", "sell_payment", "sell_shipping_cost",
     "ship_carriers", "ship_detect", "ship_sort", "telegram_enabled", "telegram_kinds", "timeline_days", "timeline_enabled", "timeline_max_mb", "timeline_prune", "ui_lang",
     "ui_lang_seen", "wh_recording",
 }

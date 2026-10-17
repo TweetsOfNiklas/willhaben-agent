@@ -27,10 +27,15 @@ It runs on your own server, from your home internet connection, and you control 
   until you click. For your own ads you can opt in to automatic answers to simple questions, with a minimum price
   Claude never goes below, human-like timing and read receipts; your thumbs-up/down feedback goes into later answers. Chats you are done with can
   be hidden or removed from the app (willhaben keeps them; they come back when the other person writes again).
+  Claude knows how many pieces of an ad are left and follows your selling preferences (both described below).
 - **Create ads quickly**: drop in notes and photos and Claude writes the title, description and category. You also get
   a price suggestion from comparable listings and the product's spec sheet from Geizhals. Upload photos of several
   items at once and Claude sorts them into one draft per item. Publish directly on willhaben (free private ads; the
-  category comes from willhaben's suggestion or your own pick).
+  category comes from willhaben's suggestion or your own pick). Claude also reads how many identical items you sell
+  ("3 Stück" in the notes, identical items on the photos; the batch sorter counts them per group) and estimates the
+  packed parcel size. A Pcs. field on every draft card corrects the count (yours wins; empty or 1 = one item).
+  Publishing copies the count and the size to My ads; the size stays an estimate, and an automatic label purchase
+  waits, until you confirm it in a shipment. A published draft links to its My ads entry and the sold page.
 - **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
   Claude plans a few searches, the app runs them anonymously on willhaben and on every other site switched on for it
   (Settings → Platforms; the search form lets you pick and names the sites still switched off), and Claude picks the best offers, each with a
@@ -68,15 +73,48 @@ It runs on your own server, from your home internet connection, and you control 
   viewer, with the zone label and Claude's screening verdict on hit cards.
 - **Your ads**: imported from your account, with a reminder before they expire. A list with a detail pane per ad and
   three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
-  automatic answers with an instruction and a minimum price (switches and text save as you type), edit text and photos
-  (Claude can propose a better text), deactivate, delete, mark sold or reserved (other buyers get a notice draft).
+  automatic answers with an instruction and a minimum price (switches and text save as you type), the number of pieces
+  (next bullet), edit text and photos (Claude can propose a better text), deactivate, delete, mark sold or reserved
+  (other buyers get a notice draft).
   Ads that expired longer ago than a cutoff (Settings → willhaben → My ads, 30 days by default) move to Deactivated; the old copy
   of a renewed ad is never listed again and its chats use the new ad's settings.
+- **Stock per ad** ("Lagerstand"): in My ads → detail pane → Pieces you enter how many identical items an ad offers
+  (empty = one item; the list then shows "2/3 pcs", the pane "1 sold · 2 available"). Every sale is recorded on the sold
+  page (from My ads or a chat): pieces, an optional total price (prefilled with the price agreed in the chat) and the
+  buyer from your chats. Each sale has an Undo there, and the chat page shows what a buyer took. While pieces are
+  left, the ad stays online on willhaben and keeps answering buyers as before, and the other buyers hear nothing. With
+  the last piece the usual sold steps open: mark the ad sold on willhaben, notice drafts to the other buyers,
+  automatic answers off, each on your click. Claude sees the remaining stock in chat drafts and automatic
+  answers ("noch 2 von 3 Stück verfügbar", the price counts per piece), and an automatic answer that names more pieces
+  than are left is held back for your approval. The stock lives only in the app, because willhaben has no quantity
+  field: a new ad's text says "N Stück verfügbar, Preis pro Stück", but when the count changes you edit the live text
+  yourself. A reservation stays ad-wide. Undoing the sale that sold an ad out lifts only the local sold status (willhaben
+  cannot undo "sold"). A renewed ad keeps its stock, minimum price and parcel size, and sales on any of its copies count.
+- **Selling preferences** (Settings → Selling → Selling preferences): your usual handover (pickup, shipping or both),
+  who pays the shipping (the buyer, or included in the price), preferred delivery (parcel shop or locker, front door)
+  and carrier, the payment ways you accept (bank transfer, PayLivery, cash) and free notes. Claude gets them as lines in
+  every reply to a buyer of your ads (manual and automatic) and in every new or revised ad text, naming only what fits
+  the handover: no shipping lines with pickup only, PayLivery only with shipping, cash only with pickup. They are sent
+  with their defaults (pickup only, the buyer pays, all three payment ways) even if you never open the page, which
+  shows what Claude gets. With PayLivery the buyer pays the shipping at willhaben, so "included in the price" applies
+  to bank transfers. Your free-text rules (Settings → Selling → My rules), the ad's own text and your instruction for
+  an ad still apply on top and win where they disagree. The shipping card on a chat page starts with the preferred
+  carrier and delivery, then the cheapest (in the default price sort), so its primary button follows the preference;
+  the app's automatic choice of a shipping option and the publish form's handover start from it too.
+  **Always on, no setting:**
+  willhaben censors e-mail addresses and links in chat messages and ads, so Claude is told never to write one, even on
+  request; an automatic answer containing one is held back, the chat composer warns about one in the open draft
+  ("Check before sending"), and publishing an ad with one in its title or description is refused. Phone numbers are
+  not treated as censored.
 - **Shipping**: when a buyer sends an address, the app compares parcel prices of Post, GLS, Hermes and DPD and shows
   the nearest drop-off points. The label is bought only after the buyer has paid: you mark the payment (a buyer's
   "I have paid" only becomes a reminder to check your account), then approve the purchase on the chat page or with a
   push button, or let the app buy automatically under your rules (ad marked sold to this buyer, confirmed parcel size,
-  price cap, chosen carriers, a grace period to cancel, a daily limit). The purchase runs in the app's own browser with
+  price cap of 10 € unless you change it, chosen carriers, a stored payment card, a grace period to cancel, a daily
+  limit; never an option against your delivery preference). A "→ Shop" option delivers to a parcel shop or locker near
+  the buyer: the chat page lists the carrier's shops around the buyer's address, you pick one (the nearest unless you
+  choose another) and it goes into the carrier's form; such labels are never bought automatically until the shop choice
+  in the carrier's form is confirmed live. The purchase runs in the app's own browser with
   your stored payment card, a per-carrier playbook learned from the first run, code guards (price check, never
   insurance/newsletter/account changes) and a stop for bank confirmations. The label goes to a label printer
   (100×150 / 100×200 mm) or a normal printer over IPP, per carrier, with tray and crop settings; the carrier form in the
@@ -187,6 +225,10 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
    decides whether pushes go to Home Assistant, Telegram or both.
 5. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
    Optionally switch on "Claude screening" and describe exactly what you want.
+
+Settings → Selling → Selling preferences records how you usually sell (pickup or shipping, who pays the shipping,
+preferred carrier and delivery, payment ways); Claude follows it in answers to your buyers and in new ad texts. The
+free-text rules stay under Settings → Selling → My rules.
 
 Settings → Claude & usage shows the token usage per task, lets you pick a model per task (default: Opus for writing
 listings, Sonnet for chat replies, screening and the product search) and sets a monthly token limit (10 M by default)
@@ -323,11 +365,13 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Own ads: auto-renew (activate / republish) | built from willhaben's web app; the first real renewal is still to be observed |
 | Own ads: edit text and photos, sold / reserved | built; saving is **not yet live-tested** |
 | Ad drafts with Claude, comparable prices, Geizhals specs, batch upload | done |
-| Publishing ads directly | done for free private ads with pickup (batch cards and single draft page, category picker); shipping/PayLivery built from the bundle but **not yet live-tested** |
+| Publishing ads directly | done for free private ads with pickup (batch cards and single draft page, category picker); shipping/PayLivery built from the bundle but **not yet live-tested** (also when Selling preferences preset it) |
+| Stock per ad: pieces on My ads and new ads, sales ledger with undo, selling piece by piece, stock in Claude's answers | built and tested with fakes; the stock is local to the app, so only the existing sold step on willhaben ("sold / reserved" above) is unverified |
+| Selling preferences (handover, shipping costs, carrier, payment, notes) and the e-mail/link rule | done |
 | Price check and product search (Produktsuche) | done (comparables of the same item by title, category selectable) |
 | Home Assistant events, pushes with action buttons | done |
 | Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
-| Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet** |
+| Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet**; the parcel shop for "→ Shop" labels is looked up and passed to the form, but whether the carrier form takes it is **not live-tested** (so shop labels stay manual) |
 | Purchase orders (buyer side): contact, negotiation, PayLivery offer, pay-now push, pickup appointments | built and tested with fakes; **not yet live-tested** |
 | PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → Platforms → willhaben → Advanced → API recording) |
 | Connection watchdog, backup, bug report, request statistics | done |

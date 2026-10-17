@@ -46,6 +46,7 @@
     <div class="flex flex-wrap items-center gap-2">
       <span class="grid size-[26px] shrink-0 place-items-center rounded-lg bg-hover text-[13px] font-bold">{{ loop.index }}</span>
       <input type="text" name="product_{{ g.id }}" value="{{ g.product }}" placeholder="{{ _('What is it?') }}" {% if busy %}disabled{% endif %} class="input min-w-[200px] flex-1 bg-base-200 font-semibold">
+      <label class="flex shrink-0 items-center gap-2 whitespace-nowrap" title="{{ _('How many identical pieces this ad offers (the price counts per piece); empty = one item') }}"><span class="text-[12.5px] text-muted">{{ _("Pcs.") }}</span><input type="number" name="quantity_{{ g.id }}" value="{{ g.quantity or '' }}" min="1" max="999" inputmode="numeric" placeholder="1" {% if busy %}disabled{% endif %} class="input input-sm w-20 bg-base-200 font-semibold"></label>
       {% if g.confidence %}{{ ui.pill({'hoch': _('high'), 'mittel': _('medium'), 'niedrig': _('low')}.get(g.confidence, g.confidence), {'hoch': 'ok', 'mittel': 'warn', 'niedrig': 'bad'}.get(g.confidence, ''), false, '', _("Claude's confidence")) }}{% endif %}
       <label class="flex shrink-0 items-center gap-2 whitespace-nowrap"><input type="checkbox" name="include_{{ g.id }}" value="1" {% if g.include %}checked{% endif %} {% if busy %}disabled{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("Create draft") }}</label>
     </div>

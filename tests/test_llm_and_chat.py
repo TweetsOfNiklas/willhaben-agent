@@ -227,6 +227,68 @@ async def test_ad_context_falls_back_to_my_own_ad(monkeypatch):
     assert other.ad_context is None
 
 
+async def test_ad_context_follows_price_changes_and_reload(monkeypatch):
+    """The ad's data is kept for AD_CONTEXT_MAX_AGE, not forever: a price change, reservation or sale on willhaben
+    reaches the next draft; the chat's Reload fetches at once, also for an ad stored as gone. A refresh that fails
+    keeps the data from before."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from app.db import Conversation, session, utcnow
+    from app.services import chats
+    from app.willhaben.public import WillhabenError
+
+    state = {"price": "€ 60", "gone": False, "fail": False, "calls": 0}
+
+    class Public:
+        async def get_detail(self, ad_id):
+            state["calls"] += 1
+            if state["fail"]:
+                raise WillhabenError("willhaben hat den VPN-Server abgewiesen")
+            if state["gone"]:
+                return None
+            return SimpleNamespace(seller_login_id="42", seller_uuid="u-42",
+                                   as_context=lambda: {"title": "Apple Watch", "price": state["price"], "paylivery": True})
+
+    def age(minutes):
+        with session() as db:
+            c = db.get(Conversation, "c1")
+            c.ad_context_at = utcnow() - timedelta(minutes=minutes)
+            db.add(c)
+            db.commit()
+
+    async def context(force=False):
+        return (await chats.ensure_ad_context("c1", force=force)).ad_context
+
+    monkeypatch.setattr(chats, "get_public", lambda: Public())
+    monkeypatch.setattr(chats, "get_session", lambda: SimpleNamespace(user={"id": 42}))
+    with session() as db:       # stored before contexts carried a time (and when they were kept forever)
+        db.add(Conversation(id="c1", ad_id="2092972264", ad_title="Apple Watch",
+                            ad_context={"title": "Apple Watch", "price": "€ 99", "paylivery": True}))
+        db.commit()
+    conv = await chats.ensure_ad_context("c1")
+    assert conv.ad_context["price"] == "€ 60" and conv.role == "seller" and conv.ad_context_at is not None
+    state["price"] = "€ 50"
+    assert (await context())["price"] == "€ 60" and state["calls"] == 1              # fresh: kept
+    age(31)
+    assert (await context())["price"] == "€ 50" and state["calls"] == 2              # older: fetched again
+    state["price"] = "€ 40"
+    assert (await context(force=True))["price"] == "€ 40" and state["calls"] == 3    # Reload: at once
+
+    state["fail"] = True
+    age(31)
+    ctx = await context()
+    assert ctx["price"] == "€ 40" and "source" not in ctx and state["calls"] == 4    # kept, not the editor fallback
+    assert (await context())["price"] == "€ 40" and state["calls"] == 5              # tried again next time
+
+    state["fail"], state["gone"] = False, True
+    assert await context() == {"title": "Apple Watch", "status": "nicht mehr online"} and state["calls"] == 6
+    age(120)
+    assert (await context())["status"] == "nicht mehr online" and state["calls"] == 6    # gone stays gone ...
+    state["gone"] = False
+    assert (await context(force=True))["price"] == "€ 40" and state["calls"] == 7        # ... until Reload asks
+
+
 def test_reply_prompt_hint_outranks_everything_and_names_unknown_price():
     from app.llm.prompts import REPLY_SYSTEM
     p = reply_prompt(role="seller", ad={"title": "Apple Watch"}, partner="Max", messages=[("in", None, "letzter Preis?")],

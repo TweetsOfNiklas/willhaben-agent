@@ -77,6 +77,8 @@
  "“{text}” → ": "„{text}“ → ",
  "not sent: {reasons}": "nicht gesendet: {reasons}",
  "not sent automatically: {reason}": "nicht automatisch gesendet: {reason}",
+ "Automatic answer failed: {error}": "Automatische Antwort fehlgeschlagen: {error}",
+ "Not answered automatically: {name}": "Nicht automatisch beantwortet: {name}",
  "Approve answer? {name}": "Antwort freigeben? {name}",
  "Question: “{text}”": "Frage: „{text}“",
  "Suggestion: “{text}”": "Vorschlag: „{text}“",
@@ -135,5 +137,9 @@
  "Reserved notice": "Info: reserviert",
  "Claude's draft": "Entwurf von Claude",
  "Check before sending": "Vor dem Senden prüfen",
- "Seen {time}": "Gesehen {time}"
+ "Seen {time}": "Gesehen {time}",
+ "Answer offers {n} pieces, only {left} available": "Antwort sagt {n} Stück zu, verfügbar sind nur {left}",
+ "{n} piece sold to this person": "{n} Stück an diese Person verkauft",
+ "{n} pieces sold to this person": "{n} Stück an diese Person verkauft",
+ "{left} of {total} still available": "noch {left} von {total} verfügbar"
 }

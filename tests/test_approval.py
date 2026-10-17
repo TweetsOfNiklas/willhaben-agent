@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 
 from app.db import Conversation, Message, MyAd, Shipment, TelegramAction, get_setting, session, set_setting, utcnow
 from app.llm.base import LLMResult
-from app.services import ha_actions, label_buy, printing, shipping, telegram
+from app.services import ha_actions, label_buy, printing, selling, shipping, telegram
 from tests.test_shipping import ADDR
+
+CARD = ("Max Muster", "4111 1111 1111 1111", "12/30", "123")
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +19,13 @@ def clean_background():
         task.cancel()
     shipping._graces.clear()
     shipping._running.clear()
+
+
+@pytest.fixture(autouse=True)
+def card(monkeypatch, tmp_path):
+    """A payment card is stored (one of the automatic rules); tests without one remove it."""
+    monkeypatch.setattr(label_buy, "_card_path", lambda: tmp_path / "payment-card.json")
+    label_buy.save_card(*CARD)
 
 
 @pytest.fixture
@@ -93,10 +102,12 @@ def buy(monkeypatch):
     return calls, state
 
 
-async def draft(sold: bool = True, user_parcel: bool = True) -> int:
-    """A shipment for chat c1: address, option GLS S -> Shop (3.90 €), sold to this buyer, parcel from the user."""
+async def draft(sold: bool = True, user_parcel: bool = True, option: str = "gls:S:home") -> int:
+    """A shipment for chat c1: address, option GLS S to the door (4.90 €; the shop option is never automatic),
+    sold to this buyer, parcel from the user."""
     shipping.save_sender({**ADDR, "name": "Max Seller"})
     s = await shipping.detect("c1")
+    s = shipping.choose(s.id, option)
     if user_parcel:
         s = shipping.set_parcel(s.id, {"length_cm": 30, "width_cm": 22, "height_cm": 8, "weight_kg": 1.4})
     if sold:
@@ -175,9 +186,11 @@ async def test_payment_remark_without_shipment_does_nothing(desk, pushes):
 
 # ------------------------------------------------------------------ automatic rules
 async def test_blockers_name_every_missing_rule(desk, pushes):
-    sid = await draft(sold=False, user_parcel=False)
+    label_buy.remove_card()
+    sid = await draft(sold=False, user_parcel=False, option="gls:S:shop")
     reasons = " | ".join(shipping.auto_blockers(shipping.get(sid)))
-    for part in ("automatic buying is off", "not paid yet", "only an estimate", "not marked as sold"):
+    for part in ("automatic buying is off", "not paid yet", "only an estimate", "not marked as sold",
+                 "no payment card stored", "shop delivery needs a manual purchase"):
         assert part in reasons
     auto_on()
     shipping.mark_paid(sid, "manual")
@@ -187,7 +200,41 @@ async def test_blockers_name_every_missing_rule(desk, pushes):
         ad.sale_status, ad.sale_conversation_id = "sold", "c1"
         db.add(ad)
         db.commit()
+    label_buy.save_card(*CARD)
+    shipping.choose(sid, "gls:S:home")
     assert shipping.auto_blockers(shipping.get(sid)) == []
+
+
+async def test_blockers_shop_delivery_card_and_delivery_preference(desk, pushes, buy):
+    """A "→ Shop" option, a missing card and an option against the delivery preference each stop the automatic
+    purchase: after the payment the chat asks instead of buying, and the card names the reason."""
+    from app.main import app
+    calls, _ = buy
+    sid = await draft(option="gls:S:shop")
+    auto_on(grace=0)
+    shipping.mark_paid(sid, "manual")
+    assert shipping.auto_blockers(shipping.get(sid)) == ["shop delivery needs a manual purchase"]
+    selling.save({"sell_delivery": "home"})
+    assert shipping.auto_blockers(shipping.get(sid)) == ["shop delivery needs a manual purchase",
+                                                          "delivers to a parcel shop, but you prefer the door"]
+    shipping.choose(sid, "gls:S:home")
+    assert shipping.auto_blockers(shipping.get(sid)) == []
+    selling.save({"sell_delivery": "shop"})
+    assert shipping.auto_blockers(shipping.get(sid)) == ["delivers to the door, but you prefer a parcel shop"]
+    selling.save({"sell_delivery": "any"})
+    label_buy.remove_card()
+    assert shipping.auto_blockers(shipping.get(sid)) == ["no payment card stored"]
+    label_buy.save_card(*CARD)
+    shipping.choose(sid, "gls:S:shop")
+
+    await shipping.after_paid(sid)                                   # the shop option: asked, not bought
+    await asyncio.gather(*list(shipping._tasks), return_exceptions=True)
+    assert calls["buy"] == [] and states(sid)["approval"] == "pending"
+    assert pushes[-1]["title"] == "Paid – buy the label?"
+    with TestClient(app) as c:
+        page = c.get("/chats/c1").text
+    assert "Not automatic because: shop delivery needs a manual purchase" in page
+    assert "Shop delivery is never bought automatically yet" in page
 
 
 async def test_blockers_price_carrier_and_daily_cap(desk, pushes):
@@ -504,6 +551,10 @@ def test_settings_route_stores_the_rules():
         assert get_setting("ship_auto_grace_min") == "15" and get_setting("ship_auto_daily") == "2"
         assert get_setting("ship_auto_need_sold") == "1" and get_setting("ship_auto_need_parcel") == "0"
         assert get_setting("ship_auto_carriers") == "gls,post"
-        assert "Automatic label purchase" in c.get("/settings/shipping").text
+        page = c.get("/settings/shipping").text
+        assert "Automatic label purchase" in page and "default 10 €" in page
+        assert "Payment card: •••• 1111" in page                                 # the card rule next to the switch
+        label_buy.remove_card()
+        assert "No payment card stored – nothing is bought automatically" in c.get("/settings/shipping").text
         c.post("/settings/shipping/auto", data={"max_price": "x"}, follow_redirects=False)
         assert get_setting("ship_auto") == "0" and get_setting("ship_auto_carriers") == "-"

@@ -113,7 +113,7 @@ def _next_gid(groups: list[dict[str, Any]]) -> str:
 
 
 def _new_group(gid: str, photos: list[int], **fields: Any) -> dict[str, Any]:
-    return {"id": gid, "photos": photos, "product": "", "product_query": "", "observations": "",
+    return {"id": gid, "photos": photos, "product": "", "product_query": "", "observations": "", "quantity": None,
             "confidence": "", "question": "", "comment": "", "include": True, "draft_id": None, "error": None,
             **fields}
 
@@ -121,7 +121,7 @@ def _new_group(gid: str, photos: list[int], **fields: Any) -> dict[str, Any]:
 def groups_from_result(data: dict[str, Any], pool: list[int], keep: list[dict[str, Any]],
                        previous: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Claude's 1-based photo numbers (over `pool`) -> groups of image indices; each photo at most once.
-    The user's comment and include flag move to the new group sharing the most photos with the old one."""
+    The user's comment, include flag and piece count move to the new group sharing the most photos with the old one."""
     groups, seen, carried = list(keep), set(), set()
     previous = [g for g in previous or [] if not locked(g)]
     for raw in data.get("groups") or []:
@@ -134,10 +134,12 @@ def groups_from_result(data: dict[str, Any], pool: list[int], keep: list[dict[st
             continue
         old = max((g for g in previous if g["id"] not in carried), default=None,
                   key=lambda g: len(set(g["photos"]) & set(photos)))
-        user = {}
+        user = {"quantity": ad_creator.pick_quantity(None, raw.get("quantity"))}    # Claude's; one piece = nothing to say
         if old and set(old["photos"]) & set(photos):
             carried.add(old["id"])
-            user = {"comment": old.get("comment") or "", "include": old.get("include", True)}
+            user |= {"comment": old.get("comment") or "", "include": old.get("include", True)}
+            if old.get("quantity"):         # the count the owner reviewed is theirs, as the comment is
+                user["quantity"] = old["quantity"]
         groups.append(_new_group(
             _next_gid(groups), photos, product=(raw.get("product") or "").strip(),
             product_query=(raw.get("product_query") or "").strip(),
@@ -156,7 +158,8 @@ async def sort(batch_id: int, hint: str | None = None) -> AdBatch:
     if not pool:
         return _update(batch_id, status="review", error=None)
     pos = {img: n for n, img in enumerate(pool, 1)}
-    current = [{"photos": [pos[i] for i in g["photos"]], "product": g.get("product"), "comment": g.get("comment")}
+    current = [{"photos": [pos[i] for i in g["photos"]], "product": g.get("product"), "comment": g.get("comment"),
+                "quantity": g.get("quantity")}
                for g in b.groups if not locked(g) and g["photos"]]
     _update(batch_id, status="sorting", error=None)
     backend = get_backend("ads")
@@ -181,7 +184,8 @@ def apply_review(batch_id: int, order: list[tuple[int, str]], fields: dict[str, 
 
     order:  (image index, target) in page order; target is a group id, "new" (all such photos form one new group)
             or "" (not used). Photo order inside a group follows page order, so the first one is the cover.
-    fields: group id -> {product, comment, include}
+    fields: group id -> {product, comment, include, quantity}; quantity only when the form sent it. Blank = one item:
+            a count the owner clears is kept as 1, so Claude's count (re-sort, draft) does not come back
     """
     b = get(batch_id)
     groups = {g["id"]: dict(g, photos=list(g["photos"]) if locked(g) else []) for g in b.groups}
@@ -207,6 +211,9 @@ def apply_review(batch_id: int, order: list[tuple[int, str]], fields: dict[str, 
         g["product"] = (f.get("product") or "").strip()
         g["comment"] = (f.get("comment") or "").replace("\r\n", "\n").strip()
         g["include"] = bool(f.get("include"))
+        if "quantity" in f:
+            q = ad_creator.parse_quantity(f["quantity"])
+            g["quantity"] = q if q is not None else (1 if g.get("quantity") else None)
     kept = [g for g in groups.values() if g["photos"] or locked(g)]
     return _update(batch_id, groups=kept)
 
@@ -239,7 +246,7 @@ async def create_drafts(batch_id: int) -> AdBatch:
             files = [(Path(b.image_paths[i]).name, Path(b.image_paths[i]).read_bytes())
                      for i in g["photos"][:ad_creator.MAX_IMAGES]]
             try:
-                d = await ad_creator.create_draft(group_notes(b, g), files, batch_id=batch_id)
+                d = await ad_creator.create_draft(group_notes(b, g), files, batch_id=batch_id, quantity=g.get("quantity"))
                 _set_group(batch_id, g["id"], draft_id=d.id, error=d.error)
             except Exception as e:  # noqa: BLE001
                 log.exception("batch %s group %s: draft failed", batch_id, g["id"])

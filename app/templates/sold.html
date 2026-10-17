@@ -2,6 +2,9 @@
 {% import "_ui.html" as ui %}
 {% block content %}
 {% set is_sold = kind == 'sold' %}
+{# an ad with a quantity sells piece by piece: willhaben and the other buyers only hear of it with the last piece #}
+{% set pieces_left = is_sold and stock and stock.remaining > 0 %}
+{% if pieces_left %}{% set left_line = _("{left} piece left – the ad stays online on willhaben; the others are told only with the last piece", left=1) if stock.remaining == 1 else _("{left} pieces left – the ad stays online on willhaben; the others are told only with the last piece", left=stock.remaining) %}{% endif %}
 <div class="mx-auto flex max-w-[760px] min-w-0 flex-col gap-4">
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
     {% if buyer %}<a class="link link-primary inline-flex items-center gap-1 no-underline" href="/chats/{{ buyer.id }}">{{ ui.icon('back', 14) }}{{ _("Chat with {name}", name=buyer.partner_name or _('unknown')) }}</a><span class="text-muted">·</span>{% endif %}
@@ -28,6 +31,34 @@
 
   {% set hidden %}<input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}">{% endset %}
 
+  {% if stock %}
+  <section id="stock" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <div class="flex flex-wrap items-center gap-2"><h2 class="text-base font-semibold">{{ _("Stock") }}</h2>
+      {{ ui.pill(_("{left} of {total} pieces left", left=stock.remaining, total=stock.quantity), 'ok' if stock.remaining else 'warn', dot=false) }}</div>
+    {% if sales %}
+    <div class="overflow-x-auto">
+      <table class="table table-sm">
+        <tbody>
+        {% for s in sales %}
+        <tr>
+          <td>{% if s.conversation_id %}<a class="link link-primary no-underline" href="/chats/{{ s.conversation_id }}">{{ names.get(s.conversation_id) or _('unknown') }}</a>{% else %}<span class="text-muted">{{ _("Buyer: not from a chat") }}</span>{% endif %}</td>
+          <td class="tabular-nums whitespace-nowrap">{{ _("{n} pcs", n=s.pieces) }}</td>
+          <td class="tabular-nums whitespace-nowrap">{{ s.price|eur if s.price is not none else '' }}</td>
+          <td class="text-xs whitespace-nowrap text-muted">{{ s.created_at|ago }}</td>
+          <td class="text-right"><form method="post" action="/sold/{{ ad_id }}/sales/{{ s.id }}/undo">{{ hidden }}
+            <button class="btn btn-ghost btn-xs text-error hover:bg-bad-soft" data-confirm="{{ _('Undo this sale? Its pieces count as available again (willhaben is not changed).') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Undo") }}</button></form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-[13px] text-muted">{{ _("No sales recorded yet.") }}</p>
+    {% endif %}
+    <small class="text-xs text-muted">{{ _("The stock is kept here in the app; the number of pieces is set under My ads.") }}</small>
+  </section>
+  {% endif %}
+
   {# step 1 runs as a background job (lane ads): the forms send through htmx, this section shows the job and swaps
      itself in when it is done (with willhaben's reasons, if it asks for one) #}
   {% set busy1 = ad and ad.pending_action in ('sold', 'reserved', 'unreserve') %}
@@ -38,6 +69,8 @@
     {% if busy1 %}
     <div>{{ ui.pending('ad:' ~ ad_id, {'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}[ad.pending_action],
                        {'sold': _("Queued: mark as sold"), 'reserved': _("Queued: mark as reserved"), 'unreserve': _("Queued: remove the reservation")}[ad.pending_action]) }}</div>
+    {% elif pieces_left %}
+    <p class="text-[13px] text-muted">{{ left_line }}</p>
     {% elif is_sold %}
     <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3" hx-boost="true" hx-target="#step1" hx-select="#step1" hx-swap="outerHTML" hx-push-url="false">
       {{ hidden }}
@@ -61,13 +94,15 @@
       </div>
     </form>
     {% endif %}
-    <p class="text-xs text-muted">{{ _("Not tested live yet: check the ad on willhaben afterwards.") }}</p>
+    {% if not pieces_left %}<p class="text-xs text-muted">{{ _("Not tested live yet: check the ad on willhaben afterwards.") }}</p>{% endif %}
   </section>
 
   <section id="step2" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <h2 class="text-base font-semibold">2 · {{ _("Tell the other buyers") }}</h2>
     {% set drafts = others | selectattr('draft') | list %}
-    {% if others %}
+    {% if pieces_left %}
+    <p class="text-[13px] text-muted">{{ left_line }}</p>
+    {% elif others %}
     {# templates are made at once; Claude drafts run as a background job – only this step swaps, no reload #}
     <form method="post" action="/sold/{{ ad_id }}/notices" class="flex flex-col gap-3" hx-boost="true" hx-target="#step2" hx-select="#step2" hx-swap="outerHTML" hx-push-url="false">
       {{ hidden }}
@@ -98,7 +133,7 @@
     {% endif %}
 
     <div id="notice-drafts">
-    {% if drafts %}
+    {% if drafts and not pieces_left %}
     {# sent in the background: only this step is swapped, the messages go out one after another #}
     <form method="post" action="/sold/{{ ad_id }}/notices/send" class="flex flex-col gap-3" hx-boost="true"
           hx-target="#step2" hx-select="#step2" hx-swap="outerHTML" hx-push-url="false">
@@ -121,15 +156,33 @@
 
   <section id="step3" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <h2 class="text-base font-semibold">3 · {{ _("Here in the app") }}</h2>
+    {% if stock and not stock.remaining %}{# sold out: nothing left to sell or reserve #}
+    <p class="text-[13px] text-muted">{{ _("All pieces are sold. If a sale fell through, undo it above.") }}</p>
+    {% else %}
     <form method="post" action="/sold/{{ ad_id }}/finish" class="flex flex-col gap-3">
       {{ hidden }}
-      <label class="flex items-center gap-2"><input type="checkbox" name="auto_off" value="1" checked class="checkbox checkbox-primary checkbox-sm"> {{ _("Switch off automatic answers for this ad (instructions are kept)") }}</label>
-      <div class="flex flex-wrap gap-2">
-        <button class="btn">{% if is_sold %}{{ _("Save as sold") }}{% else %}{{ _("Save as reserved") }}{% endif %}</button>
-        {% if ad and ad.sale_status %}<button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/sold/{{ ad_id }}/reset">{{ _("Not sold after all") }}</button>{% endif %}
+      {% if is_sold and stock %}
+      <div class="grid max-w-[420px] grid-cols-2 gap-2">
+        <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Pieces") }}</span>
+          <input type="number" name="pieces" value="1" min="1" max="{{ stock.remaining }}" step="1" required class="input input-sm w-full bg-base-200"></label>
+        <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Total price (€, optional)") }}</span>
+          <input type="text" inputmode="decimal" name="price" value="{{ ('%.2f'|format(agreed_price)).rstrip('0').rstrip('.') if agreed_price is not none else '' }}" class="input input-sm w-full bg-base-200"></label>
       </div>
+      <label class="flex items-center gap-2"><input type="checkbox" name="auto_off" value="1" checked class="checkbox checkbox-primary checkbox-sm"> {{ _("With the last piece: switch off automatic answers for this ad (instructions are kept)") }}</label>
+      {% else %}
+      <label class="flex items-center gap-2"><input type="checkbox" name="auto_off" value="1" checked class="checkbox checkbox-primary checkbox-sm"> {{ _("Switch off automatic answers for this ad (instructions are kept)") }}</label>
+      {% endif %}
+      <div class="flex flex-wrap gap-2">
+        <button class="btn">{% if is_sold and stock %}{{ _("Record sale") }}{% elif is_sold %}{{ _("Save as sold") }}{% else %}{{ _("Save as reserved") }}{% endif %}</button>
+        {% if ad and ad.sale_status and (not stock or ad.sale_status == 'reserved') %}<button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/sold/{{ ad_id }}/reset">{{ _("Not sold after all") }}</button>{% endif %}
+      </div>
+      {% if is_sold and stock %}
+      <small class="text-xs text-muted">{% if ad and ad.auto_reply %}{{ _("The ad stays online and keeps answering while pieces are left; the last piece marks it sold.") }}{% else %}{{ _("The ad stays online while pieces are left; the last piece marks it sold.") }}{% endif %}</small>
+      {% else %}
       <small class="text-xs text-muted">{{ _("A sold ad never gets automatic answers again.") }}</small>
+      {% endif %}
     </form>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

@@ -5,7 +5,7 @@ import pytest
 from sqlmodel import select
 
 from app.db import Conversation, Draft, Message, MyAd, get_setting, session, set_setting, utcnow
-from app.llm.base import LLMResult
+from app.llm.base import LLMError, LLMResult
 from app.services import chats
 from app.willhaben.account import AccountClient, SendFailed
 
@@ -219,7 +219,7 @@ def test_settings_and_myads_forms():
         assert "General instruction for automatic answers" in c.get("/settings/chats").text
         assert "Automatic answers" in c.get("/myads?show_inactive=1").text
         c.post("/myads/222/auto-reply", data={"on": "1", "instructions": "Preis fix\r\nAbholung Wien"})
-        c.post("/settings", data={"auto_reply_rules": "nur Verfügbarkeit"})
+        c.post("/settings", data={"section": "chats", "auto_reply_rules": "nur Verfügbarkeit"})
         # the toggle is on in the HTML itself: no flip when Alpine starts, and switching it off is a change to save
         page = c.get("/myads?ad=222&show_inactive=1").text
         assert re.search(r'<input type="checkbox"[^>]*name="on" x-model="on" checked>', page)
@@ -271,6 +271,48 @@ async def test_concurrent_runs_answer_once(env):
     backend, account, notes = env
     await asyncio.gather(chats.process_pending_auto(), chats.process_pending_auto("111"), chats.process_pending_auto())
     assert len(account.sent) == 1 and len(backend.calls) == 1
+
+
+@pytest.mark.parametrize("error", [LLMError("Limit erreicht"), RuntimeError("Limit erreicht")])
+async def test_failed_automatic_answer_is_pushed_once_and_shown_in_the_chat(env, monkeypatch, error):
+    """Claude (or willhaben, or a bug) fails: the owner hears about it once per buyer message - the question with
+    the reason - and the chat shows the reason next to "Prepare answer"; the sync tries AUTO_MAX_ATTEMPTS times,
+    then leaves the chat alone until the buyer writes again. Nothing silent, no retry at every sync forever."""
+    backend, account, notes = env
+    fail, calls = [True], []
+    real_complete = backend.complete
+
+    async def flaky(**kw):
+        calls.append(kw)
+        if fail[0]:
+            raise error
+        return await real_complete(**kw)
+
+    monkeypatch.setattr(backend, "complete", flaky)
+
+    def draft_error():
+        with session() as db:
+            return db.get(Conversation, "c1").draft_error
+
+    assert await chats.process_pending_auto() == 0
+    assert len(calls) == 1 and [n[0] for n in notes] == ["auto_reply_pending"]
+    kind, title, text, kw = notes[0]
+    assert title == "Not answered automatically: Anna" and "Limit erreicht" in text and "Ist der noch da?" in text
+    assert kw["tag"] == "wh-msg-c1" and kw["data"] == {"conversation_id": "c1", "ad_id": "111"}
+    assert draft_error() == "Automatic answer failed: Limit erreicht"
+    for _ in range(chats.AUTO_MAX_ATTEMPTS):                     # retried a few times, pushed once
+        assert await chats.process_pending_auto() == 0
+    assert len(calls) == chats.AUTO_MAX_ATTEMPTS and len(notes) == 1 and not account.sent
+
+    with session() as db:                                       # the buyer writes again: tried and told again
+        db.add(Message(conversation_id="c1", ext_id="m1", direction="in", text="Und der Preis?", created_at=utcnow()))
+        db.commit()
+    assert await chats.process_pending_auto() == 0
+    assert len(calls) == chats.AUTO_MAX_ATTEMPTS + 1 and len(notes) == 2 and "Und der Preis?" in notes[1][2]
+
+    fail[0] = False                                             # Claude is back: answered, the note in the chat goes
+    assert await chats.process_pending_auto() == 1
+    assert len(account.sent) == 1 and notes[-1][0] == "auto_reply" and draft_error() is None
 
 
 
@@ -435,7 +477,9 @@ async def test_auto_draft_turns_the_message_push_into_the_offer(env, monkeypatch
     assert retags == [("wh-msg-c1", f"wh-draft-{d.id}")] and cleared == ["wh-msg-c1"]
     assert not account.sent                                               # never sent automatically
 
-    notes.clear()                                                         # no message push: silent draft as before
+    notes.clear()                                                         # message pushes off: the offer alone
+    retags.clear()
+    cleared.clear()
     set_setting("notify_messages", "0")
     with session() as db:
         c = db.get(Conversation, "c1")
@@ -443,7 +487,11 @@ async def test_auto_draft_turns_the_message_push_into_the_offer(env, monkeypatch
         db.add(c)
         db.commit()
     await chats.sync()
-    assert notes == [] and len(backend.calls) == 2
+    assert [n[0] for n in notes] == ["auto_reply_pending"] and len(backend.calls) == 2
+    with session() as db:
+        d2 = db.exec(select(Draft).where(Draft.status == "draft").order_by(Draft.id.desc())).first()
+    assert d2.id != d.id and notes[0][3]["tag"] == f"wh-draft-{d2.id}" and "drafted automatically" in notes[0][2]
+    assert retags == [] and cleared == [] and not account.sent                # no message push to take over
 
 
 def test_sent_message_not_duplicated_by_history():

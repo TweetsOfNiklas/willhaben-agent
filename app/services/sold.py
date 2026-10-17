@@ -6,6 +6,11 @@ Three independent steps, each one optional and each one only on an explicit clic
      sent only via chats.send_draft after "Send selected" (+ confirm)
   3. here: automatic answers off for the ad (instructions kept) and the local sale status set
      (MyAd.sale_status; a sold ad never gets automatic answers again, see chats._auto_ad)
+
+Every sale is a row in the ledger (db.Sale, app/services/stock.py). An ad with a quantity sells piece by piece: it
+stays online and keeps answering while pieces are left, and only the last piece runs the steps above.
+A renewed ad keeps its chats on the old id: the workflow acts on the live copy (db.current_ad) and finds the
+chats of every copy (stock.ad_chain).
 """
 from __future__ import annotations
 
@@ -13,11 +18,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from sqlmodel import col, select
+from sqlmodel import Session, col, select
 
-from app.db import Conversation, Draft, Message, MyAd, session, utcnow
+from app.db import Conversation, Draft, Message, MyAd, Sale, Shipment, current_ad, session, utcnow
 from app.i18n import t
-from app.services import chats
+from app.services import chats, stock
 from app.willhaben import sales
 from app.willhaben.session import get_session
 
@@ -51,13 +56,21 @@ def notice_text(kind: str, partner: str | None) -> str:
 
 
 def ad_row(ad_id: str) -> MyAd | None:
+    """The live copy of the ad (a renewed ad's chats keep the old id)."""
     with session() as db:
-        return db.get(MyAd, ad_id)
+        return current_ad(db, ad_id)
+
+
+def current_id(ad_id: str) -> str:
+    row = ad_row(ad_id)
+    return row.ad_id if row else ad_id
 
 
 def seller_conversations(ad_id: str) -> list[Conversation]:
+    """The buyers' chats about the ad, on every copy of it."""
+    ids = stock.ad_chain(ad_id)
     with session() as db:
-        return list(db.exec(select(Conversation).where(Conversation.ad_id == ad_id, Conversation.role == "seller")
+        return list(db.exec(select(Conversation).where(col(Conversation.ad_id).in_(ids), Conversation.role == "seller")
                             .order_by(col(Conversation.last_message_at).desc().nulls_last())))
 
 
@@ -79,11 +92,14 @@ class Other:
 
 
 def others(ad_id: str, buyer: str | None) -> list[Other]:
-    """The other buyers' conversations about this ad (everyone except the buyer it was sold/reserved to)."""
+    """The other buyers' conversations about this ad (everyone except the buyer it was sold/reserved to and, for an
+    ad with a quantity, everyone who bought a piece)."""
+    ad = ad_row(ad_id)
+    bought = {s.conversation_id for s in stock.sales_of(ad_id)} if ad and ad.quantity is not None else set()
     out = []
     with session() as db:
         for conv in seller_conversations(ad_id):
-            if conv.id == buyer:
+            if conv.id == buyer or conv.id in bought:
                 continue
             msgs = list(db.exec(select(Message).where(Message.conversation_id == conv.id, Message.direction == "in")
                                 .order_by(col(Message.created_at).desc().nulls_last()).limit(1)))
@@ -98,8 +114,18 @@ def others(ad_id: str, buyer: str | None) -> list[Other]:
 
 
 # ------------------------------------------------------------------ step 1: willhaben (writes, after confirm)
+def pieces_left(ad_id: str) -> bool:
+    """An ad with a quantity that still has pieces: willhaben is marked sold only with the last one."""
+    return (stock.remaining(ad_id) or 0) > 0
+
+
 async def on_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: str | None = None) -> str:
-    """Mark sold / reserved (or remove "reserved") on willhaben. Raises sales.ReasonRequired, NotOffered, ..."""
+    """Mark sold / reserved (or remove "reserved") on willhaben. Raises sales.ReasonRequired, NotOffered, ...
+    An ad with pieces left is never marked sold (a stale page, e.g. from before a sale was undone, can still post
+    the form): only its last recorded piece leads there."""
+    ad_id = current_id(ad_id)       # the live copy: an old one is passive on willhaben
+    if kind_of(kind) == "sold" and not undo and pieces_left(ad_id):
+        raise sales.NotOffered(t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"))
     s = get_session()
     if kind_of(kind) == "sold":
         if undo:
@@ -125,7 +151,7 @@ def enqueue_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: s
     False: the ad already waits for another action."""
     from app.services import jobs
 
-    kind = kind_of(kind)
+    kind, ad_id = kind_of(kind), current_id(ad_id)
     action = "sold" if kind == "sold" else ("unreserve" if undo else "reserved")
     with session() as db:
         row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
@@ -168,8 +194,7 @@ def enqueue_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: s
 
 def pending_reasons(ad_id: str) -> list[sales.SoldReason] | None:
     """Sold reasons a background step left behind (willhaben asked for one), for the reason picker."""
-    with session() as db:
-        row = db.get(MyAd, ad_id)
+    row = ad_row(ad_id)
     raw = ((row.pending_payload or {}) if row else {}).get("reasons")
     return [sales.SoldReason(id=str(r["id"]), label=str(r["label"])) for r in raw] if raw else None
 
@@ -271,39 +296,113 @@ def discard_notices(ad_id: str, draft_ids: list[int]) -> int:
 
 
 # ------------------------------------------------------------------ step 3: local state
-def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True) -> MyAd:
-    """Automatic answers off (instructions kept) and the sale status on the ad."""
+def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, pieces: int = 1,
+           price: float | None = None) -> MyAd:
+    """"sold" records the sale in the ledger (`price`: its total, optional). An ad with a quantity stays as it is
+    while pieces are left: online, automatic answers and auto-renew unchanged. The last piece, a single item and
+    "reserved" (ad-wide) set the sale status: automatic answers off (instructions kept), sold never auto-renewed.
+    A single item has one state: an earlier sale of it is replaced. Raises ValueError (message for the page) when
+    more pieces are asked for than are left, and when an ad with a quantity is sold out (nothing left to sell or
+    reserve)."""
     kind = kind_of(kind)
     with session() as db:
-        row = db.get(MyAd, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
-        if auto_off:
-            row.auto_reply = False
-        row.sale_status, row.sale_conversation_id, row.sale_at = kind, buyer or None, utcnow()
+        row = current_ad(db, ad_id) or MyAd(ad_id=ad_id, heading=title_of(ad_id))
+        left = None
+        if row.quantity is None:
+            pieces = 1
+            _undo(db, stock.active_sales(db, row.ad_id))
+        else:
+            available = max(row.quantity - sum(s.pieces for s in stock.active_sales(db, row.ad_id)), 0)
+            if available == 0:
+                raise ValueError(t("No pieces left – undo a sale first"))
+            if kind == "sold":
+                left = available
+                if not 1 <= pieces <= left:
+                    raise ValueError(t("Pieces: a number from 1 to {max}", max=left))
         if kind == "sold":
-            row.auto_renew = False    # sold: auto-renew must never reactivate or republish it
-        row.last_action = t("Sold") if kind == "sold" else t("Reserved")
+            db.add(Sale(ad_id=row.ad_id, conversation_id=buyer or None, pieces=pieces, price=price))
+        if left is not None and left > pieces:
+            row.last_action = (t("{n} piece sold ({left} left)", n=pieces, left=left - pieces) if pieces == 1 else
+                               t("{n} pieces sold ({left} left)", n=pieces, left=left - pieces))
+        else:
+            if auto_off:
+                row.auto_reply = False
+            row.sale_status, row.sale_conversation_id, row.sale_at = kind, buyer or None, utcnow()
+            if kind == "sold":
+                row.auto_renew = False    # sold: auto-renew must never reactivate or republish it
+            row.last_action = t("Sold") if kind == "sold" else t("Reserved")
         db.add(row)
         db.commit()
         db.refresh(row)
     return row
 
 
+def _undo(db: Session, sales: list[Sale]) -> None:
+    for s in sales:
+        s.undone_at = utcnow()
+        db.add(s)
+
+
 def reset(ad_id: str) -> None:
-    """The deal fell through: forget the local sale status (willhaben is not touched)."""
+    """The deal fell through: forget the local sale status (willhaben is not touched). A single item's sale is
+    undone with it. An ad with a quantity keeps its sales (each one has its own undo, undo_sale): only a
+    reservation is lifted here."""
     with session() as db:
-        row = db.get(MyAd, ad_id)
-        if row:
-            row.sale_status = row.sale_conversation_id = row.sale_at = None
+        row = current_ad(db, ad_id)
+        if row is None or (row.quantity is not None and row.sale_status == "sold"):
+            return
+        if row.quantity is None:
+            _undo(db, stock.active_sales(db, row.ad_id))
+        row.sale_status = row.sale_conversation_id = row.sale_at = None
+        db.add(row)
+        db.commit()
+
+
+def undo_sale(ad_id: str, sale_id: int) -> bool:
+    """"Not sold after all" for one sale of the ad: the row stays (undone_at), its pieces are available again. An ad
+    it had sold out is no longer sold here (willhaben is not touched: a "sold" there stays); automatic answers and
+    auto-renew stay as the sell-out left them. False: not a sale of this ad, or undone already."""
+    with session() as db:
+        sale = db.get(Sale, sale_id)
+        if sale is None or sale.undone_at is not None or sale.ad_id not in stock.ad_chain(ad_id):
+            return False
+        row = current_ad(db, sale.ad_id)       # reads and texts before writing
+        note = (t("Sale undone ({n} piece)", n=sale.pieces) if sale.pieces == 1 else
+                t("Sale undone ({n} pieces)", n=sale.pieces))
+        _undo(db, [sale])
+        if row is not None:
+            if row.sale_status == "sold":
+                row.sale_status = row.sale_conversation_id = row.sale_at = None
+            row.last_action = note
             db.add(row)
-            db.commit()
+        db.commit()
+    return True
+
+
+def agreed_price(conversation_id: str | None) -> float | None:
+    """The price agreed in the buyer's chat (its shipment), to prefill the sale."""
+    if not conversation_id:
+        return None
+    with session() as db:
+        return db.exec(select(Shipment.agreed_price).where(Shipment.conversation_id == conversation_id,
+                                                           col(Shipment.agreed_price).is_not(None))
+                       .order_by(col(Shipment.created_at).desc())).first()
 
 
 def state_for(conv: Conversation) -> dict[str, Any] | None:
-    """Sale info for the chat page: kind, and whether this chat is the buyer's."""
+    """Sale info for the chat page: kind (sold / reserved, None while an ad with a quantity has pieces left), the
+    buyer of that status, whether this chat bought (a sale in the ledger, or the older sale status), the pieces sold
+    to it and the stock (quantity/remaining, None for a single item). None when there is nothing to show."""
     if not conv.ad_id:
         return None
     ad = ad_row(conv.ad_id)
-    if ad is None or not (ad.sale_status or ad.status in KINDS):
+    if ad is None:
         return None
-    kind = ad.sale_status or ad.status
-    return {"kind": kind, "buyer": ad.sale_conversation_id, "is_buyer": ad.sale_conversation_id == conv.id}
+    kind = ad.sale_status or (ad.status if ad.status in KINDS else None)
+    pieces = sum(s.pieces for s in stock.sales_to(conv.id))
+    n = stock.numbers(ad)
+    if kind is None and not pieces and n is None:
+        return None
+    return {"kind": kind, "buyer": ad.sale_conversation_id,
+            "is_buyer": bool(pieces) or (kind is not None and ad.sale_conversation_id == conv.id),
+            "pieces": pieces, "quantity": n["quantity"] if n else None, "remaining": n["remaining"] if n else None}

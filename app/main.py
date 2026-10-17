@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
@@ -37,7 +38,8 @@ from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import health, human_pace, jobs
 from app.services import min_price as min_price_svc
-from app.services import scam
+from app.services import scam, selling
+from app.services import stock
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app.services.search_agents import refile_screened, run_agent
@@ -217,7 +219,8 @@ templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _payliver
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
-templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS)  # _wh_handover.html
+templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,
+                             sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
                              wh_budget=requests_per_hour, wh_popup=access_stats.popup,
@@ -881,9 +884,10 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
         _background.add(task)
         task.add_done_callback(_background.discard)
     drafts = chats.drafts_of(conversation_id)
+    open_draft = next((d for d in drafts if d.status == "draft"), None)    # the one the composer shows
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, live_state=chats.live_state(conversation_id), meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
-                  sale=sold.state_for(conv),
+                  sale=sold.state_for(conv), contact_warn=selling.contact_hits(open_draft.text) if open_draft else [],
                   gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort),
                   **_chat_list(show_hidden or bool(conv.hidden_at)))
 
@@ -904,8 +908,12 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
     if sort == "near" and near:
         far = 10 ** 9
         options = sorted(options, key=lambda o: ((near.get(o.carrier) or [{}])[0].get("dist_m") or far, o.price))
+    # "→ Shop" option: the parcel shops near the buyer; the stored pick, else the nearest, is the target
+    shops = await shipping.shops_near(s) if s and conv.role == "seller" else []
+    stored = shipping.shop_for(s) if s else None
     return {"shipment": s, "ship_options": options, "ship_near": near, "ship_sort": sort,
-            "fmt_dist": dropoff.fmt_dist,
+            "ship_pref": selling.preference_text(), "fmt_dist": dropoff.fmt_dist,
+            "ship_shops": shops, "ship_shop": stored or (shops[0] if shops else None), "ship_shop_stored": bool(stored),
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
             "ship_all": shipping.all_options(s.parcel) if s else [], **(shipping.page_state(s) if s else {}),
@@ -967,6 +975,7 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 _MYADS_FILTERS = ("show_active", "show_inactive", "show_sold", "show_hidden")
+templates.env.globals.update(stock_of=stock.numbers, stock_text=stock.stock_text)   # ads with a quantity (myads.html)
 
 
 def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = None) -> RedirectResponse:
@@ -1070,6 +1079,20 @@ async def myads_auto_reply(request: Request, ad_id: str, on: str | None = Form(N
         task.add_done_callback(_background.discard)
     msg = error or (t('Automatic replies on') if on else t('Automatic replies off'))
     return _myads_back(request, msg, f"#ad-{ad_id}")
+
+
+@app.post("/myads/{ad_id}/quantity")
+async def myads_quantity(request: Request, ad_id: str, quantity: str = Form("")):
+    """Pieces offered in the ad (empty = one item); saved as you type (X-Autosave)."""
+    raw = quantity.strip()
+    try:
+        my_ads.set_quantity(ad_id, int(raw) if raw.isdigit() else (None if not raw else 0))
+        error = None
+    except ValueError as e:
+        error = str(e)
+    if request.headers.get("x-autosave"):
+        return JSONResponse({"ok": error is None, "error": error})
+    return _myads_back(request, error or t("Changes saved"), f"#ad-{ad_id}")
 
 
 @app.get("/myads/{ad_id}/edit", response_class=HTMLResponse)
@@ -1282,11 +1305,16 @@ async def sold_page(request: Request, ad_id: str, kind: str = "sold", buyer: str
 def _sold_render(request: Request, ad_id: str, kind: str, buyer: str | None, msg: str | None,
                  reasons: list | None = None) -> HTMLResponse:
     kind = sold.kind_of(kind)
+    ad_id = sold.current_id(ad_id)    # a chat of a renewed ad links the old id: the page works on the live copy
     convs = sold.seller_conversations(ad_id)
     buyer_conv = next((c for c in convs if c.id == buyer), None)
-    return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=sold.ad_row(ad_id), title=sold.title_of(ad_id),
+    ad = sold.ad_row(ad_id)
+    numbers = stock.numbers(ad)       # an ad with a quantity: the stock block, the sale's pieces and price
+    return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=ad, title=sold.title_of(ad_id),
                   convs=convs, buyer=buyer_conv, others=sold.others(ad_id, buyer_conv.id if buyer_conv else None),
-                  reasons=reasons or sold.pending_reasons(ad_id), msg=msg)   # reasons a background step left behind
+                  reasons=reasons or sold.pending_reasons(ad_id), msg=msg,   # reasons a background step left behind
+                  stock=numbers, sales=stock.sales_of(ad_id) if numbers else [], names={c.id: c.partner_name for c in convs},
+                  agreed_price=sold.agreed_price(buyer_conv.id if buyer_conv else None) if numbers else None)
 
 
 @app.post("/sold/{ad_id}/willhaben", response_class=HTMLResponse)
@@ -1296,6 +1324,9 @@ async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"),
     page offers them; the next confirm queues it again with the reason."""
     if sold.kind_of(kind) == "sold" and undo:
         return back(_sold_url(ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#step1"))
+    if sold.kind_of(kind) == "sold" and sold.pieces_left(ad_id):     # a stale page: on_willhaben refuses it too
+        return back(_sold_url(ad_id, kind, buyer or None,
+                              t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"), "#step1"))
     queued = sold.enqueue_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
     msg = t("On its way to willhaben – it runs in the background") if queued else t("Nothing queued: these ads are already being processed")
     return back(_sold_url(ad_id, kind, buyer or None, msg, "#step1"))
@@ -1330,10 +1361,41 @@ async def sold_notices_send(request: Request, ad_id: str):
 
 
 @app.post("/sold/{ad_id}/finish")
-async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), auto_off: str | None = Form(None)):
-    sold.finish(ad_id, kind, buyer or None, auto_off=bool(auto_off))
-    msg = t("Saved: {status}", status=t("sold") if sold.kind_of(kind) == "sold" else t("reserved"))
+async def sold_finish(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), auto_off: str | None = Form(None),
+                      pieces: str = Form(""), price: str = Form("")):
+    """`pieces` and `price` come from an ad with a quantity (sold.html); a single item sends neither (finish counts
+    it as one piece). A blank `pieces` is refused like any number out of range, not taken as one."""
+    try:
+        amount = min_price_svc.parse_form(price)
+    except ValueError:
+        return back(_sold_url(ad_id, kind, buyer or None, t("Price must be a number, e.g. 25 or 25,50"), "#step3"))
+    try:
+        row = sold.finish(ad_id, kind, buyer or None, auto_off=bool(auto_off),
+                          pieces=int(pieces) if pieces.strip().isdigit() else 0, price=amount)
+    except ValueError as e:
+        return back(_sold_url(ad_id, kind, buyer or None, str(e), "#step3"))
+    if sold.kind_of(kind) == "sold" and row.sale_status != "sold":     # pieces left: the ad stays online
+        msg = row.last_action or ""
+    else:
+        msg = t("Saved: {status}", status=t("sold") if sold.kind_of(kind) == "sold" else t("reserved"))
     return back(_sold_url(ad_id, kind, buyer or None, msg, "#step3"))
+
+
+@app.post("/sold/{ad_id}/sales/{sale_id}/undo")
+async def sold_undo_sale(ad_id: str, sale_id: int, kind: str = Form("sold"), buyer: str = Form("")):
+    row = sold.ad_row(ad_id)      # sold out before: open again here, but what the sell-out switched off stays off
+    reopened = row is not None and row.sale_status == "sold"
+    if not sold.undo_sale(ad_id, sale_id):
+        msg = t("Sale not found")
+    elif reopened and not row.auto_reply and not row.auto_renew:
+        msg = t("Sale undone here (willhaben unchanged); automatic answers and auto-renew stay off until you switch them on again")
+    elif reopened and not row.auto_renew:
+        msg = t("Sale undone here (willhaben unchanged); auto-renew stays off until you switch it on again")
+    elif reopened and not row.auto_reply:
+        msg = t("Sale undone here (willhaben unchanged); automatic answers stay off until you switch them on again")
+    else:
+        msg = t("Sale undone here (willhaben unchanged)")
+    return back(_sold_url(ad_id, kind, buyer or None, msg, "#stock"))
 
 
 @app.post("/sold/{ad_id}/reset")
@@ -1372,10 +1434,10 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 
 
 @app.post("/new-ad/{draft_id:int}")
-async def ad_draft_save(draft_id: int, title: str = Form(...), description: str = Form(...),
+async def ad_draft_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
-    d = ad_creator.save_fields(draft_id, title, description, price)
-    msg = d.error if d.refining else t('Changes saved')
+    d = ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
+    msg = ad_creator.save_problem(d, price) or t('Changes saved')
     return back(f"/new-ad/{draft_id}?msg={quote(msg, safe='')}")
 
 
@@ -1383,7 +1445,16 @@ async def ad_draft_save(draft_id: int, title: str = Form(...), description: str 
 async def ad_draft_refine(draft_id: int, instruction: str = Form(...)):
     """Background job (lane claude): the draft shows "Claude is revising…" and swaps itself in when done."""
     _draft_or_404(draft_id)
-    ad_creator.enqueue_refine(draft_id, instruction)
+    if not ad_creator.enqueue_refine(draft_id, instruction):
+        return back(f"/new-ad/{draft_id}?msg={quote(ad_creator.refine_refusal(draft_id), safe='')}")
+    return back(f"/new-ad/{draft_id}")
+
+
+@app.post("/new-ad/{draft_id:int}/retry")
+async def ad_draft_retry(draft_id: int):
+    """A draft Claude could not write: the same notes and photos once more, as a background job."""
+    _draft_or_404(draft_id)
+    ad_creator.enqueue_retry(draft_id)
     return back(f"/new-ad/{draft_id}")
 
 
@@ -1411,10 +1482,21 @@ async def ad_draft_geizhals(draft_id: int, url: str = Form(""), query: str = For
     return back(f"/new-ad/{draft_id}#geizhals")
 
 
-def _save_posted_fields(draft_id: int, form: Any) -> None:
-    """Unsaved title/description/price that came along with a willhaben action: saved first."""
+def _posted_quantity(form: Any) -> str | None:
+    """The piece count of a draft form; None = the form has no such field (leave the saved count alone), blank = one
+    item. Read from the raw form: FastAPI's Form() turns a blank field into a missing one."""
+    quantity = form.get("quantity")
+    return None if quantity is None else str(quantity)
+
+
+def _save_posted_fields(draft_id: int, form: Any) -> str | None:
+    """Unsaved title/description/price/pieces that came along with a willhaben action: saved first. Returns the
+    problem (it is on the draft as d.error too) when the edit was not taken over, e.g. a price that could not be read."""
     if form.get("title") is not None and form.get("description") is not None:
-        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+        price = str(form.get("price") or "")
+        return ad_creator.save_problem(ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]),
+                                                              price, _posted_quantity(form)), price)
+    return None
 
 
 @app.post("/new-ad/{draft_id:int}/willhaben/prepare")
@@ -1449,7 +1531,8 @@ async def ad_draft_wh_publish(request: Request, draft_id: int):
     publish_willhaben check the status)."""
     _draft_or_404(draft_id)
     form = await request.form()
-    _save_posted_fields(draft_id, form)
+    if _save_posted_fields(draft_id, form):                  # e.g. an unreadable price: not published with the old one
+        return back(f"/new-ad/{draft_id}#willhaben")
     try:
         option = int(str(form.get("option", "")))
     except ValueError:
@@ -1526,7 +1609,7 @@ async def ad_batch_save(request: Request, batch_id: int):
         kind, _, ref = key.partition("_")
         if kind == "img" and ref.isdigit():
             order.append((int(ref), str(value)))
-        elif kind in ("product", "comment", "include"):
+        elif kind in ("product", "comment", "include", "quantity"):
             fields.setdefault(ref, {})[kind] = str(value)
     ad_batch.apply_review(batch_id, order, fields)
     action = form.get("action")
@@ -1576,7 +1659,9 @@ def _draft_card(request: Request, d: AdDraft, saved: bool = False) -> HTMLRespon
 async def ad_draft_inline_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                                price: str = Form("")):
     _draft_or_404(draft_id)
-    return _draft_card(request, ad_creator.save_fields(draft_id, title, description, price), saved=True)
+    quantity = _posted_quantity(await request.form())
+    d = ad_creator.save_fields(draft_id, title, description, price, quantity)
+    return _draft_card(request, d, saved=ad_creator.save_problem(d, price) is None)
 
 
 @app.post("/ad-drafts/{draft_id}/inline/refine", response_class=HTMLResponse)
@@ -1585,7 +1670,7 @@ async def ad_draft_inline_refine(request: Request, draft_id: int, instruction: s
                                  price: str = Form("")):
     _draft_or_404(draft_id)
     if title is not None and description is not None:   # unsaved edits first, Claude works on the saved version
-        ad_creator.save_fields(draft_id, title, description, price)
+        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
     ad_creator.enqueue_refine(draft_id, instruction)      # background job: the card swaps itself in when done
     return _draft_card(request, _draft_or_404(draft_id))
 
@@ -1596,9 +1681,14 @@ async def ad_draft_inline_status(request: Request, draft_id: int, status: str = 
                                  price: str = Form("")):
     if status not in ("draft", "published", "discarded"):
         raise HTTPException(400)
-    _draft_or_404(draft_id)
+    d = _draft_or_404(draft_id)
     if title is not None and description is not None:
-        ad_creator.save_fields(draft_id, title, description, price)
+        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
+    live = ad_creator.live_on_willhaben(d) if status == "draft" and d.status == "published" else None
+    if live is not None:          # "not published after all" while the ad is online would let it be published twice
+        return _draft_card(request, ad_creator.update_draft(draft_id, error=t(
+            "The ad is online on willhaben as {id} – change or delete it under My ads (/myads); the draft stays published",
+            id=live.ad_id)))
     return _draft_card(request, ad_creator.update_draft(draft_id, status=status))
 
 
@@ -1609,7 +1699,7 @@ async def ad_draft_inline_prepare(request: Request, draft_id: int, title: str | 
     """Read-only: ask willhaben's insertion form for categories and required fields of this draft."""
     _draft_or_404(draft_id)
     if title is not None and description is not None:
-        ad_creator.save_fields(draft_id, title, description, price)
+        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
     try:
         d = await ad_creator.prepare_willhaben(draft_id, category_query.strip() or None)
     except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
@@ -1623,8 +1713,8 @@ async def ad_draft_inline_publish(request: Request, draft_id: int):
     Runs as a background job: the card comes back at once with a spinner and swaps itself in when done."""
     _draft_or_404(draft_id)
     form = await request.form()
-    if form.get("title") is not None and form.get("description") is not None:
-        ad_creator.save_fields(draft_id, str(form["title"]), str(form["description"]), str(form.get("price") or ""))
+    if _save_posted_fields(draft_id, form):                  # e.g. an unreadable price: not published with the old one
+        return _draft_card(request, _draft_or_404(draft_id))
     try:
         option = int(str(form.get("option", "")))
     except ValueError:
@@ -1632,6 +1722,14 @@ async def ad_draft_inline_publish(request: Request, draft_id: int):
     prefix = f"o{option}_"
     values = {k[len(prefix):]: str(v) for k, v in form.multi_items() if k.startswith(prefix) and v}
     ad_creator.enqueue_publish(draft_id, option, values, shipping=ad_creator.parse_shipping(form))
+    return _draft_card(request, _draft_or_404(draft_id))
+
+
+@app.post("/ad-drafts/{draft_id}/retry", response_class=HTMLResponse)
+async def ad_draft_inline_retry(request: Request, draft_id: int):
+    """Batch card "Try again" on a draft Claude could not write: background job, the card swaps itself in when done."""
+    _draft_or_404(draft_id)
+    ad_creator.enqueue_retry(draft_id)
     return _draft_card(request, _draft_or_404(draft_id))
 
 
@@ -1775,7 +1873,7 @@ async def capture_download(name: str):
 
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
-                     "claude", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
+                     "claude", "selling", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
                      "prices")   # settings.html groups
 
 
@@ -1944,6 +2042,8 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
+                  **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
+                      "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),
                   **({"site": _platform_row(sites[section])} if section in sites else {}),
                   **({"vpn": vpn.status()} if section == "vpn" or section == "willhaben" or section in sites else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
@@ -2191,14 +2291,17 @@ async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01
 
 @app.post("/settings")
 async def settings_save(request: Request):
-    """The general settings. Each section posts only its own fields (hidden "section"); without it, all of them."""
+    """The general settings. Each section posts only its own fields (hidden "section"); an unknown or missing section
+    saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
-    groups = {"rules": ("reply_rules",),
+    groups = {"rules": ("reply_rules",), "selling": selling.KEYS,
               "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
     section = str(form.get("section") or "")
-    todo = set(groups.get(section) or [k for g in groups.values() for k in g])
+    if section not in groups:
+        return back("/settings")
+    todo = set(groups[section])
 
     def num(key: str, default: int) -> int:
         try:
@@ -2230,7 +2333,9 @@ async def settings_save(request: Request):
     if "expiry_warn_days" in todo:
         set_setting("expiry_warn_days", str(max(0, num("expiry_warn_days", 3))))
         set_setting("myads_expired_days", str(max(0, num("myads_expired_days", 30))))
-    return back(f"/settings{'/' + section if section in groups else ''}?msg={quote(t('Changes saved'), safe='')}")
+    if "sell_handover" in todo:
+        selling.save(form)
+    return back(f"/settings/{section}?msg={quote(t('Changes saved'), safe='')}")
 
 
 def _alias(model: str) -> str:
@@ -2513,7 +2618,7 @@ async def shipment_save(request: Request, shipment_id: int):
     f = await request.form()
     addr = shipping.clean_address({k: str(f.get(k) or "") for k in shipping.ADDRESS_FIELDS})
     if addr:
-        shipping.update(shipment_id, recipient=addr)
+        shipping.set_recipient(shipment_id, addr)
     try:
         shipping.set_parcel(shipment_id, {k: f.get(k) for k in ("length_cm", "width_cm", "height_cm", "weight_kg", "contents")})
     except shipping.ShippingError as e:
@@ -2529,6 +2634,19 @@ async def shipment_option(shipment_id: int, key: str = Form(...)):
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
     return _chat_back(s.conversation_id)
+
+
+@app.post("/shipments/{shipment_id}/shop")
+async def shipment_shop(shipment_id: int, shop: str = Form("")):
+    """The owner's parcel shop for a "→ Shop" option (one of the shops the card listed, as JSON)."""
+    s = _shipment_or_404(shipment_id)
+    try:
+        shipping.set_shop(shipment_id, json.loads(shop or "null"))
+    except ValueError:
+        return _chat_back(s.conversation_id, t("Parcel shop incomplete: name and address are needed"))
+    except shipping.ShippingError as e:
+        return _chat_back(s.conversation_id, str(e))
+    return _chat_back(s.conversation_id, t("Parcel shop saved"))
 
 
 @app.post("/shipments/{shipment_id}/label")
@@ -2873,8 +2991,10 @@ async def api_draft_send(draft_id: int, payload: dict[str, Any]):
 
 @app.get("/api/myads")
 async def api_myads():
+    """Every own ad; `stock`: {quantity, sold, remaining} of an ad with several pieces, None for a single item."""
     with session() as db:
-        return [a.model_dump(mode="json") for a in db.exec(select(MyAd))]
+        ads = list(db.exec(select(MyAd)))
+    return [{**a.model_dump(mode="json"), "stock": stock.numbers(a)} for a in ads]
 
 
 @app.post("/api/myads")

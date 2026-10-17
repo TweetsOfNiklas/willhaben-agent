@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+# Fixed willhaben fact, the last bullet of the reply and ad system prompts (app/services/selling.py checks our own
+# texts for it in code)
+CONTACT_RULE = ("willhaben zensiert E-Mail-Adressen und Links in Chatnachrichten und Anzeigen: Schreib keine, auch "
+                "nicht auf Nachfrage; alles läuft über den willhaben-Chat.")
+
 REPLY_SYSTEM = """\
 Du entwirfst Chat-Antworten für eine Privatperson auf willhaben.at, dem österreichischen Kleinanzeigenportal.
 Der Entwurf wird vor dem Senden von der Person gelesen und bei Bedarf geändert.
@@ -20,6 +25,8 @@ So arbeitest du:
 - Preise nie als Lücke: kein "[Betrag] €", kein "[Preis]". Entweder du nennst eine konkrete Zahl (aus Anzeige,
   Regeln, Preisrahmen oder dein eigenes Gegenangebot, dann auch in suggested_price) oder die Antwort kommt ganz
   ohne Zahl aus (beim Angebotspreis bleiben, nach dem Angebot des Partners fragen).
+- Steht bei der Anzeige eine Stückzahl, sag nie mehr Stück zu, als verfügbar sind; fragt jemand nach mehr, biete die
+  verfügbare Zahl an. Ohne Stückzahl gilt die Anzeige als ein Artikel.
 - So kurz wie möglich: ein bis zwei Sätze, nur die Sache selbst, wie eine echte Kleinanzeigen-Nachricht. Keine
   Begrüßung ("Hallo"), kein Einfühlen oder Einleiten ("ich verstehe, dass …", "danke für deine Nachricht"), keine
   Höflichkeitsfloskeln, keine Wiederholung dessen, was der Partner geschrieben hat. Kein Gruß mit Namen am Ende,
@@ -47,7 +54,7 @@ So arbeitest du:
   Versand anbieten, nur Abholung), je als kurzer Button-Text (label) und Anweisung, wie die Antwort dafür
   umzuschreiben ist (instruction). Leer lassen, wenn es keine echte Alternative gibt (einfache Sachfrage u. Ä.)
   oder bei intent = "scam_suspect".
-"""
+""" + f"- {CONTACT_RULE}\n"
 
 MEETUP_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -110,11 +117,17 @@ def _fmt_time(dt: datetime | None) -> str:
 def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | None,
                  messages: list[tuple[str, datetime | None, str]], rules: str,
                  examples: list[str], hint: str | None, availability: str | None = None,
-                 now: datetime | None = None) -> str:
-    """messages: (direction, created_at, text) oldest first; direction in/out/unknown."""
+                 now: datetime | None = None, stock: dict[str, int] | None = None) -> str:
+    """messages: (direction, created_at, text) oldest first; direction in/out/unknown.
+    stock: {"quantity", "remaining"} of my own ad with several pieces (app/services/stock.py), else None."""
     role_txt = {"seller": "Ich verkaufe den Artikel.", "buyer": "Ich interessiere mich für den Artikel (Käufer)."}.get(
         role or "", "Rolle unbekannt (aus dem Verlauf ableiten).")
     lines = [f"Jetzt: {_fmt_time(now or datetime.now(timezone.utc))} (Ortszeit Wien)", f"Meine Rolle: {role_txt}"]
+    pieces: list[str] = []
+    if stock:
+        left = stock.get("remaining") or 0
+        pieces = [f"- Stückzahl: noch {left} von {stock.get('quantity')} Stück verfügbar (Preis gilt pro Stück)"
+                  if left > 0 else "- Stückzahl: ausverkauft"]
     if ad:
         desc = (ad.get("description") or "")[:2500]
         lines += [
@@ -122,11 +135,14 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
             "Anzeige:",
             f"- Titel: {ad.get('title')}",
             f"- Preis: {ad.get('price') or 'unbekannt (nicht abrufbar): keinen Betrag und keinen Rabatt erfinden'}",
+            *pieces,
             f"- Ort: {ad.get('location')}",
             f"- Kategorie: {ad.get('category')}",
             f"- Status: {ad.get('status')}",
             f"- Beschreibung: {desc}",
         ]
+    elif pieces:
+        lines += ["", "Anzeige:", *pieces]
     lines += ["", f"Gesprächspartner: {partner or 'unbekannt'}", "", "Verlauf (älteste zuerst):"]
     who = {"in": "Partner", "out": "Ich", "unknown": "willhaben-Hinweis/unklar"}
     for direction, ts, text in messages[-30:]:
@@ -161,11 +177,18 @@ Grundlage sind ihre Stichpunkte und die Fotos. Das Ergebnis wird vor dem Veröff
 - attributes: Marke, Modell, Größe, Farbe usw., nur wenn sichtbar oder genannt.
 - search_keywords: 2 bis 4 Wörter, mit denen man vergleichbare Inserate auf willhaben findet.
 - price_estimate: deine Einschätzung eines realistischen Angebotspreises in Euro, oder null wenn unklar.
+- quantity: Anzahl gleicher Stücke, die die Person verkauft, laut Stichpunkten und Fotos (ganze Zahl, mindestens 1;
+  z. B. "4 Stühle" oder vier gleiche Stühle auf den Fotos = 4). Bei einem einzelnen Artikel oder wenn unklar: 1.
+  Nennt die Person eine Stückzahl, gilt ihre. Bei mehr als 1 gilt der Preis pro Stück (price_estimate ebenso), und die
+  Beschreibung sagt es: "N Stück verfügbar, Preis pro Stück".
+- parcel: geschätzte Paketmaße in cm (verpackt, mit etwas Polster) und Gewicht in kg für ein einzelnes Stück,
+  aus Art und Größe des Artikels. Lieber etwas großzügig. Nur eine Schätzung; die Person prüft sie vor dem Versand.
+  Lässt sich der Artikel nicht sinnvoll schätzen, setze alle vier Werte auf 0.
 - product_query: exakter Produktname für eine Preisvergleich-Suche (Marke + Modell + ggf. Artikelnummer) mit allen
   Angaben, die die Variante festlegen: RAM, Speicher, Kapazität (Farbe nur, wenn sie eine eigene Produktvariante ist),
   z. B. "Bosch GSR 18V-55 06019H5202" oder "Raspberry Pi 4 Model B 4GB". Eine Variante, die du nicht sicher
   erkennst, lässt du weg statt zu raten. Nur bei eindeutig identifizierbaren Markenprodukten, sonst "".
-"""
+""" + f"- {CONTACT_RULE}\n"
 
 AD_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -186,15 +209,36 @@ AD_SCHEMA: dict[str, Any] = {
         "search_keywords": {"type": "string"},
         "price_estimate": {"type": ["number", "null"]},
         "product_query": {"type": "string"},
+        # no "minimum": numeric constraints are not part of the strict schema subset; the code clamps to >= 1
+        "quantity": {"type": "integer", "description": "Anzahl gleicher Stücke, mindestens 1"},
+        "parcel": {
+            "type": "object",
+            "properties": {"length_cm": {"type": "number"}, "width_cm": {"type": "number"},
+                           "height_cm": {"type": "number"}, "weight_kg": {"type": "number"}},
+            "required": ["length_cm", "width_cm", "height_cm", "weight_kg"],
+            "additionalProperties": False,
+        },
         "note": {"type": "string"},
     },
     "required": ["title", "description", "category_hint", "condition", "attributes",
-                 "search_keywords", "price_estimate", "product_query", "note"],
+                 "search_keywords", "price_estimate", "product_query", "quantity", "parcel", "note"],
     "additionalProperties": False,
 }
 
 
-def ad_prompt(notes: str, rules: str, n_images: int) -> str:
+def _piece_line(quantity: int | None) -> str | None:
+    """The owner's piece count for the prompts. An explicit 1 (the batch review, a cleared count) says so, so
+    that Claude does not offer the several pieces it may see on the photos."""
+    if not quantity or quantity < 1:
+        return None
+    if quantity == 1:
+        return "Stückzahl: 1 – ein einzelnes Stück, auch wenn auf den Fotos mehrere zu sehen sind"
+    return f"Stückzahl: {quantity} (Preis pro Stück) – erwähne im Text, dass {quantity} Stück verfügbar sind"
+
+
+def ad_prompt(notes: str, rules: str, n_images: int, quantity: int | None = None) -> str:
+    """quantity: the owner's piece count; it overrides what Claude would read from notes and photos."""
+    stock = _piece_line(quantity)
     return "\n".join([
         "Meine Stichpunkte zum Artikel:",
         notes.strip() or "(keine, nur Fotos)",
@@ -203,12 +247,14 @@ def ad_prompt(notes: str, rules: str, n_images: int) -> str:
         rules.strip() or "(keine)",
         "",
         f"Anzahl Fotos: {n_images}",
+        *([stock] if stock else []),
         "Aufgabe: Erstelle das Inserat.",
     ])
 
 
 def ad_refine_prompt(*, notes: str, rules: str, n_images: int, current: dict[str, Any],
-                     specs: list[tuple[str, str]] | None, product_name: str | None, instruction: str) -> str:
+                     specs: list[tuple[str, str]] | None, product_name: str | None, instruction: str,
+                     quantity: int | None = None) -> str:
     """Revise an existing draft according to one instruction of the user."""
     lines = [
         "Bisheriges Inserat:",
@@ -227,6 +273,8 @@ def ad_refine_prompt(*, notes: str, rules: str, n_images: int, current: dict[str
         "",
         f"Anzahl Fotos: {n_images}",
     ]
+    if stock := _piece_line(quantity):
+        lines.append(stock)
     if specs:
         lines += ["", f"Herstellerdaten laut Geizhals ({product_name}), verlässlich, darfst du verwenden:"]
         lines += [f"- {k}: {v}" for k, v in specs]
@@ -254,6 +302,8 @@ Du sortierst die Fotos nach Artikeln und erkennst, was jeder Artikel ist. Die Pe
   ehrliche allgemeine Bezeichnung wie "Holzstuhl, braun". Lies Typenschilder, Etiketten und Aufdrucke.
 - product_query: exakter Produktname für eine Preisvergleich-Suche, nur bei eindeutig erkennbarem Markenprodukt, sonst "".
 - observations: was auf den Fotos sichtbar ist und fürs Inserat zählt (Zustand, Mängel, Zubehör, Beschriftungen). Nichts erfinden.
+- quantity: Anzahl der gleichen Stücke dieses Artikels in der Gruppe (4 gleiche Stühle = 4), mindestens 1. Zähle nur,
+  was die Fotos oder die Angaben der Person hergeben; im Zweifel 1 und eine question.
 - confidence: hoch | mittel | niedrig, wie sicher Zuordnung und Erkennung sind.
 - question: konkrete Rückfrage an die Person, wenn etwas unklar ist (z. B. "Gehört das Netzteil auf Foto 7 zum Router?"), sonst "".
 - Vorgaben und Korrekturen der Person haben Vorrang vor deiner eigenen Einschätzung.
@@ -271,10 +321,12 @@ SORT_SCHEMA: dict[str, Any] = {
                     "product": {"type": "string"},
                     "product_query": {"type": "string"},
                     "observations": {"type": "string"},
+                    "quantity": {"type": "integer", "description": "Anzahl gleicher Stücke in der Gruppe, mindestens 1"},
                     "confidence": {"type": "string", "enum": ["hoch", "mittel", "niedrig"]},
                     "question": {"type": "string"},
                 },
-                "required": ["photos", "product", "product_query", "observations", "confidence", "question"],
+                "required": ["photos", "product", "product_query", "observations", "quantity", "confidence",
+                             "question"],
                 "additionalProperties": False,
             },
         },
@@ -288,13 +340,15 @@ SORT_SCHEMA: dict[str, Any] = {
 
 def sort_prompt(*, notes: str, n_images: int, current: list[dict[str, Any]] | None = None,
                 hint: str | None = None) -> str:
-    """current: the user's corrected grouping as [{photos: [1-based], product, comment}] when re-sorting."""
+    """current: the user's corrected grouping as [{photos: [1-based], product, quantity, comment}] when re-sorting."""
     lines = [f"Anzahl Fotos: {n_images} (foto1 bis foto{n_images})", "",
              "Allgemeine Angaben der Person zu allen Artikeln:", notes.strip() or "(keine)"]
     if current:
         lines += ["", "Aktuelle Gruppierung, von der Person geprüft oder korrigiert:"]
         for g in current:
             line = f"- Fotos {', '.join(map(str, g['photos']))}: {g.get('product') or '?'}"
+            if (g.get("quantity") or 0) > 1:
+                line += f" ({g['quantity']} Stück)"
             if (g.get("comment") or "").strip():
                 line += f" (Kommentar der Person: {g['comment'].strip()})"
             lines.append(line)
