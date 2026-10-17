@@ -586,8 +586,11 @@ async def _run_agent(agent_id: int) -> RunResult:
                 if plan and product_search.drop_reason(ad, plan, query):
                     continue        # "Suche" ad, far over budget or an exclusion word: never stored or notified
                 quiet = res.baseline or _quiet(query)     # the agent's or this search's first check: seen, no push
+                # with a screening or a Geizhals rule a new hit waits in "filtered" until it is judged (Geizhals,
+                # Claude: seconds to minutes), so New never shows one the rule then takes away; _file_screened files it
+                held = agent.notify and (agent.screen or geizhals_rule(agent))
                 hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
-                          state="seen" if quiet else "new")
+                          state="seen" if quiet else "filtered" if held else "new")
                 _apply(hit, ad)
                 if not hit.item_condition and (cond := known.get((ad.platform, ad.ad_id))):
                     hit.item_condition, hit.item_condition_label = cond      # what another agent's hit learned
@@ -645,7 +648,8 @@ async def _run_agent(agent_id: int) -> RunResult:
     # first those the rule held back before (filtered, no verdict yet), which get back into New only judged. A check
     # sends at most screening.MAX_PER_RUN; a hit beyond that stays unjudged and gets no push (10-14 they were pushed
     # unjudged: 30 off-topic Vinted ads in a day)
-    to_screen.sort(key=lambda h: not (h.state == "filtered" and h.screen_relevant is None))
+    fresh = {h.id for h in res.new}      # new ones wait in "filtered" too: held back before means not new now
+    to_screen.sort(key=lambda h: not (h.state == "filtered" and h.screen_relevant is None and h.id not in fresh))
     asked: set[int] = set()
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         asked = await screening.screen_all(agent_id, to_screen)
@@ -790,9 +794,12 @@ def _unjudged(agent: SearchAgent, h: Hit, asked: set[int]) -> bool:
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:
     """A new hit the screening or the Geizhals rule holds back, or one Claude was not sent (more than a check screens),
-    gets no push, so it goes to "filtered" instead of "new"; a filtered hit that passes after a price drop is pushed
-    and becomes new again, with screening on only once Claude has judged it or was sent it in this run."""
-    moves = [(h, "new", "filtered") for h in new if not passes(agent, h) or _unjudged(agent, h, asked)]
+    gets no push, so it goes to "filtered" instead of "new" (or stays there: new hits wait there while judged); a
+    filtered hit that passes, new or after a price drop, is pushed and becomes new, with screening on only once Claude
+    has judged it or was sent it in this run."""
+    moves = [(h, h.state, "filtered" if not passes(agent, h) or _unjudged(agent, h, asked) else "new")
+             for h in new if h.state in ("new", "filtered")]
+    moves = [m for m in moves if m[1] != m[2]]
     moves += [(h, "filtered", "new") for h in drops if passes(agent, h) and not _unjudged(agent, h, asked)]
     if not moves:
         return

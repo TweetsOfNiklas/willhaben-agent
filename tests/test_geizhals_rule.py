@@ -343,3 +343,24 @@ def test_the_drawer_saves_a_price_zone(fake):
         with session() as db:
             row = db.get(SearchAgent, a.id)
             assert (row.geizhals_level, row.geizhals_pct) == (None, None)
+
+
+async def test_a_new_hit_waits_out_of_new_until_judged(fake, world, monkeypatch):
+    """New never shows a hit the rule or Claude then takes away: it waits in "filtered" while it is judged."""
+    states = []
+
+    async def screen_all(agent_id, hits):
+        states.extend(h.state for h in _hits(agent_id).values())      # what the hits page shows meanwhile
+        return {h.id for h in hits}
+
+    monkeypatch.setattr(screening, "screen_all", screen_all)
+    a = create_agent("https://fake.example/s/iphone")
+    fake.pages = [[]]
+    await run_agent(a.id)
+    _set(a.id, geizhals_level="bargain", screen=True)
+    fake.pages = [[listing("1", "iPhone 13 128GB", 100.0), listing("2", "iPhone 13 128GB", 400.0)]]
+    await run_agent(a.id)
+    assert states == ["filtered", "filtered"]
+    hits = _hits(a.id)
+    assert hits["2"].state == "filtered"                              # 80 % of new: not a bargain
+    assert hits["1"].state in ("new", "filtered")                     # Claude's verdict decides (mocked: none)
