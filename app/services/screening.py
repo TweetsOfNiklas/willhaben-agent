@@ -16,7 +16,7 @@ import httpx
 from sqlmodel import col, select
 
 from app.db import Hit, SearchAgent, session, utcnow
-from app.platforms import condition
+from app.platforms import condition, shipping_info
 from app.services import ad_images, scam
 from app.services.ad_images import MAX_IMAGE_BYTES  # noqa: F401  (re-exported)
 from app.i18n import LANGS, background_lang, t
@@ -187,6 +187,8 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                           "location": h.location, "private": h.is_private, "description": h.body,
                           "condition": condition.shown(h.item_condition, h.item_condition_label, h.platform) or None,
                           "new_price": _new_price(h),
+                          "shipping": shipping_info.prompt_line(h.shipping_price, h.shipping)
+                          if h.shipping_price is not None or h.shipping else None,
                           **({"site": _site_name(h.platform)} if len(sites) > 1 else {}),
                           "scam_flags": [f.get("label") for f in h.scam_flags or [] if f.get("severity") in ("warn", "high")],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 
+from sqlalchemy import or_
 from sqlmodel import col, select
 
 from app.config import get_settings
@@ -25,6 +26,8 @@ from app.services import product_search, scam, screening
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ad_ref
 from app.platforms import vpn
+from app.platforms import shipping_info
+from app.platforms.shipping_info import apply_shipping
 from app.services.notify import notify
 
 log = logging.getLogger(__name__)
@@ -53,6 +56,7 @@ class RunResult:
     bumped: int = 0
     baseline: bool = False
     error: str | None = None
+    pending_left: int = 0       # hits still pending after the check (more than one check screens): a follow-up comes
 
 
 def _interval(platform: platforms.Platform, interval_s: int | None) -> int:
@@ -431,13 +435,25 @@ def create_agent_from_search(search_id: int, name: str | None = None, interval_s
     return agent
 
 
-async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> tuple[
+def _wh_rows_key(agent_id: int) -> str:
+    """Set once the agent's first check with the sites' larger pages (Platform.former_rows) is done."""
+    return f"wh_rows_agent_{agent_id}"
+
+
+def _old_rows(spec: SearchSpec) -> int | None:
+    return _site(spec.platform).former_rows(spec)
+
+
+async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]], widen: bool = False,
+                      older: set[tuple[str, str]] | None = None) -> tuple[
         list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, list[dict[str, Any] | None],
         list[str]]:
     """Run an agent's searches one after another (uncached), each on its platform. Returns (ads with their query,
     de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; the queries of
     the searches that succeeded; the searches the VPN held: a site waiting for the search to find it a server, no
-    error of the search). A block stops the remaining searches of this run."""
+    error of the search). A block stops the remaining searches of this run. `widen`: the agent's first check with
+    willhaben's largest page; the ads beyond the rows it asked for before go into `older` (they are not new, the
+    smaller page just never showed them)."""
     ads: list[tuple[Listing, dict[str, Any] | None]] = []
     seen: set[tuple[str, str]] = set()
     rows, errors, first_exc, ok, held = 0, [], None, [], []
@@ -460,6 +476,8 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
             continue
         ok.append(q)
         rows += page.rows_found or 0
+        if widen and older is not None and (old := _old_rows(spec)) is not None:
+            older.update((spec.platform, ad.ad_id) for ad in page.ads[old:] if ad.ad_id)
         for ad in page.ads:
             ad.platform = spec.platform               # the hit belongs to the site that was searched
             if not ad.ad_id or (spec.platform, ad.ad_id) in seen:
@@ -484,6 +502,9 @@ def _apply(hit: Hit, ad: Listing) -> None:
     hit.is_private = ad.is_private
     if ad.item_condition:           # a list without one keeps what the ad page told (Shpock states it only there)
         hit.item_condition, hit.item_condition_label = ad.item_condition, ad.item_condition_label
+    apply_shipping(hit, ad)         # the same: a list without shipping keeps what the ad page told
+    if ad.lat is not None and ad.lon is not None:
+        hit.lat, hit.lon = ad.lat, ad.lon
     hit.last_seen_at = utcnow()
 
 
@@ -509,15 +530,30 @@ async def run_agent(agent_id: int) -> RunResult:
         with session() as db:
             agent = db.get(SearchAgent, agent_id)
             title = agent.name if agent else t("Agent {id}", id=agent_id)
-        async with timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
+        from app.services import jobs
+
+        # in the header's background work while it runs (no notice when done: the hits and pushes tell)
+        async with jobs.track("agent-run", t("Search agent „{name}“", name=title), lane="agents",
+                              link=f"/hits?agent_id={agent_id}", quiet=True, current=f"agent:{agent_id}") as job, \
+                timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
             res = await _run_agent(agent_id)
             tl.finish(not res.error, res.error, payload={k: v for k, v in {
                 "rows_found": res.rows_found, "new": len(res.new), "price_drops": len(res.price_drops),
                 "bumped": res.bumped, "baseline": res.baseline or None}.items() if v is not None})
+            job.result = res.error or _run_summary(res)
+            if res.error:
+                job.status = "failed"
     finally:
         del _checking[agent_id]
         done.set_result(None)
     return res
+
+
+def _run_summary(res: RunResult) -> str:
+    parts = [t("{n} new", n=len(res.new))] if res.new else []
+    if res.price_drops:
+        parts.append(t("{n} price drops", n=len(res.price_drops)))
+    return " · ".join(parts) or (t("first check: everything counts as seen") if res.baseline else t("nothing new"))
 
 
 async def _run_agent(agent_id: int) -> RunResult:
@@ -558,7 +594,9 @@ async def _run_agent(agent_id: int) -> RunResult:
         return _fail("; ".join(skipped))
     # quiet searches last: an ad an older search finds too counts as that one's (first occurrence wins) and pushes
     usable.sort(key=lambda x: _quiet(x[1]))
-    found, rows_found, errors, first_exc, ok, held = await _search_all(usable)
+    widen = get_setting(_wh_rows_key(agent_id)) != "1"
+    older: set[tuple[str, str]] = set()
+    found, rows_found, errors, first_exc, ok, held = await _search_all(usable, widen, older)
     if not ok and not errors:                # the VPN held every search: no error, the next check runs as planned
         log.info("agent %s: every search waits for the VPN (%s)", agent_id, held[0])
         return res
@@ -586,7 +624,8 @@ async def _run_agent(agent_id: int) -> RunResult:
             if hit is None:
                 if plan and product_search.drop_reason(ad, plan, query):
                     continue        # "Suche" ad, far over budget or an exclusion word: never stored or notified
-                quiet = res.baseline or _quiet(query)     # the agent's or this search's first check: seen, no push
+                # the agent's or this search's first check: seen, no push; so are the older ads the larger page shows
+                quiet = res.baseline or _quiet(query) or (ad.platform, ad.ad_id) in older
                 # with a screening or a Geizhals rule a new hit is pending until it passed both (Geizhals, Claude:
                 # seconds to minutes): New shows only hits that passed; _file_screened files it
                 hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
@@ -647,7 +686,16 @@ async def _run_agent(agent_id: int) -> RunResult:
             backlog = []
         res.new = backlog + res.new
 
+    if widen and any(_old_rows(s) is not None and q in ok for s, q in usable):
+        set_setting(_wh_rows_key(agent_id), "1")                # its searches ran with the larger page
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
+    if pickup_limit(agent) and to_notify:
+        await _locate(to_notify)
+        from app.services import geo
+
+        # a list that says nothing about shipping (Kleinanzeigen) is no "pickup only": the ad page tells, before
+        # the distance holds a far hit back
+        await _shipping_pages([h for h in to_notify if h.shipping is None and geo.too_far(h, pickup_limit(agent))])
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
@@ -657,7 +705,7 @@ async def _run_agent(agent_id: int) -> RunResult:
         from app.services import geizhals_check
 
         await geizhals_check.check(agent, to_notify)
-    to_screen = [h for h in to_notify if geizhals_passes(agent, h)]   # held back anyway: no Claude call
+    to_screen = [h for h in to_notify if geizhals_passes(agent, h) and distance_passes(agent, h)]   # held back anyway: no Claude call
     # first those held back before (filtered or pending, no verdict yet), which get into New only judged. A check
     # sends at most screening.MAX_PER_RUN; a hit beyond that stays unjudged (pending) and gets no push (10-14 they
     # were pushed unjudged: 30 off-topic Vinted ads in a day)
@@ -666,8 +714,14 @@ async def _run_agent(agent_id: int) -> RunResult:
     asked: set[int] = set()
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         asked = await screening.screen_all(agent_id, to_screen)
-    if (agent.screen or geizhals_rule(agent)) and to_notify:
+    if _holds(agent) and to_notify:
         _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
+    if agent.screen and _holds(agent):
+        res.pending_left = sum(1 for h in res.new if h.state == PENDING)
+        if res.pending_left:            # judged in a follow-up check soon, not only at the next regular one
+            from app import scheduler
+
+            scheduler.follow_up(agent_id)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
     multi = platforms.multi()
@@ -678,13 +732,14 @@ async def _run_agent(agent_id: int) -> RunResult:
     if notify_new and res.new:
         good = [h.id for h in res.new if passes(agent, h) and not _unjudged(agent, h, asked)]
         pushed = set(good[:MAX_PUSH_PER_RUN])
+        await _shipping_pages([h for h in res.new if h.id in pushed])   # the push names the shipping
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
-                await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}".strip(" :"),
+                await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}{_ship_suffix(h)}".strip(" :"),
                              _hit_text(h), url=h.url, image=h.image_url, push=h.id in pushed,
                              data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
-                                   "price": h.price, "location": h.location, **_screen_data(h), **_scam_data(h),
-                                   **_geizhals_data(h)})
+                                   "price": h.price, "location": h.location, "shipping_price": h.shipping_price,
+                                   "shipping": h.shipping, **_screen_data(h), **_scam_data(h), **_geizhals_data(h)})
         if len(good) > MAX_PUSH_PER_RUN:
             sites = list(dict.fromkeys(h.platform for h in res.new))
             await notify("hit", label(sites[0]) if len(sites) == 1 else name,
@@ -693,7 +748,8 @@ async def _run_agent(agent_id: int) -> RunResult:
     if notify_drops:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
-                         f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}" + _scam_line(h)
+                         f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}{_ship_suffix(h)}"
+                         + _scam_line(h)
                          + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url,
                          push=passes(agent, h) and not _unjudged(agent, h, asked),
                          data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
@@ -761,8 +817,62 @@ def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
 
 
 def passes(agent: SearchAgent, hit: Hit) -> bool:
-    """Should this hit push: the screening lets it through and it keeps the Geizhals rule."""
-    return screening.passes(agent, hit) and geizhals_passes(agent, hit)
+    """Should this hit push: the screening lets it through, it keeps the Geizhals rule and the distance limit."""
+    return screening.passes(agent, hit) and geizhals_passes(agent, hit) and distance_passes(agent, hit)
+
+
+def ships(hit: Hit) -> bool:
+    return hit.shipping == shipping_info.SHIP or hit.shipping_price is not None
+
+
+def pickup_limit(agent: SearchAgent) -> int | None:
+    """The agent's own "pickup within N km", else the one of Settings → Shipping & pickup."""
+    from app.services import geo
+
+    return agent.max_km or geo.pickup_radius()
+
+
+def distance_passes(agent: SearchAgent, hit: Hit) -> bool:
+    """Pickup only within the limit: an ad that ships always passes, so does one whose place is not known."""
+    from app.services import geo
+
+    return not geo.too_far(hit, pickup_limit(agent))
+
+
+async def _locate(hits: list[Hit]) -> None:
+    """Coordinates for the hits a distance limit judges (their postcode's centre, cached), stored."""
+    from app.services import geo
+
+    located = await geo.locate_hits([h for h in hits if not ships(h)])
+    if not located:
+        return
+    with session() as db:
+        for h in located:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.lat, row.lon = h.lat, h.lon
+                db.add(row)
+        db.commit()
+
+
+async def locate_job() -> None:
+    """Hourly: coordinates for the hits shown without any (the cards' distance), a few new postcodes at a time."""
+    from app.services import geo
+
+    if geo.home_address() is None:
+        return
+    with session() as db:
+        hits = list(db.exec(select(Hit).where(col(Hit.lat).is_(None), Hit.state != CLEARED)
+                            .order_by(col(Hit.id).desc()).limit(2000)))
+    located = await geo.locate_hits(hits)
+    if located:
+        with session() as db:
+            for h in located:
+                row = db.get(Hit, h.id)
+                if row is not None:
+                    row.lat, row.lon = h.lat, h.lon
+                    db.add(row)
+            db.commit()
 
 
 async def _geizhals_prices(hits: list[Hit]) -> None:
@@ -811,8 +921,9 @@ def _unjudged(agent: SearchAgent, h: Hit, asked: set[int]) -> bool:
 
 
 def _holds(agent: SearchAgent) -> bool:
-    """New hits of this agent are pending until judged: it pushes, and screens or has a Geizhals rule."""
-    return bool(agent.notify and (agent.screen or geizhals_rule(agent)))
+    """New hits of this agent are pending until judged: it pushes, and screens, has a Geizhals rule or a distance
+    limit."""
+    return bool(agent.notify and (agent.screen or geizhals_rule(agent) or pickup_limit(agent)))
 
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:
@@ -853,6 +964,14 @@ def refile_screened() -> None:
 def _screen_line(h: Hit) -> str:
     line = screening.summary(h)
     return f"\n{line}" if line else ""
+
+
+def _ship_suffix(h: Hit) -> str:
+    """" · + € 4,90 shipping" after a pushed price; "" when the shipping is not known."""
+    from app.platforms import shipping_info
+
+    text = shipping_info.label(h.shipping_price, h.shipping, "€")
+    return f" · {text}" if text else ""
 
 
 def _hit_text(h: Hit) -> str:
@@ -948,14 +1067,19 @@ def set_keep_days(days: int) -> int:
 
 
 def clear_hits(states: Iterable[str] = ("filtered",), agent_id: int | None = None,
-               older_than_days: int | None = None) -> int:
-    """Hits in `states` (of one agent, first seen more than `older_than_days` ago) become cleared: shown nowhere, their
-    texts dropped. The row stays so a search that still lists the ad does not find it new (and screen it again)."""
+               older_than_days: int | None = None, platform: str | None = None,
+               ids: Iterable[int] | None = None) -> int:
+    """Hits in `states` (of one agent or site, first seen more than `older_than_days` ago, or just those `ids`) become
+    cleared: shown nowhere, their texts dropped. The row stays so a search that still lists the ad does not find it new (and screen it again)."""
     states = [x for x in states if x in EXPIRING]       # never saved ones
     with session() as db:
         q = select(Hit).where(col(Hit.state).in_(states))
         if agent_id:
             q = q.where(Hit.agent_id == agent_id)
+        if platform:
+            q = q.where(Hit.platform == platform)
+        if ids is not None:
+            q = q.where(col(Hit.id).in_(list(ids)))
         if older_than_days is not None:
             q = q.where(Hit.first_seen_at < utcnow() - timedelta(days=older_than_days))
         n = 0
@@ -989,3 +1113,159 @@ async def retention_job() -> None:
         return
     if cleared or gone:
         log.info("hits: %d cleared, %d rows of gone ads deleted", cleared, gone)
+
+
+STATUS_WORDS = {"sold": "sold", "verkauft": "sold", "reserved": "reserved", "reserviert": "reserved",
+                "expired": "expired", "inactive": "expired", "deleted": "gone"}
+
+
+async def _shipping_pages(hits: list[Hit]) -> None:
+    """Hits about to be pushed whose list did not state the shipping price: their ad page (one request each, through
+    the site's limiter and VPN) tells it, and their status. A failure only leaves it unknown."""
+    for h in hits:
+        p = _site(h.platform)
+        if h.shipping_price is not None or h.shipping == "pickup" or not p.can("detail"):
+            continue
+        try:
+            d = await p.detail(h.ad_id, url=h.url)
+        except (PlatformError, Exception) as e:  # noqa: BLE001 - the push goes out without it
+            log.info("shipping: ad page of %s %s not loaded: %s", h.platform, h.ad_id, e)
+            continue
+        record_status(h.platform or "willhaben", h.ad_id, site_status(d), d)
+        if d is not None:
+            apply_shipping(h, d)
+        h.site_status = site_status(d)
+
+
+def site_status(detail: Any) -> str:
+    """The ad's status as the hit keeps it: gone when the site no longer has the ad, else its status word."""
+    if detail is None:
+        return "gone"
+    raw = (getattr(detail, "status", None) or "unknown").lower()
+    return "active" if raw == "active" else STATUS_WORDS.get(raw, raw)
+
+
+def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None) -> None:
+    """The status the site just gave for an ad, and the shipping its page states, on every hit of it (several agents
+    may hold it). A hit held back only for its distance that turns out to ship goes back to New."""
+    with session() as db:
+        agents = {}
+        for h in db.exec(select(Hit).where(Hit.platform == platform_id, Hit.ad_id == ad_id)):
+            h.site_status, h.status_checked_at = status, utcnow()
+            if detail is not None:
+                was_far = h.state == "filtered" and not ships(h)
+                apply_shipping(h, detail)
+                if was_far and ships(h) and status == "active":
+                    agent = agents.get(h.agent_id) or db.get(SearchAgent, h.agent_id)
+                    agents[h.agent_id] = agent
+                    if agent is not None and passes(agent, h):
+                        h.state = "new"
+            db.add(h)
+        db.commit()
+
+
+def held_back_reasons(agent: SearchAgent | None, h: Hit) -> list[str]:
+    """Why a hit is under Filtered out (its card says it): Claude's screening, the Geizhals rule, the distance."""
+    if agent is None:
+        return []
+    out = []
+    if not screening.passes(agent, h):
+        out.append(t("Claude's screening"))
+    if not geizhals_passes(agent, h):
+        from app.services.deals import level_label
+
+        rule = t("{level} or cheaper", level=level_label(agent.geizhals_level)) if agent.geizhals_level \
+            else t("{pct} % below", pct=agent.geizhals_pct)
+        out.append(t("Geizhals rule: {rule}", rule=rule))
+    if not distance_passes(agent, h):
+        out.append(t("pickup only, farther than {n} km", n=pickup_limit(agent)))
+    return out
+
+
+WATCH_EVERY_H = 20            # a saved hit's ad is loaded about once a day
+WATCH_PER_RUN = 15            # the job runs every 2 h: a few ad pages each time, not a burst
+_STATUS_NEWS = {"sold": "Saved ad sold", "reserved": "Saved ad reserved", "gone": "Saved ad no longer online",
+                "expired": "Saved ad expired"}
+
+
+def watch_saved_on() -> bool:
+    return get_setting("watch_saved") != "0"
+
+
+async def watch_saved_job() -> None:
+    """Saved hits: their ad pages, about once a day, for a price drop or a new status (sold, reserved, gone, available
+    again), each told with a notification of the kind "saved". Ads that are gone are no longer asked."""
+    if not watch_saved_on():
+        return
+    due = utcnow() - timedelta(hours=WATCH_EVERY_H)
+    with session() as db:
+        rows = list(db.exec(select(Hit).where(Hit.state == "saved", or_(col(Hit.site_status).is_(None),
+                                                                         Hit.site_status != "gone"),
+                                              or_(col(Hit.status_checked_at).is_(None), Hit.status_checked_at < due))
+                            .order_by(col(Hit.status_checked_at).asc().nulls_first()).limit(WATCH_PER_RUN * 3)))
+    seen: set[tuple[str, str]] = set()
+    asked = 0
+    for h in rows:
+        key = (h.platform or "willhaben", h.ad_id)
+        if key in seen or not _site(h.platform).can("detail"):
+            continue
+        seen.add(key)
+        if asked >= WATCH_PER_RUN:
+            break
+        asked += 1
+        try:
+            await _watch_one(h)
+        except Exception as e:  # noqa: BLE001 - one ad must not stop the others; the next run asks again
+            log.info("saved hit %s: ad page not loaded: %s", h.id, e)
+
+
+async def _watch_one(h: Hit) -> None:
+    p = _site(h.platform)
+    d = await p.detail(h.ad_id, url=h.url)
+    status, before = site_status(d), h.site_status
+    record_status(h.platform or "willhaben", h.ad_id, status, d)
+    news: list[tuple[str, str]] = []
+    price = getattr(d, "price", None) if d is not None else None
+    if price is not None and h.price is not None and p.price_dropped(h.price, price):
+        with session() as db:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.old_price, row.price, row.price_dropped_at = row.price, price, utcnow()
+                row.price_display = getattr(d, "price_display", None) or row.price_display
+                db.add(row)
+                db.commit()
+        news.append((t("Saved ad: price dropped"), f"{h.heading}: {h.price:g} → {price:g} {p.currency}"))
+    elif price is not None and h.price != price:
+        with session() as db:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.price = price
+                row.price_display = getattr(d, "price_display", None) or row.price_display
+                db.add(row)
+                db.commit()
+    if before is not None and status != before:
+        if status in _STATUS_NEWS:
+            news.append((t(_STATUS_NEWS[status]), h.heading))
+        elif status == "active" and before in ("reserved", "sold"):
+            news.append((t("Saved ad available again"), h.heading))
+    for title, text in news:
+        await notify("saved", f"{p.name} · {title}" if platforms.multi() else title, text + _ship_suffix(h),
+                     url=h.url, image=h.image_url,
+                     data={"platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
+                           "price": price if price is not None else h.price, "status": status})
+
+
+async def check_hit(hit_id: int) -> Hit | None:
+    """The sync button of a hit: load the ad from its site (one request through its limiter and VPN) and keep its
+    status. PlatformError when the site cannot be asked; None when the hit is gone."""
+    with session() as db:
+        h = db.get(Hit, hit_id)
+    if h is None:
+        return None
+    p = _site(h.platform)
+    if not p.can("detail"):
+        raise PlatformError(t("{site} cannot load a single ad", site=p.name))
+    d = await p.detail(h.ad_id, url=h.url)
+    record_status(h.platform or "willhaben", h.ad_id, site_status(d), d)
+    with session() as db:
+        return db.get(Hit, hit_id)

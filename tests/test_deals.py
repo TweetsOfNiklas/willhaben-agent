@@ -1518,7 +1518,7 @@ async def test_results_of_filter_version_2_are_recomputed(wh, monkeypatch):
     async def no_gh(q, **kw):
         return None
     monkeypatch.setattr(deals.geizhals, "lookup", no_gh)
-    assert deals.FILTERS == 5
+    assert deals.FILTERS == 6
     res = await deals.analyze(_ad(100))
     deals.remember({**res, "comparables": {**res["comparables"], "filters": 2}})
     deals.clear_cache()
@@ -1538,6 +1538,9 @@ def test_deal_prompt_names_the_zones_and_the_condition():
     assert "Zustand laut Inserat: Neuwertig" in deals.deal_prompt(ad, res, "Deutsch", None)
     ad.item_condition, ad.item_condition_label = "new", None
     assert "Zustand angenommen: neu" in deals.deal_prompt(ad, res, "Deutsch", None)
+    assert "Versand" not in deals.deal_prompt(ad, res, "Deutsch", None)          # the site states none
+    ad.shipping_price = 5.5
+    assert "Versand: 5.5 €" in deals.deal_prompt(ad, res, "Deutsch", None)
     st = deals.stats([380, 390, 400, 410, 420, 430])
     res = {**res, "comparables": {"count": 6, "stats": st}, "position": deals.position(400, st, 100.0)}
     prompt = deals.deal_prompt(_ad(400), res, "Deutsch", None)
@@ -1702,6 +1705,16 @@ async def test_an_ad_of_another_site_compares_on_its_site_too(monkeypatch):
     assert asked == [("kleinanzeigen", "Raspberry Pi 5 8GB"), ("willhaben", "Raspberry Pi 5 8GB")]
     assert comp["count"] == 5 and sorted(a["price"] for a in comp["closest"]) == [159, 170, 175, 185, 190]   # not 149
     assert deals.comparable_sites("willhaben") == ["willhaben"] == deals.comparable_sites("preisjaeger")
+
+
+def test_comparables_come_from_every_site_switched_on():
+    from app.db import set_setting
+
+    for pid in ("vinted", "shpock", "preisjaeger"):
+        set_setting(f"platform_{pid}_enabled", "1")
+    sites = deals.comparable_sites("kleinanzeigen")
+    assert sites[:2] == ["kleinanzeigen", "willhaben"] and set(sites) == {"kleinanzeigen", "willhaben", "vinted", "shpock"}
+    assert deals.comparable_sites("preisjaeger")[0] == "willhaben" and "preisjaeger" not in deals.comparable_sites("preisjaeger")
 
 
 async def test_a_vpn_wait_is_named_as_such(monkeypatch):

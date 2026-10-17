@@ -107,8 +107,9 @@ class LLMBackend(Protocol):
                        images: list[Path] | None = None) -> LLMResult: ...
 
 
-def get_backend(purpose: str | None = None) -> LLMBackend:
-    """Backend for one job (a PURPOSES key: "chat", "ads", "shipping", …), using the model chosen for it in Settings."""
+def get_backend(purpose: str | None = None, model: str | None = None) -> LLMBackend:
+    """Backend for one job (a PURPOSES key: "chat", "ads", "shipping", …), using the model chosen for it in Settings
+    (`model`: another one for this call, e.g. the chat simulator's choice; the monthly limit still applies)."""
     from app.config import get_settings
 
     from app.db import get_setting
@@ -123,6 +124,8 @@ def get_backend(purpose: str | None = None) -> LLMBackend:
     if s.llm_backend == "claude_cli":
         from app.llm.claude_cli import ClaudeCLI
 
+        if model and not (get_setting("claude_limit_mode") == "haiku" and usage.limit()["over"]):
+            return ClaudeCLI(model=model, purpose=purpose)
         return ClaudeCLI(model=model_for(purpose), purpose=purpose)
     raise LLMError(
         f"LLM_BACKEND={s.llm_backend!r} is not implemented. Option B (claude_cli) was chosen; "

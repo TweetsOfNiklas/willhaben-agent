@@ -178,6 +178,11 @@
         <span class="flex-1"></span><small class="text-muted" aria-live="polite" x-text="state"></small><noscript><button class="btn btn-sm">{{ _("Save") }}</button></noscript></div>
     </form>
   </section>
+  {# the ad's text as willhaben shows it (its public page, cached briefly), loaded once the panel is open #}
+  <section class="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-5 py-4" id="myad-description"
+           hx-get="/myads/{{ a.ad_id }}/description" hx-trigger="load" hx-swap="innerHTML">
+    {{ ui.eyebrow(_("As buyers see it")) }}<span class="text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Loading the ad from willhaben …") }}</span>
+  </section>
   <div class="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
     {% if a.replaced_by %}<span>· {{ _("renewed as") }} <a class="link link-primary no-underline" href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></span>{% endif %}
   </div>

@@ -193,8 +193,8 @@ def test_progress_shows_bands_and_descriptions(site, wh, claude):  # noqa: F811
             db.refresh(row)
         ps._active.add(row.id)
         frag = c.get(f"/deals/search/{row.id}").text
-        assert "Searching: 4 of 7 searches done" in frag and "(incl. 4 Facebook price bands)" in frag
+        assert "4 of 7 searches" in frag and "incl. 4 Facebook price bands" in frag
         ps._update(row.id, progress={"done": 2, "total": 8, "step": "details"})
         frag = c.get(f"/deals/search/{row.id}").text
-        assert "Loading the descriptions of the shortlisted Facebook offers: 2 of 8" in frag
+        assert "Descriptions of the shortlisted Facebook offers: 2 of 8" in frag
     ps._active.discard(row.id)

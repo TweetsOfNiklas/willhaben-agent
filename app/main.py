@@ -6,10 +6,11 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from pathlib import Path
-from urllib.parse import parse_qsl, quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
+from sqlalchemy import or_
 from sqlmodel import col, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -26,21 +28,22 @@ from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
 from app.config import address_check, get_settings
 from app.db import (
-    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, MyAd, Purchase, SearchAgent, apply_public_url,
-    get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
+    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, Message, MyAd, Purchase, SearchAgent, SimChat, apply_public_url,
+    current_ad, get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage
 from app.llm import models as llm_models
 from app.llm.base import PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
-from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
+from app.services import access_stats, ad_batch, ad_creator, chat_sim, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
-from app.services import health, human_pace, jobs
+from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones, site_accounts
+from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
 from app.services import style as style_svc
-from app.services import stock
+from app.services import stock, system_prompts
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app import style_routes
@@ -72,6 +75,7 @@ async def lifespan(app: FastAPI):
     my_ads.recover()                               # queued jobs died with the last process: unmark what they held
     ad_creator.recover_publishing()
     chats.recover_sending()
+    chat_sim.recover()
     deals_web.product_search.recover()
     purchase_svc.recover()
     try:
@@ -165,7 +169,12 @@ async def ui_language(request: Request, call_next):
 
 
 # ------------------------------------------------------------------ template helpers
-def _local(dt: datetime | None, fmt: str = "%d.%m. %H:%M") -> str:
+def _local(dt: datetime | str | None, fmt: str = "%d.%m. %H:%M") -> str:
+    if isinstance(dt, str):          # ISO times kept in JSON columns (e.g. the chat simulator's runs)
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            return dt
     if not dt:
         return "–"
     if dt.tzinfo is None:
@@ -215,7 +224,20 @@ from app.services.price_gauge import gauge as _price_gauge  # noqa: E402
 from app.services.deals import level_label as _level_label  # noqa: E402
 
 templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_label)
-templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)   # the agent drawer's Geizhals rule
+templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)
+templates.env.globals.update(hit_can_sync=lambda h: _can_sync(h))     # the hit cards' sync button
+from app.platforms import shipping_info as _shipping_info  # noqa: E402
+templates.env.globals.update(shipping_label=_shipping_info.label_of)    # ui.ship(): shipping next to every price
+
+
+def _site_can_detail(pid: str) -> bool:
+    try:
+        return platforms.get(pid).can("detail")
+    except platforms.UnknownPlatform:
+        return False
+
+
+templates.env.globals.update(site_can_detail=_site_can_detail)          # ui.ship_lazy()   # the agent drawer's Geizhals rule
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -269,11 +291,15 @@ from app.services.search_agents import agent_search_items as _agent_search_items
 from app.services.search_agents import geizhals_below_pct as _geizhals_below_pct  # noqa: E402
 
 templates.env.globals.update(agent_sites=_agent_platforms, agent_search_items=_agent_search_items,
-                             geizhals_below_pct=_geizhals_below_pct)
+                             geizhals_below_pct=_geizhals_below_pct,
+                             held_back_reasons=search_agents_svc.held_back_reasons)   # Filtered out: why
 from app.services import geo as _geo  # noqa: E402
 
 templates.env.globals.update(home_point=_geo.home_cached, home_address=_geo.home_address,   # distance from home to ads
-                             result_km=_geo.distance_km)
+                             result_km=_geo.distance_km, hit_km=_geo.hit_km)
+from app.services.product_search import red_flags as _red_flags  # noqa: E402
+
+templates.env.globals.update(ps_red_flags=_red_flags)   # older stored results: without "shipping costs unclear"
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled,
                              vpn_health=vpn.health)
@@ -609,6 +635,45 @@ async def agents_run(agent_id: int):
     return back(f"/hits?agent_id={agent_id}")
 
 
+@app.post("/agents/bulk")
+async def agents_bulk(request: Request):
+    """Several agents at once (the agents page's selection): each field left empty stays as it is per agent."""
+    from app.services import search_agents
+
+    form = await request.form()
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    flag = lambda k: {"1": True, "0": False}.get(str(form.get(k) or ""))   # noqa: E731 - None: unchanged
+    enabled, notify_on, drops, screen = flag("enabled"), flag("notify"), flag("drops"), flag("screen")
+    minutes = str(form.get("interval_min") or "").strip()
+    km_mode, km = str(form.get("km_mode") or ""), _num_or_none(str(form.get("max_km") or ""))
+    changed = []
+    with session() as db:
+        for a in db.exec(select(SearchAgent).where(col(SearchAgent.id).in_(ids))):
+            if enabled is not None:
+                a.enabled = enabled
+            if notify_on is not None:
+                a.notify = notify_on
+            if drops is not None:
+                a.notify_price_drops = drops
+            if screen is not None:
+                a.screen = screen
+                a.geizhals_check = a.geizhals_check and screen
+            if minutes.isdigit() and int(minutes) > 0:
+                a.interval_s = search_agents.agent_interval(a, int(minutes) * 60)
+            if km_mode == "off":
+                a.max_km = None
+            elif km_mode == "set" and km is not None:
+                a.max_km = min(max(int(km), 1), 2000)
+            db.add(a)
+            changed.append(a)
+        db.commit()
+        for a in changed:
+            db.refresh(a)
+    for a in changed:
+        scheduler.schedule_agent(a, run_soon=False)
+    return back(f"/agents?msg={quote(t('{n} search agents changed', n=len(changed)), safe='')}")
+
+
 @app.post("/agents/{agent_id}/toggle")
 async def agents_toggle(agent_id: int):
     with session() as db:
@@ -629,7 +694,7 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
                       sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: list[str] = Form([]),
                       add_price_from: list[str] = Form([]), add_price_to: list[str] = Form([]),
                       gh_on: str | None = Form(None), gh_pct: str = Form(""), gh_level: str = Form("pct"),
-                      gh_check: str | None = Form(None)):
+                      gh_check: str | None = Form(None), km_on: str | None = Form(None), max_km: str = Form("")):
     from app.services import search_agents
 
     # the drawer's searches: terms to add (each added row and the add row send keyword, from and to, so the three
@@ -652,6 +717,8 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         level = gh_level if gh_on and gh_level in search_agents.LEVELS else None
         a.geizhals_level = level
         a.geizhals_pct = min(max(int(pct if pct is not None else 30), 1), 95) if gh_on and not level else None
+        km = _num_or_none(max_km)      # pickup only within this distance from home
+        a.max_km = min(max(int(km if km is not None else 30), 1), 2000) if km_on else None
         db.add(a)
         db.commit()
         db.refresh(a)
@@ -692,30 +759,115 @@ async def agents_delete(agent_id: int):
     return back("/agents")
 
 
+HIT_SORTS = ("newest", "price", "price_desc", "total", "distance")
+HIT_SHIP = ("ship", "pickup")
+HIT_LEVELS = ("bargain", "cheap", "fair")       # "this or better"
+_LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expensive": 4}
+_SCREEN_LEVEL = {"great": "bargain", "good": "cheap", "fair": "fair", "overpriced": "expensive"}
+
+
+@dataclass
+class HitView:
+    """What the hits page shows: tab, agent, site and the sort and filters; also what its bulk buttons act on."""
+    state: str = "new"
+    agent_id: int | None = None
+    platform: str = ""
+    sort: str = "newest"
+    ship: str = ""
+    level: str = ""
+
+    @classmethod
+    def of(cls, state: str = "new", agent_id: Any = None, platform: str = "", sort: str = "", ship: str = "",
+           level: str = "") -> "HitView":
+        aid = agent_id if isinstance(agent_id, int) else (int(agent_id) if str(agent_id or "").strip().isdigit() else None)
+        return cls(state=state or "new", agent_id=aid or None, platform=(platform or "").strip().lower(),
+                   sort=sort if sort in HIT_SORTS else "newest", ship=ship if ship in HIT_SHIP else "",
+                   level=level if level in HIT_LEVELS else "")
+
+    def params(self, **change: Any) -> dict[str, Any]:
+        d = {"state": self.state, "agent_id": self.agent_id, "platform": self.platform,
+             "sort": "" if self.sort == "newest" else self.sort, "ship": self.ship, "level": self.level, **change}
+        return {k: v for k, v in d.items() if v}
+
+    def url(self, **change: Any) -> str:
+        query = urlencode(self.params(**change))
+        return "/hits" + (f"?{query}" if query else "")
+
+    @property
+    def filtered(self) -> bool:
+        return bool(self.ship or self.level)
+
+    def where(self, q, *, state: bool = True):
+        if self.agent_id:
+            q = q.where(Hit.agent_id == self.agent_id)
+        if self.platform:
+            q = q.where(Hit.platform == self.platform)
+        if self.ship == "ship":
+            q = q.where(or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None)))
+        elif self.ship == "pickup":
+            q = q.where(Hit.shipping == "pickup")
+        if state:
+            q = q.where(Hit.state == self.state) if self.state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
+        return q
+
+    def hits(self, db, limit: int = 200) -> list[Hit]:
+        q = self.where(select(Hit))
+        if self.sort == "price":
+            q = q.order_by(col(Hit.price).asc().nulls_last(), col(Hit.id).desc())
+        elif self.sort == "price_desc":
+            q = q.order_by(col(Hit.price).desc().nulls_last(), col(Hit.id).desc())
+        elif self.sort == "total":
+            q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0)).asc(), col(Hit.id).desc())
+        else:
+            q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
+        radius = geo.pickup_radius() if self.state not in ("filtered", "all") else None
+        if not self.level and self.sort != "distance" and not radius:
+            return list(db.exec(q.limit(limit)))
+        rows = list(db.exec(q.limit(max(limit * 10, 2000))))
+        if radius:                        # Settings → Shipping & pickup: far pickup-only ads are not shown
+            home = geo.home_cached()
+            rows = [h for h in rows if not geo.too_far(h, radius, home)]
+        if self.level:
+            zones, top = price_zones.config(), _LEVEL_RANK[self.level]
+            rows = [h for h in rows if _LEVEL_RANK.get(hit_label(h, zones) or "", 9) <= top]
+        if self.sort == "distance":       # in Python: the distance comes from coordinates or a cached postcode
+            home = geo.home_cached()
+            dist = {h.id: geo.hit_km(h, home) if home else None for h in rows}
+            rows.sort(key=lambda h: (dist[h.id] is None, dist[h.id] or 0))
+        return rows[:limit]
+
+
+def hit_label(h: Hit, zones: dict[str, Any] | None = None) -> str | None:
+    """The price label a hit card shows: the zone from Geizhals' new price, else Claude's verdict."""
+    lvl = deals_svc.hit_level(h, zones) if search_agents_svc.geizhals_below_pct(h) is not None else None
+    if lvl is None and h.screen_relevant and h.screen_deal in _SCREEN_LEVEL:
+        lvl = _SCREEN_LEVEL[h.screen_deal]
+    return lvl
+
+
 @app.get("/hits", response_class=HTMLResponse)
-async def hits_page(request: Request, agent_id: str = "", state: str = "new", platform: str = ""):
-    aid = int(agent_id) if agent_id.strip().isdigit() else None   # "All search agents" sends an empty value
-    platform = platform.strip().lower()
+async def hits_page(request: Request, agent_id: str = "", state: str = "new", platform: str = "", sort: str = "",
+                    ship: str = "", level: str = ""):
+    view = HitView.of(state, agent_id, platform, sort, ship, level)   # "All search agents" sends an empty agent_id
+    aid, platform = view.agent_id, view.platform
     with session() as db:
-        q = select(Hit)
-        if aid:
-            q = q.where(Hit.agent_id == aid)
-        if platform:
-            q = q.where(Hit.platform == platform)
-        q = q.where(Hit.state == state) if state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
-        hits = list(db.exec(q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc()).limit(200)))
+        hits = view.hits(db)
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
-        counts_q = select(Hit.state, func.count()).group_by(Hit.state)
-        if aid:
-            counts_q = counts_q.where(Hit.agent_id == aid)
-        if platform:
-            counts_q = counts_q.where(Hit.platform == platform)
+        counts_q = view.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
         state_counts = dict(db.exec(counts_q).all())
         state_counts.pop(search_agents_svc.CLEARED, None)
         used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
+        # the sites to filter by: those the agents search and those hits came from (an agent's sites may change)
+        shown_q = select(Hit.platform).where(Hit.state != search_agents_svc.CLEARED).distinct()
+        if aid:
+            shown_q = shown_q.where(Hit.agent_id == aid)
+        with_hits = {p for p in db.exec(shown_q).all() if p}
     state_counts["all"] = sum(state_counts.values())
-    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
-                  platform=platform, platform_ids=used if len(used) > 1 else [],
+    filter_ids = sorted(with_hits | set(used) | ({platform} if platform else set()), key=_platform_name)
+    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=view.state,
+                  state_counts=state_counts, platform=platform, platform_ids=used if len(used) > 1 else [],
+                  filter_platform_ids=filter_ids if len(filter_ids) > 1 or platform else [], view=view,
+                  watch_saved=search_agents_svc.watch_saved_on(),
                   keep_days=search_agents_svc.keep_days())
 
 
@@ -773,6 +925,10 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
                 reduced, detail_error = True, str(e)
     if d is not None and h is not None and not reduced:
         _keep_condition(platform.id, ad_id, d, h)
+    if h is not None and not reduced and error is None:     # the ad page just loaded: its status for the hit cards
+        search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d), d)
+        with session() as db:
+            h = db.get(Hit, h.id) or h                       # the pane shows the status just loaded
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,
@@ -801,32 +957,126 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
     return back("/hits")
 
 
+_SHIP_TTL_S = 6 * 3600
+_ship_cache: dict[tuple[str, str], tuple[float, float | None, str | None]] = {}   # (site, ad) -> (at, price, kind)
+
+
+@app.get("/ship/{pid}/{ad_id}", response_class=HTMLResponse)
+async def ad_shipping(request: Request, pid: str, ad_id: str):
+    """The shipping of a result whose list stated no price (product and direct search cards load it once they are
+    in view, ui.ship_lazy): the ad page, one request through the site's limiter and VPN, kept for _SHIP_TTL_S.
+    Every hit of the ad keeps it too. Empty when the page states nothing or the site cannot be asked."""
+    import time as _time
+
+    from app.platforms import shipping_info
+
+    key = (pid, ad_id)
+    got = _ship_cache.get(key)
+    if got is None or _time.monotonic() - got[0] > _SHIP_TTL_S:
+        try:
+            p = platforms.get(pid)
+            d = await p.detail(ad_id) if p.can("detail") else None
+        except (platforms.UnknownPlatform, PlatformError) as e:
+            log.info("shipping of %s %s not loaded: %s", pid, ad_id, e)
+            return HTMLResponse("")
+        if d is not None:
+            search_agents_svc.record_status(pid, ad_id, search_agents_svc.site_status(d), d)
+        got = (_time.monotonic(), d.shipping_price if d else None, d.shipping if d else None)
+        _ship_cache[key] = got
+    text = shipping_info.label(got[1], got[2])
+    return HTMLResponse(templates.get_template("_ui.html").module.ship({"shipping_price": got[1], "shipping": got[2]})
+                        if text else "")
+
+
+@app.post("/hits/{hit_id}/sync", response_class=HTMLResponse)
+async def hit_sync(request: Request, hit_id: int):
+    """A hit card's sync button: the ad's status from its site now (sold, reserved, gone …); the card's status line."""
+    error = None
+    try:
+        h = await search_agents_svc.check_hit(hit_id)
+    except PlatformError as e:
+        error, h = str(e), None
+        with session() as db:
+            h = db.get(Hit, hit_id)
+    if h is None:
+        raise HTTPException(404)
+    return templates.TemplateResponse(request, "_hit_status.html", {"h": h, "sync_error": error,
+                                                                    "can_sync": _can_sync(h)})
+
+
+def _can_sync(h: Hit) -> bool:
+    try:
+        return platforms.get(h.platform or "willhaben").can("detail")
+    except platforms.UnknownPlatform:
+        return False
+
+
+def _view_form(form: Any, state: str | None = None) -> HitView:
+    """The hits page's view as its forms send it (hidden fields of the same names)."""
+    return HitView.of(state or form.get("state") or "new", form.get("agent_id"), form.get("platform") or "",
+                      form.get("sort") or "", form.get("ship") or "", form.get("level") or "")
+
+
 @app.post("/hits/clear-filtered")
-async def hits_clear_filtered(agent_id: int | None = Form(None)):
-    """Hits → Filtered out → Clear: those of the chosen agent, or all."""
-    search_agents_svc.clear_hits(("filtered",), agent_id or None)
-    return back(f"/hits?state=filtered&agent_id={agent_id}" if agent_id else "/hits?state=filtered")
+async def hits_clear_filtered(request: Request):
+    """Hits → Filtered out → Clear: those the page shows (agent, site, filters), or all."""
+    view = _view_form(await request.form(), "filtered")
+    if view.filtered:
+        with session() as db:
+            ids = [h.id for h in view.hits(db, limit=100000)]
+        search_agents_svc.clear_hits(("filtered",), ids=ids)
+    else:
+        search_agents_svc.clear_hits(("filtered",), view.agent_id, platform=view.platform or None)
+    return back(view.url())
 
 
 @app.post("/hits/keep-days")
-async def hits_keep_days(days: str = Form(""), agent_id: int | None = Form(None), state: str = Form("new")):
+async def hits_keep_days(request: Request):
     """Hits: after how many days they are cleared by themselves, all but saved ones (0 = never)."""
+    form = await request.form()
+    days = str(form.get("days") or "")
     search_agents_svc.set_keep_days(int(days) if days.strip().isdigit() else 0)
-    state = state if state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
-    return back(f"/hits?state={state}" + (f"&agent_id={agent_id}" if agent_id else ""))
+    view = _view_form(form)
+    view.state = view.state if view.state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
+    return back(view.url())
+
+
+@app.post("/hits/watch-saved")
+async def hits_watch_saved(request: Request):
+    """Hits → Saved: whether saved ads are loaded about once a day for price drops and status changes."""
+    form = await request.form()
+    set_setting("watch_saved", "1" if form.get("on") else "0")
+    return back(_view_form(form, "saved").url())
+
+
+@app.post("/hits/bulk")
+async def hits_bulk(request: Request):
+    """The hits page's selection: save, mark as seen, ignore or clear the ticked hits."""
+    form = await request.form()
+    ids = [int(x) for x in form.getlist("ids") if str(x).isdigit()]
+    action = str(form.get("action") or "")
+    view = _view_form(form)
+    if ids and action == "clear":
+        search_agents_svc.clear_hits(search_agents_svc.EXPIRING, ids=ids)
+    elif ids and action in ("saved", "seen", "ignored"):
+        with session() as db:
+            for h in db.exec(select(Hit).where(col(Hit.id).in_(ids), Hit.state != search_agents_svc.CLEARED)):
+                h.state = action
+                db.add(h)
+            db.commit()
+    return back(view.url())
 
 
 @app.post("/hits/mark-seen")
-async def hits_mark_seen(agent_id: int | None = Form(None)):
+async def hits_mark_seen(request: Request):
+    """New → Mark all as seen: the hits the page shows (agent, site, filters)."""
+    view = _view_form(await request.form(), "new")
     with session() as db:
-        q = select(Hit).where(Hit.state == "new")
-        if agent_id:
-            q = q.where(Hit.agent_id == agent_id)
-        for h in db.exec(q):
+        for h in view.hits(db, limit=100000):
             h.state = "seen"
             db.add(h)
         db.commit()
-    return back(f"/hits?agent_id={agent_id}" if agent_id else "/hits")
+    return back(view.url(state=""))
 
 
 # ------------------------------------------------------------------ chats
@@ -836,10 +1086,21 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
         convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
                              .order_by(col(Conversation.last_message_at).desc().nulls_last())))
         open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
-    hidden_count = sum(1 for c in convs if c.hidden_at)
+        last_dir: dict[str, str] = {}       # each chat's newest real message (not a site notice): in = they wrote last
+        for cid, direction in db.exec(select(Message.conversation_id, Message.direction).where(col(Message.kind).is_(None))
+                                      .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
+            last_dir[cid] = direction
+    waiting = {cid for cid, d in last_dir.items() if d == "in"}
+    # older than the sync's window (Settings → Automatic answers: the last N days): out of the list like hidden ones,
+    # which the sync no longer updates anyway; "Show hidden chats" brings both back
+    since = chats.sync_window()[1]
+    old = {c.id for c in convs if since is not None and c.last_message_at is not None
+           and chats._aware(c.last_message_at) < since}
+    hidden_count = sum(1 for c in convs if c.hidden_at or c.id in old)
     if not show_hidden:
-        convs = [c for c in convs if not c.hidden_at]
-    return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden}
+        convs = [c for c in convs if not c.hidden_at and c.id not in old]
+    return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden,
+            "waiting": waiting}
 
 
 @app.get("/chats", response_class=HTMLResponse)
@@ -895,6 +1156,246 @@ async def chats_sync(request: Request):
     if _hx(request):
         return Response(status_code=204)
     return back(f"/chats?msg={quote(t('Sync started – it runs in the background'), safe='')}")
+
+
+# ------------------------------------------------------------------ chat simulator (app/services/chat_sim.py)
+def _sim_url(sim_id: int | None = None, msg: str | None = None, anchor: str = "") -> str:
+    q = [f"id={sim_id}"] if sim_id else []
+    if msg:
+        q.append(f"msg={quote(msg, safe='')}")
+    return "/simulator" + (f"?{'&'.join(q)}" if q else "") + anchor
+
+
+@app.get("/simulator", response_class=HTMLResponse)
+async def simulator_page(request: Request, id: int | None = None, msg: str | None = None):
+    sim = chat_sim.get(id) if id else None
+    with session() as db:
+        ads = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.hidden).is_not(True))
+                           .order_by(col(MyAd.heading))))
+    live_ad = None
+    if sim is not None and sim.ad_id:
+        with session() as db:
+            live_ad = current_ad(db, sim.ad_id)
+    return render(request, "simulator.html", msg=msg, sims=chat_sim.all_chats(), sim=sim, ads=ads, live_ad=live_ad,
+                  purchases=purchase_svc.recent(20), personas=chat_sim.PERSONAS, platforms=chat_sim.PLATFORMS,
+                  expectations=chat_sim.EXPECTATIONS, proposals=chat_sim.open_proposals(), sim_diff=chat_sim.diff,
+                  targets=chat_sim.TARGETS, expectation_label=chat_sim.expectation_label,
+                  persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
+                  can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
+                  purchase_status=purchase_svc.status_label, sim_templates=chat_sim.templates_for,
+                  next_script=chat_sim.next_script, model_choices=llm_models.choices(),
+                  model_label=llm_models.label, default_model=model_for, system_prompts=system_prompts,
+                  reviewing=jobs.current_keys("simreview:"))
+
+
+@app.post("/simulator/new")
+async def simulator_new(role: str = Form("seller"), platform: str = Form("willhaben"), ad_id: str = Form(""),
+                        purchase_id: str = Form(""), persona: str = Form(""), title: str = Form("")):
+    try:
+        sim = await chat_sim.create(role, platform, ad_id=ad_id or None,
+                                    purchase_id=int(purchase_id) if purchase_id.isdigit() else None,
+                                    persona=persona or None, title=title)
+    except ValueError as e:
+        return back(_sim_url(msg=str(e)))
+    return back(_sim_url(sim.id))
+
+
+@app.post("/simulator/random")
+async def simulator_random(role: str = Form("seller"), platform: str = Form("willhaben"), persona: str = Form("")):
+    try:
+        sim = await chat_sim.create_random(role, platform, persona=persona or None)
+    except ValueError as e:
+        return back(_sim_url(msg=str(e)))
+    return back(_sim_url(sim.id))
+
+
+@app.post("/simulator/template")
+async def simulator_template(role: str = Form("seller"), template: str = Form(""), platform: str = Form("willhaben"),
+                             ad_id: str = Form(""), purchase_id: str = Form("")):
+    """One template, or "all" of the role's: scenarios set up (nothing sent or run yet)."""
+    keys = [k for k, _l in chat_sim.templates_for(role)] if template == "all" else [template]
+    keys = [k for k in keys if k in chat_sim.TEMPLATES]
+    if not keys:
+        raise HTTPException(404)
+    sim = None
+    try:
+        for k in keys:
+            sim = await chat_sim.create_from_template(k, platform, ad_id=ad_id or None,
+                                                      purchase_id=int(purchase_id) if purchase_id.isdigit() else None)
+    except ValueError as e:
+        return back(_sim_url(msg=str(e)))
+    msg = t("{n} scenarios set up – send their messages or run them when you like", n=len(keys)) if len(keys) > 1 else None
+    return back(_sim_url(sim.id, msg))
+
+
+@app.post("/simulator/{sim_id}/random")
+async def simulator_randomize(sim_id: int):
+    _sim_or_404(sim_id)
+    try:
+        await chat_sim.randomize(sim_id)
+    except ValueError as e:
+        return back(_sim_url(sim_id, str(e)))
+    return back(_sim_url(sim_id, t("New random ad as the article – the conversation starts again")))
+
+
+def _sim_or_404(sim_id: int):
+    sim = chat_sim.get(sim_id)
+    if sim is None:
+        raise HTTPException(404)
+    return sim
+
+
+SIM_TEXT_FIELDS = ("title_ad", "description", "location", "seller_name", "instructions", "pickup_window", "mode",
+                   "delivery")
+SIM_NUMBER_FIELDS = ("price", "min_price", "max_price", "wish_price", "shipping_cost", "quantity", "ad_shipping")
+
+
+@app.post("/simulator/{sim_id}/setup")
+async def simulator_setup(request: Request, sim_id: int):
+    _sim_or_404(sim_id)
+    form = await request.form()
+    values: dict[str, Any] = {}
+    for k in SIM_TEXT_FIELDS:
+        if k in form:
+            values["title" if k == "title_ad" else k] = str(form[k]).strip()[:4000]
+    for k in SIM_NUMBER_FIELDS:
+        if k in form:
+            raw = str(form[k]).strip()
+            n = chat_sim._number(raw) if raw else None
+            values[k] = (int(n) if k == "quantity" and n else n)
+    if "questions" in form:
+        values["questions"] = [q.strip()[:300] for q in str(form["questions"]).splitlines() if q.strip()][:8]
+    chat_sim.update_setup(sim_id, values, persona=str(form.get("persona") or "") or None,
+                          persona_text=str(form["persona_text"]) if "persona_text" in form else None,
+                          title=str(form.get("title") or ""), platform=str(form.get("platform") or "") or None,
+                          model=str(form["model"]) if "model" in form else None,
+                          partner_model=str(form["partner_model"]) if "partner_model" in form else None)
+    return back(_sim_url(sim_id, t("Saved")))
+
+
+@app.post("/simulator/{sim_id}/say")
+async def simulator_say(sim_id: int, text: str = Form("")):
+    _sim_or_404(sim_id)
+    ok = chat_sim.say(sim_id, text)
+    return back(_sim_url(sim_id, None if ok else t("Busy or empty message"), "#sim-end"))
+
+
+@app.post("/simulator/{sim_id}/{action}")
+async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: str = Form(""),
+                           kind: str = Form(""), value: str = Form("")):
+    _sim_or_404(sim_id)
+    msg = None
+    if action == "reply":
+        ok = chat_sim.reply(sim_id)
+    elif action == "partner":
+        ok = chat_sim.partner_once(sim_id)
+    elif action == "play":
+        ok = chat_sim.play(sim_id, rounds)
+    elif action == "suggest":
+        ok = chat_sim.suggest(sim_id)
+    elif action == "run":
+        ok = chat_sim.run_scenarios([sim_id]) > 0
+        msg = None if ok else t("Nothing to run: the scenario needs messages and is not running already")
+    elif action == "clear":
+        chat_sim.clear(sim_id)
+        ok = True
+    elif action == "delete":
+        chat_sim.delete(sim_id)
+        return back(_sim_url(msg=t("Test chat deleted")))
+    elif action == "scenario":
+        chat_sim.set_scenario(sim_id, on == "1")
+        ok = True
+    elif action == "expect":
+        ok = chat_sim.add_expectation(sim_id, kind, value)
+        msg = None if ok else t("Expectation not added: it needs a value")
+    else:
+        raise HTTPException(404)
+    if not ok and msg is None:
+        msg = t("The test chat is busy – wait until it is done")
+    return back(_sim_url(sim_id, msg, "#sim-end"))
+
+
+@app.get("/simulator/{sim_id}/prompt/{index}", response_class=HTMLResponse)
+async def simulator_prompt(request: Request, sim_id: int, index: int, run: str = ""):
+    """The whole prompt Claude got for one message (of the chat, or of its last run / the proposal's run)."""
+    sim = _sim_or_404(sim_id)
+    turns = (sim.last_run or {}).get("turns") if run == "last" else \
+        (sim.proposal_run or {}).get("turns") if run == "proposal" else sim.turns
+    turns = turns or []
+    if not 0 <= index < len(turns):
+        raise HTTPException(404)
+    return templates.TemplateResponse(request, "_sim_prompt.html", {"p": turns[index].get("prompt") or {},
+                                                                      "model": turns[index].get("model")})
+
+
+@app.post("/simulator/{sim_id}/expect/{index}/remove")
+async def simulator_expect_remove(sim_id: int, index: int):
+    chat_sim.remove_expectation(sim_id, index)
+    return back(_sim_url(sim_id, anchor="#sim-expect"))
+
+
+@app.post("/simulator/{sim_id}/rate/{index}")
+async def simulator_rate(sim_id: int, index: int, rating: str = Form(""), note: str | None = Form(None)):
+    chat_sim.rate(sim_id, index, rating or None, note)
+    return back(_sim_url(sim_id, anchor=f"#turn-{index}"))
+
+
+@app.post("/simulator-delete")
+async def simulator_delete_many(request: Request):
+    form = await request.form()
+    ids = [int(v) for v in form.getlist("ids") if str(v).isdigit()]
+    for sid in ids:
+        chat_sim.delete(sid)
+    back_to = str(form.get("back_to") or "")
+    keep = int(back_to) if back_to.isdigit() and int(back_to) not in ids else None
+    return back(_sim_url(keep, t("{n} test chats deleted", n=len(ids))))
+
+
+@app.post("/simulator-prompts/{kind}/{action}")
+async def simulator_prompts(kind: str, action: str, text: str = Form(""), focus: str = Form(""),
+                            model: str = Form(""), back_to: str = Form("")):
+    """System prompts: save (applies to real answers), test as a proposal, Claude review, reset to the default."""
+    if kind not in system_prompts.KINDS:
+        raise HTTPException(404)
+    sid = int(back_to) if back_to.isdigit() else None
+    if action == "save":
+        system_prompts.save(kind, text)
+        msg = t("System prompt saved – it applies to automatic answers now")
+    elif action == "propose":
+        msg = t("Proposal created – test it with the scenarios, then apply it") if chat_sim.propose_text(kind, text) \
+            else t("Nothing changed")
+    elif action == "review":
+        msg = t("Claude reviews the system prompt – the proposal appears above") if chat_sim.review(kind, focus, model or None) \
+            else t("A review of this prompt is already running")
+    elif action == "reset":
+        system_prompts.reset(kind)
+        msg = t("System prompt reset to the default")
+    else:
+        raise HTTPException(404)
+    return back(_sim_url(sid, msg, "#sim-prompts"))
+
+
+@app.post("/simulator-run-all")
+async def simulator_run_all(back_to: str = Form("")):
+    n = chat_sim.run_scenarios()
+    sid = int(back_to) if back_to.isdigit() else None
+    return back(_sim_url(sid, t("{n} scenarios are running", n=n) if n else t("No scenarios to run")))
+
+
+@app.post("/simulator-proposal/{pid}/{action}")
+async def simulator_proposal(pid: int, action: str, text: str | None = Form(None), back_to: str = Form("")):
+    sid = int(back_to) if back_to.isdigit() else None
+    if action == "try":
+        n = chat_sim.run_scenarios(proposal_id=pid)
+        msg = t("{n} scenarios are running with the proposal", n=n) if n else t("No scenarios to run")
+    elif action == "apply":
+        msg = t("Rule change applied") if chat_sim.apply_proposal(pid, text) else t("Proposal not open any more")
+    elif action == "discard":
+        chat_sim.discard_proposal(pid)
+        msg = t("Proposal discarded")
+    else:
+        raise HTTPException(404)
+    return back(_sim_url(sid, msg))
 
 
 @app.get("/chats/{conversation_id}", response_class=HTMLResponse)
@@ -994,7 +1495,7 @@ async def draft_mark_sent(draft_id: int, text: str = Form("")):
 async def draft_discard(draft_id: int):
     with session() as db:
         d = db.get(Draft, draft_id)
-    chats.discard_draft(draft_id)
+    chats.discard_draft(draft_id, by_owner=True)
     return back(f"/chats/{d.conversation_id}")
 
 
@@ -1136,6 +1637,21 @@ async def myads_edit_page(request: Request, ad_id: str, msg: str | None = None):
     return render(request, "myad_edit.html", a=row, cur=cur, msg=msg, unsaved=bool(unsaved))
 
 
+@app.get("/myads/{ad_id}/description", response_class=HTMLResponse)
+async def myads_description(request: Request, ad_id: str):
+    """My ads → the ad's panel: the ad as buyers see it (price, photos, delivery, text; anonymous, cached briefly)."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    if row is None:
+        raise HTTPException(404)
+    error = d = None
+    try:
+        d = await get_public().get_detail(ad_id)
+    except WillhabenError as e:
+        error = t("Could not load the ad from willhaben: {error}", error=e)
+    return templates.TemplateResponse(request, "_myad_description.html", {"a": row, "d": d, "error": error})
+
+
 @app.post("/myads/{ad_id}/edit/ai", response_class=HTMLResponse)
 async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), description: str = Form(""),
                         price: str = Form(""), instruction: str = Form("")):
@@ -1149,6 +1665,15 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
     except ValueError:
         value = None
     cur = {"heading": heading, "description": description, "price": value}
+    form = await request.form()
+    try:                               # answers to the questions of the last proposal, as the instruction
+        asked = json.loads(str(form.get("questions") or "[]"))
+    except ValueError:
+        asked = []
+    answers = {k[2:]: str(v) for k, v in form.items() if k.startswith("q_") and str(v).strip()}
+    answers.update({k[2:]: str(v) for k, v in form.items() if k.startswith("t_") and str(v).strip()})
+    if from_answers := ad_creator.answers_instruction(asked if isinstance(asked, list) else [], answers):
+        instruction = f"{instruction.strip()}\n\n{from_answers}".strip()
     try:
         prop = await my_ads.ai_revise(ad_id, heading, description, value, instruction)
     except LLMError as e:   # shown inside the part htmx swaps (#edit-main), not in the page head
@@ -1308,6 +1833,8 @@ async def jobs_status(since: int | None = None):
         pending += [f"addraft:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.publishing == True))]  # noqa: E712
         pending += [f"refining:{i}" for i in db.exec(select(AdDraft.id).where(AdDraft.refining == True))]  # noqa: E712
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
+        pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
+        pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
@@ -1472,6 +1999,23 @@ async def ad_draft_refine(draft_id: int, instruction: str = Form(...)):
     _draft_or_404(draft_id)
     if not ad_creator.enqueue_refine(draft_id, instruction):
         return back(f"/new-ad/{draft_id}?msg={quote(ad_creator.refine_refusal(draft_id), safe='')}")
+    return back(f"/new-ad/{draft_id}")
+
+
+@app.post("/new-ad/{draft_id:int}/answers")
+async def ad_draft_answers(request: Request, draft_id: int):
+    """The draft's questionnaire: a chosen option or own text per question; "skip" just closes it."""
+    _draft_or_404(draft_id)
+    form = await request.form()
+    if form.get("skip"):
+        ad_creator.update_draft(draft_id, questions=None)
+        return back(f"/new-ad/{draft_id}")
+    answers = {k[2:]: str(v) for k, v in form.items() if k.startswith("q_") and str(v).strip()}
+    for k, v in form.items():          # own text wins over a chosen option
+        if k.startswith("t_") and str(v).strip():
+            answers[k[2:]] = str(v)
+    if not ad_creator.enqueue_answers(draft_id, answers):
+        return back(f"/new-ad/{draft_id}?msg={quote(t('Choose or write at least one answer.'), safe='')}")
     return back(f"/new-ad/{draft_id}")
 
 
@@ -1830,6 +2374,27 @@ async def session_login(next: str = Form("/session")):
     return _session_back(next, t('Login page opened in the browser window'))
 
 
+@app.post("/settings/account/{pid}/login")
+async def site_account_login(pid: str):
+    """Kleinanzeigen, Vinted: their login page in the remote view (the overlay opens with it)."""
+    if not site_accounts.get(pid):
+        raise HTTPException(404)
+    try:
+        await site_accounts.open_login(pid)
+    except SessionUnavailable as e:
+        return back(f"/settings/{pid}?msg={quote(str(e), safe='')}")
+    return back(f"/settings/{pid}?remote=1&msg={quote(t('Login page opened in the browser window'), safe='')}")
+
+
+@app.post("/settings/account/{pid}/check")
+async def site_account_check(pid: str):
+    if not site_accounts.get(pid):
+        raise HTTPException(404)
+    st = await site_accounts.check(pid)
+    msg = t("Logged in") if st["logged_in"] else st["error"] or t("Not logged in")
+    return back(f"/settings/{pid}?msg={quote(msg, safe='')}")
+
+
 @app.post("/session/check")
 async def session_check(next: str = Form("/session")):
     ok = await get_session().check_login() if get_session().started else False
@@ -1838,8 +2403,10 @@ async def session_check(next: str = Form("/session")):
 
 @app.post("/session/open")
 async def session_open(url: str = Form(...), next: str = Form("/session")):
-    if not url.startswith("https://www.willhaben.at/"):
-        return _session_back(next, t('Only willhaben.at URLs'))
+    from app.willhaben.session import _other_site
+
+    if not (url.startswith("https://www.willhaben.at/") or (url.startswith("https://") and _other_site(url))):
+        return _session_back(next, t('Only willhaben, Kleinanzeigen and Vinted URLs'))
     await get_session().open_url(url)
     return _session_back(next)
 
@@ -1899,7 +2466,16 @@ async def capture_download(name: str):
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
                      "claude", "selling", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
-                     "prices", "geizhals")   # settings.html groups
+                     "prices", "geizhals", "browser")   # settings.html groups
+
+
+def _last_notifiable() -> datetime | None:
+    """Settings → Browser: when the last event the browser would show came (a hit, price drop or saved-ad news that
+    was pushed)."""
+    with session() as db:
+        ts = db.exec(select(func.max(EventLog.ts)).where(col(EventLog.kind).in_(("hit", "price_drop", "saved")),
+                                                          col(EventLog.quiet).is_not(True))).one()
+    return ts.replace(tzinfo=timezone.utc) if ts is not None and ts.tzinfo is None else ts
 
 
 def _site_sections() -> dict[str, Any]:
@@ -1912,7 +2488,7 @@ async def settings_page(request: Request, msg: str | None = None):
     return await settings_section(request, "willhaben", msg)
 
 
-INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "message": "New message", "auto_reply": "Answered automatically",
+INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "saved": "Saved ad", "message": "New message", "auto_reply": "Answered automatically",
                "auto_reply_pending": "Reply waiting for you", "ad_expiring": "Ad expiring soon", "ad_expired": "Ad expired",
                "ad_renewed": "Ad renewed", "paylivery": "Pay now!", "purchase": "Purchase order", "health": "Connections", "test": "Test"}
 
@@ -1933,11 +2509,14 @@ templates.env.globals.update(event_link=event_link)
 
 
 def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
-    """The inbox popover (base.html): the latest events, unread = newer than the last "Mark all read"."""
+    """The inbox popover (base.html): the events since its last "Clear" (Home's activity keeps them all); unread =
+    newer than the last clear."""
     seen = _inbox_seen_at()
     out = []
     for e in recent_events(limit):
         ts = e.ts if e.ts.tzinfo else e.ts.replace(tzinfo=timezone.utc)
+        if ts <= seen:
+            break                        # newest first: the rest was cleared
         out.append({"kind": "pay" if e.kind == "paylivery" else e.kind, "title": t(INBOX_KINDS.get(e.kind, "Notification")),
                     "text": e.message, "time": _ago(ts), "link": event_link(e), "unread": ts > seen})
     return out
@@ -1985,6 +2564,7 @@ async def inbox_items(request: Request):
 
 @app.post("/inbox/read-all")
 async def inbox_read_all(request: Request):
+    """The inbox's "Clear": all read, and the popover starts empty again."""
     set_setting("inbox_seen_at", utcnow().isoformat())
     ref = request.headers.get("referer") or "/"
     return back(ref if ref.startswith(str(request.base_url)) or ref.startswith("/") else "/")
@@ -2060,7 +2640,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
         return back(f"/settings/{next(iter(sites), 'willhaben')}")
     if section not in SETTINGS_SECTIONS and section not in sites:
         raise HTTPException(404)
-    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
+    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_days", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     if section == "claude":
         await llm_models.refresh()                 # the selectable models, fresh from the API
@@ -2070,6 +2650,9 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
                       "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),
                   **({"site": _platform_row(sites[section])} if section in sites else {}),
+                  **({"account": {**site_accounts.state(section), "checked_at": site_accounts.checked_at(section)},
+                      "account_site": site_accounts.get(section)}
+                     if site_accounts.get(section) else {}),
                   **({"vpn": vpn.status()} if section == "vpn" or section == "willhaben" or section in sites else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(),
@@ -2078,8 +2661,12 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **(await _gcal_ctx() if section == "calendar" else {}),
-                  ship=shipping.config(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
+                  ship=shipping.config(), pickup_max_km=_geo.pickup_radius(),
+                  **({"last_notifiable": _last_notifiable()} if section == "browser" else {}), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
+                  **({"adaptive": adaptive_pace.profile(None), "adaptive_on": adaptive_pace.enabled(),
+                      "adaptive_max": adaptive_pace.max_factor(), "adaptive_choices": adaptive_pace.MAX_FACTORS,
+                      "adaptive_hour": utcnow().astimezone(quiet_hours.VIENNA).hour} if section == "quiet" else {}),
                   captures=[c.name for c in sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]],
                   label_form=label_fill.active(), session_next="/settings/willhaben", backup=backup_routes.panel(),
                   web=_web_address(), **label_buy_routes.panel(), **printing_routes.panel())
@@ -2313,11 +2900,13 @@ async def set_language(request: Request, lang: str = Form("auto"), next: str = F
 @app.post("/settings/quiet")
 async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01:00"), end: str = Form("07:00"),
                          mode: str = Form("slow"), interval_min: int = Form(60), jitter: str | None = Form(None),
-                         breaks: str | None = Form(None), pace: str | None = Form(None)):
+                         breaks: str | None = Form(None), pace: str | None = Form(None),
+                         adaptive: str | None = Form(None), adaptive_max: int = Form(4)):
     quiet_hours.save(bool(enabled), start, end, mode, interval_min)
-    if pace:      # the section's "Human-like timing" switches (Settings → Quiet hours)
+    if pace:      # the section's "Human-like timing" and adaptive polling switches (Settings → Quiet hours)
         cur = human_pace.config()
         human_pace.save((cur["variance_pct"] or 30) if jitter else 0, bool(breaks))
+        adaptive_pace.save(bool(adaptive), adaptive_max)
         scheduler.reschedule_agents()
     return back(f"/settings/quiet?msg={quote(t('Quiet hours saved'), safe='')}")
 
@@ -2328,7 +2917,7 @@ async def settings_save(request: Request):
     saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
     groups = {"rules": ("reply_rules", "reply_style"), "selling": selling.KEYS,
-              "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "auto_reply_rules",
+              "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_days", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
     section = str(form.get("section") or "")
@@ -2351,11 +2940,9 @@ async def settings_save(request: Request):
         set_setting("auto_draft", "1" if form.get("auto_draft") else "0")
         set_setting("notify_messages", "1" if form.get("notify_messages") else "0")
         set_setting("chat_sync_limit", str(min(max(1, num("chat_sync_limit", 10)), 50)))
-        since = str(form.get("chat_sync_since", "")).strip()
-        try:
-            set_setting("chat_sync_since", date.fromisoformat(since).isoformat() if since else "")
-        except ValueError:
-            pass
+        days = str(form.get("chat_sync_days", "")).strip()
+        if days == "" or days.isdigit():          # empty: no cutoff; anything else keeps the old value
+            set_setting("chat_sync_days", str(min(int(days), 3650)) if days else "")
         if form.get("push_channel") in PUSH_CHANNELS:
             set_setting("push_channel", str(form.get("push_channel")))
         set_setting("reply_humanize", "1" if form.get("reply_humanize") else "0")
@@ -2595,6 +3182,8 @@ async def settings_shipping(request: Request):
         task.add_done_callback(_background.discard)
     shipping.save_carriers([str(c) for c in f.getlist("carrier")])
     set_setting("ship_detect", "1" if f.get("detect") else "0")
+    km = str(f.get("pickup_max_km") or "").strip()
+    set_setting("pickup_max_km", str(min(int(km), 2000)) if km.isdigit() and int(km) > 0 else "")
     return back(f"/settings/shipping?msg={quote(t('Changes saved'), safe='')}")
 
 

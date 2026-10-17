@@ -1,8 +1,26 @@
 {# Settings → Platforms → willhaben: browser session (login), the hourly request budget (REQUESTS_PER_HOUR from .env until it
    is changed here) and whether the product search uses willhaben. The other sites: settings/platform.html. #}
 {% import "_ui.html" as ui %}
-<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  {% with session_next = '/settings/willhaben', remote_folded = true %}{% include "_session_panel.html" %}{% endwith %}
+{# the account, as simple as Kleinanzeigen's and Vinted's (settings/platform.html); "Log in" opens the login page in
+   the remote-view overlay. The browser window itself and the request recorder are under "Browser window". #}
+{% set ss = session_status %}{% set logged = ss.logged_in %}
+<section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4" data-site-account="willhaben">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex min-w-0 items-center gap-2.5">
+      <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if logged else 'bg-off' if logged is none or not ss.started else 'bg-error' }}"></span>
+      <div class="min-w-0"><div class="font-semibold">{{ _("{site} account", site="willhaben") }}: {% if not ss.started %}{{ _("The browser is not running.") }}{% else %}{{ _("logged in") if logged else _("not checked yet") if logged is none else _("not logged in") }}{% if logged and ss.user %} {{ _("as") }} {{ ss.user.nickname or ss.user.email }}{% endif %}{% endif %}</div>
+        <div class="text-[12.5px] text-muted">{% if ss.last_check %}{{ _("checked {ago}", ago=ss.last_check|ago) }}{% endif %}{% if ss.error %} · {{ ss.error }}{% endif %}</div></div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      {% if not ss.started %}<form method="post" action="/session/start"><input type="hidden" name="next" value="/settings/willhaben"><button class="btn btn-sm btn-primary">{{ _("Start browser") }}</button></form>
+      {% else %}<form method="post" action="/session/login"><input type="hidden" name="next" value="/settings/willhaben?remote=1"><button class="btn btn-sm{{ ' btn-primary' if not logged else '' }}">{{ _("Log in") }}</button></form>
+      <form method="post" action="/session/check"><input type="hidden" name="next" value="/settings/willhaben"><button class="btn btn-sm">{{ _("Check login") }}</button></form>{% endif %}
+    </div>
+  </div>
+  <p class="text-[12.5px] text-muted">{{ _("You log in once in the app's browser window; the session stays in its profile and is renewed automatically. It is used for your chats, your ads and purchases: search agents, price checks and the product search stay anonymous.") }}</p>
+  <details class="group border-t border-base-300 pt-2.5"><summary class="cursor-pointer text-[13px] text-muted">{{ _("Browser window and request recording") }}</summary>
+    <div class="mt-3">{% with session_next = '/settings/willhaben', remote_folded = true %}{% include "_session_panel.html" %}{% endwith %}</div>
+  </details>
 </section>
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   {% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}

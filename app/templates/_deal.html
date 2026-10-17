@@ -65,7 +65,7 @@
       {% set ns = namespace(done=ad.price is none or ad.price <= 0) %}
       {% macro this_row() %}<div class="grid grid-cols-[1fr_auto_auto] gap-3 rounded-md bg-hover px-2 py-1.5 font-semibold tabular-nums"><span>→ {{ _("this ad") }}</span><span></span><span>{{ ad.price|eur }}</span></div>{% endmacro %}
       {% for a in c.closest %}{% if not ns.done and a.price > ad.price %}{% set ns.done = true %}{{ this_row() }}{% endif %}
-      <div class="grid grid-cols-[1fr_auto_auto] gap-3 px-2 py-1.5 tabular-nums"><a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ a.ad_id }}" class="truncate text-base-content no-underline hover:underline">{{ a.title }}</a><span class="text-muted">{{ a.location or '' }}{% if a.item_condition in ('new', 'defect') and a.item_condition != ad.item_condition %} · {{ condition_text(a.item_condition, a.item_condition_label, a.platform) }}{% endif %}</span><span>{{ a.price|eur }}</span></div>{% endfor %}
+      <div class="grid grid-cols-[1fr_auto_auto] gap-3 px-2 py-1.5 tabular-nums">{% set apid = a.get('platform') or 'willhaben' %}<a href="{{ a.url }}" target="_blank" rel="noopener" data-ad="{{ ad_ref(apid, a.ad_id) }}" class="truncate text-base-content no-underline hover:underline">{{ a.title }}</a><span class="text-muted">{{ platform_name(apid) }}{% if a.get('location') %} · {{ a.location }}{% endif %}{% if a.get('item_condition') in ('new', 'defect') and a.item_condition != ad.item_condition %} · {{ condition_text(a.item_condition, a.get('item_condition_label'), apid) }}{% endif %}</span><span>{{ a.price|eur }}</span></div>{% endfor %}
       {% if not ns.done %}{{ this_row() }}{% endif %}
     </div></details>
   {% endif %}

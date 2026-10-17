@@ -1,0 +1,62 @@
+{# My ads → panel: the ad as buyers see it on willhaben (GET /myads/<id>/description, swapped into #myad-description):
+   price and condition, every photo, pickup and delivery options, the text, then the price check with its Geizhals
+   rating (the ad viewer's price section, loaded after this). d: the public ad page (anonymous, cached briefly). #}
+{% import "_ui.html" as ui %}
+<div class="flex items-center justify-between gap-2">{{ ui.eyebrow(_("As buyers see it")) }}<a class="link link-primary text-[12.5px] no-underline" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a></div>
+{% if error %}<p class="m-0 text-[13px] text-error">{{ error }}</p>
+{% elif not d %}<p class="m-0 text-[13px] text-muted">{{ _("willhaben shows no text for this ad (offline or under review).") }}</p>
+{% else %}
+<div class="flex flex-wrap items-baseline gap-2.5" data-myad-price><span class="text-xl font-bold">{{ d.price_display or (d.price|eur) }}</span>{{ ui.condition_pill(d.item_condition, d.item_condition_label, d.platform, 'self-center') }}{% if d.category_path %}<span class="text-[12.5px] text-muted">{{ d.category_path|join(' › ') }}</span>{% endif %}</div>
+{% if d.images %}
+{# a gallery like the ad viewer's: the large photo (click: zoomed to the whole window, arrows and keys there too),
+   arrows and keys, a strip of thumbnails #}
+<div class="flex flex-col gap-2" data-myad-photos
+     x-data="{ i: 0, n: {{ d.images|length }}, zoom: false, src: {{ d.images|tojson|forceescape }}, go(d) { this.i = (this.i + d + this.n) % this.n } }"
+     @keydown.left.prevent="go(-1)" @keydown.right.prevent="go(1)" @keydown.escape.window="zoom = false" tabindex="0">
+  <div class="group relative grid aspect-[4/3] max-h-[70vh] w-full place-items-center overflow-hidden rounded-[10px] bg-[#111] text-[#aaa]">
+    {{ ui.icon('image', 28, 1.5) }}
+    <button type="button" @click="zoom = true" class="absolute inset-0 cursor-zoom-in" title="{{ _('Zoom') }}">
+      <img :src="src[i]" src="{{ d.images[0] }}" alt="" referrerpolicy="no-referrer" class="size-full object-contain"></button>
+    <span x-show="i === 0" class="pointer-events-none absolute top-2 left-2">{{ ui.pill(_("Cover"), 'ok', false) }}</span>
+    <span class="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2 py-0.5 text-[12px] text-white tabular-nums" x-text="(i + 1) + ' / ' + n">1 / {{ d.images|length }}</span>
+    {% if d.images|length > 1 %}
+    <button type="button" @click="go(-1)" class="btn btn-circle btn-sm absolute top-1/2 left-2 -translate-y-1/2 border-0 bg-black/55 text-white opacity-80 hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100" aria-label="{{ _('Previous photo') }}">{{ ui.icon('back', 16, 2.5) }}</button>
+    <button type="button" @click="go(1)" class="btn btn-circle btn-sm absolute top-1/2 right-2 -translate-y-1/2 border-0 bg-black/55 text-white opacity-80 hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100" aria-label="{{ _('Next photo') }}">{{ ui.icon('chevron-right', 16, 2.5) }}</button>
+    {% endif %}
+  </div>
+  {# zoomed: the photo as large as the window allows; click beside it or Esc closes, the link opens the original #}
+  <template x-teleport="body">
+    <div x-show="zoom" x-cloak x-transition.opacity @click.self="zoom = false" @keydown.left.window="zoom && go(-1)" @keydown.right.window="zoom && go(1)"
+         class="fixed inset-0 z-50 grid place-items-center bg-black/90 p-2 sm:p-6" role="dialog" aria-modal="true" data-myad-zoom>
+      <img :src="src[i]" alt="" referrerpolicy="no-referrer" @click="zoom = false" class="max-h-full max-w-full cursor-zoom-out object-contain">
+      <span class="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-2.5 py-0.5 text-[13px] text-white tabular-nums" x-text="(i + 1) + ' / ' + n"></span>
+      <div class="absolute top-3 right-3 flex gap-1.5">
+        <a :href="src[i]" target="_blank" rel="noopener" class="btn btn-circle btn-sm border-0 bg-black/60 text-white hover:bg-black/80" title="{{ _('Open in full size') }}">{{ ui.icon('external', 15) }}</a>
+        <button type="button" @click="zoom = false" class="btn btn-circle btn-sm border-0 bg-black/60 text-white hover:bg-black/80" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16, 2.5) }}</button>
+      </div>
+      {% if d.images|length > 1 %}
+      <button type="button" @click="go(-1)" class="btn btn-circle absolute top-1/2 left-3 -translate-y-1/2 border-0 bg-black/60 text-white hover:bg-black/80" aria-label="{{ _('Previous photo') }}">{{ ui.icon('back', 18, 2.5) }}</button>
+      <button type="button" @click="go(1)" class="btn btn-circle absolute top-1/2 right-3 -translate-y-1/2 border-0 bg-black/60 text-white hover:bg-black/80" aria-label="{{ _('Next photo') }}">{{ ui.icon('chevron-right', 18, 2.5) }}</button>
+      {% endif %}
+    </div>
+  </template>
+  {% if d.images|length > 1 %}
+  <div class="flex gap-1.5 overflow-x-auto pb-1">
+    {% for img in d.images %}<button type="button" @click="i = {{ loop.index0 }}" class="shrink-0 overflow-hidden rounded-md border-2 transition" :class="i === {{ loop.index0 }} ? 'border-primary' : 'border-transparent opacity-70 hover:opacity-100'" aria-label="{{ _('Photo {n} of {total}', n=loop.index, total=d.images|length) }}"><img src="{{ img }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-14 w-[72px] object-cover"></button>{% endfor %}
+  </div>
+  {% endif %}
+  <small class="text-[12px] text-muted">{{ _("{n} photos · the first is the cover", n=d.images|length) }} · <a class="link link-primary no-underline" href="/myads/{{ a.ad_id }}/edit#photos">{{ _("Change photos") }}</a></small>
+</div>
+{% endif %}
+<div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]" data-myad-delivery>
+  <span class="text-muted">{{ _("Pickup") }}</span><span>{{ d.location or d.place or _("no place given") }}</span>
+  <span class="text-muted">{{ _("Delivery") }}</span>
+  <span>{% if d.shipping_options %}{% for o in d.shipping_options %}<span class="block">PayLivery {{ o.name }}{% if o.point is not none %} · {{ _("pickup point {price}", price=o.point|eur) }}{% endif %}{% if o.home is not none %} · {{ _("to the door {price}", price=o.home|eur) }}{% endif %}</span>{% endfor %}<span class="block text-[12px] text-muted">{{ _("The buyer pays shipping and the buyer protection fee.") }}</span>
+    {% elif d.paylivery_enabled %}PayLivery{% else %}{{ _("pickup only (no PayLivery)") }}{% endif %}</span>
+</div>
+{% if d.description %}<p class="m-0 whitespace-pre-line text-[13.5px] leading-relaxed">{{ d.description }}</p>{% endif %}
+{# the price check of the ad viewer: comparable ads, Geizhals' new price and the rating #}
+<section class="flex flex-col gap-2" hx-get="/hits/ad/{{ a.ad_id }}/deal" hx-trigger="load" hx-swap="outerHTML">
+  <span class="text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Price is being checked …") }}</span>
+</section>
+{% endif %}

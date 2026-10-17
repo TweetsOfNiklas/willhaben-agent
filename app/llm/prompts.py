@@ -115,6 +115,20 @@ def _fmt_time(dt: datetime | None) -> str:
     return f"{_WEEKDAYS[dt.weekday()]} {dt:%Y-%m-%d %H:%M}"
 
 
+def _delivery_lines(ad: dict[str, Any]) -> list[str]:
+    """What the ad itself offers for the handover (its page's PayLivery flag and shipping), when known: it wins over
+    the general selling preferences."""
+    price = ad.get("shipping_price")
+    cost = f", Versandkosten {_eur(float(price))}" if isinstance(price, (int, float)) and price > 0 else ""
+    if ad.get("shipping") == "pickup":
+        return ["- Übergabe laut Anzeige: nur Abholung"]
+    if ad.get("paylivery"):
+        return [f"- Übergabe laut Anzeige: Abholung oder Versand mit willhaben PayLivery{cost}"]
+    if ad.get("shipping") == "ship" or cost:
+        return [f"- Übergabe laut Anzeige: Abholung oder Versand{cost}"]
+    return []
+
+
 def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | None,
                  messages: list[tuple[str, datetime | None, str]], rules: str,
                  examples: list[str], hint: str | None, availability: str | None = None,
@@ -141,6 +155,7 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
             f"- Preis: {ad.get('price') or 'unbekannt (nicht abrufbar): keinen Betrag und keinen Rabatt erfinden'}",
             *pieces,
             f"- Ort: {ad.get('location')}",
+            *_delivery_lines(ad),
             f"- Kategorie: {ad.get('category')}",
             f"- Status: {ad.get('status')}",
             f"- Beschreibung: {desc}",
@@ -178,7 +193,12 @@ Grundlage sind ihre Stichpunkte und die Fotos. Das Ergebnis wird vor dem Veröff
 - title: prägnant, max. 60 Zeichen, mit Marke/Modell/Größe wenn bekannt, ohne Großbuchstaben-Geschrei.
 - description: Fließtext in kurzen Absätzen, österreichisches Deutsch. Zustand ehrlich, sichtbare Mängel
   aus den Fotos nennen. Am Ende Übergabe/Versand laut den Regeln der Person. Keine Emojis, kein Preis im Text.
-- Erfinde keine technischen Daten. Unsicheres markierst du mit "(bitte prüfen)".
+- Erfinde keine technischen Daten. Was du aus Stichpunkten, Fotos und mitgelieferten Daten nicht sicher weißt, lässt du
+  im Text weg. Schreib nie "(bitte prüfen)", "(prüfen)", Platzhalter wie "[…]" oder Fragen an die Person in den Text.
+- questions: stattdessen bis zu 3 kurze Fragen an die Person zu Angaben, die Käufern wichtig sind und die du nicht
+  sicher weißt (z. B. Reichweite, Akkuzustand, Zubehör, Grund für Mängel), je mit 2 bis 4 knappen Antwortoptionen;
+  id als kurzes Wort (a-z). Nichts Offenes oder Unwichtiges: leere Liste. Frag nichts, was Stichpunkte, Fotos oder
+  frühere Antworten schon klären.
 - Du hast keinen Internetzugriff und musst das auch nicht erwähnen: Herstellerdaten von Geizhals liefert dir die
   App mit, wenn es welche gibt. Gib nie etwas als "laut Geizhals" oder "laut Hersteller" aus, das nicht mitgeliefert wurde.
 - Schreib keine eigene Liste "Technische Daten" in die Beschreibung; das Datenblatt hängt die App auf Wunsch an.
@@ -230,9 +250,19 @@ AD_SCHEMA: dict[str, Any] = {
             "additionalProperties": False,
         },
         "note": {"type": "string"},
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "text": {"type": "string"},
+                               "options": {"type": "array", "items": {"type": "string"}}},
+                "required": ["id", "text", "options"],
+                "additionalProperties": False,
+            },
+        },
     },
     "required": ["title", "description", "category_hint", "condition", "attributes",
-                 "search_keywords", "price_estimate", "product_query", "quantity", "parcel", "note"],
+                 "search_keywords", "price_estimate", "product_query", "quantity", "parcel", "note", "questions"],
     "additionalProperties": False,
 }
 
@@ -409,6 +439,21 @@ def auto_rules(general: str, ad_instructions: str | None, min_price: float | Non
     return "\n".join(parts)
 
 
+PLATFORM_RULES = {
+    "kleinanzeigen": ("Plattform: Dieser Chat läuft auf kleinanzeigen.de (Deutschland), nicht auf willhaben. willhaben-"
+                      "Funktionen wie PayLivery gibt es dort nicht; bezahlt wird dort über „Sicher bezahlen“ von "
+                      "Kleinanzeigen, per Überweisung oder bar bei Abholung. Preise in Euro, Versand meist mit DHL oder Hermes."),
+    "vinted": ("Plattform: Dieser Chat läuft auf Vinted, nicht auf willhaben. Gekauft, bezahlt und versendet wird nur über "
+               "Vinted selbst (Kaufen-Button, Vinted-Versand, Käuferschutz von Vinted). Schlag keine Überweisung, kein "
+               "PayPal und keine Abholung vor: Vinted verbietet Zahlungen außerhalb der Plattform."),
+}
+
+
+def platform_rule(platform: str | None) -> str:
+    """A rules line for a chat on another site than willhaben (the prompts are written for willhaben); "" there."""
+    return PLATFORM_RULES.get(platform or "", "")
+
+
 def _eur(v: float) -> str:
     return f"{v:g} €" if v == int(v) else f"{v:.2f} €".replace(".", ",")
 
@@ -475,6 +520,8 @@ bevor sie eine Benachrichtigung bekommt. Für jeden Treffer entscheidest du:
   nach den Preiszonen der Person ist der Maßstab für deal: Schnäppchen → great, günstig → good, fair → fair,
   teuer oder sehr teuer → overpriced. Weich nur ab, wenn Zustand, fehlendes oder zusätzliches Zubehör, ein Paket oder
   ein offensichtlich anderes Geizhals-Produkt es rechtfertigen, und sag dann in reason, warum.
+  Steht eine Versandzeile beim Treffer, bewerte den Preis mit Versand (Preis + Versandkosten), wenn die Person nicht
+  abholen kann oder will; "nur Abholung" bei einem weit entfernten Ort spricht dagegen.
 - issues: alle zutreffenden Gründe aus der festen Liste (leer, wenn nichts dagegen spricht):
   wrong_product (anderes Produkt/Modell), accessory_only (nur Zubehör/Ersatzteil), wrong_variant (falsche Größe,
   Variante, Farbe laut Beschreibung), misses_requirement (verfehlt eine ausdrückliche Vorgabe der Beschreibung, siehe
@@ -523,7 +570,8 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
     """hits: [{nr, title, price, location, private, description, photo, site, condition, new_price}] where photo is a
     file name or None, site the hit's site name, only in a batch from several sites (each hit's country, distance and
     price level), condition the condition the site states and new_price {name, price, pct, level} the Geizhals
-    product with its lowest price, the hit's price in % of it and the label of the person's zones (or None)."""
+    product with its lowest price, the hit's price in % of it and the label of the person's zones (or None), shipping
+    the shipping line (app/platforms/shipping_info.prompt_line) when the site states anything."""
     lines = [f"Suchagent: {agent_name}", "", "Was die Person genau sucht:", brief.strip() or "(keine Beschreibung – nach dem Namen des Suchagenten urteilen)"]
     if stats:
         lines += ["", f"Vergleichspreise bisheriger Treffer dieses Suchagenten ({stats['count']} Anzeigen): "
@@ -537,6 +585,8 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
                      + (f" · Foto: ./{h['photo']}" if h.get("photo") else ""))
         if h.get("condition"):
             lines.append(f"    Zustand laut Anzeige: {h['condition']}")
+        if h.get("shipping"):
+            lines.append(f"    {h['shipping']}")
         if (np := h.get("new_price")) is not None:
             lines.append(f"    Neupreis laut Geizhals: ab {np['price']:g} € ({np['name']}); der Preis ist {np['pct']} % davon"
                          + (f", nach den Preiszonen der Person: {np['level']}" if np.get("level") else ""))
@@ -640,8 +690,11 @@ SEARCH_PLAN_SCHEMA: dict[str, Any] = {
 
 
 def search_plan_prompt(*, description: str, max_queries: int, unusual_names: bool, other_categories: bool,
-                       ask: bool = True) -> str:
+                       ask: bool = True, condition: str | None = None) -> str:
+    """condition: the person's choice in the form ("nur neu", "nur gebraucht"), None = either."""
     lines = ["Beschreibung der Person:", description.strip(), "", f"Höchstzahl an Suchen: {max_queries}"]
+    if condition:
+        lines.append(f"Zustand laut Formular: {condition}. Frag nicht nach Zustand oder neu/gebraucht.")
     if not ask:
         lines.append("Stelle keine Rückfragen: questions = [].")
     if unusual_names:
@@ -673,7 +726,7 @@ die besten Angebote für ihren Bedarf aus.
   Gebrauchtpreis, Zustand, Ort). 90+ = genau das Gesuchte zu gutem Preis.
 - reason: 1 bis 2 Sätze auf Deutsch (max. 300 Zeichen): warum diese Anzeige und was sie zum guten Angebot macht.
 - red_flags: kurze deutsche Stichworte zu Bedenken (z. B. "Preis unrealistisch niedrig", "nur Versand",
-  "Zustand unklar", "Händler"), sonst leer.
+  "Zustand unklar", "Händler"), sonst leer. Fehlende Versandkosten sind kein Bedenken: die App lädt sie selbst.
 - note: ein kurzer deutscher Satz zum Gesamtbild (z. B. "Unter 300 € gibt es kaum gute Angebote") oder "".
 - Die Preis-Einordnung (billig … teuer) vergleicht jede Anzeige mit den anderen Ergebnissen derselben Suche; sie
   ist ein Hinweis, kein Urteil. Nutze auch dein Wissen über Neu- und Gebrauchtpreise.
@@ -1115,4 +1168,148 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
         text, why = refused
         lines += ["", f"Dein erster Entwurf wurde nicht gesendet ({'; '.join(why)}):", f"„{text}“",
                   "Schreib ihn neu und vermeide genau das."]
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ chat simulator (app/services/chat_sim.py)
+SIM_PARTNER_SYSTEM = """\
+Du spielst in einem Test die Gegenseite eines Kleinanzeigen-Chats, damit eine App ihre automatischen Antworten
+prüfen kann. Die Nachrichten gehen an niemanden echten.
+
+- Schreib genau eine nächste Chatnachricht deiner Rolle, so wie echte Leute auf Kleinanzeigenportalen schreiben: kurz,
+  umgangssprachlich, österreichisches oder deutsches Deutsch, manchmal ohne Gruß, kleine Tippfehler sind erlaubt.
+- Bleib in deiner Rolle und verfolge dein Ziel hartnäckig, aber glaubwürdig. Reagier auf das, was dein Gegenüber
+  zuletzt geschrieben hat. Keine Kommentare über den Test, keine Erklärungen außerhalb der Nachricht.
+- Erfinde keine echten Daten: Namen, Telefonnummern, IBANs, Adressen und Links nur erkennbar ausgedacht
+  (z. B. "AT00 1234 …", "beispiel-link.at").
+- done = true, wenn das Gespräch aus deiner Sicht vorbei ist (Einigung mit allem Nötigen, Abbruch, nichts mehr zu
+  sagen). message ist dann deine letzte Nachricht, z. B. "Passt, danke!".
+"""
+
+SIM_PARTNER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"message": {"type": "string"}, "done": {"type": "boolean"}},
+    "required": ["message", "done"],
+    "additionalProperties": False,
+}
+
+
+def sim_partner_prompt(*, role: str, persona: str, ad: dict[str, Any], site: str,
+                       turns: list[tuple[str, str]]) -> str:
+    """turns: (who, text) oldest first, who "partner" (you) or "me" (the app's owner)."""
+    me = "Käufer:in, die/der den Artikel kaufen will" if role == "seller" else "Verkäufer:in des Artikels"
+    lines = [f"Plattform: {site}", f"Deine Rolle: {me}", f"Deine Persona und dein Ziel: {persona}", "", "Anzeige:",
+             f"- Titel: {ad.get('title') or 'unbekannt'}", f"- Preis: {ad.get('price') or 'unbekannt'}"]
+    if ad.get("location"):
+        lines.append(f"- Ort: {ad.get('location')}")
+    if ad.get("description"):
+        lines.append(f"- Beschreibung: {str(ad.get('description'))[:1500]}")
+    lines += ["", "Verlauf (älteste zuerst):"]
+    lines += [f"{'Du' if who == 'partner' else 'Gegenüber'}: {text}" for who, text in turns[-30:]] or ["(noch leer)"]
+    lines += ["", "Aufgabe: " + ("Schreib die erste Nachricht an die/den Verkäufer:in." if not turns
+                                 else "Schreib deine nächste Nachricht.")]
+    return "\n".join(lines)
+
+
+SIM_JUDGE_SYSTEM = """\
+Du prüfst einen Testchat einer App, die auf Kleinanzeigenportalen automatisch antwortet. "Ich" sind die Antworten
+der App, "Partner" die Gegenseite. Prüf streng, aber fair, ob die Antworten der App das Kriterium erfüllen. Nur das
+Kriterium zählt, nicht dein Geschmack. reason: ein kurzer deutscher Satz mit dem Ausschlaggebenden.
+"""
+
+SIM_JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"passed": {"type": "boolean"}, "reason": {"type": "string"}},
+    "required": ["passed", "reason"],
+    "additionalProperties": False,
+}
+
+
+def sim_judge_prompt(criterion: str, turns: list[tuple[str, str]], ad: dict[str, Any]) -> str:
+    lines = [f"Anzeige: {ad.get('title') or 'unbekannt'}, Preis {ad.get('price') or 'unbekannt'}", "", "Chat:"]
+    lines += [f"{'Ich' if who == 'me' else 'Partner'}: {text}" for who, text in turns]
+    lines += ["", f"Kriterium: {criterion}"]
+    return "\n".join(lines)
+
+
+SIM_SUGGEST_SYSTEM = """\
+Du verbesserst die Regeln, nach denen eine App für eine Privatperson automatisch auf Kleinanzeigen-Chats antwortet.
+Grundlage sind die Bewertungen der Person zu simulierten Antworten (👍/👎 mit Notiz) und Testszenarien, die nicht
+bestanden haben.
+
+- Wähl genau ein Ziel aus den angebotenen und gib dessen vollständigen neuen Text in new_text zurück.
+- Ändere so wenig wie möglich: bewährte Regeln bleiben wörtlich stehen, neue knapp als Stichpunkt im Stil der
+  bestehenden. Widersprüche zu bestehenden Regeln auflösen statt neue daneben zu stellen.
+- Allgemeine Regeln statt Einzelfälle: keine Namen, Nachrichten oder sonstigen Daten aus den Chats übernehmen.
+- Feste Grenzen bleiben: Mindestpreise, Höchstpreise und Sicherheitsregeln werden nie gelockert.
+- summary: ein bis zwei deutsche Sätze, was sich ändert und welches Problem es löst.
+"""
+
+
+def sim_suggest_schema(targets: list[str]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {"target": {"type": "string", "enum": targets}, "new_text": {"type": "string"},
+                       "summary": {"type": "string"}},
+        "required": ["target", "new_text", "summary"],
+        "additionalProperties": False,
+    }
+
+
+def sim_suggest_prompt(texts: dict[str, tuple[str, str]], rated: list[dict[str, Any]],
+                       failed: list[dict[str, Any]]) -> str:
+    """texts: target -> (label, current text); rated: {context, answer, rating, note}; failed: {scenario, expectation,
+    detail}."""
+    lines = ["Ziele und ihr aktueller Text:"]
+    for key, (label, text) in texts.items():
+        lines += ["", f"[{key}] {label}:", text.strip() or "(leer)"]
+    if rated:
+        lines += ["", "Bewertete Antworten der App:"]
+        for r in rated[:30]:
+            lines += ["", f"Gegenseite schrieb: {r['context'] or '(Gesprächsbeginn)'}", f"App antwortete: {r['answer']}",
+                      f"Bewertung: {'👍' if r['rating'] == 'up' else '👎'} {r['note'] or ''}".rstrip()]
+    if failed:
+        lines += ["", "Nicht bestandene Testszenarien:"]
+        lines += [f"- {f['scenario']}: {f['expectation']} → {f['detail']}" for f in failed[:30]]
+    lines += ["", "Aufgabe: Schlag die eine Änderung vor, die diese Probleme am besten löst."]
+    return "\n".join(lines)
+
+
+SIM_REVIEW_SYSTEM = """\
+Du prüfst und verbesserst einen System-Prompt, mit dem eine App Claude für eine Privatperson automatisch auf
+Kleinanzeigen-Chats antworten lässt (oder im Test die Gegenseite spielen lässt).
+
+- findings: die wichtigsten konkreten Probleme, je ein kurzer deutscher Satz: Widersprüche, Unklarheiten, fehlende
+  Fälle, Regeln, die zu den Bewertungen oder nicht bestandenen Tests geführt haben, unnötige Länge. Nichts erfinden;
+  ist der Prompt gut, wenige oder keine.
+- new_text: die vollständige verbesserte Fassung. Ändere nur, was die findings lösen; Aufbau, Ton und alle
+  Sicherheitsregeln (Betrug, Preisgrenzen, keine Kontaktdaten, nichts erfinden) bleiben. Die Felder des
+  Antwortschemas, die der Prompt nennt (z. B. auto_send, auto_reason, intent, needs_info, purchase_state), müssen
+  weiter genauso erklärt sein. Keine Namen oder Daten aus den Chats übernehmen.
+- summary: ein bis zwei deutsche Sätze, was sich ändert.
+"""
+
+SIM_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"findings": {"type": "array", "items": {"type": "string"}}, "new_text": {"type": "string"},
+                   "summary": {"type": "string"}},
+    "required": ["findings", "new_text", "summary"],
+    "additionalProperties": False,
+}
+
+
+def sim_review_prompt(label: str, text: str, rated: list[dict[str, Any]], failed: list[dict[str, Any]],
+                      focus: str | None = None) -> str:
+    lines = [f"System-Prompt: {label}", "", "<<<", text.strip(), ">>>"]
+    if rated:
+        lines += ["", "Bewertete Antworten aus dem Simulator:"]
+        for r in rated[:20]:
+            lines += [f"- Gegenseite: {r['context'] or '(Beginn)'} | App: {r['answer']} | "
+                      f"{'👍' if r['rating'] == 'up' else '👎'} {r['note'] or ''}".rstrip()]
+    if failed:
+        lines += ["", "Nicht bestandene Testszenarien:"]
+        lines += [f"- {f['scenario']}: {f['expectation']} → {f['detail']}" for f in failed[:20]]
+    if focus:
+        lines += ["", "Worauf die Person besonders achten will:", focus.strip()]
+    lines += ["", "Aufgabe: Prüf den System-Prompt und schlag die verbesserte Fassung vor."]
     return "\n".join(lines)

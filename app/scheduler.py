@@ -12,8 +12,8 @@ from sqlmodel import select
 from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
-from app.services import chats, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
-from app.services.search_agents import is_checking, retention_job, run_agent
+from app.services import adaptive_pace, chats, site_accounts, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
+from app.services.search_agents import is_checking, locate_job, retention_job, run_agent, watch_saved_job
 from app.willhaben import access_log
 from app.willhaben.session import get_session
 
@@ -34,6 +34,9 @@ async def _run_agent_job(agent_id: int) -> None:
         return
     if quiet_hours.should_skip(agent):
         log.debug("agent %s: quiet hours, skipped", agent_id)
+        return
+    if adaptive_pace.should_skip(agent):
+        log.debug("agent %s: a slow hour for new ads, skipped", agent_id)
         return
     if human_pace.take_break():
         log.info("agent %s: skipping this check (human-like break)", agent_id)
@@ -66,6 +69,26 @@ def reschedule_agents() -> None:
         agents = list(db.exec(select(SearchAgent)))
     for a in agents:
         schedule_agent(a, run_soon=False)
+
+
+FOLLOW_UP_S = 120
+
+
+def follow_up(agent_id: int) -> None:
+    """A check left hits pending (Claude screens at most screening.MAX_PER_RUN per check): one more check of the
+    agent shortly, which judges them first (quiet hours and adaptive polling do not apply)."""
+    if not scheduler.running:
+        return
+    log.info("agent %s: hits still pending, another check in %s s", agent_id, FOLLOW_UP_S)
+    scheduler.add_job(_follow_up_job, "date", run_date=datetime.now().astimezone() + timedelta(seconds=FOLLOW_UP_S),
+                      args=[agent_id], id=f"{_agent_job(agent_id)}-follow-up", replace_existing=True)
+
+
+async def _follow_up_job(agent_id: int) -> None:
+    if is_checking(agent_id):
+        return
+    with timeline.fresh(actor="scheduler"):
+        await run_agent(agent_id)
 
 
 def unschedule_agent(agent_id: int) -> None:
@@ -144,6 +167,15 @@ def start() -> None:
     scheduler.add_job(retention_job, IntervalTrigger(hours=6, jitter=300), id="hits-retention",
                       replace_existing=True, max_instances=1, coalesce=True,   # Hits: retention, saved ones kept
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=20))
+    scheduler.add_job(site_accounts.check_job, IntervalTrigger(hours=4, jitter=900), id="site-accounts",
+                      replace_existing=True, max_instances=1, coalesce=True,   # Kleinanzeigen, Vinted: still logged in?
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=40))
+    scheduler.add_job(watch_saved_job, IntervalTrigger(hours=2, jitter=600), id="hits-watch-saved",
+                      replace_existing=True, max_instances=1, coalesce=True,   # saved hits: price drops, sold, gone
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=30))
+    scheduler.add_job(locate_job, IntervalTrigger(hours=1, jitter=300), id="hits-locate",
+                      replace_existing=True, max_instances=1, coalesce=True,   # hit cards: distance from home
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=25))
     scheduler.add_job(vpn_check.tick, IntervalTrigger(minutes=1), id="vpn-search",    # the VPN's schedule, stored
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=90))

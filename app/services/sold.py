@@ -290,7 +290,7 @@ def discard_notices(ad_id: str, draft_ids: list[int]) -> int:
         with session() as db:
             d = db.get(Draft, draft_id)
         if d and d.status == "draft" and d.conversation_id in convs and d.intent in NOTICE_INTENTS.values():
-            chats.discard_draft(draft_id)
+            chats.discard_draft(draft_id, by_owner=True)
             n += 1
     return n
 

@@ -62,7 +62,8 @@ class Job:
                 "link": self.link, "quiet": self.quiet, "finished_at": self.finished_at.isoformat() if self.finished_at else None}
 
 
-LANES = ("ads", "chat", "claude")   # claude: drafts and revisions (no willhaben account request, can take a minute)
+LANES = ("ads", "chat", "claude", "sim")   # claude: drafts and revisions (no willhaben account request, can take a minute);
+#   sim: the chat simulator's test chats (never in the way of real answers)
 
 _ids = itertools.count(1)
 _locks: dict[str, asyncio.Lock] = {}
@@ -157,6 +158,11 @@ async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
 def working() -> set[str]:
     """Marker keys of the items running jobs work on right now (pages show a spinner instead of an hourglass)."""
     return {j.current for j in _active if j.status == "running" and j.current}
+
+
+def current_keys(prefix: str) -> list[str]:
+    """Marker keys of queued or running jobs starting with `prefix` (pages wait for them like for DB markers)."""
+    return [j.current for j in _active if j.current and j.current.startswith(prefix)]
 
 
 def busy(kind_prefix: str = "") -> bool:

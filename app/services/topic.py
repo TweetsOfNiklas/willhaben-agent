@@ -27,13 +27,21 @@ def _windows(text: str) -> set[tuple[str, ...]]:
 
 
 def _prompt_shingles() -> set[tuple[str, ...]]:
-    """Every run of LEAK_WORDS words of the chat system prompts (built once)."""
+    """Every run of LEAK_WORDS words of the chat system prompts (built once, again after an edit)."""
     global _shingles
     if _shingles is None:
         from app.llm import prompts       # lazy: prompts is big and only needed when an answer is checked
+        from app.services import system_prompts   # the owner's edited versions count too
         _shingles = set().union(*(_windows(x) for x in (prompts.REPLY_SYSTEM, prompts.AUTO_REPLY_SYSTEM,
-                                                         prompts.PURCHASE_SYSTEM, prompts.PURCHASE_OPENER_SYSTEM)))
+                                                         prompts.PURCHASE_SYSTEM, prompts.PURCHASE_OPENER_SYSTEM,
+                                                         *system_prompts.custom_texts())))
     return _shingles
+
+
+def reset_cache() -> None:
+    """After a system prompt was edited: built again on the next check."""
+    global _shingles
+    _shingles = None
 
 
 def leaks_prompt(text: str | None) -> bool:

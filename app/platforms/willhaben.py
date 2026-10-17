@@ -24,6 +24,8 @@ from app.willhaben.parse import (
 SORTS = {"newest": 1, "relevance": 7, "price_asc": 3, "price_desc": 4}
 
 
+MAX_ROWS = 200      # willhaben's largest result page (10/2026: rows=1000 still gives 200); about 1.2 MB of JSON
+
 class WillhabenPlatform(Platform):
     id = "willhaben"
     name = "willhaben"
@@ -69,12 +71,21 @@ class WillhabenPlatform(Platform):
         return SearchSpec(platform=self.id, url=web_url(api), api=api, keyword=keyword, price_from=price_from,
                           price_to=price_to, category=category, sort=sort)
 
+    def former_rows(self, spec: SearchSpec) -> int | None:
+        raw = url_param(spec.api or "", "rows") if spec.api else None
+        rows = int(raw) if raw and raw.isdigit() else get_settings().search_rows
+        return rows if rows < MAX_ROWS else None
+
     async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+        """One result page. Without `rows` (the search agents) the largest page willhaben gives, MAX_ROWS: one request
+        covers everything new since the last check, also after quiet hours or on a busy search."""
         from app.willhaben.public import get_public
 
-        api = spec.api or to_webapi_url(spec.url, rows=rows or get_settings().search_rows)
-        if rows and url_param(api, "rows") != str(rows):
-            api = re.sub(r"([?&])rows=\d+", rf"\g<1>rows={rows}", api)
+        rows = rows or MAX_ROWS
+        api = spec.api or to_webapi_url(spec.url, rows=rows)
+        if url_param(api, "rows") != str(rows):
+            api = re.sub(r"([?&])rows=\d+", rf"\g<1>rows={rows}", api) if url_param(api, "rows") \
+                else api + ("&" if "?" in api else "?") + f"rows={rows}"
         return await get_public().search(api, cache_s=cache_s)
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:

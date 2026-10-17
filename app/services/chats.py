@@ -20,13 +20,12 @@ from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, 
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
-    AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, MAX_OTHERS, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA,
-    REPLY_SYSTEM,
-    auto_rules,
+    AUTO_REPLY_SCHEMA, MAX_OTHERS, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, REPLY_SCHEMA, REPLY_SYSTEM,
+    auto_rules, platform_rule,
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, selling, stock, style
+from app.services import my_ads, selling, stock, style, system_prompts
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -41,17 +40,17 @@ def _account() -> AccountClient:
 
 
 def sync_window() -> tuple[int, datetime | None]:
-    """Settings chat_sync_limit (N latest conversations, 1-50) and chat_sync_since (cutoff date, local midnight)."""
+    """Settings chat_sync_limit (N latest conversations, 1-50) and chat_sync_days (conversations active in the last N
+    days: the cutoff is local midnight N days ago, so it moves along every day; 0 = today only, empty = no cutoff)."""
     try:
         limit = min(max(int(get_setting("chat_sync_limit") or 10), 1), 50)
     except ValueError:
         limit = 10
     since = None
-    if raw := (get_setting("chat_sync_since") or "").strip():
-        try:
-            since = datetime.strptime(raw, "%Y-%m-%d").astimezone()   # naive -> local midnight
-        except ValueError:
-            pass
+    raw = (get_setting("chat_sync_days") or "").strip()
+    if raw.isdigit():
+        today = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        since = (today - timedelta(days=int(raw))).replace(tzinfo=None).astimezone()   # local midnight, DST-safe
     return limit, since
 
 
@@ -530,64 +529,92 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         msgs_t = [("in" if conv.unread_count else "unknown", conv.last_message_at, conv.last_message_text)]
     else:
         msgs_t = [(m.direction, m.created_at, m.text) for m in msgs]
-    cal = gcal.config()
     buy = purchase.for_conversation(conversation_id) if conv.role == "buyer" else None
     timeline.update_context(ad_id=conv.ad_id, purchase_id=buy.id if buy else None, mine=conv.role == "seller" or None)
     if auto and conv.role == "buyer" and buy is None:
         raise LLMError(t("No open purchase for this chat"))
+    ad = None
+    if buy is None:
+        with session() as db:
+            ad = current_ad(db, conv.ad_id) if conv.ad_id else None
+    req = await compose(conv, msgs_t, auto=auto, ad=ad, buy=buy, hint=hint)
+    log.info("draft for %s: hint=%r, ad price=%s", conversation_id, hint, (req["ad_ctx"] or {}).get("price"))
+    async with telegram.typing():                 # "typing…" in Telegram while Claude writes
+        result = await get_backend(req["backend"]).complete(system=req["system"], prompt=req["prompt"],
+                                                            schema=req["schema"])
+    draft = draft_from(result, conversation_id, auto=auto, buyer=buy is not None)
+    with session() as db:
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+    return draft
+
+
+async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, str]], *, auto: bool,
+                  ad: MyAd | None, buy: Any = None, hint: str | None = None,
+                  overrides: dict[str, str] | None = None, platform: str | None = None) -> dict[str, Any]:
+    """What Claude gets for one answer: {system, schema, prompt, backend, ad_ctx}. Reads settings, the calendar and
+    the owner's own messages (style), writes nothing: the chat simulator (app/services/chat_sim.py) builds its
+    answers here too, with unsaved rows. The system prompts of automatic answers are the owner's edited ones, if any
+    (app/services/system_prompts.py). `overrides` replaces them or the owner's rules for a test run:
+    "auto_reply_system", "purchase_system", "auto_reply_rules", "purchase_rules", "ad_instructions"; `platform`
+    names a site other than willhaben."""
+    overrides = overrides or {}
+    cal = gcal.config()
     if buy is not None:                           # buyer: the purchase's rules replace the seller's rules
         availability = await gcal.availability_text() if (buy.mode == "pickup" and gcal.connected()) else None
-        rules = purchase.rules_block(buy, conv, availability=availability)
+        rules = purchase.rules_block(buy, conv, availability=availability, user_rules=overrides.get("purchase_rules"))
         if auto and (lessons := feedback.prompt_block()):
             rules = f"{rules}\n\n{lessons}"
         availability = None
-        system, schema = (PURCHASE_SYSTEM, PURCHASE_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
+        system, schema = ((overrides.get("purchase_system") or system_prompts.get("purchase"), PURCHASE_SCHEMA)
+                          if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
         examples: list[str] = []
         stock_now, others = None, []
     else:
         rules = get_setting("reply_rules")
         if conv.role == "seller":                     # Settings → Selling preferences, before the per-answer blocks
             rules = selling.append_to(rules)
-        with session() as db:
-            ad = current_ad(db, conv.ad_id) if conv.ad_id else None
         floor = ad.min_price if ad and conv.role == "seller" else None
         numbers = stock.numbers(ad) if conv.role == "seller" else None    # several pieces: Claude knows how many are left
         stock_now = {"quantity": numbers["quantity"], "remaining": numbers["remaining"]} if numbers else None
         asking = (conv.ad_context or {}).get("price")
         if auto:
-            rules = f"{rules}\n\n{auto_rules(get_setting('auto_reply_rules'), ad.auto_reply_instructions if ad else None, floor, asking)}"
+            general = overrides.get("auto_reply_rules", get_setting("auto_reply_rules"))
+            instructions = overrides.get("ad_instructions", ad.auto_reply_instructions if ad else None)
+            rules = f"{rules}\n\n{auto_rules(general, instructions, floor, asking)}"
             if lessons := feedback.prompt_block():     # the owner's 👎 notes on earlier automatic answers
                 rules = f"{rules}\n\n{lessons}"
         elif floor is not None:                       # manual drafts of my own ad: same negotiation range
             rules = f"{rules}\n\n{price_floor(floor, asking)}"
         availability = await gcal.availability_text() if (cal["in_auto"] if auto else cal["in_drafts"]) else None
-        system, schema = (AUTO_REPLY_SYSTEM, AUTO_REPLY_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
+        system, schema = ((overrides.get("auto_reply_system") or system_prompts.get("auto_reply"), AUTO_REPLY_SCHEMA)
+                          if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
         examples = style.examples()                       # the profile's characteristic messages, then the newest
-        others = _others_said(conversation_id, conv.ad_id) if conv.role == "seller" else []
+        others = _others_said(conv.id, conv.ad_id) if conv.role == "seller" else []
+    if line := platform_rule(platform):
+        rules = f"{rules}\n\n{line}"
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
                           rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now,
                           style=(style.profile() or None) if buy is None else None, others=others)
-    log.info("draft for %s: hint=%r, ad price=%s", conversation_id, hint, (ad_ctx or {}).get("price"))
-    backend = get_backend("purchase" if buy is not None else "chat")   # chats of a purchase order: Settings → "Purchases"
-    async with telegram.typing():                 # "typing…" in Telegram while Claude writes
-        result = await backend.complete(system=system, prompt=prompt, schema=schema)
+    return {"system": system, "schema": schema, "prompt": prompt, "ad_ctx": ad_ctx,
+            "backend": "purchase" if buy is not None else "chat"}   # chats of a purchase order: Settings → "Purchases"
+
+
+def draft_from(result: Any, conversation_id: str, *, auto: bool, buyer: bool) -> Draft:
+    """Claude's answer as an (unsaved) Draft."""
     d = result.data
     note = (d.get("note") or "").strip()
     # "Hinweis:" marks Claude's note among needs_info (stored in the DB, matched below and in chat.html)
-    buyer_auto = auto and buy is not None
-    draft = Draft(conversation_id=conversation_id, text=d.get("reply", "").strip(), intent=d.get("intent"),
-                  needs_info=(d.get("needs_info") or []) + ([f"Hinweis: {note}"] if note else []),
-                  suggested_price=d.get("suggested_price"), model=result.model, meetup=meetups.clean(d.get("meetup")),
-                  alternatives=clean_alternatives(d.get("alternatives")),
-                  auto=True if auto else None,
-                  auto_reason=(("✓ " if d.get("auto_send") else "✗ ") + (d.get("auto_reason") or "").strip()) if auto else None,
-                  purchase=purchase.clean_state(d.get("purchase_state")) if buyer_auto else None)
-    with session() as db:
-        db.add(draft)
-        db.commit()
-        db.refresh(draft)
-    return draft
+    buyer_auto = auto and buyer
+    return Draft(conversation_id=conversation_id, text=d.get("reply", "").strip(), intent=d.get("intent"),
+                 needs_info=(d.get("needs_info") or []) + ([f"Hinweis: {note}"] if note else []),
+                 suggested_price=d.get("suggested_price"), model=result.model, meetup=meetups.clean(d.get("meetup")),
+                 alternatives=clean_alternatives(d.get("alternatives")),
+                 auto=True if auto else None,
+                 auto_reason=(("✓ " if d.get("auto_send") else "✗ ") + (d.get("auto_reason") or "").strip()) if auto else None,
+                 purchase=purchase.clean_state(d.get("purchase_state")) if buyer_auto else None)
 
 
 async def mark_read(conversation_id: str) -> int:
@@ -773,29 +800,14 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
     buyer = conv is not None and conv.role == "buyer"
     if get_setting("send_verified") != "1":
         why.append(t("Sending not confirmed yet – send once manually from the dashboard"))
-    if not d.auto_reason or not d.auto_reason.startswith("✓"):
-        why.append(t("Claude does not recommend an automatic answer"))
-    if d.intent == "scam_suspect":
-        why.append(t("Suspected scam"))
-    if any(not x.startswith("Hinweis:") for x in d.needs_info or []):
-        why.append(t("Claude needs info: {items}", items=", ".join(x for x in d.needs_info if not x.startswith("Hinweis:"))))
-    if "[" in d.text and "]" in d.text:
-        why.append(t("Answer contains placeholders"))
-    if not d.text.strip():
-        why.append(t("empty answer"))
-    if buyer:                             # purchase guards: maximum price, bank details, address, needs_user
-        p = purchase.for_conversation(conv_id)
-        why += purchase.blockers(p, d, msgs) if p is not None else [t("No open purchase for this chat")]
-    else:                                 # price floor of the own ad, checked in code (app/services/min_price.py)
+    p = purchase.for_conversation(conv_id) if buyer else None
+    if buyer and p is None:
+        why.append(t("No open purchase for this chat"))
+    ad = None
+    if not buyer:
         with session() as db:
             ad = current_ad(db, conv.ad_id) if conv and conv.ad_id else None
-        why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text,
-                                  asking=min_price.asking_value((conv.ad_context or {}).get("price") if conv else None),
-                                  intent=d.intent)
-        why += stock.blockers(ad, d.text)   # never more pieces than are left (app/services/stock.py)
-        if selling.contact_hits(d.text):
-            why.append(t("Answer contains an e-mail address or link – willhaben censors them"))
-        why += topic.blockers(d.text)     # staying on topic: no instruction words or AI talk, no essays
+    why += answer_blockers(conv, d, msgs, ad=ad, buy=p, buyer=buyer)
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in":
         why.append(t("last message is not from the other person"))
@@ -808,6 +820,35 @@ def _auto_blockers(conv_id: str, d: Draft, msgs: list[Message]) -> list[str]:
         why.append(t("already {n} automatic answers today in this chat", n=per_day))
     if sum(1 for x in sent if x.sent_at and x.sent_at >= now - timedelta(hours=1)) >= AUTO_PER_HOUR:
         why.append(t("Limit of {n} automatic answers per hour reached", n=AUTO_PER_HOUR))
+    return why
+
+
+def answer_blockers(conv: Conversation | None, d: Draft, msgs: list[Message], *, ad: MyAd | None, buy: Any,
+                    buyer: bool) -> list[str]:
+    """The checks of one answer's content (no limits, no send state): what Claude says, the price floor or the
+    purchase's maximum, stock, contact data, staying on topic. Shared with the chat simulator."""
+    why = []
+    if not d.auto_reason or not d.auto_reason.startswith("✓"):
+        why.append(t("Claude does not recommend an automatic answer"))
+    if d.intent == "scam_suspect":
+        why.append(t("Suspected scam"))
+    if any(not x.startswith("Hinweis:") for x in d.needs_info or []):
+        why.append(t("Claude needs info: {items}", items=", ".join(x for x in d.needs_info if not x.startswith("Hinweis:"))))
+    if "[" in d.text and "]" in d.text:
+        why.append(t("Answer contains placeholders"))
+    if not d.text.strip():
+        why.append(t("empty answer"))
+    if buyer:                             # purchase guards: maximum price, bank details, address, needs_user
+        if buy is not None:
+            why += purchase.blockers(buy, d, msgs)
+    else:                                 # price floor of the own ad, checked in code (app/services/min_price.py)
+        why += min_price.blockers(ad.min_price if ad else None, d.suggested_price, d.text,
+                                  asking=min_price.asking_value((conv.ad_context or {}).get("price") if conv else None),
+                                  intent=d.intent)
+        why += stock.blockers(ad, d.text)   # never more pieces than are left (app/services/stock.py)
+        if selling.contact_hits(d.text):
+            why.append(t("Answer contains an e-mail address or link – willhaben censors them"))
+        why += topic.blockers(d.text)     # staying on topic: no instruction words or AI talk, no essays
     return why
 
 
@@ -837,7 +878,9 @@ def _aware(dt):
 
 
 def _waiting_for_answer(conv_id: str) -> bool:
-    """Buyer's last message is recent and nobody (me or the app) has drafted or sent anything since."""
+    """Buyer's last message is recent and nobody (me or the app) has drafted or sent anything since. A draft the
+    owner discarded counts too: they decided not to answer that message, so no new answer is written and offered at
+    every sync (the next message from the buyer is answered again)."""
     msgs = messages_of(conv_id)
     last = next((m for m in reversed(msgs) if m.direction in ("in", "out")), None)
     if last is None or last.direction != "in" or last.created_at is None:
@@ -846,7 +889,8 @@ def _waiting_for_answer(conv_id: str) -> bool:
     if utcnow() - since > AUTO_MAX_AGE:
         return False
     with session() as db:
-        later = db.exec(select(Draft).where(Draft.conversation_id == conv_id, Draft.status != "discarded")).all()
+        later = db.exec(select(Draft).where(Draft.conversation_id == conv_id,
+                                            (Draft.status != "discarded") | (Draft.dismissed == True))).all()  # noqa: E712
     alive = conv_id in _humanized
     # "pending" = a human-like answer still "typing"; after a restart its task is gone and it must not block
     return not any(_aware(d.created_at) >= since for d in later if d.status != "pending" or alive)
@@ -1266,11 +1310,16 @@ def mark_sent(draft_id: int, text: str | None = None) -> Draft:
     return draft
 
 
-def discard_draft(draft_id: int) -> None:
+def discard_draft(draft_id: int, by_owner: bool = False) -> None:
+    """A draft goes. `by_owner`: the owner discarded it (chat page, push or Telegram button), so the buyer's message
+    counts as handled and no automatic answer is written for it again; the app's own discards (a new draft replaces
+    it, the buyer wrote again while "typing") leave the message waiting."""
     with session() as db:
         draft = db.get(Draft, draft_id)
         if draft:
             draft.status = "discarded"
+            if by_owner:
+                draft.dismissed = True
             db.add(draft)
             db.commit()
 

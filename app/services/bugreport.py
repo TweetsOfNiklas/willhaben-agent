@@ -629,7 +629,7 @@ def errors_section(anon: Anonymizer, include_info: bool = False, llm_limit: int 
 
 # Settings shown with their value; everything else only as <set> / <empty>.
 SAFE_SETTINGS = {
-    "agent_breaks", "agent_variance_pct", "auto_draft", "chat_sync_limit", "chat_sync_since", "expiry_warn_days", "myads_expired_days", "gcal_days", "gcal_duration", "gcal_in_auto",
+    "agent_breaks", "agent_variance_pct", "auto_draft", "chat_sync_limit", "chat_sync_days", "expiry_warn_days", "myads_expired_days", "gcal_days", "gcal_duration", "gcal_in_auto",
     "gcal_in_drafts", "gcal_window_end", "gcal_window_start", "geizhals_auto_specs", "health_disk_min_mb", "llm_model",
     "notify_messages", "push_channel", "quiet_enabled", "quiet_end", "quiet_interval_min", "quiet_mode", "quiet_start",
     "reply_delay_max_s", "reply_delay_min_s", "reply_fast_max_s", "reply_fast_min_s", "reply_humanize", "send_verified",

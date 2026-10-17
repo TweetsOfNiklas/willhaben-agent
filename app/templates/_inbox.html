@@ -1,7 +1,7 @@
 {# The inbox popover's content (base.html; alone from GET /inbox/items when new events come in).
    inbox_items = [{kind, title, text, time, link, unread}] (link = main.event_link), inbox_unread #}
 {% import "_ui.html" as ui %}
-{% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
+{% set kinds = {'hit': ('target', 'bg-brand-soft text-primary'), 'price_drop': ('target', 'bg-ok-soft text-success'), 'saved': ('star', 'bg-ok-soft text-success'), 'message': ('chat', 'bg-brand-soft text-primary'),
                 'auto_reply_pending': ('bot', 'bg-ok-soft text-success'), 'auto_reply': ('bot', 'bg-ok-soft text-success'), 'pay': ('cart', 'bg-warn-soft text-warning'),
                 'ad_expiring': ('tag', 'bg-warn-soft text-warning'), 'ad_expired': ('tag', 'bg-bad-soft text-error'), 'health': ('bell', 'bg-bad-soft text-error')} %}
 <div id="inbox-box" data-refresh="/inbox/items" class="flex min-h-0 flex-1 flex-col">
@@ -9,7 +9,7 @@
     <span class="font-semibold">{{ _("Inbox") }}</span>
     <small class="text-muted">{% if inbox_unread is defined and inbox_unread %}{{ _("{n} unread", n=inbox_unread) }}{% else %}{{ _("all read") }}{% endif %}</small>
     <span class="flex-1"></span>
-    {% if inbox_items is defined and inbox_items %}<form method="post" action="/inbox/read-all"><button class="btn btn-ghost btn-xs text-primary">{{ _("Mark all read") }}</button></form>{% endif %}
+    {% if inbox_items is defined and inbox_items %}<form method="post" action="/inbox/read-all"><button class="btn btn-ghost btn-xs text-primary">{{ _("Clear") }}</button></form>{% endif %}
     <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
   </div>
   <div class="overflow-auto">
@@ -20,7 +20,7 @@
       <span class="min-w-0"><span class="block {{ 'font-semibold' if n.unread else 'font-medium' }}">{{ n.title }}</span><span class="block text-[12.5px] text-muted">{{ n.text }}</span></span>
       <span class="flex flex-col items-end gap-1.5"><small class="whitespace-nowrap text-muted">{{ n.time }}</small>{% if n.unread %}<span class="size-2 rounded-full bg-primary"></span>{% endif %}</span>
     </a>
-    {% else %}<p class="px-3.5 py-4.5 text-center text-muted">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }} <a class="link link-primary no-underline" href="/#activity">{{ _("Activity") }}</a></p>{% endfor %}
+    {% else %}<p class="px-3.5 py-4.5 text-center text-muted">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }} <a class="link link-primary no-underline" href="/#activity">{{ _("Earlier ones: Activity") }}</a></p>{% endfor %}
   </div>
   <div class="border-t border-base-300 px-3.5 py-2 text-xs text-muted">{{ _("Pushes go to Home Assistant") }} · <a class="link link-primary no-underline" href="/settings/ha">{{ _("Notification settings") }}</a></div>
 </div>

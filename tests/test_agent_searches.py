@@ -385,3 +385,28 @@ def test_a_stale_or_made_up_term_key_is_ignored():
     assert parse_term_key(term_key(("Spüler", 100.0, None))) == ("Spüler", 100.0, None)
     for raw in ("", "x", "[1, 2]", '["", null, null]', '["a", "1", null]', '["a", true, null]', '{"a": 1}'):
         assert parse_term_key(raw) is None
+
+
+def test_several_agents_are_changed_at_once():
+    from fastapi.testclient import TestClient
+    from sqlmodel import select
+    from app.db import SearchAgent, session
+    from app.main import app
+
+    with session() as db:
+        for n, km in (("a", None), ("b", 50), ("c", None)):
+            db.add(SearchAgent(name=n, source_url="x", webapi_url="x", interval_s=3600, max_km=km, notify=True))
+        db.commit()
+        ids = {a.name: a.id for a in db.exec(select(SearchAgent))}
+    with TestClient(app) as c:
+        page = c.get("/agents").text
+        assert 'id="agents-bulk"' in page and f'form="agents-bulk" name="ids" value="{ids["a"]}"' in page
+        r = c.post("/agents/bulk", data={"ids": [ids["a"], ids["b"]], "enabled": "0", "km_mode": "set", "max_km": "25",
+                                         "interval_min": "20", "notify": ""}, follow_redirects=False)
+        assert "2+search+agents+changed" in r.headers["location"] or "2%20search%20agents%20changed" in r.headers["location"]
+        c.post("/agents/bulk", data={"ids": [ids["b"]], "km_mode": "off", "drops": "0"})
+    with session() as db:
+        rows = {a.name: a for a in db.exec(select(SearchAgent))}
+    assert (rows["a"].enabled, rows["a"].max_km, rows["a"].interval_s, rows["a"].notify) == (False, 25, 1200, True)
+    assert (rows["b"].enabled, rows["b"].max_km, rows["b"].notify_price_drops) == (False, None, False)
+    assert (rows["c"].enabled, rows["c"].max_km, rows["c"].interval_s) == (True, None, 3600)     # not ticked

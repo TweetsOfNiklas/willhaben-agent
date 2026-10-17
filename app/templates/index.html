@@ -76,7 +76,7 @@
         {% set meta = [h.location, (h.published_at|ago) if h.published_at else none]|select|list %}
         {% if meta %}<span class="block text-[12.5px] text-muted">{{ meta|join(' · ') }}</span>{% endif %}
       </span>
-      <span class="font-semibold whitespace-nowrap tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
+      <span class="font-semibold whitespace-nowrap tabular-nums">{{ h.price_display or (h.price|eur) }}</span>{{ ui.ship(h) }}
     </a>
     {% else %}<p class="px-4 py-3.5 text-muted">{{ _("No new hits.") }}</p>{% endfor %}
   </section>
@@ -84,7 +84,7 @@
   <div class="flex flex-col gap-5">
     <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="activity">
       <header class="border-b border-base-300 px-4 py-3 font-semibold"><h3>{{ _("Activity") }}</h3></header>
-      {% set kinds = {'hit': _('New hit'), 'price_drop': _('Price drop'), 'message': _('New message'), 'auto_reply': _('Answered automatically'),
+      {% set kinds = {'hit': _('New hit'), 'price_drop': _('Price drop'), 'saved': _('Saved ad'), 'message': _('New message'), 'auto_reply': _('Answered automatically'),
                       'auto_reply_pending': _('Reply waiting for you'), 'ad_expiring': _('Ad expiring soon'), 'ad_expired': _('Ad expired'), 'test': _('Test'), 'health': _('Connections')} %}
       {% for e in events %}
       <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-base-300 px-4 py-2" title="{{ kinds.get(e.kind, e.kind) }}">

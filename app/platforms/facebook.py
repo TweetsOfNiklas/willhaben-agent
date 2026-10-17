@@ -104,7 +104,15 @@ def parse_listing(li: dict[str, Any]) -> Listing | None:
                    location=one_line(geo.get("city")), postcode=None, state=geo.get("state"),
                    published_at=from_epoch(li.get("creation_time")), changed_at=None, end_date=None,
                    url=f"{WEB}/marketplace/item/{lid}/", image_url=photo, is_private=None, is_bumped=None,
-                   status="reserved" if li.get("is_pending") else "active", platform="facebook")
+                   status="reserved" if li.get("is_pending") else "active", platform="facebook",
+                   shipping=_delivery(li.get("delivery_types")))
+
+
+def _delivery(types: Any) -> str | None:
+    """Facebook's delivery types: only IN_PERSON is pickup only; any shipping type, shipping (no price in the list)."""
+    if not isinstance(types, list) or not types:
+        return None
+    return "ship" if any(x != "IN_PERSON" for x in types) else "pickup"
 
 
 def parse_search(html: str) -> SearchPage:

@@ -500,7 +500,8 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
     """Claude revises title and description of a live ad by one instruction (nothing is saved).
 
     Gets the current text from the edit form, the ad's photos (up to 4) and category from the public page.
-    Returns {heading, description, price_estimate, note} as a proposal for the form.
+    Returns {heading, description, price_estimate, note, questions} as a proposal for the form (questions: what
+    Claude could not tell, answered in the form and sent back as the next instruction).
     """
     import tempfile
     from pathlib import Path
@@ -531,9 +532,13 @@ async def ai_revise(ad_id: str, heading: str, description: str, price: float | N
                                   n_images=len(photos), current=current, specs=None, product_name=None,
                                   instruction=instruction, quantity=row.quantity if row else None)
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA, images=photos)
+    from app.services.ad_creator import clean_text, questions_of
+
     d = result.data
-    return {"heading": (d.get("title") or heading).strip()[:80], "description": (d.get("description") or description).strip(),
-            "price_estimate": d.get("price_estimate"), "note": (d.get("note") or "").strip()}
+    return {"heading": (d.get("title") or heading).strip()[:80],
+            "description": (clean_text(d.get("description")) or description).strip(),
+            "price_estimate": d.get("price_estimate"), "note": (d.get("note") or "").strip(),
+            "questions": questions_of(d) or []}
 
 
 async def edit(ad_id: str, heading: str, description: str, price: float | None) -> MyAd | None:
@@ -628,6 +633,19 @@ class AccountIds(set):
     complete = False
 
 
+# willhaben statuses that end an ad's time online (or take it offline by hand): anything else an active ad reports
+# for a moment is willhaben checking a change
+ENDED_STATUSES = ("expired", "passive", "deactivated", "sold", "given_away", "reserved", "deleted")
+_ENDED_WORDS = ("verkauft", "verschenkt", "reserviert", "deaktiviert", "passiv", "abgelaufen", "gelöscht", "sold",
+                "given away", "reserved", "deactivated", "expired", "deleted")
+
+
+def ended(ad: Any) -> bool:
+    """The status takes the ad offline for good or by hand (its id, or willhaben's word when the id is unknown)."""
+    label = (getattr(ad, "status_label", None) or "").lower()
+    return ad.status in ENDED_STATUSES or any(w in label for w in _ENDED_WORDS)
+
+
 async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
     """Add/update every ad of the logged-in account (`ads`: a list just loaded); returns their ids.
 
@@ -652,6 +670,13 @@ async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
                 row.status = "replaced"   # republished under a new id; the old copy stays "Passiv" on willhaben
             elif has_ended(ad):
                 row.status = "expired"    # ran out ("Passiv" on willhaben): auto-renew republishes it
+            elif previous == "active" and not ended(ad):
+                # willhaben checks a changed ad for a few seconds to minutes and reports another status meanwhile:
+                # it stays in Active (it did not vanish from the list for a moment), with willhaben's word for it
+                row.status = "active"
+                if ad.status != "active":
+                    row.last_action = t("willhaben is checking the change: {status}",
+                                        status=ad.status_label or ad.status)
             else:
                 row.status = ad.status if ad.status in ("active", "expired", "sold", "reserved", "deleted") \
                     else ad.status_label or ad.status

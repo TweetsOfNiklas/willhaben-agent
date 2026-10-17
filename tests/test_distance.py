@@ -6,6 +6,7 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import select
 
 from app import db as dbmod
 from app.db import get_setting, set_setting
@@ -137,3 +138,137 @@ def test_an_address_not_found_gets_its_own_hint(nominatim):
         frag = c.get(f"/deals/search/{sid}").text
     assert geo.home_cached() is None and "km away" not in frag and "Enter your address" not in frag
     assert 'disabled title="Your address under Settings → Shipping &amp; pickup could not be located (yet)' in frag
+
+
+def _home():
+    set_setting("ship_sender", json.dumps(HOME))
+    set_setting("ship_sender_geo", json.dumps({"addr": dropoff.address_line(HOME), "lat": 48.19, "lon": 16.33}))
+
+
+async def test_agent_distance_limit_holds_far_pickup_ads(nominatim):
+    from app.db import Hit, SearchAgent
+    from app.services import search_agents as sa
+
+    _home()
+    agent = SearchAgent(name="Rad", source_url="x", webapi_url="x", max_km=50)
+    near = Hit(agent_id=1, ad_id="1", heading="a", url="u", lat=48.2, lon=16.4, shipping="pickup")
+    far = Hit(agent_id=1, ad_id="2", heading="b", url="u", postcode="6971", location="6971 Hard", shipping="pickup")
+    far_ships = Hit(agent_id=1, ad_id="3", heading="c", url="u", lat=47.48, lon=9.73, shipping="ship")
+    nowhere = Hit(agent_id=1, ad_id="4", heading="d", url="u")
+    assert sa._holds(SearchAgent(name="x", source_url="x", webapi_url="x", max_km=10))
+    assert sa.distance_passes(agent, far)                      # its postcode not asked yet: unknown passes
+    assert await geo.locate_hits([near, far, far_ships, nowhere]) == [far]
+    assert (far.lat, far.lon) == (47.48, 9.73) and len(nominatim) == 1
+    assert sa.distance_passes(agent, near) and not sa.distance_passes(agent, far)
+    assert sa.distance_passes(agent, far_ships) and sa.distance_passes(agent, nowhere)
+    agent.max_km = None
+    assert sa.distance_passes(agent, far)
+
+
+def test_hit_cards_show_the_distance_and_sort_by_it():
+    from app.db import Hit, SearchAgent, session
+    from app.main import app
+
+    _home()
+    with session() as db:
+        a = SearchAgent(name="Rad", source_url="x", webapi_url="x", max_km=100)
+        db.add(a)
+        db.commit()
+        db.add(Hit(agent_id=a.id, ad_id="1", heading="Ad 1", url="u1", lat=47.48, lon=9.73, shipping="pickup"))
+        db.add(Hit(agent_id=a.id, ad_id="2", heading="Ad 2", url="u2", lat=48.2, lon=16.4))
+        db.add(Hit(agent_id=a.id, ad_id="3", heading="Ad 3", url="u3"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits?sort=distance").text
+        assert page.index(">Ad 2<") < page.index(">Ad 1<") < page.index(">Ad 3<")
+        assert "Nearest first" in page and 'class="text-warning">499 km' in page    # over the agent's 100
+
+
+def test_global_pickup_radius_hides_far_pickup_only_ads():
+    from app.db import Hit, SearchAgent, session
+    from app.main import app
+    from app.services import search_agents as sa
+
+    _home()
+    with TestClient(app) as c:
+        c.post("/settings/shipping", data={**HOME, "pickup_max_km": "100"})
+        assert geo.pickup_radius() == 100 and 'name="pickup_max_km" type="number" min="1" max="2000" step="1" value="100"' \
+            in c.get("/settings/shipping").text
+        with session() as db:
+            a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
+            db.add(a)
+            db.commit()
+            for ad_id, lat, lon, ship in (("1", 47.48, 9.73, None), ("2", 47.48, 9.73, "ship"), ("3", 48.2, 16.4, None),
+                                          ("4", None, None, None)):
+                db.add(Hit(agent_id=a.id, ad_id=ad_id, heading=f"Ad {ad_id}", url=f"u{ad_id}", lat=lat, lon=lon,
+                           shipping=ship))
+            db.commit()
+            far = db.exec(select(Hit).where(Hit.ad_id == "1")).one()
+            agent = db.get(SearchAgent, a.id)
+        assert sa.pickup_limit(agent) == 100 and sa._holds(agent) and not sa.distance_passes(agent, far)
+        agent.max_km = 600                                             # the agent's own limit comes first
+        assert sa.distance_passes(agent, far)
+        page = c.get("/hits").text
+        assert ">Ad 1<" not in page and all(f">Ad {n}<" in page for n in "234")   # ships, near, place unknown
+        assert ">Ad 1<" in c.get("/hits?state=all").text                         # "All" keeps it
+        c.post("/settings/shipping", data={**HOME, "pickup_max_km": ""})
+        assert geo.pickup_radius() is None and ">Ad 1<" in c.get("/hits").text
+    cards = [{"lat": 47.48, "lon": 9.73, "shipping": None}, {"postcode": "1150", "shipping": "pickup"},
+             {"lat": 47.48, "lon": 9.73, "shipping_price": 4.9}]
+    assert [geo.too_far(x, 100, (48.19, 16.33)) for x in cards] == [True, False, False]   # 1150: not located yet
+
+
+def test_a_far_hit_that_ships_comes_back_and_reasons_are_shown():
+    from app.db import Hit, SearchAgent, session
+    from app.main import app
+    from app.services import search_agents as sa
+
+    _home()
+    with session() as db:
+        a = SearchAgent(name="Switch", source_url="x", webapi_url="x", max_km=30)
+        db.add(a)
+        db.commit()
+        db.add(Hit(agent_id=a.id, platform="kleinanzeigen", ad_id="9", heading="Switch Pro", url="u", lat=47.48,
+                   lon=9.73, state="filtered"))
+        db.commit()
+        agent = db.get(SearchAgent, a.id)
+        h = db.exec(select(Hit)).one()
+    assert sa.held_back_reasons(agent, h) == ["pickup only, farther than 30 km"]
+    with TestClient(app) as c:
+        assert "Held back: pickup only, farther than 30 km" in c.get("/hits?state=filtered").text
+    page = type("D", (), {"shipping": "ship", "shipping_price": None})()
+    sa.record_status("kleinanzeigen", "9", "active", page)                 # the ad page: shipping possible
+    with session() as db:
+        assert db.exec(select(Hit)).one().state == "new"
+
+
+
+async def test_an_agent_checks_the_ad_page_before_holding_a_far_hit_back(nominatim):
+    """A Kleinanzeigen list says nothing about shipping: before the distance holds a far hit back, its ad page is
+    asked; one that ships passes."""
+    from app import platforms
+    from app.db import Hit, SearchAgent, session
+    from app.services.search_agents import create_agent, run_agent
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    _home()
+    far_ships, far_pickup = listing("1", "Switch", 500.0, lat=47.48, lon=9.73), listing("2", "Switch", 400.0, lat=47.48, lon=9.73)
+    d1, d2 = detail_of(far_ships), detail_of(far_pickup)
+    d1.shipping, d2.shipping = "ship", "pickup"
+    fake = FakePlatform(pages=[[]], details={"1": d1, "2": d2})
+    platforms.set_platform("fake", fake)
+    try:
+        a = create_agent("https://fake.example/s/switch")
+        await run_agent(a.id)                                          # baseline
+        with session() as db:
+            row = db.get(SearchAgent, a.id)
+            row.max_km = 30
+            db.add(row)
+            db.commit()
+        fake.pages = [[far_ships, far_pickup]]
+        await run_agent(a.id)
+    finally:
+        platforms.reset()
+    with session() as db:
+        states = {h.ad_id: h.state for h in db.exec(select(Hit))}
+    assert states == {"1": "new", "2": "filtered"} and set(fake.detail_calls) == {"1", "2"}

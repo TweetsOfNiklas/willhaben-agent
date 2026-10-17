@@ -1,0 +1,15 @@
+{# a hit card's status line: what the site said when the ad was last loaded (sync button, ad viewer) and how old the
+   local data is (last listed by a search, status checked). The sync button swaps the line it sits in (POST
+   /hits/{id}/sync): the card's and the ad viewer's (over the hits page, both are on the page) stay apart. #}
+{% import "_ui.html" as ui %}
+{% set st = h.site_status %}
+<div data-hit-status="{{ h.id }}" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
+  {%- if st and st != 'active' %}{{ ui.pill({'sold': _('sold'), 'reserved': _('reserved'), 'expired': _('expired'), 'gone': _('no longer online')}.get(st, st), 'warn' if st == 'reserved' else 'bad', true) }}
+  {%- elif st == 'active' %}{{ ui.pill(_('still online'), 'ok', true) }}{% endif %}
+  <span>{{ _("listed {ago}", ago=h.last_seen_at|ago) }}</span>
+  {%- if h.status_checked_at %}<span>· {{ _("checked {ago}", ago=h.status_checked_at|ago) }}</span>{% endif %}
+  {%- if sync_error %}<span class="text-error">· {{ sync_error }}</span>{% endif %}
+  {%- if can_sync %}
+  <button type="button" class="btn btn-ghost btn-xs ml-auto h-6 min-h-6 gap-1 px-1.5 font-medium busy:opacity-60" hx-post="/hits/{{ h.id }}/sync" hx-target="closest [data-hit-status]" hx-swap="outerHTML" hx-disabled-elt="this" title="{{ _('Load the ad from its site now: still online, reserved or sold?') }}">{{ ui.icon('refresh', 13, 2, 'busy:animate-spin') }}<span>{{ _("Sync") }}</span></button>
+  {%- endif %}
+</div>

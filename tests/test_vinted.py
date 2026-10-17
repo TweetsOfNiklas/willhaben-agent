@@ -58,6 +58,23 @@ def test_item_page_becomes_detail():
     assert d.published_at == NOW - timedelta(minutes=6) and d.seller_name == "seller123" and d.is_private is True
     assert len(d.images) == 6 and d.url == f"https://www.vinted.at/items/{ITEM}" and d.ref == f"vinted:{ITEM}"
     assert vi.parse_item("nothing here", ITEM) is None
+    assert d.shipping_price is None and d.shipping is None          # the fixture has no pricing block
+
+
+def _priced(services: str) -> str:
+    return (FIXTURES / "vinted_item.rsc").read_text(encoding="utf-8") + '\n2c:["$","$Ld3",null,{"pricingServices":' \
+        '{"services":' + services + '}}]\n'
+
+
+@pytest.mark.parametrize("services,price,kind", [
+    ('{"isPickUpOnly":false,"shipping":{"type":"shipping","originalPrice":{"amount":"6.5","currencyCode":"EUR"},'
+     '"finalPrice":{"amount":"4.95","currencyCode":"EUR"},"isFree":false}}', 4.95, "ship"),
+    ('{"isPickUpOnly":false,"shipping":{"finalPrice":{"amount":"0","currencyCode":"EUR"},"isFree":true}}', 0.0, "ship"),
+    ('{"isPickUpOnly":true,"shipping":null}', None, "pickup"),
+])
+def test_item_page_shipping(services, price, kind):
+    d = vi.parse_item(_priced(services), ITEM, now=NOW)
+    assert (d.shipping_price, d.shipping) == (price, kind)
 
 
 @pytest.mark.parametrize("text,age", [("6 Min.", timedelta(minutes=6)), ("2 Std.", timedelta(hours=2)),

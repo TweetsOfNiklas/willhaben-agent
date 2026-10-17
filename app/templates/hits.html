@@ -1,32 +1,53 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block content %}
+{% macro view_fields(skip=()) %}{% for k, v in view.params().items() if k not in skip %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endmacro %}
 <div class="mb-4 flex items-start justify-between gap-3 sm:mb-5 sm:gap-6">
   <div class="min-w-0">
     <h1>{{ _("Hits") }}{% if agent_id and agents.get(agent_id) %} <span class="text-base font-normal text-muted">· {{ agents[agent_id].name }}</span>{% endif %}</h1>
     {% if state == 'pending' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("New hits the Geizhals rule and Claude's screening are still checking. Those that pass move to New with a push, the others to Filtered out.") }}</p>
-    {% elif state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening or the agent's Geizhals rule held back: no push, kept here in case you want a look.") }}</p>
+    {% elif state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening, the agent's Geizhals rule or its distance limit held back: no push, kept here in case you want a look.") }}</p>
     {% else %}<p class="mt-1 max-w-[640px] text-muted max-sm:hidden">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.") }}</p>{% endif %}
   </div>
-  {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" onsubmit="return confirm({{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?'))|tojson|forceescape }})"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
-  {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" class="m-0 shrink-0"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Mark all as seen') }}" aria-label="{{ _('Mark all as seen') }}">{{ ui.icon('check', 15, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Mark all as seen") }}</span></button></form>{% endif %}
+  {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" onsubmit="return confirm({{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?'))|tojson|forceescape }})">{{ view_fields() }}<button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
+  {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" class="m-0 shrink-0">{{ view_fields() }}<button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Mark all as seen') }}" aria-label="{{ _('Mark all as seen') }}">{{ ui.icon('check', 15, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Mark all as seen") }}</span></button></form>{% endif %}
 </div>
 <form method="get" action="/hits" class="mb-3.5 flex flex-wrap items-center gap-2.5">
   {% set seg_items = [] %}
   {% set tabs = [('new', _('New'))] + ([('pending', _('Being checked'))] if state == 'pending' or state_counts.get('pending') else []) + [('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
   {% for s, label in tabs %}
-    {% set added = seg_items.append(('/hits?state=' ~ s ~ ('&agent_id=' ~ agent_id if agent_id else ''), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
+    {% set added = seg_items.append((view.url(state=s), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
   {% endfor %}
   {{ ui.seg(seg_items, 'max-sm:w-full') }}
-  <input type="hidden" name="state" value="{{ state }}">
+  {{ view_fields(('agent_id', 'platform', 'sort', 'ship', 'level')) }}
   <select name="agent_id" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full">
     <option value="">{{ _("All search agents") }}</option>
     {% for a in agents.values() %}<option value="{{ a.id }}" {% if a.id == agent_id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
   </select>
+  {% if filter_platform_ids %}<select name="platform" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Platform') }}">
+    <option value="">{{ _("All platforms") }}</option>
+    {% for pid in filter_platform_ids %}<option value="{{ pid }}" {% if pid == platform %}selected{% endif %}>{{ platform_name(pid) }}</option>{% endfor %}
+  </select>{% endif %}
+  <select name="sort" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Sort') }}">
+    {% for v, label in [('newest', _('Newest first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home_point() else []) %}<option value="{{ v }}" {% if v == view.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="ship" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Shipping') }}">
+    {% for v, label in [('', _('Shipping or pickup')), ('ship', _('Shipping possible')), ('pickup', _('Pickup only'))] %}<option value="{{ v }}" {% if v == view.ship %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="level" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Price label') }}">
+    {% for v, label in [('', _('Any price')), ('bargain', _('Bargains only')), ('cheap', _('Cheap or better')), ('fair', _('Fair or better'))] %}<option value="{{ v }}" {% if v == view.level %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
 </form>
+{% if state == 'saved' %}
+<form method="post" action="/hits/watch-saved" class="-mt-1.5 mb-2 flex flex-wrap items-center gap-2 text-[13px] text-muted">
+  {{ view_fields() }}
+  <label class="flex cursor-pointer items-center gap-2"><input type="checkbox" name="on" value="1" data-autosubmit class="toggle toggle-xs toggle-primary" {% if watch_saved %}checked{% endif %}>{{ _("Check saved ads once a day and notify on a price drop or when one is sold, reserved or gone") }}</label>
+  <noscript><button class="btn btn-xs">{{ _("Save") }}</button></noscript>
+</form>
+{% endif %}
 {# the retention: cleared hits are shown nowhere, their ads never come back as new; saved ones are kept #}
 <form method="post" action="/hits/keep-days" class="-mt-1.5 mb-3.5 flex flex-wrap items-center gap-2 text-[13px] text-muted">
-  <input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="state" value="{{ state }}">
+  {{ view_fields() }}
   <label class="flex items-center gap-2">{{ _("Clear hits automatically") }}
     <select name="days" data-autosubmit class="select select-xs w-auto bg-base-100">
       {% for d in ([7, 14, 30, 90] + ([keep_days] if keep_days not in (0, 7, 14, 30, 90) else []))|sort %}<option value="{{ d }}" {% if d == keep_days %}selected{% endif %}>{{ _("after {n} days", n=d) }}</option>{% endfor %}
@@ -37,21 +58,32 @@
 </form>
 
 {% if hits %}
+{# bulk actions: the cards' checkboxes belong to this form (form="hits-bulk"), the bar appears once one is ticked #}
+<div x-data="{ n: 0, count() { this.n = document.querySelectorAll('input[form=hits-bulk][name=ids]:checked').length }, all(on) { document.querySelectorAll('input[form=hits-bulk][name=ids]').forEach(c => c.checked = on); this.count() } }" @change="count()">
+<form id="hits-bulk" method="post" action="/hits/bulk" x-show="n" x-cloak class="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-box border border-primary bg-base-100 px-3 py-2 shadow-lg" data-bulk-bar>
+  {{ view_fields() }}
+  <span class="mr-1 text-[13px] font-semibold" x-text="{{ _('{n} selected')|tojson|forceescape }}.replace('{n}', n)"></span>
+  {% for v, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}<button name="action" value="{{ v }}" class="btn btn-sm">{{ label }}</button>{% endfor %}
+  <button name="action" value="clear" class="btn btn-sm btn-ghost text-error" onclick="return confirm({{ _('Clear the selected hits? Saved ones are kept.')|tojson|forceescape }})">{{ _("Clear") }}</button>
+  <span class="ml-auto flex gap-1.5"><button type="button" class="btn btn-sm btn-ghost" @click="all(true)">{{ _("Select all") }}</button><button type="button" class="btn btn-sm btn-ghost" @click="all(false)">{{ _("Cancel") }}</button></span>
+</form>
 <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
+{% set home = home_point() %}{# distance from home on each card (geo.hit_km: no request) #}
 {% set pz = price_zone_config() %}{# the zone label of a hit with a Geizhals new price (deals.hit_level), read once #}
 {% set screen_levels = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'} %}{# Claude's verdict in the zones' colours #}
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
-  <article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') else '' }}" id="hit-{{ h.id }}">
+  <article class="relative flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') else '' }}" id="hit-{{ h.id }}">
+    <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="hits-bulk" name="ids" value="{{ h.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}"></label>
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block">
       {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
-      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-2 block max-w-[calc(100%-16px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
+      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-10 block max-w-[calc(100%-48px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
       {% if platform_ids %}<span class="badge badge-sm absolute max-sm:hidden top-2 right-2 block max-w-[38%] truncate border-0 bg-black/55 font-medium leading-5 text-white">{{ platform_name(h.platform) }}</span>{% endif %}
     </a>
     <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-2.5">
       <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
-      <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
+      <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>{{ ui.ship(h) }}
         {% if h.old_price and h.price and h.old_price > h.price %}<span class="text-[13px] text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}{{ ui.condition_pill(h.item_condition, h.item_condition_label, h.platform, 'self-center') }}</div>
       {# the price ratings, each named by its source in the same colours: the user's zones of the Geizhals new price
          (with the share it comes from: a floored "20 % less" beside it reads as 80 % or 81 %; without a zone, e.g.
@@ -77,9 +109,11 @@
       </dl>
       {% if h.screen_reason %}<p class="m-0 line-clamp-3 text-[12.5px] leading-snug text-muted max-sm:line-clamp-2" title="{{ h.screen_reason }}">{{ h.screen_reason }}</p>{% endif %}
       {% endif %}
+      {% if h.state == 'filtered' %}{% set why = held_back_reasons(agents.get(h.agent_id), h) %}{% if why %}<p class="m-0 text-[12.5px] text-warning" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</p>{% endif %}{% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
-      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
+      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}{% set km = hit_km(h, home) %}{% if km is not none %} · <span data-km class="{{ 'text-warning' if agents.get(h.agent_id) and agents[h.agent_id].max_km and km > agents[h.agent_id].max_km and h.shipping != 'ship' and h.shipping_price is none else '' }}">{{ _("{n} km", n=km|round|int) }}</span>{% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
+      {% with sync_error=none, can_sync=hit_can_sync(h) %}{% include "_hit_status.html" %}{% endwith %}
     </div>
     {# three equal columns, one line each (icon and label): a card is one row shorter than with stacked buttons #}
     <div class="grid grid-cols-3 gap-1.5 border-t border-base-300 p-2 max-sm:col-span-2 max-sm:mt-2.5 max-sm:border-t-0 max-sm:p-0">
@@ -90,9 +124,10 @@
   </article>
 {% endfor %}
 </div>
+</div>
 {% else %}
 {% call ui.empty(_("No hits in this view."), _("New ads appear here within minutes of being published; you get a push if the agent has it switched on.")) %}
-  <div class="mt-1.5 flex flex-wrap justify-center gap-2"><a class="btn" href="/agents">{{ _("Search agents") }}</a>{% if state != 'all' %}<a class="btn btn-ghost" href="/hits?state=all{% if agent_id %}&agent_id={{ agent_id }}{% endif %}">{{ _("Show all hits") }}</a>{% endif %}</div>
+  <div class="mt-1.5 flex flex-wrap justify-center gap-2"><a class="btn" href="/agents">{{ _("Search agents") }}</a>{% if state != 'all' %}<a class="btn btn-ghost" href="{{ view.url(state='all') }}">{{ _("Show all hits") }}</a>{% endif %}</div>
 {% endcall %}
 {% endif %}
 {% endblock %}

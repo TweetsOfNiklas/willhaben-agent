@@ -345,6 +345,7 @@
 {{ _("Product search") }}||/deals
 {{ _("Purchases") }}||/purchases
 {{ _("Chats") }}||/chats
+{{ _("Chat simulator") }}|{{ _("Test the automatic answers") }}|/simulator
 {{ _("My ads") }}||/myads
 {{ _("New ad") }}|{{ _("action") }}|/new-ad
 {{ _("Browser window") }}|{{ _("action") }}|/session
@@ -468,6 +469,32 @@
 {% endif %}
 <script type="application/json" id="bg-jobs-data">{{ dict(bg_jobs(), last_event=live_cursor())|tojson }}</script>
 <script>
+// Browser notifications (Settings → Browser): new hits and price drops as the system's notifications while a tab of
+// the app is open, also in the background (the jobs poll goes on every minute). Nothing but this page: no push
+// service, no server of anyone else; per browser (localStorage), and only with the browser's permission.
+const browserNotify = {
+  KEY: 'wh-browser-notify',
+  supported() { return 'Notification' in window; },
+  on() {
+    try { return this.supported() && Notification.permission === 'granted' && localStorage.getItem(this.KEY) === '1'; }
+    catch (e) { return false; }
+  },
+  async enable() {
+    if (!this.supported()) return 'unsupported';
+    const p = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+    try { localStorage.setItem(this.KEY, p === 'granted' ? '1' : '0'); } catch (e) {}
+    return p;
+  },
+  disable() { try { localStorage.setItem(this.KEY, '0'); } catch (e) {} },
+  show(e) {
+    if (!this.on()) return;
+    const l = e.link || {};
+    try {
+      const n = new Notification(e.title, {body: e.text, tag: 'wh-e' + e.id, icon: '/static/icons/icon-192.png'});
+      n.onclick = () => { window.focus(); if (l.href) { if (l.external) window.open(l.href, '_blank', 'noopener'); else location.href = l.href; } n.close(); };
+    } catch (err) {}      // a browser that allows notifications only through a service worker (Android Chrome)
+  },
+};
 document.addEventListener('alpine:init', () => {
   // Background jobs (GET /jobs): every 3 s while something runs or the page shows elements waiting for a job, else
   // every 20 s while the tab is visible (not in the remote-view frame). Each answer also brings the sidebar badges and
@@ -479,7 +506,7 @@ document.addEventListener('alpine:init', () => {
   // in the background; gone from the fresh copy = removed (a deleted ad). data-refresh-on-lane="ads": refreshed
   // whenever a job of that lane finished. data-refresh-also="id …": more elements taken along.
   Alpine.store('jobs', {
-    active: [], recent: [], seen: null, timer: null, cursor: null, notices: [], IDLE: 20000,
+    active: [], recent: [], seen: null, timer: null, cursor: null, notices: [], IDLE: 20000, HIDDEN: 60000,
     live: !document.body.hasAttribute('data-embed'),
     T: {running: {{ _("{n} running")|tojson }}, queued: {{ _("{n} queued")|tojson }}, idle: {{ _("Background")|tojson }},
         waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }}},
@@ -506,12 +533,13 @@ document.addEventListener('alpine:init', () => {
     },
     poll() {
       clearTimeout(this.timer);
-      if (document.hidden && !document.querySelector('[data-pending-key]')) return;   // goes on when shown again
+      // hidden: goes on when shown again, unless browser notifications are on here (Settings → Browser)
+      if (document.hidden && !document.querySelector('[data-pending-key]') && !browserNotify.on()) return;   // else: keep asking
       const url = '/jobs' + (this.live && this.cursor !== null ? '?since=' + this.cursor : '');
       fetch(url, {headers: {accept: 'application/json'}}).then(r => r.ok ? r.json() : null)
         .then(d => d ? this.apply(d) : this.later(this.IDLE)).catch(() => this.later(10000));
     },
-    later(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.poll(), ms); },
+    later(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.poll(), document.hidden ? Math.max(ms, this.HIDDEN) : ms); },
     notice(n) {
       if (this.notices.some(x => x.key === n.key)) return;
       this.notices = [n, ...this.notices].slice(0, 4);
@@ -539,7 +567,9 @@ document.addEventListener('alpine:init', () => {
       if (this.live && data.counts) this.badges(data.counts);
       if (this.live && data.events && data.events.length) {
         data.events.forEach(e => { const l = e.link || {};
-          this.notice({key: 'e' + e.id, title: e.title, text: e.text, href: l.href, ad: l.ad, external: l.external}); });
+          this.notice({key: 'e' + e.id, title: e.title, text: e.text, href: l.href, ad: l.ad, external: l.external});
+          // hidden tab or another window in front: an app window left open somewhere counts as visible
+          if ((document.hidden || !document.hasFocus()) && ['hit', 'price_drop', 'saved'].includes(e.kind)) browserNotify.show(e); });
         const box = document.getElementById('inbox-box');
         if (box) refreshInPlace([box]);
       }

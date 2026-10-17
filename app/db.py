@@ -51,6 +51,7 @@ class SearchAgent(SQLModel, table=True):
     queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     plan: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {max_price, must_have, nice_to_have, exclude, summary}
     search_id: int | None = None        # origin ProductSearch
+    max_km: int | None = None           # pickup-only hits farther from home than this are held back; None = any
 
 
 class Hit(SQLModel, table=True):
@@ -87,6 +88,16 @@ class Hit(SQLModel, table=True):
     # the condition the site states (app/platforms/condition.py): from the list, or from the ad page once opened (Shpock)
     item_condition: str | None = None
     item_condition_label: str | None = None
+    # what the site said when the ad itself was last loaded (sync button, ad viewer): active | sold | reserved |
+    # expired | gone (no longer online) | the site's own word; None = never loaded
+    site_status: str | None = None
+    status_checked_at: datetime | None = None
+    # shipping to the owner (app/platforms/shipping_info.py): price (0 = free) and "ship" | "pickup"; None = not known
+    shipping_price: float | None = None
+    shipping: str | None = None
+    # the ad's place: the site's coordinates (willhaben, Kleinanzeigen) or its postcode's centre (app/services/geo.py)
+    lat: float | None = None
+    lon: float | None = None
 
 
 class Conversation(SQLModel, table=True):
@@ -139,6 +150,7 @@ class Draft(SQLModel, table=True):
     model: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     status: str = "draft"  # draft | pending (auto reply "typing") | sending (queued send job) | sent | discarded
+    dismissed: bool | None = None     # discarded by the owner (not by the app): the buyer's message counts as handled
     sent_at: datetime | None = None
     error: str | None = None
     auto: bool | None = None          # created by the auto-reply job
@@ -250,6 +262,9 @@ class AdDraft(SQLModel, table=True):
     parcel: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # Claude's packed-size estimate, shipping.clean_parcel shape
     publishing: bool | None = None     # queued/running as a background publish job
     refining: bool | None = None       # Claude revises it as a background job (ad_creator.enqueue_refine)
+    # what Claude could not tell from notes and photos: [{id, text, options}], answered on the draft page (never a
+    # "(bitte prüfen)" in the text); None = nothing open
+    questions: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -339,6 +354,43 @@ class Purchase(SQLModel, table=True):
     query: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SimChat(SQLModel, table=True):
+    """A test chat of the chat simulator (app/services/chat_sim.py): never sent, never pushed, no limits counted."""
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = ""
+    role: str = "seller"                   # seller: my ad, the partner buys | buyer: my purchase, the partner sells
+    platform: str = "willhaben"            # willhaben | kleinanzeigen | vinted
+    ad_id: str | None = None               # seller: the own ad (min. price, instructions, stock read live from it)
+    purchase_id: int | None = None         # buyer: the purchase it was copied from
+    setup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the ad / purchase as simulated
+    persona: str | None = None             # chat_sim.PERSONAS key, "custom" (persona_text) or None
+    persona_text: str | None = None
+    model: str | None = None               # Claude model for my answers (None: Settings → Claude)
+    partner_model: str | None = None       # … and for the other side Claude plays
+    turns: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # see chat_sim
+    scenario: bool = False                 # kept as a repeatable test with expectations
+    expectations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # [{kind, value}]
+    last_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {at, passed, results, turns, variant}
+    proposal_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the same with the open proposal
+    busy: str | None = None                # what runs in the background right now (pending marker "sim:<id>")
+    error: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SimProposal(SQLModel, table=True):
+    """A rule change Claude proposes from the simulator's ratings and failed scenarios, applied only on request."""
+    id: int | None = Field(default=None, primary_key=True)
+    role: str = "seller"
+    target: str = "auto_reply_rules"       # auto_reply_rules | ad_instructions | purchase_rules
+    ad_id: str | None = None               # ad_instructions: the ad
+    old_text: str = ""
+    new_text: str = ""
+    summary: str = ""
+    status: str = "open"                   # open | applied | discarded
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class TelegramAction(SQLModel, table=True):
@@ -593,7 +645,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "auto_draft": "0",
     "notify_messages": "1",
     "chat_sync_limit": "10",    # sync only the N latest conversations
-    "chat_sync_since": "",      # YYYY-MM-DD: skip conversations whose last message is older; empty = no cutoff
+    "chat_sync_days": "",       # whole days: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",
     "myads_expired_days": "30",
     "claude_token_limit_m": "10",   # Settings → Claude: monthly token limit in millions (sidebar meter); empty/0 = none
@@ -627,6 +679,11 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "quiet_end": "07:00",
     "quiet_mode": "slow",
     "quiet_interval_min": "60",
+    # adaptive polling: fewer checks in the hours that rarely bring new ads (app/services/adaptive_pace.py)
+    "adaptive_enabled": "1",
+    "watch_saved": "1",
+    "pickup_max_km": "",        # pickup-only ads farther from home are not shown anywhere ("" = no limit; geo.py)         # saved hits: their ad pages about once a day (search_agents.watch_saved_job)
+    "adaptive_max_factor": "4",
     # timeline (/timeline) and willhaben request recording: both opt-in (Settings → Timeline); entries are kept
     # forever unless pruning is switched on there
     "timeline_enabled": "0",

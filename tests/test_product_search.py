@@ -336,7 +336,7 @@ async def test_background_search_is_stored_and_refuses_a_second(wh, claude):
     row = ps.get(sid)
     assert row.status == "done" and row.requests == 3 and row.finished_at and row.started_at
     assert row.settings == {"depth": "normal", "unusual": True, "categories": False, "sort": "relevance",
-                            "photos": False, "ask": True, "platforms": ["willhaben"]}
+                            "photos": False, "ask": True, "platforms": ["willhaben"], "condition": "any"}
     assert row.plan["summary"].startswith("Leiser") and len(row.queries) == 3
     assert [r["fit"] for r in row.results] == [92, 70] and row.note == "Gute Auswahl unter 300 €."
     assert row.progress == {"done": 3, "total": 3} and row.candidates >= 5
@@ -1035,14 +1035,16 @@ async def test_load_more_ranks_the_next_offers(wh, claude, monkeypatch):
 
 
 async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch):
-    """An offer Claude ranked never goes back into the pool, also when it was passed over: "load more" runs out."""
+    """An offer Claude ranked never goes back into the pool, also when it was passed over: "load more" offers only
+    those it has not seen and runs out."""
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
     await _finish()
     row = ps.get(sid)
     first, pool = list(row.results), list(row.pool)
-    passed_over = pool[-1]                                                     # ranked once, not picked
-    assert len(pool) > 4 and passed_over["title"] in claude.calls[-1]["prompt"]
+    seen_titles = claude.calls[-1]["prompt"]
+    assert len(pool) > 4 and not any(f'] {c["title"]} ·' in seen_titles for c in pool)  # passed over: not again
+    assert f'] {first[0]["title"]} ·' in seen_titles                         # (the prompt names its offers so)
     claude.rank = {"results": []}                                              # nothing fits any more
     loads = 0
     while ps.load_more(sid):
@@ -1052,7 +1054,6 @@ async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch
         row = ps.get(sid)
         assert len(row.pool or []) == max(0, len(pool) - 4 * loads)            # the whole batch leaves the pool
     assert loads == -(-len(pool) // 4) and row.results == first and not row.pool
-    assert passed_over["title"] in claude.calls[-1]["prompt"]                  # its one more look, at the end
     assert row.candidates == 4 + len(pool) and row.progress["more"] == loads
 
 
@@ -1127,8 +1128,44 @@ def test_load_more_on_the_page(app_client, monkeypatch):
     ps._active.add(row.id)                                                     # the task that loads them runs
     frag = app_client.get(f"/deals/search/{row.id}").text
     ps._active.discard(row.id)
-    assert "Claude is ranking 2 more offers" in frag and "Spüler 0" in frag and 'hx-trigger="every 2s"' in frag
+    assert "ranks 2 offers" in frag and "Loading ads" in frag and "Spüler 0" in frag and 'hx-trigger="every 2s"' in frag
     assert 'name="interval_min"' not in frag                                   # no form in a box that refreshes itself
     assert "Loading more offers failed" not in frag and "Search warning." in frag
     ps._update(row.id, status="done", pool=None)
     assert "No more offers in this search." in app_client.get(f"/deals/search/{row.id}").text
+
+
+def test_new_or_used_from_the_form():
+    from app.platforms import Listing
+
+    assert ps.condition_wanted(True, False) == "new" and ps.condition_wanted(False, True) == "used"
+    assert ps.condition_wanted(True, True) == ps.condition_wanted(False, False) == "any"
+    used = ps.make_settings(condition="used")
+    assert used["condition"] == "used" and ps.make_settings(condition="junk")["condition"] == "any"
+    assert ps.condition_note(used) == ("Neu oder gebraucht?", "nur gebraucht") and ps.condition_note({}) is None
+    assert ps.answer_pairs({}, {}, used) == [("Neu oder gebraucht?", "nur gebraucht")]
+
+    def ad(cond):
+        return Listing(ad_id="1", heading="x", body=None, price=1.0, price_display=None, old_price=None, location=None,
+                       postcode=None, state=None, published_at=None, changed_at=None, end_date=None, url="u",
+                       image_url=None, is_private=None, is_bumped=None, status=None, item_condition=cond)
+    assert [ps.condition_fits(ad(c), used) for c in ("new", "like_new", "used", None)] == [False, True, True, True]
+    assert ps.condition_fits(ad("used"), ps.make_settings(condition="new")) is False
+    from app.llm.prompts import search_plan_prompt
+    p = search_plan_prompt(description="x", max_queries=3, unusual_names=False, other_categories=False,
+                           condition="nur gebraucht")
+    assert "Zustand laut Formular: nur gebraucht. Frag nicht" in p
+
+
+def test_the_form_sends_the_condition(wh, claude, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    started = []
+    monkeypatch.setattr(ps, "start", lambda d, s: started.append(s) or 1)
+    with TestClient(app) as c:
+        page = c.get("/deals").text
+        assert 'name="cond_new" value="1" checked' in page and 'name="cond_used" value="1" checked' in page
+        c.post("/deals/search", data={"description": "Rad", "cond_shown": "1", "cond_used": "1"})
+        c.post("/deals/search", data={"description": "Rad"})                 # an older form: either
+    assert [s["condition"] for s in started] == ["used", "any"]

@@ -74,7 +74,10 @@ def parse_listing(th: dict[str, Any]) -> Listing:
     before = to_float(th.get("nextBestPrice"))
     pct = to_float(th.get("percentage"))
     merchant = (th.get("merchant") or {}).get("merchantName") or th.get("linkHost")
-    shipping = to_float((th.get("shipping") or {}).get("price"))
+    ship = th.get("shipping") or {}
+    shipping = to_float(ship.get("price"))
+    if ship.get("isFree"):
+        shipping = 0.0
     temp = to_float(th.get("temperature"))
     facts = [f"{temp:.0f}°" if temp is not None else None,
              t("Voucher code {code}", code=th["voucherCode"]) if th.get("voucherCode") else None,
@@ -90,7 +93,8 @@ def parse_listing(th: dict[str, Any]) -> Listing:
                    changed_at=None, end_date=from_epoch((th.get("endDate") or {}).get("timestamp")),
                    url=f"{WEB}/deals/{slug}-{tid}" if slug else f"{WEB}/share-deal/{tid}",
                    image_url=image_url(th.get("mainImage")), is_private=None, is_bumped=None, status="active",
-                   platform="preisjaeger", item_condition=condition.preisjaeger(th.get("title"))[0])   # inferred: no label
+                   platform="preisjaeger", item_condition=condition.preisjaeger(th.get("title"))[0],   # inferred: no label
+                   shipping_price=shipping, shipping="ship" if shipping is not None else None)
 
 
 def parse_search(page: str, price_from: float | None = None, price_to: float | None = None) -> SearchPage:

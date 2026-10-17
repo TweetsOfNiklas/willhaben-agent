@@ -41,6 +41,17 @@
     </div>
     <small class="text-xs text-muted">{{ _("Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.") }}</small>
 
+    {% if proposal and proposal.questions %}
+    {# what Claude could not tell from text and photos: answered here, sent back with the text as the next revision #}
+    <fieldset class="flex flex-col gap-3 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-3" data-ad-questions>
+      <legend class="sr-only">{{ _("Claude's questions") }}</legend>
+      <strong>{{ _("Claude has one short question") if proposal.questions|length == 1 else _("Claude has {n} short questions", n=proposal.questions|length) }}</strong>
+      <input type="hidden" name="questions" value="{{ proposal.questions|tojson|forceescape }}">
+      {% for q in proposal.questions %}{{ ui.question(q) }}{% endfor %}
+      <div><button type="submit" class="btn btn-primary btn-sm" formaction="/myads/{{ a.ad_id }}/edit/ai" formnovalidate
+              hx-post="/myads/{{ a.ad_id }}/edit/ai" hx-target="#edit-main" hx-select="#edit-main" hx-swap="outerHTML"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Work the answers in") }}</button></div>
+    </fieldset>
+    {% endif %}
     <fieldset class="flex flex-col gap-2 border-t border-base-300 pt-4">
       <legend class="text-sm font-semibold">{{ _("Revise with Claude") }}</legend>
       <div class="join w-full">
@@ -67,11 +78,12 @@
           {# like ui.thumb, plus referrerpolicy (willhaben photos need it): placeholder when there is no URL or it fails #}
           <span class="relative grid h-[110px] w-full place-items-center overflow-hidden bg-hover text-muted/60 group-[.removed]:opacity-25">{{ ui.icon('image', 18, 1.5) }}{% if img.thumb %}<img src="{{ img.thumb }}" alt="" loading="lazy" referrerpolicy="no-referrer" class="absolute inset-0 size-full object-cover" onerror="this.remove()">{% endif %}</span>
           {{ ui.pill(_("Cover"), 'ok', false, 'absolute top-1.5 left-1.5 hidden group-first:inline-flex') }}
-          <div class="flex justify-between gap-1 p-1">
-            <button type="button" class="btn btn-outline btn-xs flex-1 group-first:invisible group-[.removed]:invisible" data-move="-1" title="{{ _('Move left') }}" aria-label="{{ _('Move left') }}">{{ ui.icon('back', 14) }}</button>
-            <button type="button" class="btn btn-outline btn-xs flex-1 group-first:invisible group-[.removed]:invisible" data-cover title="{{ _('Make cover photo') }}" aria-label="{{ _('Make cover photo') }}">{{ ui.icon('star', 14) }}</button>
-            <button type="button" class="btn btn-outline btn-xs flex-1 group-last:invisible group-[.removed]:invisible" data-move="1" title="{{ _('Move right') }}" aria-label="{{ _('Move right') }}">{{ ui.icon('chevron-right', 14) }}</button>
-            <button type="button" class="btn btn-outline btn-xs flex-1 group-[.removed]:border-error group-[.removed]:text-error" data-remove title="{{ _('Remove') }}" aria-label="{{ _('Remove') }}">{{ ui.icon('x', 14) }}</button>
+          {# four equal columns that may shrink: in a 130 px tile the buttons' own padding pushed the last one out #}
+          <div class="grid grid-cols-4 gap-1 p-1">
+            <button type="button" class="btn btn-outline btn-xs min-w-0 px-0 group-first:invisible group-[.removed]:invisible" data-move="-1" title="{{ _('Move left') }}" aria-label="{{ _('Move left') }}">{{ ui.icon('back', 14) }}</button>
+            <button type="button" class="btn btn-outline btn-xs min-w-0 px-0 group-first:invisible group-[.removed]:invisible" data-cover title="{{ _('Make cover photo') }}" aria-label="{{ _('Make cover photo') }}">{{ ui.icon('star', 14) }}</button>
+            <button type="button" class="btn btn-outline btn-xs min-w-0 px-0 group-last:invisible group-[.removed]:invisible" data-move="1" title="{{ _('Move right') }}" aria-label="{{ _('Move right') }}">{{ ui.icon('chevron-right', 14) }}</button>
+            <button type="button" class="btn btn-outline btn-xs min-w-0 px-0 group-[.removed]:border-error group-[.removed]:text-error" data-remove title="{{ _('Remove') }}" aria-label="{{ _('Remove') }}">{{ ui.icon('x', 14) }}</button>
           </div>
         </div>
         {% endfor %}

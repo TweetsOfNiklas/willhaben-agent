@@ -43,6 +43,16 @@ _REMOTE_KEYS = {"Enter", "Tab", "Shift+Tab", "Backspace", "Delete", "Escape", "A
 _CAPTURE_SKIP = ("/_next/static", "/cdn-cgi/", "/logevent", "advertisingmetrics", "/webapi/dac/", "/bbx-search/_next")
 
 
+def _other_site(url: str) -> bool:
+    """A request to a site whose account lives in this browser too (app/services/site_accounts.py)."""
+    from urllib.parse import urlsplit
+
+    from app.services.site_accounts import SITES
+
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for s in SITES.values() for h in s.hosts)
+
+
 class NotLoggedIn(RuntimeError):
     pass
 
@@ -419,6 +429,27 @@ class BrowserSession:
         await self.ui_page.bring_to_front()
         await self._goto(self.ui_page, LOGIN_URL, "login", wait_until="domcontentloaded")
 
+    async def load_hidden(self, url: str, timeout_ms: int = 30000) -> str:
+        """Open `url` in a short-lived tab of the logged-in browser (not the visible one) and return where it ended
+        up after redirects and scripts (the other sites' login checks, app/services/site_accounts.py)."""
+        self._require()
+        ui = self.ui_page
+        self._creating_internal = True
+        try:
+            page = await self.context.new_page()
+        finally:
+            self._creating_internal = False
+            self.ui_page = ui
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)   # a script's redirect to the login
+            except Exception:  # noqa: BLE001 - busy pages never get idle: what loaded counts
+                pass
+            return page.url
+        finally:
+            await page.close()
+
     async def open_url(self, url: str) -> None:
         self._require()
         self.touch_ui()
@@ -449,6 +480,8 @@ class BrowserSession:
             kind = ev.get("type")
             if kind == "click":
                 await page.mouse.click(float(ev["x"]), float(ev["y"]))
+            elif kind == "drag":
+                await self._drag(page, ev.get("points") or [])
             elif kind == "text":
                 await page.keyboard.type(str(ev["text"])[:2000])
             elif kind == "key":
@@ -470,6 +503,27 @@ class BrowserSession:
                                          duration_ms=int((time.monotonic() - started) * 1000))
             else:
                 raise ValueError(t("unknown input: {kind}", kind=kind))
+
+    @staticmethod
+    async def _drag(page, points: list[Any]) -> None:
+        """A drag from the remote view: press at the first point, move along the path at its own pace (pauses capped,
+        in small steps), release at the last (a bot check's slider)."""
+        pts = []
+        for p in points[:300]:
+            try:
+                pts.append((float(p["x"]), float(p["y"]), max(0.0, float(p.get("t") or 0))))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if len(pts) < 2:
+            raise ValueError(t("unknown input: {kind}", kind="drag"))
+        x0, y0, t_prev = pts[0]
+        await page.mouse.move(x0, y0)
+        await page.mouse.down()
+        for x, y, ts in pts[1:]:
+            await asyncio.sleep(min(max(ts - t_prev, 0) / 1000, 0.25))
+            await page.mouse.move(x, y, steps=2)
+            t_prev = ts
+        await page.mouse.up()
 
     def _on_new_page(self, page) -> None:
         # Popups (e.g. a login provider window) become the visible page so the remote view follows them.
@@ -600,7 +654,10 @@ class BrowserSession:
     async def _record(self, request) -> None:
         cap = self._capture
         url = request.url
-        if cap is None or "willhaben" not in url or any(s in url for s in _CAPTURE_SKIP):
+        if cap is None or any(s in url for s in _CAPTURE_SKIP):
+            return
+        other = _other_site(url)          # Kleinanzeigen, Vinted: kept in the capture file only (their messages)
+        if "willhaben" not in url and not other:
             return
         if request.resource_type not in ("fetch", "xhr", "document", "websocket", "eventsource"):
             return
@@ -616,11 +673,12 @@ class BrowserSession:
                 except Exception:  # noqa: BLE001 - redirects have no body
                     body = raw = None
             # what willhaben's own web app sent (PayLivery steps): also a replayable recording
-            recorder.record_http("browser", access_log.classify(url), request.method, url,
-                                 req_headers=await request.all_headers(), req_body=request.post_data,
-                                 status=resp.status if resp else None,
-                                 resp_headers=await resp.all_headers() if resp else None, resp_body=raw,
-                                 outcome=None if resp else "error")
+            if not other:
+                recorder.record_http("browser", access_log.classify(url), request.method, url,
+                                     req_headers=await request.all_headers(), req_body=request.post_data,
+                                     status=resp.status if resp else None,
+                                     resp_headers=await resp.all_headers() if resp else None, resp_body=raw,
+                                     outcome=None if resp else "error")
             cap["entries"].append({
                 "ts": utcnow().isoformat(),
                 "method": request.method,

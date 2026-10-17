@@ -684,3 +684,67 @@ def test_cleanup_marks_only_its_own_ads():
         assert db.get(MyAd, "21").pending_action == "delete" and db.get(MyAd, "22").pending_action == "edit"
     assert seen and "1" in seen[0][1]
 
+
+
+def test_the_panel_loads_the_ads_text(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.db import MyAd, session
+    from app.main import app
+    from app.willhaben import public
+
+    class _Pub:
+        async def get_detail(self, ad_id):
+            if ad_id == "2":
+                raise public.WillhabenError("HTTP 500")
+            if ad_id == "3":
+                return None
+            from app.platforms.types import AdDetail
+            return AdDetail(ad_id=ad_id, heading="Kamera", description="Erste Zeile\nZweite <Zeile>", price=40.0,
+                            price_display="€ 40", status="active", published_at=None, first_published_at=None,
+                            end_date=None, url="u", images=["https://img.example/1.jpg", "https://img.example/2.jpg"],
+                            location="1040 Wien", paylivery_enabled=True,
+                            shipping_options=[{"name": "Post", "home": 5.7, "point": 3.49}])
+
+        async def aclose(self):
+            pass
+
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "get_public", lambda: _Pub())
+    with session() as db:
+        for i in "123":
+            db.add(MyAd(ad_id=i, heading=f"Ad {i}", status="active"))
+        db.commit()
+    with TestClient(app) as c:
+        assert 'hx-get="/myads/1/description"' in c.get("/myads?ad=1").text
+        frag = c.get("/myads/1/description").text
+        assert "Erste Zeile\nZweite &lt;Zeile&gt;" in frag and 'href="/myads/1/edit"' in frag
+        assert frag.count('<img src="https://img.example/') == 2 and 'x-text="(i + 1)' in frag and "€ 40" in frag and "1040 Wien" in frag
+        assert "PayLivery Post" in frag and "€ 3,49" in frag and "€ 5,70" in frag
+        assert 'hx-get="/hits/ad/1/deal"' in frag                                # the price check with Geizhals
+        assert "HTTP 500" in c.get("/myads/2/description").text
+        assert "shows no text" in c.get("/myads/3/description").text
+        assert c.get("/myads/9/description").status_code == 404
+
+
+async def test_an_active_ad_under_review_stays_active():
+    """After an edit willhaben checks the ad for a while and reports another status: it stays in Active (with
+    willhaben's word for it) instead of jumping to Deactivated for a moment; real end states still move it."""
+    from app.willhaben.account import AdvertList, OwnAdvert
+
+    def ad(status, label=None):
+        return OwnAdvert(ad_id="5", heading="Kamera", status=status, status_label=label, price_display=None,
+                         start=None, end=None, url="u", image_url=None, actions={"2": {"relativePath": "x"}})
+
+    with session() as db:
+        db.add(MyAd(ad_id="5", heading="Kamera", status="active"))
+        db.commit()
+    for status, label, want in (("checking", "In Prüfung", "active"), ("active", None, "active"),
+                                ("unknownid", "Verschenkt", "Verschenkt"), ("active", None, "active"),
+                                ("deactivated", "Deaktiviert", "Deaktiviert")):
+        await my_ads.import_from_account(AdvertList([ad(status, label)]))
+        with session() as db:
+            row = db.get(MyAd, "5")
+        assert row.status == want, (status, label)
+        if status == "checking":
+            assert "In Prüfung" in row.last_action

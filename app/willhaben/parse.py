@@ -101,6 +101,8 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         platform="willhaben",
         item_condition=item_condition,
         item_condition_label=item_condition_label,
+        # PayLivery on: the seller ships (its price is on the ad page only); off says nothing (shipping by arrangement)
+        shipping="ship" if (_first(a, "p2penabled") or "").lower() == "true" else None,
         **_coordinates(_first(a, "COORDINATES")),
     )
 
@@ -159,15 +161,44 @@ def _money_value(v: Any) -> float | None:
     return f if math.isfinite(f) else None
 
 
-def _shipping_price(p2pp: Any) -> float | None:
-    """Cheapest PayLivery delivery price in p2ppOptions.deliveryOptions[] (None if there is no such price)."""
+def _handover(ad: dict[str, Any]) -> str | None:
+    """The ad page's "Übergabe" (advertisingParameters "Uebergabe": ["Selbstabholung", "Versand"]): "ship" when it
+    names shipping or PayLivery is on, "pickup" when it names pickup only, else None (not stated)."""
+    params = ad.get("advertisingParameters") or {}
+    raw = params.get("Uebergabe") or []
+    words = {str(w).strip().lower() for w in (raw if isinstance(raw, list) else [raw])}
+    if "versand" in words or _flag(params.get("payliveryEnabled")):
+        return "ship"
+    if "selbstabholung" in words:
+        return "pickup"
+    return None
+
+
+def shipping_options(p2pp: Any) -> list[dict[str, Any]]:
+    """PayLivery's delivery options: [{name, home, point}]: `home` the price to the door (deliveryOptions[].price),
+    `point` the one to a pickup point or locker (depositoryPrice, often lower: willhaben's "Versand ab € 3,49")."""
     if not isinstance(p2pp, dict):
-        return None
+        return []
     opts = p2pp.get("deliveryOptions")
     if isinstance(opts, dict):
         opts = [opts]
-    prices = [v for o in opts or [] if isinstance(o, dict)
-              for v in [_money_value(o.get("price"))] if v is not None and v >= 0]
+    out = []
+    for o in opts or []:
+        if not isinstance(o, dict):
+            continue
+        home, point = _money_value(o.get("price")), _money_value(o.get("depositoryPrice"))
+        home = home if home is not None and home >= 0 else None
+        point = point if point is not None and point >= 0 else None
+        if home is None and point is None:
+            continue
+        out.append({"name": str(o.get("optionName") or (o.get("carrier") or {}).get("description") or ""),
+                    "home": home, "point": point})
+    return out
+
+
+def _shipping_price(p2pp: Any) -> float | None:
+    """Cheapest PayLivery delivery price (to a pickup point or the door, as willhaben's "Versand ab"); None if none."""
+    prices = [v for o in shipping_options(p2pp) for v in (o["home"], o["point"]) if v is not None]
     return min(prices) if prices else None
 
 
@@ -217,6 +248,8 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
                                 _first(a, "payliveryEnabled")),
         buy_now=bool(((ad.get("p2ppOptions") or {}).get("buyNowInformationDto") or {}).get("isBuyNowAd")),
         shipping_price=_shipping_price(ad.get("p2ppOptions")),
+        shipping_options=shipping_options(ad.get("p2ppOptions")) or None,
+        shipping=_handover(ad),
         place=place or None,
         item_condition=item_condition,
         item_condition_label=item_condition_label,

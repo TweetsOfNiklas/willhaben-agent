@@ -56,9 +56,10 @@ from app.llm.prompts import (
     search_plan_prompt,
     search_rank_prompt,
 )
-from app.services import ad_images, deals, geo, scam
+from app.services import ad_images, deals, geo, price_zones, scam
 from app import platforms
-from app.platforms import Blocked, Listing, PlatformError, SearchSpec
+from app.platforms import Blocked, Listing, PlatformError, SearchSpec, shipping_info
+from app.platforms.text import mentions
 from app.services import timeline
 
 log = logging.getLogger(__name__)
@@ -113,15 +114,38 @@ def search_platforms() -> list[platforms.Platform]:
     return out or [platforms.get("willhaben")]
 
 
+CONDITIONS_WANTED = ("any", "new", "used")
+
+
+def condition_wanted(new: bool, used: bool) -> str:
+    """The form's two boxes: one ticked = only that, both or none = any."""
+    return "new" if new and not used else "used" if used and not new else "any"
+
+
 def make_settings(depth: str | None = "normal", unusual: bool = False, categories: bool = False,
                   sort: str | None = "relevance", photos: bool = True, ask: bool = True,
-                  sites: list[str] | None = None) -> dict[str, Any]:
-    """The search's options; `sites` = platform ids to search on (default: search_platforms())."""
+                  sites: list[str] | None = None, condition: str = "any") -> dict[str, Any]:
+    """The search's options; `sites` = platform ids to search on (default: search_platforms()); `condition`: any,
+    new or used (the person said it in the form: Claude does not ask, offers stating the other one are left out)."""
     usable = {p.id for p in platforms.all() if p.can("keyword_search")}
     chosen = [s for s in dict.fromkeys(sites or []) if s in usable] or [p.id for p in search_platforms()]
     return {"depth": depth if depth in DEPTHS else "normal", "unusual": bool(unusual), "categories": bool(categories),
             "sort": sort if sort in SORTS else "relevance", "photos": bool(photos), "ask": bool(ask),
-            "platforms": chosen}
+            "platforms": chosen, "condition": condition if condition in CONDITIONS_WANTED else "any"}
+
+
+def condition_note(settings: dict[str, Any] | None) -> tuple[str, str] | None:
+    """The form's new/used choice as a question with its answer for Claude's prompts; None for any."""
+    c = (settings or {}).get("condition") or "any"
+    return None if c == "any" else ("Neu oder gebraucht?", "nur neu" if c == "new" else "nur gebraucht")
+
+
+def condition_fits(ad: Listing, settings: dict[str, Any] | None) -> bool:
+    """An offer whose stated condition is the other one is no candidate; one stating none stays."""
+    c = (settings or {}).get("condition") or "any"
+    if c == "any" or not ad.item_condition:
+        return True
+    return price_zones.group(ad.item_condition) == c
 
 
 def max_queries(settings: dict[str, Any] | None) -> int:
@@ -205,7 +229,8 @@ async def make_plan(description: str, settings: dict[str, Any]) -> tuple[dict[st
     n = max_queries(settings)
     ask = bool(settings.get("ask"))
     prompt = search_plan_prompt(description=description, max_queries=n, unusual_names=bool(settings.get("unusual")),
-                                other_categories=bool(settings.get("categories")), ask=ask)
+                                other_categories=bool(settings.get("categories")), ask=ask,
+                                condition=(condition_note(settings) or (None, None))[1])
     out = await get_backend("search").complete(system=SEARCH_PLAN_SYSTEM, prompt=prompt, schema=SEARCH_PLAN_SCHEMA)
     plan = normalize_plan(out.data or {}, n)
     if not ask:
@@ -226,9 +251,11 @@ def clean_answers(plan: dict[str, Any] | None, raw: dict[str, Any] | None) -> di
     return out
 
 
-def answer_pairs(plan: dict[str, Any] | None, answers: dict[str, Any] | None) -> list[tuple[str, str]]:
-    """(question text, answer) in question order; unanswered questions are left out."""
-    out = []
+def answer_pairs(plan: dict[str, Any] | None, answers: dict[str, Any] | None,
+                 settings: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    """(question text, answer) in question order; unanswered questions are left out. With `settings` the form's
+    new/used choice comes first (condition_note)."""
+    out = [note] if (note := condition_note(settings)) else []
     for q in (plan or {}).get("questions") or []:
         if not isinstance(q, dict):
             continue
@@ -264,6 +291,15 @@ def drop_reason(ad: Listing, plan: dict[str, Any], q: dict[str, Any] | None = No
         if w and " " not in w and re.search(rf"(?<!\w){re.escape(w)}", title):
             return "excluded"
     return None
+
+
+LOOSE_SITES = ("shpock",)   # a page full of anything near one word (10/2026: "UCG Fiber" -> 30 ads, none of them one);
+                            # Vinted filters its own results, Facebook's search is semantic ("Mountainbike" finds MTB)
+
+
+def _on_topic(p: platforms.Platform, ad: Listing, q: dict[str, Any]) -> bool:
+    """On a loose site an offer is a candidate only when its title and text mention every word of the search."""
+    return p.id not in LOOSE_SITES or mentions(f"{ad.heading} {ad.body or ''}", q.get("keyword") or "")
 
 
 def _remaining_budget(p: platforms.Platform) -> int | None:
@@ -401,33 +437,36 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             warnings.append(t("Hourly request limit of {platform} almost used up: only {n} of {total} searches run.",
                               platform=p.name, n=budget, total=wanted))
     stopped: set[str] = set()
-    for n, (i, k) in enumerate(jobs):
+    count = {"done": 0, "requests": 0}
+
+    async def one(i: int, k: int | None) -> None:
         _qi, q, p = runs[i]
         entry = per_query[i] if k is None else per_query[i]["bands"][k]
         if p.id in stopped or (left[p.id] is not None and left[p.id] <= 0) \
                 or (k is not None and per_query[i]["found"] is None):
             entry["skipped"] = True
-            continue
+            return
         if left[p.id] is not None:
             left[p.id] -= 1
         try:
             page = await p.search(SearchSpec.from_json(entry["spec"]), rows=ROWS)   # uncached: real requests
-            requests += 1
+            count["requests"] += 1
         except Blocked as e:
-            requests += int(getattr(e, "sent", False))      # False: refused by the limiter, nothing was sent
+            count["requests"] += int(getattr(e, "sent", False))   # False: refused by the limiter, nothing was sent
             entry["error"] = str(e)
             stopped.add(p.id)
-            done = sum(1 for m in range(n) if runs[jobs[m][0]][2].id == p.id)
+            done = sum(1 for e2 in per_query if e2["platform"] == p.id and e2["found"] is not None)
             warnings.append(t("{platform} paused the search ({error}): stopped after {n} searches there, the offers "
                               "found so far are ranked.", platform=p.name, error=e, n=done))
-            continue
+            return
         except PlatformError as e:
-            requests += 1                                   # went through the limiter (network error / HTTP status)
+            count["requests"] += 1                          # went through the limiter (network error / HTTP status)
             entry["error"] = str(e)
-            continue
+            return
         finally:
+            count["done"] += 1
             if on_progress:
-                on_progress(n + 1, len(jobs), requests)
+                on_progress(count["done"], len(jobs), count["requests"])
         entry["found"] = page.rows_found
         new = 0
         for ad in page.ads:
@@ -436,13 +475,23 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             if not ad.ad_id or ad.ref in seen:
                 continue
             seen.add(ad.ref)
-            if drop_reason(ad, plan, q) is None:
+            if drop_reason(ad, plan, q) is None and _on_topic(p, ad, q) and condition_fits(ad, settings):
                 pools[i].append(ad)
                 new += 1
         entry["kept"] = new
         if k is not None:
             per_query[i]["found"] += page.rows_found
         per_query[i]["kept"] = len(pools[i])
+
+    async def site(pid: str) -> None:
+        """One site's searches in their order (its limiter paces them; bands after the whole-range searches)."""
+        for i, k in jobs:
+            if runs[i][2].id == pid:
+                await one(i, k)
+
+    # the sites at once: each answers at its own pace, so a search takes as long as its slowest site, not their sum
+    await asyncio.gather(*(site(p.id) for p in sites))
+    requests = count["requests"]
     for e in per_query:
         e.pop("spec", None)
         for b in e.get("bands") or []:
@@ -546,16 +595,47 @@ def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dic
             "position": pos, "median": st["median"] if st else None, "min": st["min"] if st else None,
             "p25": st["p25"] if st else None, "comparables": st["count"] if st else 0, "stats": st,
             "item_condition": ad.item_condition, "item_condition_label": ad.item_condition_label,
+            "shipping_price": ad.shipping_price, "shipping": ad.shipping,
             "scam_flags": scam.flags(item, scam.median_context(comp), home_country=scam.home_country_of(ad.platform))}
 
 
 # ------------------------------------------------------------------ ranking
 def _rank_line(nr: int, c: dict[str, Any]) -> dict[str, Any]:
     return {"nr": nr, "title": _one_line(c["title"])[:120],
-            "price": c["price_display"] or (f"{c['price']:g} €" if c["price"] is not None else None),
+            "price": shipping_info.with_price(c["price_display"] or (f"{c['price']:g} €" if c["price"] is not None else None),
+                                              c.get("shipping_price"), c.get("shipping")),
             "location": c["location"], "private": c["is_private"], "text": c["text"],
             "level": deals.LEVEL_DE.get((c.get("position") or {}).get("level") or ""),
             "scam": [f["label"] for f in scam.warnings(c["scam_flags"])]}
+
+
+_SHIP_UNKNOWN = re.compile(r"versand\w*\W.*(unklar|unbekannt|nicht angegeben)|(unklar|unbekannt)\w*\W.*versand", re.I)
+
+
+async def fill_shipping(results: list[dict[str, Any]]) -> None:
+    """The best offers that ship but whose list named no price (willhaben, Vinted): their ad page, one request each
+    through the site's limiter, so the photo check and the cards know the shipping (in place; failures stay open)."""
+    for r in results:
+        if r.get("shipping_price") is not None or r.get("shipping") != shipping_info.SHIP:
+            continue                        # price known, pickup only, or the list says nothing: no request
+        try:
+            p = platforms.get(r.get("platform") or "willhaben")
+            if not p.can("detail"):
+                continue
+            d = await p.detail(str(r["ad_id"]), url=r.get("url"))
+        except Exception as e:  # noqa: BLE001 - the card loads it later (ship_lazy) or shows none
+            log.info("shipping of %s %s not loaded: %s", r.get("platform"), r.get("ad_id"), e)
+            continue
+        if d is not None and (d.shipping_price is not None or d.shipping):
+            r["shipping_price"], r["shipping"] = d.shipping_price, d.shipping or r.get("shipping")
+            if getattr(d, "shipping_options", None):
+                r["shipping_options"] = d.shipping_options
+
+
+def red_flags(flags: Any) -> list[str]:
+    """Claude's concerns about an offer, without "shipping costs unclear": the app loads them itself (also for
+    results stored before the prompt said so)."""
+    return [f for f in flags or [] if isinstance(f, str) and not _SHIP_UNKNOWN.search(f)]
 
 
 def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int = TOP_N) -> list[dict[str, Any]]:
@@ -571,7 +651,7 @@ def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int 
         fit = r.get("fit")
         fit = max(0, min(100, int(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else None
         out.append({**cards[nr - 1], "fit": fit, "reason": str(r.get("reason") or "").strip()[:500],
-                    "red_flags": _texts(r.get("red_flags"), limit=5, chars=80)})
+                    "red_flags": red_flags(_texts(r.get("red_flags"), limit=5, chars=80))})
     out.sort(key=lambda c: -(c["fit"] if c["fit"] is not None else -1))
     return out[:top_n]
 
@@ -648,7 +728,9 @@ async def check_photos(description: str, plan: dict[str, Any], results: list[dic
                 continue
             images.append(img)
             items.append({"nr": nr, "title": _one_line(r.get("title"))[:120],
-                          "price": r.get("price_display") or (f"{r['price']:g} €" if r.get("price") is not None else None),
+                          "price": shipping_info.with_price(
+                              r.get("price_display") or (f"{r['price']:g} €" if r.get("price") is not None else None),
+                              r.get("shipping_price"), r.get("shipping")),
                           "level": deals.LEVEL_DE.get((r.get("position") or {}).get("level") or ""),
                           "fit": r.get("fit"), "reason": _one_line(r.get("reason"))[:300],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...
@@ -805,6 +887,9 @@ async def run(search_id: int, replan: bool = True) -> None:
             if msg:
                 found["warning"] = f"{found['warning']} {msg}" if found["warning"] else msg
         cards = [card(found["query_of"][pi], ad, plan, found["prices"][pi]) for pi, ad in picked]
+        if radius := geo.pickup_radius():   # Settings → Shipping & pickup: far pickup-only offers never reach Claude
+            await geo.locate(cards)
+            cards = [c for c in cards if not geo.too_far(c, radius)]
         cards, reserve = cards[:MAX_CANDIDATES], cards[MAX_CANDIDATES:]      # the reserve is for "load more"
         searched = {"queries": found["per_query"], "requests": found["requests"], "candidates": len(cards),
                     "warning": found["warning"]}
@@ -844,18 +929,20 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                            reserve: list[dict[str, Any]] | None = None) -> None:
     """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped. The offers not shown stay
     in `pool` for "load more": the unseen reserve first, then the cards Claude passed over."""
-    pairs = answer_pairs(plan, answers)
+    pairs = answer_pairs(plan, answers, settings)
     note = ""
+    unseen: list[dict[str, Any]] = []     # cards Claude never ranked (its call failed): they keep their turn
     if not cards:
         results = []
     else:
         try:
             results, note, _model = await rank(description, plan, cards, answers=pairs)
         except LLMError as e:
-            results = unranked(cards)
+            results, unseen = unranked(cards), cards
             msg = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
             warning = f"{warning} {msg}" if warning else msg
         else:
+            await fill_shipping(results)        # before the photo check: Claude then knows what shipping costs
             if results and settings.get("photos"):
                 _update(search_id, status="photos")
                 results, msg = await check_photos(description, plan, results, answers=pairs)
@@ -863,17 +950,18 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                     warning = f"{warning} {msg}" if warning else msg
     await geo.locate(results)           # coordinates from postcodes, home geocoded once: the list can sort by distance
     _update(search_id, status="done", results=results, note=note or None, warning=warning, finished_at=utcnow(),
-            cards=None, pool=_pool(reserve or [], cards, results))
+            cards=None, pool=_pool(reserve or [], unseen, results))
 
 
 def _key(c: dict[str, Any]) -> tuple[str, str]:
     return c.get("platform") or "willhaben", str(c.get("ad_id"))
 
 
-def _pool(fresh: list[dict[str, Any]], seen: list[dict[str, Any]], shown: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-    """What "load more" can still show: the unseen offers first, then those Claude saw and passed over."""
+def _pool(fresh: list[dict[str, Any]], unranked_: list[dict[str, Any]], shown: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """What "load more" can still show: offers Claude has not ranked yet (the unseen reserve, and a batch whose
+    ranking failed). Those it saw and passed over are not offered again: ranking them twice only costs time."""
     taken = {_key(c) for c in shown}
-    out = [c for c in fresh + seen if _key(c) not in taken]
+    out = [c for c in fresh + unranked_ if _key(c) not in taken]
     return out[:MAX_POOL] or None
 
 
@@ -907,7 +995,7 @@ async def _more(search_id: int) -> None:
         progress = dict(row.progress or {})
         plan, settings, pool = row.plan or {}, row.settings or make_settings(), list(row.pool or [])
         batch, rest = pool[:MAX_CANDIDATES], pool[MAX_CANDIDATES:]
-        pairs = answer_pairs(plan, row.answers)
+        pairs = answer_pairs(plan, row.answers, settings)
         warning, unseen = None, []
         try:
             more, _note, _model = await rank(row.description, plan, batch, answers=pairs)
@@ -915,6 +1003,7 @@ async def _more(search_id: int) -> None:
             more, unseen = unranked(batch), batch       # Claude never ranked them: those not shown keep their turn
             warning = t("Claude could not rank the offers ({error}); showing the cheapest ones instead.", error=e)
         else:
+            await fill_shipping(more)
             if more and settings.get("photos"):
                 more, warning = await check_photos(row.description, plan, more, answers=pairs)
         await geo.locate(more)
