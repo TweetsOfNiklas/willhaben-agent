@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, urlsplit
@@ -2082,7 +2082,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
         return back(f"/settings/{next(iter(sites), 'willhaben')}")
     if section not in SETTINGS_SECTIONS and section not in sites:
         raise HTTPException(404)
-    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
+    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_days", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     if section == "claude":
         await llm_models.refresh()                 # the selectable models, fresh from the API
@@ -2350,7 +2350,7 @@ async def settings_save(request: Request):
     saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
     groups = {"rules": ("reply_rules",), "selling": selling.KEYS,
-              "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "auto_reply_rules",
+              "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_days", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
     section = str(form.get("section") or "")
@@ -2371,11 +2371,9 @@ async def settings_save(request: Request):
         set_setting("auto_draft", "1" if form.get("auto_draft") else "0")
         set_setting("notify_messages", "1" if form.get("notify_messages") else "0")
         set_setting("chat_sync_limit", str(min(max(1, num("chat_sync_limit", 10)), 50)))
-        since = str(form.get("chat_sync_since", "")).strip()
-        try:
-            set_setting("chat_sync_since", date.fromisoformat(since).isoformat() if since else "")
-        except ValueError:
-            pass
+        days = str(form.get("chat_sync_days", "")).strip()
+        if days == "" or days.isdigit():          # empty: no cutoff; anything else keeps the old value
+            set_setting("chat_sync_days", str(min(int(days), 3650)) if days else "")
         if form.get("push_channel") in PUSH_CHANNELS:
             set_setting("push_channel", str(form.get("push_channel")))
         set_setting("reply_humanize", "1" if form.get("reply_humanize") else "0")

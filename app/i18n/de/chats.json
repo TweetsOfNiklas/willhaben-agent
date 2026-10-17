@@ -118,8 +118,6 @@
  "Settings": "Einstellungen",
  "The general instruction also applies, see": "Zusätzlich gilt die allgemeine Anweisung aus den",
  "Sync the latest conversations": "Die neuesten Unterhaltungen synchronisieren",
- "Only conversations active since": "Nur Unterhaltungen aktiv seit",
- "Empty: no cutoff. Older conversations are left out of the sync.": "Leer: kein Stichtag. Ältere Unterhaltungen werden nicht synchronisiert.",
  "Show hidden chats ({n})": "Ausgeblendete Chats zeigen ({n})",
  "hidden": "ausgeblendet",
  "Remove from the app": "Aus der App entfernen",
@@ -141,5 +139,8 @@
  "Answer offers {n} pieces, only {left} available": "Antwort sagt {n} Stück zu, verfügbar sind nur {left}",
  "{n} piece sold to this person": "{n} Stück an diese Person verkauft",
  "{n} pieces sold to this person": "{n} Stück an diese Person verkauft",
- "{left} of {total} still available": "noch {left} von {total} verfügbar"
+ "{left} of {total} still available": "noch {left} von {total} verfügbar",
+ "Only conversations active in the last … days": "Nur Unterhaltungen der letzten … Tage",
+ "no limit": "keine Grenze",
+ "Counted from today, so the window moves along. Empty: no limit. Older conversations are left out of the sync.": "Ab heute gezählt, der Zeitraum wandert also mit. Leer: keine Grenze. Ältere Unterhaltungen werden nicht synchronisiert."
 }

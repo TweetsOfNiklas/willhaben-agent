@@ -162,11 +162,15 @@ def test_chat_sync_window():
     from app.services.chats import sync_window
     assert sync_window() == (10, None)                 # defaults: 10 latest, no cutoff
     set_setting("chat_sync_limit", "500")
-    set_setting("chat_sync_since", "2026-09-01")
+    set_setting("chat_sync_days", "14")
     limit, since = sync_window()
-    assert limit == 50 and since.date().isoformat() == "2026-09-01" and since.tzinfo is not None
+    from datetime import date, timedelta
+    assert limit == 50 and since.date() == date.today() - timedelta(days=14) and since.tzinfo is not None
+    assert (since.hour, since.minute) == (0, 0)                       # local midnight
+    set_setting("chat_sync_days", "0")
+    assert sync_window()[1].date() == date.today()                    # today only
     set_setting("chat_sync_limit", "x")
-    set_setting("chat_sync_since", "garbage")
+    set_setting("chat_sync_days", "garbage")
     assert sync_window() == (10, None)
 
 
@@ -296,3 +300,21 @@ def test_reply_prompt_hint_outranks_everything_and_names_unknown_price():
     assert "Preis: unbekannt" in p and "keinen Betrag" in p
     assert p.index("Vorgabe der Person für genau diese Antwort") < p.index("Aufgabe:") and "nenn 55 €" in p
     assert "Vorrang vor allem anderen" in REPLY_SYSTEM and "[Betrag]" in REPLY_SYSTEM and "wie ein Mensch" in REPLY_SYSTEM
+
+
+def test_the_chat_settings_save_the_days():
+    from fastapi.testclient import TestClient
+
+    from app.db import get_setting
+    from app.main import app
+
+    client = TestClient(app)
+
+    page = client.get("/settings/chats").text
+    assert 'name="chat_sync_days"' in page and 'type="date"' not in page
+    client.post("/settings", data={"section": "chats", "chat_sync_limit": "10", "chat_sync_days": "30"})
+    assert get_setting("chat_sync_days") == "30"
+    client.post("/settings", data={"section": "chats", "chat_sync_limit": "10", "chat_sync_days": "abc"})
+    assert get_setting("chat_sync_days") == "30"                      # not a number: kept
+    client.post("/settings", data={"section": "chats", "chat_sync_limit": "10", "chat_sync_days": ""})
+    assert get_setting("chat_sync_days") == ""

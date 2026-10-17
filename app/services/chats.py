@@ -40,17 +40,17 @@ def _account() -> AccountClient:
 
 
 def sync_window() -> tuple[int, datetime | None]:
-    """Settings chat_sync_limit (N latest conversations, 1-50) and chat_sync_since (cutoff date, local midnight)."""
+    """Settings chat_sync_limit (N latest conversations, 1-50) and chat_sync_days (conversations active in the last N
+    days: the cutoff is local midnight N days ago, so it moves along every day; 0 = today only, empty = no cutoff)."""
     try:
         limit = min(max(int(get_setting("chat_sync_limit") or 10), 1), 50)
     except ValueError:
         limit = 10
     since = None
-    if raw := (get_setting("chat_sync_since") or "").strip():
-        try:
-            since = datetime.strptime(raw, "%Y-%m-%d").astimezone()   # naive -> local midnight
-        except ValueError:
-            pass
+    raw = (get_setting("chat_sync_days") or "").strip()
+    if raw.isdigit():
+        today = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        since = (today - timedelta(days=int(raw))).replace(tzinfo=None).astimezone()   # local midnight, DST-safe
     return limit, since
 
 

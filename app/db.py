@@ -598,7 +598,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "auto_draft": "0",
     "notify_messages": "1",
     "chat_sync_limit": "10",    # sync only the N latest conversations
-    "chat_sync_since": "",      # YYYY-MM-DD: skip conversations whose last message is older; empty = no cutoff
+    "chat_sync_days": "",       # whole days: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",
     "myads_expired_days": "30",
     "claude_token_limit_m": "10",   # Settings → Claude: monthly token limit in millions (sidebar meter); empty/0 = none
