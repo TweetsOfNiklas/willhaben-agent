@@ -38,7 +38,7 @@ from app.llm.claude_login import claude_token, forget_token, get_login, token_so
 from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
-from app.services import adaptive_pace, health, human_pace, jobs, price_zones
+from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones
 from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
@@ -285,7 +285,7 @@ templates.env.globals.update(agent_sites=_agent_platforms, agent_search_items=_a
 from app.services import geo as _geo  # noqa: E402
 
 templates.env.globals.update(home_point=_geo.home_cached, home_address=_geo.home_address,   # distance from home to ads
-                             result_km=_geo.distance_km)
+                             result_km=_geo.distance_km, hit_km=_geo.hit_km)
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled,
                              vpn_health=vpn.health)
@@ -641,7 +641,7 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
                       sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: list[str] = Form([]),
                       add_price_from: list[str] = Form([]), add_price_to: list[str] = Form([]),
                       gh_on: str | None = Form(None), gh_pct: str = Form(""), gh_level: str = Form("pct"),
-                      gh_check: str | None = Form(None)):
+                      gh_check: str | None = Form(None), km_on: str | None = Form(None), max_km: str = Form("")):
     from app.services import search_agents
 
     # the drawer's searches: terms to add (each added row and the add row send keyword, from and to, so the three
@@ -664,6 +664,8 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         level = gh_level if gh_on and gh_level in search_agents.LEVELS else None
         a.geizhals_level = level
         a.geizhals_pct = min(max(int(pct if pct is not None else 30), 1), 95) if gh_on and not level else None
+        km = _num_or_none(max_km)      # pickup only within this distance from home
+        a.max_km = min(max(int(km if km is not None else 30), 1), 2000) if km_on else None
         db.add(a)
         db.commit()
         db.refresh(a)
@@ -704,7 +706,7 @@ async def agents_delete(agent_id: int):
     return back("/agents")
 
 
-HIT_SORTS = ("newest", "price", "price_desc", "total")
+HIT_SORTS = ("newest", "price", "price_desc", "total", "distance")
 HIT_SHIP = ("ship", "pickup")
 HIT_LEVELS = ("bargain", "cheap", "fair")       # "this or better"
 _LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expensive": 4}
@@ -765,17 +767,17 @@ class HitView:
             q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0)).asc(), col(Hit.id).desc())
         else:
             q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
-        if not self.level:
+        if not self.level and self.sort != "distance":
             return list(db.exec(q.limit(limit)))
-        zones, top = price_zones.config(), _LEVEL_RANK[self.level]
-        out = []
-        for h in db.exec(q.limit(limit * 10)):
-            lvl = hit_label(h, zones)
-            if lvl is not None and _LEVEL_RANK.get(lvl, 9) <= top:
-                out.append(h)
-                if len(out) >= limit:
-                    break
-        return out
+        rows = list(db.exec(q.limit(max(limit * 10, 2000))))
+        if self.level:
+            zones, top = price_zones.config(), _LEVEL_RANK[self.level]
+            rows = [h for h in rows if _LEVEL_RANK.get(hit_label(h, zones) or "", 9) <= top]
+        if self.sort == "distance":       # in Python: the distance comes from coordinates or a cached postcode
+            home = geo.home_cached()
+            dist = {h.id: geo.hit_km(h, home) if home else None for h in rows}
+            rows.sort(key=lambda h: (dist[h.id] is None, dist[h.id] or 0))
+        return rows[:limit]
 
 
 def hit_label(h: Hit, zones: dict[str, Any] | None = None) -> str | None:

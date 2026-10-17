@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
 from app.services import adaptive_pace, chats, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
-from app.services.search_agents import is_checking, retention_job, run_agent
+from app.services.search_agents import is_checking, locate_job, retention_job, run_agent
 from app.willhaben import access_log
 from app.willhaben.session import get_session
 
@@ -147,6 +147,9 @@ def start() -> None:
     scheduler.add_job(retention_job, IntervalTrigger(hours=6, jitter=300), id="hits-retention",
                       replace_existing=True, max_instances=1, coalesce=True,   # Hits: retention, saved ones kept
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=20))
+    scheduler.add_job(locate_job, IntervalTrigger(hours=1, jitter=300), id="hits-locate",
+                      replace_existing=True, max_instances=1, coalesce=True,   # hit cards: distance from home
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=25))
     scheduler.add_job(vpn_check.tick, IntervalTrigger(minutes=1), id="vpn-search",    # the VPN's schedule, stored
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=90))

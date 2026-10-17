@@ -6,7 +6,7 @@
   <div class="min-w-0">
     <h1>{{ _("Hits") }}{% if agent_id and agents.get(agent_id) %} <span class="text-base font-normal text-muted">· {{ agents[agent_id].name }}</span>{% endif %}</h1>
     {% if state == 'pending' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("New hits the Geizhals rule and Claude's screening are still checking. Those that pass move to New with a push, the others to Filtered out.") }}</p>
-    {% elif state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening or the agent's Geizhals rule held back: no push, kept here in case you want a look.") }}</p>
+    {% elif state == 'filtered' %}<p class="mt-1 max-w-[640px] text-muted">{{ _("Hits Claude's screening, the agent's Geizhals rule or its distance limit held back: no push, kept here in case you want a look.") }}</p>
     {% else %}<p class="mt-1 max-w-[640px] text-muted max-sm:hidden">{{ _("Clicking a hit opens the ad here; ← / → pages through, Ctrl-click opens the ad on its site.") }}</p>{% endif %}
   </div>
   {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" onsubmit="return confirm({{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?'))|tojson|forceescape }})">{{ view_fields() }}<button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
@@ -29,7 +29,7 @@
     {% for pid in filter_platform_ids %}<option value="{{ pid }}" {% if pid == platform %}selected{% endif %}>{{ platform_name(pid) }}</option>{% endfor %}
   </select>{% endif %}
   <select name="sort" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Sort') }}">
-    {% for v, label in [('newest', _('Newest first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] %}<option value="{{ v }}" {% if v == view.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    {% for v, label in [('newest', _('Newest first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home_point() else []) %}<option value="{{ v }}" {% if v == view.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
   <select name="ship" onchange="this.form.submit()" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Shipping') }}">
     {% for v, label in [('', _('Shipping or pickup')), ('ship', _('Shipping possible')), ('pickup', _('Pickup only'))] %}<option value="{{ v }}" {% if v == view.ship %}selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -52,6 +52,7 @@
 
 {% if hits %}
 <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
+{% set home = home_point() %}{# distance from home on each card (geo.hit_km: no request) #}
 {% set pz = price_zone_config() %}{# the zone label of a hit with a Geizhals new price (deals.hit_level), read once #}
 {% set screen_levels = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'} %}{# Claude's verdict in the zones' colours #}
 {% for h in hits %}
@@ -93,7 +94,7 @@
       {% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
-      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
+      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}{% set km = hit_km(h, home) %}{% if km is not none %} · <span data-km class="{{ 'text-warning' if agents.get(h.agent_id) and agents[h.agent_id].max_km and km > agents[h.agent_id].max_km and h.shipping != 'ship' and h.shipping_price is none else '' }}">{{ _("{n} km", n=km|round|int) }}</span>{% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
       {% with sync_error=none, can_sync=hit_can_sync(h) %}{% include "_hit_status.html" %}{% endwith %}
     </div>
     {# three equal columns, one line each (icon and label): a card is one row shorter than with stacked buttons #}

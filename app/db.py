@@ -51,6 +51,7 @@ class SearchAgent(SQLModel, table=True):
     queries: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     plan: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {max_price, must_have, nice_to_have, exclude, summary}
     search_id: int | None = None        # origin ProductSearch
+    max_km: int | None = None           # pickup-only hits farther from home than this are held back; None = any
 
 
 class Hit(SQLModel, table=True):
@@ -94,6 +95,9 @@ class Hit(SQLModel, table=True):
     # shipping to the owner (app/platforms/shipping_info.py): price (0 = free) and "ship" | "pickup"; None = not known
     shipping_price: float | None = None
     shipping: str | None = None
+    # the ad's place: the site's coordinates (willhaben, Kleinanzeigen) or its postcode's centre (app/services/geo.py)
+    lat: float | None = None
+    lon: float | None = None
 
 
 class Conversation(SQLModel, table=True):

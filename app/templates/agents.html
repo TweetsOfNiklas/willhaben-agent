@@ -49,7 +49,7 @@
           {{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}<br>
           {% if a.queries %}{% set kws = a.queries|map(attribute='keyword')|select|unique|join(' · ') %}<span title="{{ kws }}">{{ _("{n} searches: {keywords}", n=a.queries|length, keywords=kws|truncate(90, true, '…')) }}</span><br>{% endif %}
           {% if a.last_rows_found is not none %}{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=site_names|join(', ')) }}{% endif %}
-          {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}{% if a.geizhals_level %} · {{ _("Geizhals: {level} or cheaper", level=deal_level_label(a.geizhals_level)) }}{% elif a.geizhals_pct %} · {{ _("{pct} % below Geizhals", pct=a.geizhals_pct) }}{% endif %}
+          {% if not a.notify %} · {{ _("no push") }}{% endif %}{% if a.notify_price_drops %} · {{ _("reports price drops") }}{% endif %}{% if a.geizhals_level %} · {{ _("Geizhals: {level} or cheaper", level=deal_level_label(a.geizhals_level)) }}{% elif a.geizhals_pct %} · {{ _("{pct} % below Geizhals", pct=a.geizhals_pct) }}{% endif %}{% if a.max_km %} · {{ _("pickup within {n} km", n=a.max_km) }}{% endif %}
         </div>
         {% if a.screen %}<div class="text-[13px] text-primary" title="{{ a.screen_brief or '' }}">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}{% if a.geizhals_check %} · {{ _("checks the Geizhals product") }}{% endif %}</div>{% endif %}
         {% if a.last_error %}<div class="text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
@@ -91,6 +91,11 @@
               <select name="gh_level" x-model="lvl" class="select select-sm w-full bg-base-200" aria-label="{{ _('Price range') }}">{% for v, lbl in geizhals_levels() %}<option value="{{ v }}">{{ lbl }}</option>{% endfor %}<option value="pct">{{ _("Own percentage") }}</option></select>
               <label x-show="lvl === 'pct'" class="flex items-center gap-2"><input type="number" name="gh_pct" min="1" max="95" step="1" value="{{ a.geizhals_pct or 30 }}" class="input input-sm w-20 bg-base-200" aria-label="{{ _('% below the Geizhals new price') }}"><span>{{ _("% below the Geizhals new price") }}</span></label>
             </div>
+          </div>
+          {# distance: pickup-only ads farther from home go to "Filtered"; ads that ship always pass #}
+          <div class="border-t border-base-300 py-2.5" x-data="{ km: {{ 'true' if a.max_km else 'false' }} }">
+            {{ ui.switch_row(_("Pickup only nearby"), _("Ads that can only be picked up are shown and pushed only within this distance from your address (Settings → Shipping & pickup). Ads that ship always pass, so do ads without a known place."), a.max_km, 'name="km_on" x-model="km"') }}
+            <label x-show="km" x-cloak class="mt-2 flex items-center gap-2 text-[13px]"><input type="number" name="max_km" min="1" max="2000" step="1" value="{{ a.max_km or 30 }}" class="input input-sm w-24 bg-base-200" aria-label="{{ _('km from home') }}"><span>{{ _("km from home") }}</span>{% if not home_address() %}<span class="text-warning">{{ _("No address set yet") }}</span>{% endif %}</label>
           </div>
           {# Searches: each search term once (it runs on every ticked site; × removes it everywhere), the searches without
              a term (a pasted filter link, one site each), terms added before Save, then the sites. Save applies it all

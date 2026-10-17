@@ -1,4 +1,5 @@
-"""Places as coordinates, for the distance from home to an ad (the product search sorted by distance).
+"""Places as coordinates, for the distance from home to an ad (the product search sorted by distance, hit cards and an
+agent's "pickup within N km").
 
 Home is the shipping sender address (Settings → Shipping & pickup), geocoded once with Nominatim: the same cached
 value the drop-off finder uses (setting `ship_sender_geo`, app/services/dropoff.py). Ads bring their own coordinates
@@ -145,6 +146,59 @@ async def locate(results: list[dict[str, Any]]) -> None:
                 r["lat"], r["lon"] = p
     except Exception as e:  # noqa: BLE001 - a distance is a nicety: never fail a search over it
         log.warning("locating results failed: %s", e)
+
+
+def postcode_of(postcode: str | None, location: str | None) -> str | None:
+    """The postcode an ad states, or the one its place line starts with ("1100 Wien")."""
+    return postcode or (m.group(1) if (m := re.match(r"(\d{4,5})\b", location or "")) else None)
+
+
+def point_cached(postcode: str | None) -> tuple[float, float] | None:
+    """A postcode's centre, only when asked before (no request: for page rendering)."""
+    country = country_of(postcode)
+    point = _cache().get(f"{country.upper()}:{postcode}") if country else None
+    return tuple(point) if point else None
+
+
+def hit_km(h: Any, origin: tuple[float, float] | None = None) -> float | None:
+    """Distance from home to a hit: its coordinates, else its postcode's centre if known already; None otherwise."""
+    origin = origin or home_cached()
+    if origin is None:
+        return None
+    lat, lon = getattr(h, "lat", None), getattr(h, "lon", None)
+    if lat is None or lon is None:
+        p = point_cached(postcode_of(getattr(h, "postcode", None), getattr(h, "location", None)))
+        if p is None:
+            return None
+        lat, lon = p
+    return km(origin, (lat, lon))
+
+
+async def locate_hits(hits: list[Any], limit: int = 60) -> list[Any]:
+    """Coordinates for hits without any but with a postcode (in place, at most `limit` new postcodes asked); the
+    hits that got some. Also geocodes home once. Never raises."""
+    located = []
+    try:
+        if await home() is None:
+            return located
+        asked = 0
+        for h in hits:
+            if h.lat is not None:
+                continue
+            pc = postcode_of(h.postcode, h.location)
+            country = country_of(pc)
+            if not country:
+                continue
+            if point_cached(pc) is None and f"{country.upper()}:{pc}" not in _cache():
+                if asked >= limit:
+                    continue
+                asked += 1
+            if (p := await postcode_point(pc, country)) is not None:
+                h.lat, h.lon = p
+                located.append(h)
+    except Exception as e:  # noqa: BLE001 - a distance is a nicety: never fail a check over it
+        log.warning("locating hits failed: %s", e)
+    return located
 
 
 def distance_km(r: dict[str, Any], origin: tuple[float, float] | None = None) -> float | None:

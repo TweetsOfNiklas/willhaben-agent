@@ -25,6 +25,7 @@ from app.services import product_search, scam, screening
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ad_ref
 from app.platforms import vpn
+from app.platforms import shipping_info
 from app.platforms.shipping_info import apply_shipping
 from app.services.notify import notify
 
@@ -486,6 +487,8 @@ def _apply(hit: Hit, ad: Listing) -> None:
     if ad.item_condition:           # a list without one keeps what the ad page told (Shpock states it only there)
         hit.item_condition, hit.item_condition_label = ad.item_condition, ad.item_condition_label
     apply_shipping(hit, ad)         # the same: a list without shipping keeps what the ad page told
+    if ad.lat is not None and ad.lon is not None:
+        hit.lat, hit.lon = ad.lat, ad.lon
     hit.last_seen_at = utcnow()
 
 
@@ -650,6 +653,8 @@ async def _run_agent(agent_id: int) -> RunResult:
         res.new = backlog + res.new
 
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
+    if agent.max_km and to_notify:
+        await _locate(to_notify)
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
@@ -659,7 +664,7 @@ async def _run_agent(agent_id: int) -> RunResult:
         from app.services import geizhals_check
 
         await geizhals_check.check(agent, to_notify)
-    to_screen = [h for h in to_notify if geizhals_passes(agent, h)]   # held back anyway: no Claude call
+    to_screen = [h for h in to_notify if geizhals_passes(agent, h) and distance_passes(agent, h)]   # held back anyway: no Claude call
     # first those held back before (filtered or pending, no verdict yet), which get into New only judged. A check
     # sends at most screening.MAX_PER_RUN; a hit beyond that stays unjudged (pending) and gets no push (10-14 they
     # were pushed unjudged: 30 off-topic Vinted ads in a day)
@@ -668,7 +673,7 @@ async def _run_agent(agent_id: int) -> RunResult:
     asked: set[int] = set()
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         asked = await screening.screen_all(agent_id, to_screen)
-    if (agent.screen or geizhals_rule(agent)) and to_notify:
+    if _holds(agent) and to_notify:
         _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
 
     # the site in the title once agents watch more than one; always in the payload (HA automations, app links)
@@ -765,8 +770,58 @@ def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
 
 
 def passes(agent: SearchAgent, hit: Hit) -> bool:
-    """Should this hit push: the screening lets it through and it keeps the Geizhals rule."""
-    return screening.passes(agent, hit) and geizhals_passes(agent, hit)
+    """Should this hit push: the screening lets it through, it keeps the Geizhals rule and the distance limit."""
+    return screening.passes(agent, hit) and geizhals_passes(agent, hit) and distance_passes(agent, hit)
+
+
+def ships(hit: Hit) -> bool:
+    return hit.shipping == shipping_info.SHIP or hit.shipping_price is not None
+
+
+def distance_passes(agent: SearchAgent, hit: Hit) -> bool:
+    """The agent's "pickup within N km": an ad that ships always passes, so does one whose place is not known."""
+    if not agent.max_km or ships(hit):
+        return True
+    from app.services import geo
+
+    km = geo.hit_km(hit)
+    return km is None or km <= agent.max_km
+
+
+async def _locate(hits: list[Hit]) -> None:
+    """Coordinates for the hits a distance limit judges (their postcode's centre, cached), stored."""
+    from app.services import geo
+
+    located = await geo.locate_hits([h for h in hits if not ships(h)])
+    if not located:
+        return
+    with session() as db:
+        for h in located:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.lat, row.lon = h.lat, h.lon
+                db.add(row)
+        db.commit()
+
+
+async def locate_job() -> None:
+    """Hourly: coordinates for the hits shown without any (the cards' distance), a few new postcodes at a time."""
+    from app.services import geo
+
+    if geo.home_address() is None:
+        return
+    with session() as db:
+        hits = list(db.exec(select(Hit).where(col(Hit.lat).is_(None), Hit.state != CLEARED)
+                            .order_by(col(Hit.id).desc()).limit(2000)))
+    located = await geo.locate_hits(hits)
+    if located:
+        with session() as db:
+            for h in located:
+                row = db.get(Hit, h.id)
+                if row is not None:
+                    row.lat, row.lon = h.lat, h.lon
+                    db.add(row)
+            db.commit()
 
 
 async def _geizhals_prices(hits: list[Hit]) -> None:
@@ -815,8 +870,9 @@ def _unjudged(agent: SearchAgent, h: Hit, asked: set[int]) -> bool:
 
 
 def _holds(agent: SearchAgent) -> bool:
-    """New hits of this agent are pending until judged: it pushes, and screens or has a Geizhals rule."""
-    return bool(agent.notify and (agent.screen or geizhals_rule(agent)))
+    """New hits of this agent are pending until judged: it pushes, and screens, has a Geizhals rule or a distance
+    limit."""
+    return bool(agent.notify and (agent.screen or geizhals_rule(agent) or agent.max_km))
 
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:

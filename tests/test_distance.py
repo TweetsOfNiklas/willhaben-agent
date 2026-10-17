@@ -137,3 +137,47 @@ def test_an_address_not_found_gets_its_own_hint(nominatim):
         frag = c.get(f"/deals/search/{sid}").text
     assert geo.home_cached() is None and "km away" not in frag and "Enter your address" not in frag
     assert 'disabled title="Your address under Settings → Shipping &amp; pickup could not be located (yet)' in frag
+
+
+def _home():
+    set_setting("ship_sender", json.dumps(HOME))
+    set_setting("ship_sender_geo", json.dumps({"addr": dropoff.address_line(HOME), "lat": 48.19, "lon": 16.33}))
+
+
+async def test_agent_distance_limit_holds_far_pickup_ads(nominatim):
+    from app.db import Hit, SearchAgent
+    from app.services import search_agents as sa
+
+    _home()
+    agent = SearchAgent(name="Rad", source_url="x", webapi_url="x", max_km=50)
+    near = Hit(agent_id=1, ad_id="1", heading="a", url="u", lat=48.2, lon=16.4, shipping="pickup")
+    far = Hit(agent_id=1, ad_id="2", heading="b", url="u", postcode="6971", location="6971 Hard", shipping="pickup")
+    far_ships = Hit(agent_id=1, ad_id="3", heading="c", url="u", lat=47.48, lon=9.73, shipping="ship")
+    nowhere = Hit(agent_id=1, ad_id="4", heading="d", url="u")
+    assert sa._holds(SearchAgent(name="x", source_url="x", webapi_url="x", max_km=10))
+    assert sa.distance_passes(agent, far)                      # its postcode not asked yet: unknown passes
+    assert await geo.locate_hits([near, far, far_ships, nowhere]) == [far]
+    assert (far.lat, far.lon) == (47.48, 9.73) and len(nominatim) == 1
+    assert sa.distance_passes(agent, near) and not sa.distance_passes(agent, far)
+    assert sa.distance_passes(agent, far_ships) and sa.distance_passes(agent, nowhere)
+    agent.max_km = None
+    assert sa.distance_passes(agent, far)
+
+
+def test_hit_cards_show_the_distance_and_sort_by_it():
+    from app.db import Hit, SearchAgent, session
+    from app.main import app
+
+    _home()
+    with session() as db:
+        a = SearchAgent(name="Rad", source_url="x", webapi_url="x", max_km=100)
+        db.add(a)
+        db.commit()
+        db.add(Hit(agent_id=a.id, ad_id="1", heading="Ad 1", url="u1", lat=47.48, lon=9.73, shipping="pickup"))
+        db.add(Hit(agent_id=a.id, ad_id="2", heading="Ad 2", url="u2", lat=48.2, lon=16.4))
+        db.add(Hit(agent_id=a.id, ad_id="3", heading="Ad 3", url="u3"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits?sort=distance").text
+        assert page.index(">Ad 2<") < page.index(">Ad 1<") < page.index(">Ad 3<")
+        assert "Nearest first" in page and 'class="text-warning">499 km' in page    # over the agent's 100
