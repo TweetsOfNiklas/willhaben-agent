@@ -160,5 +160,13 @@
   "No random ad found – try again": "Keine Zufallsanzeige gefunden – bitte nochmal versuchen",
   "Random: {title}": "Zufall: {title}",
   "A random current willhaben ad as the article": "Eine zufällige aktuelle willhaben-Anzeige als Artikel",
-  "Random ad": "Zufallsanzeige"
+  "Random ad": "Zufallsanzeige",
+  "Searching willhaben…": "Suche auf willhaben…",
+  "New random ad as the article – the conversation starts again": "Neue Zufallsanzeige als Artikel – das Gespräch beginnt von vorn",
+  "A random current willhaben ad as the article; the conversation starts again": "Eine zufällige aktuelle willhaben-Anzeige als Artikel; das Gespräch beginnt von vorn",
+  "Replace the article with a random ad and start the conversation again?": "Artikel durch eine Zufallsanzeige ersetzen und das Gespräch neu beginnen?",
+  "The app writes its answer…": "Die App schreibt ihre Antwort…",
+  "Model for the answers": "Modell für die Antworten",
+  "Model for the other side": "Modell für die Gegenseite",
+  "As in the settings ({model})": "Wie in den Einstellungen ({model})"
 }

@@ -1179,7 +1179,8 @@ async def simulator_page(request: Request, id: int | None = None, msg: str | Non
                   persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
                   can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
                   purchase_status=purchase_svc.status_label, sim_templates=chat_sim.templates_for,
-                  next_script=chat_sim.next_script)
+                  next_script=chat_sim.next_script, model_choices=llm_models.choices(),
+                  model_label=llm_models.label, default_model=model_for)
 
 
 @app.post("/simulator/new")
@@ -1222,6 +1223,16 @@ async def simulator_template(role: str = Form("seller"), template: str = Form(""
     return back(_sim_url(sim.id, msg))
 
 
+@app.post("/simulator/{sim_id}/random")
+async def simulator_randomize(sim_id: int):
+    _sim_or_404(sim_id)
+    try:
+        await chat_sim.randomize(sim_id)
+    except ValueError as e:
+        return back(_sim_url(sim_id, str(e)))
+    return back(_sim_url(sim_id, t("New random ad as the article – the conversation starts again")))
+
+
 def _sim_or_404(sim_id: int):
     sim = chat_sim.get(sim_id)
     if sim is None:
@@ -1250,7 +1261,9 @@ async def simulator_setup(request: Request, sim_id: int):
         values["questions"] = [q.strip()[:300] for q in str(form["questions"]).splitlines() if q.strip()][:8]
     chat_sim.update_setup(sim_id, values, persona=str(form.get("persona") or "") or None,
                           persona_text=str(form["persona_text"]) if "persona_text" in form else None,
-                          title=str(form.get("title") or ""), platform=str(form.get("platform") or "") or None)
+                          title=str(form.get("title") or ""), platform=str(form.get("platform") or "") or None,
+                          model=str(form["model"]) if "model" in form else None,
+                          partner_model=str(form["partner_model"]) if "partner_model" in form else None)
     return back(_sim_url(sim_id, t("Saved")))
 
 

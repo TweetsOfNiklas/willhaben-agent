@@ -17,6 +17,7 @@ class _Backend:
     def __init__(self):
         self.reply = {}
         self.calls = []
+        self.models = []
 
     async def complete(self, *, system, prompt, schema, images=None):
         self.calls.append({"system": system, "prompt": prompt})
@@ -42,7 +43,7 @@ class _Backend:
 @pytest.fixture
 def backend(monkeypatch):
     b = _Backend()
-    monkeypatch.setattr(chat_sim, "get_backend", lambda *a: b)
+    monkeypatch.setattr(chat_sim, "get_backend", lambda *a, **k: (b.models.append(k.get("model")), b)[1])
     with session() as db:
         db.add(MyAd(ad_id="111", heading="Logitech S315i", status="active", min_price=15,
                     auto_reply_instructions="Netzteil ist dabei."))
@@ -274,3 +275,39 @@ def test_old_run_time_renders(backend):
         sid = db.exec(select(SimChat.id)).first()
     with TestClient(app) as c:
         assert c.get(f"/simulator?id={sid}").status_code == 200
+
+
+async def test_randomize_replaces_the_article(backend, monkeypatch):
+    from types import SimpleNamespace
+
+    class _Public:
+        async def search_keyword(self, word, rows=30):
+            return SimpleNamespace(ads=[SimpleNamespace(ad_id="2", price=80.0)])
+
+        async def get_detail(self, ad_id):
+            return SimpleNamespace(heading="Gitarre", price=80.0, description="Akustik", location="Linz",
+                                   url="https://www.willhaben.at/iad/2", seller_name="", paylivery_enabled=False,
+                                   shipping_price=None)
+
+    monkeypatch.setattr("app.willhaben.public.get_public", lambda: _Public())
+    sim = await chat_sim.create_from_template("lowball", ad_id="111")
+    chat_sim._save(sim.id, turns=[{"who": "partner", "text": "x", "at": None}])
+    s = await chat_sim.randomize(sim.id)
+    assert s.setup["title"] == "Gitarre" and s.ad_id is None and s.turns == [] and "script" not in s.setup
+    assert s.expectations                                                     # the scenario's checks stay
+
+
+async def test_custom_models_per_test_chat(backend):
+    from app.llm import models as llm_models
+
+    opus, haiku = llm_models.newest("opus"), llm_models.newest("haiku")
+    sim = await chat_sim.create("seller", ad_id="111")
+    chat_sim.update_setup(sim.id, {}, model=opus, partner_model="haiku")
+    chat_sim.update_setup(sim.id, {}, model="no-such-model")                  # unknown: left as it was
+    s = chat_sim.get(sim.id)
+    assert s.model == opus and s.partner_model == haiku
+    chat_sim.play(sim.id, 1)
+    await _done()
+    assert backend.models[-2:] == [haiku, opus]                                # the other side, then my answer
+    chat_sim.update_setup(sim.id, {}, model="")
+    assert chat_sim.get(sim.id).model is None

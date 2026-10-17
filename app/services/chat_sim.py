@@ -223,7 +223,9 @@ async def _public_ad(ad_id: str) -> dict[str, Any]:
 
 
 def update_setup(sim_id: int, values: dict[str, Any], persona: str | None = None, persona_text: str | None = None,
-                 title: str | None = None, platform: str | None = None) -> SimChat | None:
+                 title: str | None = None, platform: str | None = None, model: str | None = None,
+                 partner_model: str | None = None) -> SimChat | None:
+    """`model` / `partner_model`: a model id, "" for the setting's model, None to leave it."""
     sim = get(sim_id)
     if sim is None:
         return None
@@ -238,6 +240,12 @@ def update_setup(sim_id: int, values: dict[str, Any], persona: str | None = None
         changes["title"] = title.strip()[:120]
     if platform in PLATFORMS:
         changes["platform"] = platform
+    from app.llm import models as llm_models
+    for key, value in (("model", model), ("partner_model", partner_model)):
+        if value is not None:
+            value = llm_models.resolve_alias(value.strip()) if value.strip() else ""
+            if not value or value in llm_models.ids():
+                changes[key] = value or None
     return _save(sim_id, **changes)
 
 
@@ -396,7 +404,8 @@ async def answer(sim: SimChat, turns: list[dict[str, Any]], overrides: dict[str,
     if "ad_instructions" in over and over.pop("ad_instructions_for", None) not in (None, sim.ad_id):
         over.pop("ad_instructions")          # a proposal for another ad's instructions does not apply here
     req = await chats.compose(conv, msgs_t, auto=True, ad=ad, buy=p, overrides=over, platform=sim.platform)
-    result = await get_backend(req["backend"]).complete(system=req["system"], prompt=req["prompt"], schema=req["schema"])
+    result = await get_backend(req["backend"], model=sim.model).complete(system=req["system"], prompt=req["prompt"],
+                                                                       schema=req["schema"])
     d: Draft = chats.draft_from(result, conv.id, auto=True, buyer=buyer)
     blockers = chats.answer_blockers(conv, d, msgs, ad=ad, buy=p, buyer=buyer)
     if buyer and stage_of(turns)[0] == "paused":
@@ -406,7 +415,7 @@ async def answer(sim: SimChat, turns: list[dict[str, Any]], overrides: dict[str,
     return {"who": "me", "text": d.text, "at": utcnow().isoformat(), "auto": not blockers,
             "reason": (d.auto_reason or "").lstrip("✓✗ ").strip(), "blockers": blockers, "intent": d.intent,
             "price": d.suggested_price, "notes": [n for n in d.needs_info or []], "purchase": d.purchase,
-            "meetup": d.meetup}
+            "meetup": d.meetup, "model": result.model}
 
 
 async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[str, Any]:
@@ -425,12 +434,14 @@ async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[
     from app.llm.prompts import platform_rule
     if line := platform_rule(sim.platform):
         prompt = f"{prompt}\n\n{line}"
-    out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt, schema=PURCHASE_OPENER_SCHEMA)
+    out = await get_backend("purchase", model=sim.model).complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
+                                                                schema=PURCHASE_OPENER_SCHEMA)
     text = str((out.data or {}).get("message") or "").strip()
     problems = purchase.text_problems(text, max_price=p.max_price, address_ok=False) if text else [t("empty answer")]
     return {"who": "me", "text": text, "at": utcnow().isoformat(), "auto": not problems, "opener": True,
             "reason": t("Opening message of the purchase"), "blockers": problems, "intent": None,
-            "price": (out.data or {}).get("opening_offer"), "notes": [], "purchase": None, "meetup": None}
+            "price": (out.data or {}).get("opening_offer"), "notes": [], "purchase": None, "meetup": None,
+            "model": out.model}
 
 
 async def partner(sim: SimChat, turns: list[dict[str, Any]]) -> dict[str, Any]:
@@ -443,13 +454,14 @@ async def partner(sim: SimChat, turns: list[dict[str, Any]]) -> dict[str, Any]:
         desc = "Ganz normale Person ohne Besonderheiten."
     prompt = sim_partner_prompt(role=sim.role, persona=desc, ad=ad_view(sim), site=PLATFORMS[sim.platform],
                                 turns=[(x["who"], x["text"]) for x in turns])
-    out = await get_backend("chat").complete(system=SIM_PARTNER_SYSTEM, prompt=prompt, schema=SIM_PARTNER_SCHEMA)
+    out = await get_backend("chat", model=sim.partner_model).complete(system=SIM_PARTNER_SYSTEM, prompt=prompt,
+                                                                    schema=SIM_PARTNER_SCHEMA)
     data = out.data or {}
     text = str(data.get("message") or "").strip()
     if not text:
         raise LLMError(t("Claude wrote no message for the other side"))
     return {"who": "partner", "text": text[:2000], "at": utcnow().isoformat(), "done": bool(data.get("done")),
-            "played": True}
+            "played": True, "model": out.model}
 
 
 # ------------------------------------------------------------------ actions (background jobs, lane "sim")
@@ -774,17 +786,13 @@ RANDOM_KEYWORDS = ("fahrrad", "iphone", "sofa", "kinderwagen", "playstation", "l
                    "bluetooth lautsprecher", "staubsauger", "drucker", "e-scooter", "rasenmäher", "uhr", "jacke", "tv")
 
 
-async def create_random(role: str, platform: str = "willhaben", persona: str | None = None,
-                        rng: random.Random | None = None) -> SimChat:
-    """A test chat about a random current willhaben ad (anonymous search for a random everyday word, one ad with
-    a price picked at random): its title, price, text and place as the setup; as buyer also a maximum (the asking
-    price) and a wish price 15 % below."""
+async def _random_detail(rng: random.Random | None = None):
+    """A random current willhaben ad with a price (anonymous search for a random everyday word)."""
     from app.willhaben.public import WillhabenError, get_public
 
     rng = rng or random.Random()
     words = list(RANDOM_KEYWORDS)
     rng.shuffle(words)
-    detail = None
     try:
         for word in words[:3]:
             page = await get_public().search_keyword(word, rows=30)
@@ -792,23 +800,47 @@ async def create_random(role: str, platform: str = "willhaben", persona: str | N
             if ads:
                 detail = await get_public().get_detail(rng.choice(ads).ad_id)
                 if detail is not None and detail.price:
-                    break
+                    return detail
     except WillhabenError as e:
         raise ValueError(t("No random ad: willhaben did not answer ({error})", error=e)) from e
-    if detail is None:
-        raise ValueError(t("No random ad found – try again"))
-    sim = await create(role, platform, persona=persona,
-                       title=t("Random: {title}", title=detail.heading or "")[:120])
-    setup = dict(sim.setup or {})
+    raise ValueError(t("No random ad found – try again"))
+
+
+def _random_setup(setup: dict[str, Any], role: str, platform: str, detail: Any) -> dict[str, Any]:
+    """The setup with the random ad as the article; as buyer also a maximum (the asking price) and a wish price 15 %
+    below."""
+    setup = dict(setup)
     setup.update({"title": detail.heading or "", "price": detail.price, "description": detail.description or "",
                   "location": detail.location or "", "url": detail.url})
+    setup.pop("script", None)
     if role == "buyer":
         setup.update({"seller_name": detail.seller_name or "", "max_price": detail.price,
                       "wish_price": round(detail.price * 0.85),
                       "shipping_cost": detail.shipping_price if detail.shipping_price else None})
         if platform == "willhaben":
             setup["mode"] = "paylivery" if detail.paylivery_enabled else "pickup"
-    return _save(sim.id, setup=setup)
+    return setup
+
+
+async def create_random(role: str, platform: str = "willhaben", persona: str | None = None,
+                        rng: random.Random | None = None) -> SimChat:
+    """A test chat about a random current willhaben ad: its title, price, text and place as the setup."""
+    detail = await _random_detail(rng)
+    sim = await create(role, platform, persona=persona,
+                       title=t("Random: {title}", title=detail.heading or "")[:120])
+    return _save(sim.id, setup=_random_setup(sim.setup or {}, role, platform, detail))
+
+
+async def randomize(sim_id: int, rng: random.Random | None = None) -> SimChat | None:
+    """This test chat about another, random willhaben ad: the article replaced, the conversation started again
+    (an own ad's link is dropped: the test chat is about the random ad now)."""
+    sim = get(sim_id)
+    if sim is None:
+        return None
+    detail = await _random_detail(rng)
+    setup = _random_setup(sim.setup or {}, sim.role, sim.platform, detail)
+    return _save(sim_id, setup=setup, ad_id=None, purchase_id=None, turns=[], last_run=None, proposal_run=None,
+                 error=None, title=t("Random: {title}", title=detail.heading or "")[:120])
 
 
 # ------------------------------------------------------------------ proposals

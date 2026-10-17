@@ -367,6 +367,8 @@ class SimChat(SQLModel, table=True):
     setup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the ad / purchase as simulated
     persona: str | None = None             # chat_sim.PERSONAS key, "custom" (persona_text) or None
     persona_text: str | None = None
+    model: str | None = None               # Claude model for my answers (None: Settings → Claude)
+    partner_model: str | None = None       # … and for the other side Claude plays
     turns: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # see chat_sim
     scenario: bool = False                 # kept as a repeatable test with expectations
     expectations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # [{kind, value}]
