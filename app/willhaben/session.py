@@ -480,6 +480,8 @@ class BrowserSession:
             kind = ev.get("type")
             if kind == "click":
                 await page.mouse.click(float(ev["x"]), float(ev["y"]))
+            elif kind == "drag":
+                await self._drag(page, ev.get("points") or [])
             elif kind == "text":
                 await page.keyboard.type(str(ev["text"])[:2000])
             elif kind == "key":
@@ -501,6 +503,27 @@ class BrowserSession:
                                          duration_ms=int((time.monotonic() - started) * 1000))
             else:
                 raise ValueError(t("unknown input: {kind}", kind=kind))
+
+    @staticmethod
+    async def _drag(page, points: list[Any]) -> None:
+        """A drag from the remote view: press at the first point, move along the path at its own pace (pauses capped,
+        in small steps), release at the last (a bot check's slider)."""
+        pts = []
+        for p in points[:300]:
+            try:
+                pts.append((float(p["x"]), float(p["y"]), max(0.0, float(p.get("t") or 0))))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if len(pts) < 2:
+            raise ValueError(t("unknown input: {kind}", kind="drag"))
+        x0, y0, t_prev = pts[0]
+        await page.mouse.move(x0, y0)
+        await page.mouse.down()
+        for x, y, ts in pts[1:]:
+            await asyncio.sleep(min(max(ts - t_prev, 0) / 1000, 0.25))
+            await page.mouse.move(x, y, steps=2)
+            t_prev = ts
+        await page.mouse.up()
 
     def _on_new_page(self, page) -> None:
         # Popups (e.g. a login provider window) become the visible page so the remote view follows them.

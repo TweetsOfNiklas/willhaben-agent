@@ -240,8 +240,14 @@ class _FakeMouse:
     async def click(self, x, y):
         self.log.append(("click", x, y))
 
-    async def move(self, x, y):
-        pass
+    async def move(self, x, y, steps=1):
+        self.log.append(("move", x, y))
+
+    async def down(self):
+        self.log.append(("down",))
+
+    async def up(self):
+        self.log.append(("up",))
 
     async def wheel(self, dx, dy):
         self.log.append(("wheel", dy))
@@ -270,7 +276,13 @@ def test_remote_input(client, monkeypatch):
     assert client.post("/session/input", json={"type": "text", "text": "user@example.at"}).status_code == 204
     assert client.post("/session/input", json={"type": "key", "key": "Enter"}).status_code == 204
     assert client.post("/session/input", json={"type": "scroll", "dy": 99999}).status_code == 204
-    assert page.log == [("click", 10.5, 20.0), ("type", "user@example.at"), ("press", "Enter"), ("wheel", 3000.0)]
+    assert [e for e in page.log if e[0] != "move"] == [("click", 10.5, 20.0), ("type", "user@example.at"),
+                                                        ("press", "Enter"), ("wheel", 3000.0)]
+    page.log.clear()
+    slide = [{"x": 10, "y": 50, "t": 0}, {"x": 60, "y": 51, "t": 120}, {"x": 140, "y": 50, "t": 300}]
+    assert client.post("/session/input", json={"type": "drag", "points": slide}).status_code == 204
+    assert page.log == [("move", 10.0, 50.0), ("down",), ("move", 60.0, 51.0), ("move", 140.0, 50.0), ("up",)]
+    assert client.post("/session/input", json={"type": "drag", "points": [{"x": 1, "y": 1}]}).status_code == 400
 
     assert client.post("/session/input", json={"type": "key", "key": "Control+w"}).status_code == 400
     assert client.post("/session/input", json={"type": "click"}).status_code == 400

@@ -39,7 +39,7 @@
       <button type="button" class="btn btn-xs font-mono" data-key="Tab">Tab</button><button type="button" class="btn btn-xs font-mono" data-key="Enter">Enter</button>
       {% if embed %}<span class="remote-state text-xs text-muted"></span>{% endif %}
     </div>
-    <div class="remote-screen overflow-hidden rounded-lg border-2 border-base-300 bg-white leading-[0] outline-none focus:border-primary" tabindex="0" title="{{ _('Click, then type') }}"><img alt="{{ _('Loading browser window …') }}" draggable="false" class="w-full cursor-pointer select-none"></div>
+    <div class="remote-screen overflow-hidden rounded-lg border-2 border-base-300 bg-white leading-[0] outline-none focus:border-primary" tabindex="0" title="{{ _('Click, then type') }}"><img alt="{{ _('Loading browser window …') }}" draggable="false" class="w-full cursor-pointer touch-none select-none"></div>
   </section>
   {% if remote_folded %}</details>{% endif %}
   <script>
@@ -86,7 +86,29 @@
       const r = img.getBoundingClientRect();
       return {x: (e.clientX - r.left) * img.naturalWidth / r.width, y: (e.clientY - r.top) * img.naturalHeight / r.height};
     }
-    img.addEventListener('click', e => { box.focus(); send({type: 'click', ...pos(e)}); });
+    // press, move, release: a short tap is a click; a longer way is a drag with its path and timing (sliders of a
+    // bot check), replayed as real mouse moves in the browser
+    let drag = null;
+    img.addEventListener('dragstart', e => e.preventDefault());
+    img.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault(); box.focus(); img.setPointerCapture(e.pointerId);
+      drag = {t0: performance.now(), points: [{...pos(e), t: 0}]};
+    });
+    img.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const p = {...pos(e), t: Math.round(performance.now() - drag.t0)}, last = drag.points[drag.points.length - 1];
+      if (Math.hypot(p.x - last.x, p.y - last.y) >= 3 && drag.points.length < 300) drag.points.push(p);
+    });
+    img.addEventListener('pointerup', e => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      d.points.push({...pos(e), t: Math.round(performance.now() - d.t0)});
+      const a = d.points[0], b = d.points[d.points.length - 1];
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 6) send({type: 'click', x: a.x, y: a.y});
+      else send({type: 'drag', points: d.points});
+    });
+    img.addEventListener('pointercancel', () => { drag = null; });
     box.addEventListener('wheel', e => { e.preventDefault(); send({type: 'scroll', dy: e.deltaY * 2, ...pos(e)}); }, {passive: false});
     box.addEventListener('keydown', e => {
       // AltGr (e.g. @ on a German keyboard) arrives as Ctrl+Alt on Windows; treat it as plain typing.
