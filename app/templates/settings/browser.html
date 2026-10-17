@@ -1,0 +1,21 @@
+{# Settings → Notifications → Browser: new hits and price drops as this browser's own notifications while a tab of
+   the app is open (base.html, browserNotify). Per browser (localStorage), nothing on the server: no push service. #}
+{% import "_ui.html" as ui %}
+<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4"
+  x-data="{ supported: browserNotify.supported(), on: browserNotify.on(), perm: ('Notification' in window) ? Notification.permission : 'unsupported',
+            async toggle() { if (this.on) { browserNotify.disable(); } else { this.perm = await browserNotify.enable(); } this.on = browserNotify.on(); },
+            test() { browserNotify.show({id: 'test', title: {{ _('New hit')|tojson|forceescape }}, text: {{ _('This is how a new ad shows up.')|tojson|forceescape }}}); } }">
+  <div class="flex flex-col gap-0.5">
+    <span class="font-medium">{{ _("Notifications in this browser") }}</span>
+    <small class="text-[12.5px] text-muted">{{ _("New hits and price drops pop up as this computer's notifications while a tab of the app is open, also in the background (it checks every minute). It needs no push service or other server: close every tab and none come. Set per browser; iPhones and Android phones only show notifications from a push service, use Home Assistant or Telegram there.") }}</small>
+  </div>
+  <template x-if="!supported"><p class="m-0 text-[13px] text-warning">{{ _("This browser does not support notifications.") }}</p></template>
+  <template x-if="supported">
+    <div class="flex flex-col gap-2.5">
+      <label class="flex cursor-pointer items-center justify-between gap-3"><span class="font-medium">{{ _("Show new hits as notifications") }}</span>
+        <input type="checkbox" class="toggle toggle-primary" :checked="on" @change="toggle()"></label>
+      <p x-show="perm === 'denied'" x-cloak class="m-0 text-[13px] text-error">{{ _("The browser blocks notifications for this site: allow them in the site settings (the lock next to the address), then switch on again.") }}</p>
+      <div x-show="on" x-cloak><button type="button" class="btn btn-sm" @click="test()">{{ _("Send a test notification") }}</button></div>
+    </div>
+  </template>
+</section>

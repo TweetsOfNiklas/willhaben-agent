@@ -138,5 +138,10 @@
  "Clear hits automatically": "Treffer automatisch leeren",
  "· saved ones are kept": "· gemerkte bleiben",
  "Being checked": "Wird geprüft",
- "New hits the Geizhals rule and Claude's screening are still checking. Those that pass move to New with a push, the others to Filtered out.": "Neue Treffer, die Geizhals-Regel und Claude gerade prüfen. Was besteht, kommt mit Push zu „Neu“, der Rest zu „Aussortiert“."
+ "New hits the Geizhals rule and Claude's screening are still checking. Those that pass move to New with a push, the others to Filtered out.": "Neue Treffer, die Geizhals-Regel und Claude gerade prüfen. Was besteht, kommt mit Push zu „Neu“, der Rest zu „Aussortiert“.",
+ "no longer online": "nicht mehr online",
+ "still online": "noch online",
+ "listed {ago}": "in der Suche {ago}",
+ "checked {ago}": "geprüft {ago}",
+ "Load the ad from its site now: still online, reserved or sold?": "Die Anzeige jetzt von ihrer Seite laden: noch online, reserviert oder verkauft?"
 }

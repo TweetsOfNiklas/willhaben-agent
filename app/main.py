@@ -212,7 +212,8 @@ from app.services.price_gauge import gauge as _price_gauge  # noqa: E402
 from app.services.deals import level_label as _level_label  # noqa: E402
 
 templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_label)
-templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)   # the agent drawer's Geizhals rule
+templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)
+templates.env.globals.update(hit_can_sync=lambda h: _can_sync(h))     # the hit cards' sync button   # the agent drawer's Geizhals rule
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -769,6 +770,8 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
                 reduced, detail_error = True, str(e)
     if d is not None and h is not None and not reduced:
         _keep_condition(platform.id, ad_id, d, h)
+    if h is not None and not reduced and error is None:     # the ad page just loaded: its status for the hit cards
+        search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d))
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,
@@ -795,6 +798,29 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
     if request.headers.get("hx-request"):
         return HTMLResponse("")
     return back("/hits")
+
+
+@app.post("/hits/{hit_id}/sync", response_class=HTMLResponse)
+async def hit_sync(request: Request, hit_id: int):
+    """A hit card's sync button: the ad's status from its site now (sold, reserved, gone …); the card's status line."""
+    error = None
+    try:
+        h = await search_agents_svc.check_hit(hit_id)
+    except PlatformError as e:
+        error, h = str(e), None
+        with session() as db:
+            h = db.get(Hit, hit_id)
+    if h is None:
+        raise HTTPException(404)
+    return templates.TemplateResponse(request, "_hit_status.html", {"h": h, "sync_error": error,
+                                                                    "can_sync": _can_sync(h)})
+
+
+def _can_sync(h: Hit) -> bool:
+    try:
+        return platforms.get(h.platform or "willhaben").can("detail")
+    except platforms.UnknownPlatform:
+        return False
 
 
 @app.post("/hits/clear-filtered")
@@ -1895,7 +1921,7 @@ async def capture_download(name: str):
 # ------------------------------------------------------------------ settings
 SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
                      "claude", "selling", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
-                     "prices", "geizhals")   # settings.html groups
+                     "prices", "geizhals", "browser")   # settings.html groups
 
 
 def _site_sections() -> dict[str, Any]:

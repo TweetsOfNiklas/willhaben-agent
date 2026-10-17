@@ -87,6 +87,10 @@ class Hit(SQLModel, table=True):
     # the condition the site states (app/platforms/condition.py): from the list, or from the ad page once opened (Shpock)
     item_condition: str | None = None
     item_condition_label: str | None = None
+    # what the site said when the ad itself was last loaded (sync button, ad viewer): active | sold | reserved |
+    # expired | gone (no longer online) | the site's own word; None = never loaded
+    site_status: str | None = None
+    status_checked_at: datetime | None = None
 
 
 class Conversation(SQLModel, table=True):

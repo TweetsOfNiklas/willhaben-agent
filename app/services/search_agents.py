@@ -989,3 +989,40 @@ async def retention_job() -> None:
         return
     if cleared or gone:
         log.info("hits: %d cleared, %d rows of gone ads deleted", cleared, gone)
+
+
+STATUS_WORDS = {"sold": "sold", "verkauft": "sold", "reserved": "reserved", "reserviert": "reserved",
+                "expired": "expired", "inactive": "expired", "deleted": "gone"}
+
+
+def site_status(detail: Any) -> str:
+    """The ad's status as the hit keeps it: gone when the site no longer has the ad, else its status word."""
+    if detail is None:
+        return "gone"
+    raw = (getattr(detail, "status", None) or "unknown").lower()
+    return "active" if raw == "active" else STATUS_WORDS.get(raw, raw)
+
+
+def record_status(platform_id: str, ad_id: str, status: str) -> None:
+    """The status the site just gave for an ad, on every hit of it (several agents may hold it)."""
+    with session() as db:
+        for h in db.exec(select(Hit).where(Hit.platform == platform_id, Hit.ad_id == ad_id)):
+            h.site_status, h.status_checked_at = status, utcnow()
+            db.add(h)
+        db.commit()
+
+
+async def check_hit(hit_id: int) -> Hit | None:
+    """The sync button of a hit: load the ad from its site (one request through its limiter and VPN) and keep its
+    status. PlatformError when the site cannot be asked; None when the hit is gone."""
+    with session() as db:
+        h = db.get(Hit, hit_id)
+    if h is None:
+        return None
+    p = _site(h.platform)
+    if not p.can("detail"):
+        raise PlatformError(t("{site} cannot load a single ad", site=p.name))
+    d = await p.detail(h.ad_id, url=h.url)
+    record_status(h.platform or "willhaben", h.ad_id, site_status(d))
+    with session() as db:
+        return db.get(Hit, hit_id)

@@ -80,6 +80,7 @@
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
       <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
+      {% with sync_error=none, can_sync=hit_can_sync(h) %}{% include "_hit_status.html" %}{% endwith %}
     </div>
     {# three equal columns, one line each (icon and label): a card is one row shorter than with stacked buttons #}
     <div class="grid grid-cols-3 gap-1.5 border-t border-base-300 p-2 max-sm:col-span-2 max-sm:mt-2.5 max-sm:border-t-0 max-sm:p-0">

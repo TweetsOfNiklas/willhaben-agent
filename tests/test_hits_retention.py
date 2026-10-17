@@ -90,3 +90,52 @@ def test_the_page():
         c.post("/hits/clear-filtered", data={"agent_id": ""})
         assert _states()["2"] == "cleared"
         assert all(h["state"] != "cleared" for h in c.get("/api/hits?state=all").json())
+
+
+def test_the_sync_button_keeps_the_sites_status(monkeypatch):
+    """A hit card's sync loads the ad: sold, reserved or gone shows on every hit of the ad, with when it was checked."""
+    from app import platforms
+    from app.main import app
+    from tests.fake_platform import FakePlatform, detail_of, listing
+
+    fake = FakePlatform()
+    platforms.set_platform("fake", fake)
+    try:
+        a, b = _agents()
+        for agent in (a, b):
+            with session() as db:
+                db.add(Hit(agent_id=agent, platform="fake", ad_id="7", heading="Ad 7", url="https://fake.example/ad/7",
+                           state="new"))
+                db.commit()
+        with session() as db:
+            hid = db.exec(select(Hit).where(Hit.agent_id == a)).one().id
+        d = detail_of(listing("7", "Ad 7", 10.0))
+        d.status = "reserved"
+        fake.details = {"7": d}
+        with TestClient(app) as c:
+            assert f'hx-post="/hits/{hid}/sync"' in c.get("/hits").text
+            html = c.post(f"/hits/{hid}/sync").text
+            assert "reserved" in html and "checked" in html
+            with session() as db:
+                assert {h.site_status for h in db.exec(select(Hit))} == {"reserved"}
+            fake.details = {"7": None}                                  # the site no longer has it
+            assert "no longer online" in c.post(f"/hits/{hid}/sync").text
+    finally:
+        platforms.reset()
+    assert sa.site_status(None) == "gone"
+
+
+def test_browser_notifications_page_and_poll():
+    """Settings → Browser: the switch lives in the page (per browser); the jobs poll carries each event's kind, so the
+    page shows hits and price drops as notifications."""
+    from app.db import log_event
+    from app.main import app
+
+    with TestClient(app) as c:
+        page = c.get("/settings/browser").text
+        assert "browserNotify.enable()" in page and "Show new hits as notifications" in page
+        assert "const browserNotify" in page and "'price_drop'" in page
+        cursor = c.get("/jobs").json()["last_event"]
+        log_event("hit", "Agent: 20 €", "https://example.invalid/ad/1")
+        events = c.get(f"/jobs?since={cursor}").json()["events"]
+        assert [e["kind"] for e in events] == ["hit"]
