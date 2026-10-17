@@ -715,3 +715,26 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
         assert "HTTP 500" in c.get("/myads/2/description").text
         assert "shows no text" in c.get("/myads/3/description").text
         assert c.get("/myads/9/description").status_code == 404
+
+
+async def test_an_active_ad_under_review_stays_active():
+    """After an edit willhaben checks the ad for a while and reports another status: it stays in Active (with
+    willhaben's word for it) instead of jumping to Deactivated for a moment; real end states still move it."""
+    from app.willhaben.account import AdvertList, OwnAdvert
+
+    def ad(status, label=None):
+        return OwnAdvert(ad_id="5", heading="Kamera", status=status, status_label=label, price_display=None,
+                         start=None, end=None, url="u", image_url=None, actions={"2": {"relativePath": "x"}})
+
+    with session() as db:
+        db.add(MyAd(ad_id="5", heading="Kamera", status="active"))
+        db.commit()
+    for status, label, want in (("checking", "In Prüfung", "active"), ("active", None, "active"),
+                                ("unknownid", "Verschenkt", "Verschenkt"), ("active", None, "active"),
+                                ("deactivated", "Deaktiviert", "Deaktiviert")):
+        await my_ads.import_from_account(AdvertList([ad(status, label)]))
+        with session() as db:
+            row = db.get(MyAd, "5")
+        assert row.status == want, (status, label)
+        if status == "checking":
+            assert "In Prüfung" in row.last_action

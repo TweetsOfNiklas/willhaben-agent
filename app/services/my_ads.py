@@ -633,6 +633,19 @@ class AccountIds(set):
     complete = False
 
 
+# willhaben statuses that end an ad's time online (or take it offline by hand): anything else an active ad reports
+# for a moment is willhaben checking a change
+ENDED_STATUSES = ("expired", "passive", "deactivated", "sold", "given_away", "reserved", "deleted")
+_ENDED_WORDS = ("verkauft", "verschenkt", "reserviert", "deaktiviert", "passiv", "abgelaufen", "gelöscht", "sold",
+                "given away", "reserved", "deactivated", "expired", "deleted")
+
+
+def ended(ad: Any) -> bool:
+    """The status takes the ad offline for good or by hand (its id, or willhaben's word when the id is unknown)."""
+    label = (getattr(ad, "status_label", None) or "").lower()
+    return ad.status in ENDED_STATUSES or any(w in label for w in _ENDED_WORDS)
+
+
 async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
     """Add/update every ad of the logged-in account (`ads`: a list just loaded); returns their ids.
 
@@ -657,6 +670,13 @@ async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
                 row.status = "replaced"   # republished under a new id; the old copy stays "Passiv" on willhaben
             elif has_ended(ad):
                 row.status = "expired"    # ran out ("Passiv" on willhaben): auto-renew republishes it
+            elif previous == "active" and not ended(ad):
+                # willhaben checks a changed ad for a few seconds to minutes and reports another status meanwhile:
+                # it stays in Active (it did not vanish from the list for a moment), with willhaben's word for it
+                row.status = "active"
+                if ad.status != "active":
+                    row.last_action = t("willhaben is checking the change: {status}",
+                                        status=ad.status_label or ad.status)
             else:
                 row.status = ad.status if ad.status in ("active", "expired", "sold", "reserved", "deleted") \
                     else ad.status_label or ad.status
