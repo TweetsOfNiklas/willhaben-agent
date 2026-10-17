@@ -604,6 +604,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
         "- Keine Termine, Adressen oder Telefonnummern zusagen, die nicht in der Anweisung zur Anzeige stehen."
     ),
     "send_verified": "0",
+    # Settings → My rules → Writing style (app/services/style.py): the profile Claude derived from my own messages
+    "reply_style": "",
+    "reply_style_meta": "",       # JSON: {at, count, examples}
     # Settings → Selling preferences (app/services/selling.py): what Claude tells buyers and writes into new ads
     "sell_handover": "pickup",          # pickup | shipping | both
     "sell_shipping_cost": "buyer",      # buyer | included (in the price)

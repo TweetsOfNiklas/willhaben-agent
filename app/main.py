@@ -39,9 +39,11 @@ from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hou
 from app.services import health, human_pace, jobs
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
+from app.services import style as style_svc
 from app.services import stock
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
+from app import style_routes
 from app.services import search_agents as search_agents_svc
 from app.services.search_agents import refile_screened, run_agent
 from app.willhaben import access_log
@@ -127,6 +129,7 @@ app.include_router(label_buy_routes.router)   # Settings → Shipping → paymen
 app.include_router(printing_routes.router)    # Settings → Printers, print buttons
 app.include_router(paylivery_routes.router)   # PayLivery card on the chat page
 app.include_router(purchase_routes.router)    # Kaufauftrag: buy dialog, order pages, order buttons, Settings → Buying
+app.include_router(style_routes.router)       # Settings → My rules → Writing style
 paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -219,6 +222,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
+templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,
@@ -2323,7 +2327,7 @@ async def settings_save(request: Request):
     """The general settings. Each section posts only its own fields (hidden "section"); an unknown or missing section
     saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
-    groups = {"rules": ("reply_rules",), "selling": selling.KEYS,
+    groups = {"rules": ("reply_rules", "reply_style"), "selling": selling.KEYS,
               "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_since", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
@@ -2340,6 +2344,8 @@ async def settings_save(request: Request):
 
     if "reply_rules" in todo:
         set_setting("reply_rules", str(form.get("reply_rules", "")).strip())
+        if "reply_style" in form:          # the style card is part of the rules form; a POST without it keeps the profile
+            set_setting("reply_style", str(form.get("reply_style", "")).replace("\r\n", "\n").strip()[:style_svc.MAX_PROFILE])
     if "auto_reply_rules" in todo:
         set_setting("auto_reply_rules", str(form.get("auto_reply_rules", "")).strip())
         set_setting("auto_draft", "1" if form.get("auto_draft") else "0")

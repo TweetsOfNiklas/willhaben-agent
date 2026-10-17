@@ -20,12 +20,13 @@ from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, 
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
-    AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM,
+    AUTO_REPLY_SCHEMA, AUTO_REPLY_SYSTEM, MAX_OTHERS, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, PURCHASE_SYSTEM, REPLY_SCHEMA,
+    REPLY_SYSTEM,
     auto_rules,
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, selling, stock
+from app.services import my_ads, selling, stock, style
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -462,6 +463,32 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
         return out
 
 
+def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHERS) -> list[str]:
+    """What I wrote to the other buyers of the same ad (every copy of a renewed ad, my seller chats only), newest
+    first: facts about the item ("funktioniert", "hab nur die eine") that the next buyer asks again. No memory is
+    needed for that; the prompt tells Claude to keep prices, commitments and appointments with others to itself."""
+    if not ad_id:
+        return []
+    ids = stock.ad_chain(ad_id)
+    with session() as db:
+        convs = db.exec(select(Conversation.id).where(col(Conversation.ad_id).in_(ids), Conversation.role == "seller",
+                                                      Conversation.id != conversation_id)).all()
+        if not convs:
+            return []
+        rows = db.exec(select(Message).where(col(Message.conversation_id).in_(convs), Message.direction == "out",
+                                             col(Message.kind).is_(None))
+                       .order_by(col(Message.created_at).desc(), col(Message.id).desc()).limit(60))
+        out: list[str] = []
+        for m in rows:
+            text = " ".join(m.text.split())
+            if len(text) < 8 or text in out:
+                continue
+            out.append(text)
+            if len(out) == limit:
+                break
+        return out
+
+
 MAX_ALTERNATIVES = 3
 
 
@@ -516,7 +543,7 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         availability = None
         system, schema = (PURCHASE_SYSTEM, PURCHASE_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
         examples: list[str] = []
-        stock_now = None
+        stock_now, others = None, []
     else:
         rules = get_setting("reply_rules")
         if conv.role == "seller":                     # Settings → Selling preferences, before the per-answer blocks
@@ -535,10 +562,12 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
             rules = f"{rules}\n\n{price_floor(floor, asking)}"
         availability = await gcal.availability_text() if (cal["in_auto"] if auto else cal["in_drafts"]) else None
         system, schema = (AUTO_REPLY_SYSTEM, AUTO_REPLY_SCHEMA) if auto else (REPLY_SYSTEM, REPLY_SCHEMA)
-        examples = _style_examples()
+        examples = style.examples()                       # the profile's characteristic messages, then the newest
+        others = _others_said(conversation_id, conv.ad_id) if conv.role == "seller" else []
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
-                          rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now)
+                          rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now,
+                          style=(style.profile() or None) if buy is None else None, others=others)
     log.info("draft for %s: hint=%r, ad price=%s", conversation_id, hint, (ad_ctx or {}).get("price"))
     backend = get_backend("purchase" if buy is not None else "chat")   # chats of a purchase order: Settings → "Purchases"
     async with telegram.typing():                 # "typing…" in Telegram while Claude writes

@@ -70,6 +70,7 @@ PURPOSES = {
     "search": ("llm_model_search", _("Product search"), _("plans willhaben searches from your description and picks the best offers – two or three calls per search")),
     "shipping": ("llm_model_shipping", _("Shipping & labels"), _("reads address and parcel size from chats, fills and buys carrier labels")),
     "purchase": ("llm_model_purchase", _("Purchases & PayLivery"), _("opening message and negotiation as buyer, PayLivery steps")),
+    "style": ("llm_model_style", _("Writing style"), _("the style profile derived from your own chat messages – runs only when you ask for it")),
 }
 
 
@@ -81,6 +82,7 @@ PURPOSE_DEFAULTS = {
     "search": "claude-sonnet-5-5",
     "shipping": "claude-sonnet-5-5",
     "purchase": "claude-sonnet-5-5",
+    "style": "claude-sonnet-5-5",
 }
 
 
