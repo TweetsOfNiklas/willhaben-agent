@@ -129,5 +129,11 @@
  "Search returned HTTP {status}": "Suche lieferte HTTP {status}",
  "Search returned no JSON": "Suche lieferte kein JSON",
  "Ad {id}: HTTP {status}": "Anzeige {id}: HTTP {status}",
- "Ad {id}: no __NEXT_DATA__ found": "Anzeige {id}: keine __NEXT_DATA__ gefunden"
+ "Ad {id}: no __NEXT_DATA__ found": "Anzeige {id}: keine __NEXT_DATA__ gefunden",
+ "Clear these {n} filtered hits?": "Diese {n} aussortierten Treffer leeren?",
+ "Clear the filtered hits of this agent?": "Die aussortierten Treffer dieses Agenten leeren?",
+ "Clear filtered hits automatically": "Aussortierte Treffer automatisch leeren",
+ "after {n} days": "nach {n} Tagen",
+ "Clear": "Leeren",
+ "never": "nie"
 }

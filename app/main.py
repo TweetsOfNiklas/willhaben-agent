@@ -698,8 +698,7 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
             q = q.where(Hit.agent_id == aid)
         if platform:
             q = q.where(Hit.platform == platform)
-        if state != "all":
-            q = q.where(Hit.state == state)
+        q = q.where(Hit.state == state) if state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
         hits = list(db.exec(q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc()).limit(200)))
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
         counts_q = select(Hit.state, func.count()).group_by(Hit.state)
@@ -708,10 +707,12 @@ async def hits_page(request: Request, agent_id: str = "", state: str = "new", pl
         if platform:
             counts_q = counts_q.where(Hit.platform == platform)
         state_counts = dict(db.exec(counts_q).all())
+        state_counts.pop(search_agents_svc.CLEARED, None)
         used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
     state_counts["all"] = sum(state_counts.values())
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=state, state_counts=state_counts,
-                  platform=platform, platform_ids=used if len(used) > 1 else [])
+                  platform=platform, platform_ids=used if len(used) > 1 else [],
+                  filtered_days=search_agents_svc.filtered_days() if state == "filtered" else None)
 
 
 def _keep_condition(platform_id: str, ad_id: str, d: platforms.AdDetail, h: Hit) -> None:
@@ -794,6 +795,20 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
     if request.headers.get("hx-request"):
         return HTMLResponse("")
     return back("/hits")
+
+
+@app.post("/hits/clear-filtered")
+async def hits_clear_filtered(agent_id: int | None = Form(None)):
+    """Hits → Filtered out → Clear: those of the chosen agent, or all."""
+    search_agents_svc.clear_filtered(agent_id or None)
+    return back(f"/hits?state=filtered&agent_id={agent_id}" if agent_id else "/hits?state=filtered")
+
+
+@app.post("/hits/filtered-days")
+async def hits_filtered_days(days: str = Form(""), agent_id: int | None = Form(None)):
+    """Hits → Filtered out: after how many days they are cleared by themselves (0 = never)."""
+    search_agents_svc.set_filtered_days(int(days) if days.strip().isdigit() else 0)
+    return back(f"/hits?state=filtered&agent_id={agent_id}" if agent_id else "/hits?state=filtered")
 
 
 @app.post("/hits/mark-seen")
@@ -2889,8 +2904,7 @@ async def api_hits(agent_id: int | None = None, state: str = "new", limit: int =
         q = select(Hit)
         if agent_id:
             q = q.where(Hit.agent_id == agent_id)
-        if state != "all":
-            q = q.where(Hit.state == state)
+        q = q.where(Hit.state == state) if state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
         return [_hit_dict(h) for h in db.exec(q.order_by(col(Hit.first_seen_at).desc()).limit(min(limit, 200)))]
 
 

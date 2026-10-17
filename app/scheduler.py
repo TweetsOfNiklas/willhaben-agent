@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
 from app.services import chats, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
-from app.services.search_agents import is_checking, run_agent
+from app.services.search_agents import filtered_job, is_checking, run_agent
 from app.willhaben import access_log
 from app.willhaben.session import get_session
 
@@ -141,6 +141,9 @@ def start() -> None:
     scheduler.add_job(geizhals.prune_job, IntervalTrigger(hours=6, jitter=300), id="geizhals-cache-prune",
                       replace_existing=True, max_instances=1, coalesce=True,   # cached answers unused for a week
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=15))
+    scheduler.add_job(filtered_job, IntervalTrigger(hours=6, jitter=300), id="hits-filtered-cleanup",
+                      replace_existing=True, max_instances=1, coalesce=True,   # Hits → Filtered out: retention
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=20))
     scheduler.add_job(vpn_check.tick, IntervalTrigger(minutes=1), id="vpn-search",    # the VPN's schedule, stored
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=90))
