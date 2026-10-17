@@ -28,7 +28,7 @@ from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
 from app.config import address_check, get_settings
 from app.db import (
-    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, MyAd, Purchase, SearchAgent, apply_public_url,
+    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, Message, MyAd, Purchase, SearchAgent, apply_public_url,
     get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage
@@ -1029,6 +1029,11 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
         convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
                              .order_by(col(Conversation.last_message_at).desc().nulls_last())))
         open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
+        last_dir: dict[str, str] = {}       # each chat's newest real message (not a site notice): in = they wrote last
+        for cid, direction in db.exec(select(Message.conversation_id, Message.direction).where(col(Message.kind).is_(None))
+                                      .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
+            last_dir[cid] = direction
+    waiting = {cid for cid, d in last_dir.items() if d == "in"}
     # older than the sync's window (Settings → Automatic answers: the last N days): out of the list like hidden ones,
     # which the sync no longer updates anyway; "Show hidden chats" brings both back
     since = chats.sync_window()[1]
@@ -1037,7 +1042,8 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
     hidden_count = sum(1 for c in convs if c.hidden_at or c.id in old)
     if not show_hidden:
         convs = [c for c in convs if not c.hidden_at and c.id not in old]
-    return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden}
+    return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden,
+            "waiting": waiting}
 
 
 @app.get("/chats", response_class=HTMLResponse)

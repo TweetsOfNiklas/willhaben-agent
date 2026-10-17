@@ -7,7 +7,12 @@
 {% block content %}
 {% set live = session_status.chat_live or {} %}
 {% set role_filter = request.query_params.get('role') if request is defined else none %}
-{% set hid = '&show_hidden=1' if show_hidden else '' %}
+{% set show_filter = request.query_params.get('show') if request is defined else none %}
+{% set show_filter = show_filter if show_filter in ('unread', 'reply', 'draft') else none %}
+{# the list's address with one filter changed (role: selling/buying, show: unread/reply/draft, hidden ones) #}
+{% macro chats_url(role=role_filter, show=show_filter, hidden=show_hidden) -%}
+/chats{% set q = [] %}{% if role %}{% set _ = q.append('role=' ~ role) %}{% endif %}{% if show %}{% set _ = q.append('show=' ~ show) %}{% endif %}{% if hidden %}{% set _ = q.append('show_hidden=1') %}{% endif %}{% if q %}?{{ q|join('&') }}{% endif %}
+{%- endmacro %}
 <div x-data="chatList" x-init="splitResize($el, 'chats')"
      class="flex min-w-0 flex-col border-base-300 md:h-screen md:overflow-x-hidden md:overflow-y-auto md:border-r {{ 'max-md:hidden' if has_detail else '' }}">
   <div class="px-5 pt-[22px] pb-3">
@@ -28,9 +33,15 @@
       {% if live.state == 'connected' %}{{ _("Live since {time} · messages arrive instantly", time=live.since|local('%H:%M')) }}{% elif live.state == 'off' %}{{ _("Live chat off · polls every few minutes") }}{% else %}{{ live.state }} · {{ _("until then it polls every few minutes") }}{% endif %}
     </div>
     {{ ui.seg([
-         ('/chats' ~ ('?show_hidden=1' if show_hidden else ''), _("All"), none, not role_filter),
-         ('/chats?role=seller' ~ hid, _("Selling"), none, role_filter == 'seller'),
-         ('/chats?role=buyer' ~ hid, _("Buying"), none, role_filter == 'buyer')], 'text-[13px]') }}
+         (chats_url(role=none), _("All"), none, not role_filter),
+         (chats_url(role='seller'), _("Selling"), none, role_filter == 'seller'),
+         (chats_url(role='buyer'), _("Buying"), none, role_filter == 'buyer')], 'text-[13px]') }}
+    {# which chats: every one, unread ones, those where the other person wrote last, those with an answer drafted #}
+    <div class="mt-2 flex flex-wrap gap-1.5 text-[12.5px]" data-chat-show>
+      {% for v, label in [(none, _("All")), ('unread', _("Unread")), ('reply', _("Awaiting my reply")), ('draft', _("Draft ready"))] %}
+      <a href="{{ chats_url(show=v) }}" class="rounded-full border px-2.5 py-0.5 no-underline {{ 'border-primary bg-brand-soft text-primary' if v == show_filter else 'border-base-300 text-muted hover:text-base-content' }}">{{ label }}</a>
+      {% endfor %}
+    </div>
   </div>
 
   {# bulk bar: only in selection mode #}
@@ -46,7 +57,9 @@
   </form>
 
   <div id="chat-list-items" class="flex flex-col gap-0.5 px-2.5 pb-4">
-    {% for c in convs if not role_filter or c.role == role_filter %}
+    {% for c in convs if (not role_filter or c.role == role_filter)
+                         and (not show_filter or (show_filter == 'unread' and c.unread_count) or (show_filter == 'reply' and c.id in waiting)
+                              or (show_filter == 'draft' and c.id in open_drafts)) %}
     <a href="/chats/{{ c.id }}" @click="rowClick($event)"
        class="grid w-full grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if conv is defined and conv and conv.id == c.id else '' }}"
        :class="selecting && 'grid-cols-[24px_36px_minmax(0,1fr)_auto]!'">
@@ -70,7 +83,7 @@
     {% else %}
     <p class="px-2.5 py-3.5 text-muted">{{ _("No conversations synced yet.") }}</p>
     {% endfor %}
-    {% if hidden_count %}<a href="/chats?{% if not show_hidden %}show_hidden=1{% endif %}{% if role_filter %}&role={{ role_filter }}{% endif %}" class="p-2.5 text-[12.5px] text-muted no-underline hover:underline">{{ _("Hide hidden and older chats") if show_hidden else _("Show {n} hidden or older chats", n=hidden_count) }}</a>{% endif %}
+    {% if hidden_count %}<a href="{{ chats_url(hidden=not show_hidden) }}" class="p-2.5 text-[12.5px] text-muted no-underline hover:underline">{{ _("Hide hidden and older chats") if show_hidden else _("Show {n} hidden or older chats", n=hidden_count) }}</a>{% endif %}
   </div>
 </div>
 

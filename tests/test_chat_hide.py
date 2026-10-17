@@ -92,3 +92,34 @@ def test_chat_list_hides_and_removes():
         c.post("/chats/b/remove")
         assert "Versteckt" not in c.get("/chats?show_hidden=1").text
         assert {x["id"] for x in c.get("/api/chats").json()} == {"a"}
+
+
+def test_chat_list_filters_unread_awaiting_reply_and_drafts():
+    from app.main import app
+
+    with session() as db:
+        for cid, name, unread in (("u", "Ungelesen-Person", 2), ("w", "Wartet-Person", 0), ("d", "Entwurf-Person", 0),
+                                  ("m", "Erledigt-Person", 0)):
+            db.add(Conversation(id=cid, partner_name=name, unread_count=unread, last_message_at=utcnow(), role="seller"))
+        db.commit()
+        at = utcnow()
+        for cid, direction in (("w", "out"), ("w", "in"), ("m", "in"), ("d", "in")):
+            at += timedelta(seconds=1)
+            db.add(Message(conversation_id=cid, ext_id=f"{cid}{at.timestamp()}", direction=direction, text="x", created_at=at))
+        at += timedelta(seconds=1)
+        db.add(Message(conversation_id="m", ext_id="m-last", direction="out", text="erledigt", created_at=at))
+        db.add(Message(conversation_id="m", ext_id="m-notice", direction="in", text="notice", kind="system",
+                       created_at=at + timedelta(seconds=1)))          # a site notice does not count as their message
+        db.add(Draft(conversation_id="d", text="Ja"))
+        db.commit()
+    names = ("Ungelesen-Person", "Wartet-Person", "Entwurf-Person", "Erledigt-Person")
+    with TestClient(app) as c:
+        def shown(url):
+            page = c.get(url).text.split('id="chat-list-items"')[1]
+            return {n for n in names if n in page}
+        assert shown("/chats") == set(names)
+        assert shown("/chats?show=unread") == {"Ungelesen-Person"}
+        assert shown("/chats?show=reply") == {"Wartet-Person", "Entwurf-Person"}
+        assert shown("/chats?show=draft") == {"Entwurf-Person"}
+        assert shown("/chats?show=reply&role=buyer") == set()
+        assert 'href="/chats?role=seller&amp;show=reply"' in c.get("/chats?show=reply").text
