@@ -25,6 +25,7 @@ from app.services import product_search, scam, screening
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ad_ref
 from app.platforms import vpn
+from app.platforms.shipping_info import apply_shipping
 from app.services.notify import notify
 
 log = logging.getLogger(__name__)
@@ -484,6 +485,7 @@ def _apply(hit: Hit, ad: Listing) -> None:
     hit.is_private = ad.is_private
     if ad.item_condition:           # a list without one keeps what the ad page told (Shpock states it only there)
         hit.item_condition, hit.item_condition_label = ad.item_condition, ad.item_condition_label
+    apply_shipping(hit, ad)         # the same: a list without shipping keeps what the ad page told
     hit.last_seen_at = utcnow()
 
 
@@ -678,13 +680,14 @@ async def _run_agent(agent_id: int) -> RunResult:
     if notify_new and res.new:
         good = [h.id for h in res.new if passes(agent, h) and not _unjudged(agent, h, asked)]
         pushed = set(good[:MAX_PUSH_PER_RUN])
+        await _shipping_pages([h for h in res.new if h.id in pushed])   # the push names the shipping
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
-                await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}".strip(" :"),
+                await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}{_ship_suffix(h)}".strip(" :"),
                              _hit_text(h), url=h.url, image=h.image_url, push=h.id in pushed,
                              data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
-                                   "price": h.price, "location": h.location, **_screen_data(h), **_scam_data(h),
-                                   **_geizhals_data(h)})
+                                   "price": h.price, "location": h.location, "shipping_price": h.shipping_price,
+                                   "shipping": h.shipping, **_screen_data(h), **_scam_data(h), **_geizhals_data(h)})
         if len(good) > MAX_PUSH_PER_RUN:
             sites = list(dict.fromkeys(h.platform for h in res.new))
             await notify("hit", label(sites[0]) if len(sites) == 1 else name,
@@ -693,7 +696,8 @@ async def _run_agent(agent_id: int) -> RunResult:
     if notify_drops:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
-                         f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}" + _scam_line(h)
+                         f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}{_ship_suffix(h)}"
+                         + _scam_line(h)
                          + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url,
                          push=passes(agent, h) and not _unjudged(agent, h, asked),
                          data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
@@ -855,6 +859,14 @@ def _screen_line(h: Hit) -> str:
     return f"\n{line}" if line else ""
 
 
+def _ship_suffix(h: Hit) -> str:
+    """" · + € 4,90 shipping" after a pushed price; "" when the shipping is not known."""
+    from app.platforms import shipping_info
+
+    text = shipping_info.label(h.shipping_price, h.shipping, "€")
+    return f" · {text}" if text else ""
+
+
 def _hit_text(h: Hit) -> str:
     return f"{h.heading} ({h.location or '?'})" + _scam_line(h) + _geizhals_line(h) + _screen_line(h)
 
@@ -995,6 +1007,24 @@ STATUS_WORDS = {"sold": "sold", "verkauft": "sold", "reserved": "reserved", "res
                 "expired": "expired", "inactive": "expired", "deleted": "gone"}
 
 
+async def _shipping_pages(hits: list[Hit]) -> None:
+    """Hits about to be pushed whose list did not state the shipping price: their ad page (one request each, through
+    the site's limiter and VPN) tells it, and their status. A failure only leaves it unknown."""
+    for h in hits:
+        p = _site(h.platform)
+        if h.shipping_price is not None or h.shipping == "pickup" or not p.can("detail"):
+            continue
+        try:
+            d = await p.detail(h.ad_id, url=h.url)
+        except (PlatformError, Exception) as e:  # noqa: BLE001 - the push goes out without it
+            log.info("shipping: ad page of %s %s not loaded: %s", h.platform, h.ad_id, e)
+            continue
+        record_status(h.platform or "willhaben", h.ad_id, site_status(d), d)
+        if d is not None:
+            apply_shipping(h, d)
+        h.site_status = site_status(d)
+
+
 def site_status(detail: Any) -> str:
     """The ad's status as the hit keeps it: gone when the site no longer has the ad, else its status word."""
     if detail is None:
@@ -1003,11 +1033,14 @@ def site_status(detail: Any) -> str:
     return "active" if raw == "active" else STATUS_WORDS.get(raw, raw)
 
 
-def record_status(platform_id: str, ad_id: str, status: str) -> None:
-    """The status the site just gave for an ad, on every hit of it (several agents may hold it)."""
+def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None) -> None:
+    """The status the site just gave for an ad, and the shipping its page states, on every hit of it (several agents
+    may hold it)."""
     with session() as db:
         for h in db.exec(select(Hit).where(Hit.platform == platform_id, Hit.ad_id == ad_id)):
             h.site_status, h.status_checked_at = status, utcnow()
+            if detail is not None:
+                apply_shipping(h, detail)
             db.add(h)
         db.commit()
 
@@ -1023,6 +1056,6 @@ async def check_hit(hit_id: int) -> Hit | None:
     if not p.can("detail"):
         raise PlatformError(t("{site} cannot load a single ad", site=p.name))
     d = await p.detail(h.ad_id, url=h.url)
-    record_status(h.platform or "willhaben", h.ad_id, site_status(d))
+    record_status(h.platform or "willhaben", h.ad_id, site_status(d), d)
     with session() as db:
         return db.get(Hit, hit_id)

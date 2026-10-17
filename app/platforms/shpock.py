@@ -76,7 +76,8 @@ def parse_listing(item: dict[str, Any]) -> Listing:
                    location=locality, postcode=_postcode(locality), state=None, published_at=None, changed_at=None,
                    end_date=None, url=item.get("canonicalURL") or f"{WEB}{item.get('path') or ''}",
                    image_url=IMAGE.format(id=media[0]) if media else None, is_private=None, is_bumped=None,
-                   status="active", platform="shpock")
+                   status="active", platform="shpock",
+                   shipping=None if item.get("isShippable") is None else ("ship" if item["isShippable"] else "pickup"))
 
 
 # Shpock's bot trap (since 2026-10-17): a search answered with generated ads, lorem-ipsum titles and places, ids

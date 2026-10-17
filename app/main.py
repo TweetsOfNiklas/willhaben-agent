@@ -213,7 +213,9 @@ from app.services.deals import level_label as _level_label  # noqa: E402
 
 templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_label)
 templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)
-templates.env.globals.update(hit_can_sync=lambda h: _can_sync(h))     # the hit cards' sync button   # the agent drawer's Geizhals rule
+templates.env.globals.update(hit_can_sync=lambda h: _can_sync(h))     # the hit cards' sync button
+from app.platforms import shipping_info as _shipping_info  # noqa: E402
+templates.env.globals.update(shipping_label=_shipping_info.label_of)    # ui.ship(): shipping next to every price   # the agent drawer's Geizhals rule
 templates.env.globals.update(deal_label=screening.deal_label, screen_labels=screening.verdict_labels,
                              screen_issue_labels=screening.issue_labels, screen_hideable=screening.HIDEABLE,
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
@@ -771,7 +773,7 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
     if d is not None and h is not None and not reduced:
         _keep_condition(platform.id, ad_id, d, h)
     if h is not None and not reduced and error is None:     # the ad page just loaded: its status for the hit cards
-        search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d))
+        search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d), d)
         with session() as db:
             h = db.get(Hit, h.id) or h                       # the pane shows the status just loaded
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad

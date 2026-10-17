@@ -104,7 +104,7 @@
           <span class="flex min-w-0 flex-col gap-0.5 px-3 py-2.5">
             <span class="leading-snug font-semibold">{{ a.heading }}</span>
             {% if preview.sites|length > 1 %}<span>{{ ui.pill(platform_name(a.platform), '', false) }}</span>{% endif %}
-            <span class="font-semibold">{{ a.price_display or '–' }}{% if a.old_price %} <span class="text-[13px] font-normal text-muted line-through">{{ a.old_price|eur }}</span>{% endif %}</span>
+            <span class="font-semibold">{{ a.price_display or '–' }}{{ ui.ship(a, 'ml-1') }}{% if a.old_price %} <span class="text-[13px] font-normal text-muted line-through">{{ a.old_price|eur }}</span>{% endif %}</span>
             <span class="text-[12.5px] text-muted">{{ a.location or '' }} · {{ a.published_at|ago }}</span>
           </span>
         </a>

@@ -464,6 +464,8 @@ bevor sie eine Benachrichtigung bekommt. Für jeden Treffer entscheidest du:
   nach den Preiszonen der Person ist der Maßstab für deal: Schnäppchen → great, günstig → good, fair → fair,
   teuer oder sehr teuer → overpriced. Weich nur ab, wenn Zustand, fehlendes oder zusätzliches Zubehör, ein Paket oder
   ein offensichtlich anderes Geizhals-Produkt es rechtfertigen, und sag dann in reason, warum.
+  Steht eine Versandzeile beim Treffer, bewerte den Preis mit Versand (Preis + Versandkosten), wenn die Person nicht
+  abholen kann oder will; "nur Abholung" bei einem weit entfernten Ort spricht dagegen.
 - issues: alle zutreffenden Gründe aus der festen Liste (leer, wenn nichts dagegen spricht):
   wrong_product (anderes Produkt/Modell), accessory_only (nur Zubehör/Ersatzteil), wrong_variant (falsche Größe,
   Variante, Farbe laut Beschreibung), misses_requirement (verfehlt eine ausdrückliche Vorgabe der Beschreibung, siehe
@@ -512,7 +514,8 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
     """hits: [{nr, title, price, location, private, description, photo, site, condition, new_price}] where photo is a
     file name or None, site the hit's site name, only in a batch from several sites (each hit's country, distance and
     price level), condition the condition the site states and new_price {name, price, pct, level} the Geizhals
-    product with its lowest price, the hit's price in % of it and the label of the person's zones (or None)."""
+    product with its lowest price, the hit's price in % of it and the label of the person's zones (or None), shipping
+    the shipping line (app/platforms/shipping_info.prompt_line) when the site states anything."""
     lines = [f"Suchagent: {agent_name}", "", "Was die Person genau sucht:", brief.strip() or "(keine Beschreibung – nach dem Namen des Suchagenten urteilen)"]
     if stats:
         lines += ["", f"Vergleichspreise bisheriger Treffer dieses Suchagenten ({stats['count']} Anzeigen): "
@@ -526,6 +529,8 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
                      + (f" · Foto: ./{h['photo']}" if h.get("photo") else ""))
         if h.get("condition"):
             lines.append(f"    Zustand laut Anzeige: {h['condition']}")
+        if h.get("shipping"):
+            lines.append(f"    {h['shipping']}")
         if (np := h.get("new_price")) is not None:
             lines.append(f"    Neupreis laut Geizhals: ab {np['price']:g} € ({np['name']}); der Preis ist {np['pct']} % davon"
                          + (f", nach den Preiszonen der Person: {np['level']}" if np.get("level") else ""))

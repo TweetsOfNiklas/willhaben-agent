@@ -47,6 +47,10 @@ class Listing:
     lon: float | None = None
     item_condition: str | None = None   # new | like_new | refurbished | used | defect (app/platforms/condition.py)
     item_condition_label: str | None = None   # the site's words for it; None with a value: inferred (Preisjäger)
+    # shipping to the owner (app/platforms/shipping_info.py): the price, 0 = free, None = not stated; and whether the
+    # seller ships at all: "ship" | "pickup" (pickup only) | None (not stated)
+    shipping_price: float | None = None
+    shipping: str | None = None
 
     @property
     def ref(self) -> str:
@@ -72,6 +76,8 @@ class Listing:
             "is_private": self.is_private,
             "item_condition": self.item_condition,
             "item_condition_label": self.item_condition_label,
+            "shipping_price": self.shipping_price,
+            "shipping": self.shipping,
         }
 
 
@@ -112,6 +118,7 @@ class AdDetail:
     platform: str = DEFAULT_PLATFORM
     item_condition: str | None = None  # as on Listing (app/platforms/condition.py)
     item_condition_label: str | None = None
+    shipping: str | None = None        # "ship" | "pickup" | None, as on Listing; shipping_price above: 0 = free
 
     @property
     def ref(self) -> str:
@@ -130,7 +137,8 @@ class AdDetail:
                    url=h.url, images=[h.image_url] if h.image_url else [], location=h.location,
                    is_private=h.is_private, platform=getattr(h, "platform", None) or DEFAULT_PLATFORM,
                    item_condition=getattr(h, "item_condition", None),
-                   item_condition_label=getattr(h, "item_condition_label", None))
+                   item_condition_label=getattr(h, "item_condition_label", None),
+                   shipping_price=getattr(h, "shipping_price", None), shipping=getattr(h, "shipping", None))
 
     @classmethod
     def from_result(cls, r: dict[str, Any]) -> AdDetail:
@@ -145,7 +153,8 @@ class AdDetail:
                    first_published_at=published, end_date=None, url=r.get("url") or "",
                    images=[r["image_url"]] if r.get("image_url") else [], location=r.get("location"),
                    is_private=r.get("is_private"), platform=r.get("platform") or DEFAULT_PLATFORM,
-                   item_condition=r.get("item_condition"), item_condition_label=r.get("item_condition_label"))
+                   item_condition=r.get("item_condition"), item_condition_label=r.get("item_condition_label"),
+                   shipping_price=r.get("shipping_price"), shipping=r.get("shipping"))
 
     def as_context(self) -> dict[str, Any]:
         return {
@@ -167,6 +176,7 @@ class AdDetail:
             "paylivery": self.paylivery_enabled,
             "buy_now": self.buy_now,
             "shipping_price": self.shipping_price,
+            "shipping": self.shipping,
             "item_condition": self.item_condition,
             "item_condition_label": self.item_condition_label,
         }

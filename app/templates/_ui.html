@@ -64,6 +64,12 @@
 {# the item condition the site states (condition.shown): new stands out, defect is red; nothing when unknown. A value
    without the site's words was inferred (Preisjäger deals are shop offers), the tooltip says so. named: "Condition: …",
    where a bare "Good" would read as a verdict (next to the price check's label). #}
+{# shipping next to a price (app/platforms/shipping_info.py): "+ € 4,90 shipping", "free shipping", "pickup only";
+   nothing when the site states nothing. x: a hit, listing, ad page or result dict #}
+{% macro ship(x, cls='') -%}
+{%- set text = shipping_label(x) %}{% if text %}<span class="text-[12.5px] font-normal tracking-normal whitespace-nowrap text-muted {{ cls }}" title="{{ _('Shipping as the site states it (eBay: to your postcode)') }}">{{ text }}</span>{% endif %}
+{%- endmacro %}
+
 {% macro condition_pill(value, label, platform, cls='', named=false) -%}
 {%- set text = condition_text(value, label, platform) %}{% if text %}{% set text = text|truncate(24, true, '…') %}{{ pill(_("Condition: {label}", label=text) if named else text, condition_tone(value), false, cls, _('Condition according to the ad') if label else _('Condition assumed (Preisjäger lists shop deals)')) }}{% endif -%}
 {%- endmacro %}

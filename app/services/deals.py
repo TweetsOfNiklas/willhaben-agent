@@ -1592,6 +1592,10 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
     v, label = ad.item_condition, ad.item_condition_label
     lines.append(f"Zustand laut Inserat: {label}" if v and label else f"Zustand angenommen: {GERMAN[v]}" if v
                  else "Zustand: unbekannt")
+    if ad.shipping_price is not None or ad.shipping:
+        from app.platforms.shipping_info import prompt_line
+
+        lines.append(prompt_line(ad.shipping_price, ad.shipping))
     if ad.category_path:
         lines.append(f"Kategorie: {' > '.join(ad.category_path)}")
     if photo:

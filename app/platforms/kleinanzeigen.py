@@ -102,6 +102,16 @@ def _price(ad: dict[str, Any]) -> tuple[float | None, str | None, bool | None]:
     return amount, euro(amount) + (" VB" if vb else ""), vb
 
 
+def _shipping(ad: dict[str, Any]) -> str | None:
+    """The category's shipping attribute (<category>.versand): "nein" = pickup only ("Nur Abholung"), "ja" = shipping
+    possible; None where the category has none (the seller's price for it is not in the answer)."""
+    for a in _many((ad.get("attributes") or {}).get("attribute")):
+        if isinstance(a, dict) and str(a.get("name") or "").endswith(".versand"):
+            v = next((str(x.get("value") or "").lower() for x in _many(a.get("value")) if isinstance(x, dict)), "")
+            return "pickup" if v == "nein" else "ship" if v == "ja" else None
+    return None
+
+
 def _common(ad: dict[str, Any]) -> dict[str, Any]:
     addr = ad.get("ad-address") or {}
     postcode = _text(addr.get("zip-code"))
@@ -121,7 +131,7 @@ def _common(ad: dict[str, Any]) -> dict[str, Any]:
             "category_name": _text(category.get("localized-name")) or _text(category.get("localized_name")),
             "description": clean_text(_text(ad.get("description"))),
             "lat": to_float(_val(addr.get("latitude"))), "lon": to_float(_val(addr.get("longitude"))),
-            "item_condition": item_condition, "item_condition_label": item_condition_label}
+            "item_condition": item_condition, "item_condition_label": item_condition_label, "shipping": _shipping(ad)}
 
 
 def parse_listing(ad: dict[str, Any]) -> Listing:
@@ -133,7 +143,7 @@ def parse_listing(ad: dict[str, Any]) -> Listing:
                    image_url=c["images"][0] if c["images"] else None, is_private=c["is_private"], is_bumped=None,
                    status="active", category_ids=[c["category_id"]] if c["category_id"] else [], platform="kleinanzeigen",
                    lat=c["lat"], lon=c["lon"], item_condition=c["item_condition"],
-                   item_condition_label=c["item_condition_label"])
+                   item_condition_label=c["item_condition_label"], shipping=c["shipping"])
 
 
 def parse_ads(data: dict[str, Any]) -> SearchPage:
@@ -158,7 +168,7 @@ def parse_ad(data: dict[str, Any]) -> AdDetail | None:
                     location=c["location"], seller_name=seller, is_private=c["is_private"],
                     category_path=[c["category_name"]] if c["category_name"] else [], category_id=c["category_id"],
                     is_vb=c["vb"], platform="kleinanzeigen", item_condition=c["item_condition"],
-                    item_condition_label=c["item_condition_label"])
+                    item_condition_label=c["item_condition_label"], shipping=c["shipping"])
 
 
 def parse_locations(data: dict[str, Any]) -> list[tuple[int, str]]:

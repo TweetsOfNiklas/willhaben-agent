@@ -58,7 +58,7 @@ from app.llm.prompts import (
 )
 from app.services import ad_images, deals, geo, scam
 from app import platforms
-from app.platforms import Blocked, Listing, PlatformError, SearchSpec
+from app.platforms import Blocked, Listing, PlatformError, SearchSpec, shipping_info
 from app.services import timeline
 
 log = logging.getLogger(__name__)
@@ -546,13 +546,15 @@ def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dic
             "position": pos, "median": st["median"] if st else None, "min": st["min"] if st else None,
             "p25": st["p25"] if st else None, "comparables": st["count"] if st else 0, "stats": st,
             "item_condition": ad.item_condition, "item_condition_label": ad.item_condition_label,
+            "shipping_price": ad.shipping_price, "shipping": ad.shipping,
             "scam_flags": scam.flags(item, scam.median_context(comp), home_country=scam.home_country_of(ad.platform))}
 
 
 # ------------------------------------------------------------------ ranking
 def _rank_line(nr: int, c: dict[str, Any]) -> dict[str, Any]:
     return {"nr": nr, "title": _one_line(c["title"])[:120],
-            "price": c["price_display"] or (f"{c['price']:g} €" if c["price"] is not None else None),
+            "price": shipping_info.with_price(c["price_display"] or (f"{c['price']:g} €" if c["price"] is not None else None),
+                                              c.get("shipping_price"), c.get("shipping")),
             "location": c["location"], "private": c["is_private"], "text": c["text"],
             "level": deals.LEVEL_DE.get((c.get("position") or {}).get("level") or ""),
             "scam": [f["label"] for f in scam.warnings(c["scam_flags"])]}
@@ -648,7 +650,9 @@ async def check_photos(description: str, plan: dict[str, Any], results: list[dic
                 continue
             images.append(img)
             items.append({"nr": nr, "title": _one_line(r.get("title"))[:120],
-                          "price": r.get("price_display") or (f"{r['price']:g} €" if r.get("price") is not None else None),
+                          "price": shipping_info.with_price(
+                              r.get("price_display") or (f"{r['price']:g} €" if r.get("price") is not None else None),
+                              r.get("shipping_price"), r.get("shipping")),
                           "level": deals.LEVEL_DE.get((r.get("position") or {}).get("level") or ""),
                           "fit": r.get("fit"), "reason": _one_line(r.get("reason"))[:300],
                           # the CLI wrapper copies photos in order as foto1, foto2, ...

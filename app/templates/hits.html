@@ -51,7 +51,7 @@
     </a>
     <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-2.5">
       <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
-      <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
+      <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>{{ ui.ship(h) }}
         {% if h.old_price and h.price and h.old_price > h.price %}<span class="text-[13px] text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}{{ ui.condition_pill(h.item_condition, h.item_condition_label, h.platform, 'self-center') }}</div>
       {# the price ratings, each named by its source in the same colours: the user's zones of the Geizhals new price
          (with the share it comes from: a floored "20 % less" beside it reads as 80 % or 81 %; without a zone, e.g.

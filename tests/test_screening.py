@@ -96,7 +96,9 @@ def _hit(ad_id):
 async def test_filtered_hit_is_new_again_after_a_passing_price_drop(responses, ha, images, monkeypatch):  # noqa: F811
     queue, _ = responses
     agent = await _agent_with_two_new(queue)
-    queue.append(copy.deepcopy(queue[-1]))           # third check: same ads
+    third = copy.deepcopy(queue[-1])                 # third check: same ads
+    queue.append(404)                                # the pushed hit's ad page (its shipping): gone
+    queue.append(third)
     monkeypatch.setattr(screening, "get_backend", lambda *a: FakeScreen(
         [{"nr": 1, "relevant": False, "deal": "unknown", "reason": "Nur ein Schlauch"},
          {"nr": 2, "relevant": True, "deal": "good", "reason": "Passt"}]))

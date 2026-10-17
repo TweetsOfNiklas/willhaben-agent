@@ -1538,6 +1538,9 @@ def test_deal_prompt_names_the_zones_and_the_condition():
     assert "Zustand laut Inserat: Neuwertig" in deals.deal_prompt(ad, res, "Deutsch", None)
     ad.item_condition, ad.item_condition_label = "new", None
     assert "Zustand angenommen: neu" in deals.deal_prompt(ad, res, "Deutsch", None)
+    assert "Versand" not in deals.deal_prompt(ad, res, "Deutsch", None)          # the site states none
+    ad.shipping_price = 5.5
+    assert "Versand: 5.5 €" in deals.deal_prompt(ad, res, "Deutsch", None)
     st = deals.stats([380, 390, 400, 410, 420, 430])
     res = {**res, "comparables": {"count": 6, "stats": st}, "position": deals.position(400, st, 100.0)}
     prompt = deals.deal_prompt(_ad(400), res, "Deutsch", None)

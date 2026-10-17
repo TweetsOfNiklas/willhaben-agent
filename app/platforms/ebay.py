@@ -34,7 +34,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from app.i18n import t
-from app.platforms import condition
+from app.platforms import condition, shipping_info
 from app.platforms.base import InvalidSearchUrl, Platform, PlatformError
 from app.platforms.httpclient import FetchResponse, HttpPlatformClient, Transport
 from app.platforms.ratelimit import RateLimiter
@@ -168,9 +168,11 @@ def parse_card(card: str, now: datetime | None = None) -> Listing | None:
     when = next((d for x in other if (d := listed_at(x, now))), None)
     rating_at = next((i for i, x in enumerate(other) if _RATING.match(x)), None)
     seller = other[rating_at - 1] if rating_at else None
+    ship_text = next((x for x in other if _SHIPPING.search(x) and "Rückversand" not in x), None)
+    ship_price, ship_kind = shipping_info.from_text(ship_text)
     facts = [*condition_texts,
              next((x for x in other if x in ("oder Preisvorschlag", "Preisvorschlag")), None),
-             next((x for x in other if _SHIPPING.search(x) and "Rückversand" not in x), None),
+             ship_text,
              t("Seller {name}, {rating}", name=seller, rating=other[rating_at]) if seller and rating_at else None]
     image = p.image if p.image and p.image.startswith("https://") else None
     return Listing(ad_id=ad_id, heading=title, body=" · ".join(f for f in facts if f) or None, price=price,
@@ -178,7 +180,17 @@ def parse_card(card: str, now: datetime | None = None) -> Listing | None:
                    location=abroad, postcode=None, state=None, published_at=when, changed_at=None, end_date=None,
                    url=f"{WEB}/itm/{ad_id}", image_url=re.sub(r"/s-l\d+\.", "/s-l500.", image) if image else None,
                    is_private=is_private, is_bumped=None, status="active", platform="ebay",
-                   item_condition=item_condition, item_condition_label=item_condition_label)
+                   item_condition=item_condition, item_condition_label=item_condition_label,
+                   shipping_price=ship_price, shipping=ship_kind)
+
+
+def ship_to() -> dict[str, str]:
+    """eBay calculates the shipping in the result list for this postcode: the owner's (Settings → Shipping address);
+    nothing without one (eBay then guesses from the IP, the VPN server's country)."""
+    from app.services import shipping
+
+    zip_code = (shipping.sender().get("zip") or "").strip()
+    return {"_stpos": zip_code} if re.fullmatch(r"\d{4}", zip_code) else {}
 
 
 def _has_results(page: str) -> bool:
@@ -379,6 +391,9 @@ def parse_item_page(page: str, ad_id: str, description: str | None = None, now: 
         if about else []
     seller_type = next((k for k in kinds if k in _SELLER_TYPES), None)
     rows = _rows(root)
+    ship_price, ship_kind = shipping_info.from_text(" ".join(rows["shipping"]) if rows.get("shipping") else None)
+    if ship_kind is None and "localPickup" in rows and not rows.get("shipping"):
+        ship_kind = shipping_info.PICKUP
     facts = [f"{t('Condition')}: {condition_text}" if condition_text else None, note,
              " ".join(rows["shipping"]) if rows.get("shipping") else None,
              t("Pickup possible") if "localPickup" in rows else None]
@@ -396,7 +411,7 @@ def parse_item_page(page: str, ad_id: str, description: str | None = None, now: 
                     seller_name=_text(root.find("div", "x-sellercard-atf__about-seller-item--seller-name")),
                     is_private=_SELLER_TYPES.get(seller_type) if seller_type else None,
                     category_path=[p for p in path if p], platform="ebay", item_condition=item_condition,
-                    item_condition_label=item_condition_label)
+                    item_condition_label=item_condition_label, shipping_price=ship_price, shipping=ship_kind)
 
 
 # ------------------------------------------------------------------ the client
@@ -638,7 +653,7 @@ class EbayPlatform(Platform):
     async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
         from app.config import get_settings
 
-        page = await self.client.search_page({**self._params(spec), "_ipg": PAGE_SIZE}, cache_s=cache_s)
+        page = await self.client.search_page({**self._params(spec), "_ipg": PAGE_SIZE, **ship_to()}, cache_s=cache_s)
         page.ads = page.ads[:rows or get_settings().search_rows]
         page.title = spec.keyword
         return page

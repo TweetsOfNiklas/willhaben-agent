@@ -91,6 +91,9 @@ class Hit(SQLModel, table=True):
     # expired | gone (no longer online) | the site's own word; None = never loaded
     site_status: str | None = None
     status_checked_at: datetime | None = None
+    # shipping to the owner (app/platforms/shipping_info.py): price (0 = free) and "ship" | "pickup"; None = not known
+    shipping_price: float | None = None
+    shipping: str | None = None
 
 
 class Conversation(SQLModel, table=True):
