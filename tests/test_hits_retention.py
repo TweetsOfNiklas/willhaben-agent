@@ -139,6 +139,8 @@ def test_browser_notifications_page_and_poll():
         log_event("hit", "Agent: 20 €", "https://example.invalid/ad/1")
         events = c.get(f"/jobs?since={cursor}").json()["events"]
         assert [e["kind"] for e in events] == ["hit"]
+        page = c.get("/settings/browser").text
+        assert "Last hit or price drop with a push:" in page and "document.hasFocus()" in page
 
 
 def test_the_ad_viewer_shows_the_status_it_just_loaded():

@@ -2217,6 +2217,15 @@ SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vp
                      "prices", "geizhals", "browser")   # settings.html groups
 
 
+def _last_notifiable() -> datetime | None:
+    """Settings → Browser: when the last event the browser would show came (a hit, price drop or saved-ad news that
+    was pushed)."""
+    with session() as db:
+        ts = db.exec(select(func.max(EventLog.ts)).where(col(EventLog.kind).in_(("hit", "price_drop", "saved")),
+                                                          col(EventLog.quiet).is_not(True))).one()
+    return ts.replace(tzinfo=timezone.utc) if ts is not None and ts.tzinfo is None else ts
+
+
 def _site_sections() -> dict[str, Any]:
     """The other platforms' settings pages (/settings/<platform id>, group "Platforms" next to willhaben)."""
     return {p.id: p for p in platforms.all(enabled_only=False) if p.id != "willhaben"}
@@ -2400,7 +2409,8 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   ha=await ha_auth.status(), ha_url=ha_auth.ha_url(), ha_source=ha_auth.token_source(),
                   ha_service=ha_auth.notify_service(), quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
                   tg=telegram.status(), tg_kinds=telegram.kinds(), tg_qr=telegram.bot_qr_svg(), **(await _gcal_ctx() if section == "calendar" else {}),
-                  ship=shipping.config(), pickup_max_km=_geo.pickup_radius(), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
+                  ship=shipping.config(), pickup_max_km=_geo.pickup_radius(),
+                  **({"last_notifiable": _last_notifiable()} if section == "browser" else {}), ship_carriers=shipping.CARRIERS, ship_logins=shipping.login_status(),
                   geizhals_auto_specs=ad_creator.auto_specs(), human=human_pace.config(),
                   **({"adaptive": adaptive_pace.profile(None), "adaptive_on": adaptive_pace.enabled(),
                       "adaptive_max": adaptive_pace.max_factor(), "adaptive_choices": adaptive_pace.MAX_FACTORS,

@@ -533,7 +533,7 @@ document.addEventListener('alpine:init', () => {
     poll() {
       clearTimeout(this.timer);
       // hidden: goes on when shown again, unless browser notifications are on here (Settings → Browser)
-      if (document.hidden && !document.querySelector('[data-pending-key]') && !browserNotify.on()) return;
+      if (document.hidden && !document.querySelector('[data-pending-key]') && !browserNotify.on()) return;   // else: keep asking
       const url = '/jobs' + (this.live && this.cursor !== null ? '?since=' + this.cursor : '');
       fetch(url, {headers: {accept: 'application/json'}}).then(r => r.ok ? r.json() : null)
         .then(d => d ? this.apply(d) : this.later(this.IDLE)).catch(() => this.later(10000));
@@ -567,7 +567,8 @@ document.addEventListener('alpine:init', () => {
       if (this.live && data.events && data.events.length) {
         data.events.forEach(e => { const l = e.link || {};
           this.notice({key: 'e' + e.id, title: e.title, text: e.text, href: l.href, ad: l.ad, external: l.external});
-          if (document.hidden && ['hit', 'price_drop', 'saved'].includes(e.kind)) browserNotify.show(e); });
+          // hidden tab or another window in front: an app window left open somewhere counts as visible
+          if ((document.hidden || !document.hasFocus()) && ['hit', 'price_drop', 'saved'].includes(e.kind)) browserNotify.show(e); });
         const box = document.getElementById('inbox-box');
         if (box) refreshInPlace([box]);
       }
