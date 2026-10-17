@@ -1,4 +1,8 @@
 {
+ "{site} account": "{site}-Konto",
+ "not checked yet": "noch nicht geprüft",
+ "You log in once in the app's browser window; the session stays in its profile like willhaben's. It is used for your messages on {site} only: search agents, price checks and the product search stay anonymous.": "Du meldest dich einmal im Browserfenster der App an; die Sitzung bleibt wie bei willhaben im Profil gespeichert. Sie wird nur für deine Nachrichten auf {site} verwendet: Suchagenten, Preisprüfung und Produktsuche bleiben anonym.",
+ "The check did not finish: {error}": "Die Prüfung ist nicht fertig geworden: {error}",
  "{name} pause after a block, {s} s left": "{name}: Pause nach einer Sperre, noch {s} s",
  "{name}: request limit ({n}/h) reached, free again in {m} min": "{name}: Anfragelimit ({n}/h) erreicht, in {m} min wieder frei",
  "{name} is switched off in Settings → Platforms": "{name} ist in Einstellungen → Plattformen ausgeschaltet",

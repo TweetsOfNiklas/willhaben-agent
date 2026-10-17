@@ -38,7 +38,7 @@ from app.llm.claude_login import claude_token, forget_token, get_login, token_so
 from app.services import access_stats, ad_batch, ad_creator, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
-from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones
+from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones, site_accounts
 from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
@@ -2034,6 +2034,27 @@ async def session_login(next: str = Form("/session")):
     return _session_back(next, t('Login page opened in the browser window'))
 
 
+@app.post("/settings/account/{pid}/login")
+async def site_account_login(pid: str):
+    """Kleinanzeigen, Vinted: their login page in the remote view (the overlay opens with it)."""
+    if not site_accounts.get(pid):
+        raise HTTPException(404)
+    try:
+        await site_accounts.open_login(pid)
+    except SessionUnavailable as e:
+        return back(f"/settings/{pid}?msg={quote(str(e), safe='')}")
+    return back(f"/settings/{pid}?remote=1&msg={quote(t('Login page opened in the browser window'), safe='')}")
+
+
+@app.post("/settings/account/{pid}/check")
+async def site_account_check(pid: str):
+    if not site_accounts.get(pid):
+        raise HTTPException(404)
+    st = await site_accounts.check(pid)
+    msg = t("Logged in") if st["logged_in"] else st["error"] or t("Not logged in")
+    return back(f"/settings/{pid}?msg={quote(msg, safe='')}")
+
+
 @app.post("/session/check")
 async def session_check(next: str = Form("/session")):
     ok = await get_session().check_login() if get_session().started else False
@@ -2278,6 +2299,9 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
                   **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
                       "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),
                   **({"site": _platform_row(sites[section])} if section in sites else {}),
+                  **({"account": {**site_accounts.state(section), "checked_at": site_accounts.checked_at(section)},
+                      "account_site": site_accounts.get(section)}
+                     if site_accounts.get(section) else {}),
                   **({"vpn": vpn.status()} if section == "vpn" or section == "willhaben" or section in sites else {}),
                   values={k: get_setting(k) for k in keys}, msg=msg, settings=get_settings(),
                   claude_source=token_source(), claude_login=get_login(),

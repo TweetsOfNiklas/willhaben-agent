@@ -4,6 +4,23 @@
    page (settings/willhaben.html: login, request budget, product search). #}
 {% import "_ui.html" as ui %}
 {% set p = site.p %}
+{% if account_site is defined %}
+{# the site's account in the app's browser: for its messages only; searches stay anonymous (app/services/site_accounts.py) #}
+<section class="mb-4 flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4" data-site-account="{{ p.id }}">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex min-w-0 items-center gap-2.5">
+      <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if account.logged_in else 'bg-off' if account.logged_in is none else 'bg-error' }}"></span>
+      <div class="min-w-0"><div class="font-semibold">{{ _("{site} account", site=account_site.name) }}: {{ _("logged in") if account.logged_in else _("not checked yet") if account.logged_in is none else _("not logged in") }}</div>
+        <div class="text-[12.5px] text-muted">{% if account.checked_at %}{{ _("checked {ago}", ago=account.checked_at|ago) }}{% endif %}{% if account.error %} · {{ account.error }}{% endif %}</div></div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <form method="post" action="/settings/account/{{ p.id }}/login"><button class="btn btn-sm{{ ' btn-primary' if not account.logged_in else '' }}">{{ _("Log in") }}</button></form>
+      <form method="post" action="/settings/account/{{ p.id }}/check"><button class="btn btn-sm">{{ _("Check login") }}</button></form>
+    </div>
+  </div>
+  <p class="text-[12.5px] text-muted">{{ _("You log in once in the app's browser window; the session stays in its profile like willhaben's. It is used for your messages on {site} only: search agents, price checks and the product search stay anonymous.", site=account_site.name) }}</p>
+</section>
+{% endif %}
 <form method="post" action="/settings/platform/{{ p.id }}" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="min-w-0"><span class="text-muted">{{ p.host }} · {{ p.home_country }}</span>

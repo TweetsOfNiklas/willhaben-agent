@@ -12,7 +12,7 @@ from sqlmodel import select
 from app.config import get_settings
 from app.i18n import t
 from app.db import SearchAgent, session, utcnow
-from app.services import adaptive_pace, chats, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
+from app.services import adaptive_pace, chats, site_accounts, geizhals, health, human_pace, my_ads, quiet_hours, timeline, vpn_check
 from app.services.search_agents import is_checking, locate_job, retention_job, run_agent, watch_saved_job
 from app.willhaben import access_log
 from app.willhaben.session import get_session
@@ -167,6 +167,9 @@ def start() -> None:
     scheduler.add_job(retention_job, IntervalTrigger(hours=6, jitter=300), id="hits-retention",
                       replace_existing=True, max_instances=1, coalesce=True,   # Hits: retention, saved ones kept
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=20))
+    scheduler.add_job(site_accounts.check_job, IntervalTrigger(hours=4, jitter=900), id="site-accounts",
+                      replace_existing=True, max_instances=1, coalesce=True,   # Kleinanzeigen, Vinted: still logged in?
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=40))
     scheduler.add_job(watch_saved_job, IntervalTrigger(hours=2, jitter=600), id="hits-watch-saved",
                       replace_existing=True, max_instances=1, coalesce=True,   # saved hits: price drops, sold, gone
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=30))
