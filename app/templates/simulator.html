@@ -67,9 +67,9 @@
   </div>
 
   {# new test chat #}
-  <form method="post" action="/simulator/new" x-data="{ role: 'seller' }" class="m-5 mt-3 flex flex-col gap-2 rounded-[10px] bg-base-200 p-3.5 text-[13px]" id="sim-new">
+  <form method="post" action="/simulator/new" x-data="{ role: 'seller' }" class="mx-5 mt-3 mb-5 flex flex-col gap-2 rounded-[10px] bg-base-200 p-3.5 text-[13px]" id="sim-new">
     <div class="font-semibold">{{ _("New test chat") }}</div>
-    <div class="grid grid-cols-2 gap-1.5">
+    <div class="flex flex-wrap gap-x-5 gap-y-1.5">
       <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" name="role" value="seller" x-model="role" class="radio radio-primary radio-xs" checked>{{ _("I sell") }}</label>
       <label class="flex cursor-pointer items-center gap-1.5"><input type="radio" name="role" value="buyer" x-model="role" class="radio radio-primary radio-xs">{{ _("I buy") }}</label>
     </div>
@@ -89,11 +89,11 @@
     </select>
     <input name="title" class="input input-sm w-full" placeholder="{{ _('Name (optional)') }}">
     <button class="btn btn-primary btn-sm">{{ ui.icon('plus', 14) }}{{ _("Start") }}</button>
-    {# templates: a ready scenario (the other side's messages and expectations) for the ad or purchase chosen above,
-       a sample article without one; created and run at once #}
+    {# templates: a ready scenario (persona, setup, expectations; the other side's messages wait in the composer) for
+       the ad or purchase chosen above, a sample article without one; nothing is sent until the owner does #}
     <div class="mt-1.5 border-t border-base-300 pt-2.5" id="sim-templates">
       <div class="mb-1 font-semibold">{{ _("Quick start: ready scenarios") }}</div>
-      <p class="mb-2 text-[12px] text-muted">{{ _("For the ad or purchase chosen above (a sample article without one). Created as a scenario and run right away.") }}</p>
+      <p class="mb-2 text-[12px] text-muted">{{ _("For the ad or purchase chosen above (a sample article without one). Fills in the other side, the setup and the expectations; the messages wait in the input field until you send them.") }}</p>
       {% for r in ('seller', 'buyer') %}
       <div class="flex flex-wrap gap-1.5" x-show="role === '{{ r }}'"{% if r == 'buyer' %} x-cloak{% endif %}>
         {% for k, label in sim_templates(r) %}<button name="template" value="{{ k }}" formaction="/simulator/template" class="btn btn-xs rounded-full font-normal">{{ _(label) }}</button>{% endfor %}
@@ -210,7 +210,8 @@
     <div>{{ ui.pending('sim:' ~ sim.id, {'run': _("Scenario is running…"), 'suggest': _("Claude looks for a better rule…"), 'play': _("Simulating the conversation…"), 'partner': _("The other side writes…")}.get(sim.busy, _("Writing the automatic answer…")), _("Queued")) }}</div>
     {% else %}
     <form method="post" action="/simulator/{{ sim.id }}/say" class="flex items-end gap-1.5">
-      <textarea name="text" rows="2" required class="textarea min-h-12 flex-1 bg-base-200 field-sizing-content" placeholder="{{ _('Write as the buyer…') if selling else _('Write as the seller…') }}"></textarea>
+      {# a template's next message of the other side waits here, to send or change #}
+      <textarea name="text" rows="2" required class="textarea min-h-12 flex-1 bg-base-200 field-sizing-content" placeholder="{{ _('Write as the buyer…') if selling else _('Write as the seller…') }}">{{ next_script(sim) }}</textarea>
       <button class="btn btn-primary">{{ ui.icon('send', 15) }}<span class="max-sm:sr-only">{{ _("Send") }}</span></button>
     </form>
     <form method="post" class="flex flex-wrap items-center gap-1.5">

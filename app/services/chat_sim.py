@@ -735,8 +735,9 @@ def _amounts(sim: SimChat) -> dict[str, Any]:
 
 async def create_from_template(key: str, platform: str = "willhaben", ad_id: str | None = None,
                                purchase_id: int | None = None) -> SimChat:
-    """A scenario from a template: the other side's messages and the expectations, for this ad or purchase (a sample
-    article without one); its first run is queued at once and fills the chat."""
+    """A scenario from a template, for this ad or purchase (a sample article without one): persona, setup and
+    expectations filled in, the other side's messages waiting in the composer (setup "script") – nothing is sent
+    or run until the owner does it."""
     role, label, persona, script, expects = TEMPLATES[key]
     sim = await create(role, platform, ad_id=ad_id if role == "seller" else None,
                        purchase_id=purchase_id if role == "buyer" else None, persona=persona)
@@ -747,7 +748,7 @@ async def create_from_template(key: str, platform: str = "willhaben", ad_id: str
         setup["max_price"] = _number(setup["price"])
     sim = _save(sim.id, setup=setup)
     n = _amounts(sim)
-    turns = [{"who": "partner", "text": m.format(**n), "at": utcnow().isoformat()} for m in script]
+    setup["script"] = [m.format(**n) for m in script]
     ex = []
     for kind, value in expects:
         if value in ("{floor}", "{max}"):
@@ -756,9 +757,14 @@ async def create_from_template(key: str, platform: str = "willhaben", ad_id: str
                 continue                  # no amount known: the check is left out
         ex.append({"kind": kind, "value": value})
     title = f"{t(label)} · {setup.get('title') or ''}".strip(" ·")[:120]
-    sim = _save(sim.id, title=title, turns=turns, expectations=ex, scenario=True)
-    run_scenarios([sim.id])
-    return sim
+    return _save(sim.id, title=title, setup=setup, expectations=ex, scenario=True)
+
+
+def next_script(sim: SimChat) -> str:
+    """The template's next message of the other side, for the composer ("" when all are sent or there is none)."""
+    script = (sim.setup or {}).get("script") or []
+    sent = sum(1 for x in sim.turns or [] if x.get("who") == "partner")
+    return script[sent] if sent < len(script) else ""
 
 
 # ------------------------------------------------------------------ proposals

@@ -206,22 +206,26 @@ def test_simulator_page(backend):
         assert "Your maximum incl. shipping" in page and "kleinanzeigen.de" in page and "PayLivery</option>" not in page
 
 
-async def test_template_creates_and_runs_a_scenario(backend):
+async def test_template_fills_in_the_scenario_without_sending(backend):
     sim = await chat_sim.create_from_template("lowball", ad_id="111")
-    assert sim.scenario and sim.persona == "lowball"
-    assert sim.turns[0]["text"].startswith("Hallo, würde dir 10 €")             # half of the ad's 20 €
+    assert sim.scenario and sim.persona == "lowball" and sim.turns == []
+    assert chat_sim.next_script(sim).startswith("Hallo, würde dir 10 €")       # half of the ad's 20 €, in the composer
     assert {"kind": "floor", "value": 15} in sim.expectations                  # the ad's minimum
+    assert not jobs.busy("sim") and backend.calls == []                       # nothing sent, nothing run
+    chat_sim.say(sim.id, chat_sim.next_script(sim))
     await _done()
-    s = chat_sim.get(sim.id)
-    assert [x["who"] for x in s.turns] == ["partner", "me", "partner", "me"] and s.last_run is not None
+    assert chat_sim.next_script(chat_sim.get(sim.id)).startswith("Ok, letztes Angebot 12 €")
 
 
 async def test_buyer_template_without_purchase_uses_the_sample(backend):
     sim = await chat_sim.create_from_template("price_fixed")
     assert sim.setup["title"] == chat_sim.SAMPLE_BUY["title"] and {"kind": "ceiling", "value": 140.0} in sim.expectations
+    chat_sim.say(sim.id, chat_sim.next_script(sim))
     await _done()
-    turns = chat_sim.get(sim.id).turns
-    assert turns[0].get("opener") and [x["who"] for x in turns[1:]] == ["partner", "me", "partner", "me"]
+    assert chat_sim.run_scenarios([sim.id]) == 1
+    await _done()
+    run = chat_sim.get(sim.id).last_run
+    assert run["turns"][0].get("opener") and [x["who"] for x in run["turns"][1:]] == ["partner", "me"]
 
 
 def test_all_templates_from_the_page(backend):
@@ -234,3 +238,6 @@ def test_all_templates_from_the_page(backend):
         assert r.status_code == 303
     seller = [k for k, _l in chat_sim.templates_for("seller")]
     assert len([s for s in chat_sim.all_chats() if s.scenario]) == len(seller)
+    first = next(s for s in chat_sim.all_chats() if s.title.startswith("“Still available?”"))
+    with TestClient(app) as c:
+        assert ">Noch da?</textarea>" in c.get(f"/simulator?id={first.id}").text

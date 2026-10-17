@@ -153,7 +153,7 @@
   "Expensive shipping": "Teurer Versand",
   "Seller agrees": "Verkäufer:in sagt zu",
   "Quick start: ready scenarios": "Schnellstart: fertige Szenarien",
-  "For the ad or purchase chosen above (a sample article without one). Created as a scenario and run right away.": "Für das oben gewählte Inserat bzw. den Kauf (ohne Auswahl ein Beispielartikel). Wird als Szenario angelegt und gleich ausgeführt.",
   "All of them": "Alle",
-  "{n} scenarios created – they run now": "{n} Szenarien angelegt – sie laufen jetzt"
+  "{n} scenarios set up – send their messages or run them when you like": "{n} Szenarien vorbereitet – sende ihre Nachrichten oder führ sie aus, wann du willst",
+  "For the ad or purchase chosen above (a sample article without one). Fills in the other side, the setup and the expectations; the messages wait in the input field until you send them.": "Für das oben gewählte Inserat bzw. den Kauf (ohne Auswahl ein Beispielartikel). Füllt Gegenseite, Setup und Erwartungen aus; die Nachrichten warten im Eingabefeld, bis du sie sendest."
 }
