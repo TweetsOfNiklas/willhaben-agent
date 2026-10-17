@@ -435,13 +435,25 @@ def create_agent_from_search(search_id: int, name: str | None = None, interval_s
     return agent
 
 
-async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> tuple[
+def _wh_rows_key(agent_id: int) -> str:
+    """Set once the agent's first check with the sites' larger pages (Platform.former_rows) is done."""
+    return f"wh_rows_agent_{agent_id}"
+
+
+def _old_rows(spec: SearchSpec) -> int | None:
+    return _site(spec.platform).former_rows(spec)
+
+
+async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]], widen: bool = False,
+                      older: set[tuple[str, str]] | None = None) -> tuple[
         list[tuple[Listing, dict[str, Any] | None]], int, list[str], Exception | None, list[dict[str, Any] | None],
         list[str]]:
     """Run an agent's searches one after another (uncached), each on its platform. Returns (ads with their query,
     de-duplicated by ad id, first occurrence wins; summed rows_found; error lines; first exception; the queries of
     the searches that succeeded; the searches the VPN held: a site waiting for the search to find it a server, no
-    error of the search). A block stops the remaining searches of this run."""
+    error of the search). A block stops the remaining searches of this run. `widen`: the agent's first check with
+    willhaben's largest page; the ads beyond the rows it asked for before go into `older` (they are not new, the
+    smaller page just never showed them)."""
     ads: list[tuple[Listing, dict[str, Any] | None]] = []
     seen: set[tuple[str, str]] = set()
     rows, errors, first_exc, ok, held = 0, [], None, [], []
@@ -464,6 +476,8 @@ async def _search_all(specs: list[tuple[SearchSpec, dict[str, Any] | None]]) -> 
             continue
         ok.append(q)
         rows += page.rows_found or 0
+        if widen and older is not None and (old := _old_rows(spec)) is not None:
+            older.update((spec.platform, ad.ad_id) for ad in page.ads[old:] if ad.ad_id)
         for ad in page.ads:
             ad.platform = spec.platform               # the hit belongs to the site that was searched
             if not ad.ad_id or (spec.platform, ad.ad_id) in seen:
@@ -565,7 +579,9 @@ async def _run_agent(agent_id: int) -> RunResult:
         return _fail("; ".join(skipped))
     # quiet searches last: an ad an older search finds too counts as that one's (first occurrence wins) and pushes
     usable.sort(key=lambda x: _quiet(x[1]))
-    found, rows_found, errors, first_exc, ok, held = await _search_all(usable)
+    widen = get_setting(_wh_rows_key(agent_id)) != "1"
+    older: set[tuple[str, str]] = set()
+    found, rows_found, errors, first_exc, ok, held = await _search_all(usable, widen, older)
     if not ok and not errors:                # the VPN held every search: no error, the next check runs as planned
         log.info("agent %s: every search waits for the VPN (%s)", agent_id, held[0])
         return res
@@ -593,7 +609,8 @@ async def _run_agent(agent_id: int) -> RunResult:
             if hit is None:
                 if plan and product_search.drop_reason(ad, plan, query):
                     continue        # "Suche" ad, far over budget or an exclusion word: never stored or notified
-                quiet = res.baseline or _quiet(query)     # the agent's or this search's first check: seen, no push
+                # the agent's or this search's first check: seen, no push; so are the older ads the larger page shows
+                quiet = res.baseline or _quiet(query) or (ad.platform, ad.ad_id) in older
                 # with a screening or a Geizhals rule a new hit is pending until it passed both (Geizhals, Claude:
                 # seconds to minutes): New shows only hits that passed; _file_screened files it
                 hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
@@ -654,6 +671,8 @@ async def _run_agent(agent_id: int) -> RunResult:
             backlog = []
         res.new = backlog + res.new
 
+    if widen and any(_old_rows(s) is not None and q in ok for s, q in usable):
+        set_setting(_wh_rows_key(agent_id), "1")                # its searches ran with the larger page
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
     if agent.max_km and to_notify:
         await _locate(to_notify)

@@ -91,6 +91,11 @@ class Platform(ABC):
     def ref(self, ad_id: str) -> str:
         return ad_ref(self.id, ad_id)
 
+    def former_rows(self, spec: SearchSpec) -> int | None:
+        """How many rows a stored search asked for when the adapter now takes a larger page (willhaben); None when
+        nothing changed. The agents' first check with the larger page files the ads beyond it as seen."""
+        return None
+
     def price_dropped(self, old: float, new: float) -> bool:
         """Is `new` a price drop from `old` for the agents (not just the same price shown differently)?"""
         return new < old

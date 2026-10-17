@@ -163,3 +163,33 @@ async def test_blocked_sets_error_and_backoff(responses):
     assert public_mod.get_public().limiter.cooling_down_s > 0
     with dbmod.session() as db:
         assert db.get(dbmod.SearchAgent, agent.id).last_error
+
+
+async def test_willhaben_agents_take_the_largest_page_once_quietly(responses, monkeypatch):
+    """An agent asks willhaben for its largest page (one request covers more); the first check with it files the ads
+    beyond the rows the agent asked for before as seen: they are older, the smaller page just never showed them."""
+    from app.db import get_setting
+    from app.platforms.willhaben import MAX_ROWS
+    from app.services import search_agents as sa
+
+    queue, calls = responses
+    base = load("search_fahrrad_rows3.json")
+    agent = create_agent(URL)
+    queue.append(base)
+    await run_agent(agent.id)                                         # baseline: all seen
+    assert f"rows={MAX_ROWS}" in str(calls[-1].url) and get_setting(sa._wh_rows_key(agent.id)) == "1"
+
+    dbmod.set_setting(sa._wh_rows_key(agent.id), "")                  # an agent from before the larger page
+    monkeypatch.setattr(sa, "_old_rows", lambda spec: 1)              # ... that asked for one row
+    page = copy.deepcopy(base)
+    ads = page["advertSummaryList"]["advertSummary"]
+    for i, ad in enumerate(ads):
+        ad["id"] = f"88800{i}"
+        _set_attr(ad, "ADID", f"88800{i}")
+    queue.append(page)
+    r = await run_agent(agent.id)
+    assert [h.ad_id for h in r.new] == ["888000"]                     # within the old page: new as always
+    with dbmod.session() as db:
+        states = {h.ad_id: h.state for h in db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id.like("888%")))}
+    assert states == {"888000": "new", "888001": "seen", "888002": "seen"}
+    assert get_setting(sa._wh_rows_key(agent.id)) == "1"
