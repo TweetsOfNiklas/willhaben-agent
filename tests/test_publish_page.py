@@ -695,3 +695,32 @@ def test_batch_table_choices_survive_a_new_prepare_and_reach_willhaben(client, w
     assert zustand[0]["selectedAttributeValueNodes"] == [{"label": "Neu", "code": "neu"}]
     assert two["ad"]["categoryPath"]["path"][-1]["code"] == "MOBILE_SPEAKER" and two["shipping"] is None
     assert {_get(a.id).status, _get(b.id).status} == {"published"}
+
+
+
+def _batch_of(*drafts):
+    with dbmod.session() as db:
+        batch = dbmod.AdBatch(status="review", groups=[{"id": f"g{i}", "photos": [], "draft_id": d.id}
+                                                       for i, d in enumerate(drafts)])
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+    return batch.id
+
+
+def test_batch_table_does_not_publish_an_unreadable_price(client, wh):  # noqa: F811
+    """A price the table could not read is not published with the old one: the row keeps the note, nothing queued."""
+    d = _draft()                                                              # price 12
+    url = f"/new-ad/batch/{_batch_of(d)}/drafts"
+    client.post(url, data={"act": f"prepare:{d.id}"})
+    wait_jobs()
+    assert _get(d.id).wh_plan["options"]
+    row = {f"{d.id}.title": "Neu", f"{d.id}.description": "Text", f"{d.id}.handover": "pickup", "sel": str(d.id)}
+    r = client.post(url, data={**row, f"{d.id}.price": "abc", "act": "publish"})
+    wait_jobs()
+    assert "Nothing published" in r.text and "Price not recognized" in r.text and 'data-pending-key="addraft:' not in r.text
+    assert wh.published == [] and _get(d.id).price_suggestion == 12 and _get(d.id).publishing is None
+
+    r = client.post(url, data={**row, f"{d.id}.price": "80 EUR", "act": "publish"})
+    wait_jobs()
+    assert len(wh.published) == 1 and _get(d.id).price_suggestion == 80 and _get(d.id).status == "published"

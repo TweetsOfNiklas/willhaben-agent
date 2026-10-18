@@ -321,19 +321,21 @@ def table_rows(form: Any) -> dict[int, dict[str, str]]:
     return rows
 
 
-async def save_table(batch_id: int, rows: dict[int, dict[str, str]]) -> list[int]:
+async def save_table(batch_id: int, rows: dict[int, dict[str, str]]) -> tuple[list[int], set[int]]:
     """Save every editable row of the table (unticked ones too: nothing typed gets lost). Returns the drafts whose row
-    has to be drawn anew: a category copied from another row that this draft did not have yet (it becomes a
-    hand-picked option, fields included)."""
+    has to be drawn anew (a category copied from another row that this draft did not have yet: it becomes a
+    hand-picked option, fields included) and the drafts whose edit was not taken over (e.g. an unreadable price)."""
     from app.willhaben.session import NotLoggedIn, SessionUnavailable
 
-    redraw = []
+    redraw, unsaved = [], set()
     for d in drafts_of(get(batch_id)):
         f = rows.get(d.id)
         if f is None or not editable(d):
             continue
         if "title" in f and "description" in f:
             d = ad_creator.save_fields(d.id, f["title"], f["description"], f.get("price", ""), f.get("quantity"))
+            if ad_creator.save_problem(d, f.get("price", "")):
+                unsaved.add(d.id)
         values: dict[str, dict[str, str]] = {}
         for k, v in f.items():
             kind, _, rest = k.partition(":")
@@ -354,11 +356,13 @@ async def save_table(batch_id: int, rows: dict[int, dict[str, str]]) -> list[int
                 ad_creator.update_draft(d.id, error=t("willhaben form not reachable: {error}", error=str(e)))
                 redraw.append(d.id)
         ad_creator.save_wh_choice(d.id, code, values, shipping)
-    return redraw
+    return redraw, unsaved
 
 
-def run_action(batch_id: int, verb: str, ids: list[int], instruction: str = "") -> tuple[str, str]:
-    """One button of the table for all ticked drafts (or the one row it belongs to): (message, tone)."""
+def run_action(batch_id: int, verb: str, ids: list[int], instruction: str = "",
+               unsaved: set[int] = frozenset()) -> tuple[str, str]:
+    """One button of the table for all ticked drafts (or the one row it belongs to): (message, tone). unsaved: drafts
+    whose edit save_table could not take over; they are not published with the old values (the row says why)."""
     drafts = {d.id: d for d in drafts_of(get(batch_id))}
     picked = [drafts[i] for i in ids if i in drafts]
     if not picked:
@@ -366,7 +370,7 @@ def run_action(batch_id: int, verb: str, ids: list[int], instruction: str = "") 
     if verb == "publish":
         n = 0
         for d in picked:
-            if d.status != "draft":
+            if d.status != "draft" or d.id in unsaved:
                 continue
             plan = d.wh_plan or {}
             if not plan.get("options"):

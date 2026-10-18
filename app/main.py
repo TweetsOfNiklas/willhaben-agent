@@ -2177,13 +2177,14 @@ async def ad_batch_drafts(request: Request, batch_id: int):
     rows = ad_batch.table_rows(form)
     if verb == "category" and ref.isdigit() and form.get("code"):   # "Choose another category" search in a row
         rows.setdefault(int(ref), {})["cat"] = str(form["code"])
-    redraw = await ad_batch.save_table(batch_id, rows)
+    redraw, unsaved = await ad_batch.save_table(batch_id, rows)
     msg, tone = t("Saved"), "ok"
     if verb == "category" and ref.isdigit():
         redraw.append(int(ref))
     elif verb != "save":
         ids = [int(ref)] if ref.isdigit() else ticked
-        msg, tone = ad_batch.run_action(batch_id, verb, ids, str(form.get(f"{ref}.instruction" if ref else "instruction") or ""))
+        msg, tone = ad_batch.run_action(batch_id, verb, ids, str(form.get(f"{ref}.instruction" if ref else "instruction") or ""),
+                                        unsaved)
         redraw += ids
     drafts = ad_batch.drafts_of(ad_batch.get(batch_id))
     return render(request, "_batch_oob.html", b=b, drafts=drafts, redraw=[d for d in drafts if d.id in set(redraw)],
