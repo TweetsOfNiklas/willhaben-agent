@@ -404,6 +404,10 @@ async def prepare_willhaben(draft_id: int, query: str | None = None) -> AdDraft:
             break
     plan = insert.build_plan(form, raw, condition=d.condition, attributes=d.attributes)
     plan["for_title"], plan["query"] = d.title, used
+    if not plan["options"]:          # willhaben suggests nothing (live: a wallbox): the category Claude named, if it exists
+        hinted = insert.hint_option(form, d.category_hint, condition=d.condition, attributes=d.attributes)
+        if hinted:
+            plan["options"] = [hinted]
     old = d.wh_plan or {}
     have = {o["path"][-1]["code"] for o in plan["options"] if o.get("path")}
     plan["options"] += [o for o in old.get("options") or [] if o.get("manual") and o["path"][-1]["code"] not in have]

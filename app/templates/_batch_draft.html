@@ -48,6 +48,7 @@
       {% if plan.options is defined %}
       <form class="bdraft-wh flex flex-col gap-2.5 border-t border-base-300 pt-2.5" hx-include="#draft-{{ d.id }} .bdraft-form" hx-post="/ad-drafts/{{ d.id }}/inline/publish" hx-target="#draft-{{ d.id }}" hx-swap="outerHTML" hx-disabled-elt="find button" hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}">
         <div class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Publish on willhaben") }} <span class="font-normal tracking-normal normal-case">· {{ plan.location }}{% if plan.contact %} · {{ plan.contact }}{% endif %}</span></div>
+        {% if not plan.options %}<small class="text-warning">{{ _("No category found for this draft – search for one below, e.g. by the product type.") }}</small>{% endif %}
         {% with pick_url="/ad-drafts/" ~ d.id ~ "/inline/category", pick_target="#draft-" ~ d.id, pick_include="#draft-" ~ d.id ~ " .bdraft-form" %}{% include "_category_picker.html" %}{% endwith %}
         {% if plan.options %}{% include "_wh_handover.html" %}<div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary btn-sm"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Publish on willhaben") }}</button><small class="text-muted">{{ _("Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.") }}</small></div>{% endif %}
       </form>
