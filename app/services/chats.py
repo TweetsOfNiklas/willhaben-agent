@@ -462,10 +462,17 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
         return out
 
 
+OTHERS_MAX_AGE = timedelta(days=30)     # what I told other buyers longer ago is no fact about the item any more
+
+
 def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHERS) -> list[str]:
-    """What I wrote to the other buyers of the same ad (every copy of a renewed ad, my seller chats only), newest
-    first: facts about the item ("funktioniert", "hab nur die eine") that the next buyer asks again. No memory is
-    needed for that; the prompt tells Claude to keep prices, commitments and appointments with others to itself."""
+    """What I wrote to the other buyers of the same ad (every copy of a renewed ad, my seller chats only) in the last
+    OTHERS_MAX_AGE, newest first: facts about the item ("funktioniert", "hab nur die eine") that the next buyer asks
+    again. No memory is needed for that; the prompt tells Claude to keep prices, commitments and appointments with
+    others to itself. Left out: the sold/reserved notices (app/services/sold.py; availability comes from the ad and
+    the stock, a lifted reservation must not live on here) and lines with contact data (an address I sent one buyer)."""
+    from app.services import sold
+
     if not ad_id:
         return []
     ids = stock.ad_chain(ad_id)
@@ -474,13 +481,16 @@ def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHER
                                                       Conversation.id != conversation_id)).all()
         if not convs:
             return []
+        notices = {style._norm(x) for x in db.exec(select(Draft.text).where(
+            col(Draft.intent).in_(list(sold.NOTICE_INTENTS.values())), col(Draft.conversation_id).in_(convs)))}
         rows = db.exec(select(Message).where(col(Message.conversation_id).in_(convs), Message.direction == "out",
-                                             col(Message.kind).is_(None))
+                                             col(Message.kind).is_(None),
+                                             col(Message.created_at) >= utcnow() - OTHERS_MAX_AGE)
                        .order_by(col(Message.created_at).desc(), col(Message.id).desc()).limit(60))
         out: list[str] = []
         for m in rows:
-            text = " ".join(m.text.split())
-            if len(text) < 8 or text in out:
+            text = style._norm(m.text)
+            if len(text) < 8 or text in out or text in notices or style.has_contact_data(text):
                 continue
             out.append(text)
             if len(out) == limit:

@@ -8,6 +8,7 @@ messages, the chosen examples, the model, a remark on how sure the profile is).
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -23,6 +24,7 @@ MAX_PROFILE = 2000        # characters of the profile text (a dozen short lines)
 MIN_MESSAGES = 5          # fewer own messages say too little about a style
 MAX_MESSAGES = 150        # own messages shown to Claude (newest first)
 MAX_NOTE = 200            # characters of Claude's remark on how sure the profile is
+_POSTCODE = re.compile(r"(?<![\d.,])[1-9]\d{3}\s+[a-zäöü][\wäöüß.-]{2,}", re.I)   # "1100 Wien", "4020 linz" (an address)
 
 STYLE_SYSTEM = """\
 Du analysierst Nachrichten, die eine Privatperson auf willhaben.at (dem österreichischen Kleinanzeigenportal)
@@ -70,19 +72,33 @@ def meta() -> dict[str, Any]:
 
 
 def examples(limit: int | None = None) -> list[str]:
-    """Style examples for the reply prompt: the profile's characteristic messages first, then the newest messages the
-    owner typed themselves (chats._style_examples) to fill up to `limit` (prompts.MAX_STYLE_EXAMPLES), each once."""
-    from app.llm.prompts import MAX_STYLE_EXAMPLES
+    """Style examples for the reply prompt: the profile's characteristic messages first (only while a profile is
+    stored, and only those still among my messages: a removed chat takes its lines out of the prompts too), then the
+    newest messages the owner typed themselves (chats._style_examples) to fill up to `limit`
+    (prompts.MAX_STYLE_EXAMPLES), each once."""
     from app.services.chats import _style_examples
 
-    limit = limit or MAX_STYLE_EXAMPLES
-    out = [e.strip() for e in meta().get("examples") or [] if isinstance(e, str) and e.strip()][:limit]
+    limit = limit or prompts.MAX_STYLE_EXAMPLES
+    stored = meta().get("examples") if profile() else None
+    out: list[str] = []
+    if isinstance(stored, list) and stored:
+        known = set(own_messages())
+        out = [_norm(e) for e in stored if isinstance(e, str) and _norm(e) in known][:limit]
     for e in _style_examples(limit):
         if len(out) >= limit:
             break
         if e not in out:
             out.append(e)
     return out
+
+
+def has_contact_data(text: str) -> bool:
+    """An e-mail address, link, phone number, IBAN or a postcode with a place in the text: such a line is never
+    repeated to another buyer (chats._others_said) and never kept as a style example."""
+    from app.services import selling
+    from app.services.scam import IBAN, PHONE_INTL, PHONE_NAT
+
+    return bool(selling.contact_hits(text)) or any(rx.search(text) for rx in (PHONE_INTL, PHONE_NAT, IBAN, _POSTCODE))
 
 
 def _norm(text: str) -> str:
@@ -134,7 +150,7 @@ async def derive() -> dict[str, Any]:
     chosen: list[str] = []
     for e in data.get("examples") or []:      # only real messages of mine, as they are: Claude must not invent any
         e = _norm(e) if isinstance(e, str) else ""
-        if e in known and e not in chosen:
+        if e in known and e not in chosen and not has_contact_data(e):
             chosen.append(e)
     info = {"at": utcnow().isoformat(), "count": len(msgs), "examples": chosen[:prompts.MAX_STYLE_EXAMPLES],
             "model": result.model, "note": str(data.get("note") or "").strip()[:MAX_NOTE]}

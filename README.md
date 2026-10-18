@@ -236,8 +236,8 @@ Settings → Selling → Selling preferences records how you usually sell (picku
 preferred carrier and delivery, payment ways); Claude follows it in answers to your buyers and in new ad texts. The
 free-text rules stay under Settings → Selling → My rules; the same page holds your writing style: "Derive from my
 messages" lets Claude describe how you write (address, length, tone, greetings, punctuation, dialect, emojis, typical
-phrases) from at least five messages you typed yourself on willhaben, and every reply draft follows the profile, which
-you can edit like the rules.
+phrases) from at least five messages you typed yourself on willhaben, and every reply draft follows the profile (a
+purchase order's negotiation keeps its own buyer persona), which you can edit like the rules.
 
 Settings → Claude & usage shows the token usage per task, lets you pick a model per task (default: Opus for writing
 listings, Sonnet for chat replies, screening, the product search and the style profile) and sets a monthly token limit (10 M by default)

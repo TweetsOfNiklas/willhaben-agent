@@ -307,3 +307,41 @@ def test_sent_drafts_with_line_breaks_are_no_style_examples():
         db.commit()
     assert style.own_messages() == ["passt, bis später dann"]
     assert chats._style_examples() == ["passt, bis später dann"]
+
+
+# ------------------------------------------------------------------ what never becomes an example, and the card's refresh
+@pytest.mark.parametrize("text, hit", [
+    ("lieferadresse: hauptstraße 5, 1100 wien", True), ("ruf mich an: 0664 1234567", True),
+    ("+43 660 1234567 bitte", True), ("AT61 1904 3002 3457 3201", True), ("schreib an max@example.at", True),
+    ("passt, 45 geht aber nicht drunter", False), ("1200 watt netzteil dabei", True), ("ok", False),
+    ("Preis 1.100 Euro wäre ok", False),
+])
+def test_has_contact_data(text, hit):
+    assert style.has_contact_data(text) is hit
+
+
+async def test_examples_drop_contact_data_and_removed_chats(backend):
+    texts = _messages(8)
+    with session() as db:
+        chats._upsert_message(db, "c1", "adr", "out", "lieferadresse hauptstraße 5, 1100 wien", T0 + timedelta(hours=1))
+        db.commit()
+    backend.data = {"examples": ["lieferadresse hauptstraße 5, 1100 wien", texts[7], texts[6]]}
+    await style.derive()
+    assert style.meta()["examples"] == [texts[7], texts[6]]            # the address is never an example
+    assert style.examples()[:2] == [texts[7], texts[6]]
+    with session() as db:                                                # the chat is removed: its lines leave the prompts
+        from sqlmodel import delete
+        from app.db import Message
+        db.exec(delete(Message).where(Message.text == texts[7]))
+        db.commit()
+    assert style.examples()[0] == texts[6] and texts[7] not in style.examples()
+
+
+def test_card_route_and_derive_swap_only_the_status(client):
+    _messages(6)
+    r = client.get("/settings/style/card", headers=EN)
+    assert r.status_code == 200 and r.text.lstrip().startswith('<section id="style-card"')
+    card = r.text
+    assert 'data-refresh="/settings/style/card"' in card and 'id="style-status"' in card
+    assert 'hx-target="#style-status"' in card and 'hx-select="#style-status"' in card
+    assert card.index('id="style-status"') < card.index('name="reply_style"')      # the textarea is outside the swapped part

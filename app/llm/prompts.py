@@ -29,10 +29,8 @@ So arbeitest du:
   Verkaufsvorgaben, wenn die Nachricht des Partners sie berührt oder der nächste Schritt davon abhängt, auch ohne
   Nachfrage. Steht dort, dass etwas immer genannt wird, gilt das weiter.
 - Steht unten eine Vorgabe der Person für genau diese Antwort, hat sie Vorrang vor allem anderen: vor den Regeln,
-  dem Verlauf und deiner eigenen Einschätzung. Entscheidung und Inhalt setzt du ohne Abschwächung um; die
-  Formulierung folgt weiter den Regeln hier. Absicherungen (Garantie, Privatverkauf) nennst du nur, wenn der Partner
-  danach fragt oder die Vorgabe sie ausdrücklich verlangt, ein Stichwort reicht nicht. Fragen aus der Vorgabe oder
-  dem alten Entwurf stellst du nur, wenn der Partner sie noch offen lässt.
+  dem Verlauf und deiner eigenen Einschätzung. Entscheidung und Inhalt setzt du genau so um, wie sie dastehen, ohne
+  sie abzuschwächen; nur die Formulierung folgt weiter den Regeln hier.
 - Erfinde keine Fakten über den Artikel, Termine, Adressen oder Telefonnummern. Was fehlt, nennst du in needs_info
   und lässt im Text eine Lücke in eckigen Klammern, z. B. [Uhrzeit].
 - Preise nie als Lücke: kein "[Betrag] €", kein "[Preis]". Entweder du nennst eine konkrete Zahl (aus Anzeige,
@@ -183,7 +181,8 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
         lines.append(f"[{_fmt_time(ts)}] {who.get(direction, '?')}: {text}")
     if others:
         lines += ["", "Was ich anderen Interessenten zu dieser Anzeige geschrieben habe (Fakten zum Artikel gelten auch "
-                      "hier; Preise, Zusagen und Termine mit anderen nicht weitergeben, die anderen Chats nicht erwähnen):"]
+                      "hier; ob er noch da ist und wie viele, sagen nur Anzeige und Stückzahl; Preise, Zusagen und Termine "
+                      "mit anderen nicht weitergeben, die anderen Chats nicht erwähnen):"]
         lines += [f"- {o}" for o in others[:MAX_OTHERS]]
     lines += ["", "Meine Regeln:", rules.strip() or "(keine)"]
     if availability:

@@ -321,14 +321,15 @@ def test_reply_prompt_style_profile_and_other_chats_blocks():
 
 
 def test_others_said_are_my_own_facts_from_the_ads_other_chats():
-    """chats._others_said: my own messages in the other seller chats of the ad (every copy of a renewed ad), newest
-    first, never this chat, never the partner's words, never willhaben notices, never another ad's chats."""
-    from datetime import datetime, timedelta, timezone
+    """chats._others_said: my own messages of the last 30 days in the other seller chats of the ad (every copy of a
+    renewed ad), newest first, never this chat, never the partner's words, never willhaben notices, never another
+    ad's chats, never a sold/reserved notice (availability comes from the ad) and never a line with contact data."""
+    from datetime import timedelta
 
-    from app.db import Conversation, MyAd, session
+    from app.db import Conversation, Draft, MyAd, session, utcnow
     from app.services.chats import _others_said, _upsert_message
 
-    t0 = datetime(2026, 10, 18, 10, 0, tzinfo=timezone.utc)
+    t0 = utcnow() - timedelta(hours=2)
     with session() as db:
         db.add(MyAd(ad_id="111", heading="Mellanox", replaced_by="333"))
         db.add(MyAd(ad_id="333", heading="Mellanox (renewed)"))
@@ -344,6 +345,11 @@ def test_others_said_are_my_own_facts_from_the_ads_other_chats():
         _upsert_message(db, "c3", "d1", "out", "hab nur die eine karte", t0 + timedelta(minutes=5))   # the renewed copy
         _upsert_message(db, "c4", "e1", "out", "die lampe ist noch da", t0 + timedelta(minutes=6))    # another ad
         _upsert_message(db, "c5", "f1", "out", "ich würde die karte selbst kaufen", t0 + timedelta(minutes=7))   # me as buyer
+        _upsert_message(db, "c2", "b5", "out", "vor langer zeit geschrieben, zählt nicht mehr", t0 - timedelta(days=45))
+        _upsert_message(db, "c2", "b6", "out", "lieferadresse: hauptstraße 5, 1100 wien, tel 0664 1234567", t0 - timedelta(minutes=5))
+        reserved = "Hallo, danke für dein Interesse! Der Artikel ist gerade reserviert."
+        _upsert_message(db, "c3", "d0", "out", reserved, t0 - timedelta(minutes=1))
+        db.add(Draft(conversation_id="c3", text=reserved, status="sent", intent="reserved_notice", sent_at=t0))
         db.commit()
     assert _others_said("c1", "111") == ["hab nur die eine karte", "ja funktioniert, hab sie bis gestern im server gehabt"]
     assert _others_said("c1", "111", limit=1) == ["hab nur die eine karte"]
@@ -373,8 +379,11 @@ def test_style_examples_put_the_profiles_examples_first():
                                                 "examples": ["eigene nachricht nummer 2", " passt so ", "", 7]}))
     assert style.profile() == "- kurz und per Du" and style.meta()["count"] == 10
     ex = style.examples()
-    assert ex[:2] == ["eigene nachricht nummer 2", "passt so"] and len(ex) == 8 and len(set(ex)) == 8
-    assert ex[2] == "eigene nachricht nummer 9" and "eigene nachricht nummer 2" not in ex[2:]
+    assert ex[0] == "eigene nachricht nummer 2" and len(ex) == 8 and len(set(ex)) == 8     # "passt so" is no message of mine
+    assert ex[1] == "eigene nachricht nummer 9" and "eigene nachricht nummer 2" not in ex[1:]
+    set_setting("reply_style", "")
+    assert style.examples()[0] == "eigene nachricht nummer 9"           # profile cleared: the derived examples go with it
+    set_setting("reply_style", "- kurz und per Du")
     set_setting("reply_style_meta", "not json")
     assert style.meta() == {} and style.panel()["profile"] == "- kurz und per Du" and style.panel()["meta"] == {}
 
@@ -432,13 +441,13 @@ def test_reply_system_answers_what_was_asked_and_keeps_rules_as_boundaries():
                  "sind aber Grenzen und kein\n  Text zum Aufsagen",
                  "Garantie, Rücknahme, Privatverkauf oder „wie gesehen“ schreibst du nie von\n  dir aus",
                  "Abweichend davon nennst du Abholung, Versand und Zahlungsweg (auch PayLivery)",
-                 "Vorrang vor allem anderen", "die\n  Formulierung folgt weiter den Regeln hier",
-                 "Absicherungen (Garantie, Privatverkauf) nennst du nur", "ein Stichwort reicht nicht",
+                 "Vorrang vor allem anderen", "setzt du genau so um, wie sie dastehen",
+                 "nur die Formulierung folgt weiter den Regeln hier",
                  "instruction, die nur die Entscheidung\n  in einem Satz nennt",
                  "keine Garantie- oder\n  Privatverkaufshinweise, keine schon beantworteten Fragen"):
         assert text in REPLY_SYSTEM, text
         assert text in AUTO_REPLY_SYSTEM and text in PURCHASE_SYSTEM, text
-    assert "Setz sie genau so um, wie sie dasteht" not in REPLY_SYSTEM
+    assert "ein Stichwort reicht nicht" not in REPLY_SYSTEM      # a typed „ohne Garantie“ stays binding (chats.revise)
     assert "Automatischer Modus: Deine Antwort wird ohne weitere Prüfung gesendet" in AUTO_REPLY_SYSTEM   # the .replace() still hits
     desc = REPLY_SCHEMA["properties"]["alternatives"]["items"]["properties"]["instruction"]["description"]
     assert desc.startswith("Nur die Entscheidung in einem kurzen Satz") and "keine schon beantworteten Fragen" in desc

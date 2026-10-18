@@ -391,3 +391,12 @@ async def test_seller_drafts_get_the_style_profile_and_the_other_chats(env):  # 
     await chats.draft_reply("c1")                     # as buyer (no purchase order): my style, nobody else's chats
     p = backend.calls[-1]["prompt"]
     assert "Mein Schreibstil" in p and "Was ich anderen Interessenten" not in p
+    from app.db import Purchase
+    with session() as db:                             # a purchase order: Claude's buyer persona, not my style
+        db.add(Purchase(ad_id="999", conversation_id="c1", mode="pickup", status="negotiating", max_price=250.0,
+                        asking_price=300.0))
+        db.commit()
+    for auto in (False, True):
+        await chats.draft_reply("c1", auto=auto)
+        p = backend.calls[-1]["prompt"]
+        assert "Mein Schreibstil" not in p and "Was ich anderen Interessenten" not in p and "Höchstpreis: 250 €" in p

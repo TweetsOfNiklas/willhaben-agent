@@ -12,6 +12,15 @@ from app.services import style
 router = APIRouter()
 
 
+@router.get("/settings/style/card", response_class=HTMLResponse)
+async def style_card(request: Request):
+    """The card alone (settings/_style.html): what an open rules page fetches to refresh it (data-refresh), instead of
+    the whole settings page with its connection checks."""
+    from app.main import templates
+
+    return templates.TemplateResponse(request, "settings/_style.html", {})
+
+
 @router.post("/settings/style/derive", response_class=HTMLResponse)
 async def style_derive(request: Request):
     """Start the derivation in the background. The card (htmx) comes back at once with its running state and

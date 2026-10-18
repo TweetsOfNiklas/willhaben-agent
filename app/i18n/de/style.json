@@ -3,7 +3,7 @@
   "the style profile derived from your own chat messages – runs only when you ask for it": "das Stilprofil aus deinen eigenen Chatnachrichten – läuft nur, wenn du es anstößt",
   "How you write, derived from your own willhaben messages. Claude follows it in every reply draft, on top of the examples it always gets. You can edit it.": "Wie du schreibst, abgeleitet aus deinen eigenen willhaben-Nachrichten. Claude hält sich bei jedem Antwortentwurf daran, zusätzlich zu den Beispielen, die es immer bekommt. Du kannst es bearbeiten.",
   "Derive from my messages": "Aus meinen Nachrichten ableiten",
-  "Deriving…": "Leite ab…",
+  "Deriving…": "Wird abgeleitet…",
   "Claude is reading your messages…": "Claude liest deine Nachrichten…",
   "queued": "eingereiht",
   "Only {n} of your own messages so far – at least {min} are needed": "Erst {n} eigene Nachrichten – mindestens {min} werden gebraucht",
