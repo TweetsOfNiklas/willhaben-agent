@@ -409,7 +409,25 @@ async def prepare_willhaben(draft_id: int, query: str | None = None) -> AdDraft:
     plan["options"] += [o for o in old.get("options") or [] if o.get("manual") and o["path"][-1]["code"] not in have]
     if old.get("shipping"):
         plan["shipping"] = old["shipping"]
+    _keep_choices(plan, old)
     return update_draft(draft_id, wh_plan=plan, error=None)
+
+
+def _keep_choices(plan: dict[str, Any], old: dict[str, Any]) -> None:
+    """Asking willhaben again keeps what the owner chose: the category (by its code, wherever it lands now) and the
+    required fields' values of options that are still there."""
+    old_opts = old.get("options") or []
+    chosen = {option_code(o): {f["code"]: f.get("selected") for f in o.get("fields") or []} for o in old_opts}
+    for o in plan["options"]:
+        for f in o["fields"]:
+            v = (chosen.get(option_code(o)) or {}).get(f["code"])
+            if v is not None and v in {c for c, _ in f["values"]}:
+                f["selected"] = v
+    sel = old.get("selected")
+    if isinstance(sel, int) and 0 <= sel < len(old_opts):
+        idx = next((i for i, o in enumerate(plan["options"]) if option_code(o) == option_code(old_opts[sel])), None)
+        if idx is not None:
+            plan["selected"] = idx
 
 
 async def add_manual_category(draft_id: int, code: str) -> AdDraft:
@@ -435,6 +453,61 @@ async def add_manual_category(draft_id: int, code: str) -> AdDraft:
         idx = len(options) - 1
     plan["options"], plan["selected"] = options, idx
     return update_draft(draft_id, wh_plan=plan, error=None)
+
+
+def option_code(o: dict[str, Any]) -> str:
+    """The willhaben category code of a wh_plan option (its leaf)."""
+    return str(o["path"][-1]["code"]) if o.get("path") else ""
+
+
+def save_wh_choice(draft_id: int, code: str | None, values: dict[str, dict[str, str]],
+                   shipping: dict[str, Any] | None) -> AdDraft:
+    """The batch table's willhaben choice, kept without publishing: the category option (by its code), the required
+    fields per option (category code -> field code -> value code; unknown values are ignored) and the handover.
+    Publishing takes them from wh_plan later (_publish_inputs falls back to each field's "selected")."""
+    import copy
+
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    plan = copy.deepcopy(d.wh_plan or {})
+    options = plan.get("options") or []
+    for o in options:
+        posted = values.get(option_code(o)) or {}
+        for f in o["fields"]:
+            allowed = {str(c): c for c, _ in f["values"]}
+            if posted.get(f["code"]) in allowed:
+                f["selected"] = allowed[posted[f["code"]]]
+    idx = next((i for i, o in enumerate(options) if option_code(o) == code), None)
+    if idx is not None:
+        plan["selected"] = idx
+    if shipping is not None:
+        plan["shipping"] = shipping
+    return update_draft(draft_id, wh_plan=plan) if plan != (d.wh_plan or {}) else d
+
+
+def enqueue_prepare(draft_id: int) -> bool:
+    """"Prepare for willhaben" as a background job (lane ads, read-only on willhaben): categories and required fields
+    land in wh_plan, the batch row swaps itself in when done. False: not a draft, busy, or already queued."""
+    from app.services import jobs
+    from app.willhaben.session import NotLoggedIn, SessionUnavailable
+
+    key = f"preparing:{draft_id}"
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d is None or d.status != "draft" or d.publishing or d.refining or key in jobs.current_keys("preparing:"):
+        return False
+
+    async def run(job) -> str:
+        try:
+            d = await prepare_willhaben(draft_id)
+        except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+            update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
+            raise
+        return t("{n} categories suggested", n=len((d.wh_plan or {}).get("options") or []))
+
+    jobs.submit("prepare", t("Prepare „{title}“ for willhaben", title=(d.title or f"#{draft_id}")[:60]), run,
+                current=key)
+    return True
 
 
 def parse_shipping(form: Any) -> dict[str, Any]:

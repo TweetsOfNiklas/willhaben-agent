@@ -1,0 +1,104 @@
+{# One draft as a row of the batch table (a <tbody>: main row + details row). Inputs belong to the form #bt and are
+   named "<draft id>.<field>"; every change saves by itself. Every <select> marks its option as selected: one without
+   counts as edited for refreshInPlace, and a waiting row would never swap in. [data-prop] cells carry ⧉ (apply to all ticked rows),
+   their [data-key] inputs are matched by key in the other rows. wrap: alone in a <table> (row refresh);
+   oob: htmx out-of-band swap. #}
+{% import "_ui.html" as ui %}
+{% macro copy_btn() %}<button type="button" data-copy class="btn btn-ghost btn-xs btn-square shrink-0 text-muted" title="{{ _('Apply to all ticked ads') }}" aria-label="{{ _('Apply to all ticked ads') }}">{{ ui.icon('copy', 13) }}</button>{% endmacro %}
+{% set plan = d.wh_plan or {} %}{% set opts = plan.options or [] %}
+{% set sel_idx = plan.selected if plan.selected is defined and plan.selected is not none and plan.selected < opts|length else 0 %}
+{% set ed = d.status == 'draft' and not d.publishing and not d.refining %}
+{% set pkey = 'addraft:' ~ d.id if d.publishing else 'refining:' ~ d.id if d.refining else 'preparing:' ~ d.id if preparing else '' %}
+{% set sh = plan.shipping or {} %}{% set ho = sh.handover or sell_handover_default() %}
+{% set st = d.price_stats or {} %}{% set match = (d.geizhals or {}).get('match') or {} %}
+{% set hos = {'pickup': _("Self pickup"), 'shipping': _("Shipping"), 'both': _("Pickup or shipping")} %}
+{% if wrap %}<table>{% endif %}
+<tbody id="row-{{ d.id }}" data-draft="{{ d.id }}" x-data="{ open: false, ho: {{ ho|tojson|forceescape }} }" class="border-t border-base-300"
+       {% if pkey %}data-pending-key="{{ pkey }}" data-refresh="/new-ad/batch/{{ b.id }}/row/{{ d.id }}?checked={{ 1 if checked else 0 }}"{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>
+<tr class="{{ 'opacity-65' if d.status == 'discarded' else '' }}">
+  <td class="w-8"><input type="checkbox" name="sel" value="{{ d.id }}" form="bt" {% if checked %}checked{% endif %} {% if d.publishing or d.status == 'published' %}disabled{% endif %} class="checkbox checkbox-primary checkbox-sm" aria-label="{{ _('Tick ad #{id}', id=d.id) }}"></td>
+  <td class="w-16">{% if d.image_paths %}<a href="/ad-drafts/{{ d.id }}/image/0" target="_blank" class="block">{{ ui.thumb('/ad-drafts/' ~ d.id ~ '/image/0') }}</a>{% endif %}</td>
+  <td class="min-w-[240px]">
+    {% if ed %}<input name="{{ d.id }}.title" value="{{ d.title or '' }}" maxlength="80" form="bt" data-save aria-label="{{ _('Title') }}" class="input input-sm w-full bg-base-200 font-semibold">
+    {% else %}<div class="font-semibold break-words">{% if d.status == 'published' and d.wh_ad_id %}<a href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" rel="noopener" class="hover:underline">{{ d.title }} ↗</a>{% else %}{{ d.title or _('Untitled') }}{% endif %}</div>{% endif %}
+    <div class="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted"><a href="/new-ad/{{ d.id }}" class="hover:text-base-content">#{{ d.id }}</a>{% if d.category_hint %}<span>· {{ d.category_hint }}</span>{% endif %}{% if d.questions %}<a href="/new-ad/{{ d.id }}" class="text-warning hover:underline">· {{ _("Claude has questions") }}</a>{% endif %}</div>
+    <span id="err-{{ d.id }}" class="block text-xs text-error">{{ d.error or '' }}</span>
+  </td>
+  <td data-prop="price" class="w-28">
+    {% if ed %}<div class="flex items-center gap-0.5"><input name="{{ d.id }}.price" data-key="price" inputmode="decimal" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}" form="bt" data-save aria-label="{{ _('Price (€)') }}" class="input input-sm w-20 bg-base-200 font-semibold">{{ copy_btn() }}</div>
+    {% else %}<span class="font-semibold">{{ d.price_suggestion|eur if d.price_suggestion is not none else '–' }}</span>{% endif %}
+    {% if st.count %}<div class="mt-1 text-xs text-muted" title="{{ _('Comparison ({n}): median {median}, middle {p25}–{p75}', n=st.count, median=st.median|eur, p25=st.p25|eur, p75=st.p75|eur) }}">⌀ {{ st.median|eur }}</div>{% endif %}
+  </td>
+  <td data-prop="quantity" class="w-24">
+    {% if ed %}<div class="flex items-center gap-0.5"><input type="number" name="{{ d.id }}.quantity" data-key="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="{{ d.quantity or '' }}" form="bt" data-save aria-label="{{ _('Pcs.') }}" class="input input-sm w-16 bg-base-200">{{ copy_btn() }}</div>
+    {% else %}{{ d.quantity or 1 }}{% endif %}
+  </td>
+  <td class="min-w-[200px]">
+    {% if ed and not preparing %}
+    <div data-prop="cat" class="flex items-center gap-0.5">
+      <select name="{{ d.id }}.cat" data-key="cat" form="bt" data-save aria-label="{{ _('Category') }}" class="select select-sm w-full min-w-0 bg-base-200">
+        {% for o in opts %}<option value="{{ o.path[-1].code }}" title="{{ o.label }}" {% if loop.index0 == sel_idx %}selected{% endif %}>{{ o.path[-2:]|map(attribute='label')|join(' › ') }}</option>{% endfor %}
+        {% if not opts %}<option value="" selected>{{ _("– no category yet –") if plan.options is not defined else _("– no suggestion –") }}</option>{% endif %}
+      </select>{{ copy_btn() }}
+    </div>
+    {% for o in opts %}{% set code = o.path[-1].code %}
+    <div data-catblock="{{ code }}" class="mt-1 flex flex-col gap-1" {% if loop.index0 != sel_idx %}hidden{% endif %}>
+      {% for f in o.fields %}<div data-prop="f:{{ f.code }}" class="flex items-center gap-0.5"><select name="{{ d.id }}.f:{{ code }}:{{ f.code }}" data-key="f:{{ f.code }}" form="bt" data-save aria-label="{{ f.label }}" class="select select-xs w-full min-w-0 bg-base-100"><option value="" {% if f.selected not in f['values']|map('first') %}selected{% endif %}>{{ f.label }}: –</option>{% for vc, vl in f['values'] %}<option value="{{ vc }}" {% if vc == f.selected %}selected{% endif %}>{{ f.label }}: {{ vl }}</option>{% endfor %}</select>{{ copy_btn() }}</div>{% endfor %}
+    </div>
+    {% endfor %}
+    {% if plan.options is not defined %}<button type="button" class="btn btn-ghost btn-xs mt-1" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-include="#bt" hx-vals='{"act": "prepare:{{ d.id }}"}' hx-swap="none" hx-disabled-elt="this"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Ask willhaben") }}</button>{% endif %}
+    {% elif preparing %}{{ ui.pending('preparing:' ~ d.id, _("Asking willhaben…"), _("Queued: categories")) }}
+    {% else %}<span class="text-[13px]">{{ opts[sel_idx].label if opts else '–' }}</span>{% endif %}
+  </td>
+  <td data-prop="handover" class="w-40">
+    {% if ed %}<div class="flex items-center gap-0.5"><select name="{{ d.id }}.handover" data-key="handover" x-model="ho" form="bt" data-save aria-label="{{ _('Handover') }}" class="select select-sm w-full min-w-0 bg-base-200">{% for v, lbl in hos.items() %}<option value="{{ v }}" {% if ho == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>{{ copy_btn() }}</div>
+    <button type="button" x-show="ho !== 'pickup'" x-cloak @click="open = true" class="mt-1 text-xs text-primary hover:underline">{{ _("PayLivery & parcel") }} →</button>
+    {% else %}<span class="text-[13px]">{{ hos.get(ho, ho) }}</span>{% endif %}
+  </td>
+  <td class="w-36">
+    {% if d.publishing %}{{ ui.pending('addraft:' ~ d.id, _("Publishing…"), _("Queued: publish")) }}
+    {% elif d.refining %}{{ ui.pending('refining:' ~ d.id, _("Claude writes…"), _("Queued: Claude")) }}
+    {% elif d.status == 'published' %}{{ ui.pill(_("published"), 'ok') }}
+    {% elif d.status == 'discarded' %}{{ ui.pill(_("discarded")) }}
+    {% elif d.status == 'error' %}{{ ui.pill(_("Error"), 'bad') }}
+    {% elif opts %}{{ ui.pill(_("ready"), 'brand') }}
+    {% else %}{{ ui.pill(_("draft")) }}{% endif %}
+  </td>
+  <td class="w-9"><button type="button" @click="open = !open" class="btn btn-ghost btn-xs btn-square" :aria-expanded="open" aria-label="{{ _('More') }}"><span class="inline-block transition-transform" :class="open && 'rotate-180'">{{ ui.icon('chevron-down', 15) }}</span></button></td>
+</tr>
+<tr x-show="open" x-cloak class="bg-base-200">
+  <td></td>
+  <td colspan="8" class="py-3">
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div class="flex min-w-0 flex-col gap-2">
+        {% if ed %}<textarea name="{{ d.id }}.description" rows="6" form="bt" data-save aria-label="{{ _('Description') }}" class="textarea w-full bg-base-100 text-[13px]">{{ d.description or '' }}</textarea>
+        <div class="flex items-center gap-1.5"><input name="{{ d.id }}.instruction" form="bt" data-enter="refine-{{ d.id }}" placeholder="{{ _('Revise with Claude, e.g. “shorter”, “mention the new battery from 2024”') }}" class="input input-sm min-w-0 flex-1 bg-base-100"><button type="button" id="refine-{{ d.id }}" class="btn btn-sm shrink-0" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-include="#bt" hx-vals='{"act": "refine:{{ d.id }}"}' hx-swap="none" hx-disabled-elt="this"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Revise") }}</button></div>
+        {% else %}<div class="text-[13px] whitespace-pre-line">{{ d.description or '' }}</div>{% endif %}
+      </div>
+      <div class="flex min-w-0 flex-col gap-2.5 text-[13px]">
+        {% if ed %}
+        <div data-prop="handover" x-show="ho !== 'pickup'" x-cloak class="flex flex-wrap items-end gap-3 rounded-[10px] bg-base-100 px-3 py-2.5">
+          <label class="flex items-center gap-2 pb-2"><input type="checkbox" name="{{ d.id }}.paylivery" data-key="paylivery" value="1" form="bt" data-save {% if sh.paylivery %}checked{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("with PayLivery (buyer protection)") }}</label>
+          <label class="flex min-w-0 flex-col gap-1.5"><span class="text-xs text-muted">{{ _("Parcel size") }}</span><select name="{{ d.id }}.parcel_size" data-key="parcel_size" form="bt" data-save class="select select-sm bg-base-100">{% for s in parcel_sizes %}<option value="{{ s }}" {% if s == (sh.size or 'S') %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+          <label class="flex min-w-0 flex-col gap-1.5"><span class="text-xs text-muted">{{ _("Carrier") }}</span><select name="{{ d.id }}.parcel_carrier" data-key="parcel_carrier" form="bt" data-save class="select select-sm bg-base-100"><option value="" {% if sh.carrier not in parcel_carriers %}selected{% endif %}>{{ _("cheapest") }}</option>{% for c in parcel_carriers %}<option value="{{ c }}" {% if c == sh.carrier %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+          {{ copy_btn() }}
+        </div>
+        {% if not preparing %}{% with pick_only=true, pick_url="/new-ad/batch/" ~ b.id ~ "/drafts?act=category:" ~ d.id, pick_target="#row-" ~ d.id, pick_include="#bt", pick_swap="none" %}{% include "_category_picker.html" %}{% endwith %}{% endif %}
+        {% endif %}
+        {% if st.count or st.llm_estimate or match.name %}<div class="text-muted">{% if st.count %}{{ _("Comparison ({n}): median {median}, middle {p25}–{p75}", n=st.count, median=st.median|eur, p25=st.p25|eur, p75=st.p75|eur) }}{% endif %}{% if st.llm_estimate %} · {{ _("Claude estimates {price}", price=st.llm_estimate|eur) }}{% endif %}{% if match.name %} · Geizhals: <a href="{{ match.url }}" target="_blank" rel="noopener" class="text-primary hover:underline">{{ match.name[:50] }}</a>{% if match.price_from %}, {{ _("new from {price}", price=match.price_from|eur) }}{% endif %}{% endif %}</div>{% endif %}
+        {% if st.note %}<div><strong>Claude:</strong> {{ st.note }}</div>{% endif %}
+        {% if d.attributes %}<div class="text-muted">{% for a in d.attributes %}{{ a.name }}: {{ a.value }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+        <div class="flex flex-wrap items-center gap-2">
+          <a href="/new-ad/{{ d.id }}" class="btn btn-sm">{{ _("Details, Geizhals, undo") }} →</a>
+          {% if d.image_paths %}<a href="/ad-drafts/{{ d.id }}/photos.zip" class="btn btn-ghost btn-sm">{{ _("Photos (.zip)") }}</a>{% endif %}
+          {% if d.status == 'error' and not d.refining %}<button type="button" class="btn btn-sm" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-include="#bt" hx-vals='{"act": "retry:{{ d.id }}"}' hx-swap="none" hx-disabled-elt="this"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Try again") }}</button>{% endif %}
+          {% if d.status == 'published' and d.wh_ad_id %}<a href="/myads?ad={{ d.wh_ad_id }}" class="btn btn-sm">{{ _("My ad") }}</a><a href="/sold/{{ d.wh_ad_id }}?kind=sold" class="btn btn-sm">{{ _("Mark sold…") }}</a>{% endif %}
+          {% if d.status == 'discarded' %}<button type="button" class="btn btn-sm" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-include="#bt" hx-vals='{"act": "restore:{{ d.id }}"}' hx-swap="none">{{ _("Restore") }}</button>
+          {% elif d.status in ('draft', 'error') and not d.publishing %}<button type="button" class="btn btn-ghost btn-sm ml-auto" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-include="#bt" hx-vals='{"act": "discard:{{ d.id }}"}' hx-swap="none">{{ _("Discard") }}</button>{% endif %}
+        </div>
+      </div>
+    </div>
+  </td>
+</tr>
+</tbody>
+{% if wrap %}</table>{% endif %}

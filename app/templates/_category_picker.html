@@ -1,4 +1,6 @@
-{# Category choice inside a publish form. Same inputs: option (radio), o{n}_<code> selects, picker search → pick_url. JS unchanged. #}
+{# Category choice inside a publish form. Same inputs: option (radio), o{n}_<code> selects, picker search → pick_url.
+   pick_only: just the search (the batch table has its own category select); pick_swap: htmx swap of the answer. #}
+{% if not pick_only %}
 {% set sel = plan.selected if plan.selected is defined and plan.selected is not none and plan.selected < (plan.options or [])|length else 0 %}
 {% for o in plan.options or [] %}{% set oi = loop.index0 %}
 <label class="flex cursor-pointer flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-100 px-3.5 py-2.5 has-[input:checked]:border-primary has-[input:checked]:bg-brand-soft has-[input:checked]:font-semibold">
@@ -8,7 +10,8 @@
   </span>
 </label>
 {% endfor %}
-<details class="wh-catpick text-[13px] text-muted" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}" data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" {% if not plan.options %}open{% endif %}>
+{% endif %}
+<details class="wh-catpick text-[13px] text-muted" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}" data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" data-swap="{{ pick_swap or 'outerHTML' }}" {% if not plan.options and not pick_only %}open{% endif %}>
   <summary class="cursor-pointer">{{ _("Choose another category") }}</summary>
   <div class="flex flex-col gap-1.5 pt-2">
     <input type="search" data-catq autocomplete="off" placeholder="{{ _('Search willhaben categories, e.g. speaker') }}" class="input input-sm w-full bg-base-100">
@@ -26,7 +29,7 @@
         const values = {code};
         const inc = box.dataset.include && document.querySelector(box.dataset.include);
         if (inc) new FormData(inc).forEach((v, k) => { values[k] = v; });
-        htmx.ajax('POST', url, {target, swap: 'outerHTML', values});
+        htmx.ajax('POST', url, {target, swap: box.dataset.swap || 'outerHTML', values});
         return;
       }
       const f = document.createElement('form');

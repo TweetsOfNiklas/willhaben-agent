@@ -1,0 +1,5 @@
+{# Published share of a batch's drafts (top of the drafts table; swapped out of band after each action). #}
+{% macro progress(drafts, oob=false) %}
+{% set n_pub = drafts|selectattr('status', 'equalto', 'published')|list|length %}{% set n_disc = drafts|selectattr('status', 'equalto', 'discarded')|list|length %}
+<div id="bt-progress" class="flex min-w-[160px] flex-1 items-center gap-3"{% if oob %} hx-swap-oob="true"{% endif %}><span class="block h-1.5 min-w-[120px] flex-1 overflow-hidden rounded-sm bg-base-300"><span class="block h-full bg-success" style="width:{{ ((n_pub + n_disc) * 100 / (drafts|length or 1))|round|int }}%"></span></span><span class="text-[13px] whitespace-nowrap"><strong>{{ n_pub }}</strong> {{ _("of {total} published", total=drafts|length) }}{% if n_disc %}, {{ _("{n} discarded", n=n_disc) }}{% endif %}</span></div>
+{% endmacro %}

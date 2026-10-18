@@ -645,3 +645,53 @@ def test_published_draft_page_is_read_only(client, wh):  # noqa: F811
     ad_creator.update_draft(d3.id, refining=None)
     r = client.post(f"/new-ad/{d3.id}/refine", data={"instruction": "  "}, follow_redirects=False)
     assert "Nothing to revise" in unquote(r.headers["location"])
+
+
+def test_batch_table_choices_survive_a_new_prepare_and_reach_willhaben(client, wh):  # noqa: F811
+    """The batch table end to end against the fake willhaben: categories asked in the background, the choices saved
+    per row (one category copied that the row lacked), asked again without losing them, then all published."""
+    a, b = _draft(), _draft()
+    ad_creator.update_draft(b.id, title="JBL Go 3")
+    with dbmod.session() as db:
+        batch = dbmod.AdBatch(status="review", groups=[{"id": "g1", "photos": [], "draft_id": a.id},
+                                                       {"id": "g2", "photos": [], "draft_id": b.id}])
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+    url = f"/new-ad/batch/{batch.id}/drafts"
+    rows = {a.id: {"title": "Logitech S125i", "description": "Gut erhalten.", "price": "12"},
+            b.id: {"title": "JBL Go 3", "description": "Gut erhalten.", "price": "12"}}
+    ticks = {"sel": [str(a.id), str(b.id)]}
+
+    def form(**extra):
+        return {**{f"{i}.{k}": v for i, f in rows.items() for k, v in f.items()}, **ticks, **extra}
+
+    assert "2 ads are being prepared" in client.post(url, data=form(act="prepare")).text
+    wait_jobs()
+    assert [o["path"][-1]["code"] for o in _get(a.id).wh_plan["options"]] == ["HEADPHONES"]
+
+    rows[a.id] |= {"cat": "HEADPHONES", "f:HEADPHONES:Zustand": "neu", "handover": "both", "paylivery": "1",
+                   "parcel_size": "M"}
+    rows[b.id] |= {"cat": "MOBILE_SPEAKER", "handover": "pickup"}                 # copied from a row that has it
+    r = client.post(url, data=form(act="save"))
+    assert f'<tbody id="row-{b.id}"' in r.text and "chosen by hand" not in r.text
+    plan_b = _get(b.id).wh_plan
+    assert plan_b["selected"] == 1 and plan_b["options"][1]["manual"]
+
+    client.post(url, data=form(act="prepare"))                                      # ask willhaben again
+    wait_jobs()
+    plan_a, plan_b = _get(a.id).wh_plan, _get(b.id).wh_plan
+    assert plan_a["options"][0]["fields"][0]["selected"] == "neu" and plan_a["shipping"]["paylivery"] is True
+    assert plan_b["selected"] == 1 and plan_b["options"][1]["path"][-1]["code"] == "MOBILE_SPEAKER"
+
+    rows[a.id] = {k: v for k, v in rows[a.id].items() if not k.startswith("f:")}    # the page's values are the saved ones
+    assert "2 ads are being published one after another" in client.post(url, data=form(act="publish")).text
+    wait_jobs()
+    sent = {p["ad"]["heading"]: p for p in wh.published}
+    one, two = sent["Logitech S125i"], sent["JBL Go 3"]
+    assert one["ad"]["categoryPath"]["path"][-1]["code"] == "HEADPHONES"
+    assert one["shipping"] == {"handover": "both", "paylivery": True, "size": "M", "carrier": None}
+    zustand = [x for x in one["ad"]["treeAttributes"] if x["attributeNode"]["code"] == "Zustand"]
+    assert zustand[0]["selectedAttributeValueNodes"] == [{"label": "Neu", "code": "neu"}]
+    assert two["ad"]["categoryPath"]["path"][-1]["code"] == "MOBILE_SPEAKER" and two["shipping"] is None
+    assert {_get(a.id).status, _get(b.id).status} == {"published"}

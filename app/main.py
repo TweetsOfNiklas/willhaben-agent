@@ -1819,7 +1819,7 @@ def _live_event(e: EventLog) -> dict[str, Any]:
 async def jobs_status(since: int | None = None):
     """Background jobs for the jobs indicator, plus every element still waiting for one (spinners on the page):
     keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published),
-    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer).
+    "refining:<id>" (Claude revises an ad draft), "preparing:<id>" (willhaben categories for an ad draft), "drafting:<conversation>" (Claude writes an answer).
     Every open page also asks now and then for what happened meanwhile: the sidebar badges ("counts") and the inbox
     events after `since` (its last known event id), shown as notices – not the ones sent without a push. Without
     `since` only "last_event", the page's starting point."""
@@ -1831,6 +1831,7 @@ async def jobs_status(since: int | None = None):
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
         pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
         pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
+        pending += jobs.current_keys("preparing:")         # willhaben categories for an ad draft (batch table)
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
@@ -2153,12 +2154,52 @@ async def ad_batch_page(request: Request, batch_id: int, msg: str | None = None)
     b = ad_batch.get(batch_id)
     if b is None:
         raise HTTPException(404)
-    ids = [g["draft_id"] for g in b.groups if g.get("draft_id")]
-    with session() as db:
-        drafts = {d.id: d for d in db.exec(select(AdDraft).where(col(AdDraft.id).in_(ids)))} if ids else {}
-    return render(request, "ad_batch.html", b=b, msg=msg, drafts=drafts, unassigned=ad_batch.unassigned(b),
-                  pending=ad_batch.pending(b), busy=b.status in ("sorting", "creating"),
-                  max_images=ad_creator.MAX_IMAGES, parallel=ad_batch.CREATE_PARALLEL)
+    return render(request, "ad_batch.html", b=b, msg=msg, drafts=ad_batch.drafts_of(b), unassigned=ad_batch.unassigned(b),
+                  pending=ad_batch.pending(b), busy=b.status in ("sorting", "creating"), selected=None,
+                  preparing=_preparing(), max_images=ad_creator.MAX_IMAGES, parallel=ad_batch.CREATE_PARALLEL)
+
+
+def _preparing() -> set[int]:
+    """Drafts with a "prepare for willhaben" job queued or running."""
+    return {int(k.split(":")[1]) for k in jobs.current_keys("preparing:")}
+
+
+@app.post("/new-ad/batch/{batch_id}/drafts", response_class=HTMLResponse)
+async def ad_batch_drafts(request: Request, batch_id: int):
+    """The drafts table: every editable row is saved (changes save on their own), then act runs on the ticked rows
+    (act "verb") or on one row (act "verb:<draft id>"). The answer only swaps what changed (htmx out-of-band)."""
+    b = ad_batch.get(batch_id)
+    if b is None:
+        raise HTTPException(404)
+    form = await request.form()
+    verb, _, ref = str(form.get("act") or request.query_params.get("act") or "save").partition(":")
+    ticked = [int(v) for v in form.getlist("sel") if str(v).isdigit()]
+    rows = ad_batch.table_rows(form)
+    if verb == "category" and ref.isdigit() and form.get("code"):   # "Choose another category" search in a row
+        rows.setdefault(int(ref), {})["cat"] = str(form["code"])
+    redraw = await ad_batch.save_table(batch_id, rows)
+    msg, tone = t("Saved"), "ok"
+    if verb == "category" and ref.isdigit():
+        redraw.append(int(ref))
+    elif verb != "save":
+        ids = [int(ref)] if ref.isdigit() else ticked
+        msg, tone = ad_batch.run_action(batch_id, verb, ids, str(form.get(f"{ref}.instruction" if ref else "instruction") or ""))
+        redraw += ids
+    drafts = ad_batch.drafts_of(ad_batch.get(batch_id))
+    return render(request, "_batch_oob.html", b=b, drafts=drafts, redraw=[d for d in drafts if d.id in set(redraw)],
+                  selected=set(ticked), preparing=_preparing(), msg=msg, tone=tone)
+
+
+@app.get("/new-ad/batch/{batch_id}/row/{draft_id}", response_class=HTMLResponse)
+async def ad_batch_row(request: Request, batch_id: int, draft_id: int, checked: int | None = None):
+    """One row of the drafts table (swapped in when its background job is done). checked: the tick as the page has
+    it (an unticked row must not come back ticked and then be published with the others)."""
+    b = ad_batch.get(batch_id)
+    d = next((d for d in ad_batch.drafts_of(b) if d.id == draft_id), None) if b else None
+    if d is None:
+        raise HTTPException(404)
+    tick = ad_batch.editable(d) if checked is None else bool(checked) and ad_batch.selectable(d)
+    return render(request, "_batch_row.html", b=b, d=d, wrap=True, checked=tick, preparing=d.id in _preparing())
 
 
 @app.post("/new-ad/batch/{batch_id}")
