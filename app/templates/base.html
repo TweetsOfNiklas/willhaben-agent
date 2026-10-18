@@ -352,10 +352,9 @@
 {{ _("Timeline") }}|{{ _("Claude, sites, actions") }}|/timeline
 {{ _("willhaben requests") }}|{{ _("statistics") }}|/stats/willhaben
 {{ _("Report a bug") }}||/bugreport
-{% for p in platforms_all(false) if p.id != 'willhaben' %}{{ p.name }}|{{ _("Settings") }}|/settings/{{ p.id }}
-{% endfor %}{% for id, label in [('willhaben', _("willhaben account")), ('purchase', _("Buying rules")), ('paylivery', 'PayLivery'), ('chats', _("Automatic answers"))] %}{{ label }}|{{ _("Settings") }} · willhaben|/settings/{{ id }}
-{% endfor %}{% for id, label in [('shipping', _("Shipping address")), ('printers', _("Printers")), ('calendar', 'Google Calendar'), ('claude', _("Claude & usage")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('quiet', _("Quiet hours")), ('backup', _("Backup & restore")), ('timeline', _("Timeline")), ('language', _("Language & appearance"))] %}{{ label }}|{{ _("Settings") }}|/settings/{{ id }}
-{% endfor %}</template>
+{{ _("Settings") }}|{{ _("Overview") }}|/settings
+{% for g in settings_groups() %}{% for s in g.sections %}{{ s.label }}|{{ _("Settings") }} · {{ g.label }}|/settings/{{ s.id }}
+{% endfor %}{% endfor %}</template>
 
 {# ---- phone: the jobs button floats above the tab bar while something runs or just finished ---- #}
 <div x-show="$store.jobs.visible" x-cloak class="toast toast-end toast-bottom z-30 max-md:bottom-[calc(72px+env(safe-area-inset-bottom))] md:hidden">

@@ -1,8 +1,8 @@
-{# Settings → Prices → Geizhals: the searches and product pages kept locally (app/services/geizhals.py, table
+{# Settings → Search & prices → Geizhals: the searches and product pages kept locally (app/services/geizhals.py, table
    geizhalscache), the last used first, and "Clear cache". gc = geizhals_cache(): {count, rows: [{kind, label, href,
    result, top, price, fetched, used, stale}], days, more}. #}
 {% import "_ui.html" as ui %}{% set gc = geizhals_cache() %}
-<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="s-geizhals-cache" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex min-w-0 flex-col gap-0.5">
       <span class="font-medium">{{ _("Cached lookups") }} {{ ui.pill(gc.count|string, '', false) }}</span>

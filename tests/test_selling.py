@@ -77,7 +77,7 @@ def test_settings_nav_groups_selling_with_rules():
     with _app_client() as c:
         page = c.get("/settings/rules").text
     nav = page[page.index("<nav"):page.index("</nav>")]
-    order = [nav.index(f'href="/settings/{s}"') for s in ("selling", "rules", "claude")]
+    order = [nav.index(f'href="/settings/{s}"') for s in ("selling", "claude", "rules")]   # My rules sits next to Claude (group AI)
     assert order == sorted(order)
 
 

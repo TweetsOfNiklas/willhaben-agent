@@ -1,6 +1,6 @@
 {# Settings → Timeline → requests to the sites: download redacted fixture files (app/willhaben/export.py) as a ZIP,
    of one site or all; other sites' files sit in a folder named after the site. #}
-<details class="text-[13px]">
+<details id="s-tl-export" class="text-[13px]">
   <summary class="cursor-pointer font-medium">{{ _("Export as test fixtures") }}</summary>
   <form method="post" action="/settings/timeline/recordings/export" class="mt-2 flex flex-col gap-2.5">
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">

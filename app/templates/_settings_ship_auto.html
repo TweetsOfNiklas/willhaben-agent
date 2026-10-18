@@ -1,7 +1,7 @@
 {# Automatic label purchase after payment: the rules. Used in the shipping section of settings.html (card = the payment card status). #}
 {% import "_ui.html" as ui %}
 {% set a = ship.auto %}
-<div class="flex flex-col gap-3">
+<div id="s-ship-auto" class="flex flex-col gap-3">
   <div><span class="font-medium">{{ _("Automatic label purchase") }}</span>
     <p class="mt-1 text-[12.5px] text-muted">{{ _("Only after the buyer has paid and you have marked it. Nothing is bought unless every rule below holds; otherwise the chat asks you first.") }}</p></div>
 <form method="post" action="/settings/shipping/auto" class="flex flex-col gap-3">
@@ -12,15 +12,15 @@
     {% else %}<span class="text-warning">{{ _("No payment card stored – nothing is bought automatically until you add one below.") }}</span>{% endif %}
   </div>
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Max. label price (€)") }}</span><input type="number" name="max_price" value="{{ '%g'|format(a.max_price) }}" min="0" max="1000" step="0.5" class="input w-full min-w-0 bg-base-200"><small class="text-xs text-muted">{{ _("default 10 €") }}</small></label>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Wait before buying (min, 0 = at once)") }}</span><input type="number" name="grace_min" value="{{ a.grace_min }}" min="0" max="120" class="input w-full min-w-0 bg-base-200"></label>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Max. automatic purchases per day") }}</span><input type="number" name="daily" value="{{ a.daily }}" min="0" max="50" class="input w-full min-w-0 bg-base-200"></label>
+    <label id="s-ship-auto-price" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Max. label price (€)") }}</span><input type="number" name="max_price" value="{{ '%g'|format(a.max_price) }}" min="0" max="1000" step="0.5" class="input w-full min-w-0 bg-base-200"><small class="text-xs text-muted">{{ _("default 10 €") }}</small></label>
+    <label id="s-ship-auto-wait" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Wait before buying (min, 0 = at once)") }}</span><input type="number" name="grace_min" value="{{ a.grace_min }}" min="0" max="120" class="input w-full min-w-0 bg-base-200"></label>
+    <label id="s-ship-auto-daily" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Max. automatic purchases per day") }}</span><input type="number" name="daily" value="{{ a.daily }}" min="0" max="50" class="input w-full min-w-0 bg-base-200"></label>
   </div>
   <label class="flex cursor-pointer items-center gap-2.5"><input type="checkbox" name="need_sold" {% if a.need_sold %}checked{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("Only if the ad is marked as sold to this buyer") }}</label>
   <label class="flex cursor-pointer items-center gap-2.5"><input type="checkbox" name="need_parcel" {% if a.need_parcel %}checked{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("Only with a size you entered (not Claude's estimate)") }}</label>
   <p class="text-[12.5px] text-muted">{{ _("Printing: one switch for all labels under Settings → Printers.") }}</p>
   <p class="text-[12.5px] text-muted">{{ _("Not automatic in any case: “→ Shop” options (the carrier form's shop choice is not confirmed live yet) and options against your delivery preference under Settings → Selling.") }}</p>
-  <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Carriers allowed for automatic buying") }}</span>
+  <div id="s-ship-auto-carriers" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Carriers allowed for automatic buying") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for key, c in ship_carriers.items() %}
       <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary">
         <input type="checkbox" name="auto_carrier" value="{{ key }}" {% if key in a.carriers %}checked{% endif %} class="checkbox checkbox-primary checkbox-xs">{{ c.name }}</label>

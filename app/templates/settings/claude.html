@@ -2,7 +2,7 @@
 {% import "_ui.html" as ui %}
 {% set cu = claude_usage if claude_usage is defined else {'used': 0, 'limit': 10000000} %}
 {% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu.limit else 0 %}
-<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="s-claude-account" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex min-w-0 items-center gap-2.5"><span class="size-2 shrink-0 rounded-full {{ 'bg-success' if llm_ok else 'bg-error' }}"></span>
       <div class="min-w-0"><div class="font-semibold">{{ _("Claude subscription") }}{% if claude_plan is defined %} · {{ claude_plan }}{% endif %}</div><div class="text-[12.5px] text-muted">{% if llm_ok %}{{ _("Signed in") }}{% if claude_account is defined %} {{ _("as") }} {{ claude_account }}{% endif %}{% if claude_last_call is defined %} · {{ _("last call {t}", t=claude_last_call|ago) }}{% endif %}{% else %}{{ _("Claude is not signed in.") }}{% endif %}</div></div></div>
@@ -16,7 +16,7 @@
   </div>
   {% endif %}
   <form method="post" action="/settings/claude" class="flex flex-col gap-3.5 border-t border-base-300 pt-3.5" x-data="{ limit: {{ (cu.limit / 1e6)|round|int }} }">
-    <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Model per task") }}</span><small class="text-[12.5px] text-muted">{# factors from llm.base.PRICES #}{% for name, f in model_costs %}{{ name }} {{ f }}×{% if not loop.last %} · {% endif %}{% endfor %} {{ _("tokens cost") }} · {{ _("Haiku price for prompts up to 100K tokens") }}</small></div>
+    <div id="s-claude-models" class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Model per task") }}</span><small class="text-[12.5px] text-muted">{# factors from llm.base.PRICES #}{% for name, f in model_costs %}{{ name }} {{ f }}×{% if not loop.last %} · {% endif %}{% endfor %} {{ _("tokens cost") }} · {{ _("Haiku price for prompts up to 100K tokens") }}</small></div>
     <div class="overflow-hidden rounded-box border border-base-300">
       {# rows = llm.base.PURPOSES, options = llm.models.choices() (full ids, fetched from the API); a model not in the list (LLM_MODEL from .env) stays selected and is kept on Save #}
       {% for key, label, hint, cur in purposes %}{% set sel = models[key] if models is defined and key in models else cur %}
@@ -27,19 +27,19 @@
     </div>
     {% if model_list is defined and model_list.at %}<small class="text-[12.5px] text-muted">{% if model_list.ok %}{{ _("Model list from the Claude API, fetched {t}", t=model_list.at|ago) }}{% else %}{{ _("The model list could not be fetched from the Claude API ({error}) – this is the last known list.", error=model_list.error) }}{% endif %}</small>{% endif %}
     <div class="flex flex-col gap-2.5 border-t border-base-300 pt-3.5">
-      <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Monthly token limit") }}</span><small class="text-[12.5px] text-muted">{{ '%.1f'|format(cu.used / 1e6) }} M {{ _("used") }} · {{ '%.1f'|format((cu.limit - cu.used) / 1e6) }} M {{ _("left") }}</small></div>
+      <div id="s-claude-limit" class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ _("Monthly token limit") }}</span><small class="text-[12.5px] text-muted">{{ '%.1f'|format(cu.used / 1e6) }} M {{ _("used") }} · {{ '%.1f'|format((cu.limit - cu.used) / 1e6) }} M {{ _("left") }}</small></div>
       {{ ui.bar(cpct, 'brand', 'h-1.5') }}
       <div class="flex min-w-0 flex-wrap items-center gap-3">
         <input type="range" name="claude_token_limit_m" min="1" max="50" step="1" x-model.number="limit" class="range range-primary range-xs min-w-0 flex-1 basis-40">
         <label class="input input-sm w-auto shrink-0 gap-1 bg-base-200 pr-2.5"><input name="limit_echo" x-model.number="limit" inputmode="numeric" class="w-12 text-right font-semibold" aria-label="{{ _('Monthly token limit') }}"><span class="text-muted">M {{ _("tokens / month") }}</span></label>
       </div>
-      <div class="flex flex-wrap items-center gap-1.5"><small class="mr-1 text-[12.5px] text-muted">{{ _("When the limit is reached") }}</small>{% for v, l in [('pause', _("Pause optional tasks")), ('haiku', _("Switch to Haiku")), ('notify', _("Only notify me"))] %}<label class="inline-flex cursor-pointer items-center rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"><input type="radio" name="claude_limit_mode" value="{{ v }}" {% if (claude_limit_mode if claude_limit_mode is defined else 'pause') == v %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
+      <div id="s-claude-limit-mode" class="flex flex-wrap items-center gap-1.5"><small class="mr-1 text-[12.5px] text-muted">{{ _("When the limit is reached") }}</small>{% for v, l in [('pause', _("Pause optional tasks")), ('haiku', _("Switch to Haiku")), ('notify', _("Only notify me"))] %}<label class="inline-flex cursor-pointer items-center rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] hover:border-primary has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"><input type="radio" name="claude_limit_mode" value="{{ v }}" {% if (claude_limit_mode if claude_limit_mode is defined else 'pause') == v %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
       <small class="text-[12.5px] text-muted">{{ _("Input + output tokens across all tasks. Covered by your Claude subscription — the limit only throttles the app, nothing is charged. Chat drafts you request by hand are never blocked.") }}</small>
     </div>
     <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
   </form>
   {% if token_usage is defined %}
-  <div class="flex flex-col gap-2.5 border-t border-base-300 pt-3.5">
+  <div id="s-claude-usage" class="flex flex-col gap-2.5 border-t border-base-300 pt-3.5">
     <span class="font-medium">{{ _("Token usage") }}</span>
     <div class="overflow-x-auto rounded-box border border-base-300">
       <table class="table table-sm min-w-[480px]">

@@ -68,7 +68,7 @@ It runs on your own server, from your home internet connection, and you control 
   bar rated by the comparable listings of the **same item** (searched by its model on willhaben and on the ad's own
   site; same model, variant and generation by their titles, in any category, without accessories, extreme prices and
   ads in another condition; you can pick a category) when a used item has 5 or more, else by the ad's share of the
-  Geizhals new price per your zones for used and new items (Settings → Prices; the condition the site states picks
+  Geizhals new price per your zones for used and new items (Settings → Search & prices; the condition the site states picks
   the zones), with the comparables' usual range drawn under the bar, and, on click, Claude's verdict. Also in the hit
   viewer, with the zone label and Claude's screening verdict on hit cards.
 - **Your ads**: imported from your account, with a reminder before they expire. A list with a detail pane per ad and
@@ -76,7 +76,7 @@ It runs on your own server, from your home internet connection, and you control 
   automatic answers with an instruction and a minimum price (switches and text save as you type), the number of pieces
   (next bullet), edit text and photos (Claude can propose a better text), deactivate, delete, mark sold or reserved
   (other buyers get a notice draft).
-  Ads that expired longer ago than a cutoff (Settings → willhaben → My ads, 30 days by default) move to Deactivated; the old copy
+  Ads that expired longer ago than a cutoff (Settings → Selling → My ads, 30 days by default) move to Deactivated; the old copy
   of a renewed ad is never listed again and its chats use the new ad's settings.
 - **Stock per ad** ("Lagerstand"): in My ads → detail pane → Pieces you enter how many identical items an ad offers
   (empty = one item; the list then shows "2/3 pcs", the pane "1 sold · 2 available"). Every sale is recorded on the sold
@@ -97,7 +97,7 @@ It runs on your own server, from your home internet connection, and you control 
   the handover: no shipping lines with pickup only, PayLivery only with shipping, cash only with pickup. They are sent
   with their defaults (pickup only, the buyer pays, all three payment ways) even if you never open the page, which
   shows what Claude gets. With PayLivery the buyer pays the shipping at willhaben, so "included in the price" applies
-  to bank transfers. Your free-text rules (Settings → Selling → My rules), the ad's own text and your instruction for
+  to bank transfers. Your free-text rules (Settings → AI → My rules), the ad's own text and your instruction for
   an ad still apply on top and win where they disagree. The shipping card on a chat page starts with the preferred
   carrier and delivery, then the cheapest (in the default price sort), so its primary button follows the preference;
   the app's automatic choice of a shipping option and the publish form's handover start from it too.
@@ -221,14 +221,14 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
    get pushes.
 4. **Settings → Telegram** (optional): create a bot with @BotFather (`/newbot`) and paste its token. Then open the bot
    in Telegram on any device (link or QR code) and press Start; the chat shows up in Settings and you confirm it with
-   one tap; compare the 4-digit code the bot sent you, since anyone can write to a bot. Settings → willhaben → Automatic answers
+   one tap; compare the 4-digit code the bot sent you, since anyone can write to a bot. Settings → Selling → Automatic answers
    decides whether pushes go to Home Assistant, Telegram or both.
 5. **Search agents → New search agent.** Type what you're looking for, click filters, and create the agent.
    Optionally switch on "Claude screening" and describe exactly what you want.
 
 Settings → Selling → Selling preferences records how you usually sell (pickup or shipping, who pays the shipping,
 preferred carrier and delivery, payment ways); Claude follows it in answers to your buyers and in new ad texts. The
-free-text rules stay under Settings → Selling → My rules.
+free-text rules stay under Settings → AI → My rules.
 
 Settings → Claude & usage shows the token usage per task, lets you pick a model per task (default: Opus for writing
 listings, Sonnet for chat replies, screening and the product search) and sets a monthly token limit (10 M by default)

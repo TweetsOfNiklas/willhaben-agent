@@ -23,7 +23,7 @@
   </details>{% endif %}
 </div>
 {%- endmacro %}
-<section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="s-vpn-configs" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <span class="font-medium">{{ _("WireGuard configs") }}</span>
     {% if vpn.mode == 'collection' %}{{ ui.pill(_("Config collection · {n} configs", n=vpn.count), 'ok' if vpn.eu else 'bad') }}
@@ -43,13 +43,13 @@
 </section>
 
 <section class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-  <form method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <form id="s-vpn-upload-zip" method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <span class="font-medium">{{ _("Config collection (.zip)") }}</span>
     <small class="text-[12.5px] text-muted">{{ _("Many configs, e.g. Mullvad's download of all servers. A search in the background finds the EU server every site answers (two when none does), every few hours and when a site refuses its server.") }}</small>
     <input type="file" name="file" accept=".zip,application/zip" required class="file-input file-input-sm w-full bg-base-200">
     <button class="btn btn-primary btn-sm self-start">{{ _("Upload collection") }}</button>
   </form>
-  <form method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <form id="s-vpn-upload-conf" method="post" action="/settings/vpn/upload" enctype="multipart/form-data" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <span class="font-medium">{{ _("Dedicated profile (.conf)") }}</span>
     <small class="text-[12.5px] text-muted">{{ _("One config, used as it is and tested every few hours. If a site refuses it, that site pauses until a test finds it working again.") }}</small>
     <input type="file" name="file" accept=".conf" required class="file-input file-input-sm w-full bg-base-200">
@@ -60,7 +60,7 @@
 
 {% if vpn.mode %}
 <div class="flex flex-wrap items-center gap-2.5">
-  <form method="post" action="/settings/vpn/forget" class="m-0"><button class="btn btn-sm">{{ _("Forget blocks") }}</button></form>
-  <form method="post" action="/settings/vpn/clear" class="m-0" onsubmit="return confirm({{ _('Remove all WireGuard configs? Sites with the VPN on pause until you upload new ones.')|tojson|forceescape }})"><button class="btn btn-ghost btn-sm text-error">{{ _("Remove configs") }}</button></form>
+  <form id="s-vpn-forget" method="post" action="/settings/vpn/forget" class="m-0"><button class="btn btn-sm">{{ _("Forget blocks") }}</button></form>
+  <form id="s-vpn-remove" method="post" action="/settings/vpn/clear" class="m-0" onsubmit="return confirm({{ _('Remove all WireGuard configs? Sites with the VPN on pause until you upload new ones.')|tojson|forceescape }})"><button class="btn btn-ghost btn-sm text-error">{{ _("Remove configs") }}</button></form>
 </div>
 {% endif %}

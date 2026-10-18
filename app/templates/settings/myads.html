@@ -3,9 +3,9 @@
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
 <p class="text-muted">{{ _("Expiry warnings for your own listings.") }} {{ _("Reactivation and auto-replies are set per ad in") }}
   <a class="link link-primary no-underline" href="/myads">{{ _("My ads") }}</a>.</p>
-<label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Warn before your own ads expire (days)") }}</span>
+<label id="s-myads-warn" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Warn before your own ads expire (days)") }}</span>
   <input type="number" name="expiry_warn_days" form="general" value="{{ values.expiry_warn_days }}" min="0" max="30" class="input w-full max-w-40 bg-base-200"></label>
-<label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Show expired ads in My ads for (days)") }}</span>
+<label id="s-myads-expired" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Show expired ads in My ads for (days)") }}</span>
   <input type="number" name="myads_expired_days" form="general" value="{{ values.myads_expired_days }}" min="0" class="input w-full max-w-40 bg-base-200">
   <small class="text-[12.5px] text-muted">{{ _("Ads that ran out longer ago are listed with the inactive ones. 0 = always show.") }}</small></label>
 <div><button type="submit" form="general" formaction="/settings" class="btn btn-primary">{{ _("Save") }}</button></div>

@@ -7,23 +7,23 @@
   {% if backup.downloads %}
   <form method="post" action="/settings/backup/export" class="flex flex-col gap-3.5 border-t border-base-300 pt-3.5">
     <div class="rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-[13px] whitespace-pre-line text-warning">{{ _("The file contains your logins and tokens (Claude, Home Assistant, Telegram, Google) and all chats. Keep it private.") }}</div>
-    {{ ui.switch_row(_("Include the willhaben login"), _("can be large; without it you log in to willhaben again after a restore"), false, 'name="include_profile"') }}
+    <div id="s-backup-profile">{{ ui.switch_row(_("Include the willhaben login"), _("can be large; without it you log in to willhaben again after a restore"), false, 'name="include_profile"') }}</div>
     {% if backup.crypto %}
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Passphrase (optional, encrypts the ZIP)") }}</span><input type="password" name="passphrase" autocomplete="new-password" minlength="8" class="input w-full min-w-0 bg-base-200"></label>
+      <label id="s-backup-passphrase" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Passphrase (optional, encrypts the ZIP)") }}</span><input type="password" name="passphrase" autocomplete="new-password" minlength="8" class="input w-full min-w-0 bg-base-200"></label>
       <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Repeat passphrase") }}</span><input type="password" name="passphrase2" autocomplete="new-password" class="input w-full min-w-0 bg-base-200"></label>
     </div>
     {% endif %}
-    <div class="flex flex-wrap items-center gap-2.5"><button class="btn btn-primary">{{ _("Download backup") }}</button><small class="text-[12.5px] text-muted">{{ _("Contains: database (with the timeline and willhaben recordings, when switched on), tokens, ad photos and parcel labels. Not included: manual API recordings.") }}</small></div>
+    <div id="s-backup-download" class="flex flex-wrap items-center gap-2.5"><button class="btn btn-primary">{{ _("Download backup") }}</button><small class="text-[12.5px] text-muted">{{ _("Contains: database (with the timeline and willhaben recordings, when switched on), tokens, ad photos and parcel labels. Not included: manual API recordings.") }}</small></div>
   </form>
   {% else %}<div class="rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]">{{ _("Set DASHBOARD_PASSWORD to enable backup downloads.") }}</div>{% endif %}
-  <form method="post" action="/settings/backup/import" enctype="multipart/form-data" class="flex flex-col gap-2 border-t border-base-300 pt-3.5">
+  <form id="s-backup-restore" method="post" action="/settings/backup/import" enctype="multipart/form-data" class="flex flex-col gap-2 border-t border-base-300 pt-3.5">
     <span class="font-medium">{{ _("Restore") }}</span>
     <div class="flex flex-wrap items-center gap-2"><input type="file" name="file" accept=".zip,.enc" required class="file-input min-w-0 flex-1 basis-[200px]">{% if backup.crypto %}<input type="password" name="passphrase" autocomplete="off" placeholder="{{ _('Passphrase (only for encrypted backups)') }}" class="input min-w-0 flex-1 basis-[180px] bg-base-200">{% endif %}<button class="btn btn-outline btn-error">{{ _("Restore…") }}</button></div>
     <small class="text-[12.5px] text-muted">{{ _("Nothing is changed yet: you see what the backup contains and confirm first.") }}</small>
   </form>
   {% if backup.safety %}
-  <div class="flex flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="font-medium">{{ _("Automatic backups before the last imports (newest {n} are kept):", n=backup.keep) }}</span>
+  <div id="s-backup-auto" class="flex flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="font-medium">{{ _("Automatic backups before the last imports (newest {n} are kept):", n=backup.keep) }}</span>
     {% for b in backup.safety %}<div class="flex flex-wrap items-center justify-between gap-2 text-[13px] tabular-nums"><span>{{ b.created_at|local("%d.%m.%Y %H:%M") }} <span class="text-muted">· {{ b.size|filesizeformat }}</span></span>{% if backup.downloads %}<a class="link link-primary no-underline" href="/settings/backup/file/{{ b.name }}" download>{{ _("Download") }}</a>{% endif %}</div>{% endfor %}
   </div>
   {% endif %}

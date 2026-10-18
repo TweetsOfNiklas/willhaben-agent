@@ -1,7 +1,7 @@
 {# Settings → Timeline: the stored requests to willhaben and the other sites (app/willhaben/recorder.py).
    tl_rec = recorder.stats() (by_platform: stored requests per site). #}
 {% import "_ui.html" as ui %}
-<section class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="s-tl-requests" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-2"><h3 class="font-semibold">{{ _("Requests to the sites") }}</h3>{% if settings.wh_replay %}{{ ui.pill(_("Replay mode on (WH_REPLAY=1)"), 'warn') }}{% endif %}</div>
   <form method="post" action="/settings/timeline/recording">
     <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block font-medium">{{ _("Record requests to the sites") }}</span><span class="block text-[12.5px] text-muted">{{ _("Every request to willhaben and the other sites with its answer (chat texts, your ads, addresses, listings), for offline replay and test fixtures. Shown in the timeline when that is on too.") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="record_wh" data-autosubmit {% if tl_cfg.record_wh %}checked{% endif %}></label>
@@ -16,7 +16,7 @@
   {% if tl_rec.by_platform %}<p class="text-[12.5px] text-muted">{% for pid, n in tl_rec.by_platform.items() %}<a class="link link-hover" href="/timeline?kind=wh&amp;site={{ pid }}">{{ tl_site_name(pid) }}</a> {{ n }}{{ ' · ' if not loop.last else '' }}{% endfor %}</p>{% endif %}
   {% if tl_rec.by_channel %}<p class="text-[12.5px] text-muted">{% for ch, n in tl_rec.by_channel.items() %}{{ ch }} {{ n }}{{ ' · ' if not loop.last else '' }}{% endfor %}</p>{% endif %}
   {% include "settings/_timeline_export.html" ignore missing %}
-  <form method="post" action="/settings/timeline/recordings/delete" onsubmit="return confirm({{ _('Delete all stored requests? The timeline keeps the other entries.')|tojson|forceescape }})">
+  <form id="s-tl-delete-requests" method="post" action="/settings/timeline/recordings/delete" onsubmit="return confirm({{ _('Delete all stored requests? The timeline keeps the other entries.')|tojson|forceescape }})">
     <button class="btn btn-ghost btn-sm text-error">{{ ui.icon('trash', 14) }}{{ _("Delete all stored requests") }}</button>
   </form>
 </section>

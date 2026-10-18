@@ -2,10 +2,10 @@
 <form method="post" action="/lang" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <input type="hidden" name="next" value="/settings/language">
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Interface") }}</span>
+    <label id="s-lang" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Interface") }}</span>
       <select name="lang" class="select w-full min-w-0 bg-base-200">{% set pref = ui_lang_pref() %}<option value="auto" {% if pref not in ui_langs %}selected{% endif %}>{{ _("Automatic (browser)") }}</option>{% for code, name in ui_langs.items() %}<option value="{{ code }}" {% if pref == code %}selected{% endif %}>{{ name }}</option>{% endfor %}</select>
       <small class="text-[12.5px] text-muted">{{ _("Language of the dashboard and of notifications.") }}</small></label>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Theme") }}</span>
+    <label id="s-theme" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Theme") }}</span>
       <select id="theme-select" class="select w-full min-w-0 bg-base-200"><option value="system">{{ _("System") }}</option><option value="light">{{ _("Light") }}</option><option value="dark">{{ _("Dark") }}</option></select>
       <small class="text-[12.5px] text-muted">{{ _("Saved in this browser.") }}</small></label>
   </div>

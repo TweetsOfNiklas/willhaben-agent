@@ -1,6 +1,6 @@
 {# Settings → Printers: which printer gets the labels, and per carrier which one (see printing_routes.py) #}
 {% macro printer_fields(which, title, p) %}
-<fieldset class="min-w-0 rounded-box border border-base-300 px-4 pt-2 pb-4">
+<fieldset id="s-print-{{ which }}" class="min-w-0 rounded-box border border-base-300 px-4 pt-2 pb-4">
   <legend class="px-1 font-semibold">{{ title }}</legend>
   <div class="flex flex-col gap-3">
   <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span>
@@ -31,7 +31,7 @@
   </div>
   {% if which == 'label' %}
   {% set known_media = print_opts.media['label'] | map('first') | list %}
-  <details>
+  <details id="s-print-crop">
     <summary class="cursor-pointer text-[13px] font-medium">{{ _("Per carrier: media and crop") }}</summary>
     <div class="mt-3 flex flex-col gap-3">
     <p class="text-[12.5px] text-muted">{{ _("Media: empty uses the printer's medium (GLS labels are 100 × 200 mm). Crop: share of the page from the top left, as numbers from 0 to 1; empty prints the page as it is. Each carrier's PDF puts the label somewhere else.") }}</p>
@@ -67,14 +67,14 @@
   <h3>{{ _("Printers") }}</h3>
   <p class="text-muted">{{ _("Paid labels go to a label printer or a normal printer, chosen per carrier.") }}</p>
   <form method="post" action="/settings/printers" class="flex flex-col gap-3.5" x-data="{ busy: false }" @submit="busy = true">
-    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Print every label automatically") }}</span>
+    <label id="s-print-auto" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Print every label automatically") }}</span>
       <input type="checkbox" class="toggle toggle-primary" name="auto" value="1" {% if printing.auto %}checked{% endif %}></label>
     <p class="text-[12.5px] text-muted">{{ _("One switch for all labels: bought here, downloaded from a carrier form or sent by willhaben PayLivery. Off: nothing is printed on its own, the Print button on the chat page still works.") }}</p>
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {{ printer_fields('label', _("Label printer"), printing.printers.label) }}
       {{ printer_fields('normal', _("Normal printer"), printing.printers.normal) }}
     </div>
-    <fieldset class="min-w-0 rounded-box border border-base-300 px-4 pt-2 pb-4">
+    <fieldset id="s-print-per-carrier" class="min-w-0 rounded-box border border-base-300 px-4 pt-2 pb-4">
       <legend class="px-1 font-semibold">{{ _("Which printer per carrier") }}</legend>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {% for code, cname in print_opts.targets %}
@@ -88,7 +88,7 @@
     <div><button class="btn btn-primary" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Save") }}</button></div>
   </form>
 
-  <div class="grid grid-cols-1 gap-4 border-t border-base-300 pt-3.5 sm:grid-cols-2">
+  <div id="s-print-test" class="grid grid-cols-1 gap-4 border-t border-base-300 pt-3.5 sm:grid-cols-2">
     <div class="flex flex-col gap-2">
       <small class="text-[12.5px] text-muted">{{ _("Label printer") }}</small>
       <div class="flex flex-wrap gap-2">
@@ -106,7 +106,7 @@
   </div>
   <small class="text-[12.5px] text-muted">{{ _("Test page and check use the saved settings. Check asks the printer for its state and the media it supports.") }}</small>
 
-  <details>
+  <details id="s-print-help">
     <summary class="cursor-pointer text-[13px] font-medium">{{ _("How the printers are reached") }}</summary>
     <div class="mt-3 flex flex-col gap-2">
       <p class="text-[12.5px] text-muted">{{ _("The app talks IPP, the printing protocol of AirPrint and IPP Everywhere printers: those take an address like ipp://192.168.1.50/ipp/print directly. A label printer without IPP, or one connected by USB, runs through a CUPS queue on a computer in your network: ipp://cups-host:631/printers/&lt;queue&gt;.") }}</p>

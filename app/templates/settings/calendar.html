@@ -7,7 +7,7 @@
     {% if gcal_error %}<span class="flex flex-wrap items-center gap-2">{{ ui.pill(_("Connection failed"), 'bad') }} <span class="text-error">{{ gcal_error }}</span></span>{% endif %}</p>
   <form method="post" action="/settings/gcal" class="flex flex-col gap-3.5">
     {% if gcal_cals %}
-    <fieldset class="min-w-0 rounded-box border border-base-300 px-4 pt-2 pb-3">
+    <fieldset id="s-cal-busy" class="min-w-0 rounded-box border border-base-300 px-4 pt-2 pb-3">
       <legend class="px-1 text-[12.5px] text-muted">{{ _("Calendars that count as busy") }}</legend>
       <div class="flex flex-col gap-2">
       {% for c in gcal_cals %}
@@ -16,7 +16,7 @@
       {% endfor %}
       </div>
     </fieldset>
-    <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("New appointments go into") }}</span>
+    <label id="s-cal-target" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("New appointments go into") }}</span>
       <select name="target" class="select w-full min-w-0 bg-base-200">
         {% for c in gcal_cals if c.writable %}
           <option value="{{ 'primary' if c.primary else c.id }}" {% if gcal_cfg.target == c.id or (c.primary and gcal_cfg.target == 'primary') %}selected{% endif %}>{{ c.name }}</option>
@@ -27,27 +27,27 @@
       <input type="hidden" name="target" value="{{ gcal_cfg.target }}">
     {% endif %}
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Handovers possible from") }}</span><input type="time" name="window_start" value="{{ gcal_cfg.window_start }}" class="input w-full min-w-0 bg-base-200"></label>
+      <label id="s-cal-window" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Handovers possible from") }}</span><input type="time" name="window_start" value="{{ gcal_cfg.window_start }}" class="input w-full min-w-0 bg-base-200"></label>
       <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("until") }}</span><input type="time" name="window_end" value="{{ gcal_cfg.window_end }}" class="input w-full min-w-0 bg-base-200"></label>
     </div>
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Look ahead (days)") }}</span><input type="number" name="days" value="{{ gcal_cfg.days }}" min="1" max="21" class="input w-full min-w-0 bg-base-200"></label>
-      <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Default length of an appointment (minutes)") }}</span><input type="number" name="duration" value="{{ gcal_cfg.duration }}" min="5" max="480" step="5" class="input w-full min-w-0 bg-base-200"></label>
+      <label id="s-cal-days" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Look ahead (days)") }}</span><input type="number" name="days" value="{{ gcal_cfg.days }}" min="1" max="21" class="input w-full min-w-0 bg-base-200"></label>
+      <label id="s-cal-duration" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Default length of an appointment (minutes)") }}</span><input type="number" name="duration" value="{{ gcal_cfg.duration }}" min="5" max="480" step="5" class="input w-full min-w-0 bg-base-200"></label>
     </div>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Buffer before and after each appointment (minutes, e.g. travel time)") }}</span>
+    <label id="s-cal-buffer" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Buffer before and after each appointment (minutes, e.g. travel time)") }}</span>
       <input type="number" name="buffer" value="{{ gcal_cfg.buffer }}" min="0" max="240" step="5" class="input w-full min-w-0 max-w-40 bg-base-200"></label>
-    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0">{{ _("Use my free times in reply drafts") }}</span><input type="checkbox" class="toggle toggle-primary" name="in_drafts" {% if gcal_cfg.in_drafts %}checked{% endif %}></label>
-    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block">{{ _("Also in automatic answers") }}</span><span class="block text-[12.5px] text-muted">{{ _("only proposes times; your rules for automatic answers still decide whether appointments may be promised") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="in_auto" {% if gcal_cfg.in_auto %}checked{% endif %}></label>
-    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block">{{ _("Add agreed appointments to the calendar by myself") }}</span><span class="block text-[12.5px] text-muted">{{ _("the push then only reports it, with an undo button") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="auto_add" {% if gcal_cfg.auto_add %}checked{% endif %}></label>
+    <label id="s-cal-drafts" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0">{{ _("Use my free times in reply drafts") }}</span><input type="checkbox" class="toggle toggle-primary" name="in_drafts" {% if gcal_cfg.in_drafts %}checked{% endif %}></label>
+    <label id="s-cal-auto" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block">{{ _("Also in automatic answers") }}</span><span class="block text-[12.5px] text-muted">{{ _("only proposes times; your rules for automatic answers still decide whether appointments may be promised") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="in_auto" {% if gcal_cfg.in_auto %}checked{% endif %}></label>
+    <label id="s-cal-add" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="block">{{ _("Add agreed appointments to the calendar by myself") }}</span><span class="block text-[12.5px] text-muted">{{ _("the push then only reports it, with an undo button") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="auto_add" {% if gcal_cfg.auto_add %}checked{% endif %}></label>
     <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
   </form>
   <p class="text-[12.5px] text-muted">{{ _("Only free/busy blocks are read – titles of your appointments never reach Claude.") }}</p>
-  <div class="flex flex-wrap items-center gap-2">
+  <div id="s-cal-disconnect" class="flex flex-wrap items-center gap-2">
     <form method="post" action="/settings/gcal/test"><button class="btn">{{ _("Show free times") }}</button></form>
     <form method="post" action="/settings/gcal/disconnect" onsubmit='return confirm({{ _("Disconnect Google Calendar?")|tojson }})'><button class="btn btn-outline btn-error">{{ _("Disconnect") }}</button></form>
   </div>
 {% else %}
-  <ol class="flex list-decimal flex-col gap-3.5 pl-5 text-[13.5px]">
+  <ol id="s-cal-connect" class="flex list-decimal flex-col gap-3.5 pl-5 text-[13.5px]">
     <li>{{ _("In Google Cloud Console, create a project and enable the “Google Calendar API”.") }}
       <a class="link link-primary no-underline" href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com" target="_blank" rel="noopener">{{ _("Open") }} ↗</a></li>
     <li>{{ _("Google Auth Platform → Audience: user type “External”, add yourself as test user, then “Publish app” (otherwise Google ends the access after 7 days).") }}

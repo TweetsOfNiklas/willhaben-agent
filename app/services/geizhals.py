@@ -322,7 +322,7 @@ def prune_cache() -> int:
 
 
 def cache_view(limit: int = 300) -> dict[str, Any]:
-    """Settings → Prices → Geizhals: the cached answers, the last used first: {count, rows: [{kind, label, href,
+    """Settings → Search & prices → Geizhals: the cached answers, the last used first: {count, rows: [{kind, label, href,
     result, fetched, used, stale}]}; `label`: the search term as sent, or the product's name."""
     from urllib.parse import parse_qs, urlparse
 
