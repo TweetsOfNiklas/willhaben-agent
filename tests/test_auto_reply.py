@@ -115,6 +115,22 @@ async def test_auto_reply_sends_when_everything_agrees(env):
     assert notes[0][0] == "auto_reply"
 
 
+async def test_auto_answer_waits_for_a_full_hourly_limit(env, monkeypatch):
+    """The automatic answer is sent with ratelimit.waiting(): a used-up willhaben budget delays it, never drops it."""
+    from app.platforms import ratelimit
+
+    backend, account, notes = env
+    seen = []
+
+    async def send(conversation_id, text):
+        seen.append(ratelimit.waits())
+        return "m1"
+
+    monkeypatch.setattr(account, "send_message", send)
+    d = await chats.auto_reply("c1")
+    assert d.status == "sent" and seen == [True] and not ratelimit.waits()
+
+
 @pytest.mark.parametrize("change, reason", [
     ({"auto_send": False, "auto_reason": "Preisverhandlung"}, "Claude does not recommend"),
     ({"reply": "Abholung um [Uhrzeit] möglich."}, "placeholders"),

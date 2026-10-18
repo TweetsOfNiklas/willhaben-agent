@@ -10,7 +10,8 @@ Flow of one search (a background task, the page polls its progress):
             willhaben RateLimiter + hourly budget): one request per query, nothing else. Ads are de-duplicated by
             ad id; "Suche"/"Tausch" ads, ads far above the budget and ads whose title has an exclusion word are
             dropped in code; at most MAX_CANDIDATES go on, taken round-robin so every query is represented.
-            A block or an exhausted budget stops the searching; what was found so far is still ranked.
+            A block stops the searching; what was found so far is still ranked. A used-up hourly budget only
+            delays it: the search waits until the site has room again (the page says until when), then goes on.
             If the plan has questions, the cards are stored and the search waits in status "asking" (no task, no
             Claude call) until the person answers or skips them (continue_run); the answers go into the ranking and
             photo prompts and into the screening brief of a search agent made from the search.
@@ -58,7 +59,7 @@ from app.llm.prompts import (
 )
 from app.services import ad_images, deals, geo, price_zones, scam
 from app import platforms
-from app.platforms import Blocked, Listing, PlatformError, SearchSpec, shipping_info
+from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ratelimit, shipping_info
 from app.platforms.text import mentions
 from app.services import timeline
 
@@ -98,6 +99,7 @@ _PATH_RE = re.compile(r"^kaufen-und-verkaufen/marktplatz/[a-z0-9-]+-\d+$")
 _transport = None             # tests inject a mock transport for the photo downloads
 _tasks: set[asyncio.Task] = set()
 _active: set[int] = set()     # searches with a live background task in this process
+_waits: dict[int, ratelimit.BudgetWait] = {}    # per search: the sites whose hourly budget it waits for right now
 
 
 class Busy(RuntimeError):
@@ -430,7 +432,7 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
     requests, warnings = 0, []
     left: dict[str, int | None] = {}
     for p in sites:
-        budget = _remaining_budget(p)
+        budget = None if ratelimit.waits() else _remaining_budget(p)   # a background search waits for the budget
         wanted = sum(1 for _, _, rp in runs if rp.id == p.id)
         left[p.id] = budget
         if budget is not None and budget < wanted:
@@ -782,10 +784,25 @@ def running() -> ProductSearch | None:
     return None
 
 
-def _spawn(coro: Coroutine[Any, Any, Any]) -> None:
-    task = asyncio.get_running_loop().create_task(coro)
+def _spawn(coro: Coroutine[Any, Any, Any], search_id: int) -> None:
+    """Run a search step in the background; a site's used-up hourly budget makes it wait, not stop (waiting_for)."""
+    bw = _waits[search_id] = ratelimit.BudgetWait()
+    with ratelimit.waiting(bw):         # the task takes the setting along
+        task = asyncio.get_running_loop().create_task(coro)
     _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+
+    def done(task: asyncio.Task) -> None:
+        _tasks.discard(task)
+        if _waits.get(search_id) is bw:
+            del _waits[search_id]
+
+    task.add_done_callback(done)
+
+
+def waiting_for(search_id: int) -> dict[str, Any]:
+    """The sites a running search waits for right now (their hourly budget is used up) and when it goes on."""
+    bw = _waits.get(search_id)
+    return bw.free_at() if bw else {}
 
 
 def start(description: str, settings: dict[str, Any]) -> int:
@@ -800,7 +817,7 @@ def start(description: str, settings: dict[str, Any]) -> int:
         db.commit()
         db.refresh(row)
     _active.add(row.id)
-    _spawn(run(row.id))
+    _spawn(run(row.id), row.id)
     return row.id
 
 
@@ -819,7 +836,7 @@ def rerun(search_id: int) -> None:
             answers=row.answers if row.answers is not None else {},
             progress={"done": 0, "total": len((row.plan or {}).get("queries") or []) or max_queries(row.settings)})
     _active.add(search_id)
-    _spawn(run(search_id, replan=replan))
+    _spawn(run(search_id, replan=replan), search_id)
 
 
 def continue_run(search_id: int, answers: dict[str, Any] | None) -> bool:
@@ -835,7 +852,7 @@ def continue_run(search_id: int, answers: dict[str, Any] | None) -> bool:
         raise Busy(t("A product search is still running – wait for it to finish."))
     _update(search_id, status="ranking", answers=clean_answers(row.plan, answers))
     _active.add(search_id)
-    _spawn(_continue(search_id))
+    _spawn(_continue(search_id), search_id)
     return True
 
 
@@ -977,7 +994,7 @@ def load_more(search_id: int) -> bool:
         raise Busy(t("A product search is still running – wait for it to finish."))
     _update(search_id, status="more")
     _active.add(search_id)
-    _spawn(_more(search_id))
+    _spawn(_more(search_id), search_id)
     return True
 
 

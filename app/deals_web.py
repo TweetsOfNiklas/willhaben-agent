@@ -250,7 +250,8 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
               "noplan": t("This search has no planned willhaben searches yet.")}.get(msg or "")
     return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": notice, "ps_oob": oob,
             "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
-            "ps_is_running": product_search.is_running, "ps_answer_pairs": product_search.answer_pairs,
+            "ps_is_running": product_search.is_running, "ps_waiting_for": product_search.waiting_for,
+            "ps_answer_pairs": product_search.answer_pairs,
             "ps_planned": product_search.planned, "ps_by_term": product_search.by_term, **_agent_ctx(shown)}
 
 

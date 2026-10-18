@@ -56,6 +56,7 @@
       {{ stage(_("Claude"), ((at + (0 if ps.status == 'searching' else 0.5)) * 100 / steps|length)|round|int, ps.status != 'searching',
                _("plan done, waits for the ads") if ps.status == 'searching'
                else steps[at][1] ~ ' · ' ~ _("step {i} of {n}", i=at + 1, n=steps|length)) }}
+      {% for site, at in ps_waiting_for(ps.id).items() %}{{ ui.msg(_("{site}: hourly request limit reached – the search goes on by itself at {time}.", site=site, time=at.strftime("%H:%M")), 'info') }}{% endfor %}
       <div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div>
     </div>
     {% elif ps.status == 'asking' %}{% set qs = plan.questions or [] %}

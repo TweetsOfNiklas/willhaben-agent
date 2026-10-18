@@ -88,5 +88,6 @@
  "{n} descriptions loaded": "{n} Beschreibungen geladen",
  "{n} no longer available": "{n} nicht mehr verfügbar",
  "Loading the descriptions of the shortlisted Facebook offers: {done} of {total} …": "Lade die Beschreibungen der engeren Facebook-Auswahl: {done} von {total} …",
- "(incl. {n} Facebook price bands)": "(inkl. {n} Facebook-Preisbereiche)"
+ "(incl. {n} Facebook price bands)": "(inkl. {n} Facebook-Preisbereiche)",
+ "{site}: hourly request limit reached – the search goes on by itself at {time}.": "{site}: stündliches Anfragelimit erreicht – die Suche geht um {time} von selbst weiter."
 }

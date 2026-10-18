@@ -296,6 +296,24 @@ async def test_hourly_budget_limits_the_queries(wh):
     assert "only 2 of 3 searches" in found["warning"]
 
 
+async def test_a_background_search_waits_for_the_budget_instead_of_skipping(wh, monkeypatch):
+    from app.platforms import ratelimit
+
+    monkeypatch.setattr(ratelimit, "WAKE_S", 0.01)
+    monkeypatch.setattr(ratelimit.random, "uniform", lambda a, b: 0.0)
+    lim = public_mod.get_public().limiter = RateLimiter(0, per_hour=2)
+    with ratelimit.waiting() as bw:
+        task = asyncio.create_task(ps.run_queries(ps.normalize_plan(PLAN, 3), ps.make_settings()))
+    for _ in range(400):
+        if bw.sites:
+            break
+        await asyncio.sleep(0.005)
+    assert len(wh["keywords"]) == 2 and "willhaben" in bw.free_at()
+    lim._recent.popleft()                     # an hour later: the third search goes out by itself
+    found = await asyncio.wait_for(task, 2)
+    assert len(wh["keywords"]) == 3 and not any(q["skipped"] for q in found["per_query"]) and not found["warning"]
+
+
 # ------------------------------------------------------------------ ranking
 async def test_ranking_merges_price_position_and_scam_flags(wh, claude):
     plan = ps.normalize_plan(PLAN, 3)
@@ -1169,3 +1187,25 @@ def test_the_form_sends_the_condition(wh, claude, monkeypatch):
         c.post("/deals/search", data={"description": "Rad", "cond_shown": "1", "cond_used": "1"})
         c.post("/deals/search", data={"description": "Rad"})                 # an older form: either
     assert [s["condition"] for s in started] == ["used", "any"]
+
+
+def test_the_page_says_when_a_waiting_search_goes_on(app_client):
+    from app.platforms import ratelimit
+
+    with dbmod.session() as db:
+        row = dbmod.ProductSearch(description="Geschirrspüler", settings=ps.make_settings(), status="searching",
+                            progress={"done": 2, "total": 3})
+        db.add(row)
+        db.commit()
+        sid = row.id
+    bw = ps._waits[sid] = ratelimit.BudgetWait()
+    bw.sites["willhaben"] = time.monotonic() + 600
+    ps._active.add(sid)
+    try:
+        frag = app_client.get(f"/deals/search/{sid}").text
+        at = bw.free_at()["willhaben"].strftime("%H:%M")
+        assert f"willhaben: hourly request limit reached – the search goes on by itself at {at}." in frag
+        bw.sites.clear()
+        assert "hourly request limit reached" not in app_client.get(f"/deals/search/{sid}").text
+    finally:
+        ps._waits.pop(sid, None)
