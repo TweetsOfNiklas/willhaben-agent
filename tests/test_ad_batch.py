@@ -153,7 +153,7 @@ def test_batch_without_photos_and_recover(client):  # noqa: F811
     assert ad_batch.get(b.id).status == "error"
 
 
-def test_batch_inline_review_and_publish(client, monkeypatch):  # noqa: F811
+def test_batch_table_review_refine_and_photos(client, monkeypatch):  # noqa: F811
     _sorting_backend(client, monkeypatch)
     photos = [("photos", (f"IMG_{i}.jpg", b"jpeg-bytes-%d" % i, "image/jpeg")) for i in range(3)]
     r = client.post("/new-ad/batch", files=photos, follow_redirects=False)
@@ -170,53 +170,33 @@ def test_batch_inline_review_and_publish(client, monkeypatch):  # noqa: F811
     assert "Review &amp; publish" in page and page.count('<tbody id="row-') == 2
     assert f'name="{d1.id}.title"' in page and "0</strong> of 2 published" in page
 
-    card = client.post(f"/ad-drafts/{d1.id}/inline", data={"title": "Bohrschrauber", "description": "Top\r\nZustand",
-                                                          "price": "45,50"}).text
-    assert f'id="draft-{d1.id}"' in card and "saved" in card and "<html" not in card
+    url = f"/new-ad/batch/{batch_id}/drafts"
+    r = client.post(url, data={f"{d1.id}.title": "Bohrschrauber", f"{d1.id}.description": "Top\r\nZustand",
+                               f"{d1.id}.price": "45,50", "act": "save"})
+    assert "Saved" in r.text and "<html" not in r.text
     with dbmod.session() as db:
         d = db.get(dbmod.AdDraft, d1.id)
     assert (d.title, d.description, d.price_suggestion) == ("Bohrschrauber", "Top\nZustand", 45.5)
 
     # refine saves unsaved edits first and goes through the normal refine (undo-able)
-    client.post(f"/ad-drafts/{d1.id}/inline/refine", data={"instruction": "kürzer", "title": "Neu", "description": "x"})
+    r = client.post(url, data={f"{d1.id}.title": "Neu", f"{d1.id}.description": "x", f"{d1.id}.instruction": "kürzer",
+                               "act": f"refine:{d1.id}"})
+    assert "Claude revises 1 ads" in r.text
     wait_jobs()
     assert "Änderungswünsche: kürzer" in client.fake.calls[-1]["prompt"] and "- Titel: Neu" in client.fake.calls[-1]["prompt"]
     with dbmod.session() as db:
         assert db.get(dbmod.AdDraft, d1.id).revisions[-1]["title"] == "Neu"
 
-    card = client.post(f"/ad-drafts/{d1.id}/inline/status", data={"status": "published"}).text
-    assert "published" in card and "Not published after all" in card
-    client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "discarded"})
+    from app.services import ad_creator
+    ad_creator.update_draft(d1.id, status="published")
+    assert "1 discarded" in client.post(url, data={"sel": str(d2.id), "act": "discard"}).text
     assert "1</strong> of 2 published, 1 discarded" in client.get(f"/new-ad/batch/{batch_id}").text
-    assert client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "bogus"}).status_code == 400
 
     import io
     import zipfile
     r = client.get(f"/ad-drafts/{d1.id}/photos.zip")
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
     assert r.headers["content-type"] == "application/zip" and len(names) == 2 and names[0].endswith("-01.jpg")
-
-
-def test_batch_card_renders_willhaben_plan(client):  # noqa: F811
-    """A prepared draft shows category options and required fields (regression: f.values was dict.values)."""
-    from app.services import ad_creator
-
-    with dbmod.session() as db:
-        d = dbmod.AdDraft(input_text="x", title="Logitech S125i", description="Gut.", price_suggestion=12)
-        db.add(d)
-        db.commit()
-        db.refresh(d)
-    ad_creator.update_draft(d.id, wh_plan={"location": "1150 Wien", "contact": "", "options": [
-        {"path": [{"label": "Mobile Lautsprecher", "code": "MOBILE_SPEAKER"}], "label": "Audio › Mobile Lautsprecher",
-         "fields": [{"code": "Zustand", "label": "Zustand", "values": [["neu", "Neu"], ["gebraucht", "Gebraucht"]],
-                     "selected": "gebraucht"}]}]})
-    from app.main import _draft_card
-    from starlette.requests import Request
-
-    html = _draft_card(Request({"type": "http", "headers": [], "method": "GET", "path": "/"}),
-                       ad_creator.update_draft(d.id)).body.decode()
-    assert 'name="o0_Zustand"' in html and '<option value="gebraucht" selected>Gebraucht</option>' in html
-    assert "Audio › Mobile Lautsprecher" in html and "/inline/publish" in html
 
 
 def test_category_queries_order():
@@ -230,7 +210,7 @@ def test_category_queries_order():
 
 
 def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypatch):  # noqa: F811
-    """Claude down while the batch wrote its drafts: the group keeps its (empty) draft; "Try again" on the card runs the
+    """Claude down while the batch wrote its drafts: the group keeps its (empty) draft; "Try again" in its table row runs the
     whole pipeline again – text, comparable prices, Geizhals – on that draft, so the batch link stays."""
     from app.llm.base import LLMError
     from app.services import ad_creator
@@ -261,15 +241,14 @@ def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypa
     assert (d.status, d.title, len(d.image_paths)) == ("error", None, 2) and "529" in d.error and "529" in g["error"]
     assert ad_batch.locked(g) and ad_batch.pending(b) == []                    # no second draft for the group
 
-    card = client.get(f"/ad-drafts/{d.id}/card").text
-    assert f'hx-post="/ad-drafts/{d.id}/retry"' in card and "Try again" in card
     assert f'"act": "retry:{d.id}"' in client.get(f"/new-ad/batch/{batch_id}").text
     assert f'action="/new-ad/{d.id}/retry"' in client.get(f"/new-ad/{d.id}").text
 
     down[0] = False
-    card = client.post(f"/ad-drafts/{d.id}/retry").text
-    assert f'data-pending-key="refining:{d.id}"' in card and "Claude is writing the draft" in card
-    assert "/retry" not in card                                                # no second click while it runs
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data={"act": f"retry:{d.id}"})
+    assert "Claude writes 1 drafts again" in r.text
+    assert f'data-pending-key="refining:{d.id}"' in r.text and "Claude writes…" in r.text
+    assert f'"act": "retry:{d.id}"' not in r.text                             # no second click while it runs
     assert ad_creator.enqueue_retry(d.id) is False
     wait_jobs()
     with dbmod.session() as db:
@@ -280,8 +259,8 @@ def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypa
     prompt = fake.calls[-1]["prompt"]
     assert "Abholung Wien" in prompt and len(fake.calls[-1]["images"]) == 2  # the same notes and photos
     assert ad_batch.get(batch_id).groups[0]["draft_id"] == d.id               # the batch still points at it
-    card = client.get(f"/ad-drafts/{d.id}/card").text
-    assert "/retry" not in card and "KTM Kinderrad 20 Zoll blau" in card and "data-pending-key" not in card
+    row = client.get(f"/new-ad/batch/{batch_id}/row/{d.id}").text
+    assert '"act": "retry:' not in row and "KTM Kinderrad 20 Zoll blau" in row and "data-pending-key" not in row
     assert ad_creator.enqueue_retry(d.id) is False                            # nothing to retry on a written draft
 
 
@@ -329,6 +308,7 @@ def test_batch_table_saves_rows_and_willhaben_choice(client):  # noqa: F811
     page = client.get(f"/new-ad/batch/{batch_id}").text
     assert page.count('<tbody id="row-') == 3 and 'id="bt"' in page and "data-copy" in page
     assert f'name="{a}.f:SPK:Zustand"' in page and f'name="{b}.f:HIFI:Zustand"' in page and "– no category yet –" in page
+    assert '<option value="gebraucht" selected>Zustand: Gebraucht</option>' in page and "Audio › Lautsprecher" in page
 
     # what ⧉ produces for "Zustand" and "Handover": the same values in the other rows; one save stores all rows
     form = [*_row(a, price="45,50", quantity="2", cat="SPK", **{"f:SPK:Zustand": "neu"}, handover="shipping",

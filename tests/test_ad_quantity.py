@@ -144,16 +144,23 @@ def test_draft_page_and_save_route(client):  # noqa: F811
     assert 'placeholder="1" value=""' in client.get(f"/new-ad/{d.id}").text
 
 
-def test_batch_card_saves_and_refines_with_the_count(client):  # noqa: F811
+def test_batch_table_saves_and_refines_with_the_count(client):  # noqa: F811
     d = _draft(quantity=2)
-    card = client.post(f"/ad-drafts/{d.id}/inline", data={"title": "Stuhl", "description": "Gut.", "price": "9",
-                                                         "quantity": "5"}).text
+    with dbmod.session() as db:
+        batch = dbmod.AdBatch(status="review", groups=[{"id": "g1", "photos": [], "draft_id": d.id}])
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+    url = f"/new-ad/batch/{batch.id}/drafts"
+    fields = {f"{d.id}.title": "Stuhl", f"{d.id}.description": "Gut.", f"{d.id}.price": "9"}
+    client.post(url, data={**fields, f"{d.id}.quantity": "5", "act": "save"})
     assert _get(d.id).quantity == 5
-    assert 'name="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="5"' in card
+    row = client.get(f"/new-ad/batch/{batch.id}/row/{d.id}").text
+    assert f'name="{d.id}.quantity" data-key="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="5"' in row
 
     client.fake.ad_extra = {"quantity": 9, "parcel": {"length_cm": 1, "width_cm": 1, "height_cm": 1, "weight_kg": 1}}
-    client.post(f"/ad-drafts/{d.id}/inline/refine",
-                data={"instruction": "kürzer", "title": "Stuhl neu", "description": "x", "quantity": "6"})
+    client.post(url, data={**fields, f"{d.id}.title": "Stuhl neu", f"{d.id}.description": "x", f"{d.id}.quantity": "6",
+                           f"{d.id}.instruction": "kürzer", "act": f"refine:{d.id}"})
     wait_jobs()
     assert "Stückzahl: 6 (Preis pro Stück)" in client.fake.calls[-1]["prompt"]
     after = _get(d.id)

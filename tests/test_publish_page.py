@@ -254,6 +254,16 @@ def _get(draft_id):
         return db.get(dbmod.AdDraft, draft_id)
 
 
+def _batch_of(*drafts):
+    with dbmod.session() as db:
+        batch = dbmod.AdBatch(status="review", groups=[{"id": f"g{i}", "photos": [], "draft_id": d.id}
+                                                       for i, d in enumerate(drafts)])
+        db.add(batch)
+        db.commit()
+        db.refresh(batch)
+    return batch.id
+
+
 def test_single_page_sections(client, wh):  # noqa: F811
     d = _draft()
     page = client.get(f"/new-ad/{d.id}").text
@@ -353,27 +363,31 @@ async def test_paylivery_needs_size(wh):
     assert wh.published == []
 
 
-def test_batch_card_picker_and_inline_category(client, wh):  # noqa: F811
+def test_batch_table_picker_category_and_publish(client, wh):  # noqa: F811
     d = _draft()
+    bid = _batch_of(d)
+    url = f"/new-ad/batch/{bid}/drafts"
     wh.suggest = {"categories": []}
-    card = client.post(f"/ad-drafts/{d.id}/inline/prepare", data={"category_query": "xyz"}).text
-    assert "willhaben suggests no category" not in card and "Choose another category" in card
-    assert f'data-pick="/ad-drafts/{d.id}/inline/category"' in card and f'data-target="#draft-{d.id}"' in card
-    assert "/inline/publish" in card and 'name="handover"' not in card               # nothing to publish yet
+    client.post(url, data={"act": f"prepare:{d.id}"})
+    wait_jobs()
+    row = client.get(f"/new-ad/batch/{bid}/row/{d.id}").text
+    assert "willhaben suggests no category" not in row and "Choose another category" in row and "– no suggestion –" in row
+    assert f'data-pick="{url}?act=category:{d.id}"' in row and f'data-target="#row-{d.id}"' in row
+    assert f'name="{d.id}.f:' not in row                                            # nothing to choose yet
 
-    card = client.post(f"/ad-drafts/{d.id}/inline/category",
-                       data={"code": "MOBILE_SPEAKER", "title": "Neu", "description": "Text"}).text
-    assert f'id="draft-{d.id}"' in card and "Audio › Mobile Lautsprecher" in card and 'name="o0_Zustand"' in card
-    assert 'name="handover" value="pickup" checked' in card
+    r = client.post(f"{url}?act=category:{d.id}",
+                    data={"code": "MOBILE_SPEAKER", f"{d.id}.title": "Neu", f"{d.id}.description": "Text"})
+    assert f'<tbody id="row-{d.id}"' in r.text and f'name="{d.id}.f:MOBILE_SPEAKER:Zustand"' in r.text
     assert _get(d.id).title == "Neu"                                                 # unsaved edits came along
 
-    card = client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "o0_Zustand": "gebraucht",
-                                                                  "handover": "shipping"}).text
-    assert f'data-pending-key="addraft:{d.id}"' in card and f'data-refresh="/ad-drafts/{d.id}/card"' in card
-    assert "/inline/publish" not in card                                             # no second click while queued
+    r = client.post(url, data={f"{d.id}.title": "Neu", f"{d.id}.description": "Text", f"{d.id}.price": "12",
+                               f"{d.id}.cat": "MOBILE_SPEAKER", f"{d.id}.f:MOBILE_SPEAKER:Zustand": "gebraucht",
+                               f"{d.id}.handover": "shipping", "sel": str(d.id), "act": "publish"})
+    assert f'data-pending-key="addraft:{d.id}"' in r.text and f'data-refresh="/new-ad/batch/{bid}/row/{d.id}?checked=' in r.text
+    assert f'name="{d.id}.title"' not in r.text                                      # nothing to edit while queued
     wait_jobs()
-    card = client.get(f"/ad-drafts/{d.id}/card").text
-    assert "View on willhaben" in card and "data-pending-key" not in card
+    row = client.get(f"/new-ad/batch/{bid}/row/{d.id}").text
+    assert "willhaben.at/iad/object?adId=1000000001" in row and "data-pending-key" not in row
     assert wh.published[-1]["shipping"] == {"handover": "shipping", "paylivery": False, "size": None, "carrier": None}
 
 
@@ -492,16 +506,15 @@ async def test_publish_fills_the_gaps_of_an_ad_the_import_created_first(wh):
         assert row.quantity == 3
 
 
-def test_batch_card_links_to_the_published_ad(client, wh):  # noqa: F811
-    d = _draft()
+def test_batch_row_links_to_the_published_ad(client, wh):  # noqa: F811
+    d, marked = _draft(), _draft()                                       # marked: "published" without a willhaben ad id
+    bid = _batch_of(d, marked)
     ad_creator.update_draft(d.id, status="published", wh_ad_id="1000000001")
-    card = client.get(f"/ad-drafts/{d.id}/card").text
-    assert 'href="/myads?ad=1000000001"' in card and 'href="/sold/1000000001?kind=sold"' in card
-
-    marked = _draft()                                                    # "published" by hand: no willhaben ad id
     ad_creator.update_draft(marked.id, status="published")
-    card = client.get(f"/ad-drafts/{marked.id}/card").text
-    assert "/myads?ad=" not in card and "/sold/" not in card
+    row = client.get(f"/new-ad/batch/{bid}/row/{d.id}").text
+    assert 'href="/myads?ad=1000000001"' in row and 'href="/sold/1000000001?kind=sold"' in row
+    row = client.get(f"/new-ad/batch/{bid}/row/{marked.id}").text
+    assert "/myads?ad=" not in row and "/sold/" not in row
 
 
 def test_catalog_has_the_german_texts_of_the_new_links():
@@ -540,11 +553,6 @@ def test_unreadable_price_keeps_the_old_one(client, wh):  # noqa: F811
                     follow_redirects=False)
     assert "Changes saved" in unquote(r.headers["location"]) and _get(d.id).price_suggestion == 1200.5
 
-    card = client.post(f"/ad-drafts/{d.id}/inline", data={"title": "Neu", "description": "Text", "price": "80 EUR"}).text
-    assert "saved ✓" in card and _get(d.id).price_suggestion == 80
-    card = client.post(f"/ad-drafts/{d.id}/inline", data={"title": "Neu", "description": "Text", "price": "viel"}).text
-    assert "Price not recognized" in card and "saved ✓" not in card and _get(d.id).price_suggestion == 80
-
     # publishing with a price that was not understood does not go out with the old one
     client.post(f"/new-ad/{d.id}/willhaben/prepare", data={})
     r = client.post(f"/new-ad/{d.id}/willhaben/publish", follow_redirects=False,
@@ -552,11 +560,6 @@ def test_unreadable_price_keeps_the_old_one(client, wh):  # noqa: F811
     assert r.status_code == 303 and "msg=" not in r.headers["location"]
     wait_jobs()
     assert wh.published == [] and "Price not recognized" in _get(d.id).error and _get(d.id).publishing is None
-    card = client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "handover": "pickup", "title": "Neu",
-                                                                  "description": "Text", "price": "abc"}).text
-    assert "data-pending-key" not in card and "Price not recognized" in card
-    wait_jobs()
-    assert wh.published == []
 
 
 # ------------------------------------------------------------------ a published draft stays published while the ad is online
@@ -568,34 +571,34 @@ def _myad(ad_id, status):
         db.commit()
 
 
-def test_no_reset_to_draft_while_the_ad_is_online(client, wh):  # noqa: F811
+def test_batch_table_publishes_once_while_the_ad_is_online(client, wh):  # noqa: F811
+    """The table publishes a draft once; a draft that went back to "draft" (old data) is not published again while its
+    ad is online – only once My ads has seen it go, and then onto the same willhaben ad."""
     d = _draft()
-    client.post(f"/ad-drafts/{d.id}/inline/prepare", data={})
-    client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "o0_Zustand": "gebraucht", "handover": "pickup"})
+    url = f"/new-ad/batch/{_batch_of(d)}/drafts"
+    client.post(url, data={"act": f"prepare:{d.id}"})
+    wait_jobs()
+    publish = {f"{d.id}.title": "Logitech S125i", f"{d.id}.description": "Gut erhalten.", f"{d.id}.price": "12",
+               f"{d.id}.handover": "pickup", "sel": str(d.id), "act": "publish"}
+    client.post(url, data=publish)
     wait_jobs()
     assert (_get(d.id).status, _get(d.id).wh_ad_id) == ("published", "1000000001")
     with dbmod.session() as db:
         assert db.get(dbmod.MyAd, "1000000001").status == "unknown"        # just published, import not run yet
+    assert "Nothing published" in client.post(url, data=publish).text and len(wh.published) == 1
 
-    card = client.post(f"/ad-drafts/{d.id}/inline/status", data={"status": "draft"}).text
-    assert "online on willhaben as 1000000001" in card and "/myads" in card and "Not published after all" in card
-    assert _get(d.id).status == "published"
+    ad_creator.update_draft(d.id, status="draft")                            # reset by old data, the ad still online
+    r = client.post(url, data=publish)
+    assert "Nothing published" in r.text and "1000000001" in r.text and "/myads" in r.text
     _myad("1000000001", "active")
-    client.post(f"/ad-drafts/{d.id}/inline/status", data={"status": "draft"})
-    assert _get(d.id).status == "published" and len(wh.published) == 1
+    client.post(url, data=publish)
+    wait_jobs()
+    assert _get(d.id).status == "draft" and len(wh.published) == 1
 
-    _myad("1000000001", "deleted")                                           # gone from willhaben: the reset is fine
-    card = client.post(f"/ad-drafts/{d.id}/inline/status", data={"status": "draft"}).text
-    assert "/inline/publish" in card and (_get(d.id).status, _get(d.id).wh_ad_id) == ("draft", "1000000001")
-    client.post(f"/ad-drafts/{d.id}/inline/publish", data={"option": "0", "o0_Zustand": "gebraucht", "handover": "pickup"})
+    _myad("1000000001", "deleted")                                           # gone from willhaben: publish again
+    client.post(url, data=publish)
     wait_jobs()
     assert len(wh.published) == 2 and wh.published[-1]["existing"] == "1000000001"
-
-    # a manually marked draft (no willhaben id) can always be taken back
-    d2 = _draft()
-    client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "published"})
-    client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "draft"})
-    assert _get(d2.id).status == "draft"
 
 
 def test_publish_refused_while_the_ad_is_online(client, wh):  # noqa: F811
@@ -697,15 +700,6 @@ def test_batch_table_choices_survive_a_new_prepare_and_reach_willhaben(client, w
     assert {_get(a.id).status, _get(b.id).status} == {"published"}
 
 
-
-def _batch_of(*drafts):
-    with dbmod.session() as db:
-        batch = dbmod.AdBatch(status="review", groups=[{"id": f"g{i}", "photos": [], "draft_id": d.id}
-                                                       for i, d in enumerate(drafts)])
-        db.add(batch)
-        db.commit()
-        db.refresh(batch)
-    return batch.id
 
 
 def test_batch_table_does_not_publish_an_unreadable_price(client, wh):  # noqa: F811
