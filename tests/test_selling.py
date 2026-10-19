@@ -363,3 +363,40 @@ def test_bugreport_keeps_the_choices_and_hides_the_notes():
     assert app_settings["sell_handover"] == "both" and app_settings["sell_carrier"] == "gls"
     assert app_settings["sell_payment"] == "transfer,cash" and app_settings["sell_notes"] == "<set>"
 
+
+
+async def test_seller_drafts_get_the_style_profile_and_the_other_chats(env):  # noqa: F811
+    """The profile from Settings → My rules → Writing style and my messages to the ad's other buyers reach every draft
+    of my own ads; a purchase order's drafts keep their own persona (no profile)."""
+    from app.db import utcnow
+    from app.services.chats import _upsert_message
+
+    backend, account, notes = env
+    set_setting("reply_style", "- kleingeschrieben, kein gruß")
+    with session() as db:
+        db.add(Conversation(id="c2", ad_id="111", ad_title="Logitech S315i", partner_name="Ben", role="seller"))
+        _upsert_message(db, "c2", "x1", "out", "ja funktioniert, netzteil ist dabei", utcnow())
+        db.commit()
+    await chats.draft_reply("c1")
+    p = backend.calls[-1]["prompt"]
+    assert "Mein Schreibstil" in p and "- kleingeschrieben, kein gruß" in p
+    assert "Was ich anderen Interessenten zu dieser Anzeige geschrieben habe" in p and "- ja funktioniert, netzteil ist dabei" in p
+    await chats.draft_reply("c1", auto=True)
+    assert "Mein Schreibstil" in backend.calls[-1]["prompt"] and "- ja funktioniert, netzteil ist dabei" in backend.calls[-1]["prompt"]
+    with session() as db:
+        conv = db.get(Conversation, "c1")
+        conv.role = "buyer"
+        db.add(conv)
+        db.commit()
+    await chats.draft_reply("c1")                     # as buyer (no purchase order): my style, nobody else's chats
+    p = backend.calls[-1]["prompt"]
+    assert "Mein Schreibstil" in p and "Was ich anderen Interessenten" not in p
+    from app.db import Purchase
+    with session() as db:                             # a purchase order: Claude's buyer persona, not my style
+        db.add(Purchase(ad_id="999", conversation_id="c1", mode="pickup", status="negotiating", max_price=250.0,
+                        asking_price=300.0))
+        db.commit()
+    for auto in (False, True):
+        await chats.draft_reply("c1", auto=auto)
+        p = backend.calls[-1]["prompt"]
+        assert "Mein Schreibstil" not in p and "Was ich anderen Interessenten" not in p and "Höchstpreis: 250 €" in p

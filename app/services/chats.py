@@ -20,12 +20,12 @@ from app.db import Conversation, Draft, Message, MyAd, current_ad, get_setting, 
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
-    AUTO_REPLY_SCHEMA, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, REPLY_SCHEMA, REPLY_SYSTEM,
+    AUTO_REPLY_SCHEMA, MAX_OTHERS, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, REPLY_SCHEMA, REPLY_SYSTEM,
     auto_rules, platform_rule,
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, selling, stock, system_prompts
+from app.services import my_ads, selling, stock, style, system_prompts
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -444,7 +444,7 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
     """The owner's own voice: messages they typed themselves on willhaben (outgoing, not sent from a Claude draft),
     newest first; only when there are too few, sent drafts rated 👍 in Telegram fill up. Never the partner's messages."""
     with session() as db:
-        sent = {d.strip() for d in db.exec(select(Draft.text).where(Draft.status == "sent")).all()}
+        sent = {style._norm(d) for d in db.exec(select(Draft.text).where(Draft.status == "sent")).all()}  # as compared below
         rows = db.exec(select(Message).where(Message.direction == "out", Message.kind.is_(None))  # type: ignore[union-attr]
                        .order_by(Message.created_at.desc()).limit(200))
         out: list[str] = []
@@ -459,6 +459,42 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
             liked = db.exec(select(Draft).where(Draft.status == "sent", Draft.feedback == "up")
                             .order_by(Draft.sent_at.desc()).limit(limit - len(out)))
             out += [r.text for r in liked if r.text not in out]
+        return out
+
+
+OTHERS_MAX_AGE = timedelta(days=30)     # what I told other buyers longer ago is no fact about the item any more
+
+
+def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHERS) -> list[str]:
+    """What I wrote to the other buyers of the same ad (every copy of a renewed ad, my seller chats only) in the last
+    OTHERS_MAX_AGE, newest first: facts about the item ("funktioniert", "hab nur die eine") that the next buyer asks
+    again. No memory is needed for that; the prompt tells Claude to keep prices, commitments and appointments with
+    others to itself. Left out: the sold/reserved notices (app/services/sold.py; availability comes from the ad and
+    the stock, a lifted reservation must not live on here) and lines with contact data (an address I sent one buyer)."""
+    from app.services import sold
+
+    if not ad_id:
+        return []
+    ids = stock.ad_chain(ad_id)
+    with session() as db:
+        convs = db.exec(select(Conversation.id).where(col(Conversation.ad_id).in_(ids), Conversation.role == "seller",
+                                                      Conversation.id != conversation_id)).all()
+        if not convs:
+            return []
+        notices = {style._norm(x) for x in db.exec(select(Draft.text).where(
+            col(Draft.intent).in_(list(sold.NOTICE_INTENTS.values())), col(Draft.conversation_id).in_(convs)))}
+        rows = db.exec(select(Message).where(col(Message.conversation_id).in_(convs), Message.direction == "out",
+                                             col(Message.kind).is_(None),
+                                             col(Message.created_at) >= utcnow() - OTHERS_MAX_AGE)
+                       .order_by(col(Message.created_at).desc(), col(Message.id).desc()).limit(60))
+        out: list[str] = []
+        for m in rows:
+            text = style._norm(m.text)
+            if len(text) < 8 or text in out or text in notices or style.has_contact_data(text):
+                continue
+            out.append(text)
+            if len(out) == limit:
+                break
         return out
 
 
@@ -544,7 +580,7 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         system, schema = ((overrides.get("purchase_system") or system_prompts.get("purchase"), PURCHASE_SCHEMA)
                           if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
         examples: list[str] = []
-        stock_now = None
+        stock_now, others = None, []
     else:
         rules = get_setting("reply_rules")
         if conv.role == "seller":                     # Settings → Selling preferences, before the per-answer blocks
@@ -564,12 +600,14 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         availability = await gcal.availability_text() if (cal["in_auto"] if auto else cal["in_drafts"]) else None
         system, schema = ((overrides.get("auto_reply_system") or system_prompts.get("auto_reply"), AUTO_REPLY_SCHEMA)
                           if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
-        examples = _style_examples()
+        examples = style.examples()                       # the profile's characteristic messages, then the newest
+        others = _others_said(conv.id, conv.ad_id) if conv.role == "seller" else []
     if line := platform_rule(platform):
         rules = f"{rules}\n\n{line}"
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
-                          rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now)
+                          rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now,
+                          style=(style.profile() or None) if buy is None else None, others=others)
     return {"system": system, "schema": schema, "prompt": prompt, "ad_ctx": ad_ctx,
             "backend": "purchase" if buy is not None else "chat"}   # chats of a purchase order: Settings → "Purchases"
 
@@ -1193,9 +1231,12 @@ async def offer_draft(conv: Conversation, d: Draft, reason: str, replaces: str |
                  actions=ha_actions.draft_actions(d.id, can_send), tag=ha_actions.tag_for(d.id))
 
 
-async def revise(draft_id: int, instruction: str) -> Draft | None:
-    """New draft from an instruction about the old one (Telegram alternative / button on the chat page); the old
-    draft is dropped. None when it is not an open draft any more."""
+async def revise(draft_id: int, instruction: str, *, chosen: bool = False) -> Draft | None:
+    """New draft from an instruction about the old one; the old draft is dropped. None when it is not an open draft
+    any more. `chosen`: the instruction is one of Claude's own alternatives the owner tapped (Telegram button, button
+    on the chat page), so it names the decision only: the wording follows the rules, and nothing the alternative or
+    the old draft added unasked (a question the partner already answered, "keine Garantie") survives. An
+    instruction the owner typed ("Mit Claude überarbeiten") stays binding as it stands."""
     with session() as db:
         old = db.get(Draft, draft_id)
         conv = db.get(Conversation, old.conversation_id) if old else None
@@ -1203,7 +1244,14 @@ async def revise(draft_id: int, instruction: str) -> Draft | None:
         return None
     # German on purpose: both texts go into the prompt
     instruction = instruction.strip() or "Formuliere die Antwort neu."
-    hint = f"Mein bisheriger Entwurf war: „{old.text}“. Überarbeite ihn so: {instruction}"
+    if chosen:
+        hint = (f"Meine Entscheidung für diese Antwort (einer deiner eigenen Vorschläge, den ich angetippt habe): "
+                f"{instruction}\nMein bisheriger Entwurf war: „{old.text}“ – nur zum Vergleich. Setz die Entscheidung um "
+                "und formuliere sie nach den Regeln oben; übernimm aus dem Vorschlag und dem alten Entwurf nichts, was "
+                "der Partner nicht verlangt hat (keine Rückfrage zu Gesagtem, kein Hinweis auf Garantie, Rücknahme oder "
+                "Privatverkauf).")
+    else:
+        hint = f"Mein bisheriger Entwurf war: „{old.text}“. Überarbeite ihn so: {instruction}"
     new = await draft_reply(conv.id, hint=hint, auto=bool(old.auto))
     discard_draft(draft_id)
     with session() as db:
@@ -1215,11 +1263,12 @@ async def revise(draft_id: int, instruction: str) -> Draft | None:
     return row
 
 
-async def revise_and_offer(draft_id: int, instruction: str) -> Draft | None:
-    """"Revise with Claude" from the push: new draft from the instruction, old one dropped, same push updated."""
+async def revise_and_offer(draft_id: int, instruction: str, *, chosen: bool = False) -> Draft | None:
+    """"Revise with Claude" (typed) or an alternative button (chosen) from the push: new draft from the instruction,
+    old one dropped, same push updated."""
     from app.services import ha_actions
 
-    row = await revise(draft_id, instruction)
+    row = await revise(draft_id, instruction, chosen=chosen)
     if row is None:
         return None
     with session() as db:
@@ -1242,7 +1291,7 @@ def enqueue_revise(draft_id: int, instruction: str) -> bool:
 
     async def run(job: jobs.Job) -> str:
         try:
-            await revise(draft_id, instruction)
+            await revise(draft_id, instruction, chosen=True)
         except Exception as e:               # the reason shows in the chat, next to the draft
             _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
             raise

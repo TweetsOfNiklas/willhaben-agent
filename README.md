@@ -24,7 +24,13 @@ It runs on your own server, from your home internet connection, and you control 
   A search agent can also be created from a finished product search: it then runs all of that search's keyword
   searches on every check and drops new ads over the plan's budget or with an exclusion word before they are stored.
 - **Chats**: your willhaben conversations, synced live. Claude drafts replies in your style and nothing is sent
-  until you click. For your own ads you can opt in to automatic answers to simple questions, with a minimum price
+  until you click. A draft answers exactly what the buyer asked (it never asks back what they already said, and ends
+  with a question only when the next step needs their decision), and your rules are boundaries, not text to recite:
+  "no warranty, private sale" is said only when a buyer asks for a warranty or a return. Your style comes from the
+  messages you typed yourself: a profile Claude derives from them on request (Settings → Selling → My rules → Writing
+  style, editable) plus the most characteristic ones as examples. What you told the other buyers of the same ad
+  ("works fine", "only this one") is known in every chat of that ad; prices and agreements with others stay private.
+  For your own ads you can opt in to automatic answers to simple questions, with a minimum price
   Claude never goes below, human-like timing and read receipts; your thumbs-up/down feedback goes into later answers. Chats you are done with can
   be hidden or removed from the app (willhaben keeps them; they come back when the other person writes again).
   Claude knows how many pieces of an ad are left and follows your selling preferences (both described below).
@@ -228,10 +234,13 @@ Open `http://<your-server>:8000` and finish the setup in the browser:
 
 Settings → Selling → Selling preferences records how you usually sell (pickup or shipping, who pays the shipping,
 preferred carrier and delivery, payment ways); Claude follows it in answers to your buyers and in new ad texts. The
-free-text rules stay under Settings → AI → My rules.
+free-text rules stay under Settings → AI → My rules; the same page holds your writing style: "Derive from my
+messages" lets Claude describe how you write (address, length, tone, greetings, punctuation, dialect, emojis, typical
+phrases) from at least five messages you typed yourself on willhaben, and every reply draft follows the profile (a
+purchase order's negotiation keeps its own buyer persona), which you can edit like the rules.
 
 Settings → Claude & usage shows the token usage per task, lets you pick a model per task (default: Opus for writing
-listings, Sonnet for chat replies, screening and the product search) and sets a monthly token limit (10 M by default)
+listings, Sonnet for chat replies, screening, the product search and the style profile) and sets a monthly token limit (10 M by default)
 for the sidebar meter. When the limit is reached the app can pause hit screening, switch every task to Haiku or only
 notify you; chat drafts you ask for are never blocked. Your subscription is not billed per token either way.
 

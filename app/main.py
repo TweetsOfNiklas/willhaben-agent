@@ -42,9 +42,11 @@ from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zon
 from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
+from app.services import style as style_svc
 from app.services import stock, system_prompts
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
+from app import style_routes
 from app.services import search_agents as search_agents_svc
 from app.services.search_agents import refile_screened, run_agent
 from app.willhaben import access_log
@@ -131,6 +133,7 @@ app.include_router(label_buy_routes.router)   # Settings → Shipping → paymen
 app.include_router(printing_routes.router)    # Settings → Printers, print buttons
 app.include_router(paylivery_routes.router)   # PayLivery card on the chat page
 app.include_router(purchase_routes.router)    # Kaufauftrag: buy dialog, order pages, order buttons, Settings → Buying
+app.include_router(style_routes.router)       # Settings → My rules → Writing style
 paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -241,6 +244,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
+templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
 templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,
@@ -1819,7 +1823,8 @@ def _live_event(e: EventLog) -> dict[str, Any]:
 async def jobs_status(since: int | None = None):
     """Background jobs for the jobs indicator, plus every element still waiting for one (spinners on the page):
     keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published),
-    "refining:<id>" (Claude revises an ad draft), "preparing:<id>" (willhaben categories for an ad draft), "drafting:<conversation>" (Claude writes an answer).
+    "refining:<id>" (Claude revises an ad draft), "preparing:<id>" (willhaben categories for an ad draft),
+    "drafting:<conversation>" (Claude writes an answer), "style" (Claude derives the writing style, Settings → My rules).
     Every open page also asks now and then for what happened meanwhile: the sidebar badges ("counts") and the inbox
     events after `since` (its last known event id), shown as notices – not the ones sent without a push. Without
     `since` only "last_event", the page's starting point."""
@@ -1832,6 +1837,7 @@ async def jobs_status(since: int | None = None):
         pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
         pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
         pending += jobs.current_keys("preparing:")         # willhaben categories for an ad draft (batch table)
+        pending += jobs.current_keys("style")              # Claude derives the writing style (app/services/style.py)
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
@@ -2877,7 +2883,7 @@ async def settings_save(request: Request):
     """The general settings. Each section posts only its own fields (hidden "section"); an unknown or missing section
     saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
-    groups = {"rules": ("reply_rules",), "selling": selling.KEYS,
+    groups = {"rules": ("reply_rules", "reply_style"), "selling": selling.KEYS,
               "chats": ("auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_days", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
@@ -2894,6 +2900,8 @@ async def settings_save(request: Request):
 
     if "reply_rules" in todo:
         set_setting("reply_rules", str(form.get("reply_rules", "")).strip())
+        if "reply_style" in form:          # the style card is part of the rules form; a POST without it keeps the profile
+            set_setting("reply_style", str(form.get("reply_style", "")).replace("\r\n", "\n").strip()[:style_svc.MAX_PROFILE])
     if "auto_reply_rules" in todo:
         set_setting("auto_reply_rules", str(form.get("auto_reply_rules", "")).strip())
         set_setting("auto_draft", "1" if form.get("auto_draft") else "0")

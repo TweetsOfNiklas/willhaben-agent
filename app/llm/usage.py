@@ -91,7 +91,7 @@ def limit() -> dict[str, Any]:
 
 
 TASK_COLORS = {"chat": "var(--brand)", "ads": "#8b5cf6", "screen": "#eb6834", "search": "#1baf7a", "shipping": "#3b82f6",
-               "purchase": "#db4b9a"}
+               "purchase": "#db4b9a", "style": "#d9a21b"}
 
 
 def month_by_task() -> list[dict[str, Any]]:

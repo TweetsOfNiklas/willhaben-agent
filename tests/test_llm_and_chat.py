@@ -146,7 +146,7 @@ def test_default_models_per_purpose():
     for p in PURPOSES:
         set_setting(PURPOSES[p][0], "")
     assert model_for("ads") == "claude-opus-5-5"
-    assert {model_for(p) for p in ("chat", "screen", "search", "shipping", "purchase")} == {"claude-sonnet-5-5"}
+    assert {model_for(p) for p in ("chat", "screen", "search", "shipping", "purchase", "style")} == {"claude-sonnet-5-5"}
     set_setting("llm_model_chat", "claude-haiku-5-5")
     assert model_for("chat") == "claude-haiku-5-5"
     set_setting("llm_model_shipping", "claude-haiku-5-5")
@@ -302,6 +302,92 @@ def test_reply_prompt_hint_outranks_everything_and_names_unknown_price():
     assert "Vorrang vor allem anderen" in REPLY_SYSTEM and "[Betrag]" in REPLY_SYSTEM and "wie ein Mensch" in REPLY_SYSTEM
 
 
+def test_reply_prompt_style_profile_and_other_chats_blocks():
+    """The style profile (Settings → My rules → Writing style) and what I told the other buyers of the same ad go into
+    the prompt as their own blocks; without them nothing is added."""
+    from app.llm.prompts import MAX_OTHERS
+    base = dict(role="seller", ad={"title": "Mellanox ConnectX-3"}, partner="Max", messages=[("in", None, "Wieviele hast du?")],
+                rules="- Du-Form", examples=["passt, 45 geht aber nicht drunter"], hint=None)
+    p = reply_prompt(**base, style="- kurz, Du, kein Gruß\n- kleingeschrieben", others=["hab nur die eine karte", "ja funktioniert"])
+    assert "Mein Schreibstil (aus meinen eigenen Nachrichten abgeleitet" in p and "- kleingeschrieben" in p
+    assert "Was ich anderen Interessenten zu dieser Anzeige geschrieben habe" in p and "- hab nur die eine karte" in p
+    assert "nicht weitergeben" in p and "die anderen Chats nicht erwähnen" in p
+    assert p.index("Verlauf (älteste zuerst):") < p.index("Was ich anderen Interessenten") < p.index("Meine Regeln:")
+    assert p.index("Mein Schreibstil") < p.index("Nachrichten, die ich selbst in anderen Chats")
+    plain = reply_prompt(**base)
+    assert "Mein Schreibstil" not in plain and "Was ich anderen Interessenten" not in plain
+    many = reply_prompt(**base, others=[f"fakt nummer {i}" for i in range(12)])
+    assert many.count("- fakt nummer") == MAX_OTHERS
+
+
+def test_others_said_are_my_own_facts_from_the_ads_other_chats():
+    """chats._others_said: my own messages of the last 30 days in the other seller chats of the ad (every copy of a
+    renewed ad), newest first, never this chat, never the partner's words, never willhaben notices, never another
+    ad's chats, never a sold/reserved notice (availability comes from the ad) and never a line with contact data."""
+    from datetime import timedelta
+
+    from app.db import Conversation, Draft, MyAd, session, utcnow
+    from app.services.chats import _others_said, _upsert_message
+
+    t0 = utcnow() - timedelta(hours=2)
+    with session() as db:
+        db.add(MyAd(ad_id="111", heading="Mellanox", replaced_by="333"))
+        db.add(MyAd(ad_id="333", heading="Mellanox (renewed)"))
+        db.add(MyAd(ad_id="222", heading="Lampe"))
+        for cid, ad, role in (("c1", "111", "seller"), ("c2", "111", "seller"), ("c3", "333", "seller"),
+                              ("c4", "222", "seller"), ("c5", "111", "buyer")):
+            db.add(Conversation(id=cid, ad_id=ad, role=role))
+        _upsert_message(db, "c1", "a1", "out", "das ist mein eigener chat, zählt nicht", t0)
+        _upsert_message(db, "c2", "b1", "in", "Funktioniert die Karte?", t0 + timedelta(minutes=1))
+        _upsert_message(db, "c2", "b2", "out", "ja funktioniert, hab sie bis gestern im server gehabt", t0 + timedelta(minutes=2))
+        _upsert_message(db, "c2", "b3", "out", "ok", t0 + timedelta(minutes=3))                       # too short
+        _upsert_message(db, "c2", "b4", "unknown", "PayLivery-Hinweis für Verkäufer", t0 + timedelta(minutes=4))
+        _upsert_message(db, "c3", "d1", "out", "hab nur die eine karte", t0 + timedelta(minutes=5))   # the renewed copy
+        _upsert_message(db, "c4", "e1", "out", "die lampe ist noch da", t0 + timedelta(minutes=6))    # another ad
+        _upsert_message(db, "c5", "f1", "out", "ich würde die karte selbst kaufen", t0 + timedelta(minutes=7))   # me as buyer
+        _upsert_message(db, "c2", "b5", "out", "vor langer zeit geschrieben, zählt nicht mehr", t0 - timedelta(days=45))
+        _upsert_message(db, "c2", "b6", "out", "lieferadresse: hauptstraße 5, 1100 wien, tel 0664 1234567", t0 - timedelta(minutes=5))
+        reserved = "Hallo, danke für dein Interesse! Der Artikel ist gerade reserviert."
+        _upsert_message(db, "c3", "d0", "out", reserved, t0 - timedelta(minutes=1))
+        db.add(Draft(conversation_id="c3", text=reserved, status="sent", intent="reserved_notice", sent_at=t0))
+        db.commit()
+    assert _others_said("c1", "111") == ["hab nur die eine karte", "ja funktioniert, hab sie bis gestern im server gehabt"]
+    assert _others_said("c1", "111", limit=1) == ["hab nur die eine karte"]
+    assert _others_said("c2", "111") == ["hab nur die eine karte", "das ist mein eigener chat, zählt nicht"]
+    assert _others_said("c1", None) == [] and _others_said("c4", "222") == []
+
+
+def test_style_examples_put_the_profiles_examples_first():
+    """style.examples(): the characteristic messages chosen with the profile, then the newest own messages, each once,
+    capped at MAX_STYLE_EXAMPLES."""
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from app.db import Conversation, session, set_setting
+    from app.services import style
+    from app.services.chats import _upsert_message
+
+    t0 = datetime(2026, 10, 18, 10, 0, tzinfo=timezone.utc)
+    with session() as db:
+        db.add(Conversation(id="c1", role="seller"))
+        for i in range(10):
+            _upsert_message(db, "c1", f"m{i}", "out", f"eigene nachricht nummer {i}", t0 + timedelta(minutes=i))
+        db.commit()
+    assert style.profile() == "" and style.meta() == {} and style.examples()[0] == "eigene nachricht nummer 9"
+    set_setting("reply_style", "  - kurz und per Du\n")
+    set_setting("reply_style_meta", json.dumps({"at": "2026-10-18T10:00:00", "count": 10,
+                                                "examples": ["eigene nachricht nummer 2", " passt so ", "", 7]}))
+    assert style.profile() == "- kurz und per Du" and style.meta()["count"] == 10
+    ex = style.examples()
+    assert ex[0] == "eigene nachricht nummer 2" and len(ex) == 8 and len(set(ex)) == 8     # "passt so" is no message of mine
+    assert ex[1] == "eigene nachricht nummer 9" and "eigene nachricht nummer 2" not in ex[1:]
+    set_setting("reply_style", "")
+    assert style.examples()[0] == "eigene nachricht nummer 9"           # profile cleared: the derived examples go with it
+    set_setting("reply_style", "- kurz und per Du")
+    set_setting("reply_style_meta", "not json")
+    assert style.meta() == {} and style.panel()["profile"] == "- kurz und per Du" and style.panel()["meta"] == {}
+
+
 def test_the_chat_settings_save_the_days():
     from fastapi.testclient import TestClient
 
@@ -339,3 +425,31 @@ def test_chats_older_than_the_window_leave_the_list():
     page = client.get("/chats").text
     assert "Neues Gespräch" in page and "Altes Gespräch" not in page and "Show 1 hidden or older chats" in page
     assert "Altes Gespräch" in client.get("/chats?show_hidden=1").text
+
+
+def test_reply_system_answers_what_was_asked_and_keeps_rules_as_boundaries():
+    """The two failures of 2026-10-18: a draft asked „Hast du noch Interesse?“ after the buyer wrote „Hätte Interesse!“,
+    and „Ja, sie funktioniert. Ist aber ein Privatverkauf, also ohne Garantie oder Rücknahme.“ recited a rule nobody
+    asked about. The system prompt now says what to answer, that rules are boundaries, how far a hint binds and that
+    alternatives name the decision only; the automatic and the buyer prompts inherit it."""
+    from app.db import DEFAULT_SETTINGS
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM, REPLY_SCHEMA, REPLY_SYSTEM
+
+    for text in ("Antworte auf das, was der Partner zuletzt geschrieben hat, und nicht mehr",
+                 "fragst du nicht noch einmal danach",
+                 "Eine Schlussfrage stellst du nur, wenn der nächste Schritt die Entscheidung des Partners braucht",
+                 "sind aber Grenzen und kein\n  Text zum Aufsagen",
+                 "Garantie, Rücknahme, Privatverkauf oder „wie gesehen“ schreibst du nie von\n  dir aus",
+                 "Abweichend davon nennst du Abholung, Versand und Zahlungsweg (auch PayLivery)",
+                 "Vorrang vor allem anderen", "setzt du genau so um, wie sie dastehen",
+                 "nur die Formulierung folgt weiter den Regeln hier",
+                 "instruction, die nur die Entscheidung\n  in einem Satz nennt",
+                 "keine Garantie- oder\n  Privatverkaufshinweise, keine schon beantworteten Fragen"):
+        assert text in REPLY_SYSTEM, text
+        assert text in AUTO_REPLY_SYSTEM and text in PURCHASE_SYSTEM, text
+    assert "ein Stichwort reicht nicht" not in REPLY_SYSTEM      # a typed „ohne Garantie“ stays binding (chats.revise)
+    assert "Automatischer Modus: Deine Antwort wird ohne weitere Prüfung gesendet" in AUTO_REPLY_SYSTEM   # the .replace() still hits
+    desc = REPLY_SCHEMA["properties"]["alternatives"]["items"]["properties"]["instruction"]["description"]
+    assert desc.startswith("Nur die Entscheidung in einem kurzen Satz") and "keine schon beantworteten Fragen" in desc
+    first = DEFAULT_SETTINGS["reply_rules"].splitlines()[0]
+    assert first == "- Privatverkauf, daher keine Garantie oder Rücknahme (nur erwähnen, wenn jemand danach fragt)."

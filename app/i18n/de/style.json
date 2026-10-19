@@ -1,0 +1,19 @@
+{
+  "Writing style": "Schreibstil",
+  "the style profile derived from your own chat messages – runs only when you ask for it": "das Stilprofil aus deinen eigenen Chatnachrichten – läuft nur, wenn du es anstößt",
+  "How you write, derived from your own willhaben messages. Claude follows it in every reply draft, on top of the examples it always gets. You can edit it.": "Wie du schreibst, abgeleitet aus deinen eigenen willhaben-Nachrichten. Claude hält sich bei jedem Antwortentwurf daran, zusätzlich zu den Beispielen, die es immer bekommt. Du kannst es bearbeiten.",
+  "Derive from my messages": "Aus meinen Nachrichten ableiten",
+  "Deriving…": "Wird abgeleitet…",
+  "Claude is reading your messages…": "Claude liest deine Nachrichten…",
+  "queued": "eingereiht",
+  "Only {n} of your own messages so far – at least {min} are needed": "Erst {n} eigene Nachrichten – mindestens {min} werden gebraucht",
+  "Derived {time} from {n} messages": "Abgeleitet {time} aus {n} Nachrichten",
+  "Not derived yet": "Noch nicht abgeleitet",
+  "One line per point, e.g. - short, per Du, no greeting": "Eine Zeile pro Punkt, z. B. - kurz, per Du, kein Gruß",
+  "Save": "Speichern",
+  "Claude derives my writing style": "Claude leitet meinen Schreibstil ab",
+  "Style profile derived from {n} messages": "Stilprofil aus {n} Nachrichten abgeleitet",
+  "Claude returned no style profile": "Claude hat kein Stilprofil geliefert",
+  "Claude is already deriving your writing style": "Claude leitet deinen Schreibstil gerade schon ab",
+  "Claude derives your writing style in the background": "Claude leitet deinen Schreibstil im Hintergrund ab"
+}

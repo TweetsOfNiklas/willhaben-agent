@@ -428,7 +428,7 @@ class LLMCall(SQLModel, table=True):
     """One Claude call (one row per model it used), for the token usage table in Settings → Claude."""
     id: int | None = Field(default=None, primary_key=True)
     ts: datetime = Field(default_factory=utcnow, index=True)
-    purpose: str = Field(index=True)          # a llm.base.PURPOSES key (chat | ads | screen | search | shipping | purchase) or other
+    purpose: str = Field(index=True)          # a llm.base.PURPOSES key (chat | ads | screen | search | shipping | purchase | style) or other
     model: str
     ok: bool = True
     call_part: int | None = None              # 0 = first model of the call (counts as the call), 1.. = further models
@@ -637,7 +637,7 @@ def log_event(kind: str, message: str, url: str | None = None, *, ad_id: str | N
 
 DEFAULT_SETTINGS: dict[str, str] = {
     "reply_rules": (
-        "- Ich verkaufe privat, keine Garantie oder Rücknahme.\n"
+        "- Privatverkauf, daher keine Garantie oder Rücknahme (nur erwähnen, wenn jemand danach fragt).\n"
         "- Abholung bevorzugt, Versand nur gegen Vorauskasse oder mit willhaben PayLivery.\n"
         "- Bei Preisverhandlung höchstens 10 % Nachlass, sonst freundlich ablehnen.\n"
         "- Du-Form, freundlich, kurz, keine Emojis."
@@ -656,6 +656,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
         "- Keine Termine, Adressen oder Telefonnummern zusagen, die nicht in der Anweisung zur Anzeige stehen."
     ),
     "send_verified": "0",
+    # Settings → My rules → Writing style (app/services/style.py): the profile Claude derived from my own messages
+    "reply_style": "",
+    "reply_style_meta": "",       # JSON: {at, count, examples, model, note} of the last derivation
     # Settings → Selling preferences (app/services/selling.py): what Claude tells buyers and writes into new ads
     "sell_handover": "pickup",          # pickup | shipping | both
     "sell_shipping_cost": "buyer",      # buyer | included (in the price)

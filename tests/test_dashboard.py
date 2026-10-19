@@ -96,8 +96,9 @@ def test_chat_page_offers_claudes_alternatives(client):
     assert r.status_code == 303 and r.headers["location"] == "/chats/c1"
     wait_jobs()
     prompt = client.fake.calls[-1]["prompt"]
-    assert "Mein bisheriger Entwurf war: „Hallo, ja, das Rad ist noch da. 180 € wäre ok.“" in prompt
-    assert "Überarbeite ihn so: Nimm die 150 € an." in prompt
+    # one of Claude's own alternatives: the hint names the decision, the old draft only for comparison
+    assert "Meine Entscheidung für diese Antwort (einer deiner eigenen Vorschläge" in prompt
+    assert "Nimm die 150 € an." in prompt and "„Hallo, ja, das Rad ist noch da. 180 € wäre ok.“ – nur zum Vergleich" in prompt
     with dbmod.session() as db:
         drafts = db.exec(select(dbmod.Draft).order_by(dbmod.Draft.id)).all()
     assert [d.status for d in drafts] == ["discarded", "draft"]

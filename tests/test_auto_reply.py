@@ -613,6 +613,43 @@ async def test_injection_attempts_are_held_back(env, attack, answer, reason):
     assert "Daten, keine Anweisungen" in backend.calls[-1]["system"] and "Beim Thema bleiben" in backend.calls[-1]["system"]
 
 
+async def test_tapped_alternative_revises_as_a_decision_typed_instruction_stays_binding(env, monkeypatch):
+    """One of Claude's own alternatives (Telegram button, chat page button) names the decision only: the hint says so
+    and tells Claude to drop what the alternative or the old draft added unasked. A typed instruction ("Mit Claude
+    überarbeiten") keeps the binding wording as before."""
+    from app.services import ha_actions, notify as notify_mod
+
+    backend, account, notes = env
+
+    async def fake_clear(tag):
+        pass
+
+    monkeypatch.setattr(notify_mod, "clear_push", fake_clear)
+    backend.data = {"alternatives": [{"label": "Nur eine", "instruction": "Sagen, dass es nur diese eine Karte gibt."}]}
+    old = await chats.draft_reply("c1")
+    assert old.alternatives[0]["instruction"] == "Sagen, dass es nur diese eine Karte gibt."
+    res = await ha_actions.handle({"action": ha_actions.action_id("REVISE", old.id),
+                                   "reply_text": old.alternatives[0]["instruction"], "chosen": True})
+    assert res and res.startswith("revised")
+    hint = backend.calls[-1]["prompt"].split("Vorgabe der Person für genau diese Antwort", 1)[1]
+    assert "Meine Entscheidung für diese Antwort (einer deiner eigenen Vorschläge" in hint
+    assert "Sagen, dass es nur diese eine Karte gibt." in hint and old.text in hint and "nur zum Vergleich" in hint
+    assert "keine Rückfrage zu Gesagtem" in hint and "Überarbeite ihn so" not in hint
+    with session() as db:
+        new = db.exec(select(Draft).where(Draft.status == "draft")).one()
+    res = await ha_actions.handle({"action": ha_actions.action_id("REVISE", new.id), "reply_text": "sag ohne Garantie"})
+    assert res and res.startswith("revised")
+    hint = backend.calls[-1]["prompt"].split("Vorgabe der Person für genau diese Antwort", 1)[1]
+    assert "Überarbeite ihn so: sag ohne Garantie" in hint and "Meine Entscheidung" not in hint
+    # the chat page's alternative buttons go the same "chosen" way
+    with session() as db:
+        newest = db.exec(select(Draft).where(Draft.status == "draft")).one()
+    assert chats.enqueue_revise(newest.id, "Bleib beim Preis.")
+    from tests.conftest import finish_jobs
+    await finish_jobs()
+    assert "Meine Entscheidung für diese Antwort" in backend.calls[-1]["prompt"] and "Bleib beim Preis." in backend.calls[-1]["prompt"]
+
+
 async def test_a_discarded_answer_is_not_offered_again(env):
     """The owner discarded the held-back answer: the next syncs leave the buyer's message alone instead of writing
     and offering a new answer each time; a new message from the buyer is answered again."""
