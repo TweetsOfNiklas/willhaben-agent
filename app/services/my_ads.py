@@ -264,7 +264,8 @@ def enqueue_cleanup(ad_ids: list[str]) -> int:
             line += " · " + t("{n} only hidden here", n=len(res["hidden"]))
         return line + (" · " + t("{n} failed (see the ads)", n=len(res["failed"])) if res["failed"] else "")
 
-    jobs.submit("myads-cleanup", t("Clean up {n} old ads", n=len(ids)), run, total=len(ids))
+    jobs.submit("myads-cleanup", t("Clean up {n} old ads", n=len(ids)), run, total=len(ids),
+                keys=[f"ad:{i}" for i in ids], on_cancel=lambda: _clear_pending(ids), grace=True, quiet=True)
     return len(ids)
 
 
@@ -306,7 +307,11 @@ def enqueue(action: str, ad_ids: list[str]) -> int:
         label = {"delete": t("Delete {n} ads on willhaben", n=len(queued)),
                  "activate": t("Activate {n} ads on willhaben", n=len(queued)),
                  "deactivate": t("Deactivate {n} ads on willhaben", n=len(queued))}[action]
-    jobs.submit(f"myads-{action}", label, lambda job: _run_bulk(job, action, queued), total=len(queued))
+    # delete cannot be undone on willhaben, and activating an expired ad republishes it under a new id: both wait the
+    # grace period in the queue (cancel instead of a confirm); deactivate is reversible on the same id
+    jobs.submit(f"myads-{action}", label, lambda job: _run_bulk(job, action, queued), total=len(queued),
+                keys=[f"ad:{i}" for i in queued], on_cancel=lambda: _clear_pending(queued),
+                grace=action in ("delete", "activate"), quiet=True)
     return len(queued)
 
 
@@ -406,8 +411,32 @@ def enqueue_edit(ad_id: str, heading: str, description: str, price: float | None
         _unmark(ad_id, payload=None)
         return t("Saved on willhaben – status now: {status}", status=(r.status if r else "") or "")
 
+    unsaved = {"unsaved": {"heading": heading, "description": description, "price": price}}
     jobs.submit("myads-edit", t("Save „{title}“ on willhaben", title=(heading or ad_id)[:60]), run,
-                current=f"ad:{ad_id}")
+                current=f"ad:{ad_id}", on_cancel=lambda: _unmark(ad_id, payload=unsaved), quiet=True)   # the text is kept
+    return True
+
+
+def enqueue_price(ad_id: str, price: float) -> bool:
+    """Save a new price on willhaben as a background job; title and text stay as willhaben has them (loaded inside
+    the job). False: the ad already waits for another action."""
+    row = _mark(ad_id, "edit", {"edit": {"price": price}})
+    if row is None:
+        return False
+
+    async def run(job: jobs.Job) -> str:
+        from app.willhaben import insert
+        try:
+            ad = await insert.get_own_ad(get_session(), ad_id)
+            r = await edit(ad_id, ad.get("heading") or "", insert.description_text(ad.get("description")), price)
+        except Exception as e:
+            _unmark(ad_id, t("Saving failed: {error}", error=e))
+            raise
+        _unmark(ad_id, payload=None)
+        return t("Saved on willhaben – status now: {status}", status=(r.status if r else "") or "")
+
+    jobs.submit("myads-edit", t("Save the price of „{title}“ on willhaben", title=(row.heading or ad_id)[:60]), run,
+                current=f"ad:{ad_id}", on_cancel=lambda: _unmark(ad_id), quiet=True)
     return True
 
 
@@ -443,8 +472,13 @@ def enqueue_photos(ad_id: str, order: list[str], new_photos: list[tuple[str, byt
         _unmark(ad_id)
         return t("Photos saved on willhaben – status now: {status}", status=(r.status if r else "") or "")
 
+    def cancelled() -> None:
+        import shutil
+        _unmark(ad_id)
+        shutil.rmtree(folder, ignore_errors=True)
+
     jobs.submit("myads-photos", t("Save the photos of „{title}“ on willhaben", title=(row.heading or ad_id)[:60]), run,
-                current=f"ad:{ad_id}")
+                current=f"ad:{ad_id}", on_cancel=cancelled, quiet=True)
     return True
 
 
@@ -640,6 +674,19 @@ _ENDED_WORDS = ("verkauft", "verschenkt", "reserviert", "deaktiviert", "passiv",
                 "given away", "reserved", "deactivated", "expired", "deleted")
 
 
+def _follow_sale_status(row: MyAd, previous: str) -> None:
+    """The sale status here follows what willhaben shows (the sold workflow writes both; this covers marks made on
+    willhaben itself): sold there = sold here; reserved there = reserved here (buyer unknown) unless a sale is
+    recorded; a reservation lifted on willhaben (reserved → active) lifts the local one too."""
+    if row.status == "sold" and row.sale_status != "sold":
+        row.sale_status, row.sale_at = "sold", utcnow()
+        row.auto_reply, row.auto_renew = False, False
+    elif row.status == "reserved" and row.sale_status is None:
+        row.sale_status, row.sale_at = "reserved", utcnow()
+    elif previous == "reserved" and row.status == "active" and row.sale_status == "reserved":
+        row.sale_status = row.sale_conversation_id = row.sale_at = None
+
+
 def ended(ad: Any) -> bool:
     """The status takes the ad offline for good or by hand (its id, or willhaben's word when the id is unknown)."""
     label = (getattr(ad, "status_label", None) or "").lower()
@@ -682,6 +729,7 @@ async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
                     else ad.status_label or ad.status
             row.published_at, row.end_date = ad.start or row.published_at, ad.end or row.end_date
             row.last_checked_at, row.last_error = utcnow(), None
+            _follow_sale_status(row, previous)
             db.add(row)
             if previous == "active" and row.status == "expired":
                 newly_expired.append(row)

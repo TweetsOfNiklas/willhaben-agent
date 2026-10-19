@@ -508,8 +508,10 @@ def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping
             update_draft(draft_id, publishing=None)
         return t("Published on willhaben")
 
+    # live on willhaben at once: it waits the grace period in the queue (cancel instead of a confirm)
     jobs.submit("publish", t("Publish „{title}“", title=(d.title or f"#{draft_id}")[:60]), run,
-                total=n_photos + 5, current=f"addraft:{draft_id}")
+                total=n_photos + 5, current=f"addraft:{draft_id}", grace=True, quiet=True,
+                on_cancel=lambda: update_draft(draft_id, publishing=None))
     return True
 
 

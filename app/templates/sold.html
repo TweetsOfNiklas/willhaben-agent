@@ -8,28 +8,28 @@
 <div class="mx-auto flex max-w-[760px] min-w-0 flex-col gap-4">
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
     {% if buyer %}<a class="link link-primary inline-flex items-center gap-1 no-underline" href="/chats/{{ buyer.id }}">{{ ui.icon('back', 14) }}{{ _("Chat with {name}", name=buyer.partner_name or _('unknown')) }}</a><span class="text-muted">·</span>{% endif %}
-    <a class="link link-primary inline-flex items-center gap-1 no-underline" href="/myads#ad-{{ ad_id }}">{{ ui.icon('back', 14) }}{{ _("My ads") }}</a>
+    <a class="link link-primary inline-flex items-center gap-1 no-underline" href="/myads?ad={{ ad_id }}">{{ ui.icon('back', 14) }}{{ _("My ads") }}</a>
   </div>
-  <h1 class="text-xl break-words">{% if is_sold %}{{ _("Sold") }}{% else %}{{ _("Reserved") }}{% endif %} · {{ title }}</h1>
+  <h1 class="text-xl break-words">{{ _("Sale") }} · {{ title }}</h1>
 
-  <div class="flex flex-col gap-3">
-    <form method="get" action="/sold/{{ ad_id }}" class="flex flex-wrap items-center gap-2">
-      <select name="kind" aria-label="{{ _('What happened') }}" onchange="this.form.submit()" class="select select-sm w-auto max-w-full">
-        <option value="sold" {% if is_sold %}selected{% endif %}>{{ _("Sold") }}</option>
-        <option value="reserved" {% if not is_sold %}selected{% endif %}>{{ _("Reserved") }}</option>
-      </select>
-      <select name="buyer" aria-label="{{ _('Buyer') }}" onchange="this.form.submit()" class="select select-sm w-auto max-w-full">
-        <option value="">{{ _("Buyer: not from a chat") }}</option>
-        {% for c in convs %}<option value="{{ c.id }}" {% if buyer and buyer.id == c.id %}selected{% endif %}>{{ _("Buyer: {name}", name=c.partner_name or c.id) }}</option>{% endfor %}
-      </select>
-      <noscript><button class="btn btn-sm">{{ _("Show") }}</button></noscript>
-    </form>
-    <p class="text-[13px] text-muted">{{ _("Three steps, each one optional. Nothing happens without your click.") }}
-      {% if ad and ad.sale_status %}{{ ui.pill(_("sold") if ad.sale_status == 'sold' else _("reserved"), 'ok', dot=false) }}{% endif %}
-      {% if ad and ad.status in ('sold', 'reserved') %}{{ ui.pill(_("willhaben: {status}", status=_("sold") if ad.status == 'sold' else _("reserved")), '', dot=false) }}{% endif %}</p>
-  </div>
+  {# the buyer: who the sale or reservation is for, and who is left out of the notices below (swaps the page's parts) #}
+  <form method="get" action="/sold/{{ ad_id }}" class="flex flex-wrap items-center gap-2" hx-get="/sold/{{ ad_id }}" hx-trigger="change" hx-target="#sale-page" hx-select="#sale-page" hx-swap="outerHTML" hx-push-url="true">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <select name="buyer" aria-label="{{ _('Buyer') }}" class="select select-sm w-auto max-w-full">
+      <option value="">{{ _("Buyer: not from a chat") }}</option>
+      {% for c in convs %}<option value="{{ c.id }}" {% if buyer and buyer.id == c.id %}selected{% endif %}>{{ _("Buyer: {name}", name=c.partner_name or c.id) }}</option>{% endfor %}
+    </select>
+    <noscript><button class="btn btn-sm">{{ _("Show") }}</button></noscript>
+  </form>
 
   {% set hidden %}<input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}">{% endset %}
+  <div id="sale-page" class="flex flex-col gap-4">
+  {# one click: sold / reserved here and on willhaben (_sale_actions.html); the page's parts follow #}
+  <section class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <h2 class="text-base font-semibold">{{ _("Sold or reserved") }}</h2>
+    {% with p = panel, target = '#sale-page', next = '/sold/' ~ ad_id ~ '?kind=' ~ kind ~ ('&buyer=' ~ buyer.id if buyer else ''), oob = '', inline = true %}{% include "_sale_actions.html" %}{% endwith %}
+    <p class="text-xs text-muted">{{ _("Nothing happens without your click. The willhaben step runs in the background; a sale waits a few seconds there, so you can take it back.") }}</p>
+  </section>
 
   {% if stock %}
   <section id="stock" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
@@ -59,46 +59,9 @@
   </section>
   {% endif %}
 
-  {# step 1 runs as a background job (lane ads): the forms send through htmx, this section shows the job and swaps
-     itself in when it is done (with willhaben's reasons, if it asks for one) #}
-  {% set busy1 = ad and ad.pending_action in ('sold', 'reserved', 'unreserve') %}
-  <section id="step1" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4"
-           {% if busy1 %}data-pending-key="ad:{{ ad_id }}"{% endif %}>
-    <h2 class="text-base font-semibold">1 · {{ _("On willhaben") }}</h2>
-    {% if ad and ad.last_error and not busy1 %}<small class="text-error">{{ ad.last_error }}</small>{% endif %}
-    {% if busy1 %}
-    <div>{{ ui.pending('ad:' ~ ad_id, {'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}[ad.pending_action],
-                       {'sold': _("Queued: mark as sold"), 'reserved': _("Queued: mark as reserved"), 'unreserve': _("Queued: remove the reservation")}[ad.pending_action]) }}</div>
-    {% elif pieces_left %}
-    <p class="text-[13px] text-muted">{{ left_line }}</p>
-    {% elif is_sold %}
-    <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3" hx-boost="true" hx-target="#step1" hx-select="#step1" hx-swap="outerHTML" hx-push-url="false">
-      {{ hidden }}
-      {% if reasons %}
-      <fieldset class="flex flex-col gap-2">
-        <legend class="text-[12.5px] text-muted">{{ _("Reason (asked by willhaben)") }}</legend>
-        {% for r in reasons %}<label class="flex items-center gap-2"><input type="radio" name="reason_id" value="{{ r.id }}" required class="radio radio-primary radio-sm">{{ r.label }}</label>{% endfor %}
-      </fieldset>
-      {% endif %}
-      <div class="flex flex-wrap gap-2">
-        <button class="btn btn-primary" data-confirm="{{ _('Mark this ad as sold on willhaben now? willhaben cannot undo this.') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Mark as sold on willhaben") }}</button>
-      </div>
-      <small class="text-xs text-muted">{{ _('Like "Auf verkauft setzen" in My ads on willhaben. A sold ad cannot be activated again.') }}</small>
-    </form>
-    {% else %}
-    <form method="post" action="/sold/{{ ad_id }}/willhaben" class="flex flex-col gap-3" hx-boost="true" hx-target="#step1" hx-select="#step1" hx-swap="outerHTML" hx-push-url="false">
-      {{ hidden }}
-      <div class="flex flex-wrap gap-2">
-        <button class="btn btn-primary" data-confirm="{{ _('Mark this ad as reserved on willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Mark as reserved on willhaben") }}</button>
-        <button name="undo" value="1" class="btn" data-confirm="{{ _('Remove the reserved mark on willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Remove reservation") }}</button>
-      </div>
-    </form>
-    {% endif %}
-    {% if not pieces_left %}<p class="text-xs text-muted">{{ _("Not tested live yet: check the ad on willhaben afterwards.") }}</p>{% endif %}
-  </section>
 
   <section id="step2" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-    <h2 class="text-base font-semibold">2 · {{ _("Tell the other buyers") }}</h2>
+    <h2 class="text-base font-semibold">{{ _("Tell the other buyers") }}</h2>
     {% set drafts = others | selectattr('draft') | list %}
     {% if pieces_left %}
     <p class="text-[13px] text-muted">{{ left_line }}</p>
@@ -146,7 +109,7 @@
       </div>
       {% endfor %}
       <div class="flex flex-wrap gap-2">
-        <button name="action" value="send" class="btn btn-primary" data-confirm="{{ _('Send the selected messages via willhaben now?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Send selected") }}</button>
+        <button name="action" value="send" class="btn btn-primary" title="{{ _('They go out one after another, each after a few seconds in the queue, where you can take it back.') }}">{{ _("Send selected") }}</button>
         <button name="action" value="discard" class="btn btn-ghost">{{ _("Discard selected") }}</button>
       </div>
     </form>
@@ -154,35 +117,6 @@
     </div>
   </section>
 
-  <section id="step3" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-    <h2 class="text-base font-semibold">3 · {{ _("Here in the app") }}</h2>
-    {% if stock and not stock.remaining %}{# sold out: nothing left to sell or reserve #}
-    <p class="text-[13px] text-muted">{{ _("All pieces are sold. If a sale fell through, undo it above.") }}</p>
-    {% else %}
-    <form method="post" action="/sold/{{ ad_id }}/finish" class="flex flex-col gap-3">
-      {{ hidden }}
-      {% if is_sold and stock %}
-      <div class="grid max-w-[420px] grid-cols-2 gap-2">
-        <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Pieces") }}</span>
-          <input type="number" name="pieces" value="1" min="1" max="{{ stock.remaining }}" step="1" required class="input input-sm w-full bg-base-200"></label>
-        <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Total price (€, optional)") }}</span>
-          <input type="text" inputmode="decimal" name="price" value="{{ ('%.2f'|format(agreed_price)).rstrip('0').rstrip('.') if agreed_price is not none else '' }}" class="input input-sm w-full bg-base-200"></label>
-      </div>
-      <label class="flex items-center gap-2"><input type="checkbox" name="auto_off" value="1" checked class="checkbox checkbox-primary checkbox-sm"> {{ _("With the last piece: switch off automatic answers for this ad (instructions are kept)") }}</label>
-      {% else %}
-      <label class="flex items-center gap-2"><input type="checkbox" name="auto_off" value="1" checked class="checkbox checkbox-primary checkbox-sm"> {{ _("Switch off automatic answers for this ad (instructions are kept)") }}</label>
-      {% endif %}
-      <div class="flex flex-wrap gap-2">
-        <button class="btn">{% if is_sold and stock %}{{ _("Record sale") }}{% elif is_sold %}{{ _("Save as sold") }}{% else %}{{ _("Save as reserved") }}{% endif %}</button>
-        {% if ad and ad.sale_status and (not stock or ad.sale_status == 'reserved') %}<button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/sold/{{ ad_id }}/reset">{{ _("Not sold after all") }}</button>{% endif %}
-      </div>
-      {% if is_sold and stock %}
-      <small class="text-xs text-muted">{% if ad and ad.auto_reply %}{{ _("The ad stays online and keeps answering while pieces are left; the last piece marks it sold.") }}{% else %}{{ _("The ad stays online while pieces are left; the last piece marks it sold.") }}{% endif %}</small>
-      {% else %}
-      <small class="text-xs text-muted">{{ _("A sold ad never gets automatic answers again.") }}</small>
-      {% endif %}
-    </form>
-    {% endif %}
-  </section>
+  </div>
 </div>
 {% endblock %}

@@ -651,8 +651,18 @@ def enqueue_send(draft_id: int, text: str) -> bool:
         db.commit()
         conv = db.get(Conversation, d.conversation_id)
     who = (conv.partner_name if conv else None) or t("unknown")
+
+    def cancelled() -> None:          # taken back while queued: an open draft again, text as edited
+        with session() as db:
+            row = db.get(Draft, draft_id)
+            if row and row.status == "sending":
+                row.status = "draft"
+                db.add(row)
+                db.commit()
+
+    # a sent message cannot be taken back: it waits the grace period in the queue (cancel instead of a confirm)
     jobs.submit("chat-send", t("Answer to {name}", name=who), lambda job: _send_job(draft_id), lane="chat",
-                current=f"draft:{draft_id}")
+                current=f"draft:{draft_id}", on_cancel=cancelled, grace=True, quiet=True)
     return True
 
 
@@ -717,7 +727,7 @@ def enqueue_draft(conversation_id: str, hint: str | None = None) -> bool:
 
     who = (c.partner_name if c else None) or t("unknown")
     jobs.submit("chat-draft", t("Claude writes an answer to {name}", name=who), run, lane="claude",
-                current=f"drafting:{conversation_id}")
+                current=f"drafting:{conversation_id}", on_cancel=lambda: _set_drafting(conversation_id, False), quiet=True)
     return True
 
 
@@ -1246,7 +1256,7 @@ def enqueue_revise(draft_id: int, instruction: str) -> bool:
         return t("Draft ready")
 
     jobs.submit("chat-draft", t("Claude revises the answer to {name}", name=c.partner_name or t("unknown")), run,
-                lane="claude", current=f"drafting:{conversation_id}")
+                lane="claude", current=f"drafting:{conversation_id}", on_cancel=lambda: _set_drafting(conversation_id, False), quiet=True)
     return True
 
 

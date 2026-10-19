@@ -1,8 +1,6 @@
 {
  "Actions": "Aktionen",
- "Take this ad offline on willhaben? You can activate it again there.": "Diese Anzeige auf willhaben deaktivieren? Du kannst sie dort wieder aktivieren.",
  "Deactivate on willhaben": "Auf willhaben deaktivieren",
- "Delete this ad on willhaben for good? This cannot be undone.": "Diese Anzeige auf willhaben endgültig löschen? Das lässt sich nicht rückgängig machen.",
  "Delete on willhaben": "Auf willhaben löschen",
  "Show in list again": "Wieder in der Liste zeigen",
  "Hide from this list only": "Nur aus dieser Liste ausblenden",
@@ -23,9 +21,6 @@
  "Select ads": "Anzeigen auswählen",
  "Select": "Auswählen",
  "{n} selected": "{n} ausgewählt",
- "Put these ads online again on willhaben?": "Diese Anzeigen auf willhaben wieder online stellen?",
- "Take these ads offline on willhaben? You can activate them again.": "Diese Anzeigen auf willhaben deaktivieren? Du kannst sie wieder aktivieren.",
- "Delete these ads on willhaben for good? This cannot be undone.": "Diese Anzeigen auf willhaben endgültig löschen? Das lässt sich nicht rückgängig machen.",
  "No ads selected": "Keine Anzeigen ausgewählt",
  "Failed: {error}": "Fehlgeschlagen: {error}",
  "Deleted on willhaben: {n}": "Auf willhaben gelöscht: {n}",
@@ -34,7 +29,6 @@
  "activated on willhaben {when}": "auf willhaben aktiviert {when}",
  "of which republished as a new ad (new willhaben id): {n}": "davon als neue Anzeige veröffentlicht (neue willhaben-ID): {n}",
  "sold – not put online again": "verkauft – nicht wieder online gestellt",
- "Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.": "Diese Anzeige auf willhaben wieder online stellen? Bietet willhaben kein „Aktivieren“ an, wird sie als neue Anzeige veröffentlicht.",
  "Clean up…": "Aufräumen…",
  "Clean up old ads": "Alte Anzeigen aufräumen",
  "Offline ads without photos (willhaben cannot put them online again), sold or given-away ads and the old copy of republished ads. Active and reserved ads are never listed.": "Inaktive Anzeigen ohne Bild (willhaben kann sie nicht mehr online stellen), verkaufte oder verschenkte Anzeigen und die alte Fassung neu veröffentlichter Anzeigen. Aktive und reservierte Anzeigen stehen nie in der Liste.",
@@ -76,5 +70,8 @@
  "Show deactivated ads ({n})": "Deaktivierte Anzeigen zeigen ({n})",
  "Active ({n})": "Aktiv ({n})",
  "Expired ({n})": "Abgelaufen ({n})",
- "Other ads": "Weitere Anzeigen"
+ "Other ads": "Weitere Anzeigen",
+ "Take this ad offline on willhaben. You can activate it again.": "Nimmt die Anzeige auf willhaben offline. Du kannst sie wieder aktivieren.",
+ "Put this ad online again on willhaben. If willhaben offers no “Activate”, it is republished as a new ad.": "Stellt die Anzeige auf willhaben wieder online. Bietet willhaben kein „Aktivieren“ an, wird sie als neue Anzeige veröffentlicht.",
+ "Deletes the ad on willhaben for good – it waits a few seconds in the queue, where you can still take it back.": "Löscht die Anzeige endgültig auf willhaben – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst."
 }

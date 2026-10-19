@@ -397,3 +397,81 @@ def test_a_published_draft_is_not_revised():
     draft_id = _ad_draft()
     ad_creator.update_draft(draft_id, status="published")
     assert not ad_creator.enqueue_refine(draft_id, "kürzer")
+
+
+async def test_a_queued_job_can_be_taken_back_but_not_a_running_one():
+    gate, ran, cleared = asyncio.Event(), [], []
+
+    async def slow(job):
+        await gate.wait()
+        ran.append(job.label)
+
+    async def quick(job):
+        ran.append(job.label)
+
+    a1 = jobs.submit("x", "first", slow)
+    a2 = jobs.submit("x", "second", quick, keys=["ad:2", "ad:3"], on_cancel=lambda: cleared.append("ad:2"))
+    a3 = jobs.submit("x", "third", quick, current="ad:4")      # markers on the page but no cancel path: stays
+    a4 = jobs.submit("x", "fourth", quick)                     # nothing to clear: cancellable as it is
+    await asyncio.sleep(0)
+    v2, v3, v4 = a2.view(), a3.view(), a4.view()
+    assert v2["cancellable"] and v2["keys"] == ["ad:2", "ad:3"] and v2["grace_s"] == 0
+    assert not v3["cancellable"] and v3["keys"] == ["ad:4"] and v4["cancellable"]
+    assert not jobs.cancel(a1.id) and not jobs.cancel(a3.id) and not jobs.cancel(999)
+    assert jobs.cancel(a2.id) and cleared == ["ad:2"] and a2.status == "cancelled" and a2.result == "Taken back"
+    assert a2 not in jobs._active and jobs.snapshot()["recent"][0]["id"] == a2.id
+    assert not jobs.cancel(a2.id) and not a2.view()["cancellable"]
+    gate.set()
+    await finish_jobs()
+    assert ran == ["first", "third", "fourth"] and a1.status == a3.status == a4.status == "done"
+    assert [j["status"] for j in jobs.snapshot()["recent"]].count("cancelled") == 1
+
+
+async def test_irreversible_jobs_wait_a_grace_period_in_which_they_can_be_taken_back(monkeypatch):
+    monkeypatch.setattr(jobs, "grace_s", lambda: 0.4)
+    ran = []
+
+    async def quick(job):
+        ran.append(job.label)
+
+    j = jobs.submit("x", "delete", quick, grace=True, on_cancel=lambda: None)
+    v = j.view()
+    assert v["status"] == "queued" and 0 < v["grace_s"] <= 0.4 and v["cancellable"]
+    await asyncio.sleep(0.1)
+    assert ran == [] and jobs.cancel(j.id)
+    await finish_jobs()
+    assert ran == [] and j.status == "cancelled"
+    j2 = jobs.submit("x", "delete again", quick, grace=True)
+    plain = jobs.submit("x", "plain", quick)              # no grace: runs at once, before the one still waiting
+    await plain.task
+    assert ran == ["plain"] and j2.status == "queued"
+    await finish_jobs()
+    assert ran == ["plain", "delete again"] and j2.status == "done" and j2.view()["grace_s"] == 0
+
+
+def test_cancel_route_takes_a_queued_answer_back(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    monkeypatch.setattr(jobs, "grace_s", lambda: 5.0)
+    sent = []
+
+    async def fake_send(did, text):
+        sent.append(did)
+        return chats.mark_sent(did, text)
+
+    monkeypatch.setattr(chats, "send_draft", fake_send)
+    draft_id = _conv_and_draft()
+    with TestClient(app) as c:
+        assert c.post(f"/drafts/{draft_id}/send", data={"text": "Ja!"}, follow_redirects=False).status_code == 303
+        job = c.get("/jobs").json()["active"][0]
+        assert job["status"] == "queued" and job["cancellable"] and job["keys"] == [f"draft:{draft_id}"] and job["grace_s"] > 3
+        page = c.get("/chats/c1").text
+        assert f'data-pending-key="draft:{draft_id}"' in page and "$store.jobs.cancelFor(k)" in page
+        assert c.post(f"/jobs/{job['id']}/cancel").json() == {"ok": True}
+        assert c.post(f"/jobs/{job['id']}/cancel").json() == {"ok": False}
+        with session() as db:
+            assert db.get(Draft, draft_id).status == "draft"           # open again, nothing went out
+        data = c.get("/jobs").json()
+        assert data["active"] == [] and data["recent"][0]["status"] == "cancelled" and data["pending"] == []
+    assert sent == []

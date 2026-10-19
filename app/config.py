@@ -66,6 +66,10 @@ class Settings(BaseSettings):
 
     # --- my ads ---
     myads_check_hour: int = 8
+    # --- background jobs (app/services/jobs.py) ---
+    # Irreversible work (delete an ad, mark it sold, send a message) waits this long in the queue before it runs:
+    # the window to take the click back (cancel button on the page, jobs popover) instead of a confirm dialog.
+    job_grace_s: float = 5.0
 
     # --- Home Assistant notifications ---
     ha_url: str | None = None

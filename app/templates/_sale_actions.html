@@ -1,0 +1,81 @@
+{% import "_ui.html" as ui %}
+{# The sale panel of an own ad: one click reserves or sells here AND on willhaben (sold.reserve / sold.sell, the
+   willhaben step as a background job), one click lifts a reservation on both. Shown in the chat (this buyer), in
+   My ads (the ad) and on the sale page. Needs: p = sold.panel(ad_id, buyer_id) (ad, buyer, wh, others, stock,
+   agreed), target = the element to swap after an action ("#sale"), next = the page to come back to,
+   oob = further ids to swap (optional). The root waits for the ad's job (data-pending-key) and refreshes itself. #}
+{% set a = p.ad %}{% set buyer = p.buyer %}{% set wh = p.wh %}{% set st = p.stock %}
+{% set kind = a.sale_status if a else none %}
+{% set mine = buyer is not none and a is not none and a.sale_conversation_id == buyer.id %}
+{% set who = buyer.partner_name if buyer and buyer.partner_name else none %}
+{% set sold_out = st and not st.remaining %}
+{# inline (My ads, sale page): buttons in a row; else (chat column): stacked, full width #}
+{% set bcls = 'btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]' if inline else 'btn btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left font-normal whitespace-normal break-words' %}
+<div id="sale-actions" class="flex flex-col gap-2.5" hx-target="{{ target }}" hx-select="{{ target }}" hx-swap="outerHTML"
+     hx-select-oob="#flash{% if oob %},{{ oob }}{% endif %}" {% if wh.pending %}data-pending-key="ad:{{ a.ad_id }}"{% endif %}>
+  {% set hidden %}<input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}"><input type="hidden" name="next" value="{{ next }}">{% endset %}
+  {# ---- what is: here and on willhaben ---- #}
+  {% if kind or wh.pending or wh.status in ('sold', 'reserved') or wh.error %}
+  <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
+    {% if kind %}{{ ui.pill(_("sold") if kind == 'sold' else _("reserved"), 'ok' if mine or not buyer else 'warn') }}
+      {% if buyer %}<small class="text-muted">{{ _("to this buyer") if mine else _("to someone else") }}</small>{% endif %}{% endif %}
+    {% if wh.pending %}{{ ui.pending('ad:' ~ a.ad_id, {'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}[wh.pending],
+                                     {'sold': _("Queued: mark as sold"), 'reserved': _("Queued: mark as reserved"), 'unreserve': _("Queued: remove the reservation")}[wh.pending]) }}
+    {% elif wh.status in ('sold', 'reserved') %}{{ ui.pill(_("willhaben: {status}", status=_("sold") if wh.status == 'sold' else _("reserved")), '', dot=false) }}
+    {% elif kind and wh.status != 'deleted' %}{# marked here, not (yet) on willhaben: offer the step #}
+      <form method="post" action="/sold/{{ a.ad_id }}/willhaben" hx-post="/sold/{{ a.ad_id }}/willhaben" class="contents">{{ hidden }}<input type="hidden" name="kind" value="{{ kind }}">
+        <button class="btn btn-ghost btn-xs h-6 min-h-6 px-1.5 font-medium text-warning" title="{{ _('Not marked on willhaben yet – mark it there now.') }}">{{ ui.icon('alert', 12) }}{{ _("Mark on willhaben") }}</button></form>
+    {% endif %}
+    {% if wh.error and not wh.pending and not wh.reasons %}<small class="text-error">{{ wh.error }}</small>{% endif %}
+  </div>
+  {% endif %}
+  {# ---- willhaben asks why the ad is sold: pick, confirm ---- #}
+  {% if wh.reasons and not wh.pending %}
+  <form method="post" action="/sold/{{ a.ad_id }}/willhaben" hx-post="/sold/{{ a.ad_id }}/willhaben" class="flex flex-col gap-2 rounded-[10px] bg-warn-soft px-3 py-2.5">
+    {{ hidden }}<input type="hidden" name="kind" value="sold">
+    <fieldset class="flex flex-col gap-1.5"><legend class="text-[12.5px] font-semibold text-warning">{{ _("willhaben asks why the ad is sold. Pick a reason.") }}</legend>
+      {% for r in wh.reasons %}<label class="flex items-center gap-2 text-[13px]"><input type="radio" name="reason_id" value="{{ r.id }}" required class="radio radio-primary radio-xs">{{ r.label }}</label>{% endfor %}</fieldset>
+    <button class="btn btn-primary btn-sm self-start">{{ _("Mark as sold on willhaben") }}</button>
+  </form>
+  {% endif %}
+  {# ---- the actions: one click each ---- #}
+  {% if not wh.pending %}
+  {% if sold_out %}<p class="text-[12.5px] text-muted">{{ _("All pieces are sold. If a sale fell through, undo it above.") if not buyer else _("All pieces are sold.") }}</p>
+  {% else %}
+  <div class="{{ 'flex flex-wrap items-end gap-2' if inline else 'flex flex-col gap-1.5' }}">
+    {% if kind != 'sold' %}
+    {# ad with a quantity: pieces and price with the sale; a single item needs no fields #}
+    <form method="post" action="/sold/{{ a.ad_id }}/sell" hx-post="/sold/{{ a.ad_id }}/sell" class="{{ 'flex flex-wrap items-end gap-2' if inline else 'flex flex-col gap-1.5' }}">
+      {{ hidden }}
+      {% if st %}
+      <div class="{{ 'flex gap-2' if inline else 'grid grid-cols-2 gap-1.5' }}">
+        <label class="flex min-w-0 flex-col gap-1"><span class="text-[11.5px] text-muted">{{ _("Pieces") }}</span>
+          <input type="number" name="pieces" value="1" min="1" max="{{ st.remaining }}" step="1" required class="input input-sm bg-base-200 {{ 'w-20' if inline else 'w-full' }}"></label>
+        <label class="flex min-w-0 flex-col gap-1"><span class="text-[11.5px] text-muted">{{ _("Total price (€, optional)") }}</span>
+          <input type="text" inputmode="decimal" name="price" value="{{ ('%.2f'|format(p.agreed)).rstrip('0').rstrip('.') if p.agreed is not none else '' }}" class="input input-sm bg-base-200 {{ 'w-28' if inline else 'w-full' }}"></label>
+      </div>
+      {% endif %}
+      <button class="{{ 'btn btn-primary whitespace-nowrap max-sm:px-2 max-sm:text-[13px]' if inline else 'btn btn-primary btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left whitespace-normal break-words' }}"
+              title="{{ _('Records the sale here (automatic answers off) and marks the ad sold on willhaben – that step waits a few seconds in the queue, where you can take it back.') if not st else _('Records the sale here; the last piece marks the ad sold on willhaben.') }}">
+        {{ ui.icon('check', 14) }}{% if who %}{{ _("Sold to {name}", name=who) }}{% elif st %}{{ _("Record sale") }}{% else %}{{ _("Mark sold") }}{% endif %}</button>
+    </form>
+    {% endif %}
+    {% if kind == 'reserved' %}
+    <form method="post" action="/sold/{{ a.ad_id }}/unreserve" hx-post="/sold/{{ a.ad_id }}/unreserve">{{ hidden }}
+      <button class="{{ bcls }}" title="{{ _('Lifts the reservation here and on willhaben.') }}">{{ ui.icon('undo', 14) }}{{ _("Remove reservation") }}</button></form>
+    {% elif kind != 'sold' %}
+    <form method="post" action="/sold/{{ a.ad_id }}/reserve" hx-post="/sold/{{ a.ad_id }}/reserve">{{ hidden }}
+      <button class="{{ bcls }}" title="{{ _('Reserves the ad here (automatic answers off) and on willhaben in one go.') }}">{{ ui.icon('clock', 14) }}{% if who %}{{ _("Reserve for {name}", name=who) }}{% else %}{{ _("Reserve") }}{% endif %}</button></form>
+    {% endif %}
+    {% if kind == 'sold' and (not st or kind == 'reserved') %}
+    <form method="post" action="/sold/{{ a.ad_id }}/reset" hx-post="/sold/{{ a.ad_id }}/reset">{{ hidden }}<input type="hidden" name="kind" value="sold">
+      <button class="{{ 'btn btn-ghost text-error hover:bg-bad-soft' if inline else 'btn btn-ghost btn-sm w-full justify-start font-normal text-error hover:bg-bad-soft' }}" title="{{ _('Only here – willhaben cannot undo “sold”.') }}">{{ _("Not sold after all") }}</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+  {# ---- the other buyers: drafts on the sale page, nothing is sent without your click ---- #}
+  {% if kind and p.others %}
+  <a class="{{ 'btn self-start' if inline else bcls }}" href="/sold/{{ a.ad_id }}?kind={{ kind }}{% if buyer %}&buyer={{ buyer.id }}{% endif %}#step2">{{ ui.icon('chat', 14) }}{{ _("Tell the other buyers ({n})", n=p.others) }}</a>
+  {% endif %}
+  {% endif %}
+</div>

@@ -35,7 +35,6 @@
  "Auto reply: {reason}": "Auto-Antwort: {reason}",
  "Caution: possible scam attempt.": "Achtung: möglicher Betrugsversuch.",
  "Note:": "Hinweis:",
- "Send this message via willhaben now?": "Diese Nachricht jetzt über willhaben senden?",
  "Send": "Senden",
  "Copy": "Kopieren",
  "Sent manually": "Manuell gesendet",
@@ -146,5 +145,6 @@
  "no limit": "keine Grenze",
  "Counted from today, so the window moves along. Empty: no limit. Older conversations are left out of the sync and of the chat list.": "Ab heute gezählt, der Zeitraum wandert also mit. Leer: keine Grenze. Ältere Unterhaltungen werden nicht synchronisiert und in der Chatliste ausgeblendet.",
  "Hide hidden and older chats": "Ausgeblendete und ältere Chats verbergen",
- "Show {n} hidden or older chats": "{n} ausgeblendete oder ältere Chats zeigen"
+ "Show {n} hidden or older chats": "{n} ausgeblendete oder ältere Chats zeigen",
+ "Goes out in a few seconds – until then you can take it back here.": "Geht in ein paar Sekunden raus – bis dahin kannst du sie hier zurücknehmen."
 }

@@ -77,8 +77,8 @@
         {% if plan.options is defined %}
         {# sent in the background with the (maybe unsaved) title, description and price; only this card, the head and the
            error line are swapped, so edits in the fields stay #}
-        <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" data-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}" class="flex flex-col"
-              hx-post="/new-ad/{{ d.id }}/willhaben/publish" hx-include="#title, #desc, #price, #quantity" hx-confirm="{{ _('Publish this ad on willhaben now? It goes live immediately (free private ad).') }}"
+        <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" class="flex flex-col"
+              hx-post="/new-ad/{{ d.id }}/willhaben/publish" hx-include="#title, #desc, #price, #quantity" title="{{ _('Goes live on willhaben as a free private ad – it waits a few seconds in the queue, where you can take it back.') }}"
               hx-target="#willhaben" hx-select="#willhaben" hx-select-oob="#draft-error,#draft-head" hx-swap="outerHTML" hx-push-url="false">
           <div class="flex flex-col gap-2.5 border-b border-base-300 px-5 py-3.5">{{ ui.eyebrow(_("Category")) }}{% with pick_url="/new-ad/" ~ d.id ~ "/willhaben/category" %}{% include "_category_picker.html" %}{% endwith %}</div>
           {% if plan.options %}
@@ -88,7 +88,6 @@
         </form>
         <script>(() => { const f = document.getElementById('wh-publish'); f.addEventListener('submit', e => {   // without htmx only
           if (window.htmx) return;
-          if (!confirm(f.dataset.confirm)) { e.preventDefault(); return; }
           for (const [name, id] of [['title', 'title'], ['description', 'desc'], ['price', 'price'], ['quantity', 'quantity']])
             f.append(Object.assign(document.createElement('input'), {type: 'hidden', name, value: document.getElementById(id).value})); }); })();</script>
         {% endif %}

@@ -2,7 +2,7 @@
 {% import "_ui.html" as ui %}
 {% block content %}
 <div class="mx-auto flex max-w-[760px] min-w-0 flex-col gap-4">
-  <a href="/myads#ad-{{ a.ad_id }}" class="btn btn-ghost btn-sm -ml-2 self-start">{{ ui.icon('back', 16) }}{{ _("My ads") }}</a>
+  <a href="/myads?ad={{ a.ad_id }}" class="btn btn-ghost btn-sm -ml-2 self-start">{{ ui.icon('back', 16) }}{{ _("My ads") }}</a>
   <div class="flex flex-col gap-1">
     <h1 class="text-xl">{{ _("Edit ad") }}</h1>
     <p class="break-words text-[13px] text-muted">{{ a.heading or a.ad_id }} · <a class="link link-primary no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("View on willhaben") }}{{ ui.icon('external', 13) }}</a>
@@ -30,10 +30,10 @@
     <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Description") }}</span>
       <textarea name="description" rows="14" required class="textarea w-full bg-base-200">{{ cur.description }}</textarea></label>
     <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Price (€)") }}</span>
-      <input name="price" id="price" inputmode="decimal" value="{{ '%g'|format(cur.price) if cur.price is not none else '' }}" class="input w-full bg-base-200"></label>
+      <input name="price" id="price" inputmode="decimal" value="{{ ('%.2f'|format(cur.price)).rstrip('0').rstrip('.') if cur.price is not none else '' }}" class="input w-full bg-base-200"></label>
     {% if proposal and proposal.price_estimate %}
       <p class="-mt-2 flex flex-wrap items-center gap-2 text-[13px]">{{ _("Claude estimates {price}", price=proposal.price_estimate|eur) }}
-        <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('price').value = '{{ '%g'|format(proposal.price_estimate) }}'">{{ _("use") }}</button></p>
+        <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('price').value = '{{ ('%.2f'|format(proposal.price_estimate)).rstrip('0').rstrip('.') }}'">{{ _("use") }}</button></p>
     {% endif %}
     <div class="flex flex-wrap items-center gap-2">
       <button class="btn btn-primary" {% if a.pending_action %}disabled{% endif %}>{{ _("Save on willhaben") }}</button>

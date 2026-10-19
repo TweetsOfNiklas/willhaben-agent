@@ -121,8 +121,13 @@ Messages (`msg`, `error`) appear as a bar on top of single-column pages and as t
 - **htmx** where a page swaps server-rendered fragments (`hx-get`/`hx-post` + `hx-target`/`hx-swap`).
   Keep the existing routes; existing `fetch()` code that already works may stay.
 - Range selection with Shift-click works for every checkbox with class `sel` (base.html).
-- Confirmations: `onsubmit='return confirm(…)'` on plain forms; on forms that send through htmx use `hx-confirm`
-  (an `onsubmit` would not stop htmx).
+- Confirmations: none for anything that runs as a background job (the click is the decision; the element shows
+  "Queued: …" with a **Cancel** until the job runs, and the jobs popover has one per queued job). Irreversible jobs
+  (delete an ad, mark it sold, send a message, publish) wait a grace period in the queue first (`job_grace_s`,
+  5 s; `jobs.submit(grace=True)`), shown as a countdown and as a notice with **Undo**. A `confirm()` stays only
+  for local, immediate actions without an undo (remove a chat from the app, clear hits, delete an agent):
+  `onsubmit='return confirm(…)'` on plain forms, `hx-confirm` on forms that send through htmx (an `onsubmit`
+  would not stop htmx).
 - Keyboard: Ctrl K / ⌘K / `/` open the command palette, Esc closes popovers.
 
 ## Background work and no reloads
@@ -140,6 +145,20 @@ lanes `ads` and `chat`); the page never waits for it and never reloads for it.
   `data-refresh-also="id …"` takes more elements along.
 - **Lists that jobs change:** `data-refresh-on-lane="ads"` refreshes the element whenever a job of that lane finished
   (e.g. My ads after "Update").
+- **Taking a click back:** `jobs.submit(..., keys=[marker keys], on_cancel=fn)` makes a queued job cancellable
+  (`POST /jobs/{id}/cancel`, `jobs.cancel`): `on_cancel` clears the submitter's markers (`pending_action`, a draft's
+  "sending"). `ui.pending()` shows the Cancel button by itself for the element's key (`$store.jobs.cancelFor(key)`).
+- **List → detail without a page load:** the rows carry `hx-get` with `hx-target`/`hx-select` of the detail column,
+  `hx-push-url="true"` and `hx-trigger="open-row"`; the page's Alpine click handler fires that event
+  (`htmx.trigger(row, 'open-row')`) on a plain click on a wide screen and leaves the link alone otherwise (phones,
+  Ctrl/Shift-click, selection mode). Never `hx-trigger="click[…]"` on a link: htmx cancels the link before the filter
+  runs, so a rejected click does nothing at all. The chat list swaps `#chat-pane` (+ `#chat-list-items`, `#chat-live`
+  out of band), My ads swaps `#myads-detail`.
+- **Swapped fragments and Alpine:** when htmx settles a swapped element that has an `id`, it copies the new element's
+  attributes over the old ones, which undoes an Alpine `x-show`/`:class` on it. Inside swapped regions, show or hide
+  by CSS (`group-has-[…]`), or keep Alpine state on elements without an id.
+- **Flash messages after a swap:** split pages always render the toast container `#flash`; a fragment that may carry a
+  message adds `#flash` to its `hx-select-oob`. Messages that only restate the click are not sent at all.
 - An element the user is editing (focus, or a value different from the rendered one) is never replaced; a hidden tab
   waits until it is shown (fetching a chat page marks its messages read on willhaben).
 - The rail (phones: a button above the tab bar) shows what runs, what is queued and the last results.

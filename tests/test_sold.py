@@ -274,22 +274,31 @@ def test_web_flow(ad_with_chats, monkeypatch):
         assert "Sold to Max Muster" in c.get("/chats/c-buyer").text
         assert f"/sold/{AD}?kind=sold" in c.get("/myads").text
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
-        assert "Erika Muster" in page and "Mark as sold on willhaben" in page
+        assert "Erika Muster" in page and "Sold to Max Muster" in page and "Reserve for Max Muster" in page
+        assert 'hx-post="/sold/1000000001/reserve"' in c.get("/chats/c-buyer").text        # one click, no extra page
+        myads = c.get(f"/myads?ad={AD}").text
+        assert 'hx-post="/sold/1000000001/sell"' in myads and "Mark sold…" not in myads
         assert page.count('name="conv"') == 2 and page.count("checked>") >= 2 and "Pick the buyer above" not in page
         nobuyer = c.get(f"/sold/{AD}?kind=sold").text   # buyer unknown: nobody pre-checked (the buyer is among them)
         assert nobuyer.count('name="conv"') == 3 and "Pick the buyer above" in nobuyer
         assert not any('name="conv"' in line and "checked" in line for line in nobuyer.splitlines())
 
-        r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
-        assert r.status_code == 200 and "On its way to willhaben" in r.text
+        # one click from the chat: sold here at once (buyer noted, automatic answers off), willhaben as a job
+        r = c.post(f"/sold/{AD}/sell", data={"buyer": "c-buyer", "next": "/chats/c-buyer"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/chats/c-buyer"
+        ad = sold.ad_row(AD)
+        assert ad.sale_status == "sold" and ad.sale_conversation_id == "c-buyer" and ad.auto_reply is False
         wait_jobs()                                                      # background job: willhaben asks for a reason
-        page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
+        page = c.get("/chats/c-buyer").text
         assert "Über willhaben" in page and 'name="reason_id"' in page and not s.writes   # reason first, nothing written
-        c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer", "reason_id": "2"})
+        assert "to this buyer" in page and 'id="sale-actions"' in page
+        r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer", "reason_id": "2", "next": "/chats/c-buyer"},
+                   follow_redirects=False)
+        assert r.headers["location"] == "/chats/c-buyer"
         wait_jobs()
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
-        assert len(s.writes) == 2 and sold.ad_row(AD).last_action == "Marked as sold on willhaben"
-        assert 'name="reason_id"' not in page                            # the reasons are used up
+        assert len(s.writes) == 2 and sold.ad_row(AD).last_action == "Marked as sold on willhaben" and sold.ad_row(AD).status == "sold"
+        assert 'name="reason_id"' not in page and "willhaben: sold" in page   # the reasons are used up
 
         r = c.post(f"/sold/{AD}/notices", data={"kind": "sold", "buyer": "c-buyer", "conv": ["c-2", "c-3"],
                                                  "mode": "template"})
@@ -305,11 +314,11 @@ def test_web_flow(ad_with_chats, monkeypatch):
         assert ad_with_chats.sent == [("c-2", "Schon weg, sorry.")]
         assert "informed" in c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
 
-        r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "auto_off": "1"})
-        assert "Saved" in r.text
-        ad = sold.ad_row(AD)
-        assert ad.sale_status == "sold" and ad.sale_conversation_id == "c-buyer" and ad.auto_reply is False
-        assert "to this buyer" in c.get("/chats/c-buyer").text
+        # the sold ad: no second sale button; "Not sold after all" lifts the local status only
+        page = c.get("/chats/c-buyer").text
+        assert "to this buyer" in page and "Sold to Max Muster" not in page and "Not sold after all" in page
+        r = c.post(f"/sold/{AD}/reset", data={"kind": "sold", "buyer": "c-buyer", "next": "/chats/c-buyer"}, follow_redirects=False)
+        assert r.headers["location"] == "/chats/c-buyer" and sold.ad_row(AD).sale_status is None
 
 
 async def test_sold_ad_is_never_auto_renewed(ad_with_chats, monkeypatch):
@@ -598,7 +607,7 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
         db.commit()
     with TestClient(app) as c:
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
-        assert 'name="pieces"' not in page and "Save as sold" in page and "Stock" not in page   # one item: as before
+        assert 'name="pieces"' not in page and "Sold to Max Muster" in page and "Stock" not in page   # one item: as before
 
         assert c.post(f"/myads/{AD}/quantity", data={"quantity": "3"}, headers=auto).json() == {"ok": True, "error": None}
         for bad in ("0", "1000", "abc", "-2"):
@@ -609,8 +618,9 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
 
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
         assert "3 of 3 pieces left" in page and 'name="pieces"' in page and 'value="40.5"' in page
-        assert "Record sale" in page and "Mark as sold on willhaben" not in page and 'name="conv"' not in page
-        assert page.count("the others are told only with the last piece") == 2
+        assert "Sold to Max Muster" in page and "Mark on willhaben" not in page and 'name="conv"' not in page
+        assert page.count("the others are told only with the last piece") == 1
+        assert "Record sale" in c.get(f"/sold/{AD}?kind=sold").text                      # no buyer: the plain label
 
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-buyer", "pieces": "2", "price": "x"})
         assert "Price must be a number" in r.text
@@ -620,7 +630,7 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
                                                 "auto_off": "1"})
         assert "2 pieces sold (1 left)" in r.text and "1 of 3 pieces left" in r.text and "2 pcs" in r.text
         assert "€ 40,50" in r.text and sold.ad_row(AD).auto_reply is True
-        assert r.text.count("1 piece left – the ad stays online") == 2 and "keeps answering" in r.text
+        assert r.text.count("1 piece left – the ad stays online") == 1
 
         # a stale page with step 1 (pieces left): nothing is queued, nothing reaches willhaben
         r = c.post(f"/sold/{AD}/willhaben", data={"kind": "sold", "buyer": "c-buyer"})
@@ -647,12 +657,12 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
         # the last pieces: steps 1 and 2 as for a single item, the others minus the piece buyers
         r = c.post(f"/sold/{AD}/finish", data={"kind": "sold", "buyer": "c-2", "pieces": "3", "auto_off": "1"})
         assert "Saved: sold" in r.text and "All pieces are sold" in r.text and 'name="pieces"' not in r.text
-        assert "Mark as sold on willhaben" in r.text and r.text.count('name="conv"') == 2      # c-buyer, c-3
+        assert "Mark on willhaben" in r.text and r.text.count('name="conv"') == 2      # c-buyer, c-3; willhaben still open
         assert "to this buyer" in c.get("/chats/c-2").text and sold.ad_row(AD).auto_reply is False
         r = c.post(f"/sold/{AD}/reset", data={"kind": "sold", "buyer": "c-2"})                 # sold out: undo a sale
         assert sold.ad_row(AD).sale_status == "sold" and "Not sold after all" not in r.text
         page = c.get(f"/sold/{AD}?kind=reserved").text                                         # nothing to reserve
-        assert "All pieces are sold" in page and "Save as reserved" not in page
+        assert "All pieces are sold" in page and '/reserve"' not in page
 
         # clearing the count would make it a single item, whose next sale undoes the whole ledger
         r = c.post(f"/myads/{AD}/quantity", data={"quantity": ""}, headers=auto).json()
@@ -662,9 +672,22 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
         last = _sale_of("c-2")
         r = c.post(f"/sold/{AD}/sales/{last.id}/undo", data={"kind": "sold", "buyer": "c-2"})
         assert "automatic answers and auto-renew stay off until you switch them on again" in r.text
-        assert "The ad stays online while pieces are left" in r.text and "keeps answering" not in r.text
+        assert "Sold to Erika Muster" in r.text and 'name="pieces"' in r.text          # pieces again: the sale form is back
         assert c.post(f"/myads/{AD}/quantity", data={"quantity": ""}, headers=auto).json()["ok"] is True
     assert sold.ad_row(AD).quantity is None
+
+
+def test_locally_reserved_ad_shows_reserved_in_my_ads(ad_with_chats):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    sold.finish(AD, "reserved", "c-buyer")              # willhaben still says active (the job may wait or have failed)
+    with TestClient(app) as c:
+        page = c.get(f"/myads?ad={AD}&show_sold=1").text
+        row = page.split(f'id="row-{AD}"')[1].split("</a>")[0]
+        head = page.split('id="myads-detail"')[1].split("</h2>")[1].split("</div>")[0]
+        assert ">reserved<" in row and ">active<" not in row
+        assert ">reserved<" in head and ">active<" not in head
 
 
 def test_locally_sold_ad_shows_sold_in_my_ads(ad_with_chats):
@@ -752,3 +775,70 @@ def test_api_lists_the_stock(ad_with_chats):
         rows = {r["ad_id"]: r for r in c.get("/api/myads").json()}
     assert rows[AD]["stock"] == {"quantity": 3, "sold": 1, "remaining": 2} and rows[AD]["heading"] == "Fahrrad"
     assert rows["1000000002"]["stock"] is None
+
+
+async def test_reserve_and_unreserve_in_one_click(ad_with_chats, monkeypatch):
+    """One click: reserved here at once (buyer noted, automatic answers off) and on willhaben as a job; one click
+    lifts both. Reserved on willhaben already: nothing queued."""
+    s = FakeSession(_page(_links("markAdReserved", "removeMarkAdReserved")))
+    monkeypatch.setattr(sold, "get_session", lambda: s)
+    row, queued = sold.reserve(AD, "c-buyer")
+    assert queued and row.sale_status == "reserved" and row.sale_conversation_id == "c-buyer" and row.auto_reply is False
+    assert sold.ad_row(AD).pending_action == "reserved"
+    await finish_jobs()
+    ad = sold.ad_row(AD)
+    assert ad.status == "reserved" and ad.pending_action is None and "updatesalesinfo" in s.calls[-1][1] and len(s.calls) == 1
+    row, queued = sold.reserve(AD, "c-2")                 # another buyer: noted here, willhaben has it already
+    assert not queued and row.sale_conversation_id == "c-2" and len(s.calls) == 1
+    row, queued = sold.unreserve(AD)
+    assert queued and row.sale_status is None and row.sale_conversation_id is None
+    await finish_jobs()
+    assert sold.ad_row(AD).status == "active" and len(s.calls) == 2 and s.calls[-1][1].endswith("/0")
+    row, queued = sold.unreserve(AD)                      # nothing reserved: nothing queued
+    assert not queued and len(s.calls) == 2
+
+
+async def test_sell_in_one_click_and_pieces_only_with_the_last(ad_with_chats, monkeypatch):
+    from app.services import my_ads
+    s = FakeSession(_page(_links("setAdSold")))           # no reason query: written at once
+    monkeypatch.setattr(sold, "get_session", lambda: s)
+    row, queued = sold.sell(AD, "c-buyer")
+    assert queued and row.sale_status == "sold" and row.auto_reply is False and sold.ad_row(AD).pending_action == "sold"
+    await finish_jobs()
+    assert sold.ad_row(AD).status == "sold" and len(s.calls) == 1 and "/sold/" in s.calls[0][1]
+    row, queued = sold.sell(AD, "c-2")                     # sold on willhaben already: nothing queued
+    assert not queued and len(s.calls) == 1
+    sold.reset(AD)
+    with session() as db:                                  # back to an active ad with pieces
+        r = db.get(MyAd, AD)
+        r.status, r.auto_reply = "active", True
+        db.add(r)
+        db.commit()
+    s.calls.clear()
+    my_ads.set_quantity(AD, 2)
+    row, queued = sold.sell(AD, "c-buyer", pieces=1, price=20)
+    assert not queued and row.sale_status is None and row.auto_reply is True and sold.ad_row(AD).pending_action is None
+    row, queued = sold.sell(AD, "c-2", pieces=1)           # the last piece: sold out, willhaben too
+    assert queued and row.sale_status == "sold"
+    await finish_jobs()
+    assert sold.ad_row(AD).status == "sold" and len(s.calls) == 1
+
+
+def test_import_follows_the_marks_made_on_willhaben():
+    """A mark set on willhaben itself (sold, reserved, reservation lifted) lands in the local sale status."""
+    from app.services import my_ads
+    row = MyAd(ad_id="x", status="reserved")
+    my_ads._follow_sale_status(row, "active")
+    assert row.sale_status == "reserved" and row.sale_conversation_id is None
+    row.status = "active"
+    my_ads._follow_sale_status(row, "reserved")
+    assert row.sale_status is None
+    row.status, row.auto_reply, row.auto_renew = "sold", True, True
+    my_ads._follow_sale_status(row, "active")
+    assert row.sale_status == "sold" and row.auto_reply is False and row.auto_renew is False
+    kept = MyAd(ad_id="y", status="reserved", sale_status="reserved", sale_conversation_id="c-1")
+    my_ads._follow_sale_status(kept, "active")              # reserved here for a known buyer: untouched
+    assert kept.sale_conversation_id == "c-1"
+    local = MyAd(ad_id="z", status="active", sale_status="reserved", sale_conversation_id="c-1")
+    my_ads._follow_sale_status(local, "active")             # reserved here only (willhaben step still open): stays
+    assert local.sale_status == "reserved"

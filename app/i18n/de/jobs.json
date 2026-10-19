@@ -16,7 +16,6 @@
  "{n} deleted on willhaben": "{n} auf willhaben gelöscht",
  "Loading the ad list from willhaben": "Lade die Anzeigenliste von willhaben",
  "Checking „{title}“": "Prüfe „{title}“",
- "Queued: {n} – processed in the background, one willhaben request after another": "Eingereiht: {n} – wird im Hintergrund abgearbeitet, eine willhaben-Anfrage nach der anderen",
  "Nothing queued: these ads are already being processed": "Nichts eingereiht: diese Anzeigen werden schon bearbeitet",
  "Background jobs": "Hintergrund-Aufgaben",
  "{n} running": "{n} läuft",
@@ -60,7 +59,6 @@
  "Runs in the background – you can leave this page. Progress in the sidebar.": "Läuft im Hintergrund – du kannst die Seite verlassen. Fortschritt in der Seitenleiste.",
  "You can leave the page: the jobs run on the server. Requests to willhaben still go out one by one with a pause.": "Du kannst die Seite verlassen: die Aufgaben laufen auf dem Server. Anfragen an willhaben gehen weiterhin einzeln mit Pause raus.",
  "Claude writes {n} drafts in the background – nothing is sent": "Claude schreibt {n} Entwürfe im Hintergrund – es wird nichts gesendet",
- "On its way to willhaben – it runs in the background": "Ist unterwegs zu willhaben – läuft im Hintergrund",
  "Saving on willhaben in the background": "Wird im Hintergrund auf willhaben gespeichert",
  "Saving the photos on willhaben in the background": "Die Fotos werden im Hintergrund auf willhaben gespeichert",
  "Sync started – it runs in the background": "Abgleich gestartet – läuft im Hintergrund",
@@ -109,5 +107,11 @@
  "Searching the sites": "Suche auf den Seiten",
  "Claude ranks the offers": "Claude bewertet die Angebote",
  "Claude checks the photos": "Claude prüft die Fotos",
- "Claude has questions – answer them to go on": "Claude hat Rückfragen – beantworte sie, dann geht es weiter"
+ "Claude has questions – answer them to go on": "Claude hat Rückfragen – beantworte sie, dann geht es weiter",
+ "Cancel": "Abbrechen",
+ "Undo": "Rückgängig",
+ "starts in {n} s": "startet in {n} s",
+ "Taken back – nothing happened": "Zurückgenommen – nichts passiert",
+ "Taken back": "Zurückgenommen",
+ "taken back": "zurückgenommen"
 }

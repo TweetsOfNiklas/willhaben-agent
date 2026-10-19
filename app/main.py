@@ -1410,6 +1410,7 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, live_state=chats.live_state(conversation_id), meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
                   sale=sold.state_for(conv), contact_warn=selling.contact_hits(open_draft.text) if open_draft else [],
+                  sale_panel=sold.panel(conv.ad_id, conv.id) if conv.role == "seller" and conv.ad_id else None,
                   gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort),
                   **_chat_list(show_hidden or bool(conv.hidden_at)))
 
@@ -1497,7 +1498,8 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 _MYADS_FILTERS = ("show_active", "show_inactive", "show_sold", "show_hidden")
-templates.env.globals.update(stock_of=stock.numbers, stock_text=stock.stock_text)   # ads with a quantity (myads.html)
+templates.env.globals.update(stock_of=stock.numbers, stock_text=stock.stock_text,   # ads with a quantity (myads.html)
+                             sale_panel=sold.panel)                                 # the sale panel of the open ad
 
 
 def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = None) -> RedirectResponse:
@@ -1550,7 +1552,10 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
             sections[i] = title
             i += len(group)
     ads = [a for _, group in groups for a in group]
-    return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
+    # the open ad (?ad=) stays open even when the chips hide its group, e.g. right after it was deactivated
+    wanted = request.query_params.get("ad")
+    cur_ad = next((a for a in rows if wanted and str(a.ad_id) == wanted), None)
+    return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL, cur_ad=cur_ad,
                   show_active=show_active, active_count=len(active) + len(expired),
                   hidden_count=len(hidden), show_hidden=show_hidden, sold_count=len(sold), show_sold=show_sold,
                   inactive_count=len(inactive), show_inactive=show_inactive, sections=sections)
@@ -1657,7 +1662,7 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
     if row is None:
         raise HTTPException(404)
     try:
-        value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
+        value = min_price_svc.parse_form(price.replace("€", ""))    # 12.5, 12,50 and 1.250,50 alike
     except ValueError:
         value = None
     cur = {"heading": heading, "description": description, "price": value}
@@ -1684,7 +1689,7 @@ async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str
     """Background job (lane ads): back to the ad, which shows "Saving…" until willhaben has it."""
     from app.willhaben.insert import InsertError
     try:
-        value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
+        value = min_price_svc.parse_form(price.replace("€", ""))    # 12.5, 12,50 and 1.250,50 alike
     except ValueError:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Invalid price'), safe='')}")
     try:
@@ -1694,6 +1699,20 @@ async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str
     if not queued:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Nothing queued: these ads are already being processed'), safe='')}")
     return back(f"/myads?ad={quote(ad_id, safe='')}&msg={quote(t('Saving on willhaben in the background'), safe='')}")
+
+
+@app.post("/myads/{ad_id}/price")
+async def myads_price(request: Request, ad_id: str, price: str = Form("")):
+    """The price alone, from the ad's panel (title and text stay): a background job, the panel shows "Saving…"."""
+    try:
+        value = min_price_svc.parse_form(price.replace("€", ""))
+    except ValueError:
+        value = None
+    if value is None:
+        return _myads_back(request, t("Invalid price"), f"#ad-{ad_id}")
+    if not my_ads.enqueue_price(ad_id, value):
+        return _myads_back(request, t("Nothing queued: these ads are already being processed"), f"#ad-{ad_id}")
+    return _myads_back(request, "", f"#ad-{ad_id}")
 
 
 @app.post("/myads/{ad_id}/photos")
@@ -1731,9 +1750,8 @@ async def myads_bulk(request: Request, action: str):
 
 
 def _queued(request: Request, n: int, form: Any = None) -> RedirectResponse:
-    msg = t("Queued: {n} – processed in the background, one willhaben request after another", n=n) if n \
-        else t("Nothing queued: these ads are already being processed")
-    return _myads_back(request, msg, form=form)
+    """The rows show what is queued (with a cancel while it waits): only a refusal needs words."""
+    return _myads_back(request, "" if n else t("Nothing queued: these ads are already being processed"), form=form)
 
 
 @app.get("/myads/cleanup", response_class=HTMLResponse)
@@ -1839,6 +1857,12 @@ async def jobs_status(since: int | None = None):
             "events": [_live_event(e) for e in reversed(new)]}
 
 
+@app.post("/jobs/{job_id}/cancel")
+async def job_cancel(job_id: int):
+    """Take a queued job back (the ✕ in the jobs popover or next to the element waiting for it): it never runs."""
+    return {"ok": jobs.cancel(job_id)}
+
+
 # ------------------------------------------------------------------ sold / reserved workflow (app/services/sold.py)
 def _sold_url(ad_id: str, kind: str, buyer: str | None, msg: str | None = None, anchor: str = "") -> str:
     q = f"kind={sold.kind_of(kind)}" + (f"&buyer={quote(buyer, safe='')}" if buyer else "")
@@ -1860,24 +1884,67 @@ def _sold_render(request: Request, ad_id: str, kind: str, buyer: str | None, msg
     numbers = stock.numbers(ad)       # an ad with a quantity: the stock block, the sale's pieces and price
     return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=ad, title=sold.title_of(ad_id),
                   convs=convs, buyer=buyer_conv, others=sold.others(ad_id, buyer_conv.id if buyer_conv else None),
+                  panel=sold.panel(ad_id, buyer_conv.id if buyer_conv else None),
                   reasons=reasons or sold.pending_reasons(ad_id), msg=msg,   # reasons a background step left behind
                   stock=numbers, sales=stock.sales_of(ad_id) if numbers else [], names={c.id: c.partner_name for c in convs},
                   agreed_price=sold.agreed_price(buyer_conv.id if buyer_conv else None) if numbers else None)
 
 
+def _sale_back(next_url: str, ad_id: str, kind: str, buyer: str | None, msg: str | None = None, anchor: str = "") -> RedirectResponse:
+    """Back to the page the sale panel sits on (`next`: the chat, My ads; only paths of this app), else the sale page."""
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return back(next_url + (("&" if "?" in next_url else "?") + f"msg={quote(msg, safe='')}" if msg else ""))
+    return back(_sold_url(ad_id, kind, buyer, msg, anchor))
+
+
 @app.post("/sold/{ad_id}/willhaben", response_class=HTMLResponse)
 async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"), buyer: str = Form(""),
-                         undo: str = Form(""), reason_id: str = Form("")):
-    """Background job (lane ads). If willhaben asks for a sold reason, the job leaves the reasons on the ad and this
-    page offers them; the next confirm queues it again with the reason."""
+                         undo: str = Form(""), reason_id: str = Form(""), next: str = Form("")):
+    """The willhaben step alone, as a background job (lane ads): the sale panel's "Mark on willhaben" when the one-click
+    sale could not queue it, and the confirm with the sold reason willhaben asked for (the job leaves the reasons
+    on the ad, the panel offers them)."""
     if sold.kind_of(kind) == "sold" and undo:
-        return back(_sold_url(ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#step1"))
+        return _sale_back(next, ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#sale-actions")
     if sold.kind_of(kind) == "sold" and sold.pieces_left(ad_id):     # a stale page: on_willhaben refuses it too
-        return back(_sold_url(ad_id, kind, buyer or None,
-                              t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"), "#step1"))
+        return _sale_back(next, ad_id, kind, buyer or None,
+                          t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"), "#sale-actions")
     queued = sold.enqueue_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
-    msg = t("On its way to willhaben – it runs in the background") if queued else t("Nothing queued: these ads are already being processed")
-    return back(_sold_url(ad_id, kind, buyer or None, msg, "#step1"))
+    return _sale_back(next, ad_id, kind, buyer or None, None if queued else t("Nothing queued: these ads are already being processed"),
+                      "#sale-actions")
+
+
+@app.post("/sold/{ad_id}/reserve")
+async def sold_reserve(ad_id: str, buyer: str = Form(""), next: str = Form("")):
+    """One click: reserved here (automatic answers off, the buyer noted) and on willhaben (background job)."""
+    try:
+        sold.reserve(ad_id, buyer or None)
+    except ValueError as e:
+        return _sale_back(next, ad_id, "reserved", buyer or None, str(e), "#sale-actions")
+    return _sale_back(next, ad_id, "reserved", buyer or None)
+
+
+@app.post("/sold/{ad_id}/unreserve")
+async def sold_unreserve(ad_id: str, buyer: str = Form(""), next: str = Form("")):
+    """One click: the reservation goes here and, when willhaben shows it, there too (background job)."""
+    sold.unreserve(ad_id)
+    return _sale_back(next, ad_id, "reserved", buyer or None)
+
+
+@app.post("/sold/{ad_id}/sell")
+async def sold_sell(ad_id: str, buyer: str = Form(""), next: str = Form(""), auto_off: str = Form("1"),
+                    pieces: str = Form(""), price: str = Form(""), reason_id: str = Form("")):
+    """One click: the sale is recorded here and, when that sells the ad out, it is marked sold on willhaben
+    (background job with a grace period). `pieces`/`price` come with an ad with a quantity."""
+    try:
+        amount = min_price_svc.parse_form(price)
+    except ValueError:
+        return _sale_back(next, ad_id, "sold", buyer or None, t("Price must be a number, e.g. 25 or 25,50"), "#sale-actions")
+    try:
+        sold.sell(ad_id, buyer or None, pieces=int(pieces) if pieces.strip().isdigit() else (0 if pieces.strip() else 1),
+                  price=amount, auto_off=auto_off != "0", reason_id=reason_id or None)
+    except ValueError as e:
+        return _sale_back(next, ad_id, "sold", buyer or None, str(e), "#sale-actions")
+    return _sale_back(next, ad_id, "sold", buyer or None)
 
 
 @app.post("/sold/{ad_id}/notices")
@@ -1947,9 +2014,9 @@ async def sold_undo_sale(ad_id: str, sale_id: int, kind: str = Form("sold"), buy
 
 
 @app.post("/sold/{ad_id}/reset")
-async def sold_reset(ad_id: str, kind: str = Form("sold"), buyer: str = Form("")):
+async def sold_reset(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), next: str = Form("")):
     sold.reset(ad_id)
-    return back(_sold_url(ad_id, kind, buyer or None, t("Sale status removed here (willhaben unchanged)"), "#step3"))
+    return _sale_back(next, ad_id, kind, buyer or None, None if next else t("Sale status removed here (willhaben unchanged)"), "#step3")
 
 
 # ------------------------------------------------------------------ new ad
@@ -2951,6 +3018,8 @@ async def settings_save(request: Request):
         set_setting("myads_expired_days", str(max(0, num("myads_expired_days", 30))))
     if "sell_handover" in todo:
         selling.save(form)
+    if request.headers.get("x-autosave"):          # saved as you change it (x-data="autosave"): no reload
+        return JSONResponse({"ok": True})
     return back(f"/settings/{section}?msg={quote(t('Changes saved'), safe='')}")
 
 

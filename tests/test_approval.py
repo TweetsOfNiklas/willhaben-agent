@@ -517,7 +517,7 @@ async def test_chat_page_restart_recovery_asks_again(desk, pushes, buy):
     shipping.update(sid, status="awaiting", approval="auto", approved_at=utcnow())   # no countdown: a restart
     with TestClient(app) as c:
         page = c.get("/chats/c1").text
-    assert "Buy &amp; print" in page and "Cancel" not in page
+    assert "Buy &amp; print" in page and "cancel-auto" not in page      # no countdown to cancel
 
 
 async def test_payment_routes(desk, pushes, buy, monkeypatch):
