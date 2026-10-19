@@ -1,0 +1,10 @@
+{# Answer of POST /new-ad/batch/{id}/drafts: only what changed, as htmx out-of-band swaps. Rows in <template> (a bare
+   <tbody> does not survive HTML parsing outside a table); the other rows only get their note. #}
+{% from "_batch_progress.html" import progress with context %}
+{% set redraw_ids = redraw|map(attribute='id')|list %}
+{% for d in redraw %}<template>{% with checked = d.id in selected and d.status in ('draft', 'error') and not d.publishing, preparing = d.id in preparing, oob = true %}{% include "_batch_row.html" %}{% endwith %}</template>
+{% endfor %}
+{% for d in drafts if d.id not in redraw_ids %}<span id="err-{{ d.id }}" class="block text-xs text-error" hx-swap-oob="true">{{ d.error or '' }}</span>
+{% endfor %}
+<span id="bt-status" class="text-[12.5px] {{ {'warn': 'text-warning', 'bad': 'text-error'}.get(tone, 'text-muted') }}" role="status" hx-swap-oob="true">{{ msg }}{% if tone == 'ok' and msg %} ✓{% endif %}</span>
+{{ progress(drafts, oob=true) }}

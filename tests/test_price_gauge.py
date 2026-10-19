@@ -1,4 +1,5 @@
 from app.services.price_gauge import gauge
+from tests.test_dashboard import client  # noqa: F401  (pytest fixture)
 
 STATS = {"count": 7, "min": 800.0, "p25": 980.0, "median": 1100.0, "p75": 1250.0, "max": 1500.0}
 
@@ -16,10 +17,13 @@ def test_no_gauge_without_data():
     assert gauge(100, {**STATS, "count": 2}) is None
 
 
-def test_gauge_renders_in_batch_draft_and_viewer():
-    from app.main import templates
-    from app.db import AdDraft
-    d = AdDraft(id=1, input_text="", title="T", description="D", image_paths=[], price_suggestion=957,
-                price_stats=STATS)
-    html = templates.env.get_template("_batch_draft.html").render(d=d, saved=False, insert_url="", _=lambda s, **k: s.format(**k) if k else s)
+def test_gauge_renders_on_the_draft_page(client):  # noqa: F811
+    from app import db as dbmod
+    with dbmod.session() as db:
+        d = dbmod.AdDraft(input_text="", title="T", description="D", image_paths=[], price_suggestion=957,
+                          price_stats=STATS)
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+    html = client.get(f"/new-ad/{d.id}").text
     assert "deal-track" in html and "13 % below the median" in html and "cheap" in html

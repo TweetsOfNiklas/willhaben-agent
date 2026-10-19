@@ -1,0 +1,26 @@
+{# The batch's drafts as one table: a bar for all ticked ads, one row per draft (_batch_row.html). Changes save on
+   their own (POST …/drafts, act=save); the buttons act on the ticked rows. Answers swap only what changed (OOB). #}
+{% import "_ui.html" as ui %}
+{% from "_batch_progress.html" import progress with context %}
+<div id="batch-drafts" class="flex flex-col gap-2.5">
+  <form id="bt" class="sticky top-0 z-10 m-0 flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-3 py-2.5 shadow-sm"
+        hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-trigger="submit, autosave delay:500ms" hx-swap="none" hx-vals='{"act": "save"}'>
+    <div class="flex flex-wrap items-center gap-2">
+      <label class="flex shrink-0 items-center gap-2 pr-1"><input type="checkbox" data-selall class="checkbox checkbox-primary checkbox-sm" aria-label="{{ _('Tick all') }}"><span data-selcount data-text="{{ _('{n} of {total} ticked') }}" class="text-[13px] whitespace-nowrap"></span></label>
+      <button type="button" class="btn btn-primary btn-sm" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-vals='{"act": "publish"}' hx-swap="none" hx-disabled-elt="this" hx-confirm="{{ _('Publish all ticked ads on willhaben now? They go live immediately (free private ads), one after another.') }}"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ ui.icon('upload', 14) }}{{ _("Publish ticked") }}</button>
+      <button type="button" class="btn btn-sm" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-vals='{"act": "prepare"}' hx-swap="none" hx-disabled-elt="this" title="{{ _('Ask willhaben for categories and required fields again (read-only)') }}"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Check categories") }}</button>
+      <div class="flex min-w-[200px] flex-1 items-center gap-1.5"><input name="instruction" data-enter="bt-refine" placeholder="{{ _('Revise all ticked with Claude, e.g. “mention pickup in Vienna 15”') }}" class="input input-sm min-w-0 flex-1 bg-base-200"><button type="button" id="bt-refine" class="btn btn-sm shrink-0" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-vals='{"act": "refine"}' hx-swap="none" hx-disabled-elt="this"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ ui.icon('sparkle', 14) }}{{ _("Revise") }}</button></div>
+      <button type="button" class="btn btn-ghost btn-sm text-error" hx-post="/new-ad/batch/{{ b.id }}/drafts" hx-vals='{"act": "discard"}' hx-swap="none" hx-confirm="{{ _('Discard all ticked ads? They can be restored.') }}">{{ _("Discard ticked") }}</button>
+    </div>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+      {{ progress(drafts) }}
+      <span id="bt-status" class="text-[12.5px] text-muted" role="status">{{ _("Changes save on their own · ⧉ applies a value to all ticked ads") }}</span>
+    </div>
+  </form>
+  <div class="overflow-x-auto rounded-box border border-base-300 bg-base-100">
+    <table class="table table-sm">
+      <thead><tr><th></th><th></th><th>{{ _("Ad") }}</th><th>{{ _("Price (€)") }}</th><th>{{ _("Pcs.") }}</th><th>{{ _("Category · required fields") }}</th><th>{{ _("Handover") }}</th><th>{{ _("Status") }}</th><th></th></tr></thead>
+      {% for d in drafts %}{% with checked = (d.id in selected) if selected is not none else (d.status == 'draft' and not d.publishing), preparing = d.id in preparing %}{% include "_batch_row.html" %}{% endwith %}{% endfor %}
+    </table>
+  </div>
+</div>

@@ -1819,7 +1819,7 @@ def _live_event(e: EventLog) -> dict[str, Any]:
 async def jobs_status(since: int | None = None):
     """Background jobs for the jobs indicator, plus every element still waiting for one (spinners on the page):
     keys "ad:<id>" (own ad action), "draft:<id>" (chat message being sent), "addraft:<id>" (ad being published),
-    "refining:<id>" (Claude revises an ad draft), "drafting:<conversation>" (Claude writes an answer).
+    "refining:<id>" (Claude revises an ad draft), "preparing:<id>" (willhaben categories for an ad draft), "drafting:<conversation>" (Claude writes an answer).
     Every open page also asks now and then for what happened meanwhile: the sidebar badges ("counts") and the inbox
     events after `since` (its last known event id), shown as notices – not the ones sent without a push. Without
     `since` only "last_event", the page's starting point."""
@@ -1831,6 +1831,7 @@ async def jobs_status(since: int | None = None):
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
         pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
         pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
+        pending += jobs.current_keys("preparing:")         # willhaben categories for an ad draft (batch table)
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
@@ -2153,12 +2154,53 @@ async def ad_batch_page(request: Request, batch_id: int, msg: str | None = None)
     b = ad_batch.get(batch_id)
     if b is None:
         raise HTTPException(404)
-    ids = [g["draft_id"] for g in b.groups if g.get("draft_id")]
-    with session() as db:
-        drafts = {d.id: d for d in db.exec(select(AdDraft).where(col(AdDraft.id).in_(ids)))} if ids else {}
-    return render(request, "ad_batch.html", b=b, msg=msg, drafts=drafts, unassigned=ad_batch.unassigned(b),
-                  pending=ad_batch.pending(b), busy=b.status in ("sorting", "creating"),
-                  max_images=ad_creator.MAX_IMAGES, parallel=ad_batch.CREATE_PARALLEL)
+    return render(request, "ad_batch.html", b=b, msg=msg, drafts=ad_batch.drafts_of(b), unassigned=ad_batch.unassigned(b),
+                  pending=ad_batch.pending(b), busy=b.status in ("sorting", "creating"), selected=None,
+                  preparing=_preparing(), max_images=ad_creator.MAX_IMAGES, parallel=ad_batch.CREATE_PARALLEL)
+
+
+def _preparing() -> set[int]:
+    """Drafts with a "prepare for willhaben" job queued or running."""
+    return {int(k.split(":")[1]) for k in jobs.current_keys("preparing:")}
+
+
+@app.post("/new-ad/batch/{batch_id}/drafts", response_class=HTMLResponse)
+async def ad_batch_drafts(request: Request, batch_id: int):
+    """The drafts table: every editable row is saved (changes save on their own), then act runs on the ticked rows
+    (act "verb") or on one row (act "verb:<draft id>"). The answer only swaps what changed (htmx out-of-band)."""
+    b = ad_batch.get(batch_id)
+    if b is None:
+        raise HTTPException(404)
+    form = await request.form()
+    verb, _, ref = str(form.get("act") or request.query_params.get("act") or "save").partition(":")
+    ticked = [int(v) for v in form.getlist("sel") if str(v).isdigit()]
+    rows = ad_batch.table_rows(form)
+    if verb == "category" and ref.isdigit() and form.get("code"):   # "Choose another category" search in a row
+        rows.setdefault(int(ref), {})["cat"] = str(form["code"])
+    redraw, unsaved = await ad_batch.save_table(batch_id, rows)
+    msg, tone = t("Saved"), "ok"
+    if verb == "category" and ref.isdigit():
+        redraw.append(int(ref))
+    elif verb != "save":
+        ids = [int(ref)] if ref.isdigit() else ticked
+        msg, tone = ad_batch.run_action(batch_id, verb, ids, str(form.get(f"{ref}.instruction" if ref else "instruction") or ""),
+                                        unsaved)
+        redraw += ids
+    drafts = ad_batch.drafts_of(ad_batch.get(batch_id))
+    return render(request, "_batch_oob.html", b=b, drafts=drafts, redraw=[d for d in drafts if d.id in set(redraw)],
+                  selected=set(ticked), preparing=_preparing(), msg=msg, tone=tone)
+
+
+@app.get("/new-ad/batch/{batch_id}/row/{draft_id}", response_class=HTMLResponse)
+async def ad_batch_row(request: Request, batch_id: int, draft_id: int, checked: int | None = None):
+    """One row of the drafts table (swapped in when its background job is done). checked: the tick as the page has
+    it (an unticked row must not come back ticked and then be published with the others)."""
+    b = ad_batch.get(batch_id)
+    d = next((d for d in ad_batch.drafts_of(b) if d.id == draft_id), None) if b else None
+    if d is None:
+        raise HTTPException(404)
+    tick = ad_batch.editable(d) if checked is None else bool(checked) and ad_batch.selectable(d)
+    return render(request, "_batch_row.html", b=b, d=d, wrap=True, checked=tick, preparing=d.id in _preparing())
 
 
 @app.post("/new-ad/batch/{batch_id}")
@@ -2213,110 +2255,6 @@ def _draft_or_404(draft_id: int) -> AdDraft:
     if d is None:
         raise HTTPException(404)
     return d
-
-
-def _draft_card(request: Request, d: AdDraft, saved: bool = False) -> HTMLResponse:
-    """One draft as it appears on the batch page (htmx swaps it in place)."""
-    return render(request, "_batch_draft.html", d=d, saved=saved, insert_url=ad_creator.INSERT_URL)
-
-
-@app.post("/ad-drafts/{draft_id}/inline", response_class=HTMLResponse)
-async def ad_draft_inline_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
-                               price: str = Form("")):
-    _draft_or_404(draft_id)
-    quantity = _posted_quantity(await request.form())
-    d = ad_creator.save_fields(draft_id, title, description, price, quantity)
-    return _draft_card(request, d, saved=ad_creator.save_problem(d, price) is None)
-
-
-@app.post("/ad-drafts/{draft_id}/inline/refine", response_class=HTMLResponse)
-async def ad_draft_inline_refine(request: Request, draft_id: int, instruction: str = Form(...),
-                                 title: str | None = Form(None), description: str | None = Form(None),
-                                 price: str = Form("")):
-    _draft_or_404(draft_id)
-    if title is not None and description is not None:   # unsaved edits first, Claude works on the saved version
-        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
-    ad_creator.enqueue_refine(draft_id, instruction)      # background job: the card swaps itself in when done
-    return _draft_card(request, _draft_or_404(draft_id))
-
-
-@app.post("/ad-drafts/{draft_id}/inline/status", response_class=HTMLResponse)
-async def ad_draft_inline_status(request: Request, draft_id: int, status: str = Form(...),
-                                 title: str | None = Form(None), description: str | None = Form(None),
-                                 price: str = Form("")):
-    if status not in ("draft", "published", "discarded"):
-        raise HTTPException(400)
-    d = _draft_or_404(draft_id)
-    if title is not None and description is not None:
-        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
-    live = ad_creator.live_on_willhaben(d) if status == "draft" and d.status == "published" else None
-    if live is not None:          # "not published after all" while the ad is online would let it be published twice
-        return _draft_card(request, ad_creator.update_draft(draft_id, error=t(
-            "The ad is online on willhaben as {id} – change or delete it under My ads (/myads); the draft stays published",
-            id=live.ad_id)))
-    return _draft_card(request, ad_creator.update_draft(draft_id, status=status))
-
-
-@app.post("/ad-drafts/{draft_id}/inline/prepare", response_class=HTMLResponse)
-async def ad_draft_inline_prepare(request: Request, draft_id: int, title: str | None = Form(None),
-                                  description: str | None = Form(None), price: str = Form(""),
-                                  category_query: str = Form("")):
-    """Read-only: ask willhaben's insertion form for categories and required fields of this draft."""
-    _draft_or_404(draft_id)
-    if title is not None and description is not None:
-        ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
-    try:
-        d = await ad_creator.prepare_willhaben(draft_id, category_query.strip() or None)
-    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
-        d = ad_creator.update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
-    return _draft_card(request, d)
-
-
-@app.post("/ad-drafts/{draft_id}/inline/publish", response_class=HTMLResponse)
-async def ad_draft_inline_publish(request: Request, draft_id: int):
-    """Publish as free private ad on willhaben (the user clicked; the chosen category and field values come along).
-    Runs as a background job: the card comes back at once with a spinner and swaps itself in when done."""
-    _draft_or_404(draft_id)
-    form = await request.form()
-    if _save_posted_fields(draft_id, form):                  # e.g. an unreadable price: not published with the old one
-        return _draft_card(request, _draft_or_404(draft_id))
-    try:
-        option = int(str(form.get("option", "")))
-    except ValueError:
-        option = -1
-    prefix = f"o{option}_"
-    values = {k[len(prefix):]: str(v) for k, v in form.multi_items() if k.startswith(prefix) and v}
-    ad_creator.enqueue_publish(draft_id, option, values, shipping=ad_creator.parse_shipping(form))
-    return _draft_card(request, _draft_or_404(draft_id))
-
-
-@app.post("/ad-drafts/{draft_id}/retry", response_class=HTMLResponse)
-async def ad_draft_inline_retry(request: Request, draft_id: int):
-    """Batch card "Try again" on a draft Claude could not write: background job, the card swaps itself in when done."""
-    _draft_or_404(draft_id)
-    ad_creator.enqueue_retry(draft_id)
-    return _draft_card(request, _draft_or_404(draft_id))
-
-
-@app.get("/ad-drafts/{draft_id}/card", response_class=HTMLResponse)
-async def ad_draft_card(request: Request, draft_id: int):
-    """The batch card on its own: swapped in when its background publish is done."""
-    return _draft_card(request, _draft_or_404(draft_id))
-
-
-@app.post("/ad-drafts/{draft_id}/inline/category", response_class=HTMLResponse)
-async def ad_draft_inline_category(request: Request, draft_id: int):
-    """Batch card: a category picked by hand becomes a selectable option in wh_plan (read-only on willhaben)."""
-    _draft_or_404(draft_id)
-    form = await request.form()
-    _save_posted_fields(draft_id, form)
-    try:
-        d = await ad_creator.add_manual_category(draft_id, str(form.get("code") or "").strip())
-    except ValueError as e:
-        d = ad_creator.update_draft(draft_id, error=str(e))
-    except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
-        d = ad_creator.update_draft(draft_id, error=t("willhaben form not reachable: {error}", error=str(e)))
-    return _draft_card(request, d)
 
 
 @app.get("/ad-drafts/{draft_id}/photos.zip")

@@ -11,7 +11,7 @@ from typing import Any, Coroutine
 from sqlmodel import select
 
 from app.config import get_settings
-from app.db import AdBatch, session
+from app.db import AdBatch, AdDraft, session
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import SORT_SCHEMA, SORT_SYSTEM, sort_prompt
@@ -254,12 +254,20 @@ async def create_drafts(batch_id: int) -> AdBatch:
             try:
                 d = await ad_creator.create_draft(group_notes(b, g), files, batch_id=batch_id, quantity=g.get("quantity"))
                 _set_group(batch_id, g["id"], draft_id=d.id, error=d.error)
+                if d.status == "draft" and not d.error and _willhaben_ready():
+                    ad_creator.enqueue_prepare(d.id)    # categories ready in the table without a click (read-only)
             except Exception as e:  # noqa: BLE001
                 log.exception("batch %s group %s: draft failed", batch_id, g["id"])
                 _set_group(batch_id, g["id"], error=str(e))
 
     await asyncio.gather(*(one(g) for g in pending(b)))
     return _update(batch_id, status="review")
+
+
+def _willhaben_ready() -> bool:
+    from app.willhaben.session import get_session
+
+    return bool(get_session().logged_in)
 
 
 def _set_group(batch_id: int, gid: str, **fields: Any) -> None:
@@ -287,3 +295,115 @@ def delete(batch_id: int) -> None:
             db.delete(b)
             db.commit()
     shutil.rmtree(_folder(batch_id), ignore_errors=True)
+
+
+# ------------------------------------------------------------------ the drafts table (review & publish)
+def drafts_of(b: AdBatch) -> list[AdDraft]:
+    """The batch's drafts in group order."""
+    ids = [g["draft_id"] for g in b.groups if g.get("draft_id")]
+    if not ids:
+        return []
+    with session() as db:
+        found = {d.id: d for d in db.exec(select(AdDraft).where(AdDraft.id.in_(ids)))}
+    return [found[i] for i in ids if i in found]
+
+
+def editable(d: AdDraft) -> bool:
+    """A row whose fields the table saves: a written draft that is not on its way to willhaben or being revised."""
+    return d.status == "draft" and not d.publishing and not d.refining
+
+
+def selectable(d: AdDraft) -> bool:
+    return d.status in ("draft", "error", "discarded") and not d.publishing
+
+
+def table_rows(form: Any) -> dict[int, dict[str, str]]:
+    """The table's inputs are named "<draft id>.<field>" -> {draft id: {field: value}}."""
+    rows: dict[int, dict[str, str]] = {}
+    for key, value in form.multi_items():
+        ref, dot, rest = key.partition(".")
+        if dot and ref.isdigit():
+            rows.setdefault(int(ref), {})[rest] = str(value)
+    return rows
+
+
+async def save_table(batch_id: int, rows: dict[int, dict[str, str]]) -> tuple[list[int], set[int]]:
+    """Save every editable row of the table (unticked ones too: nothing typed gets lost). Returns the drafts whose row
+    has to be drawn anew (a category copied from another row that this draft did not have yet: it becomes a
+    hand-picked option, fields included) and the drafts whose edit was not taken over (e.g. an unreadable price)."""
+    from app.willhaben.session import NotLoggedIn, SessionUnavailable
+
+    redraw, unsaved = [], set()
+    for d in drafts_of(get(batch_id)):
+        f = rows.get(d.id)
+        if f is None or not editable(d):
+            continue
+        if "title" in f and "description" in f:
+            d = ad_creator.save_fields(d.id, f["title"], f["description"], f.get("price", ""), f.get("quantity"))
+            if ad_creator.save_problem(d, f.get("price", "")):
+                unsaved.add(d.id)
+        values: dict[str, dict[str, str]] = {}
+        for k, v in f.items():
+            kind, _, rest = k.partition(":")
+            cat, _, field = rest.partition(":")
+            if kind == "f" and cat and field and v:
+                values.setdefault(cat, {})[field] = v
+        shipping = ad_creator.parse_shipping({k: f.get(k) for k in ("handover", "paylivery", "parcel_size",
+                                                                    "parcel_carrier")}) if f.get("handover") else None
+        code = f.get("cat") or None
+        if code and code not in {ad_creator.option_code(o) for o in (d.wh_plan or {}).get("options") or []}:
+            try:
+                await ad_creator.add_manual_category(d.id, code)
+                redraw.append(d.id)
+            except ValueError as e:
+                ad_creator.update_draft(d.id, error=str(e))
+                redraw.append(d.id)
+            except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+                ad_creator.update_draft(d.id, error=t("willhaben form not reachable: {error}", error=str(e)))
+                redraw.append(d.id)
+        ad_creator.save_wh_choice(d.id, code, values, shipping)
+    return redraw, unsaved
+
+
+def run_action(batch_id: int, verb: str, ids: list[int], instruction: str = "",
+               unsaved: set[int] = frozenset()) -> tuple[str, str]:
+    """One button of the table for all ticked drafts (or the one row it belongs to): (message, tone). unsaved: drafts
+    whose edit save_table could not take over; they are not published with the old values (the row says why)."""
+    drafts = {d.id: d for d in drafts_of(get(batch_id))}
+    picked = [drafts[i] for i in ids if i in drafts]
+    if not picked:
+        return t("No ad ticked"), "warn"
+    if verb == "publish":
+        n = 0
+        for d in picked:
+            if d.status != "draft" or d.id in unsaved:
+                continue
+            plan = d.wh_plan or {}
+            if not plan.get("options"):
+                ad_creator.update_draft(d.id, error=t("No willhaben category yet – prepare it for willhaben first"))
+                continue
+            n += ad_creator.enqueue_publish(d.id, plan.get("selected") or 0, {}, plan.get("shipping"))
+        rest = len(picked) - n
+        if not n:
+            return t("Nothing published – see the notes in the rows"), "warn"
+        return (t("{n} ads are being published one after another", n=n)
+                + (" · " + t("{n} need attention (see the rows)", n=rest) if rest else "")), "ok" if not rest else "warn"
+    if verb == "prepare":
+        n = sum(ad_creator.enqueue_prepare(d.id) for d in picked)
+        return t("{n} ads are being prepared for willhaben", n=n), "ok"
+    if verb == "refine":
+        if not instruction.strip():
+            return t("Nothing to revise: say what Claude should change"), "warn"
+        n = sum(ad_creator.enqueue_refine(d.id, instruction) for d in picked if d.status == "draft")
+        return t("Claude revises {n} ads", n=n), "ok"
+    if verb == "retry":
+        n = sum(ad_creator.enqueue_retry(d.id) for d in picked)
+        return t("Claude writes {n} drafts again", n=n), "ok"
+    if verb in ("discard", "restore"):
+        n = 0
+        for d in picked:
+            if (verb == "discard" and d.status in ("draft", "error")) or (verb == "restore" and d.status == "discarded"):
+                ad_creator.update_draft(d.id, status="discarded" if verb == "discard" else "draft")
+                n += 1
+        return (t("{n} discarded", n=n) if verb == "discard" else t("{n} restored", n=n)), "ok"
+    return t("Changes saved"), "ok"

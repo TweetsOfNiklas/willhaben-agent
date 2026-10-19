@@ -1,3 +1,4 @@
+import re
 import time
 
 from sqlmodel import select
@@ -96,8 +97,8 @@ def test_batch_sort_review_and_create(client, monkeypatch):  # noqa: F811
     assert [d.quantity for d in drafts] == [2, None]
     ad_prompts = [c["prompt"] for c in client.fake.calls if "Aufgabe: Erstelle das Inserat." in c["prompt"]]
     assert len(ad_prompts) == 2 and sum("Stückzahl: 2 (Preis pro Stück)" in p for p in ad_prompts) == 1
-    assert 'name="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="2"' in \
-        client.get(f"/new-ad/batch/{batch_id}?step=review").text
+    assert f'name="{drafts[0].id}.quantity" data-key="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="2"' \
+        in client.get(f"/new-ad/batch/{batch_id}?step=review").text
     assert "Gilt für alle meine Artikel: Abholung Wien 15" in drafts[0].input_text
     assert len(drafts[0].image_paths) == 2 and len(drafts[1].image_paths) == 1
     assert [g.get("draft_id") for g in b.groups] == [drafts[0].id, None, drafts[1].id]
@@ -152,7 +153,7 @@ def test_batch_without_photos_and_recover(client):  # noqa: F811
     assert ad_batch.get(b.id).status == "error"
 
 
-def test_batch_inline_review_and_publish(client, monkeypatch):  # noqa: F811
+def test_batch_table_review_refine_and_photos(client, monkeypatch):  # noqa: F811
     _sorting_backend(client, monkeypatch)
     photos = [("photos", (f"IMG_{i}.jpg", b"jpeg-bytes-%d" % i, "image/jpeg")) for i in range(3)]
     r = client.post("/new-ad/batch", files=photos, follow_redirects=False)
@@ -166,56 +167,36 @@ def test_batch_inline_review_and_publish(client, monkeypatch):  # noqa: F811
         d1, d2 = db.exec(select(dbmod.AdDraft).order_by(dbmod.AdDraft.id)).all()
 
     page = client.get(f"/new-ad/batch/{batch_id}").text
-    assert "Review &amp; publish" in page and page.count('class="bdraft ') == 2
-    assert f'hx-post="/ad-drafts/{d1.id}/inline"' in page and "0</strong> of 2 published" in page
+    assert "Review &amp; publish" in page and page.count('<tbody id="row-') == 2
+    assert f'name="{d1.id}.title"' in page and "0</strong> of 2 published" in page
 
-    card = client.post(f"/ad-drafts/{d1.id}/inline", data={"title": "Bohrschrauber", "description": "Top\r\nZustand",
-                                                          "price": "45,50"}).text
-    assert f'id="draft-{d1.id}"' in card and "saved" in card and "<html" not in card
+    url = f"/new-ad/batch/{batch_id}/drafts"
+    r = client.post(url, data={f"{d1.id}.title": "Bohrschrauber", f"{d1.id}.description": "Top\r\nZustand",
+                               f"{d1.id}.price": "45,50", "act": "save"})
+    assert "Saved" in r.text and "<html" not in r.text
     with dbmod.session() as db:
         d = db.get(dbmod.AdDraft, d1.id)
     assert (d.title, d.description, d.price_suggestion) == ("Bohrschrauber", "Top\nZustand", 45.5)
 
     # refine saves unsaved edits first and goes through the normal refine (undo-able)
-    client.post(f"/ad-drafts/{d1.id}/inline/refine", data={"instruction": "kürzer", "title": "Neu", "description": "x"})
+    r = client.post(url, data={f"{d1.id}.title": "Neu", f"{d1.id}.description": "x", f"{d1.id}.instruction": "kürzer",
+                               "act": f"refine:{d1.id}"})
+    assert "Claude revises 1 ads" in r.text
     wait_jobs()
     assert "Änderungswünsche: kürzer" in client.fake.calls[-1]["prompt"] and "- Titel: Neu" in client.fake.calls[-1]["prompt"]
     with dbmod.session() as db:
         assert db.get(dbmod.AdDraft, d1.id).revisions[-1]["title"] == "Neu"
 
-    card = client.post(f"/ad-drafts/{d1.id}/inline/status", data={"status": "published"}).text
-    assert "published" in card and "Not published after all" in card
-    client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "discarded"})
+    from app.services import ad_creator
+    ad_creator.update_draft(d1.id, status="published")
+    assert "1 discarded" in client.post(url, data={"sel": str(d2.id), "act": "discard"}).text
     assert "1</strong> of 2 published, 1 discarded" in client.get(f"/new-ad/batch/{batch_id}").text
-    assert client.post(f"/ad-drafts/{d2.id}/inline/status", data={"status": "bogus"}).status_code == 400
 
     import io
     import zipfile
     r = client.get(f"/ad-drafts/{d1.id}/photos.zip")
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
     assert r.headers["content-type"] == "application/zip" and len(names) == 2 and names[0].endswith("-01.jpg")
-
-
-def test_batch_card_renders_willhaben_plan(client):  # noqa: F811
-    """A prepared draft shows category options and required fields (regression: f.values was dict.values)."""
-    from app.services import ad_creator
-
-    with dbmod.session() as db:
-        d = dbmod.AdDraft(input_text="x", title="Logitech S125i", description="Gut.", price_suggestion=12)
-        db.add(d)
-        db.commit()
-        db.refresh(d)
-    ad_creator.update_draft(d.id, wh_plan={"location": "1150 Wien", "contact": "", "options": [
-        {"path": [{"label": "Mobile Lautsprecher", "code": "MOBILE_SPEAKER"}], "label": "Audio › Mobile Lautsprecher",
-         "fields": [{"code": "Zustand", "label": "Zustand", "values": [["neu", "Neu"], ["gebraucht", "Gebraucht"]],
-                     "selected": "gebraucht"}]}]})
-    from app.main import _draft_card
-    from starlette.requests import Request
-
-    html = _draft_card(Request({"type": "http", "headers": [], "method": "GET", "path": "/"}),
-                       ad_creator.update_draft(d.id)).body.decode()
-    assert 'name="o0_Zustand"' in html and '<option value="gebraucht" selected>Gebraucht</option>' in html
-    assert "Audio › Mobile Lautsprecher" in html and "/inline/publish" in html
 
 
 def test_category_queries_order():
@@ -229,7 +210,7 @@ def test_category_queries_order():
 
 
 def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypatch):  # noqa: F811
-    """Claude down while the batch wrote its drafts: the group keeps its (empty) draft; "Try again" on the card runs the
+    """Claude down while the batch wrote its drafts: the group keeps its (empty) draft; "Try again" in its table row runs the
     whole pipeline again – text, comparable prices, Geizhals – on that draft, so the batch link stays."""
     from app.llm.base import LLMError
     from app.services import ad_creator
@@ -260,15 +241,14 @@ def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypa
     assert (d.status, d.title, len(d.image_paths)) == ("error", None, 2) and "529" in d.error and "529" in g["error"]
     assert ad_batch.locked(g) and ad_batch.pending(b) == []                    # no second draft for the group
 
-    card = client.get(f"/ad-drafts/{d.id}/card").text
-    assert f'hx-post="/ad-drafts/{d.id}/retry"' in card and "Try again" in card
-    assert f'hx-post="/ad-drafts/{d.id}/retry"' in client.get(f"/new-ad/batch/{batch_id}").text
+    assert f'"act": "retry:{d.id}"' in client.get(f"/new-ad/batch/{batch_id}").text
     assert f'action="/new-ad/{d.id}/retry"' in client.get(f"/new-ad/{d.id}").text
 
     down[0] = False
-    card = client.post(f"/ad-drafts/{d.id}/retry").text
-    assert f'data-pending-key="refining:{d.id}"' in card and "Claude is writing the draft" in card
-    assert "/retry" not in card                                                # no second click while it runs
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data={"act": f"retry:{d.id}"})
+    assert "Claude writes 1 drafts again" in r.text
+    assert f'data-pending-key="refining:{d.id}"' in r.text and "Claude writes…" in r.text
+    assert f'"act": "retry:{d.id}"' not in r.text                             # no second click while it runs
     assert ad_creator.enqueue_retry(d.id) is False
     wait_jobs()
     with dbmod.session() as db:
@@ -279,6 +259,175 @@ def test_failed_draft_is_retried_with_the_same_notes_and_photos(client, monkeypa
     prompt = fake.calls[-1]["prompt"]
     assert "Abholung Wien" in prompt and len(fake.calls[-1]["images"]) == 2  # the same notes and photos
     assert ad_batch.get(batch_id).groups[0]["draft_id"] == d.id               # the batch still points at it
-    card = client.get(f"/ad-drafts/{d.id}/card").text
-    assert "/retry" not in card and "KTM Kinderrad 20 Zoll blau" in card and "data-pending-key" not in card
+    row = client.get(f"/new-ad/batch/{batch_id}/row/{d.id}").text
+    assert '"act": "retry:' not in row and "KTM Kinderrad 20 Zoll blau" in row and "data-pending-key" not in row
     assert ad_creator.enqueue_retry(d.id) is False                            # nothing to retry on a written draft
+
+
+def _form(pairs):
+    """Form pairs (a name may come more than once, like the ticks) as httpx wants them."""
+    out = {}
+    for k, v in pairs:
+        out.setdefault(k, []).append(v)
+    return out
+
+
+def _opt(code, label, fields=()):
+    return {"path": [{"label": "Audio", "code": "AUDIO"}, {"label": label, "code": code}], "label": f"Audio › {label}",
+            "fields": [{"code": f, "label": f, "values": [["neu", "Neu"], ["gebraucht", "Gebraucht"]],
+                        "selected": "gebraucht"} for f in fields]}
+
+
+def _table_batch():
+    """A batch with three written drafts: two prepared for willhaben, one not."""
+    from app.services import ad_creator
+
+    with dbmod.session() as db:
+        ds = [dbmod.AdDraft(input_text="x", title=f"Artikel {i}", description="Gut.", price_suggestion=10 + i)
+              for i in range(3)]
+        db.add_all(ds)
+        db.commit()
+        ids = [d.id for d in ds]
+        b = dbmod.AdBatch(status="review", groups=[{"id": f"g{i}", "photos": [], "draft_id": ids[i]} for i in range(3)])
+        db.add(b)
+        db.commit()
+        db.refresh(b)
+    ad_creator.update_draft(ids[0], wh_plan={"location": "1150 Wien", "options": [_opt("SPK", "Lautsprecher", ["Zustand"])]})
+    ad_creator.update_draft(ids[1], wh_plan={"location": "1150 Wien", "options": [
+        _opt("HIFI", "HiFi", ["Zustand"]), _opt("SPK", "Lautsprecher", ["Zustand"])]})
+    return b.id, ids
+
+
+def _row(i, **f):
+    base = {"title": f"Artikel {i}", "description": "Gut.", "price": "10", "quantity": ""}
+    return [(f"{i}.{k}", v) for k, v in {**base, **f}.items()]
+
+
+def test_batch_table_saves_rows_and_willhaben_choice(client):  # noqa: F811
+    batch_id, (a, b, c) = _table_batch()
+    page = client.get(f"/new-ad/batch/{batch_id}").text
+    assert page.count('<tbody id="row-') == 3 and 'id="bt"' in page and "data-copy" in page
+    assert f'name="{a}.f:SPK:Zustand"' in page and f'name="{b}.f:HIFI:Zustand"' in page and "– no category yet –" in page
+    assert '<option value="gebraucht" selected>Zustand: Gebraucht</option>' in page and "Audio › Lautsprecher" in page
+
+    # what ⧉ produces for "Zustand" and "Handover": the same values in the other rows; one save stores all rows
+    form = [*_row(a, price="45,50", quantity="2", cat="SPK", **{"f:SPK:Zustand": "neu"}, handover="shipping",
+                  paylivery="1", parcel_size="M"),
+            *_row(b, cat="SPK", **{"f:SPK:Zustand": "neu", "f:HIFI:Zustand": "bogus"}, handover="shipping",
+                  parcel_size="M"),
+            *_row(c, title="Neuer Titel", handover="pickup"), ("act", "save")]
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form(form))
+    assert r.status_code == 200 and 'id="bt-status"' in r.text and "Saved" in r.text and "<tbody" not in r.text
+    with dbmod.session() as db:
+        da, db_, dc = (db.get(dbmod.AdDraft, i) for i in (a, b, c))
+    assert (da.price_suggestion, da.quantity) == (45.5, 2)
+    assert da.wh_plan["selected"] == 0 and da.wh_plan["options"][0]["fields"][0]["selected"] == "neu"
+    assert da.wh_plan["shipping"] == {"handover": "shipping", "paylivery": True, "size": "M", "carrier": None}
+    assert db_.wh_plan["selected"] == 1 and db_.wh_plan["options"][1]["fields"][0]["selected"] == "neu"
+    assert db_.wh_plan["options"][0]["fields"][0]["selected"] == "gebraucht"          # an unknown value is ignored
+    assert db_.wh_plan["shipping"]["paylivery"] is False
+    assert dc.title == "Neuer Titel" and dc.wh_plan == {"shipping": {"handover": "pickup"}}
+
+    # an unreadable price: the row says so (out of band), the old price stays
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*_row(a, price="viel"), ("act", "save")]))
+    assert f'<span id="err-{a}"' in r.text and "Price not recognized" in r.text
+
+
+def test_batch_table_copied_category_the_row_lacks(client, monkeypatch):  # noqa: F811
+    """⧉ on the category puts a code into a row that never had it: it becomes a hand-picked option and the row is
+    drawn anew (in a <template>, the way htmx swaps table parts out of band)."""
+    from app.services import ad_creator
+
+    batch_id, (a, b, c) = _table_batch()
+    calls = []
+
+    async def manual(draft_id, code):
+        calls.append((draft_id, code))
+        if code == "NOPE":
+            raise ValueError("This category cannot be chosen")
+        return ad_creator.update_draft(draft_id, wh_plan={"location": "1150 Wien", "selected": 0,
+                                                           "options": [{**_opt(code, "Lautsprecher", ["Zustand"]), "manual": True}]})
+    monkeypatch.setattr(ad_creator, "add_manual_category", manual)
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*_row(a, cat="SPK"), *_row(c, cat="SPK"), ("act", "save")]))
+    assert calls == [(c, "SPK")]                                        # row a has the option already
+    assert re.search(rf'<template>\s*<tbody id="row-{c}"[^>]*hx-swap-oob="true"', r.text)
+    assert f'name="{c}.f:SPK:Zustand"' in r.text
+
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*_row(b, cat="NOPE"), ("act", "save")]))
+    assert "This category cannot be chosen" in r.text
+
+    # the row's own "Choose another category" search: the picked code, the row drawn anew
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts?act=category:{a}", data=_form([*_row(a, cat="SPK"), ("code", "TV")]))
+    assert calls[-1] == (a, "TV") and f'<tbody id="row-{a}"' in r.text
+
+
+def test_batch_table_publishes_and_prepares_the_ticked_rows(client, monkeypatch):  # noqa: F811
+    from app.services import ad_creator
+
+    batch_id, (a, b, c) = _table_batch()
+    published = []
+    monkeypatch.setattr(ad_creator, "enqueue_publish",
+                        lambda draft_id, option, values, shipping=None: published.append((draft_id, option, shipping)) or True)
+    form = [*_row(a, cat="SPK", handover="pickup"), *_row(b, cat="SPK", handover="both"), *_row(c, handover="pickup")]
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*form, ("sel", str(a)), ("sel", str(b)), ("sel", str(c)),
+                                                              ("act", "publish")]))
+    assert published == [(a, 0, {"handover": "pickup"}),
+                         (b, 1, {"handover": "both", "paylivery": False, "size": None, "carrier": None})]
+    assert "2 ads are being published one after another" in r.text and "1 need attention" in r.text
+    assert len(re.findall(r"<template>\s*<tbody", r.text)) == 3 and "No willhaben category yet" in r.text
+    assert f'name="sel" value="{a}" form="bt" checked' in r.text                 # the ticks stay
+
+    async def prepare(draft_id, query=None):
+        return ad_creator.update_draft(draft_id, wh_plan={"location": "1150 Wien", "options": [_opt("SPK", "Lautsprecher")]})
+    monkeypatch.setattr(ad_creator, "prepare_willhaben", prepare)
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*form, ("act", f"prepare:{c}")]))
+    assert "1 ads are being prepared" in r.text
+    wait_jobs()
+    row = client.get(f"/new-ad/batch/{batch_id}/row/{c}").text
+    assert row.strip().startswith("<table>") and f'<tbody id="row-{c}"' in row and "data-pending-key" not in row
+    assert f'name="{c}.cat"' in row and '<option value="SPK"' in row
+
+    r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*form, ("sel", str(c)), ("act", "discard")]))
+    assert "1 discarded" in r.text
+    with dbmod.session() as db:
+        assert db.get(dbmod.AdDraft, c).status == "discarded"
+    client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([("act", f"restore:{c}")]))
+    with dbmod.session() as db:
+        assert db.get(dbmod.AdDraft, c).status == "draft"
+    assert "No ad ticked" in client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([("act", "publish")])).text
+
+
+def test_written_drafts_are_prepared_for_willhaben_right_away(client, monkeypatch):  # noqa: F811
+    """With a logged-in willhaben session the categories are asked for each written draft, without a click."""
+    from app.services import ad_creator
+
+    _sorting_backend(client, monkeypatch)
+    asked = []
+    monkeypatch.setattr(ad_batch, "_willhaben_ready", lambda: True)
+    monkeypatch.setattr(ad_creator, "enqueue_prepare", lambda draft_id: asked.append(draft_id) or True)
+    photos = [("photos", (f"IMG_{i}.jpg", b"jpeg-bytes-%d" % i, "image/jpeg")) for i in range(3)]
+    r = client.post("/new-ad/batch", files=photos, follow_redirects=False)
+    batch_id = int(r.headers["location"].split("/")[-1].split("?")[0])
+    _wait(batch_id, "review")
+    client.post(f"/new-ad/batch/{batch_id}", data={"img_0": "g1", "img_1": "g1", "include_g1": "1",
+                                                   "img_2": "g2", "include_g2": "1", "action": "create"})
+    _wait(batch_id, "review")
+    assert sorted(asked) == sorted(g["draft_id"] for g in ad_batch.get(batch_id).groups if g.get("draft_id"))
+    assert len(asked) == 2
+
+
+def test_batch_rows_mark_every_select_and_keep_the_tick(client):  # noqa: F811
+    """A <select> without a selected option counts as edited for the page's refreshInPlace, so a row waiting for its
+    job would never swap in; and the refreshed row keeps the tick the page sent."""
+    from app.services import ad_creator
+
+    batch_id, (a, b, c) = _table_batch()
+    plan = ad_creator.update_draft(a).wh_plan
+    plan["options"][0]["fields"][0]["selected"] = None                     # no guess for "Zustand"
+    ad_creator.update_draft(a, wh_plan=plan)
+    for i in (a, c):
+        row = client.get(f"/new-ad/batch/{batch_id}/row/{i}").text
+        selects = re.findall(r"<select.*?</select>", row, re.S)
+        assert selects and all(" selected" in sel for sel in selects), [sel[:80] for sel in selects if " selected" not in sel]
+    assert f'value="{c}" form="bt" checked' in client.get(f"/new-ad/batch/{batch_id}/row/{c}").text
+    assert f'value="{c}" form="bt" checked' not in client.get(f"/new-ad/batch/{batch_id}/row/{c}?checked=0").text
