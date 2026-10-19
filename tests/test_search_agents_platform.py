@@ -133,3 +133,26 @@ def test_scam_rules_follow_the_sites_country():
     assert scam.home_country_of("willhaben") == "AT" and scam.home_country_of("nope") == "AT"
     safe = {"heading": "Rad", "body": "Nur Vorkasse, sicher bezahlen möglich", "price": 100, "is_private": True}
     assert "prepay_only" not in [f["code"] for f in scam.flags(safe, home_country="DE")]
+
+
+async def test_negotiable_kleinanzeigen_ads_are_never_new(fake, ha, monkeypatch):
+    """Kleinanzeigen "VB" ads are left out of the hits page; they never count or push as new either (the sidebar
+    counted them while the page showed nothing). Ones stored before move once at startup. (The fake site stands in
+    for Kleinanzeigen: its search gives every listing its own id.)"""
+    from app.services import search_agents
+    monkeypatch.setattr(search_agents, "NEGOTIABLE_HIDDEN", ("fake",))
+    fake.pages = [[]]
+    a = create_agent("https://fake.example/s/rad")
+    await run_agent(a.id)                                            # first check: nothing yet
+    fake.pages = [[listing("1", "Rad", None, price_display="VB"),
+                   listing("2", "Rad", 120.0, price_display="120 € VB"), listing("3", "Rad", 90.0)]]
+    res = await run_agent(a.id)
+    hits = _hits(a.id)
+    assert {k: h.state for k, h in hits.items()} == {"1": "filtered", "2": "filtered", "3": "new"}
+    assert [h.ad_id for h in res.new] == ["3"] and len(ha) == 1                 # one push, for the priced ad
+    with session() as db:
+        db.add(Hit(agent_id=a.id, platform="fake", ad_id="4", heading="Alt", url="u", price_display="VB",
+                   state="new"))
+        db.commit()
+    assert search_agents.refile_negotiable() == 1 and search_agents.refile_negotiable() == 0
+    assert _hits(a.id)["4"].state == "filtered"

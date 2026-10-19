@@ -668,6 +668,8 @@ async def _run_agent(agent_id: int) -> RunResult:
                           state=PENDING if judge_quiet else "seen" if quiet else PENDING if _holds(agent) else "new",
                           quiet=True if judge_quiet else None)
                 _apply(hit, ad)
+                if negotiable_only(hit):     # Kleinanzeigen "VB": never shown or pushed (the hits page leaves it out)
+                    hit.state, hit.quiet = "filtered", None
                 if not hit.item_condition and (cond := known.get((ad.platform, ad.ad_id))):
                     hit.item_condition, hit.item_condition_label = cond      # what another agent's hit learned
                 hit.scam_flags = scam.flags(hit, scam_ctx, home_country=_site(ad.platform).home_country) or None   # before screening
@@ -675,7 +677,9 @@ async def _run_agent(agent_id: int) -> RunResult:
                 db.add(hit)
                 existing[(ad.platform, ad.ad_id)] = hit
                 id_site[ad.ad_id] = ad.platform
-                if judge_quiet:
+                if hit.state == "filtered":
+                    pass
+                elif judge_quiet:
                     res.quiet.append(hit)
                 elif not quiet:
                     res.new.append(hit)
@@ -1020,6 +1024,35 @@ def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: 
                 row.state = h.state = state
                 db.add(row)
         db.commit()
+
+
+NEGOTIABLE_HIDDEN = ("kleinanzeigen",)      # sites whose "VB" ads are not shown among the hits
+
+
+def negotiable_only(h: Any) -> bool:
+    """A Kleinanzeigen ad with "VB" ("VB" alone or "120 € VB", price negotiable): not shown among the hits."""
+    return getattr(h, "platform", None) in NEGOTIABLE_HIDDEN and "VB" in (getattr(h, "price_display", None) or "")
+
+
+SETTING_VB_REFILED = "hits_vb_refiled"       # refile_negotiable() ran
+
+
+def refile_negotiable() -> int:
+    """Once, at startup: Kleinanzeigen "VB" hits that are new, pending or seen go to "filtered" (they were counted as
+    new in the sidebar while the hits page left them out). Returns how many moved."""
+    if get_setting(SETTING_VB_REFILED):
+        return 0
+    n = 0
+    with session() as db:
+        for h in db.exec(select(Hit).where(col(Hit.platform).in_(NEGOTIABLE_HIDDEN),
+                                           col(Hit.state).in_(("new", PENDING, "seen")))):
+            if negotiable_only(h):
+                h.state = "filtered"
+                db.add(h)
+                n += 1
+        db.commit()
+    set_setting(SETTING_VB_REFILED, "1")
+    return n
 
 
 def refile_screened() -> None:
