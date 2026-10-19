@@ -358,9 +358,11 @@ async def save_table(batch_id: int, rows: dict[int, dict[str, str]]) -> tuple[li
             except ValueError as e:
                 ad_creator.update_draft(d.id, error=str(e))
                 redraw.append(d.id)
+                unsaved.add(d.id)          # not published in the category it had before
             except (NotLoggedIn, SessionUnavailable, RuntimeError) as e:
                 ad_creator.update_draft(d.id, error=t("willhaben form not reachable: {error}", error=str(e)))
                 redraw.append(d.id)
+                unsaved.add(d.id)
         ad_creator.save_wh_choice(d.id, code, values, shipping)
     return redraw, unsaved
 
@@ -382,7 +384,9 @@ def run_action(batch_id: int, verb: str, ids: list[int], instruction: str = "",
             if not plan.get("options"):
                 ad_creator.update_draft(d.id, error=t("No willhaben category yet – prepare it for willhaben first"))
                 continue
-            n += ad_creator.enqueue_publish(d.id, plan.get("selected") or 0, {}, plan.get("shipping"))
+            sel = plan.get("selected") or 0
+            code = ad_creator.option_code(plan["options"][sel]) if 0 <= sel < len(plan["options"]) else None
+            n += ad_creator.enqueue_publish(d.id, sel, {}, plan.get("shipping"), code=code)
         rest = len(picked) - n
         if not n:
             return t("Nothing published – see the notes in the rows"), "warn"

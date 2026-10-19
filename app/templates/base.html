@@ -516,7 +516,8 @@ document.addEventListener('alpine:init', () => {
     live: !document.body.hasAttribute('data-embed'),
     T: {running: {{ _("{n} running")|tojson }}, queued: {{ _("{n} queued")|tojson }}, idle: {{ _("Background")|tojson }},
         waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }},
-        cancelled: {{ _("taken back")|tojson }}, startsIn: {{ _("starts in {n} s")|tojson }}, taken: {{ _("Taken back – nothing happened")|tojson }}},
+        cancelled: {{ _("taken back")|tojson }}, startsIn: {{ _("starts in {n} s")|tojson }}, taken: {{ _("Taken back – nothing happened")|tojson }},
+        tooLate: {{ _("Too late to take back – it has already started")|tojson }}},
     init() {
       try { this.apply(JSON.parse(document.getElementById('bg-jobs-data').textContent)); } catch (e) {}
       if (document.querySelector('[data-pending-key]')) this.poll();       // markers on the page: their state now
@@ -536,7 +537,11 @@ document.addEventListener('alpine:init', () => {
     async cancel(id) {
       if (!id) return;
       this.dismiss('g' + id);
-      try { await fetch('/jobs/' + id + '/cancel', {method: 'POST'}); } catch (e) {}
+      // the job may have started meanwhile (the click came in the last moment): then say so, it runs on
+      let ok = false;
+      try { ok = !!(await (await fetch('/jobs/' + id + '/cancel', {method: 'POST'})).json()).ok; } catch (e) {}
+      const j = this.active.find(x => x.id === id) || {};
+      this.notice({key: 'c' + id, title: j.label || '', text: ok ? this.T.taken : this.T.tooLate, ms: 6000});
       this.poll();
     },
     ticking() {
@@ -589,7 +594,7 @@ document.addEventListener('alpine:init', () => {
       if (this.seenActive === null) this.seenActive = new Set(this.active.map(j => j.id));
       this.active.filter(j => !this.seenActive.has(j.id)).forEach(j => {
         this.seenActive.add(j.id);
-        if (this.live && j.until && j.cancellable) this.notice({key: 'g' + j.id, title: j.label, text: '', undo: j.id, ms: j.grace_s * 1000 + 1500});
+        if (this.live && j.until && j.cancellable) this.notice({key: 'g' + j.id, title: j.label, text: '', undo: j.id, ms: j.grace_s * 1000});
       });
       this.notices.filter(n => n.undo && !this.active.some(j => j.id === n.undo && j.status === 'queued')).forEach(n => this.dismiss(n.key));
       const todo = new Set();

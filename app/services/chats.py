@@ -450,7 +450,8 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
         out: list[str] = []
         for m in rows:
             text = " ".join(m.text.split())
-            if len(text) < 8 or text in sent or text in out:
+            # an address, phone number or IBAN I sent one buyer is no style example for the next one's prompt
+            if len(text) < 8 or text in sent or text in out or style.has_contact_data(text):
                 continue
             out.append(text)
             if len(out) == limit:
@@ -458,7 +459,7 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
         if len(out) < limit:
             liked = db.exec(select(Draft).where(Draft.status == "sent", Draft.feedback == "up")
                             .order_by(Draft.sent_at.desc()).limit(limit - len(out)))
-            out += [r.text for r in liked if r.text not in out]
+            out += [r.text for r in liked if r.text not in out and not style.has_contact_data(r.text)]
         return out
 
 
@@ -470,7 +471,8 @@ def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHER
     OTHERS_MAX_AGE, newest first: facts about the item ("funktioniert", "hab nur die eine") that the next buyer asks
     again. No memory is needed for that; the prompt tells Claude to keep prices, commitments and appointments with
     others to itself. Left out: the sold/reserved notices (app/services/sold.py; availability comes from the ad and
-    the stock, a lifted reservation must not live on here) and lines with contact data (an address I sent one buyer)."""
+    the stock, a lifted reservation must not live on here), what Claude wrote (sent drafts) and lines with contact data
+    (an address I sent one buyer)."""
     from app.services import sold
 
     if not ad_id:
@@ -483,6 +485,10 @@ def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHER
             return []
         notices = {style._norm(x) for x in db.exec(select(Draft.text).where(
             col(Draft.intent).in_(list(sold.NOTICE_INTENTS.values())), col(Draft.conversation_id).in_(convs)))}
+        # what Claude wrote there (a sent draft, automatic or approved) is no fact I stated: a claim it made up in
+        # one chat must not become "what the seller said" in the next
+        claude = {style._norm(x) for x in db.exec(select(Draft.text).where(
+            Draft.status == "sent", col(Draft.conversation_id).in_(convs))) if x}
         rows = db.exec(select(Message).where(col(Message.conversation_id).in_(convs), Message.direction == "out",
                                              col(Message.kind).is_(None),
                                              col(Message.created_at) >= utcnow() - OTHERS_MAX_AGE)
@@ -490,7 +496,7 @@ def _others_said(conversation_id: str, ad_id: str | None, limit: int = MAX_OTHER
         out: list[str] = []
         for m in rows:
             text = style._norm(m.text)
-            if len(text) < 8 or text in out or text in notices or style.has_contact_data(text):
+            if len(text) < 8 or text in out or text in notices or text in claude or style.has_contact_data(text):
                 continue
             out.append(text)
             if len(out) == limit:
@@ -1184,13 +1190,14 @@ def _set_status(draft_id: int, status: str) -> None:
 
 async def _send_auto(conv: Conversation, d: Draft, conversation_id: str, title: str) -> Draft:
     """Send an automatic answer and push "answered"; on failure the draft keeps the error (status draft). A used-up
-    hourly willhaben budget delays the answer until there is room again (nobody waits for it on a page)."""
-    from app.platforms import ratelimit
+    hourly willhaben budget fails it at once instead of waiting: the checks before the send (still automatic, the
+    buyer's newest message, the floor) ran just now, an answer an hour later could go out after the owner answered
+    themselves or switched the automatic answers off."""
+    from app.platforms.ratelimit import Blocked
 
     try:
-        with ratelimit.waiting():
-            d = await send_draft(d.id, d.text)
-    except (EndpointUnknown, SendFailed, NotLoggedIn, SessionUnavailable) as e:
+        d = await send_draft(d.id, d.text)
+    except (EndpointUnknown, SendFailed, NotLoggedIn, SessionUnavailable, Blocked) as e:
         with session() as db:
             row = db.get(Draft, d.id)
             row.error = t("Sending failed: {error}", error=e)

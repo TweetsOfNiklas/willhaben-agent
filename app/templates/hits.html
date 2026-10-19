@@ -69,7 +69,8 @@
   {{ view_fields() }}
   <span class="mr-1 text-[13px] font-semibold" x-text="{{ _('{n} selected')|tojson|forceescape }}.replace('{n}', n)"></span>
   {% for v, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}<button name="action" value="{{ v }}" class="btn btn-sm">{{ label }}</button>{% endfor %}
-  <button name="action" value="clear" class="btn btn-sm btn-ghost text-error" hx-confirm="{{ _('Clear the selected hits? Saved ones are kept.') }}">{{ _("Clear") }}</button>
+  {# onclick, not hx-confirm: the form is boosted, htmx reads hx-confirm from the form, not from the clicked button #}
+  <button name="action" value="clear" class="btn btn-sm btn-ghost text-error" onclick="return confirm({{ _('Clear the selected hits? Saved ones are kept.')|tojson|forceescape }})">{{ _("Clear") }}</button>
   <span class="ml-auto flex gap-1.5"><button type="button" class="btn btn-sm btn-ghost" @click="all(true)">{{ _("Select all") }}</button><button type="button" class="btn btn-sm btn-ghost" @click="all(false)">{{ _("Cancel") }}</button></span>
 </form>
 <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">

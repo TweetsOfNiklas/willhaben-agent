@@ -367,7 +367,7 @@ def test_batch_table_publishes_and_prepares_the_ticked_rows(client, monkeypatch)
     batch_id, (a, b, c) = _table_batch()
     published = []
     monkeypatch.setattr(ad_creator, "enqueue_publish",
-                        lambda draft_id, option, values, shipping=None: published.append((draft_id, option, shipping)) or True)
+                        lambda draft_id, option, values, shipping=None, code=None: published.append((draft_id, option, shipping)) or True)
     form = [*_row(a, cat="SPK", handover="pickup"), *_row(b, cat="SPK", handover="both"), *_row(c, handover="pickup")]
     r = client.post(f"/new-ad/batch/{batch_id}/drafts", data=_form([*form, ("sel", str(a)), ("sel", str(b)), ("sel", str(c)),
                                                               ("act", "publish")]))

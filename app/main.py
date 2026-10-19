@@ -2236,12 +2236,17 @@ async def ad_batch_create(notes: str = Form(""), photos: list[UploadFile] = File
 
 
 @app.get("/new-ad/batch/{batch_id}", response_class=HTMLResponse)
-async def ad_batch_page(request: Request, batch_id: int, msg: str | None = None):
+async def ad_batch_page(request: Request, batch_id: int, msg: str | None = None, unticked: str = ""):
+    """unticked: drafts the owner unticked (the page's own refresh, ad_batch.html): they stay unticked."""
     b = ad_batch.get(batch_id)
     if b is None:
         raise HTTPException(404)
-    return render(request, "ad_batch.html", b=b, msg=msg, drafts=ad_batch.drafts_of(b), unassigned=ad_batch.unassigned(b),
-                  pending=ad_batch.pending(b), busy=b.status in ("sorting", "creating"), selected=None,
+    drafts = ad_batch.drafts_of(b)
+    off = {int(x) for x in unticked.split(",") if x.strip().isdigit()}
+    selected = {d.id for d in drafts if d.status == "draft" and not d.publishing and d.id not in off} if off else None
+    return render(request, "ad_batch.html", b=b, msg=msg, drafts=drafts, unassigned=ad_batch.unassigned(b),
+                  pending=ad_batch.pending(b), busy=b.status in ("sorting", "creating"), selected=selected,
+                  unticked=sorted(off),
                   preparing=_preparing(), max_images=ad_creator.MAX_IMAGES, parallel=ad_batch.CREATE_PARALLEL)
 
 

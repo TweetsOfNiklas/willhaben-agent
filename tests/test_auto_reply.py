@@ -115,8 +115,9 @@ async def test_auto_reply_sends_when_everything_agrees(env):
     assert notes[0][0] == "auto_reply"
 
 
-async def test_auto_answer_waits_for_a_full_hourly_limit(env, monkeypatch):
-    """The automatic answer is sent with ratelimit.waiting(): a used-up willhaben budget delays it, never drops it."""
+async def test_auto_answer_does_not_wait_for_a_full_hourly_limit(env, monkeypatch):
+    """The automatic answer is sent without ratelimit.waiting(): a used-up willhaben budget fails it at once (the
+    draft keeps the reason) instead of sending it up to an hour later, after the checks that ran before the send."""
     from app.platforms import ratelimit
 
     backend, account, notes = env
@@ -124,11 +125,11 @@ async def test_auto_answer_waits_for_a_full_hourly_limit(env, monkeypatch):
 
     async def send(conversation_id, text):
         seen.append(ratelimit.waits())
-        return "m1"
+        raise ratelimit.BudgetFull("willhaben: request limit (100/h) reached, free again in 40 min", 2400)
 
     monkeypatch.setattr(account, "send_message", send)
     d = await chats.auto_reply("c1")
-    assert d.status == "sent" and seen == [True] and not ratelimit.waits()
+    assert d.status != "sent" and seen == [False] and "limit" in (d.error or "")
 
 
 @pytest.mark.parametrize("change, reason", [

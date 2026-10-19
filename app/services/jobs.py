@@ -59,6 +59,9 @@ class Job:
     task: asyncio.Task | None = field(default=None, repr=False)
     on_cancel: Callable[[], None] | None = field(default=None, repr=False)   # clears the submitter's markers
     cancellable: bool = False   # may be cancelled while queued (has on_cancel, or no markers to clear)
+    # irreversible work (submit(grace=True): send, publish, buy, delete): never waits for a used-up hourly budget
+    # while running – it could not be taken back meanwhile and would fire long after the click; it fails instead
+    irreversible: bool = False
 
     def progress(self, done: int, step: str = "", current: str | None = None) -> None:
         self.done, self.step, self.current = done, step, current
@@ -151,7 +154,7 @@ def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *
     wait = grace_s() if grace else 0
     job = Job(next(_ids), kind, label, lane=lane, total=total, current=current, keys=keys, on_cancel=on_cancel,
               cancellable=on_cancel is not None or not keys, quiet=quiet, link=link,
-              runs_at=utcnow() + timedelta(seconds=wait) if wait else None)
+              runs_at=utcnow() + timedelta(seconds=wait) if wait else None, irreversible=grace)
     _active.append(job)
     job.task = asyncio.create_task(_run(job, run))
     return job
@@ -199,8 +202,11 @@ async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
             async with timeline.run("job", job.label, name=job.kind, **timeline.marker_ids(job.current)) as tl:
                 try:
                     async with asyncio.timeout(JOB_TIMEOUT_S) as limit:
-                        with ratelimit.waiting(_budget_pause(job, limit)):
+                        if job.irreversible:
                             job.result = await run(job) or ""
+                        else:
+                            with ratelimit.waiting(_budget_pause(job, limit)):
+                                job.result = await run(job) or ""
                     job.status = "done"
                 except TimeoutError:          # a stuck request (e.g. a willhaben page that never answers) frees the lane
                     log.warning("job %r timed out after %d s", job.label, JOB_TIMEOUT_S)

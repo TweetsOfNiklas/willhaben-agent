@@ -7,7 +7,8 @@
 {# No page loads: while Claude sorts or writes (busy) this wrapper waits for the batch (data-pending-key, the jobs
    poll) and is replaced by its fresh copy when the batch is done; while drafts are written, finished ones are
    fetched the same way (script below). The step links swap it too. #}
-<div id="batch-main"{% if busy %} data-pending-key="batch:{{ b.id }}"{% endif %}>
+{# data-refresh: the page's own fresh copy keeps the rows unticked here (?unticked=, kept up to date below) #}
+<div id="batch-main"{% if busy %} data-pending-key="batch:{{ b.id }}"{% endif %} data-refresh="/new-ad/batch/{{ b.id }}{% if unticked %}?unticked={{ unticked|join(',') }}{% endif %}">
 <div class="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
   <div class="min-w-0">
     <a href="/new-ad" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("New ad") }}</a>
@@ -107,6 +108,12 @@
       b.defaultChecked = b.checked;
       const row = b.closest('tbody[data-draft]');
       if (row && row.dataset.refresh) row.dataset.refresh = row.dataset.refresh.split('?')[0] + '?checked=' + (b.checked ? 1 : 0);
+      // a fresh copy of the whole page (drafts still being written, the batch done) must not tick it again
+      const main = document.getElementById('batch-main');
+      if (main) {
+        const off = [...document.querySelectorAll('#batch-drafts input[name="sel"]')].filter(x => !x.checked && !x.disabled).map(x => x.value);
+        main.dataset.refresh = main.dataset.refresh.split('?')[0] + (off.length ? '?unticked=' + off.join(',') : '');
+      }
     };
     if (t.matches('[data-selall]')) { boxes().forEach(b => { b.checked = t.checked; tick(b); }); count(); return; }
     if (t.matches('#batch-drafts input[name="sel"]')) { tick(t); count(); return; }

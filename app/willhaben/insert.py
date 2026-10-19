@@ -331,7 +331,8 @@ def manual_option(form: dict[str, Any], code: str, *, condition: str | None,
 def hint_option(form: dict[str, Any], hint: str | None, *, condition: str | None,
                 attributes: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """Claude's category_hint ("KFZ-Zubehör/Motorradteile > E-Mobilität > Ladestationen/Wallboxen") as an option, when
-    willhaben's own suggestion finds nothing: a leaf whose path ends in the hint's segments, else the one leaf of that name.
+    willhaben's own suggestion finds nothing: the one leaf whose path ends in the hint's segments, else the one leaf of
+    that name; several ("Zubehör") give none.
     Split only on > and ›, a slash is part of willhaben's labels."""
     want = [_norm(p) for p in re.split(r"[>›]", hint or "") if _norm(p)]
     if not want:
@@ -341,9 +342,8 @@ def hint_option(form: dict[str, Any], hint: str | None, *, condition: str | None
     leaves = [(code, info) for code, info in cats.items() if info.get("leaf")]
     hits = [c for c, info in leaves if [_norm(p) for p in info["path"]][-len(want):] == want]
     if not hits:
-        named = [c for c, info in leaves if _norm(info.get("label")) == want[-1]]
-        hits = named if len(named) == 1 else []
-    if not hits:
+        hits = [c for c, info in leaves if _norm(info.get("label")) == want[-1]]
+    if len(hits) != 1:              # none, or several ("Zubehör"): no guess – the owner picks one
         return None
     info = cats[hits[0]]
     path = [{"label": lbl, "code": c} for lbl, c in zip(info["path"], info["codes"], strict=False)]

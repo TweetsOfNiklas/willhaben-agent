@@ -569,22 +569,24 @@ _publishing: set[int] = set()     # drafts with a publish in flight (double clic
 
 
 async def publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None = None,
-                            shipping: dict[str, Any] | None = None, job: Any = None):
+                            shipping: dict[str, Any] | None = None, job: Any = None, code: str | None = None):
     """Publish the saved draft as free private ad: the chosen category option and field values from the form.
     shipping: parse_shipping() result; None = the owner's usual handover (Settings → Selling preferences; pickup, the
-    live-verified path, unless changed there). job: jobs.Job for progress."""
+    live-verified path, unless changed there). job: jobs.Job for progress. code: the chosen category's code, which
+    wins over the position `option` (a category check meanwhile may have reordered the options)."""
     from app.willhaben import insert
 
     if draft_id in _publishing:
         raise insert.InsertError("Wird gerade veröffentlicht – bitte warten")
     _publishing.add(draft_id)
     try:
-        return await _publish_willhaben(draft_id, option, values, stop_after, shipping, job)
+        return await _publish_willhaben(draft_id, option, values, stop_after, shipping, job, code)
     finally:
         _publishing.discard(draft_id)
 
 
-def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping: dict[str, Any] | None = None) -> bool:
+def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping: dict[str, Any] | None = None,
+                    code: str | None = None) -> bool:
     """Check the form right away (errors land on the draft at once), then publish as a background job.
 
     Returns False when nothing was queued (input error, already queued or published); the reason is in d.error.
@@ -599,8 +601,11 @@ def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping
     if d.refining:                        # publishing now would upload the text the revision is about to replace
         update_draft(draft_id, error=t(REFINING_BUSY))
         return False
+    if code is None:                      # the category chosen now, by its code (not its place in the list)
+        opts = (d.wh_plan or {}).get("options") or []
+        code = option_code(opts[option]) if 0 <= option < len(opts) else None
     try:
-        _publish_inputs(d, option, values, shipping)
+        _publish_inputs(d, option, values, shipping, code=code)
     except insert.InsertError as e:
         update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
         return False
@@ -609,7 +614,7 @@ def enqueue_publish(draft_id: int, option: int, values: dict[str, str], shipping
 
     async def run(job) -> str:
         try:
-            await publish_willhaben(draft_id, option, values, shipping=shipping, job=job)
+            await publish_willhaben(draft_id, option, values, shipping=shipping, job=job, code=code)
         except Exception as e:
             log.warning("publishing draft %s failed: %s", draft_id, e)
             update_draft(draft_id, error=t("Publishing failed: {error}", error=str(e)))
@@ -726,8 +731,10 @@ def live_on_willhaben(d: AdDraft) -> MyAd | None:
     return row if row is not None and row.status not in GONE else None
 
 
-def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: dict[str, Any] | None):
-    """Everything that can be checked without willhaben: (chosen option, attrs, labels, shipping) or InsertError."""
+def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: dict[str, Any] | None,
+                    code: str | None = None):
+    """Everything that can be checked without willhaben: (chosen option, attrs, labels, shipping) or InsertError.
+    code: the chosen category; its option is looked up by it (the list may have changed since the click)."""
     from app.willhaben import insert
 
     if d.status == "published":
@@ -739,6 +746,11 @@ def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: d
             f"ändern oder löschen statt noch einmal veröffentlichen")
     plan = d.wh_plan or {}
     opts = plan.get("options") or []
+    if code:
+        found = next((i for i, o in enumerate(opts) if option_code(o) == code), None)
+        if found is None:
+            raise insert.InsertError("Die gewählte Kategorie ist nicht mehr in der Liste – bitte neu wählen")
+        option = found
     if not (0 <= option < len(opts)):
         raise insert.InsertError("Bitte zuerst eine Kategorie wählen")
     if not (d.title or "").strip() or not (d.description or "").strip():
@@ -770,13 +782,13 @@ def _publish_inputs(d: AdDraft, option: int, values: dict[str, str], shipping: d
 
 
 async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str], stop_after: str | None,
-                             shipping: dict[str, Any] | None, job: Any = None):
+                             shipping: dict[str, Any] | None, job: Any = None, code: str | None = None):
     from app.willhaben import insert
     from app.willhaben.session import get_session
 
     with session() as db:
         d = db.get(AdDraft, draft_id)
-    chosen, attrs, labels, shipping = _publish_inputs(d, option, values, shipping)
+    chosen, attrs, labels, shipping = _publish_inputs(d, option, values, shipping, code=code)
     with session() as db:
         d = db.get(AdDraft, draft_id)             # wh_plan may just have been updated
     done = [0]

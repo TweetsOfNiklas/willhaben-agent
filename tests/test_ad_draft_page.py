@@ -94,5 +94,5 @@ def test_batch_page_waits_for_the_batch_instead_of_reloading(client):  # noqa: F
     assert f"batch:{b.id}" in client.get("/jobs", headers={"accept": "application/json"}).json()["pending"]
     ad_batch._update(b.id, status="review")
     page = client.get(f"/new-ad/batch/{b.id}").text
-    assert 'id="batch-main">' in page and 'data-pending-key="batch:' not in page
+    assert 'id="batch-main" data-refresh=' in page and 'data-pending-key="batch:' not in page
     assert f"batch:{b.id}" not in client.get("/jobs", headers={"accept": "application/json"}).json()["pending"]

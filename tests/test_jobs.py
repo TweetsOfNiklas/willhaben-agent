@@ -109,7 +109,7 @@ async def test_publish_runs_as_job_with_progress(monkeypatch):
     draft_id = _ad_draft()
     seen = []
 
-    async def fake_publish(did, option, values, stop_after=None, shipping=None, job=None):
+    async def fake_publish(did, option, values, stop_after=None, shipping=None, job=None, code=None):
         job.progress(1, "Lade Foto 1/1 hoch", f"addraft:{did}")
         seen.append((jobs.working(), values))
         return ad_creator.update_draft(did, status="published", wh_ad_id="1000000009")
