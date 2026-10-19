@@ -923,7 +923,7 @@ async def test_the_category_rule_is_stored_at_the_start(fx, monkeypatch):
 
 def test_fee_rule_is_willhabens_by_default():
     assert purchase.fee_rule() == {"service": "willhaben Käuferschutzgebühr", "pct": 4.5, "fixed": 0.0, "min": 0.99,
-                                   "max": 49.99, "category": None}
+                                   "max": 49.99, "category": None, "round_down": False, "at_price": None, "at_fee": None}
 
 
 def test_the_rule_stored_with_the_order_applies(monkeypatch):
@@ -1132,3 +1132,32 @@ async def test_buyer_injection_attempts_are_held_back(fx, attack, answer, reason
     fx.backend.draft = {**answer, "auto_send": True, "auto_reason": "Gegenangebot im Rahmen"}
     d = await chats.auto_reply("conv-buy-1")
     assert d.status != "sent" and fx.account.sent == [] and reason in (d.auto_reason or "")
+
+
+async def test_willhabens_own_fee_goes_with_the_order(fx, monkeypatch):
+    """The fee willhaben shows in its PayLivery window at the asking price sets the default maximum and counts for
+    every lower price, so an agreement never goes above the maximum."""
+    seen = []
+
+    async def stated(ad_id, price):
+        seen.append((ad_id, price))
+        return 21.0                                                  # 7 % of 300, where the rule says 13.50
+
+    monkeypatch.setattr(purchase, "stated_fee", stated)
+    fx.ad = detail(shipping_price=7.9)
+    pid = await open_order(fx, max_price=None)
+    p = row(pid)
+    assert seen == [(p.ad_id, 300.0)] and p.fee["at_price"] == 300.0 and p.fee["at_fee"] == 21.0
+    assert p.max_price == 328.9                                     # 300 + 7.90 + 21.00
+    assert purchase.fee_of(p, 280.0) == 21.0 and purchase.item_ceiling(p) == 300.0
+    assert any("willhaben" in (line.get("text") or "") and "21" in (line.get("text") or "") for line in p.log or [])
+
+
+async def test_without_willhabens_fee_the_category_rule_applies(fx, monkeypatch):
+    async def stated(ad_id, price):
+        return None
+
+    monkeypatch.setattr(purchase, "stated_fee", stated)
+    fx.ad = detail(shipping_price=7.9)
+    pid = await open_order(fx, max_price=None)
+    assert row(pid).fee["at_fee"] is None and row(pid).max_price == 321.4       # 300 + 7.90 + 4.5 % of 300

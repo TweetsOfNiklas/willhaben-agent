@@ -67,3 +67,14 @@ def test_vinted_list_states_the_fee_and_the_label_names_it():
         "+ € 4,90 shipping · + € 0,80 buyer protection"
     assert shipping_info.label_of({"buyer_fee": 1.15}) == "+ € 1,15 buyer protection"
     assert shipping_info.label_of({"shipping_price": 4.9, "shipping": "ship"}) == "+ € 4,90 shipping"
+
+
+def test_a_stated_fee_counts_for_its_price_and_every_lower_one():
+    r = fees.RULES["willhaben"].stated(420.0, 29.40)               # a CPU: 7 % where the rule says 4.5 %
+    assert r.fee(420) == 29.40
+    assert r.fee(380) == 29.40 and r.fee(10) == 29.40              # never less than at the asking price: a safe total
+    assert r.fee(500) == 35.0                                       # above it: the rule (22.50) scaled by 29.40 / 18.90
+    assert r.item_for_cents(45000) == 42056                         # € 420.56 + its fee € 29.44 = € 450
+    assert fees.from_dict(r.as_dict()) == r
+    assert fees.RULES["willhaben"].stated(0, 1.0) is fees.RULES["willhaben"]
+    assert fees.RULES["willhaben"].round_down is False and fees.FeeRule("x", 4.5, round_down=True).fee(325) == 14.62

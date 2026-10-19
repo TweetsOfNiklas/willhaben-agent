@@ -221,6 +221,18 @@ def rule_of(row: Purchase | None = None) -> fees.FeeRule:
     return fees.from_dict(getattr(row, "fee", None), "willhaben") or fees.RULES["willhaben"]
 
 
+async def stated_fee(ad_id: str, price: float) -> float | None:
+    """willhaben's fee for the ad at this price, read from its PayLivery window (app/willhaben/paylivery_fee.py,
+    read-only); None when it could not be read."""
+    from app.willhaben import paylivery_fee
+    from app.willhaben.session import get_session
+    try:
+        return (await paylivery_fee.fetch(get_session(), ad_id, price))["fee"]
+    except Exception as e:  # noqa: BLE001 - without it the category's rule applies
+        log.info("PayLivery fee of %s not read: %s", ad_id, e)
+        return None
+
+
 def paylivery_fee(item_price: float | None, rule: fees.FeeRule | None = None) -> float:
     """Buyer protection fee of PayLivery for an item price in euro (0 for a price that is not positive)."""
     return (rule or rule_of()).fee(item_price)
@@ -646,6 +658,15 @@ async def _begin_inner(pid: int) -> None:
         log.info("price check for %s failed: %s", row.ad_id, e)
     ad_ship = detail.shipping_price if row.mode == "paylivery" else None     # PayLivery: the buyer's delivery price
     rule = fees.rule("willhaben", detail.category_path) or rule_of()      # the fee rule of the ad's category
+    if row.mode == "paylivery" and detail.price:   # willhaben's exact fee at the asking price (its PayLivery window)
+        stated = await stated_fee(row.ad_id, detail.price)
+        if stated is not None:
+            rule = rule.stated(detail.price, stated)
+            row = _change(pid, lambda r: _line(r, t("Buyer protection fee from willhaben: {fee} at the asking price",
+                                                    fee=_money(stated))))
+        else:
+            row = _change(pid, lambda r: _line(r, t("willhaben did not show the buyer protection fee – it is estimated "
+                                                    "from the category")))
     default_max, ship, fee = None, 0.0, 0.0
     if not row.max_price and detail.price:        # no maximum typed: the asking price plus shipping (and PayLivery's fee)
         ship = ad_ship if ad_ship is not None else SHIPPING_ESTIMATE.get(row.mode or "", 0.0)

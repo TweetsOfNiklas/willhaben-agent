@@ -6,6 +6,7 @@ are faked per test (FakePublic, deals.analyze); purchase.start and the actions a
 background work.
 """
 import re
+import time
 import shutil
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -654,7 +655,7 @@ def test_dialog_carries_the_fee_rule_as_json(client, monkeypatch):  # noqa: F811
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     form = re.search(r'<form method="post" action="/purchases"[^>]*>', frag).group(0)
     assert json.loads(htmllib.unescape(re.search(r"data-fee='([^']*)'", form).group(1))) == {
-        "service": "willhaben Käuferschutzgebühr", "pct": 4.5, "fixed": 0.0, "min": 0.99, "max": 49.99, "category": None}
+        "service": "willhaben Käuferschutzgebühr", "pct": 4.5, "fixed": 0.0, "min": 0.99, "max": 49.99, "category": None, "round_down": False, "at_price": None, "at_fee": None}
     assert 'data-fee-tpl="Buyer protection {amount}"' in frag
 
 
@@ -878,6 +879,9 @@ results.totals = items.map(i => wbBuy.costs(c14, i).total);
 results.roundTrip = items.map(i => wbBuy.item(c14, wbBuy.costs(c14, i).total));
 results.ceilings = maxima.map(m => wbBuy.item(c14, m));
 results.costs300 = wbBuy.costs(c14, 300);
+// a fee willhaben stated at the asking price (420 -> 29.40): that price and every lower one cost it, above it scaled
+const stated = { service: 'x', pct: 4.5, fixed: 0, min: 0.99, max: 49.99, at_price: 420, at_fee: 29.4 };
+results.statedFees = [420, 380, 10, 500].map(i => wbBuy.feeCents(Math.round(i * 100), stated) / 100);
 c14.radios.paylivery.checked = false; c14.radios.direct.checked = true;
 results.direct = { fee: wbBuy.fee(c14, 300), costs: wbBuy.costs(c14, 300), item: wbBuy.item(c14, 300) };
 c14.radios.direct.checked = false; c14.radios.pickup.checked = true;
@@ -1012,6 +1016,9 @@ def test_buy_steps_script_in_node():  # noqa: F811
     assert r["fees"] == [paylivery_fee(i) for i in items]
     assert r["totals"] == [costs_of(Purchase(max_price=300.0, **ad), i)["total"] for i in items]
     assert r["roundTrip"] == items                                    # total -> item gives the item price back
+    from app.platforms import fees as fees_mod
+    stated = fees_mod.RULES["willhaben"].stated(420.0, 29.4)
+    assert r["statedFees"] == [stated.fee(i) for i in (420, 380, 10, 500)] == [29.4, 29.4, 29.4, 35.0]
     assert [max(1.0, c) for c in r["ceilings"]] == [item_ceiling(Purchase(max_price=m, **ad)) for m in maxima]
     assert r["ceilings"][:3] == [0, 0, 0]                             # nothing left after the shipping: 0, not negative
     assert r["costs300"] == {"ship": 7.9, "fee": 13.5, "total": 321.4}
@@ -1128,3 +1135,17 @@ def test_start_through_the_dialog_stays_on_the_page(client, monkeypatch):  # noq
     pid2 = int(r.headers["location"].rsplit("/", 1)[1])
     wait_jobs()
     assert begun == [pid2]
+
+
+def test_dialog_uses_the_fee_read_when_the_ad_was_opened(client, monkeypatch):  # noqa: F811
+    import html as htmllib
+    import json
+
+    from app.willhaben import paylivery_fee
+    _switch_on()
+    _use(monkeypatch, _ad())
+    monkeypatch.setattr(paylivery_fee, "_cache", {("2000000001", 250.0): (time.monotonic(), {"fee": 17.5})})
+    frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
+    form = re.search(r'<form method="post" action="/purchases"[^>]*>', frag).group(0)
+    rule = json.loads(htmllib.unescape(re.search(r"data-fee='([^']*)'", form).group(1)))
+    assert rule["at_price"] == 250.0 and rule["at_fee"] == 17.5

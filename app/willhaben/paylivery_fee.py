@@ -126,3 +126,9 @@ async def fetch(sess: Any, ad_id: str, price: float | None = None) -> dict[str, 
     if fee is not None:
         _cache[key] = (time.monotonic(), res)
     return res
+
+
+def cached(ad_id: str, price: float | None) -> float | None:
+    """The fee read for this ad and price within the last hour (the ad viewer reads it when the ad is opened)."""
+    hit = _cache.get((str(ad_id), price))
+    return hit[1]["fee"] if hit and time.monotonic() - hit[0] < CACHE_S else None

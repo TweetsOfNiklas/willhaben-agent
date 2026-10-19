@@ -235,5 +235,7 @@
   "Open the order": "Auftrag öffnen",
   "Needs your own address (Settings → Shipping)": "Braucht deine eigene Adresse (Einstellungen → Versand)",
   "Purchase „{title}“": "Kauf „{title}“",
-  "Taken back before the first message": "Vor der ersten Nachricht zurückgenommen"
+  "Taken back before the first message": "Vor der ersten Nachricht zurückgenommen",
+  "Buyer protection fee from willhaben: {fee} at the asking price": "Käuferschutzgebühr laut willhaben: {fee} beim Angebotspreis",
+  "willhaben did not show the buyer protection fee – it is estimated from the category": "willhaben hat die Käuferschutzgebühr nicht angezeigt – sie wird nach der Kategorie geschätzt"
 }

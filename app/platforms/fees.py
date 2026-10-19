@@ -10,14 +10,15 @@ a category rule (the category path from leaf to root, by name or id, CATEGORY_RU
 
 Sources (checked 2026-10-19):
 - willhaben PayLivery: help centre "Wie viel kostet PayLivery" (updated 2026-10-09): 4.5 %, at least € 0.99, at most
-  € 49.99, "the fee can vary by category and item price". No category rates are published; willhaben shows the
-  exact fee in the PayLivery window of the chat.
+  € 49.99, "the fee can vary by category and item price". Its window showed on 2026-10-19: € 325 -> € 14.62 (4.5 %,
+  cents cut off), € 420 for a CPU -> € 29.40 (7 %), € 15 -> € 2.49 (no rule known for it). So the exact fee of an
+  ad is read from that window (app/willhaben/paylivery_fee.py) and a purchase keeps it with its rule (stated()).
 - Vinted: 5 % + € 0.70 (Vinted's catalog: € 2.00 -> € 0.80, € 8.99 -> € 1.15, € 20.00 -> € 1.70).
 - Kleinanzeigen "Sicher bezahlen": 4.5 % + € 0.50 (2026 guides; older ones say € 0.35).
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Iterable
 
 
@@ -29,14 +30,37 @@ class FeeRule:
     min: float = 0.0
     max: float | None = None
     category: str | None = None   # the category the rule is for (None: the site's general rule)
+    # cents cut off instead of rounded half up. willhaben showed 14.625 -> 14.62 once (cut off or rounded half to even);
+    # not set for it yet: its fee is read at the asking price and counts for every lower one (at_price)
+    round_down: bool = False
+    # the fee the site stated for one item price (willhaben's PayLivery window, at the asking price). That price costs
+    # exactly this; a lower one is counted with it too (a cheaper item never costs more fee, so a total never ends up
+    # above a maximum), a higher one with the rule scaled by how far the stated fee lies above it.
+    at_price: float | None = None
+    at_fee: float | None = None
+
+    def _rule_cents(self, item_cents: int) -> int:
+        raw = (item_cents * round(self.pct * 10) + (0 if self.round_down else 500)) // 1000 + _cents(self.fixed)
+        raw = max(raw, _cents(self.min))
+        return min(raw, _cents(self.max)) if self.max is not None else raw
 
     def cents(self, item_cents: int) -> int:
         """The fee in cents for an item price in cents; 0 without a positive price."""
         if item_cents <= 0:
             return 0
-        raw = (item_cents * round(self.pct * 10) + 500) // 1000 + _cents(self.fixed)
-        raw = max(raw, _cents(self.min))
-        return min(raw, _cents(self.max)) if self.max is not None else raw
+        if self.at_price is None or self.at_fee is None:
+            return self._rule_cents(item_cents)
+        at, stated = _cents(self.at_price), _cents(self.at_fee)
+        if item_cents <= at:
+            return stated
+        base = self._rule_cents(at)
+        return max(stated, self._rule_cents(item_cents) * stated // base if base else stated)
+
+    def stated(self, price: float, fee: float) -> "FeeRule":
+        """This rule with the fee the site stated for an item price (see at_price)."""
+        if not price or price <= 0 or fee is None or fee < 0:
+            return self
+        return replace(self, at_price=round(float(price), 2), at_fee=round(float(fee), 2))
 
     def fee(self, item_price: float | None) -> float:
         if item_price is None or item_price <= 0:
@@ -95,7 +119,9 @@ def from_dict(d: dict[str, Any] | None, platform: str | None = None) -> FeeRule 
         try:
             return FeeRule(service=str(d.get("service") or ""), pct=float(d["pct"]), fixed=float(d.get("fixed") or 0),
                            min=float(d.get("min") or 0), max=float(d["max"]) if d.get("max") is not None else None,
-                           category=d.get("category"))
+                           category=d.get("category"), round_down=bool(d.get("round_down")),
+                           at_price=float(d["at_price"]) if d.get("at_price") is not None else None,
+                           at_fee=float(d["at_fee"]) if d.get("at_fee") is not None else None)
         except (KeyError, TypeError, ValueError):
             pass
     return rule(platform)

@@ -23,9 +23,16 @@
         try { var r = JSON.parse(f.dataset.fee || 'null'); return r && r.pct > 0 ? r : null; } catch (e) { return null; } },
       // the fee of an item price in cents (integer maths as fees.FeeRule.cents: percent rounded half up plus the fixed part,
       // then min and max)
-      feeCents: function (c, r) { if (!(c > 0)) return 0;
-        var v = Math.max(Math.floor((c * Math.round(r.pct * 10) + 500) / 1000) + Math.round((r.fixed || 0) * 100), Math.round((r.min || 0) * 100));
+      ruleCents: function (c, r) {
+        var v = Math.max(Math.floor((c * Math.round(r.pct * 10) + (r.round_down ? 0 : 500)) / 1000) + Math.round((r.fixed || 0) * 100), Math.round((r.min || 0) * 100));
         return r.max == null ? v : Math.min(v, Math.round(r.max * 100)); },
+      // as fees.FeeRule.cents: a fee willhaben stated at one price counts for that price and every lower one
+      feeCents: function (c, r) { if (!(c > 0)) return 0;
+        if (r.at_price == null || r.at_fee == null) return this.ruleCents(c, r);
+        var at = Math.round(r.at_price * 100), st = Math.round(r.at_fee * 100);
+        if (c <= at) return st;
+        var base = this.ruleCents(at, r);
+        return Math.max(st, base ? Math.floor(this.ruleCents(c, r) * st / base) : st); },
       // the buyer protection fee of an item price in euro (0 without PayLivery or a fee rule)
       fee: function (f, item) { var r = this.rule(f); return r ? this.feeCents(Math.round(item * 100), r) / 100 : 0; },
       // what an item price costs: shipping of the mode, the fee and the total (the maximum that fits exactly this item price)

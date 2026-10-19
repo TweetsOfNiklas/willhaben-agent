@@ -229,6 +229,9 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
     ask = d.price if d.price and d.price > 0 else None
     res = await _market(d)
     rule = fees.rule("willhaben", d.category_path) or purchase.rule_of()    # the fee rule of the ad's category
+    from app.willhaben import paylivery_fee
+    if d.price and (stated := paylivery_fee.cached(d.ad_id, d.price)) is not None:
+        rule = rule.stated(d.price, stated)        # read when the ad was opened (the ad viewer's price breakdown)
     ctx.update(fee=purchase.fee_rule(rule), fee_of=rule.fee)
     extra = rule.fee(ask) if pre == "paylivery" else 0.0
     # the suggested wish price: the discount below the asking price (whole euros) plus shipping and fee of the mode
