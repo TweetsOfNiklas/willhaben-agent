@@ -2,8 +2,9 @@
   <script>
     // Buy dialog (_buy_dialog.html): the three parts (how to buy, price, start) of one form on one screen; Start is possible
     // once a way to buy is chosen and the prices are in order. The maximum includes the shipping of the chosen mode and, with
-    // PayLivery, willhaben's buyer protection fee (form data-fee = {pct, min, max}: pct % of the item price, at least min, at
-    // most max; fee()/costs()/item() mirror purchase._fee_cents/costs_of/_item_for_cents in integer cents). The field
+    // PayLivery, willhaben's buyer protection fee (form data-fee = fees.FeeRule of the ad's category {pct, fixed, min, max}: pct % of the
+    // item price plus fixed, at least min, at most max (null: none); fee()/costs()/item() mirror FeeRule.cents, costs_of and
+    // FeeRule.item_for_cents in integer cents). The field
     // always holds a number, the default (asking price plus shipping and fee) until the user changes it; max_default is "1" while
     // the value is that default (the server may then use its own exact figure), "" once it was changed. A cleared field
     // is refilled with the default when it loses focus or the step is left. Next to the field one pill rates the value -
@@ -17,31 +18,27 @@
     window.wbBuy = {
       ship: function (f) { var m = f.querySelector('input[name=mode]:checked'); if (!m) return 0;
         try { return +(JSON.parse(f.dataset.ship || '{}')[m.value] || 0); } catch (e) { return 0; } },
-      // the PayLivery fee rule {pct, min, max} of the form while PayLivery is the chosen mode, else null (no fee)
+      // the PayLivery fee rule {pct, fixed, min, max} of the form while PayLivery is the chosen mode, else null (no fee)
       rule: function (f) { var m = f.querySelector('input[name=mode]:checked'); if (!m || m.value !== 'paylivery') return null;
         try { var r = JSON.parse(f.dataset.fee || 'null'); return r && r.pct > 0 ? r : null; } catch (e) { return null; } },
-      // the fee of an item price in cents (integer maths as purchase._fee_cents: percent rounded half up, then min and max)
+      // the fee of an item price in cents (integer maths as fees.FeeRule.cents: percent rounded half up plus the fixed part,
+      // then min and max)
       feeCents: function (c, r) { if (!(c > 0)) return 0;
-        return Math.min(Math.max(Math.floor((c * Math.round(r.pct * 10) + 500) / 1000), Math.round(r.min * 100)), Math.round(r.max * 100)); },
+        var v = Math.max(Math.floor((c * Math.round(r.pct * 10) + 500) / 1000) + Math.round((r.fixed || 0) * 100), Math.round((r.min || 0) * 100));
+        return r.max == null ? v : Math.min(v, Math.round(r.max * 100)); },
       // the buyer protection fee of an item price in euro (0 without PayLivery or a fee rule)
       fee: function (f, item) { var r = this.rule(f); return r ? this.feeCents(Math.round(item * 100), r) / 100 : 0; },
       // what an item price costs: shipping of the mode, the fee and the total (the maximum that fits exactly this item price)
       costs: function (f, item) { var s = this.ship(f), e = this.fee(f, item);
         return {ship: s, fee: e, total: Math.round(item * 100 + s * 100 + e * 100) / 100}; },
-      // the inverse of costs().total: the largest item price whose item + shipping + fee is at most the total (cents; the
-      // mirror of purchase._item_for_cents). Without PayLivery just total minus shipping; 0 when nothing is left.
+      // the inverse of costs().total: the largest item price whose item + shipping + fee is at most the total (cents, a
+      // binary search as fees.FeeRule.item_for_cents). Without PayLivery just total minus shipping; 0 when nothing is left.
       item: function (f, total) {
-        var self = this, r = this.rule(f), avail = Math.round(total * 100) - Math.round(this.ship(f) * 100);
+        var r = this.rule(f), avail = Math.round(total * 100) - Math.round(this.ship(f) * 100);
         if (!r) return avail / 100;
-        if (avail <= 0) return 0;
-        var pm = Math.round(r.pct * 10), lo = Math.round(r.min * 100), hi = Math.round(r.max * 100), c;
-        if (avail <= lo * 1000 / pm + lo) c = avail - lo;
-        else if (avail >= hi * 1000 / pm + hi) c = avail - hi;
-        else c = Math.round(avail * 1000 / (1000 + pm));
-        c = Math.max(c, 0);
-        while (c + self.feeCents(c + 1, r) + 1 <= avail) c++;
-        while (c > 0 && c + self.feeCents(c, r) > avail) c--;
-        return c / 100;
+        var lo = 0, hi = Math.max(avail, 0);
+        while (lo < hi) { var mid = Math.floor((lo + hi + 1) / 2); if (mid + this.feeCents(mid, r) <= avail) lo = mid; else hi = mid - 1; }
+        return lo / 100;
       },
       base: function (f) { var a = +f.dataset.ask; return a > 0 ? this.costs(f, a).total : 0; },
       // the suggested wish price: the discount of the settings below the asking price (whole euros, as purchase.target_price

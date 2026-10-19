@@ -31,6 +31,7 @@ from sqlmodel import col, select
 from app.db import Conversation, Draft, Message, MyAd, Purchase, SimChat, SimProposal, current_ad, get_setting, \
     session, set_setting, utcnow
 from app.i18n import t
+from app.platforms import fees
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
     PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, SIM_JUDGE_SCHEMA, SIM_JUDGE_SYSTEM, SIM_PARTNER_SCHEMA,
@@ -394,7 +395,13 @@ def _purchase(sim: SimChat, turns: list[dict[str, Any]]) -> Purchase:
                     pickup_window=s.get("pickup_window") or None, status=status if status != "paused" else "negotiating",
                     shipping_cost=_number(ship), shipping_source="ad" if _number(ship) else None, agreed_price=agreed,
                     questions=[{"question": q, "answer": None} for q in s.get("questions") or [] if q],
-                    conversation_id=f"sim-{sim.id}")
+                    conversation_id=f"sim-{sim.id}", fee=_fee_rule(sim))
+
+
+def _fee_rule(sim: SimChat) -> dict[str, Any] | None:
+    """The buyer fee rule of the simulated ad: its site's, by the category of a random ad (app/platforms/fees.py)."""
+    r = fees.rule(sim.platform, (sim.setup or {}).get("category_path"))
+    return r.as_dict() if r else None
 
 
 def _messages(sim: SimChat, turns: list[dict[str, Any]]) -> list[Message]:
@@ -448,7 +455,7 @@ async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[
     prompt = purchase_opener_prompt(ad_context=ad, target=purchase.target_price(p), max_price=p.max_price, mode=p.mode,
                                     rules=rules, seller_name=ad.get("seller_name"), shipping_cost=cost,
                                     shipping_source=src, item_ceiling=purchase.item_ceiling(p),
-                                    fee=purchase.fee_rule() if p.mode == "paylivery" else None,
+                                    fee=purchase.fee_rule(purchase.rule_of(p)) if p.mode == "paylivery" else None,
                                     questions=[q["question"] for q in p.questions or []], asking=p.asking_price)
     from app.llm.prompts import platform_rule
     if line := platform_rule(sim.platform):
@@ -831,7 +838,8 @@ def _random_setup(setup: dict[str, Any], role: str, platform: str, detail: Any) 
     below."""
     setup = dict(setup)
     setup.update({"title": detail.heading or "", "price": detail.price, "description": detail.description or "",
-                  "location": detail.location or "", "url": detail.url, **delivery_of(detail)})
+                  "location": detail.location or "", "url": detail.url,
+                  "category_path": list(getattr(detail, "category_path", None) or []), **delivery_of(detail)})
     setup.pop("script", None)
     if role == "buyer":
         setup.update({"seller_name": detail.seller_name or "", "max_price": detail.price,

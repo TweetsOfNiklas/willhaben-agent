@@ -51,6 +51,7 @@ class Listing:
     # seller ships at all: "ship" | "pickup" (pickup only) | None (not stated)
     shipping_price: float | None = None
     shipping: str | None = None
+    buyer_fee: float | None = None      # the buyer fee the site states for this ad (Vinted: buyer protection), app/platforms/fees.py
 
     @property
     def ref(self) -> str:
@@ -78,6 +79,7 @@ class Listing:
             "item_condition_label": self.item_condition_label,
             "shipping_price": self.shipping_price,
             "shipping": self.shipping,
+            "buyer_fee": self.buyer_fee,
         }
 
 
@@ -120,6 +122,7 @@ class AdDetail:
     item_condition: str | None = None  # as on Listing (app/platforms/condition.py)
     item_condition_label: str | None = None
     shipping: str | None = None        # "ship" | "pickup" | None, as on Listing; shipping_price above: 0 = free
+    buyer_fee: float | None = None     # as on Listing
 
     @property
     def ref(self) -> str:
@@ -139,7 +142,8 @@ class AdDetail:
                    is_private=h.is_private, platform=getattr(h, "platform", None) or DEFAULT_PLATFORM,
                    item_condition=getattr(h, "item_condition", None),
                    item_condition_label=getattr(h, "item_condition_label", None),
-                   shipping_price=getattr(h, "shipping_price", None), shipping=getattr(h, "shipping", None))
+                   shipping_price=getattr(h, "shipping_price", None), shipping=getattr(h, "shipping", None),
+                   buyer_fee=getattr(h, "buyer_fee", None))
 
     @classmethod
     def from_result(cls, r: dict[str, Any]) -> AdDetail:
@@ -155,7 +159,7 @@ class AdDetail:
                    images=[r["image_url"]] if r.get("image_url") else [], location=r.get("location"),
                    is_private=r.get("is_private"), platform=r.get("platform") or DEFAULT_PLATFORM,
                    item_condition=r.get("item_condition"), item_condition_label=r.get("item_condition_label"),
-                   shipping_price=r.get("shipping_price"), shipping=r.get("shipping"))
+                   shipping_price=r.get("shipping_price"), shipping=r.get("shipping"), buyer_fee=r.get("buyer_fee"))
 
     def as_context(self) -> dict[str, Any]:
         return {

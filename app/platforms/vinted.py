@@ -81,6 +81,7 @@ def parse_listing(item: dict[str, Any], host: str = HOST) -> Listing:
     price = _money(p.get("price"))
     discounted = _money(p.get("priceWithDiscount"))
     total = _money(p.get("totalItemPrice"))
+    fee = _money(p.get("serviceFee"))
     box = p.get("itemBox") or {}
     lines = [one_line(box.get("firstLine")), one_line(box.get("secondLine"))]
     if total is not None:
@@ -99,7 +100,7 @@ def parse_listing(item: dict[str, Any], host: str = HOST) -> Listing:
                    image_url=p.get("thumbnailUrl") or (photos[0] if photos else None),
                    is_private=(not user.get("isBusiness")) if "isBusiness" in user else None, is_bumped=None,
                    status="active", platform="vinted", item_condition=item_condition,
-                   item_condition_label=item_condition_label)
+                   item_condition_label=item_condition_label, buyer_fee=fee)
 
 
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:

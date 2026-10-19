@@ -653,7 +653,8 @@ def test_dialog_carries_the_fee_rule_as_json(client, monkeypatch):  # noqa: F811
     _use(monkeypatch, _ad())
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     form = re.search(r'<form method="post" action="/purchases"[^>]*>', frag).group(0)
-    assert json.loads(htmllib.unescape(re.search(r"data-fee='([^']*)'", form).group(1))) == {"pct": 4.5, "min": 0.99, "max": 49.99}
+    assert json.loads(htmllib.unescape(re.search(r"data-fee='([^']*)'", form).group(1))) == {
+        "service": "willhaben Käuferschutzgebühr", "pct": 4.5, "fixed": 0.0, "min": 0.99, "max": 49.99, "category": None}
     assert 'data-fee-tpl="Buyer protection {amount}"' in frag
 
 

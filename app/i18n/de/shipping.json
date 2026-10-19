@@ -100,5 +100,6 @@
  "Address and parcel size taken from the chat": "Adresse und Paketgröße aus dem Chat übernommen",
  "Prepare parcel: {name}": "Paket vorbereiten: {name}",
  "Claude is preparing the parcel from the chat…": "Claude bereitet das Paket aus dem Chat vor…",
- "Queued: prepare the parcel": "Eingereiht: Paket vorbereiten"
+ "Queued: prepare the parcel": "Eingereiht: Paket vorbereiten",
+ "+ {amount} buyer protection": "+ {amount} Käuferschutz"
 }

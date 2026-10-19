@@ -817,7 +817,7 @@ class HitView:
         elif self.sort == "price_desc":
             q = q.order_by(col(Hit.price).desc().nulls_last(), col(Hit.id).desc())
         elif self.sort == "total":
-            q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0)).asc(), col(Hit.id).desc())
+            q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0) + func.coalesce(Hit.buyer_fee, 0)).asc(), col(Hit.id).desc())
         else:
             q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
         radius = geo.pickup_radius() if self.state not in ("filtered", "all") else None

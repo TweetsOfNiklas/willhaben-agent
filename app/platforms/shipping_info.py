@@ -51,6 +51,8 @@ def apply_shipping(target: Any, source: Any) -> None:
         target.shipping = kind
         if kind == PICKUP:
             target.shipping_price = None
+    if (fee := getattr(source, "buyer_fee", None)) is not None and hasattr(target, "buyer_fee"):
+        target.buyer_fee = fee                      # the site's own buyer fee (app/platforms/fees.py)
 
 
 def label(price: float | None, kind: str | None, currency: str = "€") -> str:
@@ -68,9 +70,15 @@ def label(price: float | None, kind: str | None, currency: str = "€") -> str:
 
 
 def label_of(x: Any, currency: str = "€") -> str:
-    """label() of a hit, listing, ad page or a stored result dict (old ones have no shipping keys)."""
+    """label() of a hit, listing, ad page or a stored result dict (old ones have no shipping keys), with the buyer fee
+    the site states for the ad ("+ € 4,90 shipping · + € 1,15 buyer protection")."""
     get = x.get if isinstance(x, dict) else (lambda k: getattr(x, k, None))
-    return label(get("shipping_price"), get("shipping"), currency)
+    text = label(get("shipping_price"), get("shipping"), currency)
+    fee = get("buyer_fee")
+    if fee:
+        amount = f"{currency} {fee:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        text = " · ".join(x for x in (text, t("+ {amount} buyer protection", amount=amount)) if x)
+    return text
 
 
 def total(price: float | None, shipping_price: float | None) -> float | None:

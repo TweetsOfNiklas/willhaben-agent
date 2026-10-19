@@ -988,9 +988,9 @@ def _money_de(v: float) -> str:
 
 
 def _fee_text(fee: dict[str, Any]) -> str:
-    pct = f"{fee['pct']:g}".replace(".", ",")
-    return (f"willhaben Käuferschutzgebühr {pct} % des Artikelpreises, mind. {_money_de(fee['min'])}, "
-            f"max. {_money_de(fee['max'])}, zahlt der Käufer")
+    from app.platforms import fees
+
+    return fees.text_de(fees.from_dict(fee) or fees.RULES["willhaben"])
 
 
 def _ceiling_lines(mode: str, shipping_cost: float | None, shipping_source: str | None, max_price: float | None,

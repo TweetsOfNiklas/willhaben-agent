@@ -218,12 +218,21 @@ amount appears in his text. Market figures at the start: `median`, `min` and `p2
 fee ("Käuferschutzgebühr"); the seller pays nothing. Source: help centre article "Wie viel kostet PayLivery -
 Online-Zahlung und Versand?" (https://hilfe.willhaben.at/hc/de/articles/360011365380, updated 2026-10-09): 4.5 % of the
 item price, at least € 0.99, at most € 49.99 (the cap applies from an item price of about € 1,111); "the fee can vary by
-category and item price", so the rule is an approximation, kept in `PAYLIVERY_FEE_PCT/MIN/MAX` in
-`app/services/purchase.py`. Pickup and a bank transfer without PayLivery have no fee. The maximum price of a PayLivery
-order therefore covers item + shipping + fee: `paylivery_fee()` computes the fee in whole cents (rounded half up),
-`item_ceiling()` inverts `item + fee(item) <= maximum - shipping`, and the guards (agreement, buy-now shortcut) compare
-the total incl. fee with the maximum. The PayLivery offer stays the plain item price, willhaben adds shipping and fee at
-checkout. The buy dialog carries the rule as `data-fee` and mirrors the maths in `window.wbBuy` (`fee`, `costs`, `item`).
+category and item price", so the rule is an approximation. The rules of all sites (willhaben, Vinted 5 % + € 0.70,
+Kleinanzeigen "Sicher bezahlen" 4.5 % + € 0.50) live in `app/platforms/fees.py`; `fees.rule(platform, category_path)`
+takes a category rule (`CATEGORY_RULES`, leaf first) before the site's own one, and an order stores the rule of its
+ad's category at the start (`Purchase.fee`). Pickup and a bank transfer without PayLivery have no fee. The maximum price
+of a PayLivery order therefore covers item + shipping + fee: `FeeRule.cents()` computes the fee in whole cents (rounded
+half up), `item_ceiling()` inverts `item + fee(item) <= maximum - shipping` (binary search), and the guards (agreement,
+buy-now shortcut) compare the total incl. fee with the maximum. The PayLivery offer stays the plain item price,
+willhaben adds shipping and fee at checkout. The buy dialog carries the rule as `data-fee` and mirrors the maths in
+`window.wbBuy` (`fee`, `costs`, `item`). Vinted's result list states the fee per ad (`serviceFee`): it is stored as
+`buyer_fee` on listings and hits and shown next to the shipping.
+The exact willhaben fee is shown in the chat's PayLivery window: the chat app (`/bbx-lead`, page
+`/iad/myprofile/chat/[[...slug]]`) opens an iframe whose URL is `button.baseHref` of the ad's integrations
+(`GET /webapi/convoad/v1/chat/ad_list/<own user uuid>?ids=<adId>` → `ads[0].integrations[]` with `initName`
+`at.willhaben.messaging.p2p` (offer) or `…p2p-buynow`) plus `?itemId=<ad uuid>&partnerId=<seller uuid>&activeUserId=<own
+uuid>` (read in the bundle 2026-10-19; the iframe's own calls are not captured yet).
 Not live-verified: the amounts shown at the real checkout (compare them once with `costs_of()`).
 
 Hooks: `paylivery.on_stage(fn)` registers `fn(conv, stage, state)` (async). It runs as a background task after every

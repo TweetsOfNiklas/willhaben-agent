@@ -910,9 +910,29 @@ def test_paylivery_fee_boundaries(item, fee):
     assert purchase.paylivery_fee(item) == fee
 
 
-def test_fee_constants_cite_the_rule():
-    assert (purchase.PAYLIVERY_FEE_PCT, purchase.PAYLIVERY_FEE_MIN, purchase.PAYLIVERY_FEE_MAX) == (4.5, 0.99, 49.99)
-    assert purchase.fee_rule() == {"pct": 4.5, "min": 0.99, "max": 49.99}
+async def test_the_category_rule_is_stored_at_the_start(fx, monkeypatch):
+    """The fee rule of the ad's category goes with the order and sets the default maximum."""
+    from app.platforms import fees
+    computers = fees.FeeRule("willhaben Käuferschutzgebühr", 6.0, 0.0, 0.99, 49.99, category="computer")
+    monkeypatch.setitem(fees.CATEGORY_RULES, "willhaben", {"computer": computers})
+    fx.ad = detail(shipping_price=7.9)
+    pid = await open_order(fx, max_price=None)
+    assert row(pid).fee == computers.as_dict()
+    assert row(pid).max_price == 325.9                                    # 300 + 7.90 + 6 % of 300
+
+
+def test_fee_rule_is_willhabens_by_default():
+    assert purchase.fee_rule() == {"service": "willhaben Käuferschutzgebühr", "pct": 4.5, "fixed": 0.0, "min": 0.99,
+                                   "max": 49.99, "category": None}
+
+
+def test_the_rule_stored_with_the_order_applies(monkeypatch):
+    from app.platforms import fees
+    special = fees.FeeRule("willhaben Käuferschutzgebühr", 6.0, 0.0, 0.99, 49.99, category="handys")
+    pl = _p(mode="paylivery", fee=special.as_dict())
+    assert purchase.fee_of(pl, 100) == 6.0 and purchase.costs_of(pl, 100)["total"] == 112.0
+    assert purchase.item_for_total(pl, 112.0) == 100.0
+    assert purchase.fee_of(_p(mode="paylivery", fee={"broken": 1}), 100) == 4.5      # unreadable: willhaben's rule
 
 
 def test_fee_and_costs_only_for_paylivery():

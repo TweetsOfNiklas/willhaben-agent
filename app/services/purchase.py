@@ -32,6 +32,7 @@ from app.db import Conversation, Draft, Message, Purchase, get_setting, session,
 from app.i18n import t
 from app.llm.base import get_backend
 from app.llm.prompts import PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, purchase_opener_prompt, purchase_rules
+from app.platforms import fees
 from app.services import deals, meetups, paylivery, shipping, topic
 from app.services.notify import notify
 from app.willhaben.account import OpenerUnconfirmed, SendFailed
@@ -55,13 +56,8 @@ DEFAULT_DISCOUNT_PCT = 10           # suggested wish price (and the target witho
 WISH_SLACK = 0.01                   # an opening offer may be 1 % (at least 1 €) below the wish price: Claude rounds
 # Shipping in euro while nothing better is known (no PayLivery price of the ad, no price named by the seller)
 SHIPPING_ESTIMATE = {"paylivery": 6.0, "direct": 6.0, "pickup": 0.0}   # € when the ad names no price (Post M is 7.90)
-# willhaben buyer protection fee ("Käuferschutzgebühr") of PayLivery: paid by the BUYER, the seller pays nothing. Source: help
-# centre article "Wie viel kostet PayLivery - Online-Zahlung und Versand?" (https://hilfe.willhaben.at/hc/de/articles/360011365380,
-# updated 2026-10-09): 4.5 % of the item price, at least € 0.99, at most € 49.99; "the fee can vary by category and item
-# price". Pickup and a bank transfer without PayLivery have no fee. The percentage has one decimal (see _fee_cents).
-PAYLIVERY_FEE_PCT = 4.5
-PAYLIVERY_FEE_MIN = 0.99
-PAYLIVERY_FEE_MAX = 49.99
+# The buyer protection fee of PayLivery (paid by the buyer): app/platforms/fees.py, by the ad's category; the rule
+# is stored with the order at its start (Purchase.fee).
 SETTING_ENABLED = "purchase_enabled"      # "1": purchase orders allowed (Settings)
 SETTING_RULES = "purchase_rules"          # free-text rules of the user for purchases
 SETTING_DISCOUNT = "purchase_discount_pct"
@@ -219,30 +215,25 @@ def _cents(v: float) -> int:
     return int(round(float(v) * 100))
 
 
-def _fee_cents(item_cents: int) -> int:
-    """The buyer protection fee in cents (integer maths, the browser mirrors it in wbBuy.feeCents): the percentage of the
-    item price rounded half up, at least the minimum, at most the maximum; 0 without a positive item price."""
-    if item_cents <= 0:
-        return 0
-    raw = (item_cents * round(PAYLIVERY_FEE_PCT * 10) + 500) // 1000
-    return min(max(raw, _cents(PAYLIVERY_FEE_MIN)), _cents(PAYLIVERY_FEE_MAX))
+def rule_of(row: Purchase | None = None) -> fees.FeeRule:
+    """The fee rule of this order: the one stored at its start (the ad's category, app/platforms/fees.py), else
+    willhaben's general PayLivery rule."""
+    return fees.from_dict(getattr(row, "fee", None), "willhaben") or fees.RULES["willhaben"]
 
 
-def paylivery_fee(item_price: float | None) -> float:
+def paylivery_fee(item_price: float | None, rule: fees.FeeRule | None = None) -> float:
     """Buyer protection fee of PayLivery for an item price in euro (0 for a price that is not positive)."""
-    if item_price is None or item_price <= 0:
-        return 0.0
-    return _fee_cents(_cents(item_price)) / 100
+    return (rule or rule_of()).fee(item_price)
 
 
-def fee_rule() -> dict[str, float]:
+def fee_rule(rule: fees.FeeRule | None = None) -> dict[str, Any]:
     """The fee rule for the browser (data-fee of the buy dialog) and the prompts."""
-    return {"pct": PAYLIVERY_FEE_PCT, "min": PAYLIVERY_FEE_MIN, "max": PAYLIVERY_FEE_MAX}
+    return (rule or rule_of()).as_dict()
 
 
 def fee_of(row: Purchase, item_price: float | None) -> float:
     """The buyer protection fee that applies to this order: PayLivery only (a bank transfer or pickup has none)."""
-    return paylivery_fee(item_price) if row.mode == "paylivery" else 0.0
+    return rule_of(row).fee(item_price) if row.mode == "paylivery" else 0.0
 
 
 def costs_of(row: Purchase, item_price: float) -> dict[str, Any]:
@@ -253,32 +244,12 @@ def costs_of(row: Purchase, item_price: float) -> dict[str, Any]:
     return {"shipping": ship, "shipping_source": source, "fee": fee, "total": round(float(item_price) + ship + fee, 2)}
 
 
-def _item_for_cents(avail: int) -> int:
-    """The largest item price (cents) whose price plus buyer protection fee is at most `avail` cents; the inverse of
-    item + fee(item), found by the formula of the fee regime and then corrected by single cents (the fee is rounded)."""
-    if avail <= 0:
-        return 0
-    pm, lo, hi = round(PAYLIVERY_FEE_PCT * 10), _cents(PAYLIVERY_FEE_MIN), _cents(PAYLIVERY_FEE_MAX)
-    if avail <= lo * 1000 / pm + lo:                    # the minimum fee applies (small prices)
-        c = avail - lo
-    elif avail >= hi * 1000 / pm + hi:                  # the maximum fee applies (about € 1,111 and more)
-        c = avail - hi
-    else:
-        c = round(avail * 1000 / (1000 + pm))
-    c = max(c, 0)
-    while c + _fee_cents(c + 1) + 1 <= avail:
-        c += 1
-    while c > 0 and c + _fee_cents(c) > avail:
-        c -= 1
-    return c
-
-
 def item_for_total(row: Purchase, total: float) -> float:
     """The item price a total incl. shipping (and, with PayLivery, the buyer protection fee) leaves: total minus the
     shipping that applies and the fee of the item price (item + fee(item) <= total - shipping). Never below 1 euro."""
     ship = shipping_of(row)[0]
     if row.mode == "paylivery":
-        return max(1.0, _item_for_cents(_cents(total) - _cents(ship)) / 100)
+        return max(1.0, rule_of(row).item_for_cents(_cents(total) - _cents(ship)) / 100)
     return max(1.0, round(total - ship, 2))
 
 
@@ -674,10 +645,11 @@ async def _begin_inner(pid: int) -> None:
     except Exception as e:  # noqa: BLE001 - the price check is a bonus, the purchase goes on without it
         log.info("price check for %s failed: %s", row.ad_id, e)
     ad_ship = detail.shipping_price if row.mode == "paylivery" else None     # PayLivery: the buyer's delivery price
+    rule = fees.rule("willhaben", detail.category_path) or rule_of()      # the fee rule of the ad's category
     default_max, ship, fee = None, 0.0, 0.0
     if not row.max_price and detail.price:        # no maximum typed: the asking price plus shipping (and PayLivery's fee)
         ship = ad_ship if ad_ship is not None else SHIPPING_ESTIMATE.get(row.mode or "", 0.0)
-        fee = paylivery_fee(detail.price) if row.mode == "paylivery" else 0.0
+        fee = rule.fee(detail.price) if row.mode == "paylivery" else 0.0
         default_max = round(detail.price + ship + fee, 2)
     max_price = row.max_price or default_max
     far = bool(detail.price and max_price and detail.price > max_price * OVER)
@@ -693,7 +665,7 @@ async def _begin_inner(pid: int) -> None:
                                   setattr(r, "max_price", max_price), setattr(r, "market", market),
                                   setattr(r, "shipping_cost", ad_ship),
                                   setattr(r, "shipping_source", "ad" if ad_ship is not None else None),
-                                  info and _line(r, info)))
+                                  setattr(r, "fee", rule.as_dict()), info and _line(r, info)))
     target = target_price(row)
     cost, src = shipping_of(row)
     refused: tuple[str, list[str]] | None = None
@@ -702,7 +674,7 @@ async def _begin_inner(pid: int) -> None:
                                         mode=row.mode, rules=get_setting(SETTING_RULES) or DEFAULT_RULES,
                                         seller_name=detail.seller_name, shipping_cost=cost, shipping_source=src,
                                         item_ceiling=item_ceiling(row),
-                                        fee=fee_rule() if row.mode == "paylivery" else None,
+                                        fee=fee_rule(rule_of(row)) if row.mode == "paylivery" else None,
                                         questions=[q["question"] for q in row.questions or []],
                                         asking=detail.price, refused=refused)
         out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
@@ -836,7 +808,7 @@ def rules_block(p: Purchase, conv: Conversation | None = None, availability: str
                           note=p.note,
                           pickup_window=p.pickup_window, availability=availability, seller_name=seller,
                           shipping_cost=cost, shipping_source=src, item_ceiling=item_ceiling(p),
-                          fee=fee_rule() if p.mode == "paylivery" else None, questions=p.questions)
+                          fee=fee_rule(rule_of(p)) if p.mode == "paylivery" else None, questions=p.questions)
 
 
 def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:

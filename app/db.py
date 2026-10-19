@@ -95,6 +95,7 @@ class Hit(SQLModel, table=True):
     # shipping to the owner (app/platforms/shipping_info.py): price (0 = free) and "ship" | "pickup"; None = not known
     shipping_price: float | None = None
     shipping: str | None = None
+    buyer_fee: float | None = None       # the buyer fee the site states (Vinted's buyer protection), app/platforms/fees.py
     # the ad's place: the site's coordinates (willhaben, Kleinanzeigen) or its postcode's centre (app/services/geo.py)
     lat: float | None = None
     lon: float | None = None
@@ -348,6 +349,7 @@ class Purchase(SQLModel, table=True):
     shipping_cost: float | None = None     # shipping in euro; the effective value is purchase.shipping_of(row)
     shipping_source: str | None = None     # "ad" (PayLivery price of the ad) | "chat" (named by the seller); else estimate
     agreed_total: float | None = None      # agreed item price + shipping (or the agreed total of the seller)
+    fee: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # buyer fee rule of the ad's category (fees.FeeRule)
     market: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # {median, min, p25, count} at start
     payment: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # direct: {iban, holder, amount, reference}
     note: str | None = None                # last remark of Claude, or why it is paused / failed

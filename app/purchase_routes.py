@@ -20,6 +20,7 @@ from jinja2 import pass_context
 
 from app.db import get_setting, set_setting
 from app.i18n import t
+from app.platforms import fees
 from app.services import deals, price_bar, purchase, shipping
 from app.services.purchase import PurchaseError
 from app.willhaben.public import WillhabenError, get_public
@@ -227,14 +228,16 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
     ship = {"paylivery": _pl_ship(d), "direct": purchase.SHIPPING_ESTIMATE["direct"], "pickup": 0.0}
     ask = d.price if d.price and d.price > 0 else None
     res = await _market(d)
-    extra = purchase.paylivery_fee(ask) if pre == "paylivery" else 0.0
+    rule = fees.rule("willhaben", d.category_path) or purchase.rule_of()    # the fee rule of the ad's category
+    ctx.update(fee=purchase.fee_rule(rule), fee_of=rule.fee)
+    extra = rule.fee(ask) if pre == "paylivery" else 0.0
     # the suggested wish price: the discount below the asking price (whole euros) plus shipping and fee of the mode
     # (mirrors wbBuy.wishBase; the agent offers exactly what the field says)
     wish = None
     if ask:
         item = ask * (1 - ctx["discount"] / 100)
         item = float(math.floor(item)) if item >= 1 else round(item, 2)
-        wish = round(item + (ship[pre] if pre else 0.0) + (purchase.paylivery_fee(item) if pre == "paylivery" else 0.0), 2)
+        wish = round(item + (ship[pre] if pre else 0.0) + (rule.fee(item) if pre == "paylivery" else 0.0), 2)
     ctx.update(d=d, res=res, fair=_fair(d, res), ship=ship, pre=pre, wish_prefill=wish, direct_ok=direct_ok,
                prefill=round(ask + ship[pre] + extra, 2) if (ask and pre) else ask)
     return ctx
