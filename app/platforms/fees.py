@@ -128,14 +128,12 @@ def text_de(r: FeeRule) -> str:
 
 def ad_fee(platform: str | None, price: float | None, category: Iterable[str] | str | None = None,
            known: float | None = None, paylivery: bool = False) -> dict[str, Any] | None:
-    """The buyer fee line of an ad's price breakdown: {"amount", "service", "exact"} (exact: the site stated it),
-    None when the buyer pays none for a shipped purchase. willhaben only with PayLivery; Kleinanzeigen' fee belongs to
-    the optional "Sicher bezahlen" and is left out."""
+    """The buyer fee line of an ad's price breakdown: {"amount", "service"}, only when the site states the fee for
+    this ad (Vinted's list); an estimate is never shown there (willhaben's varies by category and shows only in the
+    PayLivery window). None otherwise."""
     platform = platform or "willhaben"
-    if not price or price <= 0 or platform not in ("willhaben", "vinted") or (platform == "willhaben" and not paylivery):
+    if known is None or not price or price <= 0 or (platform == "willhaben" and not paylivery):
         return None
     r = rule(platform, category)
-    if r is None:
-        return None
-    amount = fee(platform, price, category, known=known)
-    return {"amount": amount, "service": r.service, "exact": known is not None} if amount > 0 else None
+    amount = round(float(known), 2)
+    return {"amount": amount, "service": r.service if r else ""} if amount > 0 else None

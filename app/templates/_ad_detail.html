@@ -30,13 +30,13 @@
           {% if o.point is not none %}<span class="text-muted">{{ _("Shipping {carrier} to a pickup point", carrier=o.name) }}</span><span class="text-right">{{ o.point|eur }}</span>{% endif %}
           {% if o.home is not none %}<span class="text-muted">{{ _("Shipping {carrier} to the door", carrier=o.name) }}</span><span class="text-right">{{ o.home|eur }}</span>{% endif %}
         {% else %}<span class="text-muted">{{ _("Shipping") }}</span><span class="text-right">{{ _("free") if sp <= 0 else sp|eur }}</span>{% endfor %}
-        {# the buyer fee of a shipped purchase (willhaben with PayLivery, Vinted): stated by the site or estimated (app/platforms/fees.py) #}
+        {# the buyer fee of a shipped purchase, only as the site states it (Vinted); willhaben's: a note below #}
         {% set known_fee = d.buyer_fee if d.buyer_fee is defined and d.buyer_fee is not none else (h.buyer_fee if h else none) %}
         {% set bf = buyer_fee_line(d.platform, d.price, d.category_path if d.category_path is defined else none, known_fee,
                                    d.paylivery_enabled is defined and (d.paylivery_enabled or opts)) %}
-        {% if bf %}<span class="text-muted">{{ _("Buyer protection fee") }}{% if not bf.exact %} <span class="text-[12px]" title="{{ bf.service }}">({{ _("estimated") }})</span>{% endif %}</span><span class="text-right">{{ bf.amount|eur }}</span>{% endif %}
+        {% if bf %}<span class="text-muted">{{ _("Buyer protection fee") }}</span><span class="text-right">{{ bf.amount|eur }}</span>{% endif %}
         <span class="border-t border-base-300 pt-0.5 font-semibold">{{ _("Total from") if (opts|map(attribute='home')|reject('none')|list + opts|map(attribute='point')|reject('none')|list)|length > 1 else _("Total") }}</span><span class="border-t border-base-300 pt-0.5 text-right font-semibold">{{ (d.price + sp + (bf.amount if bf else 0))|eur }}</span>
-        {% if bf and not bf.exact and d.platform == 'willhaben' %}<span class="col-span-2 text-[12px] text-muted">{{ _("willhaben shows the exact fee when you pay with PayLivery; it can vary by category.") }}</span>{% endif %}
+        {% if not bf and d.paylivery_enabled is defined and (d.paylivery_enabled or opts) %}<span class="col-span-2 text-[12px] text-muted">{{ _("plus willhaben's buyer protection fee when paying with PayLivery") }}</span>{% endif %}
       </div>
       {% endif %}
       <div class="mt-1.5 text-[13px] leading-normal text-muted">{% if d.location %}{{ d.location }}{% endif %}{% if d.published_at %} · {{ _("published {ago}", ago=d.published_at|ago) }}{% endif %}{% if d.first_published_at and d.published_at and d.first_published_at < d.published_at %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}{% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}{% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}</div>

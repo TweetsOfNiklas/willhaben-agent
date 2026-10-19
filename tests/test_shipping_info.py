@@ -176,7 +176,7 @@ def test_the_ad_viewer_breaks_the_price_down():
     fake = FakePlatform()
     d = detail_of(listing("1", "Lautsprecher", 25.0))
     d.shipping_price, d.shipping_options, d.paylivery_enabled = 3.49, [{"name": "Post", "home": 5.7, "point": 3.49}], True
-    d.platform = "willhaben"                              # PayLivery: willhaben's buyer fee, estimated
+    d.platform = "willhaben"                              # PayLivery: willhaben's buyer fee is not known here
     v = detail_of(listing("2", "Jacke", 20.0))
     v.platform, v.shipping_price, v.buyer_fee = "vinted", 2.95, 1.70     # Vinted states its fee
     p = detail_of(listing("3", "Rad", 20.0))
@@ -190,9 +190,9 @@ def test_the_ad_viewer_breaks_the_price_down():
         platforms.reset()
     box = frags[0].split("data-price-breakdown")[1].split("</div>")[0]
     assert "Shipping Post to a pickup point" in box and "€ 3,49" in box and "€ 5,70" in box
-    assert "Buyer protection fee" in box and "estimated" in box and "€ 1,13" in box      # 4.5 % of € 25
-    assert "Total from" in box and "€ 29,62" in box and "exact fee" in box
+    assert "Buyer protection fee" not in box                   # willhaben's varies by category: never guessed
+    assert "Total from" in box and "€ 28,49" in box and "plus willhaben&#39;s buyer protection fee" in box
     box = frags[1].split("data-price-breakdown")[1].split("</div>")[0]
-    assert "€ 1,70" in box and "estimated" not in box and "€ 24,65" in box
+    assert "Buyer protection fee" in box and "€ 1,70" in box and "€ 24,65" in box        # as Vinted states it
     box = frags[2].split("data-price-breakdown")[1].split("</div>")[0]
     assert "Buyer protection fee" not in box and "€ 24,90" in box
