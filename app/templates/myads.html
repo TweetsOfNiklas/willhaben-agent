@@ -121,7 +121,11 @@
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-center gap-2.5"><h2 class="text-[17px] tracking-tight sm:text-[19px]">{{ a.heading or a.ad_id }}</h2>
         {% if a.sale_status == 'sold' %}{{ ui.pill(_("sold"), 'warn') }}{% elif a.sale_status == 'reserved' %}{{ ui.pill(_("reserved"), 'warn') }}{% elif a.status == 'active' %}{{ ui.pill(_("active"), 'ok') }}{% elif a.status == 'expired' %}{{ ui.pill(_("expired"), 'bad') }}{% elif a.status in ('sold', 'reserved') %}{{ ui.pill(_("sold") if a.status == 'sold' else _("reserved"), 'warn') }}{% endif %}</div>
-      <div class="mt-1 text-muted">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %} · <a class="link link-primary no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}</a></div>
+      <div class="mt-1 text-muted">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %} · <a class="link link-primary no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}</a>
+        {# willhaben's own editor (marketplace ads; it asks for the login in this browser) #}
+        · <a class="link link-primary no-underline" href="https://www.willhaben.at/iad/anzeige-bearbeiten/marktplatz?adId={{ a.ad_id }}" target="_blank" rel="noopener">{{ _("Edit on willhaben") }}</a>
+        · <button type="button" class="link link-primary inline-flex items-center gap-1 no-underline" title="{{ _('Fetch the ad from willhaben again (otherwise a copy up to 5 minutes old is shown)') }}"
+                  hx-get="/myads/{{ a.ad_id }}/description?refresh=1" hx-target="#myad-description" hx-swap="innerHTML" hx-disabled-elt="this"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Reload") }}</button></div>
       {% if a.last_error %}<div class="mt-1 text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
       {% if a.pending_action %}<div class="mt-1.5">{{ pending_note(a) }}</div>{% endif %}
     </div>

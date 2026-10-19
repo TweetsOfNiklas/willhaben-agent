@@ -719,9 +719,10 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
             db.add(MyAd(ad_id=i, heading=f"Ad {i}", status="active"))
         db.commit()
     with TestClient(app) as c:
-        assert 'hx-get="/myads/1/description"' in c.get("/myads?ad=1").text
+        panel = c.get("/myads?ad=1").text
+        assert 'hx-get="/myads/1/description"' in panel
         frag = c.get("/myads/1/description").text
-        assert "Erste Zeile\nZweite &lt;Zeile&gt;" in frag and 'href="/myads/1/edit"' in frag
+        assert "Erste Zeile\nZweite &lt;Zeile&gt;" in frag 
         assert frag.count('<img src="https://img.example/') == 2 and 'x-text="(i + 1)' in frag and "€ 40" in frag and "1040 Wien" in frag
         assert "PayLivery Post" in frag and "€ 3,49" in frag and "€ 5,70" in frag
         assert 'hx-get="/hits/ad/1/deal"' in frag                                # the price check with Geizhals
@@ -729,8 +730,8 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
         assert "shows no text" in c.get("/myads/3/description").text
         assert c.get("/myads/9/description").status_code == 404
         # "Reload" fetches anew; the link opens willhaben's own editor
-        assert 'hx-get="/myads/1/description?refresh=1"' in frag
-        assert 'href="https://www.willhaben.at/iad/anzeige-bearbeiten/marktplatz?adId=1"' in frag
+        assert 'hx-get="/myads/1/description?refresh=1"' in panel and "/edit\"" not in frag   # in the header
+        assert 'href="https://www.willhaben.at/iad/anzeige-bearbeiten/marktplatz?adId=1"' in panel
         refreshed.clear()
         c.get("/myads/1/description?refresh=1")
         assert refreshed == [True]
