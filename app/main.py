@@ -1645,15 +1645,16 @@ async def myads_edit_page(request: Request, ad_id: str, msg: str | None = None):
 
 
 @app.get("/myads/{ad_id}/description", response_class=HTMLResponse)
-async def myads_description(request: Request, ad_id: str):
-    """My ads → the ad's panel: the ad as buyers see it (price, photos, delivery, text; anonymous, cached briefly)."""
+async def myads_description(request: Request, ad_id: str, refresh: bool = False):
+    """My ads → the ad's panel: the ad as buyers see it (price, photos, delivery, text; anonymous, cached briefly;
+    `refresh`: the "Reload" button, fetched anew)."""
     with session() as db:
         row = db.get(MyAd, ad_id)
     if row is None:
         raise HTTPException(404)
     error = d = None
     try:
-        d = await get_public().get_detail(ad_id)
+        d = await get_public().get_detail(ad_id, refresh=refresh)
     except WillhabenError as e:
         error = t("Could not load the ad from willhaben: {error}", error=e)
     return templates.TemplateResponse(request, "_myad_description.html", {"a": row, "d": d, "error": error})

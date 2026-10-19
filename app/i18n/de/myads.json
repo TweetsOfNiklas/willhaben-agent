@@ -37,5 +37,6 @@
  "Change price": "Preis ändern",
  "Save on willhaben": "Auf willhaben speichern",
  "Price": "Preis",
- "Save the price of „{title}“ on willhaben": "Preis von „{title}“ auf willhaben speichern"
+ "Save the price of „{title}“ on willhaben": "Preis von „{title}“ auf willhaben speichern",
+ "Fetch the ad from willhaben again (otherwise a copy up to 5 minutes old is shown)": "Anzeige neu von willhaben laden (sonst wird eine bis zu 5 Minuten alte Kopie gezeigt)"
 }

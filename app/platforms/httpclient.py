@@ -362,8 +362,9 @@ class HttpPlatformClient:
 
     async def _get(self, url: str, *, headers: dict[str, str] | None = None, params: dict[str, Any] | None = None,
                    cache_s: float = 0, kind: str | None = None,
-                   valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
-        """GET through the platform's limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same request.
+                   valid: Callable[[FetchResponse], bool] | None = None, refresh: bool = False) -> FetchResponse:
+        """GET through the platform's limiter; `cache_s` > 0 reuses a recent 200/404 answer for the same request
+        (`refresh`: fetched anew all the same, the answer replaces the kept one).
         `valid(r)` judges every fetched 200, never a cached or replayed one: False is a page in place of the one asked
         for (a bot check, an error page), which is not cached.
 
@@ -374,7 +375,7 @@ class HttpPlatformClient:
         key = (full, (headers or {}).get("accept"))
         hit = self._cache.get(key)
         # a 404 can turn into a live ad within minutes (freshly published or reactivated): keep it only briefly
-        if cache_s and hit and time.monotonic() - hit[0] < (min(cache_s, NOT_FOUND_CACHE_S) if hit[1].status_code == 404 else cache_s):
+        if cache_s and hit and not refresh and time.monotonic() - hit[0] < (min(cache_s, NOT_FOUND_CACHE_S) if hit[1].status_code == 404 else cache_s):
             access_log.record(self.channel, kind, "cached", platform=self.platform)
             recorder.record_http(self.channel, kind, "GET", full, status=hit[1].status_code, resp_headers=hit[1].headers,
                                  resp_body=hit[1].content, duration_ms=0, outcome="cached", cached=True,

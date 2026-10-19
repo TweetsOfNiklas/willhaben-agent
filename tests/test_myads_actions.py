@@ -693,8 +693,11 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
     from app.main import app
     from app.willhaben import public
 
+    refreshed = []
+
     class _Pub:
-        async def get_detail(self, ad_id):
+        async def get_detail(self, ad_id, refresh=False):
+            refreshed.append(refresh)
             if ad_id == "2":
                 raise public.WillhabenError("HTTP 500")
             if ad_id == "3":
@@ -725,6 +728,12 @@ def test_the_panel_loads_the_ads_text(monkeypatch):
         assert "HTTP 500" in c.get("/myads/2/description").text
         assert "shows no text" in c.get("/myads/3/description").text
         assert c.get("/myads/9/description").status_code == 404
+        # "Reload" fetches anew; the link opens willhaben's own editor
+        assert 'hx-get="/myads/1/description?refresh=1"' in frag
+        assert 'href="https://www.willhaben.at/iad/anzeige-bearbeiten/marktplatz?adId=1"' in frag
+        refreshed.clear()
+        c.get("/myads/1/description?refresh=1")
+        assert refreshed == [True]
 
 
 async def test_an_active_ad_under_review_stays_active():
