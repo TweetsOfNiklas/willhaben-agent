@@ -16,6 +16,11 @@ from typing import Any
 from app.i18n import t
 
 SHIP, PICKUP = "ship", "pickup"
+# Sites where a shipped purchase is paid through the site with buyer protection: willhaben (shipping there means
+# PayLivery: the list's p2penabled, the price is PayLivery's), Vinted (every purchase), eBay (eBay-Garantie when paid
+# through eBay) and Shpock (shipping with Shpock's payment). Kleinanzeigen' "Sicher bezahlen" is not visible per ad,
+# Facebook and Preisjäger have none.
+BUYER_PROTECTION_SITES = ("willhaben", "vinted", "ebay", "shpock")
 _AMOUNT = re.compile(r"(\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)")
 
 

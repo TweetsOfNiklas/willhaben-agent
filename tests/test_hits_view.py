@@ -63,3 +63,25 @@ def test_bulk_actions_on_the_ticked_hits():
     with session() as db:
         assert {h.ad_id: h.state for h in db.exec(select(Hit))} == {"1": "saved", "2": "saved", "3": "ignored",
                                                                     "4": "cleared"}
+
+
+def test_shipping_with_buyer_protection():
+    from app.main import app
+
+    with session() as db:
+        a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
+        db.add(a)
+        db.commit()
+        for ad_id, platform, ship_price, ship in (("1", "willhaben", None, "ship"),       # PayLivery on
+                                                  ("2", "kleinanzeigen", 5.0, "ship"),   # no buyer protection visible
+                                                  ("3", "vinted", None, None),           # Vinted: always
+                                                  ("4", "ebay", 4.9, None),
+                                                  ("5", "willhaben", None, "pickup"),
+                                                  ("6", "facebook", None, "ship")):
+            db.add(Hit(agent_id=a.id, platform=platform, ad_id=ad_id, heading=f"Ad {ad_id}", url=f"https://x/{ad_id}",
+                       price=10.0, shipping_price=ship_price, shipping=ship))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits?ship=protected").text
+        assert set(_order(page)) == {"1", "3", "4"}
+        assert 'value="protected" selected' in page

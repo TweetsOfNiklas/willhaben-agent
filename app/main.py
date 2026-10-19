@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlmodel import col, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -762,7 +762,7 @@ async def agents_delete(agent_id: int):
 
 
 HIT_SORTS = ("newest", "price", "price_desc", "total", "distance")
-HIT_SHIP = ("ship", "pickup")
+HIT_SHIP = ("ship", "protected", "pickup")
 HIT_LEVELS = ("bargain", "cheap", "fair")       # "this or better"
 _LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expensive": 4}
 _SCREEN_LEVEL = {"great": "bargain", "good": "cheap", "fair": "fair", "overpriced": "expensive"}
@@ -806,6 +806,10 @@ class HitView:
             q = q.where(Hit.platform == self.platform)
         if self.ship == "ship":
             q = q.where(or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None)))
+        elif self.ship == "protected":       # shipping paid through the site, with its buyer protection
+            ships = or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None))
+            q = q.where(or_(and_(col(Hit.platform).in_(_shipping_info.BUYER_PROTECTION_SITES), ships),
+                            and_(Hit.platform == "vinted", or_(col(Hit.shipping).is_(None), Hit.shipping != "pickup"))))
         elif self.ship == "pickup":
             q = q.where(Hit.shipping == "pickup")
         if state:
