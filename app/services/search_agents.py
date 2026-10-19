@@ -58,6 +58,9 @@ class RunResult:
     baseline: bool = False
     error: str | None = None
     pending_left: int = 0       # hits still pending after the check (more than one check screens): a follow-up comes
+    # the first check's hits (and a new search's) of an agent that judges: checked like new ones, but never pushed;
+    # they end in "seen" or "filtered"
+    quiet: list[Hit] = field(default_factory=list)
 
 
 def _interval(platform: platforms.Platform, interval_s: int | None) -> int:
@@ -658,8 +661,12 @@ async def _run_agent(agent_id: int) -> RunResult:
                 quiet = res.baseline or _quiet(query) or (ad.platform, ad.ad_id) in older
                 # with a screening or a Geizhals rule a new hit is pending until it passed both (Geizhals, Claude:
                 # seconds to minutes): New shows only hits that passed; _file_screened files it
+                # a quiet hit of an agent that judges (screening, Geizhals rule, distance) is checked too, without a
+                # push: it ends in "seen" or "filtered", not unjudged in "seen"
+                judge_quiet = quiet and _judges(agent)
                 hit = Hit(agent_id=agent_id, platform=ad.platform, ad_id=ad.ad_id, heading=ad.heading, url=ad.url,
-                          state="seen" if quiet else PENDING if _holds(agent) else "new")
+                          state=PENDING if judge_quiet else "seen" if quiet else PENDING if _holds(agent) else "new",
+                          quiet=True if judge_quiet else None)
                 _apply(hit, ad)
                 if not hit.item_condition and (cond := known.get((ad.platform, ad.ad_id))):
                     hit.item_condition, hit.item_condition_label = cond      # what another agent's hit learned
@@ -668,7 +675,9 @@ async def _run_agent(agent_id: int) -> RunResult:
                 db.add(hit)
                 existing[(ad.platform, ad.ad_id)] = hit
                 id_site[ad.ad_id] = ad.platform
-                if not quiet:
+                if judge_quiet:
+                    res.quiet.append(hit)
+                elif not quiet:
                     res.new.append(hit)
                 continue
             prev_price, prev_published = hit.price, hit.published_at
@@ -699,26 +708,37 @@ async def _run_agent(agent_id: int) -> RunResult:
         notify_new, notify_drops = agent.notify, agent.notify and agent.notify_price_drops
         db.add(agent)
         db.commit()
-        for h in res.new + res.price_drops:
+        for h in res.new + res.price_drops + res.quiet:
             db.refresh(h)
         db.refresh(agent)
         fresh = {h.id for h in res.new}
         # pending hits an earlier check did not finish (Claude got only MAX_PER_RUN, a crash, a restart): judged now,
         # before this check's own; with the rule and the screening switched off meanwhile they are simply new
         drops = {h.id for h in res.price_drops}
+        fresh |= {h.id for h in res.quiet}
         backlog = [h for h in db.exec(select(Hit).where(Hit.agent_id == agent_id, Hit.state == PENDING))
                    if h.id not in fresh and h.id not in drops]
+        quiet_backlog = [h for h in backlog if h.quiet]
+        backlog = [h for h in backlog if not h.quiet]
         if backlog and not _holds(agent):
             for h in backlog:
                 h.state = "new"
                 db.add(h)
             db.commit()
             backlog = []
+        if quiet_backlog and not _judges(agent):
+            for h in quiet_backlog:
+                h.state = "seen"
+                db.add(h)
+            db.commit()
+            quiet_backlog = []
         res.new = backlog + res.new
+        res.quiet = quiet_backlog + res.quiet
 
     if widen and any(_old_rows(s) is not None and q in ok for s, q in usable):
         set_setting(_wh_rows_key(agent_id), "1")                # its searches ran with the larger page
     to_notify = (res.new if notify_new else []) + (res.price_drops if notify_drops else [])
+    to_notify = to_notify + [h for h in res.quiet if h not in to_notify]    # judged like them, never pushed
     if pickup_limit(agent) and to_notify:
         await _locate(to_notify)
         from app.services import geo
@@ -739,15 +759,17 @@ async def _run_agent(agent_id: int) -> RunResult:
     # first those held back before (filtered or pending, no verdict yet), which get into New only judged. A check
     # sends at most screening.MAX_PER_RUN; a hit beyond that stays unjudged (pending) and gets no push (10-14 they
     # were pushed unjudged: 30 off-topic Vinted ads in a day)
-    to_screen.sort(key=lambda h: not (h.state in ("filtered", PENDING) and h.screen_relevant is None
-                                      and h.id not in fresh))
+    to_screen.sort(key=lambda h: (bool(h.quiet), not (h.state in ("filtered", PENDING) and h.screen_relevant is None
+                                                       and h.id not in fresh)))   # quiet ones last
     asked: set[int] = set()
     if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
         asked = await screening.screen_all(agent_id, to_screen)
     if _holds(agent) and to_notify:
         _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
-    if agent.screen and _holds(agent):
-        res.pending_left = sum(1 for h in res.new if h.state == PENDING)
+    if res.quiet:
+        _file_quiet(agent, res.quiet, asked)
+    if agent.screen and (_holds(agent) or res.quiet):
+        res.pending_left = sum(1 for h in res.new + res.quiet if h.state == PENDING)
         if res.pending_left:            # judged in a follow-up check soon, not only at the next regular one
             from app import scheduler
 
@@ -954,6 +976,29 @@ def _holds(agent: SearchAgent) -> bool:
     """New hits of this agent are pending until judged: it pushes, and screens, has a Geizhals rule or a distance
     limit."""
     return bool(agent.notify and (agent.screen or geizhals_rule(agent) or pickup_limit(agent)))
+
+
+def _judges(agent: SearchAgent) -> bool:
+    """The agent judges its new hits (it pushes, and screens or has a Geizhals rule or a distance limit): then it
+    judges its quiet ones too. An agent without pushes judges neither (its hits are simply new or seen)."""
+    return _holds(agent)
+
+
+def _file_quiet(agent: SearchAgent, quiet: list[Hit], asked: set[int]) -> None:
+    """The quiet hits (first check, new search) once judged: "seen" when they pass, "filtered" when not; one Claude was
+    not sent stays pending for the next check. Never pushed."""
+    moves = [(h, "filtered" if not passes(agent, h) else PENDING if _unjudged(agent, h, asked) else "seen")
+             for h in quiet if h.state == PENDING]
+    moves = [m for m in moves if m[1] != PENDING]
+    if not moves:
+        return
+    with session() as db:
+        for h, state in moves:
+            row = db.get(Hit, h.id)
+            if row is not None and row.state == PENDING:      # unless it was saved or ignored meanwhile
+                row.state = h.state = state
+                db.add(row)
+        db.commit()
 
 
 def _file_screened(agent: SearchAgent, new: list[Hit], drops: list[Hit], asked: set[int]) -> None:

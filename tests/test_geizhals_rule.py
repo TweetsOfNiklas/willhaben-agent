@@ -404,3 +404,41 @@ def test_without_a_geizhals_price_the_zone_asks_claudes_verdict():
     a.geizhals_level, a.geizhals_pct = None, 30                         # an own % keeps passing unknown products
     h.screen_deal = "overpriced"
     assert geizhals_passes(a, h)
+
+
+async def test_the_first_checks_hits_are_judged_too_without_a_push(fake, world, monkeypatch):
+    """What an agent finds on its first check counts as seen (no push), but is judged like a new hit: what fails the
+    screening goes to "filtered", not unjudged into "seen"; one Claude was not sent waits for the next check."""
+    _lookups, sent = world
+
+    async def screen_all(agent_id, hits):
+        hits = hits[:2]                                               # MAX_PER_RUN: two
+        with session() as db:
+            for h in hits:
+                row = db.get(Hit, h.id)
+                row.screen_relevant = h.screen_relevant = "hülle" not in h.heading.lower()
+                row.screen_deal = h.screen_deal = "fair"
+                db.add(row)
+            db.commit()
+        return {h.id for h in hits}
+
+    monkeypatch.setattr(screening, "screen_all", screen_all)
+    from app import scheduler
+    follow_ups = []
+    monkeypatch.setattr(scheduler, "follow_up", follow_ups.append)
+    a = create_agent("https://fake.example/s/iphone")
+    _set(a.id, screen=True)
+    fake.pages = [[listing("1", "iPhone 13 128GB", 300.0), listing("2", "Hülle für iPhone 13", 10.0),
+                   listing("3", "iPhone 13 128GB", 310.0)]]
+    res = await run_agent(a.id)
+    assert res.baseline and not res.new
+    assert {k: h.state for k, h in _hits(a.id).items()} == {"1": "seen", "2": "filtered", "3": "pending"}
+    assert all(h.quiet for h in _hits(a.id).values()) and follow_ups == [a.id]
+    await run_agent(a.id)                                             # the one left over, still without a push
+    assert _hits(a.id)["3"].state == "seen" and not [s for s in sent if s["kind"] != "health"]
+    _set(a.id, screen=False)                                          # an agent that does not judge: seen as before
+    fake.pages = [[listing("1", "iPhone 13 128GB", 300.0)]]
+    b = create_agent("https://fake.example/s/iphone2")
+    fake.pages = [[listing("9", "Hülle", 5.0)]]
+    await run_agent(b.id)
+    assert _hits(b.id)["9"].state == "seen" and _hits(b.id)["9"].quiet is None
