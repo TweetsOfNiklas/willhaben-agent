@@ -46,7 +46,7 @@ from app.services import stock, system_prompts
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app.services import search_agents as search_agents_svc
-from app.services.search_agents import refile_screened, run_agent
+from app.services.search_agents import refile_screened
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -441,7 +441,7 @@ async def agents_page(request: Request, error: str | None = None):
             if len(row) < 4:
                 row.append(h)
     return render(request, "agents.html", agents=agents, counts=counts, thumbs=thumbs, error=error,
-                  quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
+                  quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(), checking=set(jobs.current_keys("agent:")),
                   next_run=scheduler.next_run, settings=get_settings(), thresholds=screening.thresholds())
 
 
@@ -556,7 +556,7 @@ async def agents_new(request: Request):
         preview["ads"] = merged
         preview["rows_found"] = sum(r["rows_found"] for r in preview["sites"])
     return render(request, "agent_new.html", f=filters, url=url, preview=preview, platform=p,
-                  platform_choices=choices, chosen=[p.id] + [o.id for o in others], error=error, url_param=url_param,
+                  platform_choices=choices, chosen=[p.id] + [o.id for o in others], builder_error=error, url_param=url_param,
                   platform_off=[x for x in platforms.all(enabled_only=False) if not platforms.enabled(x.id)
                                 and (x.can("search_url") or x.can("keyword_search"))],
                   settings=get_settings(), thresholds=screening.thresholds())
@@ -618,17 +618,17 @@ def _create_agent(url: str, platform: str, keyword: str, price_from: Any, price_
 
 @app.post("/agents/{agent_id}/run")
 async def agents_run(agent_id: int):
+    """"Check now": the check runs as a background job (lane agents); the card shows it and refreshes itself when it
+    is done (the hits page and the pushes tell what it found)."""
     with session() as db:
         a = db.get(SearchAgent, agent_id)
         last = a.last_run_at if a else None
     if last and last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     if last and (utcnow() - last).total_seconds() < 60:   # no hammering willhaben via the button
-        return back(f"/hits?agent_id={agent_id}")
-    res = await run_agent(agent_id)
-    if res.error:
-        return back(f"/agents?error={res.error}")
-    return back(f"/hits?agent_id={agent_id}")
+        return back(f"/agents?msg={quote(t('Checked less than a minute ago – the next check waits a moment'), safe='')}")
+    search_agents_svc.enqueue_run(agent_id)
+    return back("/agents")
 
 
 @app.post("/agents/bulk")
@@ -1849,6 +1849,10 @@ async def jobs_status(since: int | None = None):
         pending += [f"drafting:{i}" for i in db.exec(select(Conversation.id).where(Conversation.drafting == True))]  # noqa: E712
         pending += [f"sim:{i}" for i in db.exec(select(SimChat.id).where(col(SimChat.busy).is_not(None)))]
         pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
+        pending += jobs.current_keys("agent:")             # a search agent's check (scheduled or "Check now")
+        pending += jobs.current_keys("shipping:")          # Claude prepares a parcel from a chat
+        pending += jobs.current_keys("purchase:")          # a purchase order about to contact the seller
+        pending += [f"batch:{i}" for i in db.exec(select(AdBatch.id).where(col(AdBatch.status).in_(("sorting", "creating"))))]
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))

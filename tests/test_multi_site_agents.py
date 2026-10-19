@@ -134,3 +134,20 @@ def test_new_agent_page_previews_every_chosen_site(sites, client):
     assert 'name="sites" value="fake"' in form and 'name="sites" value="other"' in form and 'name="keyword" value="rad"' in form
     alone = client.get("/agents/new?sites=other&keyword=rad").text
     assert "main search" not in alone and 'name="sites" value="other" class="checkbox checkbox-sm" checked' in alone
+
+
+def test_new_agent_page_swaps_its_body_in_place(sites, client):
+    """The builder's site ticks, link, search and filter chips are boosted GET requests that swap the builder body
+    (id agent-builder); creating the agent and the settings links leave the page as before."""
+    a, b = sites
+    a.pages = [[listing("1", "Rad A", 100.0)]]
+    b.pages = [[listing("7", "Rad B", 120.0)]]
+    page = client.get("/agents/new?sites=fake&sites=other&keyword=rad").text
+    assert 'id="agent-builder" hx-boost="true" hx-target="#agent-builder" hx-select="#agent-builder"' in page
+    body = page[page.index('id="agent-builder"'):]
+    assert 'action="/agents" hx-boost="false"' in body and 'id="agent-sites"' in body
+    assert body.count("</form>") >= 3 and 'id="agent-keyword"' in body
+    bad = client.get("/agents/new?url=https://nowhere.example/x").text
+    assert "<!doctype html>" in bad.lower()
+    err = bad[bad.index('id="agent-builder"'):]
+    assert 'role="status"' in err                                        # the error sits inside the swapped body

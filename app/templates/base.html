@@ -143,7 +143,8 @@
 <main class="{% if split %}grid min-w-0 pb-[calc(64px+env(safe-area-inset-bottom))] md:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] md:pb-0{% else %}mx-auto w-full max-w-[1240px] min-w-0 px-4 pt-5 pb-[calc(80px+env(safe-area-inset-bottom))] md:px-9 md:pt-7 md:pb-10{% endif %}"
       {% if split %}data-split{% endif %}>
   {% set notice_text = purchase_notice() %}
-  {% if not split %}
+  {% set toasts = split or (request is defined and request.headers.get('hx-request')) %}
+  {% if not toasts %}
     {% if notice_text %}{{ ui.msg(notice_text) }}{% endif %}
     {% if msg %}{{ ui.msg(msg) }}{% endif %}
     {% if error %}{{ ui.msg(error, 'error') }}{% endif %}
@@ -153,15 +154,14 @@
 </div>
 
 {# split pages have no room for a message bar: messages come as toasts. The container is always there (#flash), so a
-   fragment swapped in by htmx can bring its message along (hx-select-oob="#flash"). #}
-{% if split %}
-<div id="flash" class="toast toast-end toast-bottom z-50 max-md:bottom-[calc(72px+env(safe-area-inset-bottom))] {{ '' if (notice_text or msg or error) else 'hidden' }}" x-data>
-  {% for text, bad in [(notice_text, false), (msg, false), (error, true)] if text %}
+   fragment swapped in by htmx can bring its message along (hx-select-oob="#flash"): on a one-column page the message
+   of such a fragment comes as a toast too (the bar on top would be out of view), a full load keeps the bar. #}
+<div id="flash" class="toast toast-end toast-bottom z-50 max-md:bottom-[calc(72px+env(safe-area-inset-bottom))] {{ '' if toasts and (notice_text or msg or error) else 'hidden' }}" x-data>
+  {% for text, bad in [(notice_text, false), (msg, false), (error, true)] if text and toasts %}
   <div role="status" class="alert max-w-sm text-sm whitespace-pre-line shadow-lg {{ 'alert-error' if bad else 'border-base-300 bg-base-100' }}"
        x-init="setTimeout(() => $el.remove(), {{ 12000 if bad else 7000 }})">{{ text }}<button class="btn btn-ghost btn-xs btn-square" @click="$el.parentElement.remove()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 14) }}</button></div>
   {% endfor %}
 </div>
-{% endif %}
 
 {# ---- account menu ---- #}
 {% set more_pages = [('/agents', 'detective', _("Search agents"), 0), ('/deals', 'search', _("Product search"), 0), ('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)), ('/new-ad', 'plus', _("New ad"), 0)] %}

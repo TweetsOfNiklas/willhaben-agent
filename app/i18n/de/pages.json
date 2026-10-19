@@ -175,5 +175,9 @@
  "still online": "noch online",
  "listed {ago}": "in der Suche {ago}",
  "checked {ago}": "geprüft {ago}",
- "Load the ad from its site now: still online, reserved or sold?": "Die Anzeige jetzt von ihrer Seite laden: noch online, reserviert oder verkauft?"
+ "Load the ad from its site now: still online, reserved or sold?": "Die Anzeige jetzt von ihrer Seite laden: noch online, reserviert oder verkauft?",
+ "Checking…": "Wird geprüft…",
+ "Queued: check": "Eingereiht: prüfen",
+ "Check „{name}“ now": "„{name}“ jetzt prüfen",
+ "Checked less than a minute ago – the next check waits a moment": "Vor weniger als einer Minute geprüft – die nächste Prüfung wartet einen Moment"
 }

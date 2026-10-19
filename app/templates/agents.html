@@ -23,9 +23,11 @@
 </div>
 {% endif %}
 {% if agents %}
-{# several agents at once: the cards' boxes belong to this form; each field left at "unchanged" stays as it is #}
-<div x-data="{ n: 0, count() { this.n = document.querySelectorAll('input[form=agents-bulk][name=ids]:checked').length }, all(on) { document.querySelectorAll('input[form=agents-bulk][name=ids]').forEach(c => c.checked = on); this.count() } }" @change="count()">
+{# several agents at once: the cards' boxes belong to this form; each field left at "unchanged" stays as it is.
+   Sent in the background: the grid of cards swaps itself in (the boxes come back unticked, so the count starts over) #}
+<div x-data="{ n: 0, count() { this.n = document.querySelectorAll('input[form=agents-bulk][name=ids]:checked').length }, all(on) { document.querySelectorAll('input[form=agents-bulk][name=ids]').forEach(c => c.checked = on); this.count() } }" @change="count()" @htmx:after-settle="count()">
 <form id="agents-bulk" method="post" action="/agents/bulk" x-show="n" x-cloak data-bulk-bar
+      hx-post="/agents/bulk" hx-target="#agents-grid" hx-select="#agents-grid" hx-swap="outerHTML" hx-select-oob="#flash"
       class="sticky top-2 z-20 mb-4 flex flex-col gap-3 rounded-box border border-primary bg-base-100 px-4 py-3 shadow-lg">
   <div class="flex flex-wrap items-center gap-2"><strong x-text="{{ _('{n} selected')|tojson|forceescape }}.replace('{n}', n)"></strong>
     <span class="ml-auto flex gap-1.5"><button type="button" class="btn btn-sm btn-ghost" @click="all(true)">{{ _("Select all") }}</button><button type="button" class="btn btn-sm btn-ghost" @click="all(false)">{{ _("Cancel") }}</button></span></div>
@@ -41,10 +43,14 @@
   </div>
   <div><button class="btn btn-primary btn-sm">{{ _("Apply to the selected agents") }}</button></div>
 </form>
-<div class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+<div id="agents-grid" class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
   {% for a in agents %}
-  {# the card and its settings dialog; the dialog is opened and closed from Alpine (x-ref dlg) #}
-  <div x-data class="flex min-w-0 flex-col">
+  {# the card and its settings dialog; the dialog is opened and closed from Alpine (x-ref dlg). Every action of the
+     card (check, pause, settings) is sent in the background and swaps just this card (its id); while a check of
+     the agent runs the card carries its marker and refreshes itself when the check is done. #}
+  {% set swap = 'hx-target="#agent-' ~ a.id ~ '" hx-select="#agent-' ~ a.id ~ '" hx-swap="outerHTML" hx-select-oob="#flash"' %}
+  {% set busy = ('agent:' ~ a.id) in checking %}
+  <div x-data id="agent-{{ a.id }}" class="flex min-w-0 flex-col"{% if busy %} data-pending-key="agent:{{ a.id }}"{% endif %}>
     <article class="relative flex flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 {{ '' if a.enabled else 'opacity-70' }}">
       <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="agents-bulk" name="ids" value="{{ a.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}: {{ a.name }}"></label>
       {# phone: a shorter strip, and a slim one when no hit has a picture #}
@@ -75,11 +81,15 @@
       </div>
       {# actions: a 2 × 2 grid, so no button wraps alone onto a second row #}
       <footer class="grid grid-cols-2 gap-2 border-t border-base-300 p-2.5">
-        <form method="post" action="/agents/{{ a.id }}/run" x-data="{ busy: false }" @submit="busy = true" class="flex">
-          <button class="btn btn-sm w-full whitespace-nowrap" :disabled="busy">
-            <span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Check now") }}</button>
+        {% if busy %}
+        <div class="flex min-w-0 items-center px-1">{{ ui.pending('agent:' ~ a.id, _("Checking…"), _("Queued: check")) }}</div>
+        {% else %}
+        <form method="post" action="/agents/{{ a.id }}/run" hx-post="/agents/{{ a.id }}/run" {{ swap|safe }} hx-disabled-elt="find button" class="flex">
+          <button class="btn btn-sm w-full whitespace-nowrap">
+            <span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Check now") }}</button>
         </form>
-        <form method="post" action="/agents/{{ a.id }}/toggle" class="flex">
+        {% endif %}
+        <form method="post" action="/agents/{{ a.id }}/toggle" hx-post="/agents/{{ a.id }}/toggle" {{ swap|safe }} class="flex">
           <button class="btn btn-sm w-full whitespace-nowrap">{{ _("Pause") if a.enabled else _("Resume") }}</button>
         </form>
         <button type="button" class="btn btn-ghost btn-sm w-full whitespace-nowrap" @click="$refs.dlg.showModal()">{{ _("Settings") }}</button>
@@ -98,7 +108,7 @@
           <a href="{{ a.source_url }}" target="_blank" rel="noopener" class="link link-primary text-[13px] whitespace-nowrap no-underline">{{ _("Search on {platform}", platform=platform_name(a.platform)) }} ↗</a>
           <button class="btn btn-ghost btn-sm btn-square" type="button" @click="$refs.dlg.close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
         </header>
-        <form method="post" action="/agents/{{ a.id }}/edit" class="flex flex-1 flex-col gap-3.5 px-5 py-[18px]">
+        <form method="post" action="/agents/{{ a.id }}/edit" hx-post="/agents/{{ a.id }}/edit" {{ swap|safe }} class="flex flex-1 flex-col gap-3.5 px-5 py-[18px]">
           <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Name") }}</span><input name="name" value="{{ a.name }}" class="input w-full bg-base-200"></label>
           <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Check every (minutes)") }}</span><input type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}" class="input w-full bg-base-200"></label>
           <div class="border-t border-base-300 py-2.5">{{ ui.switch_row(_("Notify"), _("Push to phone / Telegram for new hits"), a.notify, 'name="notify_on"') }}</div>
@@ -194,7 +204,8 @@
             <button class="btn btn-primary">{{ _("Save") }}</button>
             <button type="button" class="btn btn-ghost" @click="$refs.dlg.close()">{{ _("Cancel") }}</button>
             <span class="flex-1"></span>
-            <button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/agents/{{ a.id }}/delete" data-confirm="{{ _('Delete search agent and its hits?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Delete agent") }}</button>
+            {# gone for good, no undo: the confirm stays (hx-confirm, since the form sends through htmx); the card vanishes #}
+            <button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/agents/{{ a.id }}/delete" hx-post="/agents/{{ a.id }}/delete" hx-confirm="{{ _('Delete search agent and its hits?') }}">{{ _("Delete agent") }}</button>
           </footer>
         </form>
       </div>

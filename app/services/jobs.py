@@ -68,8 +68,8 @@ class Job:
                 "keys": self.keys, "cancellable": self.status == "queued" and self.cancellable, "grace_s": round(wait, 1)}
 
 
-LANES = ("ads", "chat", "claude", "sim")   # claude: drafts and revisions (no willhaben account request, can take a minute);
-#   sim: the chat simulator's test chats (never in the way of real answers)
+LANES = ("ads", "chat", "claude", "sim", "agents")   # claude: drafts and revisions (no willhaben account request, can take a minute);
+#   sim: the chat simulator's test chats (never in the way of real answers); agents: search-agent checks started by hand
 
 _ids = itertools.count(1)
 _locks: dict[str, asyncio.Lock] = {}
@@ -125,8 +125,10 @@ def grace_s() -> float:
 
 def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *, lane: str = "ads", total: int = 0,
            current: str | None = None, reuse_queued: bool = False, keys: list[str] | None = None,
-           on_cancel: Callable[[], None] | None = None, grace: bool = False, quiet: bool = False) -> Job:
+           on_cancel: Callable[[], None] | None = None, grace: bool = False, quiet: bool = False,
+           link: str | None = None) -> Job:
     """Queue `run(job)` in `lane`; it returns the result line shown in the header. Needs a running event loop.
+    `link`: the page with the result (the finished-job notice opens it; no notice on that page itself).
 
     `keys`: the marker keys ("ad:123", "draft:5") of everything the job will touch, so the elements waiting for it
     can offer a cancel button while it is queued. `on_cancel` clears those markers when it is cancelled (cancel());
@@ -142,7 +144,7 @@ def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *
     keys = list(keys or ([current] if current else []))
     wait = grace_s() if grace else 0
     job = Job(next(_ids), kind, label, lane=lane, total=total, current=current, keys=keys, on_cancel=on_cancel,
-              cancellable=on_cancel is not None or not keys, quiet=quiet,
+              cancellable=on_cancel is not None or not keys, quiet=quiet, link=link,
               runs_at=utcnow() + timedelta(seconds=wait) if wait else None)
     _active.append(job)
     job.task = asyncio.create_task(_run(job, run))

@@ -212,3 +212,54 @@ async def test_a_running_check_shows_in_the_background_work(responses):
     assert seen and any(label.startswith("Search agent") for label in seen[0])
     done = [j for j in jobs.snapshot()["recent"] if j["label"].startswith("Search agent")]
     assert done and done[0]["status"] == "done" and "first check" in done[0]["result"]
+
+
+def test_check_now_is_a_job_the_card_waits_for(responses, monkeypatch):
+    """"Check now" queues the check (lane agents) and comes straight back: the card carries the marker, the jobs
+    endpoint lists it, and the card refreshes itself when the check is done (no page load)."""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.services import jobs
+    from app.services import search_agents as sa
+    from app.services.search_agents import enqueue_run
+    from tests.conftest import wait_jobs
+
+    queue, _calls = responses
+    agent = create_agent(URL)
+    queue.append(load("search_fahrrad_rows3.json"))
+    real = sa._run_agent
+    with TestClient(app) as c:
+        gate = c.portal.call(asyncio.Event)          # the check waits until the test has looked at the page
+
+        async def held(agent_id):
+            await gate.wait()
+            return await real(agent_id)
+
+        monkeypatch.setattr(sa, "_run_agent", held)
+        page = c.get("/agents").text
+        card = page[page.index(f'id="agent-{agent.id}"'):page.index("</article>")]
+        assert f'hx-post="/agents/{agent.id}/run"' in card and f'hx-select="#agent-{agent.id}"' in card
+        assert f'hx-post="/agents/{agent.id}/toggle"' in card and "data-pending-key" not in card
+        assert 'hx-target="#agents-grid"' in page and 'id="agents-grid"' in page
+        assert f'hx-post="/agents/{agent.id}/delete" hx-confirm=' in page and "return confirm(" not in page
+        r = c.post(f"/agents/{agent.id}/run", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/agents"
+        assert f"agent:{agent.id}" in c.get("/jobs", headers={"accept": "application/json"}).json()["pending"]
+        page = c.get("/agents").text
+        card = page[page.index(f'id="agent-{agent.id}"'):page.index("</article>")]
+        assert f'data-pending-key="agent:{agent.id}"' in card and ("Queued: check" in card or "Checking…" in card)
+        assert "Check now" not in card
+        assert not enqueue_run(agent.id)                                   # already on its way: not twice
+        c.portal.call(gate.set)
+        wait_jobs()
+        assert f"agent:{agent.id}" not in c.get("/jobs", headers={"accept": "application/json"}).json()["pending"]
+        done = [j for j in jobs.snapshot()["recent"] if j["label"].startswith("Check")]
+        assert done and done[0]["status"] == "done" and done[0]["lane"] == "agents" and "first check" in done[0]["result"]
+        assert jobs.snapshot()["recent"].count(done[0]) == 1               # the check is not shown a second time
+        r = c.post(f"/agents/{agent.id}/run", follow_redirects=False)      # just checked: nothing queued
+        assert "less%20than%20a%20minute" in r.headers["location"] and not jobs.busy()
+        card = c.get("/agents").text.split(f'id="agent-{agent.id}"')[1].split("</article>")[0]
+        assert "Check now" in card and "data-pending-key" not in card
