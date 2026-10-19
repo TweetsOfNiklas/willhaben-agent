@@ -1,59 +1,157 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
-{# Grouped settings: section nav on the left (desktop), a select on phones; the selected section on the right.
-   `section` = active id (route: /settings/<id>; /settings = willhaben). A #hash in the URL is mapped to the path below.
-   Flags on the nav: bad / warn = a dot next to the label (not connected, missing data); off = a platform switched off. #}
-{# Platforms: willhaben (account, login, request budget) with its own features indented below it (buying, PayLivery,
-   my ads, chats: willhaben only), then one page per other site (settings/platform.html) #}
-{% set wh_sub = [("purchase", _("Buying rules"), ''), ("paylivery", "PayLivery", ''), ("myads", _("My ads"), ''), ("chats", _("Automatic answers"), '')] %}
-{% set sub_ids = wh_sub|map('first')|list %}
-{% set sites = [("willhaben", "willhaben", ('bad' if session_status.started and not session_status.logged_in else ''))] + wh_sub %}
-{% for p in platforms_all(false) %}{% if p.id != 'willhaben' %}{% set _x = sites.append((p.id, p.name, ('' if platform_enabled(p.id) else 'off'))) %}{% endif %}{% endfor %}
-{# VPN: the WireGuard connection of every site's anonymous requests (settings/vpn.html); a dot when it has a problem #}
-{% set _x = sites.append(("vpn", _("VPN"), ('bad' if vpn_health()[0] == 'problem' else ''))) %}
-{% set groups = [
-  (_("Platforms"), sites),
-  (_("Prices"), [("prices", _("Price rating"), ''), ("geizhals", "Geizhals", '')]),
-  (_("Shipping & pickup"), [("shipping", _("Shipping address"), ('warn' if ship_sender_ok is defined and not ship_sender_ok else '')), ("printers", _("Printers"), ''), ("calendar", "Google Calendar", '')]),
-  (_("Selling"), [("selling", _("Selling preferences"), ''), ("rules", _("My rules"), '')]),
-  (_("AI"), [("claude", _("Claude & usage"), ('bad' if llm_ok is defined and not llm_ok else ''))]),
-  (_("Notifications"), [("ha", "Home Assistant", ''), ("telegram", "Telegram", ''), ("quiet", _("Quiet hours"), ''), ("browser", _("Browser"), '')]),
-  (_("System"), [("backup", _("Backup & restore"), ''), ("timeline", _("Timeline"), ''), ("web", _("Web address"), ('' if web is not defined or web.reachable else 'warn')), ("language", _("Language & appearance"), '')]),
-] %}
+{# Settings: the search box and the section nav on the left (desktop), a select on phones; on the right the overview
+   (/settings: every group with its sections and what they hold, what needs attention) or the chosen section
+   (/settings/<id>). nav_groups, nav_flags and attention come from main._settings_nav(); the map itself is
+   app/services/settings_catalog.py (also the command palette and the search index). Flags next to a section:
+   bad / warn = a dot (not logged in, VPN problem, sender address missing, Claude not signed in, web address
+   unreachable), off = a site switched off.
+   The search (Alpine settingsSearch) fetches /settings/search.json on the first keystroke and shows its hits in place
+   of the content: a section's name or description, or a field's label or keywords, in the UI language or in English.
+   A hit opens /settings/<id>#<anchor>; the page scrolls to that field and marks it for a moment. #}
 {% set dot = {'bad': 'bg-error', 'warn': 'bg-warning'} %}
-{% set section = section if section is defined and section else 'willhaben' %}
-{% set ns = namespace(title='', group='') %}
-{% for g, items in groups %}{% for id, label, flag in items %}{% if id == section %}{% set ns.title = label %}{% set ns.group = (g ~ ' · willhaben') if id in sub_ids else g %}{% endif %}{% endfor %}{% endfor %}
+{% set section = section if section is defined and section else 'overview' %}
+{% set overview = section == 'overview' %}
+{% set ns = namespace(title=_("Overview"), group='') %}
+{% for g in nav_groups %}{% for s in g.sections %}{% if s.id == section %}{% set ns.title = s.label %}{% set ns.group = g.label %}{% endif %}{% endfor %}{% endfor %}
+{% macro entry(href, label, active, flag) -%}
+<a href="{{ href }}" class="flex h-8 items-center justify-between gap-2 rounded-field px-2.5 pl-3.5 text-base-content no-underline {{ 'bg-brand-soft font-semibold text-primary' if active else 'hover:bg-hover' }}"{% if active %} aria-current="page"{% endif %}>
+  <span class="truncate">{{ label }}</span>
+  {% if flag == 'off' %}<small class="shrink-0 text-[11.5px] text-muted">{{ _("off") }}</small>{% elif flag %}<span class="size-2 shrink-0 rounded-full {{ {'bad': 'bg-error', 'warn': 'bg-warning'}[flag] }}"></span>{% endif %}
+</a>
+{%- endmacro %}
 {% block content %}
-{{ ui.head(_("Settings"), _("Changes are saved per section.")) }}
-<div class="grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)] md:items-start">
-  {# phone: one select instead of the nav #}
-  <select aria-label="{{ _('Settings') }}" class="select w-full bg-base-100 md:hidden" onchange="location.href='/settings/'+this.value">
-    {% for g, items in groups %}<optgroup label="{{ g }}">{% for id, label, flag in items %}<option value="{{ id }}" {% if id == section %}selected{% endif %}>{% if id in sub_ids %}&nbsp;&nbsp;&nbsp;{% endif %}{{ label }}</option>{% endfor %}</optgroup>{% endfor %}
-  </select>
-
-  <nav aria-label="{{ _('Settings') }}" class="hidden md:sticky md:top-6 md:flex md:flex-col md:gap-3.5">
-    {% for g, items in groups %}
-    <div class="flex flex-col gap-0.5">
-      {{ ui.eyebrow(g, 'px-2.5 pb-1.5') }}
-      {% for id, label, flag in items %}
-      <a href="/settings/{{ id }}" class="flex h-[34px] items-center justify-between gap-2 rounded-field px-2.5 {{ 'pl-7 text-[13.5px]' if id in sub_ids else 'pl-3.5' }} text-base-content no-underline {{ 'bg-brand-soft font-semibold text-primary' if id == section else 'hover:bg-hover' }}"{% if id == section %} aria-current="page"{% endif %}>
-        <span class="truncate">{{ label }}</span>
-        {% if flag == 'off' %}<small class="shrink-0 text-[11.5px] text-muted">{{ _("off") }}</small>{% elif flag %}<span class="size-2 shrink-0 rounded-full {{ dot[flag] }}"></span>{% endif %}
-      </a>
+{{ ui.head(_("Settings"), _("Search a setting, or pick a section.") if overview else _("Changes are saved per section.")) }}
+<div x-data="settingsSearch" class="grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)] md:items-start">
+  <div class="flex flex-col gap-3 md:sticky md:top-6">
+    <label class="relative block">
+      <span class="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-muted">{{ ui.icon('search', 16) }}</span>
+      <input type="search" x-model="q" @focus="load()" @input="load(); pick()" @keydown.down.prevent="sel = Math.min(sel + 1, rows.length - 1)"
+             @keydown.up.prevent="sel = Math.max(sel - 1, 0)" @keydown.enter.prevent="go()" @keydown.escape="q = ''"
+             placeholder="{{ _('Search settings…') }}" aria-label="{{ _('Search settings…') }}" autocomplete="off" class="input input-sm w-full bg-base-100 pl-7">
+    </label>
+    {# phone: one select instead of the nav #}
+    <select aria-label="{{ _('Settings') }}" class="select w-full bg-base-100 md:hidden" onchange="location.href=this.value">
+      <option value="/settings" {% if overview %}selected{% endif %}>{{ _("Overview") }}</option>
+      {% for g in nav_groups %}<optgroup label="{{ g.label }}">{% for s in g.sections %}<option value="/settings/{{ s.id }}" {% if s.id == section %}selected{% endif %}>{{ s.label }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+    <nav aria-label="{{ _('Settings') }}" class="hidden max-h-[85dvh] overflow-y-auto md:flex md:flex-col md:gap-3.5">
+      {{ entry('/settings', _("Overview"), overview, '') }}
+      {% for g in nav_groups %}
+      <div class="flex flex-col gap-0.5">
+        {{ ui.eyebrow(g.label, 'px-2.5 pb-1.5') }}
+        {% for s in g.sections %}{{ entry('/settings/' ~ s.id, s.label, s.id == section, nav_flags.get(s.id, '')) }}{% endfor %}
+      </div>
       {% endfor %}
-    </div>
-    {% endfor %}
-  </nav>
+    </nav>
+  </div>
 
   <div class="flex min-w-0 max-w-[720px] flex-col gap-4 xl:max-w-[880px]">
-    <div>{{ ui.eyebrow(ns.group, 'mb-0.5') }}<h2>{{ ns.title }}</h2></div>
-    {% if section == 'purchase' %}{% include "_settings_purchase.html" %}
-    {% elif section == 'paylivery' %}{% include "_settings_paylivery.html" %}
-    {% elif section == 'printers' %}{% include "_settings_printing.html" %}
-    {% elif site is defined %}{% include "settings/platform.html" %}
-    {% else %}{% include "settings/" ~ section ~ ".html" %}{% endif %}
+    {# the search's hits, in place of the content while something is typed: a section's row, then its matching fields #}
+    <div x-show="q.trim()" x-cloak class="rounded-box border border-base-300 bg-base-100 p-1.5" data-settings-hits>
+      <template x-for="(r, n) in rows" :key="r.key">
+        <a :href="r.href" @mouseenter="sel = n" class="flex items-start justify-between gap-3 rounded-field px-3 text-base-content no-underline"
+           :class="[r.item ? 'py-1.5 pl-7' : (n ? 'mt-1.5 ' : '') + 'py-2 font-semibold', n === sel ? 'bg-hover' : 'hover:bg-hover']">
+          <span class="min-w-0"><span class="block" x-text="r.label"></span><span x-show="r.hint" class="block text-[12.5px] leading-snug font-normal text-muted" x-text="r.hint"></span></span>
+          <span x-show="r.group" class="shrink-0 pt-0.5 text-[11.5px] font-normal tracking-wide text-muted uppercase" x-text="r.group"></span>
+        </a>
+      </template>
+      <p x-show="ready && !rows.length" class="px-3 py-4.5 text-center text-muted" x-text="{{ _('No setting matches')|tojson|forceescape }} + ' „' + q.trim() + '“'"></p>
+      <p x-show="!ready" class="px-3 py-4.5 text-center text-muted">…</p>
+    </div>
+
+    <div x-show="!q.trim()" class="flex min-w-0 flex-col gap-4">
+      {% if overview %}
+      {% if attention %}
+      <section class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 px-3 py-3" data-attention>
+        {{ ui.eyebrow(_("Needs attention"), 'px-2.5 pt-1 pb-1.5') }}
+        {% for s, flag in attention %}
+        <a href="/settings/{{ s.id }}" class="flex items-center gap-2.5 rounded-field px-2.5 py-2 text-base-content no-underline hover:bg-hover">
+          <span class="size-2 shrink-0 rounded-full {{ dot[flag] }}"></span><span class="min-w-0 flex-1">{{ s.attention }}</span><span class="shrink-0 text-[12.5px] text-muted">{{ s.label }} →</span>
+        </a>
+        {% endfor %}
+      </section>
+      {% endif %}
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {% for g in nav_groups %}{% set wide = g.sections|length > 5 %}
+        <section class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 px-3 py-3 {{ 'sm:col-span-2' if wide else '' }}">
+          {{ ui.eyebrow(g.label, 'px-2.5 pt-1 pb-1.5') }}
+          <div class="{{ 'grid grid-cols-1 gap-x-3 sm:grid-cols-2' if wide else 'flex flex-col' }}">
+          {% for s in g.sections %}{% set flag = nav_flags.get(s.id, '') %}
+          <a href="/settings/{{ s.id }}" class="flex items-start justify-between gap-3 rounded-field px-2.5 py-2 text-base-content no-underline hover:bg-hover">
+            <span class="min-w-0"><span class="block font-medium">{{ s.label }}</span><span class="block text-[12.5px] leading-snug text-muted">{{ s.description }}</span></span>
+            {% if flag == 'off' %}<small class="shrink-0 pt-0.5 text-[11.5px] text-muted">{{ _("off") }}</small>{% elif flag %}<span class="mt-1.5 size-2 shrink-0 rounded-full {{ dot[flag] }}"></span>{% endif %}
+          </a>
+          {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div>{{ ui.eyebrow(ns.group, 'mb-0.5') }}<h2>{{ ns.title }}</h2></div>
+      {% if section == 'purchase' %}{% include "_settings_purchase.html" %}
+      {% elif section == 'paylivery' %}{% include "_settings_paylivery.html" %}
+      {% elif section == 'printers' %}{% include "_settings_printing.html" %}
+      {% elif site is defined %}{% include "settings/platform.html" %}
+      {% else %}{% include "settings/" ~ section ~ ".html" %}{% endif %}
+      {% endif %}
+    </div>
   </div>
 </div>
-<script>if (location.hash && location.pathname === '/settings') location.replace('/settings/' + location.hash.slice(1) + location.search);</script>
+<script>
+  // /settings#<section> (the old links) leads to the section's page; /settings/<section>#<anchor> (a search hit) scrolls
+  // to that field, opens the <details> around it and marks it for a moment
+  (() => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id) return;
+    if (location.pathname === '/settings') { location.replace('/settings/' + id + location.search); return; }
+    window.addEventListener('load', () => {      // after Alpine (the content sits under x-show)
+      const el = document.getElementById(id);
+      if (!el) return;
+      for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
+      const mark = ['outline', 'outline-2', 'outline-primary', 'outline-offset-1', 'rounded-field'];
+      el.classList.add(...mark);
+      setTimeout(() => el.scrollIntoView({block: 'center'}), 120);   // after the browser's own jump to the hash
+      setTimeout(() => el.classList.remove(...mark.slice(0, 4)), 3500);
+    });
+  })();
+  document.addEventListener('alpine:init', () => Alpine.data('settingsSearch', () => ({
+    q: '', sel: 0, ready: false, loading: false, data: null,
+    async load() {
+      if (this.data || this.loading) return;
+      this.loading = true;
+      try { this.data = (await (await fetch('/settings/search.json')).json()).sections; } catch (e) { this.data = []; }
+      this.loading = false; this.ready = true; this.pick();
+    },
+    // Enter opens the first field when the top section is there only because of its fields ("plz" -> Postcode, not the page)
+    pick() { this.sel = this.rows.length > 1 && this.rows[0].weak ? 1 : 0; },
+    norm(parts) { return parts.join(' ').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); },
+    // the hits, flat for the keyboard: a section (its name, description or group matches, or one of its fields does),
+    // then its fields whose label or keywords match; a field matches on its section's name too when two or more words
+    // are typed ("telegram test"). Sections with a hit of their own come first.
+    get rows() {
+      const words = this.norm([this.q]).split(/\s+/).filter(Boolean);
+      if (!words.length || !this.data) return [];
+      const hit = text => words.every(w => text.includes(w));
+      const found = [];
+      for (const s of this.data) {
+        const name = this.norm(s.label), own = hit(name) ? 3 : hit(this.norm([...s.label, ...s.description, ...s.group])) ? 2 : 0;
+        const items = s.items.map(i => {
+          const label = this.norm(i.label), all = this.norm([...i.label, ...i.keywords]);
+          return {i, score: hit(label) ? 3 : hit(all) ? 2 : words.length > 1 && hit(all + ' ' + name) ? 1 : 0};
+        }).filter(x => x.score);
+        if (own || items.length) found.push({s, own, best: Math.max(own, ...items.map(x => x.score)), items});
+      }
+      found.sort((a, b) => b.best - a.best);
+      const rows = [];
+      for (const f of found) {
+        rows.push({key: f.s.id, href: '/settings/' + f.s.id, label: f.s.label[0], hint: f.s.description[0], group: f.s.group[0], item: false, weak: !f.own});
+        for (const x of f.items) rows.push({key: f.s.id + '#' + x.i.anchor, href: '/settings/' + f.s.id + '#' + x.i.anchor, label: x.i.label[0], hint: '', group: '', item: true});
+        if (rows.length >= 40) break;
+      }
+      return rows;
+    },
+    go() { const r = this.rows[this.sel]; if (r) location.href = r.href; },
+  })));
+</script>
 {% endblock %}

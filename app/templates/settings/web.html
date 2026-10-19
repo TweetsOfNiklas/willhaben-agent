@@ -1,7 +1,7 @@
 {# Settings → Web address: where links in notifications and messages point. Stored here, it wins over PUBLIC_URL in .env
    (db.apply_public_url); web = main._web_address(). #}
 <form method="post" action="/settings/web" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Address of this dashboard") }}</span>
+  <label id="s-web-url" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Address of this dashboard") }}</span>
     <input name="public_url" type="url" value="{{ web.stored }}" placeholder="{{ web.env }}" autocomplete="off" spellcheck="false" class="input w-full min-w-0 bg-base-200">
     <small class="text-[12.5px] text-muted">{{ _("Links in Telegram and Home Assistant notifications open this address, e.g. https://willhaben.example.com. Empty: PUBLIC_URL from .env ({url}).", url=web.env) }}</small></label>
   <p class="text-[13px] {{ 'text-success' if web.https else 'text-warning' }}">

@@ -2398,9 +2398,27 @@ async def capture_download(name: str):
 
 
 # ------------------------------------------------------------------ settings
-SETTINGS_SECTIONS = ("willhaben", "purchase", "paylivery", "myads", "chats", "vpn", "shipping", "printers", "calendar",
-                     "claude", "selling", "rules", "ha", "telegram", "quiet", "backup", "timeline", "web", "language",
-                     "prices", "geizhals", "browser")   # settings.html groups
+from app.services import settings_catalog  # noqa: E402
+
+SETTINGS_SECTIONS = settings_catalog.SECTION_IDS   # the sections with a page of their own, in nav order (settings.html)
+templates.env.globals.update(settings_groups=lambda: settings_catalog.build(_site_sections().values()))   # the palette
+
+
+def _settings_nav() -> dict[str, Any]:
+    """settings.html: the groups with their sections (settings_catalog) and a flag per section: bad / warn = a dot next
+    to it (not logged in, VPN problem, sender address missing, Claude not signed in, web address unreachable), off = a
+    site switched off. `attention`: the flagged sections with a line each, for the overview."""
+    sites = _site_sections()
+    ss = get_session().status()
+    flags = {"willhaben": "bad" if ss["started"] and not ss["logged_in"] else "",
+             "vpn": "bad" if vpn.health()[0] == "problem" else "",
+             "shipping": "" if shipping.sender_complete() else "warn",
+             "claude": "" if claude_token() else "bad",
+             "web": "" if _web_address()["reachable"] else "warn",
+             **{pid: "" if platforms.enabled(pid) else "off" for pid in sites}}
+    groups = settings_catalog.build(sites.values())
+    attention = [(s, flags[s.id]) for g in groups for s in g.sections if flags.get(s.id) in ("bad", "warn") and s.attention]
+    return {"nav_groups": groups, "nav_flags": {k: v for k, v in flags.items() if v}, "attention": attention}
 
 
 def _last_notifiable() -> datetime | None:
@@ -2419,7 +2437,16 @@ def _site_sections() -> dict[str, Any]:
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, msg: str | None = None):
-    return await settings_section(request, "willhaben", msg)
+    """The overview: every group with its sections and what they hold, what needs attention, and the search.
+    A #section hash (the old links) is sent on to /settings/<section> by the page."""
+    return render(request, "settings.html", section=settings_catalog.OVERVIEW, msg=msg, **_settings_nav())
+
+
+@app.get("/settings/search.json")
+async def settings_search_index():
+    """The settings search's index (settings.html fetches it on the first keystroke): every section with its fields,
+    each text in the UI language and in English (settings_catalog.index)."""
+    return settings_catalog.index(_site_sections().values())
 
 
 INBOX_KINDS = {"hit": "New hit", "price_drop": "Price drop", "saved": "Saved ad", "message": "New message", "auto_reply": "Answered automatically",
@@ -2579,7 +2606,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     if section == "claude":
         await llm_models.refresh()                 # the selectable models, fresh from the API
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
-                  **(_claude_section() if section == "claude" else {}),
+                  **_settings_nav(), **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
                   **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
                       "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),
@@ -2671,7 +2698,7 @@ def _vpn_back(msg: str, next_url: str = "") -> RedirectResponse:
 from app.services import vpn_check  # noqa: E402
 
 templates.env.globals.update(vpn_test=vpn_check.view)   # Settings → VPN → the connection (settings/_vpn_test.html)
-templates.env.globals.update(geizhals_cache=geizhals.cache_view)   # Settings → Prices → Geizhals
+templates.env.globals.update(geizhals_cache=geizhals.cache_view)   # Settings → Search & prices → Geizhals
 
 
 def _vpn_test_panel(request: Request, note: str | None = None) -> HTMLResponse:
@@ -2728,7 +2755,7 @@ async def settings_vpn_clear():
 
 @app.post("/settings/geizhals/clear")
 async def settings_geizhals_clear():
-    """Settings → Prices → Geizhals: delete every cached search and product page (the next lookups ask again)."""
+    """Settings → Search & prices → Geizhals: delete every cached search and product page (the next lookups ask again)."""
     n = geizhals.clear_cache()
     return back(f"/settings/geizhals?msg={quote(t('{n} cached answers deleted', n=n), safe='')}")
 

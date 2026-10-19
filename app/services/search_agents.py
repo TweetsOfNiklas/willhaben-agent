@@ -779,7 +779,7 @@ LEVEL_DEAL = {"bargain": "great", "cheap": "good", "fair": "fair"}   # the same 
 
 def level_choices() -> list[tuple[str, str]]:
     """The price zones the agent drawer offers, with where each ends now: [("cheap", "cheap (used below 75 %, new
-    below 100 % of the new price)"), ...]. The limits are Settings → Prices → Price rating."""
+    below 100 % of the new price)"), ...]. The limits are Settings → Search & prices → Price rating."""
     from app.services import deals, price_zones
 
     z = price_zones.config()
@@ -797,7 +797,7 @@ def geizhals_rule(agent: SearchAgent) -> bool:
 
 def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
     """The agent's Geizhals rule: the price is at least `geizhals_pct` % below the Geizhals new price, or its price zone
-    (Settings → Prices → Price rating, used or new by the item's condition) is `geizhals_level` or cheaper. Without a
+    (Settings → Search & prices → Price rating, used or new by the item's condition) is `geizhals_level` or cheaper. Without a
     Geizhals price (not found, Geizhals unreachable) a zone takes Claude's price verdict (LEVEL_DEAL) when the
     screening gave one. Without the rule, any price to compare or, for a zone, with a defective item: it passes."""
     cents = _geizhals_cents(hit)

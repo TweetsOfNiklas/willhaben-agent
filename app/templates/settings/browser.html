@@ -12,10 +12,10 @@
   <template x-if="!supported"><p class="m-0 text-[13px] text-warning">{{ _("This browser does not support notifications.") }}</p></template>
   <template x-if="supported">
     <div class="flex flex-col gap-2.5">
-      <label class="flex cursor-pointer items-center justify-between gap-3"><span class="font-medium">{{ _("Show new hits as notifications") }}</span>
+      <label id="s-browser-notify" class="flex cursor-pointer items-center justify-between gap-3"><span class="font-medium">{{ _("Show new hits as notifications") }}</span>
         <input type="checkbox" class="toggle toggle-primary" :checked="on" @change="toggle()"></label>
       <p x-show="perm === 'denied'" x-cloak class="m-0 text-[13px] text-error">{{ _("The browser blocks notifications for this site: allow them in the site settings (the lock next to the address), then switch on again.") }}</p>
-      <div x-show="on" x-cloak><button type="button" class="btn btn-sm" @click="test()">{{ _("Send a test notification") }}</button></div>
+      <div id="s-browser-test" x-show="on" x-cloak><button type="button" class="btn btn-sm" @click="test()">{{ _("Send a test notification") }}</button></div>
       {# so that "nothing came" can be told apart from "does not work": held-back hits never notify #}
       <small class="text-[12.5px] text-muted">{% if last_notifiable %}{{ _("Last hit or price drop with a push: {ago}.", ago=last_notifiable|ago) }}{% else %}{{ _("No hit or price drop with a push yet.") }}{% endif %} {{ _("Hits the screening or a rule held back never notify, here or on the phone.") }}</small>
     </div>

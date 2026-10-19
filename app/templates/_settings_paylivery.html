@@ -3,7 +3,7 @@
 <section id="paylivery" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <h3>PayLivery</h3>
   <form method="post" action="/settings/paylivery" class="flex flex-col gap-3.5">
-    <label class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Notify me about PayLivery stage changes") }}</span>
+    <label id="s-paylivery-notify" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Notify me about PayLivery stage changes") }}</span>
       <input type="checkbox" class="toggle toggle-primary" name="notify" value="1" {% if pl.notify %}checked{% endif %}></label>
     <p class="text-[12.5px] text-muted">{{ _("Every PayLivery action runs in the browser window with the API recording on, because willhaben's PayLivery calls are not documented yet. Send the recording file for verification.") }}</p>
     <div><button type="submit" class="btn btn-primary">{{ _("Save") }}</button></div>

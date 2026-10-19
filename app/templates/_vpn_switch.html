@@ -3,7 +3,7 @@
 {% import "_ui.html" as ui %}
 {% set vs = vpn.sites|selectattr('id', 'equalto', vpn_site)|first %}
 {% if vs %}
-<section class="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="s-vpn-site" class="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <form method="post" action="/settings/vpn/site/{{ vs.id }}" class="m-0">
     <input type="hidden" name="next" value="/settings/{{ vs.id }}">
     {{ ui.switch_row(_("Anonymous requests through the VPN"), _("Search agents, screening, price checks and the ad viewer use the shared WireGuard connection. Your login never does."), vs.on, 'name="enabled" value="1" data-autosubmit') }}

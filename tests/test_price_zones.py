@@ -107,7 +107,7 @@ def test_settings_page_and_navigation(client):
     assert ":class=\"{'input-error': bad('used', 1)}\"" in page.text            # the field that breaks the rule
     set_setting("ui_lang", "de")
     page = client.get("/settings/prices").text
-    assert "Preiseinstufung" in page and ">Preise<" in page and "Gebrauchtes" in page and "Neuware" in page
+    assert "Preiseinstufung" in page and ">Suche &amp; Preise<" in page and "Gebrauchtes" in page and "Neuware" in page
 
 
 def test_settings_save_and_refuse(client):

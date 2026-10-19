@@ -90,7 +90,7 @@
     <dt class="text-muted">{{ _("Every") }}</dt>
     <dd class="m-0">
       <form method="post" action="/settings/vpn/interval" class="m-0 flex flex-wrap items-center gap-2">
-        <label class="input input-sm w-[7.5rem] bg-base-100"><input type="number" name="hours" min="1" max="168" step="1" value="{{ vt.interval }}" required aria-label="{{ _('Hours between two regular searches') }}" class="tabular-nums"><span class="text-muted">{{ _("hours") }}</span></label>
+        <label id="s-vpn-hours" class="input input-sm w-[7.5rem] bg-base-100"><input type="number" name="hours" min="1" max="168" step="1" value="{{ vt.interval }}" required aria-label="{{ _('Hours between two regular searches') }}" class="tabular-nums"><span class="text-muted">{{ _("hours") }}</span></label>
         <button class="btn btn-sm">{{ _("Save") }}</button>
       </form></dd>
   </dl>

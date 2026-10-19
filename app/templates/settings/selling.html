@@ -7,25 +7,25 @@
 <form method="post" action="/settings" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <input type="hidden" name="section" value="selling">
   <p class="text-muted">{{ _("Claude follows these in every answer to your buyers and in every new listing.") }} {{ _("Your free-text rules, the ad's own text and your instruction for an ad still apply on top and win where they disagree:") }} <a href="/settings/rules" class="text-primary hover:underline">{{ _("My rules") }}</a></p>
-  <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Handover") }}</span>
+  <div id="s-sell-handover" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Handover") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for v, l in [('pickup', _("Self pickup")), ('shipping', _("Shipping")), ('both', _("Self pickup or shipping"))] %}<label class="{{ chip }}"><input type="radio" name="sell_handover" value="{{ v }}" {% if sell.handover == v %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
     <small class="text-[12.5px] text-muted">{{ _("Also the preset when you publish a new ad.") }}</small></div>
-  <div class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("Shipping costs") }}</span>
+  <div id="s-sell-shipping-cost" class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("Shipping costs") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for v, l in [('buyer', _("Paid by the buyer")), ('included', _("Included in the price"))] %}<label class="{{ chip }}"><input type="radio" name="sell_shipping_cost" value="{{ v }}" {% if sell.shipping_cost == v %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
     <small class="text-[12.5px] text-muted">{{ _("With PayLivery the buyer always pays the shipping through willhaben; “included” then only applies to bank transfers.") }}</small></div>
-  <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Delivery to the buyer") }}</span>
+  <div id="s-sell-delivery" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Delivery to the buyer") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for v, l in [('any', _("Any")), ('shop', _("Parcel shop or locker")), ('home', _("Front door"))] %}<label class="{{ chip }}"><input type="radio" name="sell_delivery" value="{{ v }}" {% if sell.delivery == v %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div></div>
-  <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Preferred carrier") }}</span>
+  <label id="s-sell-carrier" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Preferred carrier") }}</span>
     <select name="sell_carrier" class="select w-full min-w-0 bg-base-200"><option value="">{{ _("cheapest") }}</option>{% for key, c in ship_carriers.items() %}<option value="{{ key }}" {% if sell.carrier == key %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select>
     <small class="text-[12.5px] text-muted">{{ _("The shipping card in a chat lists the preferred carrier and delivery first, then the cheapest.") }}</small></label>
-  <div class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("Payment") }}</span>
+  <div id="s-sell-payment" class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("Payment") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for v, l in [('transfer', _("Bank transfer")), ('paylivery', "willhaben PayLivery"), ('cash', _("Cash on pickup"))] %}<label class="{{ chip }}"><input type="checkbox" name="sell_payment" value="{{ v }}" {% if v in sell.payment %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
     <small class="text-[12.5px] text-muted">{{ _("Claude only names what fits the handover: PayLivery with shipping, cash with pickup.") }}</small></div>
-  <label class="flex flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("More selling facts for Claude") }}</span>
+  <label id="s-sell-notes" class="flex flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("More selling facts for Claude") }}</span>
     <textarea name="sell_notes" rows="4" placeholder="{{ _('e.g. Shipping on weekdays only. Invoice available.') }}" class="textarea w-full min-w-0 bg-base-200">{{ sell.notes }}</textarea></label>
   <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
 </form>
-<section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<section id="s-sell-always" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <span class="font-medium">{{ _("Always included") }}</span>
   <p class="text-[12.5px] text-muted">{{ _("willhaben censors e-mail addresses and links in chat messages and ads. Claude is always told so; automatic answers that contain one are held back, ads with one are not published, and the chat warns before you send one.") }}</p>
   <p class="rounded-[10px] bg-base-200 px-3.5 py-3 text-[13px] break-words" data-contact-rule>{{ contact_rule }}</p>

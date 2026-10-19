@@ -20,7 +20,7 @@
     <button class="btn btn-outline btn-error">{{ _("Remove card") }}</button>
   </form>
   {% endif %}
-  <div class="mt-1 flex flex-col gap-1.5 border-t border-base-300 pt-3.5">
+  <div id="s-ship-playbooks" class="mt-1 flex flex-col gap-1.5 border-t border-base-300 pt-3.5">
     <span class="font-medium">{{ _("Learned checkouts") }}</span>
     <p class="text-[12.5px] text-muted">{{ _("A carrier's steps are learned from the first purchase and repeated without Claude. Claude is asked again only when a page changed. Only field names and button texts are stored, never your data.") }}</p>
     {% for key, pb in playbooks.items() %}

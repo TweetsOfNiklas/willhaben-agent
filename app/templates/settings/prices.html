@@ -1,4 +1,4 @@
-{# Settings → Prices → Price rating. price_zone_view(): zones, defaults, names, labels, texts. Alpine priceZones draws the
+{# Settings → Search & prices → Price rating. price_zone_view(): zones, defaults, names, labels, texts. Alpine priceZones draws the
    preview bar, the example ring and the range chips; the server checks again (price_zones.save) and answers with an
    error code only (?err=used-order), whose text price_zone_error() looks up. #}
 {% import "_ui.html" as ui %}{% set v = price_zone_view() %}{% set err = price_zone_error(request.query_params.get('err')) %}
@@ -8,7 +8,7 @@
   <form method="post" action="/settings/prices" x-data="priceZones({{ v|tojson|forceescape }})" class="flex flex-col gap-5">
   {% for g, title, hint in [('used', _("Used items"), _("Also like new, refurbished and ads whose condition the site does not say.")),
                             ('new', _("New items"), _("Only ads the site marks as new, and shop deals from Preisjäger. Geizhals shows the lowest shop price, which is usually below the RRP."))] %}
-    <fieldset class="flex min-w-0 flex-col gap-3 border-t border-base-300 pt-4 first-of-type:border-t-0 first-of-type:pt-0">
+    <fieldset id="s-prices-{{ g }}" class="flex min-w-0 flex-col gap-3 border-t border-base-300 pt-4 first-of-type:border-t-0 first-of-type:pt-0">
       <div class="flex items-center justify-between gap-2"><span class="font-medium">{{ title }}</span><button type="button" class="btn btn-ghost btn-xs" title="{{ v.defaults[g]|join(' / ') }} %" @click="reset('{{ g }}')">{{ _("Default values") }}</button></div>
       <small class="-mt-2 text-[12.5px] text-muted">{{ hint }}</small>
       {# preview: the zones, the new price at 100 %, the example as a ring (drawn by the script only) #}
@@ -38,7 +38,7 @@
   {% endfor %}
     <p class="text-[12.5px] text-muted">{{ _("Without a new price the comparable ads decide: the middle half of their prices counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.") }}</p>
     <div class="flex flex-wrap gap-2"><button class="btn btn-primary" :disabled="!ok('used') || !ok('new')">{{ _("Save") }}</button>
-      <button name="reset" value="1" class="btn btn-ghost" formnovalidate :disabled="isDefault()" data-confirm="{{ _('Set both groups back to the default values and save?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Reset to default values") }}</button></div>
+      <button id="s-prices-reset" name="reset" value="1" class="btn btn-ghost" formnovalidate :disabled="isDefault()" data-confirm="{{ _('Set both groups back to the default values and save?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Reset to default values") }}</button></div>
   </form>
 </section>
 <script>

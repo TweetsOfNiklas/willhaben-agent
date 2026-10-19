@@ -52,7 +52,7 @@ def price_zone_view() -> dict[str, Any]:
 
 @router.post("/settings/prices")
 async def settings_prices(request: Request):
-    """The price zones (Settings → Prices → Price rating): saved only when both groups are valid; a refusal
+    """The price zones (Settings → Search & prices → Price rating): saved only when both groups are valid; a refusal
     redirects with an error code, never with text from the request. reset=1 sets both groups back to the defaults,
     whatever the fields hold."""
     form = await request.form()

@@ -1,4 +1,4 @@
-"""Price zones of the price check (Settings → Prices → Price rating): from which share of the lowest Geizhals new
+"""Price zones of the price check (Settings → Search & prices → Price rating): from which share of the lowest Geizhals new
 price an ad counts as bargain, cheap, fair, expensive or very expensive, separately for used and new items.
 
 One owner of reading, writing and checking the setting (the human_pace pattern). The arithmetic is in whole cents,
