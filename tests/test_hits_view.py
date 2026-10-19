@@ -72,18 +72,22 @@ def test_shipping_with_buyer_protection():
         a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
         db.add(a)
         db.commit()
-        for ad_id, platform, ship_price, ship in (("1", "willhaben", None, "ship"),       # PayLivery on
-                                                  ("2", "kleinanzeigen", 5.0, "ship"),   # no buyer protection visible
-                                                  ("3", "vinted", None, None),           # Vinted: always
-                                                  ("4", "ebay", 4.9, None),
-                                                  ("5", "willhaben", None, "pickup"),
-                                                  ("6", "facebook", None, "ship")):
+        for ad_id, platform, ship_price, ship, pl in (
+                ("1", "willhaben", None, "ship", True),          # PayLivery on (the list's p2penabled)
+                ("2", "kleinanzeigen", 5.0, "ship", None),       # no buyer protection visible
+                ("3", "vinted", None, None, None),               # Vinted: always
+                ("4", "ebay", 4.9, None, None),
+                ("5", "willhaben", None, "pickup", None),
+                ("6", "facebook", None, "ship", None),
+                ("7", "willhaben", None, "ship", False),         # handover "Versand", PayLivery off
+                ("8", "willhaben", None, "ship", None),          # from before the flag, no PayLivery price: unknown
+                ("9", "willhaben", 3.49, "ship", None)):         # from before the flag, PayLivery's price
             db.add(Hit(agent_id=a.id, platform=platform, ad_id=ad_id, heading=f"Ad {ad_id}", url=f"https://x/{ad_id}",
-                       price=10.0, shipping_price=ship_price, shipping=ship))
+                       price=10.0, shipping_price=ship_price, shipping=ship, paylivery=pl))
         db.commit()
     with TestClient(app) as c:
         page = c.get("/hits?ship=protected").text
-        assert set(_order(page)) == {"1", "3", "4"}
+        assert set(_order(page)) == {"1", "3", "4", "9"}
         assert 'value="protected" selected' in page
 
 
@@ -111,3 +115,18 @@ def test_newest_hits_first_and_no_negotiable_kleinanzeigen_ads():
         assert _order(c.get("/hits?sort=oldest").text) == ["1", "3", "2"]
         assert _order(c.get("/hits?sort=published").text) == ["1", "3", "2"]
         assert _order(c.get("/hits?state=all").text) == ["2", "3", "1"]
+
+
+def test_the_paylivery_flag_comes_from_the_list_and_the_ad_page():
+    from types import SimpleNamespace
+
+    from app.platforms.shipping_info import apply_shipping
+    hit = Hit(agent_id=1, ad_id="1", heading="x", url="u", platform="willhaben")
+    apply_shipping(hit, SimpleNamespace(shipping_price=None, shipping="ship", paylivery=False))
+    assert hit.paylivery is False and hit.shipping == "ship"
+    page = SimpleNamespace(platform="willhaben", shipping_price=3.49, shipping="ship", paylivery_enabled=True,
+                           shipping_options=[{"name": "Post", "home": 5.7, "point": 3.49}])
+    apply_shipping(hit, page)
+    assert hit.paylivery is True
+    apply_shipping(hit, SimpleNamespace(shipping_price=None, shipping=None))      # says nothing: kept
+    assert hit.paylivery is True

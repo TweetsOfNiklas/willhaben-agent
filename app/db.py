@@ -96,6 +96,8 @@ class Hit(SQLModel, table=True):
     shipping_price: float | None = None
     shipping: str | None = None
     buyer_fee: float | None = None       # the buyer fee the site states (Vinted's buyer protection), app/platforms/fees.py
+    # willhaben: PayLivery on (list or ad page); "ship" alone may be the ad's handover "Versand" without it. None = not known
+    paylivery: bool | None = None
     # the ad's place: the site's coordinates (willhaben, Kleinanzeigen) or its postcode's centre (app/services/geo.py)
     lat: float | None = None
     lon: float | None = None

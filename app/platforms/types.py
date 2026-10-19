@@ -52,6 +52,7 @@ class Listing:
     shipping_price: float | None = None
     shipping: str | None = None
     buyer_fee: float | None = None      # the buyer fee the site states for this ad (Vinted: buyer protection), app/platforms/fees.py
+    paylivery: bool | None = None       # willhaben: PayLivery on (the list's p2penabled); None = not stated
 
     @property
     def ref(self) -> str:
@@ -80,6 +81,7 @@ class Listing:
             "shipping_price": self.shipping_price,
             "shipping": self.shipping,
             "buyer_fee": self.buyer_fee,
+            "paylivery": self.paylivery,
         }
 
 
@@ -143,7 +145,7 @@ class AdDetail:
                    item_condition=getattr(h, "item_condition", None),
                    item_condition_label=getattr(h, "item_condition_label", None),
                    shipping_price=getattr(h, "shipping_price", None), shipping=getattr(h, "shipping", None),
-                   buyer_fee=getattr(h, "buyer_fee", None))
+                   buyer_fee=getattr(h, "buyer_fee", None), paylivery_enabled=bool(getattr(h, "paylivery", None)))
 
     @classmethod
     def from_result(cls, r: dict[str, Any]) -> AdDetail:

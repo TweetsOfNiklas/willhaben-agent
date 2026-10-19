@@ -16,8 +16,8 @@ from typing import Any
 from app.i18n import t
 
 SHIP, PICKUP = "ship", "pickup"
-# Sites where a shipped purchase is paid through the site with buyer protection: willhaben (shipping there means
-# PayLivery: the list's p2penabled, the price is PayLivery's), Vinted (every purchase), eBay (eBay-Garantie when paid
+# Sites where a shipped purchase is paid through the site with buyer protection: willhaben (only with PayLivery,
+# Hit.paylivery; its shipping price is PayLivery's), Vinted (every purchase), eBay (eBay-Garantie when paid
 # through eBay) and Shpock (shipping with Shpock's payment). Kleinanzeigen' "Sicher bezahlen" is not visible per ad,
 # Facebook and Preisjäger have none.
 BUYER_PROTECTION_SITES = ("willhaben", "vinted", "ebay", "shpock")
@@ -58,6 +58,12 @@ def apply_shipping(target: Any, source: Any) -> None:
             target.shipping_price = None
     if (fee := getattr(source, "buyer_fee", None)) is not None and hasattr(target, "buyer_fee"):
         target.buyer_fee = fee                      # the site's own buyer fee (app/platforms/fees.py)
+    if hasattr(target, "paylivery"):                # willhaben PayLivery: the list's flag or the ad page's
+        pl = getattr(source, "paylivery", None)
+        if pl is None and getattr(source, "platform", None) == "willhaben" and hasattr(source, "paylivery_enabled"):
+            pl = bool(source.paylivery_enabled or getattr(source, "shipping_options", None))
+        if pl is not None:
+            target.paylivery = pl
 
 
 def label(price: float | None, kind: str | None, currency: str = "€") -> str:

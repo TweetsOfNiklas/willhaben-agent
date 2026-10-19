@@ -812,7 +812,11 @@ class HitView:
             q = q.where(or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None)))
         elif self.ship == "protected":       # shipping paid through the site, with its buyer protection
             ships = or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None))
-            q = q.where(or_(and_(col(Hit.platform).in_(_shipping_info.BUYER_PROTECTION_SITES), ships),
+            others = [p for p in _shipping_info.BUYER_PROTECTION_SITES if p not in ("willhaben", "vinted")]
+            # willhaben: PayLivery on; a hit from before the flag counts when it has PayLivery's shipping price
+            paylivery = or_(Hit.paylivery == True, and_(col(Hit.paylivery).is_(None), col(Hit.shipping_price).is_not(None)))  # noqa: E712
+            q = q.where(or_(and_(Hit.platform == "willhaben", paylivery),
+                            and_(col(Hit.platform).in_(others), ships),
                             and_(Hit.platform == "vinted", or_(col(Hit.shipping).is_(None), Hit.shipping != "pickup"))))
         elif self.ship == "pickup":
             q = q.where(Hit.shipping == "pickup")

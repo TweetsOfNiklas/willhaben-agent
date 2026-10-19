@@ -103,6 +103,7 @@ def parse_summary(ad: dict[str, Any]) -> AdSummary:
         item_condition_label=item_condition_label,
         # PayLivery on: the seller ships (its price is on the ad page only); off says nothing (shipping by arrangement)
         shipping="ship" if (_first(a, "p2penabled") or "").lower() == "true" else None,
+        paylivery={"true": True, "false": False}.get((_first(a, "p2penabled") or "").lower()),
         **_coordinates(_first(a, "COORDINATES")),
     )
 
