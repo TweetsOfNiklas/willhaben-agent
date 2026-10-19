@@ -1,0 +1,26 @@
+{# Settings → All platforms: the defaults every site uses unless its own page sets its own value (main.settings_all_platforms) #}
+{% import "_ui.html" as ui %}
+{% set d = platform_defaults() %}
+<form method="post" action="/settings/platforms" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <p class="text-[12.5px] text-muted">{{ _("These values apply to every platform – willhaben too – unless its own page sets a value of its own.") }}</p>
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <label id="s-all-budget" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none)") }}</span>
+      <input name="requests_per_hour" value="{{ d.budget }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
+    <label id="s-all-gap" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minimum gap between requests (s)") }}</span>
+      <input name="gap" value="{{ '%g'|format(d.gap) if d.gap is not none else '' }}" placeholder="{{ _('each site its own pace') }}" inputmode="decimal" class="input w-full min-w-0 bg-base-200"></label>
+  </div>
+  <small class="text-[12.5px] text-muted">{{ _("When a site's budget is used up, its searches wait until the next hour; product search and price checks count too. Without a gap here each site keeps its built-in pace (slower where a bot manager watches, e.g. Vinted and eBay).") }}</small>
+  <div><button class="btn btn-primary">{{ _("Save") }}</button></div>
+</form>
+<section class="overflow-hidden rounded-box border border-base-300 bg-base-100">
+  <header class="border-b border-base-300 px-5 py-3 font-semibold">{{ _("What each platform uses") }}</header>
+  <table class="table table-sm">
+    <thead><tr><th>{{ _("Platform") }}</th><th class="text-right">{{ _("Budget / h") }}</th><th class="text-right">{{ _("Gap (s)") }}</th><th></th></tr></thead>
+    <tbody>{% for r in d.sites %}<tr>
+      <td><a class="link link-primary inline-flex items-center gap-1.5 no-underline" href="/settings/{{ r.id }}">{{ ui.icon('site-' ~ r.id, 14) }}{{ r.name }}</a></td>
+      <td class="text-right tabular-nums">{{ r.budget }}{% if not r.own_budget %} <span class="text-[11.5px] text-muted">({{ _("default") }})</span>{% endif %}</td>
+      <td class="text-right tabular-nums">{{ '%g'|format(r.gap) }}{% if not r.own_gap %} <span class="text-[11.5px] text-muted">({{ _("default") if d.gap is not none else _("built-in") }})</span>{% endif %}</td>
+      <td class="text-right">{% if not r.enabled %}<small class="text-muted">{{ _("off") }}</small>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table>
+</section>

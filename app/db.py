@@ -742,15 +742,17 @@ def current_ad(db: Session, ad_id: str) -> MyAd | None:
 
 
 def requests_per_hour() -> int:
-    """The hourly willhaben request budget: set in Settings → willhaben, else REQUESTS_PER_HOUR from .env (0 = none)."""
+    """The default hourly request budget of every platform (Settings → All platforms; before it was willhaben's, the
+    others followed it), else REQUESTS_PER_HOUR from .env (0 = none). A platform's own budget wins
+    (platform_per_hour)."""
     raw = get_setting("requests_per_hour")
     return int(raw) if raw.isdigit() else get_settings().requests_per_hour
 
 
 def platform_per_hour(platform: str) -> int:
-    """The hourly request budget of a platform: its own (platform_own_per_hour), else willhaben's, so every site has
-    the same budget until one is set apart."""
-    own = None if platform == "willhaben" else platform_own_per_hour(platform)
+    """The hourly request budget of a platform, willhaben included: its own (platform_own_per_hour), else the default
+    of all platforms (requests_per_hour)."""
+    own = platform_own_per_hour(platform)
     return requests_per_hour() if own is None else own
 
 
@@ -760,7 +762,7 @@ def platform_own_per_hour(platform: str) -> int | None:
     raw = get_setting(f"platform_{platform}_per_hour")
     if raw.isdigit():
         return int(raw)
-    if raw == "-":
+    if raw == "-" or platform == "willhaben":
         return None
     own = getattr(get_settings(), f"platform_{platform}_per_hour", None)
     return None if own is None else int(own)
@@ -780,14 +782,34 @@ def _follow_willhaben_budget() -> None:
     set_setting("site_budgets_follow_wh", "1")
 
 
-def platform_min_gap_s(platform: str) -> float:
-    if platform == "willhaben":
-        return get_settings().request_min_gap_s
-    raw = get_setting(f"platform_{platform}_min_gap_s").strip()
+def default_min_gap_s() -> float | None:
+    """The minimum gap between two requests to one site for every platform without its own (Settings → All
+    platforms); None: each site keeps its built-in pace (default_site_gap_s)."""
     try:
-        return float(raw) if raw else float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+        raw = get_setting("platforms_min_gap_s").strip().replace(",", ".")
+        return float(raw) if raw else None
     except ValueError:
-        return float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+        return None
+
+
+def default_site_gap_s(platform: str) -> float:
+    """A site's built-in pace (.env / config: slower where a bot manager watches, e.g. Vinted, eBay)."""
+    if platform == "willhaben":
+        return float(get_settings().request_min_gap_s)
+    return float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+
+
+def platform_min_gap_s(platform: str) -> float:
+    """The gap between two requests to a site: its own (Settings → the site), else the default of all platforms,
+    else its built-in pace."""
+    raw = get_setting(f"platform_{platform}_min_gap_s").strip().replace(",", ".")
+    try:
+        if raw:
+            return float(raw)
+    except ValueError:
+        pass
+    default = default_min_gap_s()
+    return default if default is not None else default_site_gap_s(platform)
 
 
 def get_setting(key: str) -> str:

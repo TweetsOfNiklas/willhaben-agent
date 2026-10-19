@@ -44,10 +44,9 @@ def willhaben_limiter() -> RateLimiter:
     """The one limiter for every willhaben request, anonymous or via the logged-in browser (same home IP)."""
     global _limiter
     if _limiter is None:
-        s = get_settings()
-        from app.db import requests_per_hour   # the budget may be changed in Settings
+        from app.db import platform_min_gap_s, platform_per_hour   # changed in Settings (own or all platforms)
 
-        _limiter = RateLimiter(s.request_min_gap_s, requests_per_hour(), name="willhaben")
+        _limiter = RateLimiter(platform_min_gap_s("willhaben"), platform_per_hour("willhaben"), name="willhaben")
     return _limiter
 
 

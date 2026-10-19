@@ -231,9 +231,9 @@ def test_settings_platforms_page_and_save(client):
     assert [nav.index(x) for x in order] == sorted(nav.index(x) for x in order)
     assert "Buying · willhaben" not in page and "Platforms · willhaben" not in client.get("/settings/paylivery").text
     assert '<div class="text-xs font-semibold tracking-wide text-muted uppercase mb-0.5">Buying</div><h2>PayLivery</h2>' in client.get("/settings/paylivery").text
-    assert 'href="/settings/platforms"' not in page and "<h2>willhaben</h2>" in page
-    r = client.get("/settings/platforms", follow_redirects=False)            # the former page of all sites
-    assert r.status_code == 303 and r.headers["location"] == "/settings/kleinanzeigen"
+    assert 'href="/settings/platforms"' in page and "<h2>willhaben</h2>" in page   # All platforms: the defaults
+    allp = client.get("/settings/platforms").text
+    assert 'action="/settings/platforms"' in allp and 'name="requests_per_hour"' in allp and "What each platform uses" in allp
     page = client.get("/settings/kleinanzeigen").text
     assert 'action="/settings/platform/kleinanzeigen"' in page and 'name="enabled"' in page and 'name="auth"' in page
     assert 'name="has_product_search"' not in page                     # willhaben's form is on its own page
@@ -257,8 +257,8 @@ def test_willhaben_settings_hold_its_product_search_switch(client):
 
     page = client.get("/settings/willhaben").text
     assert 'name="product_search"' in page and 'name="has_product_search"' in page
-    client.post("/settings/willhaben", data={"requests_per_hour": "50", "has_product_search": "1"}, follow_redirects=False)
-    assert get_setting("platform_willhaben_product_search") == "0" and get_setting("requests_per_hour") == "50"
+    client.post("/settings/willhaben", data={"budget": "50", "has_product_search": "1"}, follow_redirects=False)
+    assert get_setting("platform_willhaben_product_search") == "0" and get_setting("platform_willhaben_per_hour") == "50"
     client.post("/settings/willhaben", data={"requests_per_hour": "60", "next": "/agents"}, follow_redirects=False)
     assert get_setting("platform_willhaben_product_search") == "0"          # the usage popover's form leaves it alone
     client.post("/settings/willhaben", data={"requests_per_hour": "60", "has_product_search": "1", "product_search": "on"})
