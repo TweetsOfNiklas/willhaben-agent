@@ -130,3 +130,36 @@ def test_the_paylivery_flag_comes_from_the_list_and_the_ad_page():
     assert hit.paylivery is True
     apply_shipping(hit, SimpleNamespace(shipping_price=None, shipping=None))      # says nothing: kept
     assert hit.paylivery is True
+
+
+def test_several_agents_and_sites_at_once():
+    """The agent and site filters take several (ticked boxes send repeated fields, links a comma list); all ticked is
+    no filter; "Clear" on Filtered out clears exactly what the page shows."""
+    from app.main import app
+
+    with session() as db:
+        agents = [SearchAgent(name=n, source_url=n, webapi_url=n) for n in ("A", "B", "C")]
+        db.add_all(agents)
+        db.commit()
+        for a in agents:
+            db.refresh(a)
+        ids = [a.id for a in agents]
+        for i, (aid, site) in enumerate([(ids[0], "willhaben"), (ids[1], "willhaben"), (ids[2], "willhaben"),
+                                         (ids[0], "vinted")]):
+            db.add(Hit(agent_id=aid, platform=site, ad_id=str(i + 1), heading=f"Ad {i + 1}", url=f"https://x/{i}",
+                       price=10.0, state="filtered"))
+        db.commit()
+    a, b, c = ids
+    with TestClient(app) as cl:
+        two = cl.get(f"/hits?state=filtered&agent_id={a}&agent_id={b}").text
+        assert set(_order(two)) == {"1", "2", "4"}
+        assert f'name="agent_id" value="{a}" checked' in two and f'name="agent_id" value="{c}" checked' not in two
+        assert "2 search agents" in two and f"agent_id={a}%2C{b}" in two              # tabs keep both
+        assert set(_order(cl.get(f"/hits?state=filtered&agent_id={a},{b}&platform=vinted").text)) == {"4"}
+        every = cl.get(f"/hits?state=filtered&agent_id={a}&agent_id={b}&agent_id={c}").text
+        assert set(_order(every)) == {"1", "2", "3", "4"} and "All search agents" in every
+        assert "data-multi-all" in every and "data-multi-none" in every
+        cl.post("/hits/clear-filtered", data={"agent_id": f"{a},{b}", "platform": "willhaben"})
+    with session() as db:
+        states = {h.ad_id: h.state for h in db.exec(select(Hit))}
+    assert states == {"1": "cleared", "2": "cleared", "3": "filtered", "4": "filtered"}   # only what was shown

@@ -773,26 +773,43 @@ _LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expens
 _SCREEN_LEVEL = {"great": "bargain", "good": "cheap", "fair": "fair", "overpriced": "expensive"}
 
 
+def _many(value: Any) -> list[str]:
+    """A multi-select's values: repeated fields (["1", "2"]), one comma list ("1,2") or a single value."""
+    items = value if isinstance(value, (list, tuple, set)) else [value]
+    return [p.strip() for v in items if v is not None for p in str(v).split(",") if p.strip()]
+
+
 @dataclass
 class HitView:
-    """What the hits page shows: tab, agent, site and the sort and filters; also what its bulk buttons act on."""
+    """What the hits page shows: tab, agents, sites (several of each, none = all) and the sort and filters; also what
+    its bulk buttons act on."""
     state: str = "new"
-    agent_id: int | None = None
-    platform: str = ""
+    agent_ids: tuple[int, ...] = ()
+    platforms: tuple[str, ...] = ()
     sort: str = "newest"
     ship: str = ""
     level: str = ""
 
     @classmethod
-    def of(cls, state: str = "new", agent_id: Any = None, platform: str = "", sort: str = "", ship: str = "",
+    def of(cls, state: str = "new", agent_id: Any = None, platform: Any = "", sort: str = "", ship: str = "",
            level: str = "") -> "HitView":
-        aid = agent_id if isinstance(agent_id, int) else (int(agent_id) if str(agent_id or "").strip().isdigit() else None)
-        return cls(state=state or "new", agent_id=aid or None, platform=(platform or "").strip().lower(),
+        ids = tuple(dict.fromkeys(int(x) for x in _many(agent_id) if x.isdigit() and int(x)))
+        sites = tuple(dict.fromkeys(x.lower() for x in _many(platform)))
+        return cls(state=state or "new", agent_ids=ids, platforms=sites,
                    sort=sort if sort in HIT_SORTS else "newest", ship=ship if ship in HIT_SHIP else "",
                    level=level if level in HIT_LEVELS else "")
 
+    @property
+    def agent_id(self) -> int | None:
+        """The one agent shown (its name in the heading, no agent badge on the cards), None for several or all."""
+        return self.agent_ids[0] if len(self.agent_ids) == 1 else None
+
+    @property
+    def platform(self) -> str:
+        return self.platforms[0] if len(self.platforms) == 1 else ""
+
     def params(self, **change: Any) -> dict[str, Any]:
-        d = {"state": self.state, "agent_id": self.agent_id, "platform": self.platform,
+        d = {"state": self.state, "agent_id": ",".join(map(str, self.agent_ids)), "platform": ",".join(self.platforms),
              "sort": "" if self.sort == "newest" else self.sort, "ship": self.ship, "level": self.level, **change}
         return {k: v for k, v in d.items() if v}
 
@@ -805,10 +822,10 @@ class HitView:
         return bool(self.ship or self.level)
 
     def where(self, q, *, state: bool = True):
-        if self.agent_id:
-            q = q.where(Hit.agent_id == self.agent_id)
-        if self.platform:
-            q = q.where(Hit.platform == self.platform)
+        if self.agent_ids:
+            q = q.where(col(Hit.agent_id).in_(self.agent_ids))
+        if self.platforms:
+            q = q.where(col(Hit.platform).in_(self.platforms))
         # Kleinanzeigen ads with "VB" (price negotiable: "VB" alone or "120 € VB") are not shown
         q = q.where(or_(Hit.platform != "kleinanzeigen", ~func.coalesce(Hit.price_display, "").like("%VB%")))
         if self.ship == "ship":
@@ -867,27 +884,33 @@ def hit_label(h: Hit, zones: dict[str, Any] | None = None) -> str | None:
 
 
 @app.get("/hits", response_class=HTMLResponse)
-async def hits_page(request: Request, agent_id: str = "", state: str = "new", platform: str = "", sort: str = "",
-                    ship: str = "", level: str = ""):
-    view = HitView.of(state, agent_id, platform, sort, ship, level)   # "All search agents" sends an empty agent_id
-    aid, platform = view.agent_id, view.platform
+async def hits_page(request: Request, state: str = "new", sort: str = "", ship: str = "", level: str = ""):
+    """agent_id and platform: several (repeated fields of the multi-selects, or comma lists in links); all ticked or
+    none = no filter."""
+    qp = request.query_params
+    view = HitView.of(state, qp.getlist("agent_id"), qp.getlist("platform"), sort, ship, level)
     with session() as db:
-        hits = view.hits(db)
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
-        counts_q = view.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
-        state_counts = dict(db.exec(counts_q).all())
-        state_counts.pop(search_agents_svc.CLEARED, None)
         used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
         # the sites to filter by: those the agents search and those hits came from (an agent's sites may change)
         shown_q = select(Hit.platform).where(Hit.state != search_agents_svc.CLEARED).distinct()
-        if aid:
-            shown_q = shown_q.where(Hit.agent_id == aid)
+        if view.agent_ids:
+            shown_q = shown_q.where(col(Hit.agent_id).in_(view.agent_ids))
         with_hits = {p for p in db.exec(shown_q).all() if p}
+        filter_ids = sorted(with_hits | set(used) | set(view.platforms), key=_platform_name)
+        # every option ticked is no filter (a clean URL, and a new agent or site shows up too)
+        if view.agent_ids and set(agents) <= set(view.agent_ids):
+            view.agent_ids = ()
+        if view.platforms and set(filter_ids) <= set(view.platforms):
+            view.platforms = ()
+        hits = view.hits(db)
+        counts_q = view.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
+        state_counts = dict(db.exec(counts_q).all())
+        state_counts.pop(search_agents_svc.CLEARED, None)
     state_counts["all"] = sum(state_counts.values())
-    filter_ids = sorted(with_hits | set(used) | ({platform} if platform else set()), key=_platform_name)
-    return render(request, "hits.html", hits=hits, agents=agents, agent_id=aid, state=view.state,
-                  state_counts=state_counts, platform=platform, platform_ids=used if len(used) > 1 else [],
-                  filter_platform_ids=filter_ids if len(filter_ids) > 1 or platform else [], view=view,
+    return render(request, "hits.html", hits=hits, agents=agents, agent_id=view.agent_id, state=view.state,
+                  state_counts=state_counts, platform=view.platform, platform_ids=used if len(used) > 1 else [],
+                  filter_platform_ids=filter_ids if len(filter_ids) > 1 or view.platforms else [], view=view,
                   watch_saved=search_agents_svc.watch_saved_on(),
                   keep_days=search_agents_svc.keep_days())
 
@@ -1054,7 +1077,8 @@ def _can_sync(h: Hit) -> bool:
 
 def _view_form(form: Any, state: str | None = None) -> HitView:
     """The hits page's view as its forms send it (hidden fields of the same names)."""
-    return HitView.of(state or form.get("state") or "new", form.get("agent_id"), form.get("platform") or "",
+    return HitView.of(state or form.get("state") or "new", form.getlist("agent_id") if hasattr(form, "getlist")
+                      else form.get("agent_id"), form.getlist("platform") if hasattr(form, "getlist") else form.get("platform"),
                       form.get("sort") or "", form.get("ship") or "", form.get("level") or "")
 
 
@@ -1062,12 +1086,9 @@ def _view_form(form: Any, state: str | None = None) -> HitView:
 async def hits_clear_filtered(request: Request):
     """Hits → Filtered out → Clear: those the page shows (agent, site, filters), or all."""
     view = _view_form(await request.form(), "filtered")
-    if view.filtered:
-        with session() as db:
-            ids = [h.id for h in view.hits(db, limit=100000)]
-        search_agents_svc.clear_hits(("filtered",), ids=ids)
-    else:
-        search_agents_svc.clear_hits(("filtered",), view.agent_id, platform=view.platform or None)
+    with session() as db:                   # exactly what the page shows (several agents or sites, the filters)
+        ids = [h.id for h in view.hits(db, limit=100000)]
+    search_agents_svc.clear_hits(("filtered",), ids=ids)
     return back(view.url())
 
 

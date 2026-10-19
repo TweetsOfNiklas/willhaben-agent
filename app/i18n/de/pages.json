@@ -183,5 +183,8 @@
  "Shipping with buyer protection": "Versand mit Käuferschutz",
  "Newest hits first": "Neueste Treffer zuerst",
  "Oldest hits first": "Älteste Treffer zuerst",
- "Recently published first": "Zuletzt veröffentlicht zuerst"
+ "Recently published first": "Zuletzt veröffentlicht zuerst",
+ "None": "Keine",
+ "{n} search agents": "{n} Suchagenten",
+ "{n} platforms": "{n} Plattformen"
 }

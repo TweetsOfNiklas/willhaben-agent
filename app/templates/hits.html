@@ -1,6 +1,19 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
 {% block content %}
+{# A filter with several choices (search agents, sites): a dropdown of checkboxes, "All" and "None" on top. Every one
+   ticked (or none sent) = no filter; with none ticked nothing is sent until one is ticked again (the script below). #}
+{% macro multi(name, values, labels, chosen, all_label, n_label, aria) %}
+{% set picked = chosen|list %}{% set on = (picked if picked else values)|list %}
+<details class="relative max-sm:w-full" data-multi="{{ name }}">
+  <summary class="select select-sm w-auto min-w-[150px] max-w-[260px] cursor-pointer list-none bg-base-100 max-sm:w-full max-sm:max-w-none" aria-label="{{ aria }}">
+    <span class="truncate">{% if not picked %}{{ all_label }}{% elif picked|length == 1 %}{% for v in values %}{% if v == picked[0] %}{{ labels[loop.index0] }}{% endif %}{% endfor %}{% else %}{{ n_label.replace('{n}', picked|length|string) }}{% endif %}</span></summary>
+  <div class="absolute top-full left-0 z-30 mt-1 flex max-h-80 w-72 max-w-[calc(100vw-2rem)] flex-col gap-0.5 overflow-auto rounded-box border border-base-300 bg-base-100 p-2 shadow-lg">
+    <div class="mb-1 flex gap-1.5 border-b border-base-300 pb-1.5"><button type="button" class="btn btn-xs" data-multi-all>{{ _("All") }}</button><button type="button" class="btn btn-xs" data-multi-none>{{ _("None") }}</button></div>
+    {% for v in values %}<label class="flex cursor-pointer items-center gap-2 rounded-field px-1.5 py-1 text-[13px] hover:bg-hover"><input type="checkbox" name="{{ name }}" value="{{ v }}" {% if v in on %}checked{% endif %} class="checkbox checkbox-primary checkbox-xs"><span class="min-w-0 truncate">{{ labels[loop.index0] }}</span></label>{% endfor %}
+  </div>
+</details>
+{% endmacro %}
 {% macro view_fields(skip=()) %}{% for k, v in view.params().items() if k not in skip %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endmacro %}
 {# everything below swaps as one piece (#hits-page): the tabs and filters (GET) and the forms (POST, redirect back)
    go through htmx with the page's URL kept in the address bar; without JavaScript they still reload the page #}
@@ -16,6 +29,33 @@
   {% if state == 'filtered' and hits %}<form method="post" action="/hits/clear-filtered" class="m-0 shrink-0" hx-boost="true" {{ swap|safe }} hx-confirm="{{ (_('Clear these {n} filtered hits?', n=state_counts.get('filtered', 0)) if not agent_id else _('Clear the filtered hits of this agent?')) }}">{{ view_fields() }}<button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Clear') }}" aria-label="{{ _('Clear') }}">{{ ui.icon('trash', 15, 2, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Clear") }}</span></button></form>{% endif %}
   {% if state == 'new' and hits %}<form method="post" action="/hits/mark-seen" class="m-0 shrink-0" hx-boost="true" {{ swap|safe }}>{{ view_fields() }}<button class="btn max-sm:btn-sm max-sm:btn-square" title="{{ _('Mark all as seen') }}" aria-label="{{ _('Mark all as seen') }}">{{ ui.icon('check', 15, 2.5, 'sm:hidden') }}<span class="max-sm:hidden">{{ _("Mark all as seen") }}</span></button></form>{% endif %}
 </div>
+<script>(() => {
+  // multi-selects (macro multi): All / None, nothing sent while none is ticked, the open dropdown stays open when the
+  // filters' answer swaps the page in (each tick filters at once), a click elsewhere closes it
+  if (window.__hitsMulti) return;
+  window.__hitsMulti = true;
+  let open = null;
+  const send = box => box.dispatchEvent(new Event('change', {bubbles: true}));
+  document.addEventListener('click', e => {
+    const all = e.target.closest('[data-multi-all], [data-multi-none]');
+    if (all) {
+      const d = all.closest('[data-multi]'), on = all.matches('[data-multi-all]');
+      const boxes = [...d.querySelectorAll('input[type=checkbox]')];
+      boxes.forEach(b => { b.checked = on; });
+      if (on && boxes.length) send(boxes[0]);
+      return;
+    }
+    document.querySelectorAll('details[data-multi][open]').forEach(d => { if (!d.contains(e.target)) { d.open = false; open = null; } });
+  });
+  document.addEventListener('change', e => {
+    const d = e.target.closest && e.target.closest('details[data-multi]');
+    if (!d) return;
+    open = d.dataset.multi;
+    if (!d.querySelector('input[type=checkbox]:checked')) e.stopPropagation();   // none ticked: wait for a pick
+  }, true);
+  document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details[data-multi]')) open = e.target.open ? e.target.dataset.multi : (open === e.target.dataset.multi ? null : open); }, true);
+  document.addEventListener('htmx:afterSettle', () => { if (open) { const d = document.querySelector(`details[data-multi="${open}"]`); if (d) d.open = true; } });
+})();</script>
 <form method="get" action="/hits" class="mb-3.5 flex flex-wrap items-center gap-2.5" hx-get="/hits" hx-trigger="change" {{ swap|safe }}>
   {% set seg_items = [] %}
   {% set tabs = [('new', _('New'))] + ([('pending', _('Being checked'))] if state == 'pending' or state_counts.get('pending') else []) + [('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
@@ -24,14 +64,10 @@
   {% endfor %}
   <div hx-boost="true" {{ swap|safe }} class="contents">{{ ui.seg(seg_items, 'max-sm:w-full') }}</div>
   {{ view_fields(('agent_id', 'platform', 'sort', 'ship', 'level')) }}
-  <select name="agent_id" class="select select-sm w-auto bg-base-100 max-sm:w-full">
-    <option value="">{{ _("All search agents") }}</option>
-    {% for a in agents.values() %}<option value="{{ a.id }}" {% if a.id == agent_id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
-  </select>
-  {% if filter_platform_ids %}<select name="platform" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Platform') }}">
-    <option value="">{{ _("All platforms") }}</option>
-    {% for pid in filter_platform_ids %}<option value="{{ pid }}" {% if pid == platform %}selected{% endif %}>{{ platform_name(pid) }}</option>{% endfor %}
-  </select>{% endif %}
+  {{ multi('agent_id', agents.values()|map(attribute='id')|list, agents.values()|map(attribute='name')|list, view.agent_ids,
+           _("All search agents"), _("{n} search agents"), _("Search agents")) }}
+  {% if filter_platform_ids %}{% set plabels = [] %}{% for pid in filter_platform_ids %}{% set _x = plabels.append(platform_name(pid)) %}{% endfor %}
+  {{ multi('platform', filter_platform_ids, plabels, view.platforms, _("All platforms"), _("{n} platforms"), _("Platform")) }}{% endif %}
   <select name="sort" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Sort') }}">
     {% for v, label in [('newest', _('Newest hits first')), ('oldest', _('Oldest hits first')), ('published', _('Recently published first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home_point() else []) %}<option value="{{ v }}" {% if v == view.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
