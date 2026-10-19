@@ -163,3 +163,26 @@ def test_several_agents_and_sites_at_once():
     with session() as db:
         states = {h.ad_id: h.state for h in db.exec(select(Hit))}
     assert states == {"1": "cleared", "2": "cleared", "3": "filtered", "4": "filtered"}   # only what was shown
+
+
+def test_the_list_loads_more_when_scrolled_to_its_end():
+    from datetime import datetime, timedelta, timezone
+
+    from app.main import HIT_PAGE, app
+
+    t0 = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    with session() as db:
+        a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
+        db.add(a)
+        db.commit()
+        for i in range(HIT_PAGE + 5):
+            db.add(Hit(agent_id=a.id, platform="willhaben", ad_id=str(i), heading=f"Rad {i}", url=f"https://x/{i}",
+                       price=10.0, first_seen_at=t0 + timedelta(minutes=i)))
+        db.commit()
+    with TestClient(app) as cl:
+        first = cl.get("/hits").text
+        assert first.count('data-hit="') // 2 == HIT_PAGE and 'id="hits-more"' in first
+        assert re.search(rf'hx-get="/hits\?[^"]*offset={HIT_PAGE}"', first) and 'hx-trigger="revealed"' in first
+        assert f">Rad {HIT_PAGE + 4}<" in first and ">Rad 4<" not in first           # newest first
+        rest = cl.get(f"/hits?offset={HIT_PAGE}").text
+        assert rest.count('data-hit="') // 2 == 5 and 'id="hits-more"' not in rest and ">Rad 0<" in rest

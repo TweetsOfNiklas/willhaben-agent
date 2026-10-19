@@ -109,7 +109,7 @@
   <button name="action" value="clear" class="btn btn-sm btn-ghost text-error" onclick="return confirm({{ _('Clear the selected hits? Saved ones are kept.')|tojson|forceescape }})">{{ _("Clear") }}</button>
   <span class="ml-auto flex gap-1.5"><button type="button" class="btn btn-sm btn-ghost" @click="all(true)">{{ _("Select all") }}</button><button type="button" class="btn btn-sm btn-ghost" @click="all(false)">{{ _("Cancel") }}</button></span>
 </form>
-<div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
+<div id="hits-grid" class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3.5">
 {% set home = home_point() %}{# distance from home on each card (geo.hit_km: no request) #}
 {% set pz = price_zone_config() %}{# the zone label of a hit with a Geizhals new price (deals.hit_level), read once #}
 {% set screen_levels = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'} %}{# Claude's verdict in the zones' colours #}
@@ -169,6 +169,10 @@
     </div>
   </article>
 {% endfor %}
+{# the next batch when this marker scrolls into view: its cards and the next marker take its place #}
+{% if more %}<div id="hits-more" class="col-span-full flex items-center justify-center gap-2 py-5 text-[13px] text-muted"
+     hx-get="{{ view.url(offset=offset + page) }}" hx-trigger="revealed" hx-select="#hits-grid > article, #hits-more"
+     hx-swap="outerHTML" hx-push-url="false"><span class="loading loading-spinner loading-sm"></span>{{ _("Loading more hits …") }}</div>{% endif %}
 </div>
 </div>
 {% else %}

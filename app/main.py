@@ -766,6 +766,7 @@ async def agents_delete(agent_id: int):
     return back("/agents")
 
 
+HIT_PAGE = 200      # hits per batch; scrolling to the end of the list loads the next one
 HIT_SORTS = ("newest", "oldest", "published", "price", "price_desc", "total", "distance")
 HIT_SHIP = ("ship", "protected", "pickup")
 HIT_LEVELS = ("bargain", "cheap", "fair")       # "this or better"
@@ -844,7 +845,8 @@ class HitView:
             q = q.where(Hit.state == self.state) if self.state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
         return q
 
-    def hits(self, db, limit: int = 200) -> list[Hit]:
+    def hits(self, db, limit: int = 200, offset: int = 0) -> list[Hit]:
+        """The page's hits in its order; `offset`: the next batch when the list is scrolled down."""
         q = self.where(select(Hit))
         if self.sort == "price":
             q = q.order_by(col(Hit.price).asc().nulls_last(), col(Hit.id).desc())
@@ -860,8 +862,8 @@ class HitView:
             q = q.order_by(col(Hit.first_seen_at).desc(), col(Hit.id).desc())
         radius = geo.pickup_radius() if self.state not in ("filtered", "all") else None
         if not self.level and self.sort != "distance" and not radius:
-            return list(db.exec(q.limit(limit)))
-        rows = list(db.exec(q.limit(max(limit * 10, 2000))))
+            return list(db.exec(q.offset(offset).limit(limit)))
+        rows = list(db.exec(q.limit(max((offset + limit) * 10, 2000))))
         if radius:                        # Settings → Shipping & pickup: far pickup-only ads are not shown
             home = geo.home_cached()
             rows = [h for h in rows if not geo.too_far(h, radius, home)]
@@ -872,7 +874,7 @@ class HitView:
             home = geo.home_cached()
             dist = {h.id: geo.hit_km(h, home) if home else None for h in rows}
             rows.sort(key=lambda h: (dist[h.id] is None, dist[h.id] or 0))
-        return rows[:limit]
+        return rows[offset:offset + limit]
 
 
 def hit_label(h: Hit, zones: dict[str, Any] | None = None) -> str | None:
@@ -884,7 +886,8 @@ def hit_label(h: Hit, zones: dict[str, Any] | None = None) -> str | None:
 
 
 @app.get("/hits", response_class=HTMLResponse)
-async def hits_page(request: Request, state: str = "new", sort: str = "", ship: str = "", level: str = ""):
+async def hits_page(request: Request, state: str = "new", sort: str = "", ship: str = "", level: str = "",
+                    offset: int = 0):
     """agent_id and platform: several (repeated fields of the multi-selects, or comma lists in links); all ticked or
     none = no filter."""
     qp = request.query_params
@@ -903,7 +906,8 @@ async def hits_page(request: Request, state: str = "new", sort: str = "", ship: 
             view.agent_ids = ()
         if view.platforms and set(filter_ids) <= set(view.platforms):
             view.platforms = ()
-        hits = view.hits(db)
+        offset = max(offset, 0)
+        hits = view.hits(db, HIT_PAGE, offset)
         counts_q = view.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
         state_counts = dict(db.exec(counts_q).all())
         state_counts.pop(search_agents_svc.CLEARED, None)
@@ -911,6 +915,7 @@ async def hits_page(request: Request, state: str = "new", sort: str = "", ship: 
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=view.agent_id, state=view.state,
                   state_counts=state_counts, platform=view.platform, platform_ids=used if len(used) > 1 else [],
                   filter_platform_ids=filter_ids if len(filter_ids) > 1 or view.platforms else [], view=view,
+                  offset=offset, page=HIT_PAGE, more=len(hits) == HIT_PAGE,
                   watch_saved=search_agents_svc.watch_saved_on(),
                   keep_days=search_agents_svc.keep_days())
 
