@@ -103,5 +103,10 @@
  "Queued: prepare the parcel": "Eingereiht: Paket vorbereiten",
  "+ {amount} buyer protection": "+ {amount} Käuferschutz",
  "Buyer protection fee": "Käuferschutzgebühr",
- "willhaben shows the exact fee when you pay with PayLivery; it can vary by category.": "Die genaue Gebühr zeigt willhaben beim Bezahlen mit PayLivery; sie kann je nach Kategorie abweichen."
+ "willhaben shows the exact fee when you pay with PayLivery; it can vary by category.": "Die genaue Gebühr zeigt willhaben beim Bezahlen mit PayLivery; sie kann je nach Kategorie abweichen.",
+ "Total with fee from": "Gesamt mit Gebühr ab",
+ "as willhaben shows it in the PayLivery window": "wie willhaben sie im PayLivery-Fenster zeigt",
+ "not loaded": "nicht geladen",
+ "Loading the buyer protection fee from willhaben …": "Käuferschutzgebühr wird bei willhaben abgefragt …",
+ "willhaben did not show the fee": "willhaben hat die Gebühr nicht angezeigt"
 }

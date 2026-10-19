@@ -954,6 +954,26 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
                                                                    "ref": platform.ref(ad_id)})
 
 
+@app.get("/wh-fee/{ad_id}", response_class=HTMLResponse)
+async def wh_paylivery_fee(request: Request, ad_id: str, price: float | None = None, sp: float = 0.0):
+    """The ad viewer's price breakdown: willhaben's exact PayLivery fee, read from the chat's PayLivery window in a
+    hidden read-only tab (app/willhaben/paylivery_fee.py); `sp` the cheapest shipping for the total."""
+    from app.willhaben import paylivery_fee
+    if not ad_id.isdigit():
+        raise HTTPException(400)
+    fee = error = None
+    try:
+        fee = (await paylivery_fee.fetch(get_session(), ad_id, price))["fee"]
+        if fee is None:
+            error = t("willhaben did not show the fee")
+    except (paylivery_fee.FeeError, NotLoggedIn, SessionUnavailable, RuntimeError) as e:
+        error = str(e)
+    except Exception as e:  # noqa: BLE001 - the breakdown stays usable whatever the window does
+        log.warning("PayLivery fee for %s failed: %s", ad_id, e)
+        error = t("willhaben did not show the fee")
+    return templates.TemplateResponse(request, "_wh_fee.html", {"fee": fee, "error": error, "price": price, "sp": sp})
+
+
 @app.get("/hits/ad/{ad_id}", response_class=HTMLResponse)
 async def hit_ad_detail(request: Request, ad_id: str, hit: int | None = None):
     """A willhaben ad as a fragment for the in-dashboard viewer (other sites: /hits/ad/<platform>/<id>)."""

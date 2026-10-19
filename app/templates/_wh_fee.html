@@ -1,0 +1,9 @@
+{# willhaben's exact PayLivery fee in the ad viewer's price breakdown (grid cells; GET /wh-fee/<id>): the fee and the
+   total with it, or why it is not known (then the note that it comes on top) #}
+{% if fee is not none %}
+<span class="text-muted">{{ _("Buyer protection fee") }}</span><span class="text-right">{{ fee|eur }}</span>
+{% if price %}<span class="font-semibold">{{ _("Total with fee from") }}</span><span class="text-right font-semibold">{{ (price + sp + fee)|eur }}</span>{% endif %}
+<span class="col-span-2 text-[12px] text-muted">{{ _("as willhaben shows it in the PayLivery window") }}</span>
+{% else %}
+<span class="col-span-2 text-[12px] text-muted">{{ _("plus willhaben's buyer protection fee when paying with PayLivery") }}{% if error %} <span title="{{ error }}">({{ _("not loaded") }})</span>{% endif %}</span>
+{% endif %}

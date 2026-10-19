@@ -450,6 +450,74 @@ class BrowserSession:
         finally:
             await page.close()
 
+    async def read_hidden(self, url: str, wait_for: str, timeout_ms: int = 25000) -> dict[str, Any]:
+        """Open `url` in a short-lived tab of the logged-in browser and read it, strictly read-only: every request but
+        GET/HEAD/OPTIONS is blocked (nothing can be sent, offered or bought). Waits until the page text contains the
+        regex `wait_for` (or the timeout). Returns {"text", "found", "requests": [{method, url, status, blocked,
+        type}], "bodies": {url: JSON text of willhaben's data calls}}."""
+        import re as _re
+
+        self._require()
+        ui = self.ui_page
+        self._creating_internal = True
+        try:
+            page = await self.context.new_page()
+        finally:
+            self._creating_internal = False
+            self.ui_page = ui
+        reqs: list[dict[str, Any]] = []
+        bodies: dict[str, str] = {}
+
+        async def guard(route) -> None:
+            req = route.request
+            if req.method not in ("GET", "HEAD", "OPTIONS"):
+                reqs.append({"method": req.method, "url": req.url, "type": req.resource_type, "blocked": True})
+                await route.abort()
+                return
+            await route.continue_()
+
+        async def seen(resp) -> None:
+            req = resp.request
+            reqs.append({"method": req.method, "url": req.url, "type": req.resource_type, "status": resp.status})
+            if req.resource_type in ("fetch", "xhr") and "willhaben" in req.url and len(bodies) < 40:
+                try:
+                    bodies[req.url] = (await resp.text())[:200_000]
+                except Exception:  # noqa: BLE001 - redirects and aborted responses have no body
+                    pass
+
+        tasks: set[asyncio.Task] = set()
+
+        def on_response(resp) -> None:
+            task = asyncio.ensure_future(seen(resp))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+
+        await page.route("**/*", guard)
+        page.on("response", on_response)
+        text, found = "", False
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            deadline = time.monotonic() + timeout_ms / 1000
+            pattern = _re.compile(wait_for, _re.I)
+            while True:
+                try:
+                    text = await page.inner_text("body", timeout=2000)
+                except Exception:  # noqa: BLE001 - still loading
+                    text = ""
+                if pattern.search(text):
+                    found = True
+                    await asyncio.sleep(0.5)          # the amount may render a moment after the label
+                    text = await page.inner_text("body", timeout=2000)
+                    break
+                if time.monotonic() > deadline:
+                    break
+                await asyncio.sleep(0.5)
+        finally:
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await page.close()
+        return {"text": text, "found": found, "requests": reqs, "bodies": bodies}
+
     async def open_url(self, url: str) -> None:
         self._require()
         self.touch_ui()

@@ -191,7 +191,8 @@ def test_the_ad_viewer_breaks_the_price_down():
     box = frags[0].split("data-price-breakdown")[1].split("</div>")[0]
     assert "Shipping Post to a pickup point" in box and "€ 3,49" in box and "€ 5,70" in box
     assert "Buyer protection fee" not in box                   # willhaben's varies by category: never guessed
-    assert "Total from" in box and "€ 28,49" in box and "plus willhaben&#39;s buyer protection fee" in box
+    assert "Total from" in box and "€ 28,49" in box
+    assert 'hx-get="/wh-fee/1?price=25.0&amp;sp=3.49"' in frags[0]           # the exact fee, from the PayLivery window
     box = frags[1].split("data-price-breakdown")[1].split("</div>")[0]
     assert "Buyer protection fee" in box and "€ 1,70" in box and "€ 24,65" in box        # as Vinted states it
     box = frags[2].split("data-price-breakdown")[1].split("</div>")[0]

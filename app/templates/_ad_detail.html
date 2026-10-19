@@ -36,7 +36,12 @@
                                    d.paylivery_enabled is defined and (d.paylivery_enabled or opts)) %}
         {% if bf %}<span class="text-muted">{{ _("Buyer protection fee") }}</span><span class="text-right">{{ bf.amount|eur }}</span>{% endif %}
         <span class="border-t border-base-300 pt-0.5 font-semibold">{{ _("Total from") if (opts|map(attribute='home')|reject('none')|list + opts|map(attribute='point')|reject('none')|list)|length > 1 else _("Total") }}</span><span class="border-t border-base-300 pt-0.5 text-right font-semibold">{{ (d.price + sp + (bf.amount if bf else 0))|eur }}</span>
-        {% if not bf and d.paylivery_enabled is defined and (d.paylivery_enabled or opts) %}<span class="col-span-2 text-[12px] text-muted">{{ _("plus willhaben's buyer protection fee when paying with PayLivery") }}</span>{% endif %}
+        {% if not bf and d.paylivery_enabled is defined and (d.paylivery_enabled or opts) %}
+        {% set cheapest = (opts|map(attribute='point')|reject('none')|list + opts|map(attribute='home')|reject('none')|list + [sp])|min %}
+        {# willhaben's exact fee, read from the chat's PayLivery window (app/willhaben/paylivery_fee.py) #}
+        <div class="contents" hx-get="/wh-fee/{{ d.ad_id }}?price={{ d.price }}&amp;sp={{ cheapest }}" hx-trigger="load" hx-swap="outerHTML">
+          <span class="col-span-2 text-[12px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Loading the buyer protection fee from willhaben …") }}</span></div>
+        {% endif %}
       </div>
       {% endif %}
       <div class="mt-1.5 text-[13px] leading-normal text-muted">{% if d.location %}{{ d.location }}{% endif %}{% if d.published_at %} · {{ _("published {ago}", ago=d.published_at|ago) }}{% endif %}{% if d.first_published_at and d.published_at and d.first_published_at < d.published_at %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}{% if d.category_path %}<br>{{ d.category_path|join(' › ') }}{% endif %}{% if d.seller_name or d.is_private is not none %}<br>{{ d.seller_name or '' }}{% if d.is_private == false %} · {{ _("dealer") }}{% elif d.is_private %} · {{ _("private") }}{% endif %}{% endif %}</div>
