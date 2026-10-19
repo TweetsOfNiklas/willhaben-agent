@@ -2139,20 +2139,16 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 @app.post("/new-ad/{draft_id:int}")
 async def ad_draft_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
-    """The draft's fields; saved as you type (X-Autosave: {"ok", "error"}), a plain form still redirects."""
-    d = ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
-    problem = ad_creator.save_problem(d, price)
+    """The draft's fields; saved as you type (X-Autosave: {"ok", "error"}; ad_creator.autosave: price and pieces also
+    while Claude revises, no error line on the draft), a plain form still redirects."""
+    form = await request.form()
     if request.headers.get("x-autosave"):
+        _draft_or_404(draft_id)
+        problem = ad_creator.autosave(draft_id, form)
         return JSONResponse({"ok": problem is None, "error": problem})
+    d = ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(form))
+    problem = ad_creator.save_problem(d, price)
     return back(f"/new-ad/{draft_id}?msg={quote(problem or t('Changes saved'), safe='')}")
-
-
-@app.post("/new-ad/{draft_id:int}/fields")
-async def ad_draft_autosave(request: Request, draft_id: int):
-    """The draft page saves a field when it is left (fetch, keepalive): {"ok", "error"}."""
-    _draft_or_404(draft_id)
-    problem = ad_creator.autosave(draft_id, await request.form())
-    return {"ok": problem is None, "error": problem}
 
 
 @app.post("/new-ad/{draft_id:int}/refine")

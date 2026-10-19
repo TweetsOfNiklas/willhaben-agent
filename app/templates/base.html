@@ -673,7 +673,7 @@ document.addEventListener('alpine:init', () => {
   // auto-save: <form x-data="autosave" …> posts with X-Autosave (server answers {"ok", "error"}): switches at once,
   // text a moment after typing stops. Show the state with <small x-text="state"></small>.
   Alpine.data('autosave', () => ({
-    state: '', last: '', timer: null,
+    state: '', last: '', timer: null, pending: null,     // pending: the save in flight (a page may wait for it)
     init() {
       this.last = new URLSearchParams(new FormData(this.$el)).toString();
       this.$el.addEventListener('change', () => this.save());
@@ -685,8 +685,12 @@ document.addEventListener('alpine:init', () => {
     async save() {
       clearTimeout(this.timer);
       const body = new URLSearchParams(new FormData(this.$el));
-      if (body.toString() === this.last) return;
+      if (body.toString() === this.last) return this.pending;
       this.last = body.toString(); this.state = {{ _("Saving …")|tojson }};
+      const run = this.pending = this._send(body).finally(() => { if (this.pending === run) this.pending = null; });
+      return run;
+    },
+    async _send(body) {
       try {
         const r = await fetch(this.$el.action, {method: 'POST', body, headers: {'X-Autosave': '1'}});
         const j = r.ok ? await r.json() : {ok: false};

@@ -35,7 +35,6 @@
           <label class="flex min-w-0 flex-1 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Price (€)") }}</span><input name="price" id="price" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}" class="input w-full bg-base-200 text-base font-semibold"{% if published %} readonly{% endif %}></label>
           <label class="flex w-20 shrink-0 flex-col gap-1.5" title="{{ _('How many identical pieces this ad offers (the price counts per piece); empty = one item') }}"><span class="text-[12.5px] text-muted">{{ _("Pcs.") }}</span><input type="number" name="quantity" id="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="{{ d.quantity or '' }}" class="input w-full bg-base-200 text-base font-semibold"{% if published %} readonly{% endif %}></label>
         </div>
-        <small id="autosave-state" class="text-xs text-muted sm:col-start-1" aria-live="polite"></small>
         <div class="flex min-w-0 flex-col gap-1.5 sm:pt-[22px]">
           {% if st.count %}{% with g = price_gauge(d.price_suggestion, st), basis = _("{n} comparable ads", n=st.count) %}{% include "_price_gauge.html" %}{% endwith %}
           <span class="text-[12.5px] text-muted">{{ _("{n} ads for “{q}”", n=st.count, q=d.search_keywords) }} · {{ _("Median") }} {{ st.median|eur }} · {{ _("middle 50 %") }} {{ st.p25|eur }} – {{ st.p75|eur }}{% if st.llm_estimate %} · {{ _("Claude estimates {price}.", price=st.llm_estimate|eur) }}{% endif %}</span>{% endif %}
@@ -44,28 +43,22 @@
       {% if not published %}<small class="text-[12.5px] text-muted" x-text="state"></small>{% endif %}
     </form>
     {% if not published %}
-    {# every field is saved when it is left: the other buttons on this page reload it and would drop an unsaved price.
-       Saved values become the fields' defaults, so a background refresh of the form no longer counts them as edits. #}
-    <script>(() => {   // on the document: the form is swapped for a fresh copy after Claude's revision
-      let saving = null;   // a button clicked right after typing waits for the save, so the reloaded page has it
-      document.addEventListener('submit', e => {
-        if (!saving || e.target.id === 'draft-form') return;
+    {# a button clicked right after typing (Geizhals, category, answers, publish) waits for the form's autosave: its
+       answer swaps the form for the saved version, which would bring back an old price otherwise #}
+    <script>(() => {
+      document.addEventListener('submit', async e => {
+        const f = document.getElementById('draft-form'), form = e.target;
+        if (!f || form === f || form.dataset.flushed || !window.Alpine) return;
+        const a = Alpine.$data(f);
+        if (!a || !a.save) return;
+        const changed = new URLSearchParams(new FormData(f)).toString() !== a.last;
+        if (!changed && !a.pending) return;
         e.preventDefault(); e.stopPropagation();
-        const form = e.target, btn = e.submitter;
-        saving.finally(() => form.requestSubmit(btn && btn.form === form ? btn : undefined));
+        try { await a.save(); } catch (err) {}
+        form.dataset.flushed = '1';
+        form.requestSubmit(e.submitter && e.submitter.form === form ? e.submitter : undefined);
+        delete form.dataset.flushed;
       }, true);
-      document.addEventListener('change', e => {
-        const f = e.target;
-        if (!f.closest('#draft-form') || !['title', 'desc', 'price', 'quantity'].includes(f.id)) return;
-        const body = new FormData();
-        body.append(f.name, f.value);
-        const run = saving = fetch('/new-ad/{{ d.id }}/fields', {method: 'POST', body, keepalive: true}).then(r => r.json()).then(j => {
-          if (j.ok) f.defaultValue = f.value;
-          const el = document.getElementById('autosave-state');
-          if (el) { el.textContent = j.ok ? {{ (_("saved") ~ " ✓")|tojson }} : j.error; el.className = 'text-xs sm:col-start-1 ' + (j.ok ? 'text-muted' : 'text-error'); }
-        }).catch(() => { const el = document.getElementById('autosave-state'); if (el) el.textContent = {{ _("Not saved – check the connection")|tojson }}; })
-          .finally(() => { if (saving === run) saving = null; });
-      });
     })();</script>
     {% endif %}
     {# Claude revises in the background (lane claude); when done this section, the text fields (unless you are editing

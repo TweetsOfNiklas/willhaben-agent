@@ -18,17 +18,29 @@ def _get(draft_id):
         return db.get(AdDraft, draft_id)
 
 
-def test_a_field_is_saved_when_left(client):  # noqa: F811
+AUTO = {"X-Autosave": "1"}
+
+
+def _form(d, **change):
+    """What the draft page's autosave sends: the whole form, with `change` applied."""
+    return {"title": d.title or "", "description": d.description or "", "price": "%g" % (d.price_suggestion or 0),
+            "quantity": str(d.quantity or ""), **change}
+
+
+def test_the_draft_form_saves_as_you_type(client):  # noqa: F811
     draft_id = _new(client)
-    assert 'id="autosave-state"' in client.get(f"/new-ad/{draft_id}").text
-    assert client.post(f"/new-ad/{draft_id}/fields", data={"price": "1.200,50"}).json() == {"ok": True, "error": None}
+    page = client.get(f"/new-ad/{draft_id}").text
+    assert 'x-data="autosave"' in page and "form.dataset.flushed" in page     # other buttons wait for the save
+    r = client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), price="1.200,50"), headers=AUTO)
+    assert r.json() == {"ok": True, "error": None}
     d = _get(draft_id)
-    assert d.price_suggestion == 1200.5 and d.title == "KTM Kinderrad 20 Zoll blau"     # only the field sent
+    assert d.price_suggestion == 1200.5 and d.title == "KTM Kinderrad 20 Zoll blau"
     assert 'value="1200.5"' in client.get(f"/new-ad/{draft_id}").text                     # a reload keeps it
-    r = client.post(f"/new-ad/{draft_id}/fields", data={"price": "zwölf"}).json()
+    r = client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), price="zwölf"), headers=AUTO).json()
     assert r["ok"] is False and "zwölf" in r["error"] and _get(draft_id).price_suggestion == 1200.5
     assert _get(draft_id).error is None                                                   # no banner for it
-    client.post(f"/new-ad/{draft_id}/fields", data={"description": "Zeile 1\r\n\r\nZeile 2", "quantity": "3"})
+    client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), description="Zeile 1\r\n\r\nZeile 2", quantity="3"),
+                headers=AUTO)
     d = _get(draft_id)
     assert d.description == "Zeile 1\n\nZeile 2" and d.quantity == 3
 
@@ -36,12 +48,15 @@ def test_a_field_is_saved_when_left(client):  # noqa: F811
 def test_while_claude_revises_only_price_and_pieces_are_saved(client):  # noqa: F811
     draft_id = _new(client)
     ad_creator.update_draft(draft_id, refining=True)
-    r = client.post(f"/new-ad/{draft_id}/fields", data={"price": "80", "title": "Neu"}).json()
+    r = client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), price="80"), headers=AUTO).json()
+    assert r["ok"] is True and _get(draft_id).price_suggestion == 80   # the unchanged text is no edit to refuse
+    r = client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), price="85", title="Neu"), headers=AUTO).json()
     d = _get(draft_id)
-    assert d.price_suggestion == 80 and d.title == "KTM Kinderrad 20 Zoll blau" and r["ok"] is False
+    assert d.price_suggestion == 85 and d.title == "KTM Kinderrad 20 Zoll blau" and r["ok"] is False
+    assert d.error is None
     ad_creator.update_draft(draft_id, refining=False, status="published")
-    assert client.post(f"/new-ad/{draft_id}/fields", data={"price": "90"}).json()["ok"] is False
-    assert _get(draft_id).price_suggestion == 80
+    r = client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), price="90"), headers=AUTO).json()
+    assert r["ok"] is False and _get(draft_id).price_suggestion == 85
 
 
 def test_a_revision_names_another_product_and_a_price(client, gh, monkeypatch):  # noqa: F811
@@ -58,7 +73,7 @@ def test_a_revision_names_another_product_and_a_price(client, gh, monkeypatch): 
 
     monkeypatch.setattr(fake, "complete", complete)
     draft_id = _new(client)
-    client.post(f"/new-ad/{draft_id}/fields", data={"price": "120"})
+    client.post(f"/new-ad/{draft_id}", data=_form(_get(draft_id), price="120"), headers=AUTO)
     searches = len(gh)
 
     client.post(f"/new-ad/{draft_id}/refine", data={"instruction": "kürzer"})   # Claude's own estimate: price stays

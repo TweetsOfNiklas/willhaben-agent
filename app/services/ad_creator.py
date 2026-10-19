@@ -292,8 +292,8 @@ def save_fields(draft_id: int, title: str, description: str, price: str | None,
 
 
 def autosave(draft_id: int, form: Any) -> str | None:
-    """A field of the draft page saved as soon as it is left (the page's other buttons reload it, which used to drop
-    an unsaved price). Only the fields the form sent; price and pieces also while Claude revises (the revision does
+    """The draft page's autosave (X-Autosave on POST /new-ad/<id>, the whole form as you type). Only the fields the
+    form sent, and only changed ones; price and pieces also while Claude revises (the revision does
     not touch them), title and description not (its result would overwrite them). Returns the problem, else None;
     nothing goes to d.error."""
     with session() as db:
@@ -314,11 +314,13 @@ def autosave(draft_id: int, form: Any) -> str | None:
     for key, name in (("title", "title"), ("description", "description")):
         if form.get(key) is None:
             continue
+        value = str(form[key]).replace("\r\n", "\n").strip()
+        if value == (getattr(d, name) or "").strip():
+            continue                    # unchanged (the page sends the whole form): nothing to refuse while revising
         if d.refining:
             problem = problem or t(REFINING_BUSY)
             continue
-        value = str(form[key])
-        fields[name] = value.strip() if key == "title" else value.replace("\r\n", "\n").strip()
+        fields[name] = value
     if fields:
         update_draft(draft_id, **fields)
     return problem
