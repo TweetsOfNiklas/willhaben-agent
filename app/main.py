@@ -71,6 +71,8 @@ async def lifespan(app: FastAPI):
     _timeline.mark_interrupted()                   # runs cut off by the last restart
     apply_public_url()                             # Settings → Web address wins over PUBLIC_URL in .env
     refile_screened()                              # once: screened-out hits leave "new" for "filtered"
+    from app.llm import usage as _llm_usage
+    _llm_usage.reprice_calls()                     # once: stored Claude costs from the tokens and the API prices
     ad_batch.recover()
     my_ads.recover()                               # queued jobs died with the last process: unmark what they held
     ad_creator.recover_publishing()

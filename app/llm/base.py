@@ -44,15 +44,41 @@ MODELS = [
     ("claude-haiku-5-5", "Haiku 5.5"),
 ]
 
-# API list prices, USD per million tokens (input, output). Source: Anthropic Claude API pricing, as of 2026-10-06.
-# Haiku 5.5: prompts up to 100K tokens ($0.50 / $2.50 beyond). Only shown as relative cost in Settings → Claude;
-# the "API price" column there comes from the CLI's own costUSD (app/llm/usage.py), not from this table.
+# API list prices, USD per million tokens (input, output), and what a cache read costs relative to input.
+# Source: platform.claude.com/docs/en/about-claude/pricing, read 2026-10-19. Cache writes: 2x input (the CLI writes
+# the 1-hour cache: its own costUSD matched that for Opus and Fable); cache reads 0.05x on Opus 5.5 and Sonnet 5.5,
+# 0.025x on Fable 5.1, else 0.1x. Haiku 5.5 costs $0.50 / $2.50 for prompts over 100,000 tokens (input incl. cache).
 PRICES = {
     "claude-opus-5-5": (4.0, 20.0),
     "claude-fable-5-1": (10.0, 50.0),
     "claude-sonnet-5-5": (2.0, 10.0),
     "claude-haiku-5-5": (0.10, 0.50),
 }
+CACHE_READ = {"claude-opus-5-5": 0.05, "claude-sonnet-5-5": 0.05, "claude-fable-5-1": 0.025}
+CACHE_WRITE = 2.0
+HAIKU_LONG = ("claude-haiku-5-5", 100_000, (0.50, 2.50))
+
+
+def _priced(model: str | None) -> str | None:
+    """The PRICES key of a model id as the CLI reports it ("claude-sonnet-5-5[1m]", a dated id)."""
+    m = (model or "").lower()
+    return next((k for k in PRICES if m == k or m.startswith(k)), None)
+
+
+def cost_usd(model: str | None, input_tokens: int = 0, output_tokens: int = 0, cache_read: int = 0,
+             cache_write: int = 0) -> float | None:
+    """What a call costs at the API list prices; None for a model without a price (then the CLI's own figure is
+    kept). The CLI's costUSD priced Haiku 5.5 like Sonnet and Sonnet 5.5's cache reads at 0.1x."""
+    key = _priced(model)
+    if key is None:
+        return None
+    price_in, price_out = PRICES[key]
+    name, limit, long_prices = HAIKU_LONG
+    if key == name and input_tokens + cache_read + cache_write > limit:
+        price_in, price_out = long_prices
+    total = (price_in * (input_tokens + CACHE_WRITE * cache_write + CACHE_READ.get(key, 0.1) * cache_read)
+             + price_out * output_tokens)
+    return round(total / 1_000_000, 6)
 
 
 def cost_factors(ids: Iterable[str] | None = None) -> dict[str, int]:

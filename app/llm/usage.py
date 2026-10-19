@@ -48,12 +48,43 @@ def record(purpose: str | None, model: str, data: dict[str, Any] | None, *, ok: 
                 db.add(LLMCall(purpose=purpose or "other", model=r["model"] or model, ok=ok,
                                duration_ms=duration_ms if i == 0 else None, input_tokens=r["input"],
                                output_tokens=r["output"], cache_read_tokens=r["cache_read"],
-                               cache_write_tokens=r["cache_write"], cost_usd=r["cost_usd"], call_part=i))
+                               cache_write_tokens=r["cache_write"], call_part=i,
+                               cost_usd=_cost(r["model"] or model, r)))
             db.commit()
         if rows:
             _limit_reached_push()
     except Exception as e:  # noqa: BLE001 - statistics must never break a Claude call
         log.warning("could not record LLM usage: %s", e)
+
+
+def _cost(model: str | None, r: dict[str, Any]) -> float:
+    """The call's price from its tokens and the API list prices (llm.base.cost_usd), else the CLI's costUSD."""
+    from app.llm.base import cost_usd
+    mine = cost_usd(model, r["input"], r["output"], r["cache_read"], r["cache_write"])
+    return mine if mine is not None else r["cost_usd"]
+
+
+SETTING_REPRICED = "llm_costs_repriced"     # reprice_calls() ran
+
+
+def reprice_calls() -> int:
+    """Once, at startup: the stored calls priced from their tokens (the CLI's costUSD was off for Haiku 5.5 and for
+    Sonnet 5.5's cache reads). Returns how many rows changed."""
+    from app.llm.base import cost_usd
+    if get_setting(SETTING_REPRICED):
+        return 0
+    changed = 0
+    with session() as db:
+        for row in db.exec(select(LLMCall).where(LLMCall.ok == True)):  # noqa: E712
+            c = cost_usd(row.model, row.input_tokens or 0, row.output_tokens or 0, row.cache_read_tokens or 0,
+                         row.cache_write_tokens or 0)
+            if c is not None and abs(c - (row.cost_usd or 0)) > 1e-9:
+                row.cost_usd = c
+                db.add(row)
+                changed += 1
+        db.commit()
+    set_setting(SETTING_REPRICED, "1")
+    return changed
 
 
 LIMIT_MODES = ("pause", "haiku", "notify")   # over the limit: pause hit screening / everything on Haiku / only a push
@@ -124,7 +155,7 @@ def month_by_model() -> list[dict[str, Any]]:
 
 
 def month_cost_by_model() -> list[dict[str, Any]]:
-    """This month's API price per model (the CLI's own costUSD, what the usage would cost pay-as-you-go) for the
+    """This month's API price per model (from the tokens and the API list prices, what the usage would cost pay-as-you-go) for the
     Claude popover: [{label, model, cost_usd, color}], biggest first."""
     from app.llm import models
 
