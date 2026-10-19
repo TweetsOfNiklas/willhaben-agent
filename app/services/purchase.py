@@ -1106,7 +1106,7 @@ async def resume(pid: int) -> None:
             _change(pid, lambda r: _line(r, t("Looking for the chat of the sent opening message")))
             return
         row = _change(pid, lambda r: _move(r, "new", t("Resumed")))
-        _spawn(_begin(pid))
+        _queue_start(pid, row.ad_title or row.ad_id)      # the opener again waits its grace period
         return
     row = _change(pid, lambda r: _move(r, back if back in OPEN and back != "paused" else "negotiating", t("Resumed"), note=None))
 
@@ -1122,7 +1122,7 @@ async def restart(pid: int) -> None:
             _change(pid, lambda r: _move(r, "paused", t("Looking for the chat of the sent opening message")))
             return
         _change(pid, lambda r: _move(r, "new", t("Started again"), note=None))
-        _spawn(_begin(pid))
+        _queue_start(pid, row.ad_title or row.ad_id)      # the opener again waits its grace period
     else:
         _change(pid, lambda r: _move(r, "negotiating", t("Started again"), note=None))
 
