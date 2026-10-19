@@ -57,7 +57,7 @@ async def test_full_publish_order_and_bodies():
                      ("POST", "/webapi/iad/products/privates/carts/c9/checkout")]
     presave_body = s.calls[0][2]
     assert presave_body["price"] == 12 and presave_body["heading"] == "Logitech S125i"
-    assert presave_body["description"] == "<p>Gut erhalten.</p><ul><li>Netzteil</li><li>Dock</li></ul>"
+    assert presave_body["description"] == "<p>Gut erhalten.</p><p><br></p><ul><li>Netzteil</li><li>Dock</li></ul>"
     assert presave_body["categoryPath"] == {"path": [{"label": "Mobile Lautsprecher", "code": "MOBILE_SPEAKER"}]}
     assert {"attributeNode": {"label": "Übergabe", "code": "Uebergabe"},
             "selectedAttributeValueNodes": [{"label": "Selbstabholung", "code": "PICKUP"}]} in presave_body["treeAttributes"]

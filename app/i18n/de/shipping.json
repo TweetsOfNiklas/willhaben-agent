@@ -101,5 +101,7 @@
  "Prepare parcel: {name}": "Paket vorbereiten: {name}",
  "Claude is preparing the parcel from the chat…": "Claude bereitet das Paket aus dem Chat vor…",
  "Queued: prepare the parcel": "Eingereiht: Paket vorbereiten",
- "+ {amount} buyer protection": "+ {amount} Käuferschutz"
+ "+ {amount} buyer protection": "+ {amount} Käuferschutz",
+ "Buyer protection fee": "Käuferschutzgebühr",
+ "willhaben shows the exact fee when you pay with PayLivery; it can vary by category.": "Die genaue Gebühr zeigt willhaben beim Bezahlen mit PayLivery; sie kann je nach Kategorie abweichen."
 }

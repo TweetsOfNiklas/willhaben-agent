@@ -225,7 +225,7 @@ async def test_ad_context_falls_back_to_my_own_ad(monkeypatch):
         db.add(Conversation(id="c2", ad_id="1", ad_title="Fremde Anzeige", role="buyer"))
         db.commit()
     conv = await chats.ensure_ad_context("c1")
-    assert conv.ad_context["price"] == "€ 60" and conv.ad_context["description"] == "Top Zustand\n\nMit Ladekabel"
+    assert conv.ad_context["price"] == "€ 60" and conv.ad_context["description"] == "Top Zustand\nMit Ladekabel"   # as willhaben shows it
     assert conv.ad_context["source"] == "own_ad" and "paylivery" not in conv.ad_context   # fetched again next time
     other = await chats.ensure_ad_context("c2")                                            # not mine: no editor data
     assert other.ad_context is None

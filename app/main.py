@@ -227,6 +227,8 @@ templates.env.globals.update(price_gauge=_price_gauge, deal_level_label=_level_l
 templates.env.globals.update(geizhals_levels=search_agents_svc.level_choices)
 templates.env.globals.update(hit_can_sync=lambda h: _can_sync(h))     # the hit cards' sync button
 from app.platforms import shipping_info as _shipping_info  # noqa: E402
+from app.platforms import fees as _fees  # noqa: E402
+templates.env.globals.update(buyer_fee_line=_fees.ad_fee)   # the buyer fee in the ad viewer's price breakdown
 templates.env.globals.update(shipping_label=_shipping_info.label_of)    # ui.ship(): shipping next to every price
 
 

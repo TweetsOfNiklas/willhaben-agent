@@ -124,3 +124,18 @@ def text_de(r: FeeRule) -> str:
     if r.max is not None:
         parts.append(f"max. {money(r.max)}")
     return f"{r.service} {', '.join(parts)}, zahlt der Käufer"
+
+
+def ad_fee(platform: str | None, price: float | None, category: Iterable[str] | str | None = None,
+           known: float | None = None, paylivery: bool = False) -> dict[str, Any] | None:
+    """The buyer fee line of an ad's price breakdown: {"amount", "service", "exact"} (exact: the site stated it),
+    None when the buyer pays none for a shipped purchase. willhaben only with PayLivery; Kleinanzeigen' fee belongs to
+    the optional "Sicher bezahlen" and is left out."""
+    platform = platform or "willhaben"
+    if not price or price <= 0 or platform not in ("willhaben", "vinted") or (platform == "willhaben" and not paylivery):
+        return None
+    r = rule(platform, category)
+    if r is None:
+        return None
+    amount = fee(platform, price, category, known=known)
+    return {"amount": amount, "service": r.service, "exact": known is not None} if amount > 0 else None
