@@ -1,20 +1,23 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui %}
-{% block head %}{% if b.status == 'sorting' %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
 {% block content %}
 {% set open_groups = b.groups|rejectattr('draft_id')|list %}
 {% set dl = drafts.values()|list if drafts else [] %}
 {% set step = request.query_params.get('step', 'review' if dl else 'sort') if request is defined else ('review' if dl else 'sort') %}
+{# No page loads: while Claude sorts or writes (busy) this wrapper waits for the batch (data-pending-key, the jobs
+   poll) and is replaced by its fresh copy when the batch is done; while drafts are written, finished ones are
+   fetched the same way (script below). The step links swap it too. #}
+<div id="batch-main"{% if busy %} data-pending-key="batch:{{ b.id }}"{% endif %}>
 <div class="mb-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
   <div class="min-w-0">
     <a href="/new-ad" class="text-[13px] text-muted no-underline hover:text-base-content">← {{ _("New ad") }}</a>
     <h1 class="mt-1.5 flex flex-wrap items-baseline gap-x-2">{{ _("Batch #{id}", id=b.id) }} <span class="text-[15px] font-normal text-muted">· {{ _("{n} photos", n=b.image_paths|length) }} · {{ _("{n} items", n=b.groups|length) }}</span></h1>
     {% if b.notes %}<p class="mt-1 text-muted">{{ _("For all items:") }} {{ b.notes }}</p>{% endif %}
   </div>
-  {{ ui.seg([('?step=sort', _("Sort photos"), open_groups|length, step == 'sort'), ('?step=review', _("Review & publish"), dl|length, step == 'review')]) }}
+  <div class="contents" hx-boost="true" hx-target="#batch-main" hx-select="#batch-main" hx-swap="outerHTML" hx-push-url="true">{{ ui.seg([('?step=sort', _("Sort photos"), open_groups|length, step == 'sort'), ('?step=review', _("Review & publish"), dl|length, step == 'review')]) }}</div>
 </div>
 {% if b.status == 'sorting' %}<div role="status" class="mb-4 flex items-center gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5"><span class="loading loading-spinner loading-sm shrink-0 text-primary"></span><span>{{ _("Claude is looking at the photos and sorting them by item … with {n} photos this takes about {min} min. The page reloads by itself.", n=b.image_paths|length, min=1 + b.image_paths|length // 6) }}</span></div>
-{% elif b.status == 'creating' %}<div role="status" class="mb-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5" id="creating" data-drafts="{{ dl|length }}"><span>{{ _("Claude is writing the drafts, {n} still open.", n=pending|length) }} {{ _("Finished ones appear below as soon as they are ready – you can already edit them.") }}</span><span id="reload-hint" class="flex flex-wrap items-center gap-2" hidden><a href="" class="btn btn-xs">{{ _("Show new drafts") }}</a><small class="text-muted">({{ _("Save unsaved changes first") }})</small></span></div>{% endif %}
+{% elif b.status == 'creating' %}<div role="status" class="mb-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5" id="creating" data-drafts="{{ dl|length }}"><span>{{ _("Claude is writing the drafts, {n} still open.", n=pending|length) }} {{ _("Finished ones appear below as soon as they are ready – you can already edit them.") }}</span><span id="reload-hint" class="flex flex-wrap items-center gap-2" hidden><button type="button" class="btn btn-xs" onclick="refreshInPlace([document.getElementById('batch-main')])">{{ _("Show new drafts") }}</button><small class="text-muted">({{ _("Save unsaved changes first") }})</small></span></div>{% endif %}
 {% if b.error %}{{ ui.msg(b.error, 'error') }}{% endif %}
 {% if b.note and b.status != 'sorting' %}<div role="status" class="mb-4 flex gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5"><span><strong>{{ _("Note from Claude:") }}</strong> {{ b.note }}</span></div>{% endif %}
 
@@ -71,6 +74,7 @@
 </form>
 {% endif %}
 {% if not busy and b.status != 'sorting' %}<form method="post" action="/new-ad/batch/{{ b.id }}/delete" class="m-0 mt-4" onsubmit="return confirm({{ _('Delete this batch? Finished drafts are kept.')|tojson|forceescape }})"><button class="btn btn-ghost btn-sm text-error hover:bg-bad-soft">{{ _("Delete batch") }} <span class="text-muted">· {{ _("finished drafts are kept") }}</span></button></form>{% endif %}
+</div>
 <script>
 (() => {
   // ---- draft cards: title length, unsaved-changes flag
@@ -82,43 +86,51 @@
   });
   window.addEventListener('beforeunload', e => { if (document.querySelector('.bdraft[data-dirty]')) e.preventDefault(); });
 
-  // ---- while drafts are being written: poll, reload when new ones are ready (unless something is unsaved)
-  const creating = document.getElementById('creating');
-  if (creating) {
-    const known = +creating.dataset.drafts;
+  // ---- while drafts are being written: ask for the count now and then and fetch #batch-main anew when new ones are
+  //      ready (refreshInPlace, base.html) – not while a card has unsaved changes: then a hint, and the fresh copy
+  //      comes once they are saved. The end of the batch comes through the jobs poll (data-pending-key).
+  if (document.getElementById('creating')) {
+    let known = +document.getElementById('creating').dataset.drafts;
     const timer = setInterval(async () => {
+      const banner = document.getElementById('creating');
+      if (!banner) return clearInterval(timer);                            // replaced: the batch is done
       const r = await fetch('/new-ad/batch/{{ b.id }}/progress').then(r => r.json()).catch(() => null);
       if (!r || (r.drafts === known && r.status === 'creating')) return;
-      if (!document.querySelector('.bdraft[data-dirty]')) { clearInterval(timer); location.reload(); }
-      else document.getElementById('reload-hint').hidden = false;
+      if (document.querySelector('.bdraft[data-dirty]')) { document.getElementById('reload-hint').hidden = false; return; }
+      known = r.drafts;
+      refreshInPlace([document.getElementById('batch-main')]);
     }, 5000);
   }
 })();
 </script>
 <script>
 (() => {
+  // photo tiles: drag between groups, or pick the group below the photo. Delegated, so the tiles of a fresh copy
+  // of #batch-main work without any binding.
   let dragged = null;
   const OVER = ['border-primary', 'bg-brand-soft'];   // a photo is dragged over a group
   const zoneFor = gid => document.querySelector(`.tiles[data-gid="${gid}"]`);
-  document.querySelectorAll('#batch-form .tile-photo:not(.locked)').forEach(t => {
-    t.addEventListener('dragstart', e => { dragged = t; e.dataTransfer.effectAllowed = 'move'; });
-    t.addEventListener('dragend', () => { dragged = null; });
-    t.querySelector('select').addEventListener('change', e => {
-      const zone = zoneFor(e.target.value);
-      if (zone) zone.appendChild(t);
-    });
+  const tile = e => e.target.closest && e.target.closest('#batch-form .tile-photo:not(.locked)');
+  const zone = e => e.target.closest && e.target.closest('#batch-form .tiles[data-gid]');
+  document.addEventListener('dragstart', e => { const t = tile(e); if (t) { dragged = t; e.dataTransfer.effectAllowed = 'move'; } });
+  document.addEventListener('dragend', () => { dragged = null; });
+  document.addEventListener('change', e => {
+    const t = tile(e);
+    if (!t || !e.target.matches('select')) return;
+    const z = zoneFor(e.target.value);
+    if (z) z.appendChild(t);
   });
-  document.querySelectorAll('#batch-form .tiles[data-gid]').forEach(z => {
-    z.addEventListener('dragover', e => { if (dragged) { e.preventDefault(); z.classList.add(...OVER); } });
-    z.addEventListener('dragleave', () => z.classList.remove(...OVER));
-    z.addEventListener('drop', e => {
-      e.preventDefault(); z.classList.remove(...OVER);
-      if (!dragged) return;
-      const before = e.target.closest('.tile-photo');
-      if (before && before !== dragged && before.parentNode === z) z.insertBefore(dragged, before);
-      else z.appendChild(dragged);
-      dragged.querySelector('select').value = z.dataset.gid;
-    });
+  document.addEventListener('dragover', e => { const z = zone(e); if (z && dragged) { e.preventDefault(); z.classList.add(...OVER); } });
+  document.addEventListener('dragleave', e => { const z = zone(e); if (z) z.classList.remove(...OVER); });
+  document.addEventListener('drop', e => {
+    const z = zone(e);
+    if (!z) return;
+    e.preventDefault(); z.classList.remove(...OVER);
+    if (!dragged) return;
+    const before = e.target.closest('.tile-photo');
+    if (before && before !== dragged && before.parentNode === z) z.insertBefore(dragged, before);
+    else z.appendChild(dragged);
+    dragged.querySelector('select').value = z.dataset.gid;
   });
 })();
 </script>

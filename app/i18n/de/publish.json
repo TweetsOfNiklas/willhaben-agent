@@ -16,5 +16,6 @@
  "This category cannot be chosen (not found or not a final category)": "Diese Kategorie geht nicht (nicht gefunden oder keine Endkategorie)",
  "chosen by hand": "selbst gewählt",
  "with PayLivery (buyer protection)": "mit PayLivery (Käuferschutz)",
- "Goes live on willhaben as a free private ad – it waits a few seconds in the queue, where you can take it back.": "Geht als kostenlose Privatanzeige auf willhaben live – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst."
+ "Goes live on willhaben as a free private ad – it waits a few seconds in the queue, where you can take it back.": "Geht als kostenlose Privatanzeige auf willhaben live – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst.",
+ "Claude writes draft #{id}": "Claude schreibt Entwurf #{id}"
 }

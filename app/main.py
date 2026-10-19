@@ -2035,10 +2035,11 @@ async def new_ad_page(request: Request):
 
 @app.post("/new-ad")
 async def new_ad_create(notes: str = Form(""), photos: list[UploadFile] = File(default=[])):
+    """The draft page opens at once; Claude writes the listing as a background job (lane claude)."""
     files = [(p.filename or "", await p.read()) for p in photos if p.filename]
     if not notes.strip() and not files:
         return back("/new-ad")
-    draft = await ad_creator.create_draft(notes, files)
+    draft = ad_creator.enqueue_create(notes, files)
     return back(f"/new-ad/{draft.id}")
 
 
@@ -2056,9 +2057,12 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 @app.post("/new-ad/{draft_id:int}")
 async def ad_draft_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
+    """The draft's fields; saved as you type (X-Autosave: {"ok", "error"}), a plain form still redirects."""
     d = ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
-    msg = ad_creator.save_problem(d, price) or t('Changes saved')
-    return back(f"/new-ad/{draft_id}?msg={quote(msg, safe='')}")
+    problem = ad_creator.save_problem(d, price)
+    if request.headers.get("x-autosave"):
+        return JSONResponse({"ok": problem is None, "error": problem})
+    return back(f"/new-ad/{draft_id}?msg={quote(problem or t('Changes saved'), safe='')}")
 
 
 @app.post("/new-ad/{draft_id:int}/refine")
@@ -2097,8 +2101,12 @@ async def ad_draft_retry(draft_id: int):
 
 @app.post("/new-ad/{draft_id:int}/reconcile")
 async def ad_draft_reconcile(draft_id: int):
-    await ad_creator.reconcile_with_geizhals(draft_id)
-    return back(f"/new-ad/{draft_id}")
+    """Background job (lane claude) like a revision: the draft shows "Claude is revising…" and swaps itself in."""
+    _draft_or_404(draft_id)
+    if not ad_creator.enqueue_refine(draft_id, ad_creator.RECONCILE_INSTRUCTION,
+                                     label=t("Checked against the Geizhals spec sheet")):
+        return back(f"/new-ad/{draft_id}?msg={quote(ad_creator.refine_refusal(draft_id), safe='')}#geizhals")
+    return back(f"/new-ad/{draft_id}#geizhals")
 
 
 @app.post("/new-ad/{draft_id:int}/undo")

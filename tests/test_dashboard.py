@@ -204,11 +204,13 @@ def test_ad_draft_with_photo_and_price_stats(client):
     r = client.post("/new-ad", data={"notes": "KTM Kinderrad 20 Zoll"},
                     files=[("photos", ("rad.jpg", jpg, "image/jpeg"))], follow_redirects=False)
     assert r.status_code == 303
-    draft_url = r.headers["location"]
+    draft_url = r.headers["location"]                         # at once: Claude writes in the background
+    wait_jobs()
     call = client.fake.calls[-1]
     assert len(call["images"]) == 1 and "KTM Kinderrad" in call["prompt"]
     page = client.get(draft_url).text
     assert "KTM Kinderrad 20 Zoll blau" in page
+    assert 'id="draft-form" x-data="autosave"' in page and 'id="draft-aside"' in page and 'data-pending-key="refining:' not in page
     with dbmod.session() as db:
         d = db.exec(select(dbmod.AdDraft)).one()
     assert d.price_stats["llm_estimate"] == 120

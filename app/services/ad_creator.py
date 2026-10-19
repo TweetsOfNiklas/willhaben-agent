@@ -102,6 +102,39 @@ async def create_draft(notes: str, files: list[tuple[str, bytes]], batch_id: int
     return await _write_draft(draft.id, notes, save_images(draft.id, files), owner_quantity)
 
 
+def enqueue_create(notes: str, files: list[tuple[str, bytes]], quantity: int | None = None) -> AdDraft:
+    """"Create listing with Claude" without waiting: the draft row and its photos exist at once (the page shows
+    "Claude is writing the draft…" and swaps itself in when done), Claude writes title, description, price and
+    the rest as a background job (lane claude, up to two minutes; the same pipeline as create_draft). Taken back
+    while queued, the draft is left as an error with "Try again"."""
+    from app.services import jobs
+
+    owner_quantity = parse_quantity(quantity)
+    with session() as db:
+        draft = AdDraft(input_text=notes, quantity=pick_quantity(owner_quantity, None), refining=True)
+        db.add(draft)
+        db.commit()
+        db.refresh(draft)
+    draft_id = draft.id
+    paths = save_images(draft_id, files)
+
+    async def run(job) -> str:
+        try:
+            d = await _write_draft(draft_id, notes, paths, owner_quantity)
+        finally:
+            update_draft(draft_id, refining=None)
+        if d.error:
+            raise RuntimeError(d.error)
+        return t("Written: {title}", title=(d.title or "")[:60])
+
+    def taken_back() -> None:
+        update_draft(draft_id, refining=None, status="error", error=t("Taken back"))
+
+    jobs.submit("refine", t("Claude writes draft #{id}", id=draft_id), run, lane="claude", current=f"refining:{draft_id}",
+                on_cancel=taken_back, link=f"/new-ad/{draft_id}")
+    return update_draft(draft_id, image_paths=paths)
+
+
 @timeline.scoped(draft_id="draft_id")
 async def retry_draft(draft_id: int) -> AdDraft:
     """A draft Claude could not write (status "error"): the whole pipeline once more from the same notes and photos."""
