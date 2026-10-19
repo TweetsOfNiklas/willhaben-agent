@@ -26,7 +26,8 @@ def test_catalog_names_every_section_once():
     ids = [s.id for g in groups for s in g.sections]
     assert len(ids) == len(set(ids))
     assert [i for i in ids if i not in {s.id for s in SITES}] == list(SETTINGS_SECTIONS)   # the nav order is the page order
-    assert ids[:5] == ["willhaben", "kleinanzeigen", "vinted", "facebook", "vpn"]       # the sites sit between willhaben and the VPN
+    assert ids[:5] == ["willhaben", "kleinanzeigen", "vinted", "facebook", "quiet"]     # the sites after willhaben
+    assert groups[-1].sections[0].id == "vpn"                                          # the VPN under System
     assert [g.label for g in groups] == ["Platforms", "Search & prices", "Buying", "Selling", "Shipping & pickup", "AI", "Notifications", "System"]
     for g in groups:
         for s in g.sections:

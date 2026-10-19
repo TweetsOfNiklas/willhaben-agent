@@ -222,12 +222,12 @@ def test_settings_platforms_page_and_save(client):
 
     page = client.get("/settings/willhaben").text
     nav = page[page.index('<nav aria-label="Settings"'):]                 # the settings menu, not the account menu
-    # the groups in order (settings_catalog): the sites and the VPN first, then by what you do with the app
-    order = ['href="/settings"', "Platforms", 'href="/settings/willhaben"', 'href="/settings/kleinanzeigen"', 'href="/settings/vpn"',
+    # the groups in order (settings_catalog): the sites first, then by what you do with the app, the VPN under System
+    order = ['href="/settings"', "Platforms", 'href="/settings/willhaben"', 'href="/settings/kleinanzeigen"',
              "Search &amp; prices", 'href="/settings/quiet"', "Buying", 'href="/settings/purchase"', 'href="/settings/paylivery"',
              "Selling", 'href="/settings/chats"', 'href="/settings/myads"', 'href="/settings/calendar"',
              "Shipping &amp; pickup", 'href="/settings/shipping"', 'href="/settings/printers"', "AI", 'href="/settings/rules"',
-             "Notifications", 'href="/settings/telegram"', "System", 'href="/settings/language"']
+             "Notifications", 'href="/settings/telegram"', "System", 'href="/settings/vpn"', 'href="/settings/language"']
     assert [nav.index(x) for x in order] == sorted(nav.index(x) for x in order)
     assert "Buying · willhaben" not in page and "Platforms · willhaben" not in client.get("/settings/paylivery").text
     assert '<div class="text-xs font-semibold tracking-wide text-muted uppercase mb-0.5">Buying</div><h2>PayLivery</h2>' in client.get("/settings/paylivery").text
