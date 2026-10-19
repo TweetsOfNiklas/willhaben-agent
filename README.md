@@ -81,7 +81,8 @@ It runs on your own server, from your home internet connection, and you control 
   three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
   automatic answers with an instruction and a minimum price (switches and text save as you type), the number of pieces
   (next bullet), edit text and photos (Claude can propose a better text), deactivate, delete, mark sold or reserved
-  (other buyers get a notice draft).
+  in one click: here and on willhaben together, from the ad or from the buyer's chat (the sale page keeps the stock
+  ledger and the notice drafts for the other buyers; a mark made on willhaben itself is picked up by the next update).
   Ads that expired longer ago than a cutoff (Settings → Selling → My ads, 30 days by default) move to Deactivated; the old copy
   of a renewed ad is never listed again and its chats use the new ad's settings.
 - **Stock per ad** ("Lagerstand"): in My ads → detail pane → Pieces you enter how many identical items an ad offers
@@ -139,7 +140,9 @@ It runs on your own server, from your home internet connection, and you control 
 - **Connection watchdog**: tiles on the home page and a warning push when the willhaben login, Claude, Home Assistant,
   Telegram, live chat or disk space fails.
 - **Polite by design**: every willhaben request goes through one shared rate limiter (minimum gap plus an
-  hourly budget). Quiet hours slow the agents down at night. Nothing is ever written to willhaben without your approval.
+  hourly budget). Quiet hours slow the agents down at night. Nothing is ever written to willhaben without your click,
+  and no confirm dialogs: every willhaben action is queued, shows a **Cancel** until it runs, and the irreversible ones
+  (delete, sold, send a message, publish) wait a few seconds in the queue first, with an **Undo** notice.
 - **Timeline** (opt-in, Settings → Timeline): what happened, for which ad, chat, search agent, product search or
   purchase. Every Claude call with its full prompt and answer, your actions (also via Telegram, Home Assistant, the API
   and MCP), background jobs, agent runs and notifications, each with its errors and duration; jobs and agent runs open

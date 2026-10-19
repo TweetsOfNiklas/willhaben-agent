@@ -1,14 +1,15 @@
-{# Print buttons next to the label: the printer set for the carrier first, the other printer as alternative #}
-<form method="post" action="/shipments/{{ shipment.id }}/print" class="flex flex-wrap items-center gap-1.5">
+{# Print buttons next to the label: the printer set for the carrier first, the other printer as alternative. Sent in
+   the background; the shipping card (#shipping) swaps itself in with the print line. #}
+<form method="post" action="/shipments/{{ shipment.id }}/print" hx-post="/shipments/{{ shipment.id }}/print" hx-target="#shipping" hx-select="#shipping" hx-swap="outerHTML" hx-select-oob="#flash" hx-disabled-elt="find button" class="flex flex-wrap items-center gap-1.5">
   {% if print_choice == 'none' %}
-    <button class="btn btn-xs" name="which" value="label" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on label printer") }}</button>
-    <button class="btn btn-xs" name="which" value="normal" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on normal printer") }}</button>
+    <button class="btn btn-xs" name="which" value="label">{{ _("Print on label printer") }}</button>
+    <button class="btn btn-xs" name="which" value="normal">{{ _("Print on normal printer") }}</button>
   {% else %}
-    <button class="btn btn-primary btn-xs" name="which" value="auto" onclick="this.setAttribute('aria-busy','true')">{{ _("Print") }}</button>
+    <button class="btn btn-primary btn-xs" name="which" value="auto">{{ _("Print") }}</button>
     {% if print_choice == 'label' %}
-      <button class="btn btn-xs" name="which" value="normal" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on normal printer") }}</button>
+      <button class="btn btn-xs" name="which" value="normal">{{ _("Print on normal printer") }}</button>
     {% else %}
-      <button class="btn btn-xs" name="which" value="label" onclick="this.setAttribute('aria-busy','true')">{{ _("Print on label printer") }}</button>
+      <button class="btn btn-xs" name="which" value="label">{{ _("Print on label printer") }}</button>
     {% endif %}
   {% endif %}
 </form>

@@ -94,6 +94,7 @@ def test_draft_with_geizhals_refine_and_undo(client, gh, monkeypatch):  # noqa: 
     monkeypatch.setattr(fake, "complete", complete)
     r = client.post("/new-ad", data={"notes": "Bosch Akkuschrauber"}, follow_redirects=False)
     draft_id = int(r.headers["location"].rsplit("/", 1)[1])
+    wait_jobs()
     page = client.get(f"/new-ad/{draft_id}").text
     assert "New from" in page and "Geizhals spec sheet" in page and "Bosch GSR 18V-55 Set" in page
     assert "Check text against the spec sheet" in page
@@ -194,6 +195,7 @@ def test_unconfirmed_variant_does_not_rewrite_the_draft(client, pi, monkeypatch)
     client.post("/settings/listings", data={"geizhals_auto_specs": "on"})
     r = client.post("/new-ad", data={"notes": "Raspberry Pi"}, follow_redirects=False)
     draft_id = int(r.headers["location"].rsplit("/", 1)[1])
+    wait_jobs()
     from app.db import AdDraft, session
     with session() as db:
         d = db.get(AdDraft, draft_id)

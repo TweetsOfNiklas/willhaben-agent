@@ -7,7 +7,7 @@
 {% block content %}
 {% set ns = namespace(cur=none) %}
 {% for a in ads %}{% if (cur_id and a.ad_id|string == cur_id) or (not cur_id and ns.cur is none and not a.replaced_by) %}{% set ns.cur = a %}{% endif %}{% endfor %}
-{% set cur = ns.cur %}
+{% set cur = cur_ad if cur_ad is defined and cur_ad else ns.cur %}
 {% set keep = ('&show_active=1' if show_active and (show_inactive or show_sold) else '') ~ ('&show_inactive=1' if show_inactive else '') ~ ('&show_sold=1' if show_sold else '') ~ ('&show_hidden=1' if show_hidden else '') %}
 {% macro chip_href(a_on, i_on, s_on) -%}
   /myads?{{ 'show_active=1&' if a_on and (i_on or s_on) else '' }}{{ 'show_inactive=1&' if i_on else '' }}{{ 'show_sold=1&' if s_on else '' }}{{ 'show_hidden=1' if show_hidden else '' }}
@@ -26,6 +26,7 @@
 {% macro status_pill(a) -%}
   {%- if a.replaced_by %}{{ ui.pill(_("renewed")) }}
   {%- elif a.sale_status == 'sold' %}{{ ui.pill(_("sold"), 'warn') }}
+  {%- elif a.sale_status == 'reserved' %}{{ ui.pill(_("reserved"), 'warn') }}
   {%- elif a.status == 'active' %}{{ ui.pill(_("active"), 'ok') }}
   {%- elif a.status == 'expired' %}{{ ui.pill(_("expired"), 'bad') }}
   {%- elif a.status in ('sold', 'reserved') or a.sale_status %}{{ ui.pill(_("sold") if (a.status == 'sold' or a.sale_status == 'sold') else _("reserved"), 'warn') }}
@@ -47,7 +48,9 @@
         </form>
       </div>
     </div>
-    <div id="myads-chips" class="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0">
+    {# the chips swap in the list, the counts and the detail (boosted links, no page load) #}
+    <div id="myads-chips" class="-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0"
+         hx-boost="true" hx-target="#myads-rows" hx-select="#myads-rows" hx-swap="outerHTML" hx-select-oob="#myads-chips,#myads-count,#myads-detail">
       {{ ui.chip(chip_href(not show_active, show_inactive, show_sold), _("Active"), active_count, show_active) }}
       {{ ui.chip(chip_href(show_active, not show_inactive, show_sold), _("Deactivated"), inactive_count, show_inactive) }}
       {{ ui.chip(chip_href(show_active, show_inactive, not show_sold), _("Sold / reserved"), sold_count, show_sold) }}
@@ -56,7 +59,7 @@
 
   {# bulk bar: only in selection mode #}
   {# the buttons send in the background (htmx) and swap in the fresh list; the picked ads then wait for their job #}
-  <form id="bulk" method="post" x-show="selecting" x-cloak @submit="confirmBulk($event)" @htmx:confirm="confirmHx($event)"
+  <form id="bulk" method="post" x-show="selecting" x-cloak @submit="busyBulk($event)"
         @htmx:after-request="mode(false)" hx-target="#myads-rows" hx-select="#myads-rows" hx-swap="outerHTML"
         hx-select-oob="#myads-chips,#myads-count,#myads-detail"
         class="mx-4 mb-2.5 flex flex-wrap md:mx-5 items-center gap-2 rounded-[10px] bg-brand-soft px-2.5 py-2">
@@ -81,6 +84,7 @@
     {# the columns without the checkbox are plain classes, so a row is laid out before Alpine starts (page load,
        fresh copy after a job); Alpine only adds the checkbox column while selecting #}
     <a href="/myads?ad={{ a.ad_id }}{{ keep }}" id="row-{{ a.ad_id }}" @click="rowClick($event)" @mousedown="selecting && $event.shiftKey && $event.preventDefault()"
+       hx-get="/myads?ad={{ a.ad_id }}{{ keep }}" hx-target="#myads-detail" hx-select="#myads-detail" hx-swap="outerHTML" hx-push-url="true" hx-trigger="open-row"
        {% if a.pending_action %}data-pending-key="ad:{{ a.ad_id }}"{% endif %}
        class="grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] p-2.5 text-left text-base-content no-underline {{ 'bg-brand-soft' if on else 'hover:bg-hover' }}"
        :class="selecting && 'grid-cols-[20px_52px_minmax(0,1fr)_auto]!'">
@@ -103,7 +107,7 @@
     {% else %}
     <p class="px-2.5 py-3.5 text-muted">{{ _("No own ads yet") }}{% if not session_status.logged_in %} – {{ _("first") }} <a class="link link-primary" href="/settings/willhaben">{{ _("log in to willhaben") }}</a>{% endif %}.</p>
     {% endfor %}
-    {% if hidden_count %}<a class="p-2.5 text-[12.5px] text-muted no-underline hover:underline" href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_active=1&' if show_active and (show_inactive or show_sold) else '' }}{{ 'show_sold=1&' if show_sold else '' }}{{ 'show_inactive=1' if show_inactive else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a>{% endif %}
+    {% if hidden_count %}<a class="p-2.5 text-[12.5px] text-muted no-underline hover:underline" hx-boost="true" hx-target="#myads-rows" hx-select="#myads-rows" hx-swap="outerHTML" hx-select-oob="#myads-chips,#myads-count,#myads-detail" href="/myads?{{ '' if show_hidden else 'show_hidden=1&' }}{{ 'show_active=1&' if show_active and (show_inactive or show_sold) else '' }}{{ 'show_sold=1&' if show_sold else '' }}{{ 'show_inactive=1' if show_inactive else '' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a>{% endif %}
   </div>
 </div>
 
@@ -116,7 +120,7 @@
     {{ ui.thumb(a.image_url, 'h-16 w-20 sm:h-[84px] sm:w-[112px]', 'rounded-[10px]') }}
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-center gap-2.5"><h2 class="text-[17px] tracking-tight sm:text-[19px]">{{ a.heading or a.ad_id }}</h2>
-        {% if a.sale_status == 'sold' %}{{ ui.pill(_("sold"), 'warn') }}{% elif a.status == 'active' %}{{ ui.pill(_("active"), 'ok') }}{% elif a.status == 'expired' %}{{ ui.pill(_("expired"), 'bad') }}{% elif a.sale_status %}{{ ui.pill(_("sold") if a.sale_status == 'sold' else _("reserved"), 'warn') }}{% endif %}</div>
+        {% if a.sale_status == 'sold' %}{{ ui.pill(_("sold"), 'warn') }}{% elif a.sale_status == 'reserved' %}{{ ui.pill(_("reserved"), 'warn') }}{% elif a.status == 'active' %}{{ ui.pill(_("active"), 'ok') }}{% elif a.status == 'expired' %}{{ ui.pill(_("expired"), 'bad') }}{% elif a.status in ('sold', 'reserved') %}{{ ui.pill(_("sold") if a.status == 'sold' else _("reserved"), 'warn') }}{% endif %}</div>
       <div class="mt-1 text-muted">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %} · <a class="link link-primary no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}</a></div>
       {% if a.last_error %}<div class="mt-1 text-[13px] text-error">{{ a.last_error }}</div>{% endif %}
       {% if a.pending_action %}<div class="mt-1.5">{{ pending_note(a) }}</div>{% endif %}
@@ -128,18 +132,25 @@
   <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center" hx-target="#myads-detail" hx-select="#myads-detail" hx-swap="outerHTML"
        hx-select-oob="#myads-rows,#myads-chips,#myads-count">
     <a class="btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" href="/myads/{{ a.ad_id }}/edit">{{ _("Edit") }}</a>
-    {% if a.status == 'active' %}<form method="post" action="/myads/{{ a.ad_id }}/deactivate" hx-post="/myads/{{ a.ad_id }}/deactivate" hx-confirm="{{ _('Take this ad offline on willhaben? You can activate it again there.') }}"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]">{{ _("Deactivate") }}</button></form>
-    {% elif a.status not in ('sold', 'reserved') %}<form method="post" action="/myads/bulk/activate" hx-post="/myads/bulk/activate" hx-confirm="{{ _('Put this ad online again on willhaben? If willhaben offers no “Activate”, it is republished as a new ad.') }}"><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]">{{ _("Activate") }}</button></form>{% endif %}
-    <a class="btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" href="/sold/{{ a.ad_id }}?kind=sold{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Mark sold…") }}</a>
-    <a class="btn whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" href="/sold/{{ a.ad_id }}?kind=reserved{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Reserve…") }}</a>
-    <form method="post" action="/myads/{{ a.ad_id }}/delete" class="col-span-2 sm:ml-auto" hx-post="/myads/{{ a.ad_id }}/delete" hx-confirm="{{ _('Delete this ad on willhaben for good? This cannot be undone.') }}"><button class="btn btn-ghost w-full text-error hover:bg-bad-soft">{{ _("Delete") }}</button></form>
+    {% if a.status == 'active' %}<form method="post" action="/myads/{{ a.ad_id }}/deactivate" hx-post="/myads/{{ a.ad_id }}/deactivate"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" title="{{ _('Take this ad offline on willhaben. You can activate it again.') }}">{{ _("Deactivate") }}</button></form>
+    {% elif a.status not in ('sold', 'reserved') %}<form method="post" action="/myads/bulk/activate" hx-post="/myads/bulk/activate"><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="btn w-full whitespace-nowrap max-sm:px-2 max-sm:text-[13px]" title="{{ _('Put this ad online again on willhaben. If willhaben offers no “Activate”, it is republished as a new ad.') }}">{{ _("Activate") }}</button></form>{% endif %}
+    <form method="post" action="/myads/{{ a.ad_id }}/delete" class="col-span-2 sm:ml-auto" hx-post="/myads/{{ a.ad_id }}/delete"><button class="btn btn-ghost w-full text-error hover:bg-bad-soft" title="{{ _('Deletes the ad on willhaben for good – it waits a few seconds in the queue, where you can still take it back.') }}">{{ _("Delete") }}</button></form>
   </div>
+  {% endif %}
+  {# sold / reserved: one click does it here and on willhaben (_sale_actions.html); the sale page has the ledger and
+     the notices to the other buyers #}
+  {% if not a.replaced_by %}
+  <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">{{ ui.eyebrow(_("Sale")) }}<a class="link link-primary text-[12.5px] no-underline" href="/sold/{{ a.ad_id }}?kind={{ a.sale_status or 'sold' }}{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}">{{ _("Sale page: stock, the other buyers") }} →</a></div>
+    {% with p = sale_panel(a.ad_id, a.sale_conversation_id), target = '#myads-detail', next = '/myads?ad=' ~ a.ad_id ~ keep, oob = '#myads-rows,#myads-chips,#myads-count', inline = true %}{% include "_sale_actions.html" %}{% endwith %}
+  </section>
   {% endif %}
 
   <section class="rounded-box border border-base-300 bg-base-100">
     <div class="grid grid-cols-1 gap-4 border-b border-base-300 px-5 py-4 sm:grid-cols-2">
       <div>{{ ui.eyebrow(_("Expires"), 'mb-1') }}<div class="text-base tabular-nums">{{ a.end_date|local('%d.%m.%Y %H:%M') }}</div><div class="text-[13px] text-muted">{{ a.end_date|ago }}</div></div>
-      <form method="post" action="/myads/{{ a.ad_id }}/auto-renew" x-data="autosave" class="flex items-start justify-between gap-3">
+      <form method="post" action="/myads/{{ a.ad_id }}/auto-renew" x-data="autosave" class="flex items-start justify-between gap-3"
+            @autosaved="$event.detail.ok && refreshInPlace([document.getElementById('row-{{ a.ad_id }}')])">
         <div class="contents" x-data="{ on: {{ 'true' if a.auto_renew else 'false' }} }">
         <input type="hidden" name="on" value="{{ '1' if a.auto_renew else '0' }}" x-ref="on">
         <div>{{ ui.eyebrow(_("Auto-renew"), 'mb-1') }}
@@ -160,7 +171,8 @@
         <input type="number" name="quantity" min="1" max="999" step="1" inputmode="numeric" class="input w-full bg-base-200" value="{{ a.quantity if a.quantity is not none else '' }}" placeholder="{{ _('one item') }}">
         <small class="text-xs text-muted" aria-live="polite" x-text="state"></small></label>
     </form>
-    <form method="post" action="/myads/{{ a.ad_id }}/auto-reply" id="ad-{{ a.ad_id }}" x-data="autosave" class="flex flex-col gap-3 px-5 py-4">
+    <form method="post" action="/myads/{{ a.ad_id }}/auto-reply" id="ad-{{ a.ad_id }}" x-data="autosave" class="flex flex-col gap-3 px-5 py-4"
+          @autosaved="$event.detail.ok && refreshInPlace([document.getElementById('row-{{ a.ad_id }}')])">
       <label class="flex cursor-pointer items-start justify-between gap-3" x-data="{ on: {{ 'true' if a.auto_reply else 'false' }} }">
         <div>{{ ui.eyebrow(_("Automatic answers"), 'mb-1') }}
           <div class="text-base" x-text="on ? {{ _('On — Claude answers simple questions')|tojson|forceescape }} : {{ _('Off')|tojson|forceescape }}">{{ _("On — Claude answers simple questions") if a.auto_reply else _("Off") }}</div>
@@ -193,12 +205,11 @@
 
 <script>
 document.addEventListener('alpine:init', () => Alpine.data('myadsList', () => ({
-  selecting: false, picked: [], total: 0, last: null,
-  T: {none: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}, activate: {{ _("Put these ads online again on willhaben?")|tojson }},
-      deactivate: {{ _("Take these ads offline on willhaben? You can activate them again.")|tojson }}, delete: {{ _("Delete these ads on willhaben for good? This cannot be undone.")|tojson }},
-      hide: {{ _("Hide these ads from this list? They stay online on willhaben.")|tojson }}, unhide: {{ _("Show these ads in the list again?")|tojson }}},
+  selecting: false, picked: [], last: null,
+  T: {none: {{ _("Select all")|tojson }}, n: {{ _("{n} selected")|tojson }}},
   boxes() { return [...this.$root.querySelectorAll('input.sel')]; },
-  init() { this.total = this.boxes().length; },
+  get total() { return this.boxes().length; },     // follows the list after a swap or a job's refresh
+  init() { document.addEventListener('htmx:afterSettle', () => { const ids = this.boxes().map(b => b.value); this.picked = this.picked.filter(v => ids.includes(v)); }); },
   mode(on) { this.selecting = on; this.last = null; if (!on) this.picked = []; },
   all(on) { this.picked = on ? this.boxes().map(b => b.value) : []; },
   // ticks or unticks one box; with Shift every box between the one clicked before and this one, like a file manager
@@ -208,27 +219,29 @@ document.addEventListener('alpine:init', () => Alpine.data('myadsList', () => ({
     this.picked = on ? [...new Set([...this.picked, ...ids])] : this.picked.filter(v => !ids.includes(v));
     this.last = b.value;
   },
-  // in selection mode a click on the row ticks it instead of opening the ad
+  // in selection mode a click on the row ticks it instead of opening the ad. Otherwise, on a wide screen, the detail
+  // swaps in (the row's hx-get fires on "open-row": a click trigger would cancel the link before any filter runs) and
+  // the highlight moves at once; phones and Ctrl/Shift-click keep the link (list → detail page, new tab).
   rowClick(e) {
-    if (!this.selecting) return;
+    if (!this.selecting) {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0 || innerWidth < 768 || !window.htmx) return;
+      e.preventDefault();
+      this.highlight(e.currentTarget);
+      htmx.trigger(e.currentTarget, 'open-row');
+      return;
+    }
     e.preventDefault();
     const b = e.currentTarget.querySelector('input.sel');
     if (b) this.tick(b, !this.picked.includes(b.value), e.shiftKey);
   },
+  highlight(row) {
+    this.$root.querySelectorAll('#myads-rows > a').forEach(a => { a.classList.toggle('bg-brand-soft', a === row); a.classList.toggle('hover:bg-hover', a !== row); });
+  },
   // the box toggles itself (x-model); Shift also takes the boxes in between along
   boxClick(e) { this.tick(e.target, e.target.checked, e.shiftKey); },
-  // htmx sends the bulk buttons: one confirm with the picked titles, then the request
-  confirmHx(e) {
-    const btn = e.detail.elt;
-    if (!btn.dataset || !btn.dataset.act) return;
-    e.preventDefault();
-    const list = this.boxes().filter(b => this.picked.includes(b.value)).map(b => '• ' + b.dataset.title).join('\n');
-    if (confirm(this.T[btn.dataset.act] + '\n\n' + list)) e.detail.issueRequest(true);
-  },
-  confirmBulk(e) {
-    const act = e.submitter && e.submitter.dataset.act;
-    const list = this.boxes().filter(b => this.picked.includes(b.value)).map(b => '• ' + b.dataset.title).join('\n');
-    if (!act || !confirm(this.T[act] + '\n\n' + list)) { e.preventDefault(); return; }
+  // a plain (no-htmx) bulk submit: the button shows it is on its way
+  busyBulk(e) {
+    if (!e.submitter || !e.submitter.dataset.act) { e.preventDefault(); return; }
     e.submitter.classList.add('btn-disabled'); e.submitter.prepend(Object.assign(document.createElement('span'), {className: 'loading loading-spinner loading-xs'}));
   },
 })));

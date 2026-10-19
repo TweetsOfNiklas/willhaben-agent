@@ -22,7 +22,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from app.db import utcnow
@@ -43,7 +43,7 @@ class Job:
     kind: str                  # e.g. "myads-update": a still queued job of the same kind is reused, not doubled
     label: str
     lane: str = "ads"
-    status: str = "queued"     # queued | running | done | failed
+    status: str = "queued"     # queued | running | done | failed | cancelled (taken back while queued)
     step: str = ""             # what happens right now, e.g. "Delete „Fahrrad“"
     current: str | None = None  # the item being worked on right now, as a page marker key ("ad:123", "draft:5")
     done: int = 0
@@ -52,9 +52,13 @@ class Job:
     problems: int = 0          # items that did not work out (job itself finished)
     link: str | None = None    # the page with the result (the finished-job notice opens it)
     quiet: bool = False        # no notice when it finishes: the page that started it shows the result itself
+    keys: list[str] = field(default_factory=list)   # every marker key the job will touch (a page's cancel button finds it)
+    runs_at: datetime | None = None   # grace period (submit(grace=True)): not before this; cancel it meanwhile
     created_at: datetime = field(default_factory=utcnow)
     finished_at: datetime | None = None
     task: asyncio.Task | None = field(default=None, repr=False)
+    on_cancel: Callable[[], None] | None = field(default=None, repr=False)   # clears the submitter's markers
+    cancellable: bool = False   # may be cancelled while queued (has on_cancel, or no markers to clear)
 
     def progress(self, done: int, step: str = "", current: str | None = None) -> None:
         self.done, self.step, self.current = done, step, current
@@ -63,13 +67,15 @@ class Job:
             timeline.update_context(**timeline.marker_ids(current))
 
     def view(self) -> dict[str, Any]:
+        wait = max((self.runs_at - utcnow()).total_seconds(), 0) if self.runs_at and self.status == "queued" else 0
         return {"id": self.id, "label": self.label, "lane": self.lane, "status": self.status, "step": self.step, "current": self.current,
                 "done": self.done, "total": self.total, "result": self.result, "problems": self.problems,
-                "link": self.link, "quiet": self.quiet, "finished_at": self.finished_at.isoformat() if self.finished_at else None}
+                "link": self.link, "quiet": self.quiet, "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+                "keys": self.keys, "cancellable": self.status == "queued" and self.cancellable, "grace_s": round(wait, 1)}
 
 
-LANES = ("ads", "chat", "claude", "sim")   # claude: drafts and revisions (no willhaben account request, can take a minute);
-#   sim: the chat simulator's test chats (never in the way of real answers)
+LANES = ("ads", "chat", "claude", "sim", "agents")   # claude: drafts and revisions (no willhaben account request, can take a minute);
+#   sim: the chat simulator's test chats (never in the way of real answers); agents: search-agent checks started by hand
 
 _ids = itertools.count(1)
 _locks: dict[str, asyncio.Lock] = {}
@@ -116,19 +122,65 @@ async def track(kind: str, label: str, *, lane: str = "claude", link: str | None
         _finished.appendleft(job)
 
 
+def grace_s() -> float:
+    """How long an irreversible job (delete, mark sold, send) waits in the queue before it runs, so that the click
+    can still be taken back (the page's cancel button, the jobs popover) instead of a confirm dialog before it."""
+    from app.config import get_settings
+    return max(float(get_settings().job_grace_s), 0)
+
+
 def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *, lane: str = "ads", total: int = 0,
-           current: str | None = None, reuse_queued: bool = False) -> Job:
-    """Queue `run(job)` in `lane`; it returns the result line shown in the header. Needs a running event loop."""
+           current: str | None = None, reuse_queued: bool = False, keys: list[str] | None = None,
+           on_cancel: Callable[[], None] | None = None, grace: bool = False, quiet: bool = False,
+           link: str | None = None) -> Job:
+    """Queue `run(job)` in `lane`; it returns the result line shown in the header. Needs a running event loop.
+    `link`: the page with the result (the finished-job notice opens it; no notice on that page itself).
+
+    `keys`: the marker keys ("ad:123", "draft:5") of everything the job will touch, so the elements waiting for it
+    can offer a cancel button while it is queued. `on_cancel` clears those markers when it is cancelled (cancel());
+    a job with markers but no on_cancel cannot be cancelled. `grace`: irreversible work waits grace_s() seconds
+    in the queue first (the window to take the click back). `quiet`: no notice when it is done – the page that
+    started it shows the result itself (a failure still gets one)."""
     if lane not in LANES:
         raise ValueError(lane)
     if reuse_queued:
         for j in _active:
             if j.kind == kind and j.status == "queued":
                 return j
-    job = Job(next(_ids), kind, label, lane=lane, total=total, current=current)
+    keys = list(keys or ([current] if current else []))
+    wait = grace_s() if grace else 0
+    job = Job(next(_ids), kind, label, lane=lane, total=total, current=current, keys=keys, on_cancel=on_cancel,
+              cancellable=on_cancel is not None or not keys, quiet=quiet, link=link,
+              runs_at=utcnow() + timedelta(seconds=wait) if wait else None)
     _active.append(job)
     job.task = asyncio.create_task(_run(job, run))
     return job
+
+
+def cancel(job_id: int) -> bool:
+    """Take a queued job back: it never runs, its markers are cleared (on_cancel) and it is listed as cancelled.
+    False: unknown, already running or finished, or not cancellable."""
+    job = next((j for j in _active if j.id == job_id), None)
+    if job is None or job.status != "queued" or not job.cancellable:
+        return False
+    job.status, job.result = "cancelled", t("Taken back")
+    if job.task is not None:
+        job.task.cancel()
+    if job.on_cancel is not None:
+        try:
+            job.on_cancel()
+        except Exception as e:  # noqa: BLE001 - the markers are the submitter's business; the job is off either way
+            log.warning("on_cancel of job %r failed: %s", job.label, e)
+    _settle(job)
+    return True
+
+
+def _settle(job: Job) -> None:
+    job.finished_at, job.step, job.current = utcnow(), "", None
+    if job in _active:
+        _active.remove(job)
+    if job not in _finished:
+        _finished.appendleft(job)
 
 
 JOB_TIMEOUT_S = 15 * 60     # longest a job may run (a big clean-up or update fits); the lane is freed afterwards
@@ -139,6 +191,8 @@ async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
     from app.services import timeline
 
     try:
+        if job.runs_at is not None:       # grace period: cancellable until it ends (task.cancel() lands here)
+            await asyncio.sleep(max((job.runs_at - utcnow()).total_seconds(), 0))
         async with _locks.setdefault(job.lane, asyncio.Lock()):
             job.status = "running"
             # one timeline entry per job; Claude calls and willhaben requests inside it are its steps
@@ -157,11 +211,11 @@ async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
                 tl.finish(job.status == "done", job.result if job.status == "failed" else None,
                           payload={k: v for k, v in {"result": job.result, "problems": job.problems, "done": job.done,
                                                      "total": job.total, "lane": job.lane}.items() if v})
+    except asyncio.CancelledError:        # cancel() while queued (or the loop shutting down): it never ran
+        if job.status == "queued":
+            job.status, job.result = "cancelled", t("Taken back")
     finally:
-        job.finished_at, job.step, job.current = utcnow(), "", None
-        if job in _active:
-            _active.remove(job)
-        _finished.appendleft(job)
+        _settle(job)
 
 
 def budget_wait(job: Job) -> BudgetWait:

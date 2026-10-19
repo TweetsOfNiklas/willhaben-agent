@@ -48,7 +48,7 @@ from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
 from app import style_routes
 from app.services import search_agents as search_agents_svc
-from app.services.search_agents import refile_screened, run_agent
+from app.services.search_agents import refile_screened
 from app.willhaben import access_log
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -434,7 +434,7 @@ async def index(request: Request):
 
 # ------------------------------------------------------------------ search agents
 @app.get("/agents", response_class=HTMLResponse)
-async def agents_page(request: Request, error: str | None = None):
+async def agents_page(request: Request, error: str | None = None, msg: str | None = None):
     with session() as db:
         agents = list(db.exec(select(SearchAgent).order_by(SearchAgent.created_at)))
         counts = dict(db.exec(select(Hit.agent_id, func.count()).where(Hit.state == "new").group_by(Hit.agent_id)).all())
@@ -444,8 +444,8 @@ async def agents_page(request: Request, error: str | None = None):
             row = thumbs.setdefault(h.agent_id, [])
             if len(row) < 4:
                 row.append(h)
-    return render(request, "agents.html", agents=agents, counts=counts, thumbs=thumbs, error=error,
-                  quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(),
+    return render(request, "agents.html", agents=agents, counts=counts, thumbs=thumbs, error=error, msg=msg,
+                  quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(), checking=set(jobs.current_keys("agent:")),
                   next_run=scheduler.next_run, settings=get_settings(), thresholds=screening.thresholds())
 
 
@@ -560,7 +560,7 @@ async def agents_new(request: Request):
         preview["ads"] = merged
         preview["rows_found"] = sum(r["rows_found"] for r in preview["sites"])
     return render(request, "agent_new.html", f=filters, url=url, preview=preview, platform=p,
-                  platform_choices=choices, chosen=[p.id] + [o.id for o in others], error=error, url_param=url_param,
+                  platform_choices=choices, chosen=[p.id] + [o.id for o in others], builder_error=error, url_param=url_param,
                   platform_off=[x for x in platforms.all(enabled_only=False) if not platforms.enabled(x.id)
                                 and (x.can("search_url") or x.can("keyword_search"))],
                   settings=get_settings(), thresholds=screening.thresholds())
@@ -622,17 +622,17 @@ def _create_agent(url: str, platform: str, keyword: str, price_from: Any, price_
 
 @app.post("/agents/{agent_id}/run")
 async def agents_run(agent_id: int):
+    """"Check now": the check runs as a background job (lane agents); the card shows it and refreshes itself when it
+    is done (the hits page and the pushes tell what it found)."""
     with session() as db:
         a = db.get(SearchAgent, agent_id)
         last = a.last_run_at if a else None
     if last and last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     if last and (utcnow() - last).total_seconds() < 60:   # no hammering willhaben via the button
-        return back(f"/hits?agent_id={agent_id}")
-    res = await run_agent(agent_id)
-    if res.error:
-        return back(f"/agents?error={res.error}")
-    return back(f"/hits?agent_id={agent_id}")
+        return back(f"/agents?msg={quote(t('Checked less than a minute ago – the next check waits a moment'), safe='')}")
+    search_agents_svc.enqueue_run(agent_id)
+    return back("/agents")
 
 
 @app.post("/agents/bulk")
@@ -1414,6 +1414,7 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     return render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                   drafts=drafts, msg=msg, live_state=chats.live_state(conversation_id), meetup=meetups.current(conv, drafts), gcal_on=gcal.connected(),
                   sale=sold.state_for(conv), contact_warn=selling.contact_hits(open_draft.text) if open_draft else [],
+                  sale_panel=sold.panel(conv.ad_id, conv.id) if conv.role == "seller" and conv.ad_id else None,
                   gcal_duration=gcal.config()["duration"], **await _shipping_ctx(conversation_id, conv, sort),
                   **_chat_list(show_hidden or bool(conv.hidden_at)))
 
@@ -1441,6 +1442,7 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
             "ship_pref": selling.preference_text(), "fmt_dist": dropoff.fmt_dist,
             "ship_shops": shops, "ship_shop": stored or (shops[0] if shops else None), "ship_shop_stored": bool(stored),
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
+            "ship_detecting": f"shipping:{conversation_id}" in jobs.current_keys("shipping:"),
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
             "ship_all": shipping.all_options(s.parcel) if s else [], **(shipping.page_state(s) if s else {}),
             **printing_routes.shipment_panel(s)}
@@ -1501,7 +1503,8 @@ async def draft_discard(draft_id: int):
 
 # ------------------------------------------------------------------ my ads
 _MYADS_FILTERS = ("show_active", "show_inactive", "show_sold", "show_hidden")
-templates.env.globals.update(stock_of=stock.numbers, stock_text=stock.stock_text)   # ads with a quantity (myads.html)
+templates.env.globals.update(stock_of=stock.numbers, stock_text=stock.stock_text,   # ads with a quantity (myads.html)
+                             sale_panel=sold.panel)                                 # the sale panel of the open ad
 
 
 def _myads_back(request: Request, msg: str = "", anchor: str = "", form: Any = None) -> RedirectResponse:
@@ -1554,7 +1557,10 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
             sections[i] = title
             i += len(group)
     ads = [a for _, group in groups for a in group]
-    return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL,
+    # the open ad (?ad=) stays open even when the chips hide its group, e.g. right after it was deactivated
+    wanted = request.query_params.get("ad")
+    cur_ad = next((a for a in rows if wanted and str(a.ad_id) == wanted), None)
+    return render(request, "myads.html", ads=ads, msg=msg, myadverts_url=my_ads.MYADVERTS_URL, cur_ad=cur_ad,
                   show_active=show_active, active_count=len(active) + len(expired),
                   hidden_count=len(hidden), show_hidden=show_hidden, sold_count=len(sold), show_sold=show_sold,
                   inactive_count=len(inactive), show_inactive=show_inactive, sections=sections)
@@ -1661,7 +1667,7 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
     if row is None:
         raise HTTPException(404)
     try:
-        value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
+        value = min_price_svc.parse_form(price.replace("€", ""))    # 12.5, 12,50 and 1.250,50 alike
     except ValueError:
         value = None
     cur = {"heading": heading, "description": description, "price": value}
@@ -1688,7 +1694,7 @@ async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str
     """Background job (lane ads): back to the ad, which shows "Saving…" until willhaben has it."""
     from app.willhaben.insert import InsertError
     try:
-        value = float(price.replace("€", "").replace(".", "").replace(",", ".").strip()) if price.strip() else None
+        value = min_price_svc.parse_form(price.replace("€", ""))    # 12.5, 12,50 and 1.250,50 alike
     except ValueError:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Invalid price'), safe='')}")
     try:
@@ -1698,6 +1704,20 @@ async def myads_edit_save(ad_id: str, heading: str = Form(...), description: str
     if not queued:
         return back(f"/myads/{ad_id}/edit?msg={quote(t('Nothing queued: these ads are already being processed'), safe='')}")
     return back(f"/myads?ad={quote(ad_id, safe='')}&msg={quote(t('Saving on willhaben in the background'), safe='')}")
+
+
+@app.post("/myads/{ad_id}/price")
+async def myads_price(request: Request, ad_id: str, price: str = Form("")):
+    """The price alone, from the ad's panel (title and text stay): a background job, the panel shows "Saving…"."""
+    try:
+        value = min_price_svc.parse_form(price.replace("€", ""))
+    except ValueError:
+        value = None
+    if value is None:
+        return _myads_back(request, t("Invalid price"), f"#ad-{ad_id}")
+    if not my_ads.enqueue_price(ad_id, value):
+        return _myads_back(request, t("Nothing queued: these ads are already being processed"), f"#ad-{ad_id}")
+    return _myads_back(request, "", f"#ad-{ad_id}")
 
 
 @app.post("/myads/{ad_id}/photos")
@@ -1735,9 +1755,8 @@ async def myads_bulk(request: Request, action: str):
 
 
 def _queued(request: Request, n: int, form: Any = None) -> RedirectResponse:
-    msg = t("Queued: {n} – processed in the background, one willhaben request after another", n=n) if n \
-        else t("Nothing queued: these ads are already being processed")
-    return _myads_back(request, msg, form=form)
+    """The rows show what is queued (with a cancel while it waits): only a refusal needs words."""
+    return _myads_back(request, "" if n else t("Nothing queued: these ads are already being processed"), form=form)
 
 
 @app.get("/myads/cleanup", response_class=HTMLResponse)
@@ -1838,12 +1857,22 @@ async def jobs_status(since: int | None = None):
         pending += jobs.current_keys("simreview:")         # Claude reviews a system prompt (chat simulator)
         pending += jobs.current_keys("preparing:")         # willhaben categories for an ad draft (batch table)
         pending += jobs.current_keys("style")              # Claude derives the writing style (app/services/style.py)
+        pending += jobs.current_keys("agent:")             # a search agent's check (scheduled or "Check now")
+        pending += jobs.current_keys("shipping:")          # Claude prepares a parcel from a chat
+        pending += jobs.current_keys("purchase:")          # a purchase order about to contact the seller
+        pending += [f"batch:{i}" for i in db.exec(select(AdBatch.id).where(col(AdBatch.status).in_(("sorting", "creating"))))]
         last = _live_cursor()
         new = [] if since is None or since >= last else list(db.exec(
             select(EventLog).where(EventLog.id > since, col(EventLog.quiet).is_not(True))
             .order_by(col(EventLog.id).desc()).limit(LIVE_EVENTS)))
     return {**jobs.snapshot(), "pending": pending, "counts": _nav_counts(), "last_event": last,
             "events": [_live_event(e) for e in reversed(new)]}
+
+
+@app.post("/jobs/{job_id}/cancel")
+async def job_cancel(job_id: int):
+    """Take a queued job back (the ✕ in the jobs popover or next to the element waiting for it): it never runs."""
+    return {"ok": jobs.cancel(job_id)}
 
 
 # ------------------------------------------------------------------ sold / reserved workflow (app/services/sold.py)
@@ -1867,24 +1896,67 @@ def _sold_render(request: Request, ad_id: str, kind: str, buyer: str | None, msg
     numbers = stock.numbers(ad)       # an ad with a quantity: the stock block, the sale's pieces and price
     return render(request, "sold.html", ad_id=ad_id, kind=kind, ad=ad, title=sold.title_of(ad_id),
                   convs=convs, buyer=buyer_conv, others=sold.others(ad_id, buyer_conv.id if buyer_conv else None),
+                  panel=sold.panel(ad_id, buyer_conv.id if buyer_conv else None),
                   reasons=reasons or sold.pending_reasons(ad_id), msg=msg,   # reasons a background step left behind
                   stock=numbers, sales=stock.sales_of(ad_id) if numbers else [], names={c.id: c.partner_name for c in convs},
                   agreed_price=sold.agreed_price(buyer_conv.id if buyer_conv else None) if numbers else None)
 
 
+def _sale_back(next_url: str, ad_id: str, kind: str, buyer: str | None, msg: str | None = None, anchor: str = "") -> RedirectResponse:
+    """Back to the page the sale panel sits on (`next`: the chat, My ads; only paths of this app), else the sale page."""
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return back(next_url + (("&" if "?" in next_url else "?") + f"msg={quote(msg, safe='')}" if msg else ""))
+    return back(_sold_url(ad_id, kind, buyer, msg, anchor))
+
+
 @app.post("/sold/{ad_id}/willhaben", response_class=HTMLResponse)
 async def sold_willhaben(request: Request, ad_id: str, kind: str = Form("sold"), buyer: str = Form(""),
-                         undo: str = Form(""), reason_id: str = Form("")):
-    """Background job (lane ads). If willhaben asks for a sold reason, the job leaves the reasons on the ad and this
-    page offers them; the next confirm queues it again with the reason."""
+                         undo: str = Form(""), reason_id: str = Form(""), next: str = Form("")):
+    """The willhaben step alone, as a background job (lane ads): the sale panel's "Mark on willhaben" when the one-click
+    sale could not queue it, and the confirm with the sold reason willhaben asked for (the job leaves the reasons
+    on the ad, the panel offers them)."""
     if sold.kind_of(kind) == "sold" and undo:
-        return back(_sold_url(ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#step1"))
+        return _sale_back(next, ad_id, kind, buyer or None, t("willhaben cannot undo \"sold\"."), "#sale-actions")
     if sold.kind_of(kind) == "sold" and sold.pieces_left(ad_id):     # a stale page: on_willhaben refuses it too
-        return back(_sold_url(ad_id, kind, buyer or None,
-                              t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"), "#step1"))
+        return _sale_back(next, ad_id, kind, buyer or None,
+                          t("Pieces left: record the sale instead – willhaben is marked sold with the last piece"), "#sale-actions")
     queued = sold.enqueue_willhaben(ad_id, kind, undo=bool(undo), reason_id=reason_id or None)
-    msg = t("On its way to willhaben – it runs in the background") if queued else t("Nothing queued: these ads are already being processed")
-    return back(_sold_url(ad_id, kind, buyer or None, msg, "#step1"))
+    return _sale_back(next, ad_id, kind, buyer or None, None if queued else t("Nothing queued: these ads are already being processed"),
+                      "#sale-actions")
+
+
+@app.post("/sold/{ad_id}/reserve")
+async def sold_reserve(ad_id: str, buyer: str = Form(""), next: str = Form("")):
+    """One click: reserved here (automatic answers off, the buyer noted) and on willhaben (background job)."""
+    try:
+        sold.reserve(ad_id, buyer or None)
+    except ValueError as e:
+        return _sale_back(next, ad_id, "reserved", buyer or None, str(e), "#sale-actions")
+    return _sale_back(next, ad_id, "reserved", buyer or None)
+
+
+@app.post("/sold/{ad_id}/unreserve")
+async def sold_unreserve(ad_id: str, buyer: str = Form(""), next: str = Form("")):
+    """One click: the reservation goes here and, when willhaben shows it, there too (background job)."""
+    sold.unreserve(ad_id)
+    return _sale_back(next, ad_id, "reserved", buyer or None)
+
+
+@app.post("/sold/{ad_id}/sell")
+async def sold_sell(ad_id: str, buyer: str = Form(""), next: str = Form(""), auto_off: str = Form("1"),
+                    pieces: str = Form(""), price: str = Form(""), reason_id: str = Form("")):
+    """One click: the sale is recorded here and, when that sells the ad out, it is marked sold on willhaben
+    (background job with a grace period). `pieces`/`price` come with an ad with a quantity."""
+    try:
+        amount = min_price_svc.parse_form(price)
+    except ValueError:
+        return _sale_back(next, ad_id, "sold", buyer or None, t("Price must be a number, e.g. 25 or 25,50"), "#sale-actions")
+    try:
+        sold.sell(ad_id, buyer or None, pieces=int(pieces) if pieces.strip().isdigit() else (0 if pieces.strip() else 1),
+                  price=amount, auto_off=auto_off != "0", reason_id=reason_id or None)
+    except ValueError as e:
+        return _sale_back(next, ad_id, "sold", buyer or None, str(e), "#sale-actions")
+    return _sale_back(next, ad_id, "sold", buyer or None)
 
 
 @app.post("/sold/{ad_id}/notices")
@@ -1954,9 +2026,9 @@ async def sold_undo_sale(ad_id: str, sale_id: int, kind: str = Form("sold"), buy
 
 
 @app.post("/sold/{ad_id}/reset")
-async def sold_reset(ad_id: str, kind: str = Form("sold"), buyer: str = Form("")):
+async def sold_reset(ad_id: str, kind: str = Form("sold"), buyer: str = Form(""), next: str = Form("")):
     sold.reset(ad_id)
-    return back(_sold_url(ad_id, kind, buyer or None, t("Sale status removed here (willhaben unchanged)"), "#step3"))
+    return _sale_back(next, ad_id, kind, buyer or None, None if next else t("Sale status removed here (willhaben unchanged)"), "#step3")
 
 
 # ------------------------------------------------------------------ new ad
@@ -1970,10 +2042,11 @@ async def new_ad_page(request: Request):
 
 @app.post("/new-ad")
 async def new_ad_create(notes: str = Form(""), photos: list[UploadFile] = File(default=[])):
+    """The draft page opens at once; Claude writes the listing as a background job (lane claude)."""
     files = [(p.filename or "", await p.read()) for p in photos if p.filename]
     if not notes.strip() and not files:
         return back("/new-ad")
-    draft = await ad_creator.create_draft(notes, files)
+    draft = ad_creator.enqueue_create(notes, files)
     return back(f"/new-ad/{draft.id}")
 
 
@@ -1991,9 +2064,12 @@ async def ad_draft_page(request: Request, draft_id: int, msg: str | None = None)
 @app.post("/new-ad/{draft_id:int}")
 async def ad_draft_save(request: Request, draft_id: int, title: str = Form(...), description: str = Form(...),
                         price: str = Form("")):
+    """The draft's fields; saved as you type (X-Autosave: {"ok", "error"}), a plain form still redirects."""
     d = ad_creator.save_fields(draft_id, title, description, price, _posted_quantity(await request.form()))
-    msg = ad_creator.save_problem(d, price) or t('Changes saved')
-    return back(f"/new-ad/{draft_id}?msg={quote(msg, safe='')}")
+    problem = ad_creator.save_problem(d, price)
+    if request.headers.get("x-autosave"):
+        return JSONResponse({"ok": problem is None, "error": problem})
+    return back(f"/new-ad/{draft_id}?msg={quote(problem or t('Changes saved'), safe='')}")
 
 
 @app.post("/new-ad/{draft_id:int}/refine")
@@ -2032,8 +2108,12 @@ async def ad_draft_retry(draft_id: int):
 
 @app.post("/new-ad/{draft_id:int}/reconcile")
 async def ad_draft_reconcile(draft_id: int):
-    await ad_creator.reconcile_with_geizhals(draft_id)
-    return back(f"/new-ad/{draft_id}")
+    """Background job (lane claude) like a revision: the draft shows "Claude is revising…" and swaps itself in."""
+    _draft_or_404(draft_id)
+    if not ad_creator.enqueue_refine(draft_id, ad_creator.RECONCILE_INSTRUCTION,
+                                     label=t("Checked against the Geizhals spec sheet")):
+        return back(f"/new-ad/{draft_id}?msg={quote(ad_creator.refine_refusal(draft_id), safe='')}#geizhals")
+    return back(f"/new-ad/{draft_id}#geizhals")
 
 
 @app.post("/new-ad/{draft_id:int}/undo")
@@ -2924,6 +3004,8 @@ async def settings_save(request: Request):
         set_setting("myads_expired_days", str(max(0, num("myads_expired_days", 30))))
     if "sell_handover" in todo:
         selling.save(form)
+    if request.headers.get("x-autosave"):          # saved as you change it (x-data="autosave"): no reload
+        return JSONResponse({"ok": True})
     return back(f"/settings/{section}?msg={quote(t('Changes saved'), safe='')}")
 
 
@@ -3127,7 +3209,11 @@ async def chat_calendar_forget(conversation_id: str):
 
 
 # ------------------------------------------------------------------ shipping (parcel labels)
-def _chat_back(conversation_id: str, msg: str = "") -> RedirectResponse:
+def _chat_back(conversation_id: str, msg: str = "", request: Request | None = None) -> RedirectResponse:
+    """Back to the chat's shipping card. `request` (success paths): sent through htmx, the card itself shows the
+    new state, so a message that only restates the click is left out; errors come without it and stay."""
+    if request is not None and _hx(request):
+        msg = ""
     return back(f"/chats/{conversation_id}?msg={quote(msg, safe='')}#shipping")
 
 
@@ -3195,12 +3281,13 @@ async def settings_shipping_open(carrier: str):
 
 
 @app.post("/chats/{conversation_id}/shipping/detect")
-async def shipping_detect(conversation_id: str):
-    try:
-        s = await shipping.detect(conversation_id, force=True)
-    except (LLMError, shipping.ShippingError) as e:
-        return _chat_back(conversation_id, str(e))
-    return _chat_back(conversation_id, "" if s and s.recipient else t("No complete address in this chat yet – enter it by hand"))
+async def shipping_detect(request: Request, conversation_id: str):
+    """Background job (lane claude): the card shows "Preparing the parcel…" and swaps itself in when it is done."""
+    with session() as db:
+        if db.get(Conversation, conversation_id) is None:
+            raise HTTPException(404)
+    shipping.enqueue_detect(conversation_id)
+    return _chat_back(conversation_id, request=request)
 
 
 @app.post("/shipments/{shipment_id}")
@@ -3214,7 +3301,9 @@ async def shipment_save(request: Request, shipment_id: int):
         shipping.set_parcel(shipment_id, {k: f.get(k) for k in ("length_cm", "width_cm", "height_cm", "weight_kg", "contents")})
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Changes saved") if addr else t("Address incomplete: name, street, postcode and city are needed"))
+    if not addr:
+        return _chat_back(s.conversation_id, t("Address incomplete: name, street, postcode and city are needed"))
+    return _chat_back(s.conversation_id, t("Changes saved"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/option")
@@ -3228,7 +3317,7 @@ async def shipment_option(shipment_id: int, key: str = Form(...)):
 
 
 @app.post("/shipments/{shipment_id}/shop")
-async def shipment_shop(shipment_id: int, shop: str = Form("")):
+async def shipment_shop(request: Request, shipment_id: int, shop: str = Form("")):
     """The owner's parcel shop for a "→ Shop" option (one of the shops the card listed, as JSON)."""
     s = _shipment_or_404(shipment_id)
     try:
@@ -3237,7 +3326,7 @@ async def shipment_shop(shipment_id: int, shop: str = Form("")):
         return _chat_back(s.conversation_id, t("Parcel shop incomplete: name and address are needed"))
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Parcel shop saved"))
+    return _chat_back(s.conversation_id, t("Parcel shop saved"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/label")
@@ -3292,64 +3381,64 @@ async def shipment_label_file(shipment_id: int):
 
 
 @app.post("/shipments/{shipment_id}/paid")
-async def shipment_paid(shipment_id: int):
+async def shipment_paid(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.mark_paid(shipment_id, "manual")
         await shipping.after_paid(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Marked as paid"))
+    return _chat_back(s.conversation_id, t("Marked as paid"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/unpaid")
-async def shipment_unpaid(shipment_id: int):
+async def shipment_unpaid(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.unmark_paid(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Payment mark removed"))
+    return _chat_back(s.conversation_id, t("Payment mark removed"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/approve")
-async def shipment_approve(shipment_id: int):
+async def shipment_approve(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.approve(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Buying the label – this takes a moment"))
+    return _chat_back(s.conversation_id, t("Buying the label – this takes a moment"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/decline")
-async def shipment_decline(shipment_id: int):
+async def shipment_decline(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.decline(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Label not bought"))
+    return _chat_back(s.conversation_id, t("Label not bought"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/retry")
-async def shipment_retry(shipment_id: int):
+async def shipment_retry(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.retry(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Trying again"))
+    return _chat_back(s.conversation_id, t("Trying again"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/cancel-auto")
-async def shipment_cancel_auto(shipment_id: int):
+async def shipment_cancel_auto(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         await shipping.cancel_auto(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Automatic purchase cancelled – approve the label below"))
+    return _chat_back(s.conversation_id, t("Automatic purchase cancelled – approve the label below"), request=request)
 
 
 # ------------------------------------------------------------------ telegram

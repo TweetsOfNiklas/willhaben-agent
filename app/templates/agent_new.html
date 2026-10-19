@@ -15,6 +15,11 @@
    with willhaben's own filters when it is willhaben; the others search the same term and price range. Switched-off
    sites lead to their settings page. `chosen` = [main, others…] from the route. #}
 {% set sites_qs %}{% for sid in chosen %}&sites={{ sid }}{% endfor %}{% endset %}
+{# everything below swaps in place: the site ticks, the link, the search and every filter chip are GET requests
+   this wrapper boosts and selects itself from (the address bar follows). Links to other pages and the form that
+   creates the agent are left out (hx-boost="false"). #}
+<div id="agent-builder" hx-boost="true" hx-target="#agent-builder" hx-select="#agent-builder" hx-swap="outerHTML show:none" hx-push-url="true">
+{% if builder_error %}{{ ui.msg(builder_error, 'error') }}{% endif %}
 <form method="get" action="/agents/new" id="agent-sites" class="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
   <span class="text-[12.5px] text-muted">{{ _("Sites") }}</span>
   {% for pc in platform_choices %}<label class="flex cursor-pointer items-center gap-1.5"><input type="checkbox" name="sites" value="{{ pc.id }}" class="checkbox checkbox-sm"{% if pc.id in chosen %} checked{% endif %}{% if not pc.can('keyword_search') and pc.id != platform.id %} disabled{% endif %} onchange="this.form.requestSubmit()">{{ pc.name }}{% if pc.id == platform.id and chosen|length > 1 %} <small class="text-muted">{{ _("main search") }}</small>{% endif %}</label>{% endfor %}
@@ -22,14 +27,15 @@
   {% if preview.price_from is not none %}<input type="hidden" name="price_from" value="{{ preview.price_from|int }}">{% endif %}
   {% if preview.price_to is not none %}<input type="hidden" name="price_to" value="{{ preview.price_to|int }}">{% endif %}
   {% if url %}<input type="hidden" name="url" value="{{ url }}" data-site="{{ platform.id }}">{% endif %}
-  {% for pc in platform_off %}<a href="/settings/{{ pc.id }}" class="inline-flex items-center gap-1 rounded-full border border-dashed border-base-300 px-2.5 py-0.5 text-[12.5px] text-muted no-underline hover:border-primary hover:text-primary" title="{{ _('Switched off – its settings page has the switch') }}">{{ pc.name }} <small class="opacity-75">{{ _("off") }}</small></a>{% endfor %}
+  {% for pc in platform_off %}<a href="/settings/{{ pc.id }}" hx-boost="false" class="inline-flex items-center gap-1 rounded-full border border-dashed border-base-300 px-2.5 py-0.5 text-[12.5px] text-muted no-underline hover:border-primary hover:text-primary" title="{{ _('Switched off – its settings page has the switch') }}">{{ pc.name }} <small class="opacity-75">{{ _("off") }}</small></a>{% endfor %}
 </form>
-<script>(() => { const f = document.getElementById('agent-sites'); f.addEventListener('submit', () => {
-  // the link or filter state belongs to the main site: unticking that site drops it
-  const u = f.querySelector('input[name=url]'); if (!u) return;
-  const box = f.querySelector('input[name=sites][value="' + u.dataset.site + '"]'); if (box && !box.checked) u.remove();
-}); })();</script>
-{% if platform_off %}<p class="mb-4 text-[12.5px] text-muted">{{ _("{sites} can also be watched once you switch them on in the settings.", sites=platform_off|map(attribute='name')|join(', ')) }} <a class="link link-primary" href="/settings/{{ platform_off[0].id }}">{{ _("Switch on") }} →</a></p>{% else %}<div class="mb-4"></div>{% endif %}
+<script>(() => { const f = document.getElementById('agent-sites'); f.addEventListener('change', e => {
+  // the link or filter state belongs to the main site: unticking that site drops it (before the tick's own handler
+  // sends the form – htmx reads the fields when it is sent, so this runs in the capture phase)
+  const u = f.querySelector('input[name=url]'); if (!u || e.target.name !== 'sites') return;
+  if (e.target.value === u.dataset.site && !e.target.checked) u.remove();
+}, true); })();</script>
+{% if platform_off %}<p class="mb-4 text-[12.5px] text-muted">{{ _("{sites} can also be watched once you switch them on in the settings.", sites=platform_off|map(attribute='name')|join(', ')) }} <a class="link link-primary" href="/settings/{{ platform_off[0].id }}" hx-boost="false">{{ _("Switch on") }} →</a></p>{% else %}<div class="mb-4"></div>{% endif %}
 <form method="get" action="/agents/new" class="mb-3 flex flex-nowrap items-center gap-2.5">
   {% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
   <label class="input h-[42px] flex-1 rounded-[10px] bg-base-100">
@@ -43,7 +49,7 @@
   {% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
   <label class="input h-[42px] min-w-[240px] flex-1 rounded-[10px] bg-base-100">
     {{ ui.icon('search', 16, 2, 'text-muted') }}
-    <input type="search" name="keyword" value="{{ (f.keyword if f else (preview.keyword or url_param(url, 'keyword'))) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus class="grow text-[15px]">
+    <input type="search" name="keyword" id="agent-keyword" value="{{ (f.keyword if f else (preview.keyword or url_param(url, 'keyword'))) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" autofocus class="grow text-[15px]">
   </label>
   {% if not wh %}<input name="price_from" inputmode="numeric" value="{{ preview.price_from|int if preview.price_from is not none else '' }}" placeholder="{{ _('from') }} €" class="input h-[42px] w-24 rounded-[10px] bg-base-100">
   <input name="price_to" inputmode="numeric" value="{{ preview.price_to|int if preview.price_to is not none else '' }}" placeholder="{{ _('to') }} €" class="input h-[42px] w-24 rounded-[10px] bg-base-100">{% endif %}
@@ -80,7 +86,7 @@
         {% for row in preview.sites %}<li class="flex flex-wrap items-baseline gap-x-2"><span class="font-medium">{{ row.p.name }}</span>{% if row.error %}<span class="text-error">{{ row.error }}</span>{% else %}<span class="text-muted">{{ _("{n} ads", n='{:,}'.format(row.rows_found).replace(',', '.')) }}</span>{% endif %}{% if row.url %}<a href="{{ row.url }}" target="_blank" rel="noopener" class="link link-primary ml-auto no-underline">{{ _("on {platform}", platform=row.p.name) }} ↗</a>{% endif %}</li>{% endfor %}
       </ul>
       {% elif chosen|length > 1 %}<p class="text-[12.5px] text-warning">{{ _("The other sites need a search term: type one above.") }}</p>{% endif %}
-      <form method="post" action="/agents" class="flex flex-col gap-3.5">
+      <form method="post" action="/agents" hx-boost="false" class="flex flex-col gap-3.5">
         <input type="hidden" name="url" value="{{ preview.url }}">
         <input type="hidden" name="platform" value="{{ platform.id }}">
         {% if preview.sites|length > 1 %}{% for row in preview.sites %}<input type="hidden" name="sites" value="{{ row.p.id }}">{% endfor %}
@@ -113,7 +119,8 @@
     </div>
   </div>
 </div>
-{% elif not error %}
+{% elif not builder_error %}
 <p class="text-muted">{{ _("Type a search term or paste a link to see what the agent would find.") }}</p>
 {% endif %}
+</div>
 {% endblock %}

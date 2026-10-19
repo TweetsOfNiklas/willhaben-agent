@@ -33,5 +33,9 @@
  "one item": "ein Artikel",
  "{n} piece is sold already – undo the sale first to clear the count": "{n} Stück ist schon verkauft – mach zuerst den Verkauf rückgängig, dann lässt sich die Zahl leeren",
  "{n} pieces are sold already – undo the sales first to clear the count": "{n} Stück sind schon verkauft – mach zuerst die Verkäufe rückgängig, dann lässt sich die Zahl leeren",
- "Zoom": "Vergrößern"
+ "Zoom": "Vergrößern",
+ "Change price": "Preis ändern",
+ "Save on willhaben": "Auf willhaben speichern",
+ "Price": "Preis",
+ "Save the price of „{title}“ on willhaben": "Preis von „{title}“ auf willhaben speichern"
 }

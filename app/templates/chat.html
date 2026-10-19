@@ -6,7 +6,7 @@
 {% block thread %}
 {% set ad = conv.ad_context or {} %}
 {% set selling = conv.role == 'seller' %}
-<div class="flex min-w-0 flex-1 basis-full flex-col max-md:min-h-[calc(100dvh-60px-env(safe-area-inset-bottom))] md:basis-[380px]">
+<div class="flex min-w-0 flex-1 basis-full flex-col max-md:min-h-[calc(100dvh-60px-env(safe-area-inset-bottom))] xl:h-screen">
   <div class="sticky top-0 z-[2] flex items-center gap-2.5 border-b border-base-300 bg-base-100 px-4 py-3 md:px-5 md:py-3.5">
     <a href="/chats" class="btn btn-ghost btn-sm btn-square -ml-2 md:hidden" aria-label="{{ _('Chats') }}">{{ ui.icon('back', 18) }}</a>
     <div class="min-w-0 flex-1">
@@ -20,22 +20,24 @@
     </div>
   </div>
 
-  <div id="chat-messages" class="flex flex-1 flex-col justify-end gap-2 px-4 py-5 md:px-5">
+  {# the first message takes the free space above (mt-auto): a short thread sits at the bottom, a long one scrolls
+     (justify-end would push the oldest messages out of reach above the scroller) #}
+  <div id="chat-messages" class="flex min-h-0 flex-1 flex-col gap-2 px-4 py-5 md:px-5 xl:overflow-y-auto">
     {# my messages: ✓ sent, ✓✓ seen by the other person (Message.read, chats.mark_seen); the newest one says it in words #}
     {% set last_out = messages|selectattr('direction', 'equalto', 'out')|rejectattr('kind')|list|last %}
     {% for m in messages %}
       {% if m.kind or m.direction == 'unknown' %}{# willhaben's notices (PayLivery, shipping, status); rows stored before
          notices got their kind only carry direction "unknown" – neither side wrote them #}
-      <div data-notice class="mx-auto max-w-[85%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere] md:max-w-[80%]">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
+      <div data-notice class="mx-auto max-w-[85%] rounded-[14px] bg-hover px-3.5 py-2 text-center text-[12.5px] whitespace-pre-wrap text-muted [overflow-wrap:anywhere] md:max-w-[80%] {{ 'mt-auto' if loop.first else '' }}">{{ m.text or _("willhaben notice") }} · <small>{{ m.created_at|local }}</small></div>
       {% else %}
       {% set mine = m.direction == 'out' %}
       {% set state = (_("Seen {time}", time=m.read_at|local) if m.read_at else _("Seen")) if m.read else _("Sent") %}
-      <div class="chat {{ 'chat-end' if mine else 'chat-start' }}"{% if mine %} data-seen="{{ 1 if m.read else 0 }}"{% endif %}>
+      <div class="chat {{ 'chat-end' if mine else 'chat-start' }} {{ 'mt-auto' if loop.first else '' }}"{% if mine %} data-seen="{{ 1 if m.read else 0 }}"{% endif %}>
         <div class="chat-bubble max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere] md:max-w-[72%] {{ 'chat-bubble-primary' if mine else 'border border-base-300 bg-base-100 text-base-content' }}">{{ m.text }}<small class="mt-1 flex items-center justify-end gap-1 text-[11.5px]"><span class="opacity-70">{{ m.created_at|local }}</span>{% if mine %}<span class="{{ '' if m.read else 'opacity-70' }}" title="{{ state }}">{{ ui.icon('checks' if m.read else 'check', 14, 2.25) }}<span class="sr-only">{{ state }}</span></span>{% endif %}</small></div>
         {% if last_out and m.id == last_out.id %}<div class="chat-footer mt-0.5 text-[11.5px] text-muted" aria-hidden="true">{{ state }}</div>{% endif %}
       </div>
       {% endif %}
-    {% else %}<p class="text-muted">{{ _("No history stored.") }}</p>{% endfor %}
+    {% else %}<p class="mt-auto text-muted">{{ _("No history stored.") }}</p>{% endfor %}
   </div>
 
   {# drafts come newest first (chats.drafts_of): the composer shows the newest open one, never an older, stale draft #}
@@ -98,8 +100,7 @@
         <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/mark-sent" hx-post="/drafts/{{ d.id }}/mark-sent">{{ ui.icon('check', 15) }}{{ _("Sent manually") }}</button>
         <button class="btn btn-ghost btn-sm hover:bg-bad-soft hover:text-error max-sm:px-2" title="{{ _('Discard') }}" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ ui.icon('trash', 15) }}<span class="max-sm:sr-only">{{ _("Discard") }}</span></button>
         <span class="flex-1"></span>
-        <button class="btn btn-primary px-5" hx-post="/drafts/{{ d.id }}/send" hx-confirm="{{ _('Send this message via willhaben now?') }}"
-                data-confirm="{{ _('Send this message via willhaben now?') }}" onclick="return !!window.htmx || confirm(this.dataset.confirm)">{{ ui.icon('send', 16) }}{{ _("Send") }}</button>
+        <button class="btn btn-primary px-5" hx-post="/drafts/{{ d.id }}/send" title="{{ _('Goes out in a few seconds – until then you can take it back here.') }}">{{ ui.icon('send', 16) }}{{ _("Send") }}</button>
       </div>
     </form>
     {# 5 · or let Claude rewrite it: one of its other decisions for this situation (same buttons as in Telegram; one click
@@ -130,10 +131,26 @@
     {% set sent = drafts|selectattr('status', 'equalto', 'sent')|list %}
     {% if sent %}<details class="text-[12.5px] text-muted"><summary class="cursor-pointer select-none">{{ _("{n} earlier drafts", n=sent|length) }}</summary><div class="mt-1.5 flex max-h-40 flex-col gap-1.5 overflow-y-auto">{% for d in sent %}<p class="break-words whitespace-pre-wrap"><span class="tabular-nums">{{ d.sent_at|local }}</span> · {{ d.text }}</p>{% endfor %}</div></details>{% endif %}
   </div>
+  <script>
+  // The thread opens at its newest message, right above the composer – before the first paint (this runs as soon
+  // as the composer is parsed), again once everything is loaded, and whenever the thread is swapped in.
+  // Desktop: the message list scrolls on its own; phones: the page.
+  window.chatScrollEnd = () => {
+    const m = document.getElementById('chat-messages'), c = document.getElementById('chat-composer');
+    if (!m || location.hash) return;
+    let s = m;     // the list itself (wide screens), else the pane or the page – whatever scrolls
+    while (s && !((getComputedStyle(s).overflowY === 'auto' || getComputedStyle(s).overflowY === 'scroll') && s.scrollHeight > s.clientHeight)) s = s.parentElement;
+    if (s === m) { m.scrollTop = m.scrollHeight; return; }
+    const gap = m.getBoundingClientRect().bottom - (c ? c.getBoundingClientRect().top : innerHeight);
+    if (gap > 0) (s || document.scrollingElement).scrollTop += gap;
+  };
+  chatScrollEnd();
+  addEventListener('load', chatScrollEnd, {once: true});
+  </script>
 </div>
 
 {# the context column stays in view beside a long thread (desktop); phones: below the thread #}
-<aside id="chat-context" class="flex w-full min-w-0 shrink-0 flex-col gap-4 *:shrink-0 border-t border-base-300 bg-base-200 px-4 py-5 md:sticky md:top-0 md:max-h-screen md:w-[280px] md:overflow-y-auto md:border-t-0 md:border-l md:px-[18px]">
+<aside id="chat-context" class="flex w-full min-w-0 shrink-0 flex-col gap-4 *:shrink-0 border-t border-base-300 bg-base-200 px-4 py-5 md:px-[18px] xl:h-screen xl:overflow-y-auto xl:border-t-0 xl:border-l">
   {% if ad %}
   <section class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100">
     {% if ad.images %}{{ ui.thumb(ad.images[0], 'h-[110px] w-full', '', '') }}{% endif %}
@@ -146,24 +163,22 @@
     </div>
   </section>
   {% endif %}
-  {% if selling and conv.ad_id %}
-  {% set sold_lbl = _("Sold to {name}", name=conv.partner_name or _('unknown')) ~ '…' %}
-  {% set reserved_lbl = _("Reserved for {name}", name=conv.partner_name or _('unknown')) ~ '…' %}
+  {% if selling and conv.ad_id and sale_panel %}
+  {# one click sells or reserves here and on willhaben (_sale_actions.html); the panel swaps itself in #}
   <section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="sale">
     <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("This buyer") }}</h3>
-    {% if sale and sale.kind %}{% set mine = sale.buyer == conv.id if sale.kind == 'reserved' else sale.is_buyer %}<div class="flex min-w-0 flex-wrap items-center gap-2">{{ ui.pill(_("sold") if sale.kind == 'sold' else _("reserved"), 'ok' if mine else '') }}<small class="text-muted">{% if mine %}{{ _("to this buyer") }}{% elif sale.kind == 'sold' %}{{ _("No automatic answers in this chat any more.") }}{% endif %}</small></div>{% endif %}
     {# an ad with several pieces, not sold out: what this person bought and what is left #}
     {% if sale and sale.quantity is not none and sale.kind != 'sold' %}<div class="flex min-w-0 flex-wrap items-center gap-2">{% if sale.pieces %}{{ ui.pill(_("{n} piece sold to this person", n=sale.pieces) if sale.pieces == 1 else _("{n} pieces sold to this person", n=sale.pieces), 'ok') }}{% endif %}<small class="text-muted tabular-nums">{{ _("{left} of {total} still available", left=sale.remaining, total=sale.quantity) }}</small></div>{% endif %}
-    <a class="btn btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left font-normal whitespace-normal break-words" href="/sold/{{ conv.ad_id }}?kind=sold&buyer={{ conv.id }}" title="{{ sold_lbl }}">{{ sold_lbl }}</a>
-    <a class="btn btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left font-normal whitespace-normal break-words" href="/sold/{{ conv.ad_id }}?kind=reserved&buyer={{ conv.id }}" title="{{ reserved_lbl }}">{{ reserved_lbl }}</a>
-    <p class="text-[12px] text-muted">{{ _("Next page: mark it on willhaben, tell the other buyers, switch off automatic answers – each step only on your click.") }}</p>
+    {% if sale and sale.kind == 'sold' and not sale.is_buyer %}<small class="text-[12px] text-muted">{{ _("No automatic answers in this chat any more.") }}</small>{% endif %}
+    {% with p = sale_panel, target = '#sale', next = '/chats/' ~ conv.id, oob = '', inline = false %}{% include "_sale_actions.html" %}{% endwith %}
   </section>
   {% endif %}
   {% include "_purchase.html" %}
   {% include "_paylivery.html" %}
   {% if ship_on %}{% include "_shipping.html" %}{% endif %}
   {% if gcal_on %}
-  <section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="meetup">
+  <section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="meetup"
+           hx-boost="true" hx-target="#meetup" hx-select="#meetup" hx-swap="outerHTML" hx-select-oob="#flash" hx-push-url="false">
     <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Calendar") }}</h3>
     {% if meetup and meetup.event_id %}
       <div class="break-words text-[13px]"><strong>{{ _("In your calendar") }}</strong> · {{ meetup.start.replace('T', ' ') }}{% if meetup.location %} · {{ meetup.location }}{% endif %} {% if meetup.event_link %}<a class="link link-primary" href="{{ meetup.event_link }}" target="_blank" rel="noopener">{{ _("Open") }}{{ ui.icon('external', 13) }}</a>{% endif %}</div>

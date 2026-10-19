@@ -143,7 +143,8 @@
 <main class="{% if split %}grid min-w-0 pb-[calc(64px+env(safe-area-inset-bottom))] md:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] md:pb-0{% else %}mx-auto w-full max-w-[1240px] min-w-0 px-4 pt-5 pb-[calc(80px+env(safe-area-inset-bottom))] md:px-9 md:pt-7 md:pb-10{% endif %}"
       {% if split %}data-split{% endif %}>
   {% set notice_text = purchase_notice() %}
-  {% if not split %}
+  {% set toasts = split or (request is defined and request.headers.get('hx-request')) %}
+  {% if not toasts %}
     {% if notice_text %}{{ ui.msg(notice_text) }}{% endif %}
     {% if msg %}{{ ui.msg(msg) }}{% endif %}
     {% if error %}{{ ui.msg(error, 'error') }}{% endif %}
@@ -152,15 +153,15 @@
 </main>
 </div>
 
-{# split pages have no room for a message bar: messages come as toasts #}
-{% if split and (notice_text or msg or error) %}
-<div class="toast toast-end toast-bottom z-50 max-md:bottom-[calc(72px+env(safe-area-inset-bottom))]" x-data>
-  {% for text, bad in [(notice_text, false), (msg, false), (error, true)] if text %}
+{# split pages have no room for a message bar: messages come as toasts. The container is always there (#flash), so a
+   fragment swapped in by htmx can bring its message along (hx-select-oob="#flash"): on a one-column page the message
+   of such a fragment comes as a toast too (the bar on top would be out of view), a full load keeps the bar. #}
+<div id="flash" class="toast toast-end toast-bottom z-50 max-md:bottom-[calc(72px+env(safe-area-inset-bottom))] {{ '' if toasts and (notice_text or msg or error) else 'hidden' }}" x-data>
+  {% for text, bad in [(notice_text, false), (msg, false), (error, true)] if text and toasts %}
   <div role="status" class="alert max-w-sm text-sm whitespace-pre-line shadow-lg {{ 'alert-error' if bad else 'border-base-300 bg-base-100' }}"
        x-init="setTimeout(() => $el.remove(), {{ 12000 if bad else 7000 }})">{{ text }}<button class="btn btn-ghost btn-xs btn-square" @click="$el.parentElement.remove()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 14) }}</button></div>
   {% endfor %}
 </div>
-{% endif %}
 
 {# ---- account menu ---- #}
 {% set more_pages = [('/agents', 'detective', _("Search agents"), 0), ('/deals', 'search', _("Product search"), 0), ('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0)), ('/new-ad', 'plus', _("New ad"), 0)] %}
@@ -303,8 +304,11 @@
             <span x-show="j.status === 'done' && !j.problems" class="text-success">{{ ui.icon('check', 14) }}</span>
             <span x-show="j.status === 'done' && j.problems" class="text-warning">{{ ui.icon('alert', 14) }}</span>
             <span x-show="j.status === 'failed'" class="text-error">{{ ui.icon('x', 14) }}</span>
+            <span x-show="j.status === 'cancelled'" class="text-muted">{{ ui.icon('undo', 14) }}</span>
             <a x-show="j.link" :href="j.link" class="min-w-0 flex-1 truncate font-medium text-base-content no-underline hover:underline" x-text="j.label"></a>
             <span x-show="!j.link" class="min-w-0 flex-1 truncate font-medium" x-text="j.label"></span>
+            {# queued and cancellable (jobs.submit on_cancel): take it back before it runs #}
+            <button x-show="j.cancellable" type="button" class="btn btn-ghost btn-xs shrink-0 text-muted hover:text-error" @click="$store.jobs.cancel(j.id)" title="{{ _('Cancel') }}">{{ ui.icon('x', 13, 2.5) }}{{ _("Cancel") }}</button>
           </div>
           <div class="text-[12.5px] text-muted" x-text="$store.jobs.line(j)"></div>
           <div x-show="j.status === 'running' && j.total" class="h-1 overflow-hidden rounded-sm bg-base-300">
@@ -372,7 +376,9 @@
     <div role="status" class="alert flex max-w-sm items-start gap-2 border-base-300 bg-base-100 py-2.5 text-sm shadow-lg" :class="n.bad && 'border-l-4 border-l-error'">
       <a :href="n.href || '#'" :data-ad="n.ad || null" :target="n.external ? '_blank' : null" :rel="n.external ? 'noopener' : null"
          @click="!n.href && $event.preventDefault(); $store.jobs.dismiss(n.key)" class="min-w-0 flex-1 text-base-content no-underline">
-        <span class="block font-semibold" x-text="n.title"></span><span class="line-clamp-2 block text-[12.5px] text-muted" x-text="n.text"></span></a>
+        <span class="block font-semibold" x-text="n.title"></span><span class="line-clamp-2 block text-[12.5px] text-muted" x-text="n.undo ? $store.jobs.T.startsIn.replace('{n}', $store.jobs.leftFor(n.undo)) : n.text"></span></a>
+      {# a job in its grace period: one click takes it back #}
+      <button x-show="n.undo" type="button" class="btn btn-sm shrink-0" @click="$store.jobs.cancel(n.undo)">{{ ui.icon('undo', 14) }}{{ _("Undo") }}</button>
       <button type="button" class="btn btn-ghost btn-xs btn-square" @click="$store.jobs.dismiss(n.key)" aria-label="{{ _('Close') }}">{{ ui.icon('x', 14) }}</button>
     </div>
   </template>
@@ -505,10 +511,12 @@ document.addEventListener('alpine:init', () => {
   // in the background; gone from the fresh copy = removed (a deleted ad). data-refresh-on-lane="ads": refreshed
   // whenever a job of that lane finished. data-refresh-also="id …": more elements taken along.
   Alpine.store('jobs', {
-    active: [], recent: [], seen: null, timer: null, cursor: null, notices: [], IDLE: 20000, HIDDEN: 60000,
+    active: [], recent: [], seen: null, seenActive: null, timer: null, cursor: null, notices: [], IDLE: 20000, HIDDEN: 60000,
+    now: Date.now(), tick: null,
     live: !document.body.hasAttribute('data-embed'),
     T: {running: {{ _("{n} running")|tojson }}, queued: {{ _("{n} queued")|tojson }}, idle: {{ _("Background")|tojson }},
-        waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }}},
+        waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }},
+        cancelled: {{ _("taken back")|tojson }}, startsIn: {{ _("starts in {n} s")|tojson }}, taken: {{ _("Taken back – nothing happened")|tojson }}},
     init() {
       try { this.apply(JSON.parse(document.getElementById('bg-jobs-data').textContent)); } catch (e) {}
       if (document.querySelector('[data-pending-key]')) this.poll();       // markers on the page: their state now
@@ -519,6 +527,25 @@ document.addEventListener('alpine:init', () => {
     get visible() { return this.active.length > 0 || this.recent.length > 0; },
     get problems() { return this.recent.some(j => j.status === 'failed' || j.problems); },
     isWorking(key) { return this.active.some(j => j.status === 'running' && j.current === key); },
+    // Taking a click back: a queued job with a cancel path (jobs.submit on_cancel) can be cancelled until it runs;
+    // irreversible ones (delete, sold, send, publish) wait a grace period in the queue first (job_grace_s).
+    cancelFor(key) { const j = this.active.find(j => j.cancellable && (j.current === key || (j.keys || []).includes(key))); return j ? j.id : null; },
+    left(j) { return j && j.until ? Math.max(0, Math.ceil((j.until - this.now) / 1000)) : 0; },
+    leftFor(id) { return this.left(this.active.find(j => j.id === id)); },
+    graceText(key) { const n = this.leftFor(this.cancelFor(key)); return n ? ' · ' + this.T.startsIn.replace('{n}', n) : ''; },
+    async cancel(id) {
+      if (!id) return;
+      this.dismiss('g' + id);
+      try { await fetch('/jobs/' + id + '/cancel', {method: 'POST'}); } catch (e) {}
+      this.poll();
+    },
+    ticking() {
+      if (this.tick) return;
+      this.tick = setInterval(() => {
+        this.now = Date.now();
+        if (!this.active.some(j => j.until && j.until > this.now)) { clearInterval(this.tick); this.tick = null; }
+      }, 500);
+    },
     summary() {
       const run = this.active.filter(j => j.status === 'running').length, q = this.active.length - run;
       if (!this.active.length) return this.T.idle;
@@ -526,7 +553,7 @@ document.addEventListener('alpine:init', () => {
     },
     line(j) {
       if (j.status === 'running') return (j.step || this.T.starting) + (j.total ? ' · ' + j.done + '/' + j.total : '');
-      if (j.status === 'queued') return this.T.waiting;
+      if (j.status === 'queued') return this.left(j) ? this.T.startsIn.replace('{n}', this.left(j)) : this.T.waiting;
       const at = j.finished_at ? new Date(j.finished_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + ' · ' : '';
       return at + (j.result || this.T[j.status] || '');
     },
@@ -542,7 +569,7 @@ document.addEventListener('alpine:init', () => {
     notice(n) {
       if (this.notices.some(x => x.key === n.key)) return;
       this.notices = [n, ...this.notices].slice(0, 4);
-      setTimeout(() => this.dismiss(n.key), n.bad ? 15000 : 10000);
+      setTimeout(() => this.dismiss(n.key), n.ms || (n.bad ? 15000 : 10000));
     },
     dismiss(key) { this.notices = this.notices.filter(x => x.key !== key); },
     badges(counts) {
@@ -554,13 +581,24 @@ document.addEventListener('alpine:init', () => {
       });
     },
     apply(data) {
-      this.active = data.active || []; this.recent = data.recent || [];
+      this.now = Date.now();
+      this.active = (data.active || []).map(j => ({...j, until: j.grace_s ? this.now + j.grace_s * 1000 : null}));
+      this.recent = data.recent || [];
+      if (this.active.some(j => j.until)) this.ticking();
+      // a job in its grace period that this page did not know yet: a notice with Undo, gone when the period ends
+      if (this.seenActive === null) this.seenActive = new Set(this.active.map(j => j.id));
+      this.active.filter(j => !this.seenActive.has(j.id)).forEach(j => {
+        this.seenActive.add(j.id);
+        if (this.live && j.until && j.cancellable) this.notice({key: 'g' + j.id, title: j.label, text: '', undo: j.id, ms: j.grace_s * 1000 + 1500});
+      });
+      this.notices.filter(n => n.undo && !this.active.some(j => j.id === n.undo && j.status === 'queued')).forEach(n => this.dismiss(n.key));
       const todo = new Set();
       if (this.seen === null) this.seen = new Set(this.recent.map(j => j.id));     // known at load: no refresh
       const fresh = this.recent.filter(j => !this.seen.has(j.id));                 // finished since: even a quick one
       fresh.forEach(j => this.seen.add(j.id));
       const here = pageUrl();     // a flash message (?msg=) does not make it another page
-      if (this.live) fresh.filter(j => !j.quiet && !(j.link && j.link.split('#')[0] === here)).forEach(j =>
+      // quiet jobs (the page shows their result itself) only when they failed; none for the page they link to
+      if (this.live) fresh.filter(j => (!j.quiet || j.status === 'failed' || j.problems) && !(j.link && j.link.split('#')[0] === here)).forEach(j =>
         this.notice({key: 'j' + j.id, title: j.label, text: j.result || this.T[j.status] || '', href: j.link,
                      bad: j.status === 'failed' || !!j.problems}));
       if (this.live && data.counts) this.badges(data.counts);
@@ -666,6 +704,7 @@ function pageUrl() { const q = new URLSearchParams(location.search); q.delete('m
 // Replace elements by their fresh copy (same id) from the page fetched in the background (one request per URL);
 // gone there = removed here. An element you are typing in or have edited waits until you leave it.
 function refreshInPlace(els) {
+  els = els.filter(Boolean);      // an element the page does not show right now (a row the chips hide) is skipped
   // a hidden tab waits until it is shown again: fetching a chat page marks its messages read on willhaben
   if (document.hidden) {
     const later = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', later); refreshInPlace(els.filter(e => e.isConnected)); } };
@@ -675,9 +714,11 @@ function refreshInPlace(els) {
   const edited = el => {
     const a = document.activeElement;
     if (a && el.contains(a) && a.matches('input, textarea, select')) return true;
+    // a select without a `selected` attribute shows its first option: that is its default, not an edit
+    const picked = s => Math.max(0, [...s.options].findIndex(o => o.defaultSelected));
     return [...el.querySelectorAll('input, textarea, select')].some(f =>
       f.type === 'checkbox' || f.type === 'radio' ? f.checked !== f.defaultChecked
-        : f.tagName === 'SELECT' ? [...f.options].some(o => o.selected !== o.defaultSelected) : f.value !== f.defaultValue);
+        : f.tagName === 'SELECT' ? f.selectedIndex !== picked(f) : f.value !== f.defaultValue);
   };
   const byUrl = new Map();
   els.forEach(el => {

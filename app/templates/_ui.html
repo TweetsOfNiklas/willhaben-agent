@@ -166,9 +166,12 @@
 {# An element waiting for a background job (its container carries data-pending-key=key, see base.html): a spinner
    with running_text while its job works on it, a clock with queued_text while it waits in the queue. #}
 {% macro pending(key, running_text, queued_text, cls='') -%}
-<span class="inline-flex items-center gap-1.5 text-[12.5px] {{ cls }}" x-data="{ k: {{ key|tojson|forceescape }} }">
+<span class="inline-flex flex-wrap items-center gap-1.5 text-[12.5px] {{ cls }}" x-data="{ k: {{ key|tojson|forceescape }} }">
   <span x-show="$store.jobs.isWorking(k)" x-cloak class="inline-flex items-center gap-1.5 text-primary"><span class="loading loading-spinner loading-xs"></span>{{ running_text }}</span>
-  <span x-show="!$store.jobs.isWorking(k)" class="inline-flex items-center gap-1.5 text-muted">{{ icon('clock', 13) }}{{ queued_text }}</span>
+  <span x-show="!$store.jobs.isWorking(k)" class="inline-flex items-center gap-1.5 text-muted">{{ icon('clock', 13) }}{{ queued_text }}<span x-text="$store.jobs.graceText(k)"></span></span>
+  {# still queued and cancellable (jobs.submit on_cancel): one click takes it back, nothing reaches willhaben #}
+  <button type="button" x-show="!$store.jobs.isWorking(k) && $store.jobs.cancelFor(k)" x-cloak @click.prevent.stop="$store.jobs.cancel($store.jobs.cancelFor(k))"
+          class="btn btn-ghost btn-xs h-5 min-h-5 gap-1 px-1.5 font-medium text-muted hover:text-error" title="{{ _('Cancel') }}">{{ icon('x', 11, 2.5) }}{{ _("Cancel") }}</button>
 </span>
 {%- endmacro %}
 

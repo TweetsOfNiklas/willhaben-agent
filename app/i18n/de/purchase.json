@@ -227,5 +227,13 @@
   "Internal instructions or AI talk in our own message ({word})": "Interne Anweisungen oder KI-Gerede in unserer Nachricht ({word})",
   "Answer is unusually long ({n} characters) – a chat answer needs a few sentences": "Antwort ist ungewöhnlich lang ({n} Zeichen) – eine Chatantwort braucht ein paar Sätze",
   "Our own message quotes the agent's instructions": "Unsere Nachricht zitiert die Anweisungen des Agenten",
-  "Settings → willhaben → Buying rules": "Einstellungen → willhaben → Regeln für Käufe"
+  "Settings → willhaben → Buying rules": "Einstellungen → willhaben → Regeln für Käufe",
+  "Contacting the seller…": "Der Verkäufer wird angeschrieben…",
+  "Queued: the first message to the seller": "Eingereiht: die erste Nachricht an den Verkäufer",
+  "Purchase started": "Kauf gestartet",
+  "The agent reads the ad in a few seconds and writes to the seller. Until then you can take it back with Undo in the notice; afterwards the order page shows every step.": "Der Agent liest in ein paar Sekunden die Anzeige und schreibt dem Verkäufer. Bis dahin kannst du es mit Rückgängig in der Meldung zurücknehmen; danach zeigt die Auftragsseite jeden Schritt.",
+  "Open the order": "Auftrag öffnen",
+  "Needs your own address (Settings → Shipping)": "Braucht deine eigene Adresse (Einstellungen → Versand)",
+  "Purchase „{title}“": "Kauf „{title}“",
+  "Taken back before the first message": "Vor der ersten Nachricht zurückgenommen"
 }

@@ -474,7 +474,8 @@ async def test_hit_starts_a_purchase_order(tg, monkeypatch):
     markup = tg[-1][1]["reply_markup"]
     b = _buttons(tg[-1][1])
     await telegram.handle_update(_press(b["🛒 Start purchase order"], markup=markup))
-    await __import__("asyncio").gather(*purchase._TASKS)               # the background start (replaced above)
+    from tests.conftest import finish_jobs
+    await finish_jobs()                                                 # the background start (a job; replaced above)
     row = purchase.recent()[0]
     assert row.ad_id == "77" and row.mode == "paylivery" and row.ad_title == "KTM Rad" and row.asking_price == 120.0
     assert row.max_price is None and started == [row.id]

@@ -20,7 +20,7 @@ from jinja2 import pass_context
 
 from app.db import get_setting, set_setting
 from app.i18n import t
-from app.services import deals, price_bar, purchase
+from app.services import deals, price_bar, purchase, shipping
 from app.services.purchase import PurchaseError
 from app.willhaben.public import WillhabenError, get_public
 
@@ -204,7 +204,7 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
     """Everything _buy_dialog.html shows. Nothing is fetched while purchases are switched off."""
     ctx: dict[str, Any] = {"ad_id": ad_id, "search_id": search_id, "query": query or "", "on": enabled(), "d": None,
                            "res": None, "fair": None, "wh_error": None, "gone": False, "ship": {}, "pre": None, "prefill": None,
-                           "wish_prefill": None, "discount": _discount_value(),
+                           "wish_prefill": None, "discount": _discount_value(), "direct_ok": True,
                            "fee": purchase.fee_rule(), "fee_of": purchase.paylivery_fee}
     if not ctx["on"]:
         return ctx
@@ -220,6 +220,10 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
     # asking price plus the shipping of that mode and, with PayLivery, the buyer protection fee (no mode: the asking
     # price alone)
     pre = "paylivery" if d.paylivery_enabled and get_setting(purchase.SETTING_PREFER_PAYLIVERY) == "1" else None
+    direct_ok = shipping.sender_complete()          # a bank-transfer purchase needs your own address for the parcel
+    ways = [m for m, ok in (("paylivery", d.paylivery_enabled), ("direct", direct_ok), ("pickup", True)) if ok]
+    if pre is None and len(ways) == 1:              # one way to buy: ticked already
+        pre = ways[0]
     ship = {"paylivery": _pl_ship(d), "direct": purchase.SHIPPING_ESTIMATE["direct"], "pickup": 0.0}
     ask = d.price if d.price and d.price > 0 else None
     res = await _market(d)
@@ -231,7 +235,7 @@ async def _dialog(ad_id: str, search_id: int | None, query: str | None) -> dict[
         item = ask * (1 - ctx["discount"] / 100)
         item = float(math.floor(item)) if item >= 1 else round(item, 2)
         wish = round(item + (ship[pre] if pre else 0.0) + (purchase.paylivery_fee(item) if pre == "paylivery" else 0.0), 2)
-    ctx.update(d=d, res=res, fair=_fair(d, res), ship=ship, pre=pre, wish_prefill=wish,
+    ctx.update(d=d, res=res, fair=_fair(d, res), ship=ship, pre=pre, wish_prefill=wish, direct_ok=direct_ok,
                prefill=round(ask + ship[pre] + extra, 2) if (ask and pre) else ask)
     return ctx
 
@@ -255,12 +259,18 @@ async def purchase_new(request: Request, ad_id: str, search: str = "", q: str = 
 
 # ------------------------------------------------------------------ order start
 @router.post("/purchases")
-async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price: str = Form(""),
+async def purchase_start(request: Request, ad_id: str = Form(""), mode: str = Form(""), max_price: str = Form(""),
                          pickup_window: str = Form(""), search_id: str = Form(""), query: str = Form(""),
                          title: str = Form(""), url: str = Form(""), image_url: str = Form(""),
                          price: str = Form(""), back: str = Form(""), max_default: str = Form(""),
                          questions: str = Form(""), wish_price: str = Form("")):
+    """Start purchase. Sent through htmx (the dialog) a refusal goes into the dialog's own line (HX-Retarget) and
+    the confirmation takes the form's place (_buy_result.html): nothing leaves the page. The order itself starts
+    as a job with a grace period (purchase.start), so it can still be taken back. A plain form redirects as before."""
+    from app.main import templates
+
     dest = _safe_back(back, "/purchases")
+    hx = bool(request.headers.get("hx-request"))
     try:
         ad = ad_id.strip()
         if not ad.isdigit():
@@ -272,13 +282,20 @@ async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price:
             image_url=_https(image_url, "https://"), price=_float(price), pickup_window=pickup_window,
             questions=questions, wish_price=_wish_price(wish_price))
     except PurchaseError as e:
+        if hx:
+            r = templates.TemplateResponse(request, "_buy_result.html", {"error": str(e), "pid": None})
+            r.headers.update({"HX-Retarget": "find .bd-error", "HX-Reswap": "innerHTML"})
+            return r
         return _go(dest, str(e))
+    if hx:
+        return templates.TemplateResponse(request, "_buy_result.html", {"error": None, "pid": pid})
     return _go(f"/purchases/{pid}")
 
 
 @router.post("/purchases/{pid}/{action}")
-async def purchase_action(pid: int, action: str, value: str = Form("")):
-    """One order button. Only the actions the order's current status offers are run (purchase.actions)."""
+async def purchase_action(request: Request, pid: int, action: str, value: str = Form("")):
+    """One order button. Only the actions the order's current status offers are run (purchase.actions). Sent
+    through htmx the card swaps itself in and shows the new state, so only a refusal comes back as a notice."""
     if action not in ACTIONS:
         raise HTTPException(404)
     row = purchase.get(pid)
@@ -286,7 +303,7 @@ async def purchase_action(pid: int, action: str, value: str = Form("")):
         raise HTTPException(404)
     if action not in {a["name"] for a in purchase.actions(row)}:
         return _go(_order_page(row), t("This action is not possible now."))
-    text = t("Changes saved")
+    text = None if request.headers.get("hx-request") else t("Changes saved")
     try:
         if action == "pause":
             await purchase.pause(pid, t("Paused by you"), push=False)

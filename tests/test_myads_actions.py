@@ -748,3 +748,30 @@ async def test_an_active_ad_under_review_stays_active():
         assert row.status == want, (status, label)
         if status == "checking":
             assert "In Prüfung" in row.last_action
+
+
+def test_price_changes_from_the_panel_and_decimal_points_are_read_right(monkeypatch):
+    """POST /myads/<id>/price saves the price alone (title and text as willhaben has them) as a background job;
+    "12.5" means twelve and a half, not 125."""
+    from app.main import app
+
+    acct = _Editor()
+    monkeypatch.setattr(my_ads, "get_session", lambda: acct)
+    with session() as db:
+        db.add(MyAd(ad_id="1000000001", heading="Alter Titel", url="https://www.willhaben.at/iad/object?adId=1000000001"))
+        db.commit()
+    with TestClient(app) as c:
+        r = c.post("/myads/1000000001/price", data={"price": "12.5"}, follow_redirects=False)
+        assert r.status_code == 303 and "ad=1000000001" in r.headers["location"] and "msg=&" in r.headers["location"]
+        wait_jobs()                                                  # the job may already have run (no grace in tests)
+        assert acct.put_body["price"] == 12.5 and acct.put_body["heading"] == "Alter Titel"
+        with session() as db:
+            assert db.get(MyAd, "1000000001").pending_action is None
+        r = c.post("/myads/1000000001/price", data={"price": "abc"}, follow_redirects=False)
+        assert "Invalid" in r.headers["location"]
+        r = c.post("/myads/1000000001/edit", data={"heading": "Neu", "description": "Text", "price": "12.5"},
+                   follow_redirects=False)
+        wait_jobs()
+        assert acct.put_body["price"] == 12.5                        # the edit page reads a decimal point too
+        page = c.get("/myads/1000000001/edit").text                  # and renders without %g surprises
+        assert ('value="12.5"' in page or 'value="40"' in page) and "e+0" not in page

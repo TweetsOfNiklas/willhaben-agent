@@ -52,7 +52,14 @@
       else body.replaceChildren(msg('px-6 py-6 text-error', T.error.replace('{status}', r.status)));
     } catch (e) { body.replaceChildren(msg('px-6 py-6 text-error', T.offline)); }
     dlg.querySelector('article').scrollTop = 0;
-    if (hit) { const card = document.getElementById('hit-' + hit); if (card) card.dataset.viewed = 'true'; }
+    if (hit) {
+      const card = document.getElementById('hit-' + hit);
+      if (card && card.dataset.viewed !== 'true') {      // opened = seen (ad_fragment): the New count follows
+        card.dataset.viewed = 'true';
+        const from = card.querySelector('button[data-from]')?.dataset.from;
+        if (from === 'new') document.dispatchEvent(new CustomEvent('hit-state', {detail: {hit, from: 'new', state: 'seen'}}));
+      }
+    }
   }
 
   document.addEventListener('click', e => {
@@ -82,7 +89,11 @@
       const r = await fetch(`/hits/${st.dataset.hit}/state`, {method: 'POST', body: fd, headers: {'HX-Request': 'true'}});
       if (r.ok) {
         const card = document.getElementById('hit-' + st.dataset.hit);
-        if (card) card.remove();                                    // gone from this view, like the card buttons
+        if (card) {
+          const from = card.querySelector('button[data-from]')?.dataset.from;
+          document.dispatchEvent(new CustomEvent('hit-state', {detail: {hit: st.dataset.hit, from: from === 'new' ? 'seen' : from, state: st.dataset.state}}));
+          card.remove();                                            // gone from this view, like the card buttons
+        }
         list.splice(idx, 1);
         if (list.length) show(Math.min(idx, list.length - 1)); else dlg.close();
       } else st.disabled = false;

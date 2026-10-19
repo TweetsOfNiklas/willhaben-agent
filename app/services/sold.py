@@ -188,8 +188,50 @@ def enqueue_willhaben(ad_id: str, kind: str, *, undo: bool = False, reason_id: s
     label = {"sold": t("Mark „{title}“ as sold on willhaben", title=title_of(ad_id)[:60]),
              "reserved": t("Mark „{title}“ as reserved on willhaben", title=title_of(ad_id)[:60]),
              "unreserve": t("Remove the reservation of „{title}“ on willhaben", title=title_of(ad_id)[:60])}[action]
-    jobs.submit(f"sold-{action}", label, run, current=f"ad:{ad_id}")
+    # "sold" cannot be undone on willhaben: it waits the grace period in the queue (cancel instead of a confirm)
+    jobs.submit(f"sold-{action}", label, run, current=f"ad:{ad_id}", on_cancel=unmark, grace=action == "sold", quiet=True)
     return True
+
+
+# ------------------------------------------------------------------ one click: here and on willhaben together
+def reserve(ad_id: str, buyer: str | None) -> tuple[MyAd, bool]:
+    """"Reserve": the ad is reserved here at once (automatic answers off, the buyer noted) and, as a background job,
+    marked reserved on willhaben – unless willhaben shows it reserved already. Returns the row and whether the
+    willhaben step was queued (False: already reserved there, or another job still works on the ad; the page shows
+    the willhaben state and offers the step again). Raises ValueError when an ad with a quantity is sold out."""
+    row = finish(ad_id, "reserved", buyer, auto_off=True)
+    queued = row.status != "reserved" and enqueue_willhaben(row.ad_id, "reserved")
+    return row, queued
+
+
+def unreserve(ad_id: str) -> tuple[MyAd | None, bool]:
+    """"Remove reservation": gone here at once and, when willhaben shows the ad reserved, there too (background job).
+    The automatic answers go back to what they were before the reservation (finish() noted them)."""
+    row = ad_row(ad_id)
+    reset(ad_id, restore_auto=True)
+    queued = row is not None and row.status == "reserved" and enqueue_willhaben(row.ad_id, "reserved", undo=True)
+    return ad_row(ad_id), queued
+
+
+def sell(ad_id: str, buyer: str | None, *, pieces: int = 1, price: float | None = None, auto_off: bool = True,
+         reason_id: str | None = None) -> tuple[MyAd, bool]:
+    """"Sold": the sale is recorded here at once (finish) and, when that sells the ad out (a single item, the last
+    piece), the ad is marked sold on willhaben as a background job – unless willhaben shows it sold already.
+    Returns the row and whether the willhaben step was queued. Raises ValueError like finish()."""
+    row = finish(ad_id, "sold", buyer, auto_off=auto_off, pieces=pieces, price=price)
+    queued = row.sale_status == "sold" and row.status not in ("sold", "deleted") \
+        and enqueue_willhaben(row.ad_id, "sold", reason_id=reason_id)
+    return row, queued
+
+
+def willhaben_state(ad: MyAd | None) -> dict[str, Any]:
+    """What willhaben shows for the ad, for the sale panel: status (sold / reserved / active / …), the job waiting or
+    running for it (pending_action), its last error and the sold reasons willhaben asked for."""
+    if ad is None:
+        return {"status": None, "pending": None, "error": None, "reasons": None}
+    raw = ((ad.pending_payload or {}).get("reasons")) or None
+    return {"status": ad.status, "pending": ad.pending_action if ad.pending_action in ("sold", "reserved", "unreserve") else None,
+            "error": ad.last_error, "reasons": [sales.SoldReason(id=str(r["id"]), label=str(r["label"])) for r in raw] if raw else None}
 
 
 def pending_reasons(ad_id: str) -> list[sales.SoldReason] | None:
@@ -265,7 +307,12 @@ def enqueue_notice_drafts(ad_id: str, kind: str, conversation_ids: list[str], *,
         job.problems = len(errors)
         return t("{n} drafts prepared – nothing sent yet", n=made)
 
-    jobs.submit("notice-drafts", t("Claude writes {n} notices", n=len(picked)), run, lane="claude", total=len(picked))
+    def cancelled() -> None:
+        for cid in picked:
+            chats._set_drafting(cid, False)
+
+    jobs.submit("notice-drafts", t("Claude writes {n} notices", n=len(picked)), run, lane="claude", total=len(picked),
+                keys=[f"drafting:{c}" for c in picked], on_cancel=cancelled, quiet=True)
     return len(picked)
 
 
@@ -325,6 +372,8 @@ def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, p
             row.last_action = (t("{n} piece sold ({left} left)", n=pieces, left=left - pieces) if pieces == 1 else
                                t("{n} pieces sold ({left} left)", n=pieces, left=left - pieces))
         else:
+            if not row.sale_status:       # entering the sale status: remember the answers as they were (reset restores)
+                row.auto_reply_before_sale = row.auto_reply
             if auto_off:
                 row.auto_reply = False
             row.sale_status, row.sale_conversation_id, row.sale_at = kind, buyer or None, utcnow()
@@ -343,10 +392,11 @@ def _undo(db: Session, sales: list[Sale]) -> None:
         db.add(s)
 
 
-def reset(ad_id: str) -> None:
+def reset(ad_id: str, *, restore_auto: bool = False) -> None:
     """The deal fell through: forget the local sale status (willhaben is not touched). A single item's sale is
     undone with it. An ad with a quantity keeps its sales (each one has its own undo, undo_sale): only a
-    reservation is lifted here."""
+    reservation is lifted here. `restore_auto` ("Remove reservation"): the automatic answers go back to what
+    they were before the sale status switched them off; otherwise ("not sold after all") they stay off."""
     with session() as db:
         row = current_ad(db, ad_id)
         if row is None or (row.quantity is not None and row.sale_status == "sold"):
@@ -354,6 +404,9 @@ def reset(ad_id: str) -> None:
         if row.quantity is None:
             _undo(db, stock.active_sales(db, row.ad_id))
         row.sale_status = row.sale_conversation_id = row.sale_at = None
+        if restore_auto and row.auto_reply_before_sale is not None:
+            row.auto_reply = row.auto_reply_before_sale
+        row.auto_reply_before_sale = None
         db.add(row)
         db.commit()
 
@@ -406,3 +459,21 @@ def state_for(conv: Conversation) -> dict[str, Any] | None:
     return {"kind": kind, "buyer": ad.sale_conversation_id,
             "is_buyer": bool(pieces) or (kind is not None and ad.sale_conversation_id == conv.id),
             "pieces": pieces, "quantity": n["quantity"] if n else None, "remaining": n["remaining"] if n else None}
+
+
+def others_to_tell(ad_id: str, buyer: str | None) -> int:
+    """How many other buyers' chats have not heard yet (no notice sent): the "Tell the other buyers" button."""
+    return sum(1 for o in others(ad_id, buyer) if not o.informed)
+
+
+def panel(ad_id: str, buyer_id: str | None = None) -> dict[str, Any]:
+    """What the sale panel (_sale_actions.html) shows for an ad: its live copy, the buyer's chat (if any), what
+    willhaben shows, how many other buyers are still to be told, the stock and the price agreed in the chat."""
+    ad_id = current_id(ad_id)
+    ad = ad_row(ad_id)
+    with session() as db:
+        buyer = db.get(Conversation, buyer_id) if buyer_id else None
+    n = stock.numbers(ad)
+    return {"ad": ad, "buyer": buyer, "wh": willhaben_state(ad), "stock": n,
+            "others": others_to_tell(ad_id, buyer.id if buyer else None) if ad is not None else 0,
+            "agreed": agreed_price(buyer.id if buyer else None) if n else None}

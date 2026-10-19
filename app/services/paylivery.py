@@ -1109,7 +1109,7 @@ def _ui(name: str) -> dict[str, str]:
         "accept": {"label": t("Accept offer"), "confirm": t("Accept this offer on willhaben now?")},
         "decline": {"label": t("Decline offer"), "confirm": t("Decline this offer on willhaben now?")},
         "label": {"label": t("Download label"), "confirm": ""},
-        "mark_shipped": {"label": t("Mark shipped"), "confirm": t("Mark this parcel as shipped in this app?")},
+        "mark_shipped": {"label": t("Mark shipped"), "confirm": ""},     # only in this app: no confirm, no undo needed
         "offer": {"label": t("Send offer"), "confirm": t("Send this offer on willhaben for the amount entered?")},
         "buy": {"label": t("Buy now & pay"), "confirm": t("Buy now and pay with willhaben PayLivery? This runs on willhaben.")},
         "receipt": {"label": t("Confirm receipt"), "confirm": t("Confirm on willhaben that you received the parcel?")},

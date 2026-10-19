@@ -9,6 +9,7 @@ URLs or JSON; the adapters do.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Iterable
@@ -516,10 +517,11 @@ def is_checking(agent_id: int) -> bool:
     return agent_id in _checking
 
 
-async def run_agent(agent_id: int) -> RunResult:
+async def run_agent(agent_id: int, job: Any = None) -> RunResult:
     """One check of a search agent, as one timeline run (its searches, screening and pushes are the steps). Never two
     checks of one agent at once: they send every search twice (eBay answered the second with 403, 10-13). A check
-    asked for while one runs ("Run now" during a scheduled one) waits for it, then runs with the current settings."""
+    asked for while one runs ("Run now" during a scheduled one) waits for it, then runs with the current settings.
+    `job`: the background job this check runs as (enqueue_run), so it is not shown a second time."""
     from app.services import timeline
 
     while (running := _checking.get(agent_id)) is not None:
@@ -532,21 +534,49 @@ async def run_agent(agent_id: int) -> RunResult:
             title = agent.name if agent else t("Agent {id}", id=agent_id)
         from app.services import jobs
 
-        # in the header's background work while it runs (no notice when done: the hits and pushes tell)
-        async with jobs.track("agent-run", t("Search agent „{name}“", name=title), lane="agents",
-                              link=f"/hits?agent_id={agent_id}", quiet=True, current=f"agent:{agent_id}") as job, \
-                timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
+        # in the header's background work while it runs (no notice when done: the hits and pushes tell); a check
+        # queued by hand is a job of its own already (enqueue_run sets its result)
+        shown = contextlib.nullcontext(job) if job is not None else jobs.track(
+            "agent-run", t("Search agent „{name}“", name=title), lane="agents", link=f"/hits?agent_id={agent_id}",
+            quiet=True, current=f"agent:{agent_id}")
+        async with shown as tracked, timeline.run("agent_run", title, name=f"agent-{agent_id}", agent_id=agent_id) as tl:
             res = await _run_agent(agent_id)
             tl.finish(not res.error, res.error, payload={k: v for k, v in {
                 "rows_found": res.rows_found, "new": len(res.new), "price_drops": len(res.price_drops),
                 "bumped": res.bumped, "baseline": res.baseline or None}.items() if v is not None})
-            job.result = res.error or _run_summary(res)
-            if res.error:
-                job.status = "failed"
+            if job is None:
+                tracked.result = res.error or _run_summary(res)
+                if res.error:
+                    tracked.status = "failed"
     finally:
         del _checking[agent_id]
         done.set_result(None)
     return res
+
+
+def enqueue_run(agent_id: int) -> bool:
+    """"Check now": one check of the agent as a background job (lane agents; cancellable while it waits). The card
+    carries the marker "agent:<id>" meanwhile and refreshes itself when the check is done. False: a check of this
+    agent is queued or running already (a scheduled one shows the same marker), or no such agent."""
+    from app.services import jobs
+
+    key = f"agent:{agent_id}"
+    if key in jobs.current_keys("agent:"):
+        return False
+    with session() as db:
+        agent = db.get(SearchAgent, agent_id)
+    if agent is None:
+        return False
+
+    async def run(job) -> str:
+        res = await run_agent(agent_id, job=job)
+        if res.error:
+            raise RuntimeError(res.error)
+        return _run_summary(res)
+
+    jobs.submit("agent-run", t("Check „{name}“ now", name=agent.name), run, lane="agents", current=key,
+                on_cancel=lambda: None, link=f"/hits?agent_id={agent_id}")
+    return True
 
 
 def _run_summary(res: RunResult) -> str:

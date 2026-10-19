@@ -6,7 +6,18 @@
 {% if error %}<p class="m-0 text-[13px] text-error">{{ error }}</p>
 {% elif not d %}<p class="m-0 text-[13px] text-muted">{{ _("willhaben shows no text for this ad (offline or under review).") }}</p>
 {% else %}
-<div class="flex flex-wrap items-baseline gap-2.5" data-myad-price><span class="text-xl font-bold">{{ d.price_display or (d.price|eur) }}</span>{{ ui.condition_pill(d.item_condition, d.item_condition_label, d.platform, 'self-center') }}{% if d.category_path %}<span class="text-[12.5px] text-muted">{{ d.category_path|join(' › ') }}</span>{% endif %}</div>
+{# the price changes right here (POST /myads/<id>/price, a background job: the panel shows "Saving…"); the edit page is
+   for title, text and photos #}
+<div class="flex flex-wrap items-center gap-2.5" data-myad-price x-data="{ edit: false }">
+  <span class="text-xl font-bold" x-show="!edit">{{ d.price_display or (d.price|eur) }}</span>
+  <button type="button" class="btn btn-ghost btn-xs text-muted" x-show="!edit" @click="edit = true; $nextTick(() => $refs.price.select())">{{ _("Change price") }}</button>
+  <form method="post" action="/myads/{{ a.ad_id }}/price" x-show="edit" x-cloak class="flex items-center gap-1.5" @keydown.escape.prevent="edit = false"
+        hx-post="/myads/{{ a.ad_id }}/price" hx-target="#myads-detail" hx-select="#myads-detail" hx-swap="outerHTML" hx-select-oob="#myads-rows,#flash">
+    <label class="input input-sm w-32 gap-1 bg-base-200"><span class="text-muted">€</span><input name="price" x-ref="price" inputmode="decimal" value="{{ ('%.2f'|format(d.price)).rstrip('0').rstrip('.') if d.price is not none else '' }}" class="w-full text-right font-semibold" aria-label="{{ _('Price') }}"></label>
+    <button class="btn btn-primary btn-sm">{{ _("Save on willhaben") }}</button>
+    <button type="button" class="btn btn-ghost btn-sm" @click="edit = false">{{ _("Cancel") }}</button>
+  </form>
+  {{ ui.condition_pill(d.item_condition, d.item_condition_label, d.platform, 'self-center') }}{% if d.category_path %}<span class="text-[12.5px] text-muted">{{ d.category_path|join(' › ') }}</span>{% endif %}</div>
 {% if d.images %}
 {# a gallery like the ad viewer's: the large photo (click: zoomed to the whole window, arrows and keys there too),
    arrows and keys, a strip of thumbnails #}

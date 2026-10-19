@@ -121,8 +121,12 @@ def sender_ok():
 
 
 async def drain():
+    """Run the order's background work to the end: its tasks, and the start queued as a job (grace 0 in tests)."""
     import asyncio
+
+    from tests.conftest import finish_jobs
     for _ in range(3):
+        await finish_jobs()
         tasks = list(purchase._TASKS)
         if not tasks:
             break

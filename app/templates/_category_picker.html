@@ -11,7 +11,7 @@
 </label>
 {% endfor %}
 {% endif %}
-<details class="wh-catpick text-[13px] text-muted" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}" data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" data-swap="{{ pick_swap or 'outerHTML' }}" {% if not plan.options and not pick_only %}open{% endif %}>
+<details class="wh-catpick text-[13px] text-muted" data-search="/api/willhaben/categories" data-pick="{{ pick_url }}" data-target="{{ pick_target or '' }}" data-include="{{ pick_include or '' }}" data-swap="{{ pick_swap or 'outerHTML' }}" data-select="{{ pick_select or '' }}"{% if pick_oob %} hx-select-oob="{{ pick_oob }}"{% endif %} {% if not plan.options and not pick_only %}open{% endif %}>
   <summary class="cursor-pointer">{{ _("Choose another category") }}</summary>
   <div class="flex flex-col gap-1.5 pt-2">
     <input type="search" data-catq autocomplete="off" placeholder="{{ _('Search willhaben categories, e.g. speaker') }}" class="input input-sm w-full bg-base-100">
@@ -29,7 +29,9 @@
         const values = {code};
         const inc = box.dataset.include && document.querySelector(box.dataset.include);
         if (inc) new FormData(inc).forEach((v, k) => { values[k] = v; });
-        htmx.ajax('POST', url, {target, swap: box.dataset.swap || 'outerHTML', values});
+        // data-select: the part of a full page to take (the draft page redirects to itself); hx-select-oob on this
+        // element (the source) takes more parts along, e.g. the error line
+        htmx.ajax('POST', url, {target, swap: box.dataset.swap || 'outerHTML', values, source: box, select: box.dataset.select || undefined});
         return;
       }
       const f = document.createElement('form');

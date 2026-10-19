@@ -2,7 +2,7 @@
 {% import "_ui.html" as ui %}
 {# push target: a row of radio chips (the radio itself is visually hidden, the label is the chip) #}
 {% set push_opts = [('auto', _("Automatic")), ('ha', 'Home Assistant'), ('telegram', 'Telegram'), ('both', _("both"))] %}
-<form method="post" action="/settings" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+<form method="post" action="/settings" x-data="autosave" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <input type="hidden" name="section" value="chats">
   <label id="s-chats-rules" class="flex flex-col gap-1.5"><span class="font-medium text-base-content">{{ _("General instruction for automatic answers") }}</span><small class="text-[12.5px] text-muted">{{ _("Applies to every ad with auto-reply on, in addition to the ad's own instruction.") }}</small><textarea name="auto_reply_rules" rows="5" class="textarea w-full min-w-0 bg-base-200">{{ values.auto_reply_rules }}</textarea></label>
   <label id="s-chats-draft" class="flex cursor-pointer items-center justify-between gap-3 border-t border-base-300 pt-3.5"><span class="min-w-0"><span class="block font-medium">{{ _("Draft replies automatically") }}</span><span class="block text-[12.5px] text-muted">{{ _("Automatically create a reply draft for new messages (never sent automatically)") }}</span></span><input type="checkbox" class="toggle toggle-primary" name="auto_draft" {% if values.auto_draft == '1' %}checked{% endif %}></label>
@@ -22,7 +22,7 @@
     <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("and at most (seconds)") }}</span><input type="number" name="reply_fast_max_s" value="{{ values.reply_fast_max_s }}" min="0" max="600" class="input w-full min-w-0 bg-base-200"></label>
   </div>
   <small class="text-[12.5px] text-muted">{{ _("Each answer gets its own random timing within this window, plus a few seconds per line of text. If the buyer writes again in the meantime, the answer is rewritten.") }}</small>
-  <div id="s-chats-test" class="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-base-300 pt-3.5"><button class="btn btn-primary">{{ _("Save") }}</button>
+  <div id="s-chats-test" class="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-base-300 pt-3.5"><button class="btn btn-primary">{{ _("Save") }}</button><small class="text-muted" aria-live="polite" x-text="state"></small>
     <span class="text-[12.5px] text-muted">{{ _("Sending via willhaben:") }} {% if values.send_verified == '1' %}{{ ui.pill(_("confirmed"), 'ok') }}{% else %}{{ ui.pill(_("not confirmed yet")) }}{% endif %}</span>
     <button class="btn btn-ghost btn-sm" formaction="/settings/test-chat" formnovalidate>{{ _("Test chat connection") }}</button></div>
 </form>

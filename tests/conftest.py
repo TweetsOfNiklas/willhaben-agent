@@ -9,6 +9,7 @@ os.environ.update({
     "HA_LISTENER": "0",
     "TELEGRAM_LISTENER": "0",
     "HUMANIZE_CHAT": "0",       # auto replies answer immediately in tests (test_humanize covers the timing)
+    "JOB_GRACE_S": "0",         # irreversible jobs run at once (test_jobs covers the grace period)
     "TELEGRAM_BOT_TOKEN": "",
     "REQUEST_MIN_GAP_S": "0",
     "PLATFORM_KLEINANZEIGEN_MIN_GAP_S": "0",

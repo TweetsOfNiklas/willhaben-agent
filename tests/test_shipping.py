@@ -444,3 +444,59 @@ def test_misfit_names_the_broken_rule():
     assert xl.misfit({"length_cm": 180, "width_cm": 10, "height_cm": 10, "weight_kg": 5}) == "too long: 180 cm > 175 cm"
     small = next(o for o in CARRIERS["post"].options if o.size == "Päckchen S")
     assert small.misfit({"length_cm": 30, "width_cm": 20, "height_cm": 5, "weight_kg": 1}) == "too big: 30×20×5 cm > 35.3×25×3 cm"
+
+
+async def test_prepare_parcel_is_a_job_the_card_waits_for(chat, monkeypatch):
+    """"Prepare parcel from this chat" queues Claude's reading (lane claude) and comes straight back: the card carries
+    the marker, the jobs endpoint lists it, and the card refreshes itself when the shipment is there (no page load).
+    Every form of the card sends in the background and swaps the card."""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.services import jobs
+    from tests.conftest import wait_jobs
+
+    real = shipping.detect
+    with TestClient(app) as c:
+        gate = c.portal.call(asyncio.Event)
+
+        async def held(cid, force=False):
+            await gate.wait()
+            return await real(cid, force=force)
+
+        monkeypatch.setattr(shipping, "detect", held)
+        card = c.get("/chats/c1").text.split('id="shipping"')[1].split("</section>")[0]
+        assert 'hx-post="/chats/c1/shipping/detect" hx-target="#shipping" hx-select="#shipping"' in card
+        r = c.post("/chats/c1/shipping/detect", headers={"HX-Request": "true"}, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/chats/c1?msg=#shipping"
+        assert "shipping:c1" in c.get("/jobs", headers={"accept": "application/json"}).json()["pending"]
+        card = c.get("/chats/c1").text.split('id="shipping"')[1].split("</section>")[0]
+        assert 'data-pending-key="shipping:c1"' in card and "Queued: prepare the parcel" in card
+        assert "Prepare parcel from this chat" not in card
+        assert not shipping.enqueue_detect("c1")                        # already on its way: not twice
+        c.portal.call(gate.set)
+        wait_jobs()
+        s = shipping.open_for("c1")
+        assert s is not None and s.recipient["street"] == "Hauptstraße"
+        done = [j for j in jobs.snapshot()["recent"] if j["label"].startswith("Prepare parcel")]
+        assert done and done[0]["status"] == "done" and done[0]["lane"] == "claude" and "taken from the chat" in done[0]["result"]
+        page = c.get("/chats/c1").text
+        card = page.split('id="shipping"')[1].split("</section>")[0]
+        assert "data-pending-key" not in card and "Max Muster" in card
+        assert f'hx-post="/shipments/{s.id}" hx-target="#shipping"' in card           # address and parcel
+        assert f'hx-post="/shipments/{s.id}/paid" hx-target="#shipping"' in card
+        assert f'hx-post="/shipments/{s.id}/status" hx-target="#shipping"' in card
+        assert 'hx-boost="true" hx-target="#shipping"' in card and 'hx-push-url="false"' in card   # the sort links
+        assert f'action="/shipments/{s.id}/label"><input' in card and f'hx-post="/shipments/{s.id}/label"' not in card
+        assert "return confirm(" not in card
+        # through htmx a confirmation that only restates the click is left out; a plain form still gets it
+        r = c.post(f"/shipments/{s.id}/paid", headers={"HX-Request": "true"}, follow_redirects=False)
+        assert r.headers["location"] == "/chats/c1?msg=#shipping"
+        r = c.post(f"/shipments/{s.id}/unpaid", follow_redirects=False)
+        assert "Payment%20mark%20removed" in r.headers["location"]
+        r = c.post(f"/shipments/{s.id}", data={"name": "x", "length_cm": 30, "width_cm": 22, "height_cm": 8, "weight_kg": 1.4},
+                   headers={"HX-Request": "true"}, follow_redirects=False)
+        assert "Address%20incomplete" in r.headers["location"]                     # a refusal stays
+        assert c.post("/chats/nope/shipping/detect", follow_redirects=False).status_code == 404
