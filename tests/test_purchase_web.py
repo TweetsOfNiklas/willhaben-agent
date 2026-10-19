@@ -19,6 +19,7 @@ from app.services import purchase as svc
 from app.willhaben import public as public_mod
 from app.willhaben.parse import AdDetail
 from app.willhaben.public import WillhabenError
+from tests.conftest import wait_jobs
 from tests.test_dashboard import _conversation, client  # noqa: F401  (client fixture: dashboard with mocked willhaben)
 
 RESULT = {"ad_id": "2000000001", "title": "Geschirrspüler Bosch", "price": 250.0, "price_display": "€ 250",
@@ -392,9 +393,15 @@ def test_preference_preselects_paylivery_and_the_maximum_with_its_shipping(clien
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
     assert 'name="max_price" min="1" step="0.01" value="267.25"' in frag      # 250 + 6 + 11.25
 
-    _use(monkeypatch, _ad(paylivery=False, shipping=None, price=100.0))   # no PayLivery at the ad: not preselected
-    frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    assert _preselected(frag) == [] and 'name="max_price" min="1" step="0.01" value="100.00"' in frag
+    _use(monkeypatch, _ad(paylivery=False, shipping=None, price=100.0))   # no PayLivery at the ad, no own address yet:
+    frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text          # pickup is the only way left – ticked already
+    assert _preselected(frag) == ["pickup"] and 'name="max_price" min="1" step="0.01" value="100.00"' in frag
+    assert 'value="direct" required disabled' in frag and "Needs your own address (Settings → Shipping)" in frag
+    from app.services import shipping
+    shipping.save_sender({"name": "Niklas Ruby", "street": "Teststraße", "house_no": "4", "zip": "1150", "city": "Wien",
+                          "phone": "+43 660 1234567", "email": "me@example.test"})
+    frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text          # two ways again: nothing ticked
+    assert _preselected(frag) == [] and 'value="direct" required ' in frag and "Needs your own address" not in frag
 
 
 def test_paylivery_card_is_disabled_without_paylivery_at_the_ad(client, monkeypatch):  # noqa: F811
@@ -573,15 +580,17 @@ def test_mode_cards_span_the_column_and_the_number_field_has_no_spinner(client, 
     assert "touch-none" in (Path(__file__).resolve().parent.parent / "app" / "templates" / "_buy_dialog.html").read_text(encoding="utf-8")
 
 
-def test_dialog_has_three_steps_in_order_and_the_chips(client, monkeypatch):  # noqa: F811
+def test_dialog_shows_the_three_parts_on_one_screen(client, monkeypatch):  # noqa: F811
     _switch_on()
     _use(monkeypatch, _ad(buy_now=True))
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    # no hidden attribute in the markup: all three panels show without JavaScript (the script hides two of them)
-    assert re.findall(r'<section class="bd-step" data-step="(\d)"[^>]*>', frag) == ["1", "2", "3"]
-    assert re.findall(r'class="bd-chip[^"]*" data-n="(\d)"', frag) == ["1", "2", "3"]
-    assert re.findall(r'<span class="bd-n[^"]*">\d</span>([^<]+)</button>', frag) == ["How to buy", "Price", "Start"]
-    assert frag.count('class="btn btn-primary bd-next ') == 2 and frag.count('class="btn bd-back ') == 2
+    # the three parts in order on one screen, no step chips, no Next/Back; the summary sits right above Start
+    assert re.findall(r'<section class="bd-step[^"]*" data-step="(\d)"[^>]*>', frag) == ["1", "2", "3"]
+    assert "bd-chip" not in frag and "bd-next" not in frag and "bd-back" not in frag and "hidden" not in re.search(r'<section class="bd-step[^"]*" data-step="2"[^>]*>', frag).group(0)
+    assert [m for m in re.findall(r'uppercase ">([^<]+)</div>', frag)] == ["How to buy", "Price", "Start"]
+    assert frag.index('class="bd-summary') < frag.index('class="bd-error') < frag.index('class="btn btn-primary ml-auto bd-start"')
+    # sent through htmx: a refusal lands in .bd-error, the confirmation takes the form's place
+    assert 'class="bd-form" hx-post="/purchases" hx-target="this" hx-swap="outerHTML"' in frag
     assert 'onkeydown="wbBuy.enter(event)"' in frag and 'data-empty="–"' in frag
     assert frag.count(">Change</button>") == 4 and 'data-s="timerow"' in frag and 'data-s="wish"' in frag
     for key in ["mode", "ship", "time", "max"]:
@@ -741,9 +750,10 @@ function form(o) {
   for (const v of ['paylivery', 'direct', 'pickup'])
     radios[v] = node({ value: v, checked: o.checked === v, disabled: (o.disabled || []).includes(v),
                        dataset: { label: v, shipText: (o.shipText || {})[v] || '' } });
-  const steps = [1, 2, 3].map(n => node({ dataset: { step: String(n) } }));
-  const chips = [1, 2, 3].map(n => node({ dataset: { n: String(n) } }));
-  const nexts = [node(), node()];
+  // the three parts of the one screen: "Change" scrolls one into view and focuses its first field
+  const steps = [1, 2, 3].map(n => node({ dataset: { step: String(n) }, scrolled: false, scrollIntoView() { this.scrolled = true; },
+                                           field: node(), querySelector() { return this.field; } }));
+  const starts = [node()];
   const lives = [node({ dataset: { tpl: '{n} % · {level}' } }), node({ dataset: { tpl: '{n} % · {level}' } })];
   const pins = [node({ hidden: true })];
   // the bar: a gauge that records its pointer listeners and sits at x 100..500 on the page
@@ -757,42 +767,36 @@ function form(o) {
   const fair = o.fair === false ? undefined : JSON.stringify(FAIR);
   // real forms always carry the PayLivery fee rule (data-fee); o.fee === false leaves it out (no rule: no fee at all)
   const fee = o.fee === false ? undefined : JSON.stringify({ pct: 4.5, min: 0.99, max: 49.99 });
-  const f = node({ dataset: { ask: String(o.ask), ship: JSON.stringify(o.ship), step: o.step, fair: o.fair === false ? undefined : fair, fee, discount: '10' },
+  const f = node({ dataset: { ask: String(o.ask), ship: JSON.stringify(o.ship), fair: o.fair === false ? undefined : fair, fee, discount: '10' },
     elements: { max_price: { value: o.max === undefined ? '' : o.max },
                 max_default: { value: o.maxDefault === undefined ? '1' : o.maxDefault },
                 wish_price: { value: o.wish || '' },
-                pickup_window: { value: o.time || '' }, back: { value: '' } },
-    scrolled: false, scrollIntoView() { this.scrolled = true; },
-    closest: sel => (o.dialog && sel === 'dialog' ? { querySelector: () => ({ scrollTop: 99 }) } : null) });
-  const map = { 'input[name=mode]:checked': () => Object.values(radios).find(r => r.checked) || null,
-                '.bd-chip.bd-on': () => chips.find(c => c.classList.contains('bd-on')) || null, '.bd-summary': () => summary };
-  const lists = { '.bd-step': steps, '.bd-chip': chips, '.bd-next': nexts, '.bd-live': lives, '.bd-pin': pins, '.bd-sugg button': sugg, '.bd-drag': gauges };
+                pickup_window: { value: o.time || '' }, back: { value: '' } } });
+  const map = { 'input[name=mode]:checked': () => Object.values(radios).find(r => r.checked) || null, '.bd-summary': () => summary };
+  const lists = { '.bd-step': steps, '.bd-start': starts, '.bd-live': lives, '.bd-pin': pins, '.bd-sugg button': sugg, '.bd-drag': gauges };
   f.querySelector = s => (map[s] ? map[s]() : null);
   f.querySelectorAll = s => lists[s] || [];
-  Object.assign(f, { radios, steps, chips, nexts, lives, pins, sugg, sm, gauge });
+  Object.assign(f, { radios, steps, starts, lives, pins, sugg, sm, gauge });
   return f;
 }
 const base = { ask: 250, ship: { paylivery: 7.9, direct: 6, pickup: 0 }, shipText: { paylivery: 'Shipping € 7.90', direct: 'Shipping about € 6', pickup: 'cash, no shipping' } };
-const shown = f => f.steps.map(s => !s.hidden);
+const start = f => f.starts[0].disabled;          // true = Start is not possible yet
 const pill = f => [f.lives[0].textContent, f.lives[0].hidden, ['fair', 'cheap', 'bargain', 'expensive', 'very_expensive'].some(t => f.lives[0].classList.contains('bg-lvl-' + t))];
 const results = {};
-// 1. opening: step 1 only, no mode yet, Next disabled
+// 1. opening: no mode yet, Start not possible, the wish price suggested
 let f = form({ ...base, chips: [200, 150] }); wbBuy.init(f);
-results.init = { js: f.classList.contains('bd-js'), shown: shown(f), chips: f.chips.map(c => [c.disabled, c.classList.contains('bd-on')]), next1: f.nexts[0].disabled };
+results.init = { js: f.classList.contains('bd-js'), start: start(f) };
 results.wishInit = f.elements.wish_price.value;                 // no mode yet: 10 % below 250
-// 2. choose PayLivery (untouched maximum follows the mode), Next enabled, Next goes to step 2
+// 2. choose PayLivery (untouched maximum follows the mode), Start possible
 f.elements.max_price.value = '250.00';
 f.radios.paylivery.checked = true; wbBuy.mode(f);
-results.wishInit = results.wishInit || null;
-results.mode = { wish: f.elements.wish_price.value, sumWish: f.sm.wish.textContent, max: f.elements.max_price.value, next1: f.nexts[0].disabled, sumMode: f.sm.mode.textContent, sumShip: f.sm.ship.textContent,
+results.mode = { wish: f.elements.wish_price.value, sumWish: f.sm.wish.textContent, max: f.elements.max_price.value, start: start(f), sumMode: f.sm.mode.textContent, sumShip: f.sm.ship.textContent,
                  maxDefault: f.elements.max_default.value, sumMax: f.sm.max.textContent };
-wbBuy.next(f);
-results.step2 = { step: String(f.dataset.step), shown: shown(f), chipDone: f.chips[0].classList.contains('bd-done'), chipOn: f.chips[1].classList.contains('bd-on'), next2: f.nexts[1].disabled };
 // the default itself: the ad's own position (0.75, expensive), 0 %, the ring is shown (around the needle)
 results.dflt = { pill: pill(f), pinHidden: f.pins[0].hidden, chips: f.sugg.map(c => c.textContent), on: f.sugg.map(c => c.classList.contains('bd-on')) };
 // 3. a cleared field: still valid (no pill while empty, the summary names the default); leaving the field refills the number
 f.elements.max_price.value = ''; wbBuy.input(f);
-results.empty = { next2: f.nexts[1].disabled, maxDefault: f.elements.max_default.value, pill: pill(f), pinHidden: f.pins[0].hidden, sumMax: f.sm.max.textContent };
+results.empty = { start: start(f), maxDefault: f.elements.max_default.value, pill: pill(f), pinHidden: f.pins[0].hidden, sumMax: f.sm.max.textContent };
 wbBuy.blur(f);
 results.blur = { value: f.elements.max_price.value, maxDefault: f.elements.max_default.value, pill: pill(f), pinHidden: f.pins[0].hidden };
 f.elements.max_price.value = ''; wbBuy.input(f); wbBuy.mode(f);       // the untouched default follows the mode, also from empty
@@ -801,28 +805,25 @@ f.elements.max_price.value = ''; wbBuy.input(f);
 f.elements.max_price.checkValidity = () => false;             // a half-typed "12,5": bad input, not empty
 results.badInput = wbBuy.valid(f, 2);
 delete f.elements.max_price.checkValidity;
-wbBuy.next(f);                                                // Next refills too
-results.emptyGoes = { step: String(f.dataset.step), value: f.elements.max_price.value };
-wbBuy.go(f, 2);
 f.elements.max_price.value = '200'; wbBuy.input(f);           // changed: the flag is cleared; typing the default again sets it
 results.changed = f.elements.max_default.value;
 wbBuy.mode(f);                                                // a changed value is kept when the mode changes
 results.changedKept = f.elements.max_price.value;
 f.elements.max_price.value = '269.15'; wbBuy.input(f);
 results.backToDefault = f.elements.max_default.value;
-f.elements.max_price.value = ''; wbBuy.input(f); wbBuy.go(f, 1); wbBuy.go(f, 2);   // the step chips refill as well
-results.chipRefill = f.elements.max_price.value;
+f.elements.max_price.value = ''; wbBuy.input(f); wbBuy.go(f, 2);      // "Change" refills too, and scrolls to the price part
+results.changeRefill = { value: f.elements.max_price.value, scrolled: f.steps[1].scrolled, focused: !!f.steps[1].field.focused };
 f.elements.max_price.value = '0.5'; wbBuy.input(f);
-results.below1 = { next2: f.nexts[1].disabled, maxDefault: f.elements.max_default.value, pill: pill(f) };
+results.below1 = { start: start(f), maxDefault: f.elements.max_default.value, pill: pill(f) };
 f.elements.max_price.value = '216.90'; wbBuy.input(f);
 // 4. one pill: 216.90 = item 200 + 7.90 shipping + 9 buyer protection = the median (0.5, fair), 19 % below 269.15; the ring at 50 %
 results.fairPill = { pill: pill(f), cls: f.lives[0].classList.contains('bg-lvl-fair'), summaryPill: f.lives[1].textContent, pin: [f.pins[0].hidden, f.pins[0].style.left],
                      sumMax: f.sm.max.textContent, chips: f.sugg.map(c => c.textContent), on: f.sugg.map(c => c.classList.contains('bd-on')) };
-// 5. enter in the number field goes to step 3, never submits; a radio Enter is swallowed
-let prevented = 0;
+// 5. Enter in a field never starts the purchase: it leaves the field; a radio Enter is swallowed, links keep Enter
+let prevented = 0, blurred = 0;
 const ev = (key, target) => ({ key, target, preventDefault() { prevented++; } });
-wbBuy.enter(ev('Enter', { form: f, type: 'number', tagName: 'INPUT' }));
-results.enter = { step: String(f.dataset.step), prevented };
+wbBuy.enter(ev('Enter', { form: f, type: 'number', tagName: 'INPUT', blur() { blurred++; } }));
+results.enter = { prevented, blurred, value: f.elements.max_price.value };
 let linkPrev = 0;
 wbBuy.enter({ key: 'Enter', target: { form: f, tagName: 'A', type: '' }, preventDefault() { linkPrev++; } });
 results.linkEnter = linkPrev;
@@ -834,20 +835,19 @@ f.elements.max_price.checkValidity = () => false;             // e.g. 220.555: t
 results.invalidStep2 = wbBuy.valid(f, 2);
 delete f.elements.max_price.checkValidity;
 f.elements.max_price.value = '216.90'; wbBuy.input(f);
-// 6. the summary: back to step 1 with Change, the pickup time row appears and follows the typed time
+// 6. the summary: "Change" leads up to the first part, the pickup time row appears and follows the typed time
 wbBuy.go(f, 1);
-results.back1 = { step: String(f.dataset.step), shown: shown(f), timerowHidden: f.sm.timerow.hidden, scrolled: f.scrolled, chipFocus: !!f.chips[0].focused };
+results.change = { scrolled: f.steps[0].scrolled, focused: !!f.steps[0].field.focused, timerowHidden: f.sm.timerow.hidden };
 f.radios.paylivery.checked = false; f.radios.pickup.checked = true; wbBuy.mode(f);
 results.pickup = { max: f.elements.max_price.value, maxDefault: f.elements.max_default.value, timerowHidden: f.sm.timerow.hidden, time: f.sm.time.textContent, ship: f.sm.ship.textContent,
                    chips: f.sugg.map(c => c.textContent), pill: pill(f) };                 // the typed maximum is kept; no shipping now
 f.elements.pickup_window.value = ' Samstag '; wbBuy.sum(f);
 results.time = f.sm.time.textContent;
-// 7. jump forward stops at the first step that is not valid (no mode yet); a dialog body scrolls to the top
-let g = form({ ...base, dialog: true, max: '' }); wbBuy.init(g);
-wbBuy.go(g, 3);
-results.jump = { step: String(g.dataset.step) };
-g.radios.direct.checked = true; wbBuy.mode(g); wbBuy.go(g, 3);   // with a mode an empty maximum no longer stops the jump
-results.jumpEmpty = { step: String(g.dataset.step), sumMax: g.sm.max.textContent, value: g.elements.max_price.value };
+// 7. no mode yet: Start stays off whatever the price; a mode with an empty maximum is enough
+let g = form({ ...base, max: '' }); wbBuy.init(g);
+results.noMode = start(g);
+g.radios.direct.checked = true; wbBuy.mode(g);
+results.modeEmpty = { start: start(g), sumMax: g.sm.max.textContent, value: g.elements.max_price.value };
 // 8. chip click: the item price plus shipping, untouched flag cleared, chip lights up
 let h = form({ ...base, checked: 'direct', max: '256', chips: [200] }); wbBuy.init(h);
 wbBuy.pick(h, 200);
@@ -858,16 +858,16 @@ results.pick = { max: h.elements.max_price.value, maxDefault: h.elements.max_def
                  pill: pill(h) };
 // 9. no comparable ads (no data-fair): no pill, no ring, the field alone
 let k = form({ ...base, checked: 'direct', max: '300', fair: false }); wbBuy.init(k);
-results.noScale = { pill: pill(k), pinHidden: k.pins[0].hidden, sumMax: k.sm.max.textContent, next: k.nexts[0].disabled };
-// 10. the same form with a fresh init keeps its maximum and step (no reset of the typed value)
+results.noScale = { pill: pill(k), pinHidden: k.pins[0].hidden, sumMax: k.sm.max.textContent, start: start(k) };
+// 10. the same form with a fresh init keeps its maximum (no reset of the typed value)
 wbBuy.init(k);
-results.reinit = { max: k.elements.max_price.value, step: String(k.dataset.step) };
-// 11. an ad without a price: optional, no percent, no pill, step 2 passable, the summary says so
-let n = form({ ...base, ask: 0, checked: 'direct', max: '', fair: false, step: '2' }); wbBuy.init(n);
+results.reinit = { max: k.elements.max_price.value };
+// 11. an ad without a price: optional, no percent, no pill, Start possible, the summary says so
+let n = form({ ...base, ask: 0, checked: 'direct', max: '', fair: false }); wbBuy.init(n);
 wbBuy.blur(n);                                                // no price, no default: nothing to refill
-results.noPrice = { next2: n.nexts[1].disabled, value: n.elements.max_price.value, sumMax: n.sm.max.textContent, pill: pill(n), pct: wbBuy.percent(n) };
+results.noPrice = { start: start(n), value: n.elements.max_price.value, sumMax: n.sm.max.textContent, pill: pill(n), pct: wbBuy.percent(n) };
 n.elements.max_price.value = '100'; wbBuy.input(n);
-results.noPriceTyped = { sumMax: n.sm.max.textContent, pill: pill(n), next2: n.nexts[1].disabled };
+results.noPriceTyped = { sumMax: n.sm.max.textContent, pill: pill(n), start: start(n) };
 // 14. fee, costs and item (PayLivery, shipping 7.90): the cents maths that purchase.py mirrors, also for direct and pickup
 let c14 = form({ ...base, checked: 'paylivery', max: '300' }); wbBuy.init(c14);
 const items = [0.5, 1, 5, 10, 22, 22.01, 22.5, 23, 25, 100, 250, 281.34, 300, 999.99, 1110, 1110.89, 1111, 1500, 5000];
@@ -884,7 +884,7 @@ results.pickupCosts = { costs: wbBuy.costs(c14, 300), item: wbBuy.item(c14, 300)
 let c15 = form({ ...base, checked: 'paylivery', max: '300', fee: false }); wbBuy.init(c15);   // no rule in the form: no fee
 results.noRule = { fee: wbBuy.fee(c15, 300), total: wbBuy.costs(c15, 300).total, item: wbBuy.item(c15, 300), base: wbBuy.base(c15) };
 // 15. the summary row "How to buy": the fee of the item price at the maximum (else of the asking price) only with PayLivery
-let c16 = form({ ...base, checked: 'paylivery', max: '216.90', shipText: { paylivery: 'Shipping € 7.90', direct: 'Shipping about € 6' }, step: '3' }); wbBuy.init(c16);
+let c16 = form({ ...base, checked: 'paylivery', max: '216.90', shipText: { paylivery: 'Shipping € 7.90', direct: 'Shipping about € 6' } }); wbBuy.init(c16);
 results.sumFee = c16.sm.ship.textContent;                         // item 200 -> 9
 c16.elements.max_price.value = ''; wbBuy.input(c16);
 results.sumFeeEmpty = c16.sm.ship.textContent;                    // no maximum: the asking price 250 -> 11.25
@@ -922,14 +922,14 @@ cheapItem.dataset.fair = JSON.stringify({ ...FAIR, scale: [[2, 0], [4, 0.25], [5
 wbBuy.drag(cheapItem, 0.4);                                        // item 4.6 (cents below € 10)
 results.cheapDrag = cheapItem.elements.max_price.value;
 results.noScaleDrag = wbBuy.drag(k, 0.5);                           // no data-fair: nothing happens
-// the wish price: a typed value stays when the mode changes, above the maximum it blocks Next
-const w = form({ ...base, checked: 'paylivery', max: '269.15', step: '2' }); wbBuy.init(w);
+// the wish price: a typed value stays when the mode changes, above the maximum it blocks Start
+const w = form({ ...base, checked: 'paylivery', max: '269.15' }); wbBuy.init(w);
 const wishSuggested = w.elements.wish_price.value;
 w.elements.wish_price.value = '280'; wbBuy.wishInput(w);
-const wishOver = { next2: w.nexts[1].disabled, valid: wbBuy.valid(w, 2) };
+const wishOver = { start: start(w), valid: wbBuy.valid(w, 2) };
 w.elements.wish_price.value = '240'; wbBuy.wishInput(w);
 w.radios.direct.checked = true; w.radios.paylivery.checked = false; wbBuy.mode(w);
-results.wish = { suggested: wishSuggested, over: wishOver, typedKept: w.elements.wish_price.value, next2: w.nexts[1].disabled,
+results.wish = { suggested: wishSuggested, over: wishOver, typedKept: w.elements.wish_price.value, start: start(w),
                  sum: w.sm.wish.textContent };
 console.log(JSON.stringify(results));
 """
@@ -937,7 +937,7 @@ console.log(JSON.stringify(results));
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is needed to run the dialog script")
 def test_buy_steps_script_in_node():  # noqa: F811
-    """The three steps, the lines and the summary of window.wbBuy (_buy_script.html), run without a browser on a fake form."""
+    """The one screen, the lines and the summary of window.wbBuy (_buy_script.html), run without a browser on a fake form."""
     import json
     import subprocess
 
@@ -948,49 +948,47 @@ def test_buy_steps_script_in_node():  # noqa: F811
     out = subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     r = json.loads(out.stdout)
-    assert r["init"] == {"js": True, "shown": [True, False, False], "chips": [[False, True], [True, False], [True, False]],
-                         "next1": True}
+    assert r["init"] == {"js": True, "start": True}                   # no way to buy chosen yet: no Start
     # PayLivery: the default maximum is the asking price 250 + shipping 7.90 + buyer protection 11.25 = 269.15
-    assert r["mode"]["max"] == "269.15" and r["mode"]["next1"] is False and r["mode"]["maxDefault"] == "1"
+    assert r["mode"]["max"] == "269.15" and r["mode"]["start"] is False and r["mode"]["maxDefault"] == "1"
     assert r["mode"]["sumMax"] == "€ 269,15"
     # wish price: 10 % below 250 = 225; with PayLivery plus 7.90 shipping and the fee of 225 (10.13) = 243.03
     assert r["wishInit"] == "225.00" and r["mode"]["wish"] == "243.03" and r["mode"]["sumWish"] == "€ 243,03"
-    assert r["wish"] == {"suggested": "243.03", "over": {"next2": True, "valid": False}, "typedKept": "240",
-                         "next2": False, "sum": "€ 240"}
+    assert r["wish"] == {"suggested": "243.03", "over": {"start": True, "valid": False}, "typedKept": "240",
+                         "start": False, "sum": "€ 240"}
     assert r["mode"]["sumMode"] == "paylivery" and r["mode"]["sumShip"] == "Shipping € 7.90 · Buyer protection € 11,25"
-    assert r["step2"] == {"step": "2", "shown": [False, True, False], "chipDone": True, "chipOn": True, "next2": False}
     # the default is the ad's own price: 0 %, fair (250 = p75, the end of the middle half); the ring is shown (around the
     # needle), not hidden; the chips add shipping 7.90 and the fee of their own item price (200: 9, 150: 6.75)
     assert r["dflt"] == {"pill": ["0 % · fair", False, True], "pinHidden": False,
                          "chips": ["Cheap · € 216,90", "Cheap · € 164,65"], "on": [False, False]}
-    # cleared: valid and passable, no pill and no ring while empty, the summary shows the default; leaving the field refills the number
-    assert r["empty"] == {"next2": False, "maxDefault": "1", "pill": ["", True, False], "pinHidden": True, "sumMax": "€ 269,15"}
+    # cleared: valid, Start stays possible, no pill and no ring while empty, the summary shows the default; leaving the field refills the number
+    assert r["empty"] == {"start": False, "maxDefault": "1", "pill": ["", True, False], "pinHidden": True, "sumMax": "€ 269,15"}
     assert r["blur"] == {"value": "269.15", "maxDefault": "1", "pill": ["0 % · fair", False, True], "pinHidden": False}
-    assert r["emptyMode"] == "269.15" and r["badInput"] is False and r["emptyGoes"] == {"step": "3", "value": "269.15"}
-    assert r["changed"] == "" and r["changedKept"] == "200" and r["backToDefault"] == "1" and r["chipRefill"] == "269.15"
-    assert r["below1"] == {"next2": True, "maxDefault": "", "pill": ["", True, False]}       # below € 1 (and no item price left): no pill
+    assert r["emptyMode"] == "269.15" and r["badInput"] is False
+    assert r["changed"] == "" and r["changedKept"] == "200" and r["backToDefault"] == "1"
+    assert r["changeRefill"] == {"value": "269.15", "scrolled": True, "focused": True}
+    assert r["below1"] == {"start": True, "maxDefault": "", "pill": ["", True, False]}       # below € 1 (and no item price left): no pill, no Start
     assert r["fairPill"]["pill"] == ["−19 % · fair", False, True] and r["fairPill"]["cls"] and r["fairPill"]["summaryPill"] == "−19 % · fair"
     assert r["fairPill"]["pin"] == [False, "50.0%"] and r["fairPill"]["sumMax"] == "€ 216,90"
     assert r["fairPill"]["chips"] == ["Cheap · € 216,90", "Cheap · € 164,65"] and r["fairPill"]["on"] == [True, False]
-    assert r["enter"] == {"step": "3", "prevented": 1} and r["linkEnter"] == 0 and r["invalidStep2"] is False
+    assert r["enter"] == {"prevented": 1, "blurred": 1, "value": "216.90"} and r["linkEnter"] == 0 and r["invalidStep2"] is False
     assert r["above"] == {"pill": ["+49 % · very expensive", False, True], "cls": True, "pin": [False, "97.5%"]}
     assert r["bargain"] == {"pill": ["−59 % · bargain", False, True], "cls": True, "pin": "0.0%"}
-    assert r["back1"]["step"] == "1" and r["back1"]["shown"] == [True, False, False] and r["back1"]["scrolled"]
-    assert r["back1"]["timerowHidden"] is True and r["back1"]["chipFocus"] is True
+    assert r["change"] == {"scrolled": True, "focused": True, "timerowHidden": True}
     assert r["pickup"]["max"] == "216.90" and r["pickup"]["timerowHidden"] is False       # typed maximum is kept
     assert r["pickup"]["maxDefault"] == ""
     assert r["pickup"]["ship"] == "cash, no shipping" and r["pickup"]["chips"] == ["Cheap · € 200", "Cheap · € 150"]
     assert r["pickup"]["pill"] == ["−13 % · fair", False, True]                           # no shipping, no fee now: item 216.90, base 250
     assert r["time"] == "Samstag"
-    assert r["jump"]["step"] == "1"                                  # no mode yet: stops at step 1
-    assert r["jumpEmpty"] == {"step": "3", "sumMax": "€ 256", "value": "256.00"}          # the jump refilled the default
+    assert r["noMode"] is True                                       # no mode yet: no Start
+    assert r["modeEmpty"] == {"start": False, "sumMax": "€ 256", "value": "256.00"}       # a mode is enough: the default fills in
     assert r["pickDefault"] == "1"
     assert r["pick"]["max"] == "206.00" and r["pick"]["maxDefault"] == "" and r["pick"]["chip"] == "Cheap · € 206"
     assert r["pick"]["on"] is True and r["pick"]["pill"] == ["−20 % · fair", False, True]   # item 200 = the median, base 256
-    assert r["noScale"] == {"pill": ["", True, False], "pinHidden": True, "sumMax": "€ 300", "next": False}
-    assert r["reinit"]["max"] == "300" and r["reinit"]["step"] == "1"
-    assert r["noPrice"] == {"next2": False, "value": "", "sumMax": "no price in the ad", "pill": ["", True, False], "pct": None}
-    assert r["noPriceTyped"] == {"sumMax": "€ 100", "pill": ["", True, False], "next2": False}
+    assert r["noScale"] == {"pill": ["", True, False], "pinHidden": True, "sumMax": "€ 300", "start": False}
+    assert r["reinit"] == {"max": "300"}
+    assert r["noPrice"] == {"start": False, "value": "", "sumMax": "no price in the ad", "pill": ["", True, False], "pct": None}
+    assert r["noPriceTyped"] == {"sumMax": "€ 100", "pill": ["", True, False], "start": False}
     # inverse of the position scale: the exact mirror of place(), clamped to the bar, equal prices merged
     assert r["inverse"]["mid"] == 200 and r["inverse"]["q10"] == 120 and r["inverse"]["between"] == 225
     assert r["inverse"]["lo"] == 100 and r["inverse"]["hi"] == 400 and all(r["inverse"]["roundTrip"])
@@ -1090,3 +1088,42 @@ def test_buy_dialog_rating_is_the_one_of_position():
             for price, got in zip(prices, ans["rated"], strict=True):
                 p = deals.position(price, a, None)
                 assert got[0] == p["level"] and got[1] == pytest.approx(p["pos"], abs=0.001), (price, got, p)
+
+
+# ------------------------------------------------------------------ start through the dialog (htmx)
+def test_start_through_the_dialog_stays_on_the_page(client, monkeypatch):  # noqa: F811
+    """Through htmx a refusal lands in the dialog's own line (HX-Retarget), the start takes the form's place; the order
+    waits in the queue with a grace period (take back = cancelled, nothing sent) and the card shows the start."""
+    from app.services import jobs
+    _switch_on()
+    hx = {"HX-Request": "true"}
+    r = client.post("/purchases", data={"ad_id": "2000000001", "mode": "pickup", "max_price": "viel", "back": "/deals"}, headers=hx)
+    assert r.status_code == 200 and r.headers["HX-Retarget"] == "find .bd-error" and r.headers["HX-Reswap"] == "innerHTML"
+    assert 'role="alert"' in r.text and "Enter the maximum price in euros." in r.text and "<html" not in r.text.lower()
+    begun = []
+
+    async def no_begin(pid):
+        begun.append(pid)
+
+    monkeypatch.setattr(svc, "_begin", no_begin)
+    monkeypatch.setattr(jobs, "grace_s", lambda: 60)                # the window to take the click back
+    r = client.post("/purchases", data={"ad_id": "2000000001", "mode": "pickup", "max_price": "220", "title": "Bosch",
+                                        "price": "250", "back": "/deals"}, headers=hx)
+    assert r.status_code == 200 and "HX-Retarget" not in r.headers
+    assert "Purchase started" in r.text and 'class="bd-started' in r.text and "<html" not in r.text.lower()
+    pid = int(re.search(r'href="/purchases/(\d+)"', r.text).group(1))
+    job = next(j for j in jobs.snapshot()["active"] if j["current"] == f"purchase:{pid}")
+    assert job["status"] == "queued" and job["cancellable"] and job["lane"] == "chat" and job["label"] == "Purchase „Bosch“"
+    assert f"purchase:{pid}" in client.get("/jobs", headers={"accept": "application/json"}).json()["pending"]
+    page = client.get(f"/purchases/{pid}").text
+    assert f'id="purchase" data-pending-key="purchase:{pid}"' in page and "Queued: the first message to the seller" in page
+    assert client.post(f"/jobs/{job['id']}/cancel").json() == {"ok": True}  # taken back: nothing reached the seller
+    assert begun == [] and svc.get(pid).status == "cancelled" and "Taken back before the first message" in svc.get(pid).log[-1]["text"]
+    assert "data-pending-key" not in client.get(f"/purchases/{pid}").text.split('id="purchase"')[1].split("</section>")[0]
+    # a plain form (no JavaScript) redirects to the order page as before, and the start runs when the grace period is over
+    monkeypatch.setattr(jobs, "grace_s", lambda: 0)
+    r = client.post("/purchases", data={"ad_id": "2000000001", "mode": "pickup", "max_price": "220", "back": "/deals"},
+                    follow_redirects=False)
+    pid2 = int(r.headers["location"].rsplit("/", 1)[1])
+    wait_jobs()
+    assert begun == [pid2]

@@ -599,8 +599,39 @@ def start(ad_id: str, mode: str, max_price: float | None = None, *, search_id: i
         db.commit()
         db.refresh(row)
         pid = row.id
-    _spawn(_begin(pid))
+    _queue_start(pid, title or ad_id)
     return pid
+
+
+def _queue_start(pid: int, title: str) -> None:
+    """The start (read the ad, Claude's opener, the first message to the seller) as a background job (lane chat)
+    with a grace period: the click can be taken back (take_back) before anything reaches the seller. The purchase
+    card waits on "purchase:<id>" meanwhile and refreshes itself."""
+    from app.services import jobs
+
+    begin = _begin                    # bound now (tests swap it out around start())
+
+    async def run(job) -> str:
+        await begin(pid)
+        row = get(pid)
+        return status_label(row.status) if row is not None else ""
+
+    jobs.submit("purchase-start", t("Purchase „{title}“", title=title[:60]), run, lane="chat", current=f"purchase:{pid}",
+                on_cancel=lambda: take_back(pid), grace=True, link=f"/purchases/{pid}")
+
+
+def take_back(pid: int) -> None:
+    """The start was taken back while it waited in the queue: nothing was sent, the order is cancelled."""
+    row = get(pid)
+    if row is None or row.status != "new":
+        return
+    _change(pid, lambda r: _move(r, "cancelled", t("Taken back before the first message")))
+
+
+def pending_start(pid: int) -> bool:
+    """The order's start still waits in the queue or runs right now (the card shows it)."""
+    from app.services import jobs
+    return f"purchase:{pid}" in jobs.current_keys("purchase:")
 
 
 async def _fail(pid: int, reason: str) -> None:
@@ -1029,7 +1060,7 @@ def card_for(row: Purchase, log_limit: int | None = 8) -> dict[str, Any]:
         "pct_below": pct_below(row.asking_price, row.max_price),
         "log": list(reversed(entries)), "next": next_text(row), "pay_now": row.status == "pay_now",
         "wh_url": WH_CHAT.format(cid=row.conversation_id) if row.conversation_id else None,
-        "actions": actions(row),
+        "actions": actions(row), "pending": pending_start(row.id),
     }
 
 

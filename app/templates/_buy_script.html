@@ -1,6 +1,7 @@
 {# window.wbBuy: the buy dialog maths (_buy_dialog.html). Moved verbatim from the old base.html when the new page shell came in. #}
   <script>
-    // Buy dialog (_buy_dialog.html): three steps in one form. The maximum includes the shipping of the chosen mode and, with
+    // Buy dialog (_buy_dialog.html): the three parts (how to buy, price, start) of one form on one screen; Start is possible
+    // once a way to buy is chosen and the prices are in order. The maximum includes the shipping of the chosen mode and, with
     // PayLivery, willhaben's buyer protection fee (form data-fee = {pct, min, max}: pct % of the item price, at least min, at
     // most max; fee()/costs()/item() mirror purchase._fee_cents/costs_of/_item_for_cents in integer cents). The field
     // always holds a number, the default (asking price plus shipping and fee) until the user changes it; max_default is "1" while
@@ -146,8 +147,7 @@
         var w = self.wish(f);
         s('wish').textContent = w > 0 ? self.eur(w) : x.dataset.empty;
       },
-      cur: function (f) { return +(f.dataset.step || 1); },
-      // step 1: a mode is chosen; step 2: the maximum may be empty (= default), else at least 1 (€) and what the browser accepts
+      // part 1: a mode is chosen; part 2: the maximum may be empty (= default), else at least 1 (€) and what the browser accepts
       // (cents only; a half-typed "12,5" counts as bad input, not as empty); step 3 has nothing to check
       valid: function (f, n) {
         if (n === 1) return !!f.querySelector('input[name=mode]:checked');
@@ -156,29 +156,17 @@
             && (!wl.value || this.wish(f) >= 1) && (!wl.checkValidity || wl.checkValidity()) && this.wishOk(f); }
         return true;
       },
-      // the step chips (done = ticked, current, upcoming = disabled) and the Next buttons
+      // the Start button: possible once a way to buy is chosen and the prices are in order
       nav: function (f) {
-        var self = this, n = this.cur(f);
-        f.querySelectorAll('.bd-chip').forEach(function (c) {
-          var k = +c.dataset.n;
-          c.disabled = k > n;
-          c.classList.toggle('bd-on', k === n);
-          c.classList.toggle('bd-done', k < n);
-          if (k === n) c.setAttribute('aria-current', 'step'); else c.removeAttribute('aria-current');
-        });
-        f.querySelectorAll('.bd-next').forEach(function (b) { b.disabled = !self.valid(f, n); });
+        var ok = this.valid(f, 1) && this.valid(f, 2);
+        f.querySelectorAll('.bd-start').forEach(function (b) { b.disabled = !ok; });
       },
       refresh: function (f) {
         this.wishFollow(f);
         var over = f.querySelector('.bd-wish-over'); if (over) over.hidden = this.wishOk(f);
         this.lines(f); this.sum(f); this.nav(f); },
-      show: function (f) {
-        var n = this.cur(f);
-        f.querySelectorAll('.bd-step').forEach(function (s) { s.hidden = +s.dataset.step !== n; });
-        this.refresh(f);
-      },
-      // once per fresh form: JavaScript on, step 1 shown
-      init: function (f) { f.classList.add('bd-js'); if (!f.dataset.step) f.dataset.step = '1'; this.bind(f); this.wishFollow(f); this.show(f); },
+      // once per fresh form: JavaScript on (the live summary shows), the lines and Start follow the fields
+      init: function (f) { f.classList.add('bd-js'); this.bind(f); this.wishFollow(f); this.refresh(f); },
       // pointer (mouse, pen, finger) on the bar moves the ring: down, move while pressed, up; once per gauge
       bind: function (f) {
         var self = this;
@@ -210,24 +198,24 @@
         this.put(f, this.costs(f, Math.max(c, 0.01)).total);
         return true;
       },
-      // to step n; a jump forward stops at the first step that is not valid yet
+      // "Change" in the summary: up to that part of the form (all three are on one screen), its first field focused
       go: function (f, n) {
         this.refill(f);
-        for (var k = 1; k < n; k++) if (!this.valid(f, k)) { n = k; break; }
-        f.dataset.step = n;
-        this.show(f);
-        var dlg = f.closest('dialog');
-        if (dlg) dlg.querySelector('article').scrollTop = 0; else f.scrollIntoView({block: 'start'});
-        var chip = f.querySelector('.bd-chip.bd-on'); if (chip) chip.focus({preventScroll: true});
+        var s = null;
+        f.querySelectorAll('.bd-step').forEach(function (x) { if (+x.dataset.step === n) s = x; });
+        if (!s) return;
+        s.scrollIntoView({block: 'start', behavior: 'smooth'});
+        var field = s.querySelector ? s.querySelector('input:not([type=hidden]):not([disabled]), textarea') : null;
+        if (field) field.focus({preventScroll: true});
       },
-      next: function (f) { this.refill(f); var n = this.cur(f); if (n < 3 && this.valid(f, n)) this.go(f, n + 1); },
-      back: function (f) { var n = this.cur(f); if (n > 1) this.go(f, n - 1); },
-      // Enter in a field goes to the next step, never submits before the last one; links and summaries keep Enter
+      // Enter in a field never starts the purchase (only the button does): it leaves the field, which refills an
+      // emptied maximum; links and the text area keep Enter
       enter: function (e) {
         var t = e.target, f = t.form;
-        if (e.key !== 'Enter' || !f || t.tagName !== 'INPUT' || this.cur(f) === 3) return;
+        if (e.key !== 'Enter' || !f || t.tagName !== 'INPUT') return;
         e.preventDefault();
-        if (t.type === 'text' || t.type === 'number') this.next(f);
+        if ((t.type === 'text' || t.type === 'number') && t.blur) t.blur();
+        this.refill(f);
       },
       // the field holds a number: the default (asking price plus shipping), unless the ad has no price (then it may stay empty)
       refill: function (f) {

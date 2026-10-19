@@ -1,0 +1,12 @@
+{# After "Start purchase" through htmx (_buy_dialog.html): a refusal for the dialog's own line (.bd-error, the page
+   stays), or the confirmation that takes the form's place – the order waits a few seconds in the queue (Undo in the
+   notice), then the agent reads the ad and writes to the seller. #}
+{% import "_ui.html" as ui %}
+{% if error %}<p role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-error">{{ error }}</p>
+{% else %}
+<div class="bd-started flex flex-col gap-3 px-[22px] py-6">
+  <div class="flex items-center gap-2 text-[17px] font-semibold">{{ ui.icon('check', 20, 2.5, 'text-success') }}{{ _("Purchase started") }}</div>
+  <p class="text-muted">{{ _("The agent reads the ad in a few seconds and writes to the seller. Until then you can take it back with Undo in the notice; afterwards the order page shows every step.") }}</p>
+  <div class="flex flex-wrap gap-2"><a href="/purchases/{{ pid }}" class="btn btn-primary">{{ _("Open the order") }}</a><button type="button" class="btn hidden [dialog_&]:inline-flex" onclick="this.closest('dialog').close()">{{ _("Close") }}</button></div>
+</div>
+{% endif %}
