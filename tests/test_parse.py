@@ -133,7 +133,7 @@ def test_clean_text_keeps_paragraphs_and_lists():
 
     raw = ("<p><strong>Carbon NEU </strong></p><p><strong>Shimano 105</strong></p><p>Größe M</p>"
            "<ul><li>Rechnung</li><li>Garantie &amp; Versand</li></ul>Zeile 1<br>Zeile 2")
-    assert clean_text(raw) == "Carbon NEU\nShimano 105\nGröße M\n\n• Rechnung\n• Garantie & Versand\nZeile 1\nZeile 2"
+    assert clean_text(raw) == "Carbon NEU\nShimano 105\nGröße M\n• Rechnung\n• Garantie & Versand\nZeile 1\nZeile 2"
 
 
 @pytest.mark.parametrize("options, expected", [

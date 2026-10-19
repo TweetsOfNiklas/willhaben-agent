@@ -97,3 +97,9 @@ def test_old_notice_rows_show_as_notices():
 def test_clean_text_drops_a_tag_cut_off_at_the_end():
     assert clean_text("Verkauf wegen Nichtgebrauch. <br...") == "Verkauf wegen Nichtgebrauch. …"
     assert clean_text("Akku <Ladung ok") == "Akku <Ladung ok"            # not a tag: stays
+
+
+def test_clean_text_list_items_in_lists_of_their_own():
+    html = "<p>Daten:</p><ul><li>A</li></ul><ul><li>B</li></ul><p>Ende</p><p><br></p><p>Gruß</p>"
+    assert clean_text(html) == "Daten:\n• A\n• B\nEnde\n\nGruß"            # as willhaben shows it
+    assert clean_text("<p>Daten:</p><p><br></p><ul><li>A</li></ul>") == "Daten:\n\n• A"
