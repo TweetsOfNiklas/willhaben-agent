@@ -28,10 +28,10 @@ ALL = "all"                                # pseudo platform: every site togethe
 
 # display types of the logged kinds: what a site's chart stacks by (order = stack order, bottom first); "messages",
 # not "chat", so a type never shares its name with the channel "chat" or the kind "chat"
-TYPES = ("search", "detail", "messages", "account", "other")
-TYPE_OF = {"search": "search", "filters": "search", "detail": "detail", "chat": "messages", "send": "messages",
-           "categories": "account", "myads": "account", "publish": "account", "upload": "account", "login": "account",
-           "navigation": "account", "other": "other"}
+TYPES = ("search", "detail", "photos", "messages", "account", "other")
+TYPE_OF = {"search": "search", "filters": "search", "detail": "detail", "image": "photos", "chat": "messages",
+           "send": "messages", "categories": "account", "myads": "account", "publish": "account", "upload": "account",
+           "login": "account", "navigation": "account", "other": "other"}
 
 
 def channel_label(ch: str) -> str:
@@ -42,7 +42,8 @@ def kind_label(k: str) -> str:
     return {
         "search": t("search"), "detail": t("ad detail"), "filters": t("search filters"), "categories": t("categories"),
         "myads": t("my ads"), "chat": t("chat"), "send": t("send message"), "publish": t("publish ad"),
-        "upload": t("photo upload"), "login": t("login / profile"), "navigation": t("page navigation"), "other": t("other"),
+        "upload": t("photo upload"), "login": t("login / profile"), "navigation": t("page navigation"),
+        "image": t("photos of ads"), "other": t("other"),
     }.get(k, k)
 
 
@@ -51,7 +52,7 @@ SPARK_W, SPARK_H = 120, 24
 
 
 def type_label(k: str) -> str:
-    return {"search": t("search"), "detail": t("ad detail"), "messages": t("chats & messages"),
+    return {"search": t("search"), "detail": t("ad detail"), "photos": t("photos of ads"), "messages": t("chats & messages"),
             "account": t("my ads & account"), "other": t("other")}.get(k, k)
 
 
@@ -426,7 +427,7 @@ def _spark(row: dict[str, Any], data: dict[str, Any]) -> dict[str, Any] | None:
 CHANNEL_COLORS = {"anonymous": "#2a78d6", "account": "#eb6834", "chat": "#1baf7a"}
 
 
-TYPE_COLORS = {"search": "#2a78d6", "detail": "#8b5cf6", "messages": "#1baf7a", "account": "#eb6834", "other": "#9ca3af"}
+TYPE_COLORS = {k: f"var(--wh-type-{k})" for k in TYPES}     # the statistics page's colours (app/styles/app.css)
 
 
 def popup(now: float | None = None, platform: str = "willhaben", usage: dict[str, Any] | None = None) -> dict[str, Any]:

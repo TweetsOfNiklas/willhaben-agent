@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 CHANNELS = ("anonymous", "account", "chat")
 KINDS = ("search", "detail", "filters", "categories", "myads", "chat", "send", "publish", "upload", "login",
-         "navigation", "other")
+         "navigation", "image", "other")
 OUTCOMES = ("ok", "client_error", "blocked", "error", "cached")   # cached = served from PublicClient's cache, no access
 RETENTION_DAYS = 8
 FLUSH_INTERVAL_S = 60
@@ -49,6 +49,7 @@ _RULES: list[tuple[re.Pattern[str], str]] = [(re.compile(p), k) for p, k in (
     (r"/userprofile|/sso/|/myprofile/login", "login"),
     (r"/bap/categorysuggestion|/anzeigenaufgabe", "categories"),
     (r"^/webapi/myatz/", "myads"),                     # own ads: delete, deactivate, ...
+    (r"^/webapi/iad/atimage/", "myads"),               # an own ad's photo list (the photo editor)
     (r"/bap/(presave|save|edit)$|/bap/\d+$|/iad/products/|/p2p-aggregator/", "publish"),
     (r"/myprofile/|/soldreasons|/bap/", "myads"),
     (r"/ad-search/|^/iad/(kaufen-und-verkaufen|immobilien|gebrauchtwagen|jobs)/(?!d/)", "search"),
@@ -57,8 +58,27 @@ _RULES: list[tuple[re.Pattern[str], str]] = [(re.compile(p), k) for p, k in (
 )]
 
 
+_IMAGE_PATH = re.compile(r"\.(jpe?g|png|webp|gif|avif|heic)$")
+_IMAGE_HOSTS = ("cache.willhaben.at", "img.", "images.", "image.", "scontent", "fbcdn.net", "imgproxy")
+
+
+def image_kind(url: str) -> str | None:
+    """"image" for an ad's photo (a file of an image type, or a site's image server: willhaben's cache, Shpock's and
+    Vinted's image hosts, Facebook's CDN), else None. Every site's photos land there, not in "other"."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    host, path = (parts.hostname or "").lower(), parts.path.lower()
+    if _IMAGE_PATH.search(path) or any(h in host for h in _IMAGE_HOSTS) or path.startswith("/mmo/"):
+        return "image"
+    return None
+
+
 def classify(url: str) -> str:
     """Coarse kind of a willhaben URL or path; the path itself is never kept."""
+    if image := image_kind(url):
+        return image
     try:
         path = urlsplit(url).path.lower().rstrip("/") or "/"
     except ValueError:

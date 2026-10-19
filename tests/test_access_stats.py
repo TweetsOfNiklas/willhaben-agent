@@ -496,7 +496,7 @@ def test_other_site_stacks_by_type():
     _put(NOW_MIN, kind="other", outcome="cached", count=4, platform="ebay")
     d = access_stats.series("1h", now=NOW, platform="ebay", by="channel")               # channels are willhaben's only
     assert d["stack"] == "type" and d["stacks"] == ["type"] and d["stack_keys"] == ["search", "detail"]
-    assert d["by_type"] == {"search": 3, "detail": 3, "messages": 0, "account": 0, "other": 0}
+    assert d["by_type"] == {"search": 3, "detail": 3, "photos": 0, "messages": 0, "account": 0, "other": 0}
     assert d["type_outcomes"]["detail"]["requests"] == 3 and d["type_outcomes"]["detail"]["blocked"] == 1
     assert d["type_outcomes"]["other"]["cached"] == 4 and d["type_outcomes"]["other"]["requests"] == 0
     assert d["type_kinds"] == {} and d["budget"] == 240                                # willhaben's: none of its own
@@ -515,7 +515,7 @@ def test_willhaben_stacks_by_channel_or_type():
     assert d["stack"] == "channel" and d["stacks"] == ["channel", "type"] and d["stack_keys"] == ["anonymous", "account", "chat"]
     ty = access_stats.series("1h", now=NOW, by="type")
     assert ty["stack_keys"] == ["search", "messages", "account"]
-    assert ty["by_type"] == {"search": 3, "detail": 0, "messages": 1, "account": 1, "other": 0}
+    assert ty["by_type"] == {"search": 3, "detail": 0, "photos": 0, "messages": 1, "account": 1, "other": 0}
     assert ty["type_kinds"] == {"search": {"search": 2, "filters": 1}, "messages": {"send": 1}, "account": {"myads": 1}}
     assert [s["key"] for s in access_stats.chart(ty)["bars"][-1]["segs"]] == ["search", "messages", "account"]
 
@@ -617,3 +617,14 @@ def test_css_has_the_type_colours():                                            
     css = (Path(access_stats.__file__).resolve().parents[1] / "static" / "app.css").read_text(encoding="utf-8")
     for ty in access_stats.TYPES:
         assert f".fill-type-{ty}" in css and f".bg-type-{ty}" in css, ty
+
+
+def test_photos_have_their_own_category():
+    """An ad's photo is "image" (Fotos von Anzeigen) on every site, not "other"."""
+    assert access_log.classify("https://cache.willhaben.at/mmo/1/123/456/789_123_hoved.jpg") == "image"
+    assert access_log.image_kind("https://img.shpock.com/12.34/abcdef") == "image"
+    assert access_log.image_kind("https://scontent-vie1-1.xx.fbcdn.net/v/t39/1_2_n.jpg") == "image"
+    assert access_log.image_kind("https://images1.vinted.net/t/01_abc/f800/1.webp") == "image"
+    assert access_log.classify("https://www.willhaben.at/webapi/iad/atimage/123") == "myads"
+    assert access_log.image_kind("https://www.willhaben.at/iad/object?adId=1") is None
+    assert access_stats.TYPE_OF["image"] == "photos" and "image" in access_log.KINDS
