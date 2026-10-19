@@ -73,5 +73,11 @@
  "Other ads": "Weitere Anzeigen",
  "Take this ad offline on willhaben. You can activate it again.": "Nimmt die Anzeige auf willhaben offline. Du kannst sie wieder aktivieren.",
  "Put this ad online again on willhaben. If willhaben offers no “Activate”, it is republished as a new ad.": "Stellt die Anzeige auf willhaben wieder online. Bietet willhaben kein „Aktivieren“ an, wird sie als neue Anzeige veröffentlicht.",
- "Deletes the ad on willhaben for good – it waits a few seconds in the queue, where you can still take it back.": "Löscht die Anzeige endgültig auf willhaben – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst."
+ "Deletes the ad on willhaben for good – it waits a few seconds in the queue, where you can still take it back.": "Löscht die Anzeige endgültig auf willhaben – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst.",
+ "Geizhals spec sheet": "Geizhals-Datenblatt",
+ "in the text: {name}": "im Text: {name}",
+ "none in the text": "keins im Text",
+ "Put into the text": "In den Text einfügen",
+ "Replace in the text": "Im Text ersetzen",
+ "Spec sheet of {name} is in the text – check it, then save on willhaben.": "Datenblatt von {name} steht im Text – prüfen, dann auf willhaben speichern."
 }

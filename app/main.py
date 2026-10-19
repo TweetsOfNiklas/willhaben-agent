@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 from pathlib import Path
@@ -247,6 +247,7 @@ templates.env.globals.update(intent_label=chats.intent_label)        # the draft
 templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
+templates.env.globals.update(geizhals_sheet=geizhals.find_spec_block)   # the spec sheet in a description (myad_edit.html)
 templates.env.globals.update(paylivery_offers=ad_creator.paylivery_offers, paylivery_pick=_wh_insert.preselect_offer,
                              parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,   # batch table
                              sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
@@ -1689,6 +1690,40 @@ async def myads_edit_ai(request: Request, ad_id: str, heading: str = Form(""), d
                       ai_error=t("Claude could not revise the ad: {error}", error=e))
     return render(request, "myad_edit.html", a=row, instruction=instruction, proposal=prop,
                   cur={"heading": prop["heading"], "description": prop["description"], "price": value})
+
+
+@app.post("/myads/{ad_id}/edit/geizhals", response_class=HTMLResponse)
+async def myads_edit_geizhals(ad_id: str, request: Request, heading: str = Form(""), description: str = Form(""),
+                              price: str = Form(""), gh_action: str = Form("search"), gh_query: str = Form(""),
+                              gh_url: str = Form("")):
+    """The Geizhals spec sheet of the editor, like in ad creation: search a product, put its sheet into the text
+    (replacing the one there) or remove it. Only the form changes; saving is "Save on willhaben"."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    if row is None:
+        raise HTTPException(404)
+    try:
+        value = ad_creator.parse_price(price)
+    except ValueError:
+        value = None
+    cur = {"heading": heading, "description": description.replace("\r\n", "\n"), "price": value}
+    gh: dict[str, Any] = {"query": gh_query.strip()}
+    try:
+        if gh_action == "remove":
+            cur["description"] = geizhals.with_spec_block(cur["description"], "")
+        elif gh_action == "use" and gh_url.strip():
+            prod = await geizhals.product(gh_url.strip())
+            block = geizhals.spec_block(asdict(prod))
+            if not block:
+                gh["error"] = t("No spec sheet on the product page.")
+            else:
+                cur["description"] = geizhals.with_spec_block(cur["description"], block)
+            gh["match"] = asdict(prod)
+        elif gh["query"]:
+            gh.update(await geizhals.lookup(gh["query"]) or {})
+    except geizhals.GeizhalsError as e:
+        gh["error"] = str(e)
+    return render(request, "myad_edit.html", a=row, cur=cur, gh=gh)
 
 
 @app.post("/myads/{ad_id}/edit")

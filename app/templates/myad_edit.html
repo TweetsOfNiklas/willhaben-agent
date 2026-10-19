@@ -35,6 +35,33 @@
       <p class="-mt-2 flex flex-wrap items-center gap-2 text-[13px]">{{ _("Claude estimates {price}", price=proposal.price_estimate|eur) }}
         <button type="button" class="btn btn-outline btn-xs" onclick="document.getElementById('price').value = '{{ ('%.2f'|format(proposal.price_estimate)).rstrip('0').rstrip('.') }}'">{{ _("use") }}</button></p>
     {% endif %}
+    {# the Geizhals spec sheet at the end of the text, like in ad creation: search, put in (replacing the one there),
+       remove – only the form changes, "Save on willhaben" sends it #}
+    {% set g = gh if gh is defined else {} %}{% set sheet = geizhals_sheet(cur.description) %}
+    <fieldset class="flex flex-col gap-2 rounded-field bg-base-200 px-3.5 py-3" id="geizhals">
+      <legend class="sr-only">Geizhals</legend>
+      <div class="flex flex-wrap items-center justify-between gap-2 text-[13px]"><strong>{{ _("Geizhals spec sheet") }}</strong>
+        {% if sheet %}<span class="flex min-w-0 flex-wrap items-center gap-2"><span class="min-w-0 break-words text-muted">{{ _("in the text: {name}", name=sheet[2]) }}</span>
+          <button type="submit" name="gh_action" value="remove" class="btn btn-ghost btn-xs" formaction="/myads/{{ a.ad_id }}/edit/geizhals" formnovalidate
+                  hx-post="/myads/{{ a.ad_id }}/edit/geizhals" hx-target="#edit-main" hx-select="#edit-main" hx-swap="outerHTML">{{ _("Remove") }}</button></span>
+        {% else %}<span class="text-xs text-muted">{{ _("none in the text") }}</span>{% endif %}</div>
+      <div class="join w-full">
+        <input name="gh_query" value="{{ g.get('query') or (sheet[2] if sheet else cur.heading) }}" placeholder="{{ _('Search for a product, e.g. Bosch GSR 18V-55') }}" class="input input-sm join-item min-w-0 w-full bg-base-100">
+        <button type="submit" name="gh_action" value="search" class="btn btn-sm join-item whitespace-nowrap" formaction="/myads/{{ a.ad_id }}/edit/geizhals" formnovalidate
+                hx-post="/myads/{{ a.ad_id }}/edit/geizhals" hx-target="#edit-main" hx-select="#edit-main" hx-swap="outerHTML"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Search") }}</button>
+      </div>
+      {% if g.get('error') %}<small class="text-xs text-error">{{ g.error }}</small>{% endif %}
+      {% set found = ([g.match] if g.get('match') and g.get('candidates') is not none else []) + (g.get('candidates') or [])|rejectattr('url', 'equalto', (g.get('match') or {}).get('url'))|list %}
+      {% if g.get('candidates') is not none and g.get('query') and not found %}<small class="text-xs text-muted">{{ _("Nothing found for “{q}”.", q=g.query) }}</small>{% endif %}
+      {% if found %}
+      <div class="join w-full">
+        <select name="gh_url" class="select select-sm join-item min-w-0 w-full bg-base-100">{% for c in found %}<option value="{{ c.url }}">{{ c.name }}{% if c.get('price') or c.get('price_from') %} – {{ (c.get('price') or c.get('price_from'))|eur }}{% endif %}</option>{% endfor %}</select>
+        <button type="submit" name="gh_action" value="use" class="btn btn-sm join-item whitespace-nowrap" formaction="/myads/{{ a.ad_id }}/edit/geizhals" formnovalidate
+                hx-post="/myads/{{ a.ad_id }}/edit/geizhals" hx-target="#edit-main" hx-select="#edit-main" hx-swap="outerHTML"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Put into the text") if not sheet else _("Replace in the text") }}</button>
+      </div>
+      {% if g.get('verified') is sameas false %}<small class="text-xs text-warning">{{ _("Variant not confirmed – check that this is the right model") }}</small>{% endif %}
+      {% elif g.get('match') and not g.get('error') %}<small class="text-xs text-muted">{{ _("Spec sheet of {name} is in the text – check it, then save on willhaben.", name=g.match.name) }}</small>{% endif %}
+    </fieldset>
     <div class="flex flex-wrap items-center gap-2">
       <button class="btn btn-primary" {% if a.pending_action %}disabled{% endif %}>{{ _("Save on willhaben") }}</button>
       <small class="text-muted">{{ _("Runs in the background – you go back to the ad right away.") }}</small>

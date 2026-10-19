@@ -549,6 +549,33 @@ async def lookup(query: str, page: bool = True) -> dict[str, Any] | None:
     return {"query": query, "match": asdict(prod), "candidates": [asdict(h) for h in hits[:12]], "verified": verified}
 
 
+_SPEC_HEAD = re.compile(r"^Technische Daten \((?P<name>.+), laut Hersteller/Geizhals\):[ \t]*$", re.M)
+
+
+def find_spec_block(text: str | None) -> tuple[int, int, str] | None:
+    """The spec sheet (spec_block) in a description: (start, end, product name), None without one. Its lines may come
+    back from willhaben as "• " list items."""
+    m = _SPEC_HEAD.search(text or "")
+    if m is None:
+        return None
+    end = m.end()
+    for line in re.finditer(r"\n([^\n]*)", text[m.end():]):
+        if not line.group(1).lstrip().startswith(("- ", "• ")):
+            break
+        end = m.end() + line.end()
+    return m.start(), end, m.group("name")
+
+
+def with_spec_block(text: str | None, block: str) -> str:
+    """The description with its spec sheet replaced by `block` (appended when it had none; "" removes it)."""
+    text = text or ""
+    if (found := find_spec_block(text)) is not None:
+        start, end, _ = found
+        text = (text[:start].rstrip() + "\n\n" + text[end:].lstrip()).strip()
+    text = text.rstrip()
+    return f"{text}\n\n{block}" if block else text
+
+
 def spec_block(match: dict[str, Any] | None) -> str:
     """Text appended to the description when the user ticks "add the spec sheet" (ad content: stays German)."""
     if not match or not match.get("specs"):

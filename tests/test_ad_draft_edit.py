@@ -132,3 +132,38 @@ def test_parse_shipping_takes_one_offer():
     assert ad_creator.parse_shipping(form) == {"handover": "shipping", "paylivery": True, "size": "M", "carrier": "Hermes"}
     bogus = {"handover": "both", "parcel_option": "XXL|UPS"}
     assert ad_creator.parse_shipping(bogus) == {"handover": "both", "paylivery": False, "size": None, "carrier": None}
+
+
+# ------------------------------------------------------------------ My ads → edit: the Geizhals spec sheet
+def test_find_and_replace_the_spec_sheet():
+    from app.services import geizhals
+    text = "Gut erhalten.\n\nTechnische Daten (Pi 5, laut Hersteller/Geizhals):\n• SoC: BCM2712\n• RAM: 4GB\n\nGruß"
+    start, end, name = geizhals.find_spec_block(text)
+    assert name == "Pi 5" and text[end:] == "\n\nGruß"
+    new = geizhals.spec_block({"name": "Pi 4", "specs": [("RAM", "4GB")]})
+    assert geizhals.with_spec_block(text, new) == ("Gut erhalten.\n\nGruß\n\n"
+                                                   "Technische Daten (Pi 4, laut Hersteller/Geizhals):\n- RAM: 4GB")
+    assert geizhals.with_spec_block(text, "") == "Gut erhalten.\n\nGruß"
+    assert geizhals.with_spec_block("Nur Text", new).startswith("Nur Text\n\nTechnische Daten (Pi 4")
+    assert geizhals.find_spec_block("Nur Text") is None
+
+
+def test_my_ad_editor_searches_puts_in_and_removes_the_sheet(client, gh):  # noqa: F811
+    from app.db import MyAd
+    with session() as db:
+        db.add(MyAd(ad_id="77", heading="Akkuschrauber", status="active"))
+        db.commit()
+    text = "Wie neu.\n\nTechnische Daten (Altes Modell, laut Hersteller/Geizhals):\n• Typ: alt"
+    form = {"heading": "Akkuschrauber", "description": text, "price": "12,50"}
+    page = client.post("/myads/77/edit/geizhals", data={**form, "gh_action": "search", "gh_query": "Bosch GSR 18V-55"}).text
+    assert "im Text: Altes Modell" in page or "in the text: Altes Modell" in page
+    assert 'value="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html"' in page
+    assert 'value="12.5"' in page                                                     # the form keeps its values
+
+    page = client.post("/myads/77/edit/geizhals", data={
+        **form, "gh_action": "use", "gh_url": "https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html"}).text
+    assert "Altes Modell" not in page and "- Typ: Bohrschrauber" in page and "Wie neu." in page
+
+    page = client.post("/myads/77/edit/geizhals", data={**form, "gh_action": "remove"}).text
+    assert "Technische Daten" not in page and "Wie neu." in page
+    assert client.post("/myads/99/edit/geizhals", data=form).status_code == 404
