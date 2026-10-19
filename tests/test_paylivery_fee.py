@@ -1,4 +1,6 @@
 """willhaben's exact PayLivery fee from the chat's PayLivery window (app/willhaben/paylivery_fee.py)."""
+import json
+
 import pytest
 
 from app.willhaben import paylivery_fee as pf
@@ -8,6 +10,7 @@ from app.willhaben import paylivery_fee as pf
     ("Artikel\n€ 420,00\nKäuferschutzgebühr\n€ 29,40\nGesamt\n€ 452,89", 29.4),
     ("Käuferschutzgebühr (7 %) € 1.029,40", 1029.4),
     ("29,40 €\nKäuferschutzgebühr", 29.4),
+    ("Artikelpreis\t€\xa0325,00\nVersand\t€\xa06,90\nwillhaben-Käuferschutz\t€\xa014,62\n", 14.62),   # the window, 2026-10-19
     ("Versand € 3,49", None),
 ])
 def test_fee_from_the_windows_text(text, fee):
@@ -74,3 +77,11 @@ def test_the_breakdown_loads_the_fee(monkeypatch):
         frag = c.get("/wh-fee/2?price=420").text
         assert "kein PayLivery-Fenster" in frag and "buyer protection fee" in frag
         assert c.get("/wh-fee/abc").status_code == 400
+
+
+def test_the_fee_from_the_windows_data_call():
+    body = json.dumps({"paymentPreviewPriceBreakdown": {"adPrice": 325.0, "buyerProtectionPrice": 14.62, "totalPrice": 346.52}})
+    assert pf.fee_from_bodies({"https://mint.willhaben.at/p2p/pulse/x": "{}",
+                               "https://mint.willhaben.at/p2p/payment/preview/data/x": body}) == 14.62
+    assert pf.fee_from_bodies({"https://mint.willhaben.at/p2p/payment/preview/data/x": "kaputt"}) is None
+    assert pf.price_section("Max Muster\nGasse 1\nArtikelpreis € 15\nwillhaben-Käuferschutz € 2,49").startswith("Artikelpreis")

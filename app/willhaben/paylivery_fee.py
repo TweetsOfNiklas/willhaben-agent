@@ -6,7 +6,10 @@ window the chat opens for "Sofort kaufen" / "Anfrage senden". That window is an 
 `?itemId=<ad uuid>&partnerId=<seller uuid>&activeUserId=<own uuid>` (bbx-lead bundle, chat page).
 
 The app opens that address in a hidden tab of the logged-in browser that blocks every request but GET/HEAD/OPTIONS
-(session.read_hidden), so nothing is ever sent, offered or bought, and reads "Käuferschutzgebühr … € x" from the page.
+(session.read_hidden), so nothing is ever sent, offered or bought. The window goes /p2p/buynow/init → a payment
+preview with an id of its own, whose data call (`/p2p/payment/preview/data/<id>`) has
+paymentPreviewPriceBreakdown.buyerProtectionPrice; the page text ("willhaben-Käuferschutz € x") is the fallback.
+Seen 2026-10-19: € 15 → € 2,49, € 325 → € 14,62 (4.5 %, cut off), € 420 (CPUs) → € 29,40.
 Each read is put on the timeline (kind "wh", name "paylivery-fee") with the window's calls, so the window's own data
 call can be wired in directly later. Results are kept for an hour per ad and price.
 """
@@ -49,6 +52,27 @@ def fee_from_text(text: str) -> float | None:
     return None
 
 
+def fee_from_bodies(bodies: dict[str, str]) -> float | None:
+    """The fee from the window's data call `GET mint.willhaben.at/p2p/payment/preview/data/<preview id>`:
+    paymentPreviewPriceBreakdown.buyerProtectionPrice (the preview id is made by /p2p/buynow/init when the window
+    opens, so the call cannot be made without it)."""
+    for url, text in (bodies or {}).items():
+        if "/p2p/payment/preview/data/" not in url:
+            continue
+        try:
+            price = (json.loads(text).get("paymentPreviewPriceBreakdown") or {}).get("buyerProtectionPrice")
+            return round(float(price), 2) if price is not None else None
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return None
+
+
+def price_section(text: str) -> str:
+    """The window's price part only ("Preis … willhaben-Käuferschutz € x"), without the delivery address above it."""
+    i = (text or "").find("Artikelpreis")
+    return text[i:i + 600] if i >= 0 else ""
+
+
 def pick_integration(convoad: Any) -> dict[str, Any] | None:
     """The PayLivery window among the ad's chat integrations: "Sofort kaufen" first, else the offer."""
     ads = (convoad or {}).get("ads") if isinstance(convoad, dict) else None
@@ -87,15 +111,18 @@ async def fetch(sess: Any, ad_id: str, price: float | None = None) -> dict[str, 
         raise FeeError("willhaben bietet für diese Anzeige kein PayLivery-Fenster an")
     url = f"{integ['button']['baseHref']}?itemId={item}&partnerId={seller}&activeUserId={me}"
     page = await sess.read_hidden(url, FEE_TEXT + r"[^\n€]{0,60}€\s*\d")
-    fee = fee_from_text(page["text"])
+    fee = fee_from_bodies(page["bodies"])
+    if fee is None:
+        fee = fee_from_text(price_section(page["text"]) or page["text"])
     res = {"fee": fee, "integration": integ.get("initName"), "found": fee is not None}
     timeline.record("wh", f"PayLivery-Gebühr {ad_id}: " + (f"€ {fee:.2f}" if fee is not None else "nicht gefunden"),
                     name="paylivery-fee", ok=fee is not None,
                     payload={"integration": integ.get("initName"), "fee": fee, "price": price,
                              "requests": [{k: v for k, v in r.items()} for r in page["requests"]][:200]},
-                    blobs={"text": page["text"][:20_000],
-                           "bodies": json.dumps(page["bodies"], ensure_ascii=False)[:1_000_000],
-                           "convoad": json.dumps(convoad, ensure_ascii=False)[:100_000]})
+                    # the price part and the price data only: the window also shows the buyer's address
+                    blobs={"text": price_section(page["text"]),
+                           "preview": next((b for u, b in page["bodies"].items() if "/p2p/payment/preview/data/" in u),
+                                           None)})
     if fee is not None:
         _cache[key] = (time.monotonic(), res)
     return res

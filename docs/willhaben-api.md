@@ -232,7 +232,12 @@ The exact willhaben fee is shown in the chat's PayLivery window: the chat app (`
 `/iad/myprofile/chat/[[...slug]]`) opens an iframe whose URL is `button.baseHref` of the ad's integrations
 (`GET /webapi/convoad/v1/chat/ad_list/<own user uuid>?ids=<adId>` → `ads[0].integrations[]` with `initName`
 `at.willhaben.messaging.p2p` (offer) or `…p2p-buynow`) plus `?itemId=<ad uuid>&partnerId=<seller uuid>&activeUserId=<own
-uuid>` (read in the bundle 2026-10-19; the iframe's own calls are not captured yet).
+uuid>` (read in the bundle 2026-10-19). Seen live 2026-10-19 (`app/willhaben/paylivery_fee.py`, read-only tab): the
+"Sofort kaufen" window is `https://mint.willhaben.at/p2p/buynow/init?…` → 302 `/p2p/buynow?token=…` → 302
+`/p2p/payment/preview/<preview id>`; its data call `GET /p2p/payment/preview/data/<preview id>` returns
+`paymentPreviewPriceBreakdown` {adPrice, shipmentPrice{home, postOffice, parcelLocker, …}, buyerProtectionPrice,
+totalPrice, summary}. No POST is needed to show the fee. Seen fees: € 15 → € 2,49, € 325 → € 14,62, € 420 (CPUs) →
+€ 29,40.
 Not live-verified: the amounts shown at the real checkout (compare them once with `costs_of()`).
 
 Hooks: `paylivery.on_stage(fn)` registers `fn(conv, stage, state)` (async). It runs as a background task after every
