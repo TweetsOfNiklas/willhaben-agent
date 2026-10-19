@@ -84,8 +84,12 @@
     <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="hits-bulk" name="ids" value="{{ h.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}"></label>
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block">
       {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
-      {% if not agent_id and agents.get(h.agent_id) %}<span class="badge badge-sm absolute max-sm:hidden top-2 left-10 block max-w-[calc(100%-48px)] truncate border-0 bg-black/55 font-medium leading-5 text-white {{ 'max-w-[58%]' if platform_ids else '' }}">{{ agents[h.agent_id].name }}</span>{% endif %}
-      {% if platform_ids %}<span class="badge badge-sm absolute max-sm:hidden top-2 right-2 block max-w-[38%] truncate border-0 bg-black/55 font-medium leading-5 text-white">{{ platform_name(h.platform) }}</span>{% endif %}
+      {# agent and site in one row right of the checkbox: the agent's name gives way (truncated), the site keeps its width #}
+      {% set show_agent = not agent_id and agents.get(h.agent_id) %}
+      {% if show_agent or platform_ids %}<div class="pointer-events-none absolute top-2 right-2 left-10 flex items-center gap-1.5 max-sm:hidden">
+        {% if show_agent %}<span class="badge badge-sm block min-w-0 truncate border-0 bg-black/55 font-medium leading-5 text-white">{{ agents[h.agent_id].name }}</span>{% endif %}
+        {% if platform_ids %}<span class="badge badge-sm ml-auto block max-w-[45%] shrink-0 truncate border-0 bg-black/55 font-medium leading-5 text-white">{{ platform_name(h.platform) }}</span>{% endif %}
+      </div>{% endif %}
     </a>
     <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-2.5">
       <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
