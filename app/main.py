@@ -247,7 +247,8 @@ templates.env.globals.update(intent_label=chats.intent_label)        # the draft
 templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)
-templates.env.globals.update(parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,
+templates.env.globals.update(paylivery_offers=ad_creator.paylivery_offers, paylivery_pick=_wh_insert.preselect_offer,
+                             parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,   # batch table
                              sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
@@ -2070,6 +2071,14 @@ async def ad_draft_save(request: Request, draft_id: int, title: str = Form(...),
     if request.headers.get("x-autosave"):
         return JSONResponse({"ok": problem is None, "error": problem})
     return back(f"/new-ad/{draft_id}?msg={quote(problem or t('Changes saved'), safe='')}")
+
+
+@app.post("/new-ad/{draft_id:int}/fields")
+async def ad_draft_autosave(request: Request, draft_id: int):
+    """The draft page saves a field when it is left (fetch, keepalive): {"ok", "error"}."""
+    _draft_or_404(draft_id)
+    problem = ad_creator.autosave(draft_id, await request.form())
+    return {"ok": problem is None, "error": problem}
 
 
 @app.post("/new-ad/{draft_id:int}/refine")

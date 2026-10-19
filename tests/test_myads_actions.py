@@ -433,11 +433,11 @@ async def test_edit_changes_only_three_fields(monkeypatch):
     await my_ads.import_from_account()
     cur = await my_ads.load_for_edit("1000000001")
     assert {k: cur[k] for k in ("heading", "description", "price")} == {
-        "heading": "Alter Titel", "description": "Zeile eins\nZeile zwei\n\n• Netzteil\n• Tasche", "price": 40}
+        "heading": "Alter Titel", "description": "Zeile eins\nZeile zwei\n• Netzteil\n• Tasche", "price": 40}  # no gap on willhaben either
     assert cur["images"] == [] and cur["images_error"]        # no imageList link: text editing still works
     row = await my_ads.edit("1000000001", "Neuer Titel", "Neu\n\n• Netzteil", 35.0)
     body = acct.put_body
-    assert body["heading"] == "Neuer Titel" and body["price"] == 35 and body["description"] == "<p>Neu</p><ul><li>Netzteil</li></ul>"
+    assert body["heading"] == "Neuer Titel" and body["price"] == 35 and body["description"] == "<p>Neu</p><p><br></p><ul><li>Netzteil</li></ul>"
     assert body["advertImageList"] == {"advertImage": [{"id": 1}]} and body["categoryPath"] == {"path": ["X"]}   # full object
     assert "edited" in row.last_action                       # heading comes back from the account list
     assert not any("cart" in p or "checkout" in p for _, p in acct.calls)

@@ -298,7 +298,7 @@ def test_single_page_sections(client, wh):  # noqa: F811
     page = client.get(f"/new-ad/{d.id}").text
     assert "Audio › Kopfhörer" in page and 'name="o0_Zustand"' in page and "Publish on willhaben now" in page
     assert 'name="handover" value="pickup" checked' in page and "Choose another category" in page
-    assert f'data-pick="/new-ad/{d.id}/willhaben/category"' in page and 'name="parcel_size"' in page
+    assert f'data-pick="/new-ad/{d.id}/willhaben/category"' in page and 'name="parcel_option" value="S|dpd" checked' in page
 
     wh.fail = "nicht eingeloggt"
     insert.clear_form_cache()

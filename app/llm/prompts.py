@@ -309,8 +309,10 @@ def ad_prompt(notes: str, rules: str, n_images: int, quantity: int | None = None
 
 def ad_refine_prompt(*, notes: str, rules: str, n_images: int, current: dict[str, Any],
                      specs: list[tuple[str, str]] | None, product_name: str | None, instruction: str,
-                     quantity: int | None = None) -> str:
-    """Revise an existing draft according to one instruction of the user."""
+                     quantity: int | None = None, product_query: str | None = None,
+                     price: float | None = None) -> str:
+    """Revise an existing draft according to one instruction of the user. product_query and price (the draft's, None
+    for an ad already online): Claude may change them when the instruction says so."""
     lines = [
         "Bisheriges Inserat:",
         f"- Titel: {current.get('title') or ''}",
@@ -341,6 +343,12 @@ def ad_refine_prompt(*, notes: str, rules: str, n_images: int, current: dict[str
         "Keine Liste der technischen Daten in die Beschreibung, die füge ich selbst an. "
         "Im Feld note kurz, was du geändert hast.",
     ]
+    if product_query is not None or price is not None:
+        lines.insert(lines.index("- Beschreibung:"), f"- Produkt (für Geizhals): {product_query or '–'}")
+        lines.insert(lines.index("- Beschreibung:"), f"- Preis: {f'{price:g} €' if price is not None else '–'}")
+        lines.append("product_query: das Produkt von oben; ein anderes nur, wenn sich laut meinen Wünschen zeigt, dass "
+                     "es ein anderes Produkt oder eine andere Variante ist. price_estimate: der Preis von oben, außer ich "
+                     "nenne einen neuen.")
     return "\n".join(lines)
 
 

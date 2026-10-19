@@ -1,4 +1,4 @@
-{# Handover inside a publish form. Same names: handover, paylivery, parcel_size, parcel_carrier. Until the draft has
+{# Handover inside a publish form. Same names: handover, paylivery, parcel_option ("S|Hermes", one of the PayLivery offers). Until the draft has
    a handover of its own: the owner's usual one (Settings → Selling preferences). #}
 {% set sh = plan.shipping or {} %}{% set ho = sh.handover or sell_handover_default() %}
 <fieldset class="wh-handover m-0 flex flex-col gap-2.5 border-0 p-0" x-data="{ ho: '{{ ho }}' }">
@@ -8,10 +8,24 @@
       <input type="radio" name="handover" value="{{ v }}" {% if ho == v %}checked{% endif %} x-model="ho" class="sr-only">{{ lbl }}</label>
     {% endfor %}
   </div>
-  <div class="wh-ship flex flex-wrap items-end gap-3 rounded-[10px] bg-base-200 px-3 py-2.5" x-show="ho !== 'pickup'" x-cloak>
-    <label class="flex items-center gap-2 pb-2 text-[13px]"><input type="checkbox" name="paylivery" value="1" {% if sh.paylivery %}checked{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("with PayLivery (buyer protection)") }}</label>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-xs text-muted">{{ _("Parcel size") }}</span><select name="parcel_size" class="select select-sm bg-base-100 text-[13px]">{% for s in parcel_sizes %}<option value="{{ s }}" {% if s == (sh.size or 'S') %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
-    <label class="flex min-w-0 flex-col gap-1.5"><span class="text-xs text-muted">{{ _("Carrier") }}</span><select name="parcel_carrier" class="select select-sm bg-base-100 text-[13px]"><option value="">{{ _("cheapest") }}</option>{% for c in parcel_carriers %}<option value="{{ c }}" {% if c == sh.carrier %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
-    <small class="basis-full text-xs text-warning">{{ _("Parcel size and carrier only count with PayLivery; the buyer pays the shipping. Shipping has not been tested with willhaben yet – if a step fails, the ad stays an unpublished draft on willhaben.") }}</small>
+  {% set offers = paylivery_offers() %}{% set kg = ((d.parcel or {}).weight_kg if d is defined and d.parcel else none) %}
+  {% set pick = paylivery_pick(offers, kg, sh.get('size'), sh.get('carrier')) %}
+  <div class="wh-ship flex flex-col gap-2.5 rounded-[10px] bg-base-200 px-3 py-2.5" x-show="ho !== 'pickup'" x-cloak x-data="{ pl: {{ 'true' if sh.paylivery else 'false' }} }">
+    <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" name="paylivery" value="1" {% if sh.paylivery %}checked{% endif %} x-model="pl" class="checkbox checkbox-primary checkbox-sm">{{ _("with PayLivery (buyer protection)") }}</label>
+    <div class="flex flex-col gap-1.5" x-show="pl" x-cloak>
+      <span class="text-xs text-muted">{{ _("Carrier and parcel size – the buyer pays this shipping price") }}{% if kg %} · {{ _("parcel about {kg} kg", kg='%g'|format(kg)) }}{% endif %}</span>
+      {% for o in offers %}
+      <label class="flex cursor-pointer items-start gap-2.5 rounded-field border border-base-300 bg-base-100 px-2.5 py-2 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft">
+        <input type="radio" name="parcel_option" value="{{ o.size }}|{{ o.carrier }}" {% if pick and o.size == pick.size and o.carrier == pick.carrier %}checked{% endif %} class="radio radio-primary radio-sm mt-0.5">
+        <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span class="flex flex-wrap items-baseline justify-between gap-x-3"><strong>{{ o.carrier }} {{ o.size }}</strong><span class="whitespace-nowrap">{% if o.get('original_price') %}<s class="text-muted">{{ o.original_price|eur }}</s> {% endif %}<strong>{{ o.price|eur }}</strong></span></span>
+          <span class="text-xs text-muted">{{ o.limits }}{% if o.get('liability') %} · {{ o.liability }}{% endif %}</span>
+          {% if kg and o.get('max_kg') and kg > o.max_kg %}<span class="text-xs text-warning">{{ _("too heavy: {kg} kg > {max} kg", kg='%g'|format(kg), max='%g'|format(o.max_kg)) }}</span>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+      <small class="text-xs text-muted">{{ _("Prices and limits as willhaben listed them; at publishing the current offer of this carrier and size is used.") }}</small>
+    </div>
+    <small class="text-xs text-muted" x-show="!pl">{{ _("Without PayLivery the buyer pays you directly and you send the parcel yourself.") }}</small>
   </div>
 </fieldset>

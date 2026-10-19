@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import re
 import statistics
@@ -13,7 +14,7 @@ from typing import Any
 from sqlmodel import select
 
 from app.config import get_settings
-from app.db import AdDraft, MyAd, get_setting, session, utcnow
+from app.db import AdDraft, MyAd, get_setting, session, set_setting, utcnow
 from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import AD_SCHEMA, AD_SYSTEM, ad_prompt, ad_refine_prompt
@@ -290,6 +291,39 @@ def save_fields(draft_id: int, title: str, description: str, price: str | None,
     return update_draft(draft_id, **fields)
 
 
+def autosave(draft_id: int, form: Any) -> str | None:
+    """A field of the draft page saved as soon as it is left (the page's other buttons reload it, which used to drop
+    an unsaved price). Only the fields the form sent; price and pieces also while Claude revises (the revision does
+    not touch them), title and description not (its result would overwrite them). Returns the problem, else None;
+    nothing goes to d.error."""
+    with session() as db:
+        d = db.get(AdDraft, draft_id)
+    if d is None:
+        return None
+    if d.status == "published":
+        return t(PUBLISHED_READONLY)
+    fields: dict[str, Any] = {}
+    problem = None
+    if form.get("price") is not None:
+        try:
+            fields["price_suggestion"] = parse_price(str(form["price"]))
+        except ValueError:
+            problem = t(PRICE_UNREADABLE, price=str(form["price"]).strip())
+    if form.get("quantity") is not None:
+        fields["quantity"] = pick_quantity(parse_quantity(str(form["quantity"])), None)
+    for key, name in (("title", "title"), ("description", "description")):
+        if form.get(key) is None:
+            continue
+        if d.refining:
+            problem = problem or t(REFINING_BUSY)
+            continue
+        value = str(form[key])
+        fields[name] = value.strip() if key == "title" else value.replace("\r\n", "\n").strip()
+    if fields:
+        update_draft(draft_id, **fields)
+    return problem
+
+
 def save_problem(d: AdDraft, price: str | None) -> str | None:
     """After save_fields: why the edit was not (fully) taken over, or None when everything was saved."""
     if d.refining or d.status == "published":
@@ -348,6 +382,7 @@ async def search_geizhals(draft_id: int, query: str) -> AdDraft:
 
 
 _VERSION_FIELDS = ("title", "description", "category_hint", "condition", "attributes")
+_UNDO_EXTRA = ("product_query", "geizhals", "price_suggestion")   # in a revision only when it changed them
 
 RECONCILE_INSTRUCTION = (
     "Gleiche das Inserat mit den Herstellerdaten von Geizhals ab: Korrigiere Angaben, die dem Datenblatt "
@@ -377,24 +412,61 @@ async def refine_draft(draft_id: int, instruction: str, label: str | None = None
     prompt = ad_refine_prompt(notes=d.input_text, rules=selling.append_to(get_setting("reply_rules"), for_ad=True),
                               n_images=len(d.image_paths),
                               current=current, specs=match.get("specs") if trusted else None,
-                              product_name=match.get("name"), instruction=instruction, quantity=d.quantity)
+                              product_name=match.get("name"), instruction=instruction, quantity=d.quantity,
+                              product_query=d.product_query or "", price=d.price_suggestion)
     try:
         result = await get_backend("ads").complete(system=AD_SYSTEM, prompt=prompt, schema=AD_SCHEMA,
                                                    images=[Path(p) for p in d.image_paths])
     except LLMError as e:
         return update_draft(draft_id, error=t("Revision failed: {error}", error=e))
     data = result.data
+    extra: dict[str, Any] = {}
+    # another product (the owner said what it really is): Geizhals looks it up again, the old spec sheet goes
+    query = (data.get("product_query") or "").strip()
+    if instruction != RECONCILE_INSTRUCTION and query and _norm_query(query) != _norm_query(d.product_query):
+        gh = await _geizhals_lookup(query)
+        extra.update(product_query=query, geizhals=gh)
+        block = geizhals.spec_block((gh or {}).get("match")) if (gh or {}).get("verified") else ""
+        had_block = had_block and bool(block)
+    # a price the owner named in the instruction (Claude's estimate alone never changes it)
+    price = named_price(instruction, data.get("price_estimate"))
+    if price is not None and price != d.price_suggestion:
+        extra["price_suggestion"] = price
     description = (clean_text(data.get("description")) or "").rstrip()
     if had_block:
         description = f"{description}\n\n{block}"
     revisions = list(d.revisions or [])
     revisions.append({**{k: getattr(d, k) for k in _VERSION_FIELDS}, "instruction": label or instruction,
-                      "at": utcnow().isoformat()})
-    return update_draft(draft_id, title=data.get("title"), description=description,
-                        category_hint=data.get("category_hint"), condition=data.get("condition"),
-                        attributes=data.get("attributes") or [], revisions=revisions[-20:], model=result.model,
-                        error=None, price_stats={**(d.price_stats or {}), "note": data.get("note")},
-                        questions=questions_of(data))
+                      "at": utcnow().isoformat(), **{k: getattr(d, k) for k in _UNDO_EXTRA if k in extra}})
+    d = update_draft(draft_id, title=data.get("title"), description=description,
+                     category_hint=data.get("category_hint"), condition=data.get("condition"),
+                     attributes=data.get("attributes") or [], revisions=revisions[-20:], model=result.model,
+                     error=None, price_stats={**(d.price_stats or {}), "note": data.get("note")},
+                     questions=questions_of(data), **extra)
+    return attach_specs_if_wanted(draft_id) if "geizhals" in extra else d
+
+
+def _norm_query(q: str | None) -> str:
+    return re.sub(r"[^0-9a-z]+", "", (q or "").lower())
+
+
+_NUMBER = re.compile(r"\d+(?:[.'’]\d{3})*(?:[.,]\d{1,2})?")
+
+
+def named_price(instruction: str, price: Any) -> float | None:
+    """Claude's price_estimate when the instruction names that very amount ("Preis 80 €", "verkaufe um 1.200"),
+    else None."""
+    try:
+        want = round(float(price), 2)
+    except (TypeError, ValueError):
+        return None
+    for m in _NUMBER.finditer(instruction or ""):
+        try:
+            if parse_price(m.group(0)) == want:
+                return want
+        except ValueError:
+            continue
+    return None
 
 
 def undo_revision(draft_id: int) -> AdDraft:
@@ -404,7 +476,8 @@ def undo_revision(draft_id: int) -> AdDraft:
     if not revisions:
         return d
     last = revisions.pop()
-    return update_draft(draft_id, revisions=revisions, **{k: last.get(k) for k in _VERSION_FIELDS})
+    return update_draft(draft_id, revisions=revisions, **{k: last.get(k) for k in _VERSION_FIELDS},
+                        **{k: last[k] for k in _UNDO_EXTRA if k in last})
 
 
 # ------------------------------------------------------------------ publish on willhaben (direct, per click)
@@ -548,7 +621,8 @@ def enqueue_prepare(draft_id: int) -> bool:
 
 
 def parse_shipping(form: Any) -> dict[str, Any]:
-    """Übergabe fields of the publish form → {"handover", "paylivery", "size", "carrier"}; without a valid handover the
+    """Übergabe fields of the publish form (parcel_option "S|Hermes", or parcel_size + parcel_carrier) →
+    {"handover", "paylivery", "size", "carrier"}; without a valid handover the
     owner's usual one (Settings → Selling preferences, pickup unless changed there).
     Everything but pickup NEEDS LIVE VERIFICATION (insert.set_delivery)."""
     from app.willhaben import insert
@@ -560,9 +634,30 @@ def parse_shipping(form: Any) -> dict[str, Any]:
         return {"handover": "pickup"}
     size = str(form.get("parcel_size") or "").upper()
     carrier = str(form.get("parcel_carrier") or "")
+    if "|" in str(form.get("parcel_option") or ""):     # one offer of the list: "S|Hermes"
+        size, carrier = str(form["parcel_option"]).split("|", 1)
+        size = size.upper()
     return {"handover": handover, "paylivery": str(form.get("paylivery") or "").lower() in ("1", "true", "on", "yes"),
             "size": size if size in insert.PARCEL_SIZES else None,
             "carrier": carrier if carrier in insert.PAYLIVERY_CARRIERS else None}
+
+
+def paylivery_offers() -> list[dict[str, Any]]:
+    """The PayLivery offers for the handover form: the list willhaben sent at the last publish with PayLivery, else
+    the one in insert.OFFERS."""
+    from app.willhaben import insert
+
+    try:
+        stored = json.loads(get_setting("paylivery_offers") or "null")
+    except ValueError:
+        stored = None
+    return stored if isinstance(stored, list) and stored else insert.OFFERS
+
+
+def remember_offers(res: dict[str, Any] | None) -> None:
+    offers = (((res or {}).get("trace") or {}).get("delivery") or {}).get("offers")
+    if offers:
+        set_setting("paylivery_offers", json.dumps(offers, ensure_ascii=False))
 
 
 _publishing: set[int] = set()     # drafts with a publish in flight (double click, second tab)
@@ -845,6 +940,7 @@ async def _publish_willhaben(draft_id: int, option: int, values: dict[str, str],
                                    shipping=ship, on_delivery=delivery_set, on_step=on_step)
     if res.get("stopped"):                       # step-by-step trial: nothing public yet, draft stays a draft
         return res
+    remember_offers(res)
     d = update_draft(draft_id, status="published", wh_ad_id=res["ad_id"], error=None)
     from app.services import my_ads
     parcel_estimate = clean_parcel(d.parcel)       # source "claude": the shipping card says "estimated"

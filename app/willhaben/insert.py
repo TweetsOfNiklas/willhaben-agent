@@ -132,13 +132,13 @@ async def get_own_ad(s: BrowserSession, ad_id: str) -> dict[str, Any]:
 
 
 def description_text(html_text: str | None) -> str:
-    """The editor's HTML description → plain text for editing (inverse of description_html)."""
+    """The editor's HTML description → plain text for editing (inverse of description_html). Each <p> is a line, an
+    empty one (<p><br></p>) a blank line; older ads with one <p> per paragraph read as lines too, as willhaben shows them."""
     import html as _html
     t_ = html_text or ""
+    t_ = re.sub(r"(?i)<p[^>]*>\s*(?:<br\s*/?>\s*)?</p>", "\n", t_)
     t_ = re.sub(r"(?i)<li[^>]*>\s*", "• ", t_)
-    t_ = re.sub(r"(?i)</li>\s*", "\n", t_)
-    t_ = re.sub(r"(?i)<br\s*/?>", "\n", t_)
-    t_ = re.sub(r"(?i)</p>\s*|</ul>\s*|</div>\s*", "\n\n", t_)
+    t_ = re.sub(r"(?i)</li>|<br\s*/?>|</p>|</div>", "\n", t_)        # </ul>: its last </li> ended the line
     t_ = re.sub(r"<[^>]+>", "", t_)
     t_ = _html.unescape(t_)
     return re.sub(r"\n{3,}", "\n\n", "\n".join(ln.rstrip() for ln in t_.split("\n"))).strip()
@@ -265,6 +265,80 @@ HANDOVERS = {"pickup": [PICKUP], "shipping": [SHIPPING], "both": [PICKUP, SHIPPI
 PARCEL_SIZES = ("XS", "S", "M", "L")                  # PayLivery sizes offered by willhaben's form (bundle: eT)
 PAYLIVERY_CARRIERS = ("Post", "dpd", "Hermes")         # carrier.description values seen in the bundle (eC)
 
+# The PayLivery offers (what the buyer pays for shipping, and what fits) as willhaben listed them for an ad on
+# 2026-10-19 (deliveryOptions of the p2ppUserOptions link). Each publish with PayLivery stores the live list
+# (setting "paylivery_offers", offers_of()), which then replaces this one in the form.
+OFFERS_SEEN = "2026-10-19"
+OFFERS: list[dict[str, Any]] = [
+    {"size": "S", "carrier": "Post", "price": 5.7, "max_kg": 3.0, "limits": "max. L 100cm × B 60cm × H 60cm, bis 3kg",
+     "liability": "Haftung bis € 510"},
+    {"size": "S", "carrier": "Hermes", "price": 5.7, "max_kg": 31.5,
+     "limits": "Längste + kürzeste Seite = max. 50cm, bis 31,5kg", "liability": "Haftung bis € 500"},
+    {"size": "S", "carrier": "dpd", "price": 3.49, "original_price": 5.6, "max_kg": 3.0,
+     "limits": "(Höhe + Breite) × 2 + Länge = max. 3m, Länge max. 1,75m, bis 3kg", "liability": "Haftung bis € 520"},
+    {"size": "M", "carrier": "Post", "price": 7.9, "max_kg": 10.0, "limits": "max. L 100cm × B 60cm × H 60cm, bis 10kg",
+     "liability": "Haftung bis € 510"},
+    {"size": "M", "carrier": "Hermes", "price": 6.4, "max_kg": 31.5,
+     "limits": "Längste + kürzeste Seite = max. 80cm, bis 31,5kg", "liability": "Haftung bis € 500"},
+    {"size": "M", "carrier": "dpd", "price": 7.5, "max_kg": 10.0,
+     "limits": "(Höhe + Breite) × 2 + Länge = max. 3m, Länge max. 1,75m, bis 10kg", "liability": "Haftung bis € 520"},
+    {"size": "L", "carrier": "Post", "price": 9.9, "max_kg": 31.5,
+     "limits": "max. L 100cm × B 60cm × H 60cm, bis 31,5kg", "liability": "Haftung bis € 510"},
+    {"size": "L", "carrier": "Hermes", "price": 6.9, "max_kg": 31.5,
+     "limits": "Längste + kürzeste Seite = max. 120cm, bis 31,5kg", "liability": "Haftung bis € 500"},
+    {"size": "L", "carrier": "dpd", "price": 9.7, "max_kg": 31.5,
+     "limits": "(Höhe + Breite) × 2 + Länge = max. 3m, Länge max. 1,75m, bis 31,5kg", "liability": "Haftung bis € 520"},
+]
+
+
+def _kg(text: str) -> float | None:
+    m = re.search(r"bis\s*(\d+(?:[.,]\d+)?)\s*kg", text or "")
+    return float(m.group(1).replace(",", ".")) if m else None
+
+
+def offers_of(options: dict[str, Any]) -> list[dict[str, Any]]:
+    """willhaben's deliveryOptions (p2ppUserOptions) in the shape of OFFERS, smallest size first."""
+    order = {s: i for i, s in enumerate(PARCEL_SIZES)}
+    out = []
+    for o in options.get("deliveryOptions") or []:
+        size = ((o.get("parcelSize") or {}).get("size") or "").upper()
+        carrier = (o.get("carrier") or {}).get("description") or ""
+        try:
+            price = float(o.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if not size or not carrier:
+            continue
+        limits = re.sub(r",\s*quaderförmiges Paket$", "", str(o.get("description") or "").strip())
+        offer = {"size": size, "carrier": carrier, "price": price, "max_kg": _kg(limits), "limits": limits,
+                 "liability": str(o.get("parcelInsurance") or "")}
+        try:
+            if float(o.get("originalPrice")) > price:
+                offer["original_price"] = float(o["originalPrice"])
+        except (TypeError, ValueError):
+            pass
+        out.append(offer)
+    return sorted(out, key=lambda x: (order.get(x["size"], 9), x["price"]))
+
+
+def preselect_offer(offers: list[dict[str, Any]], weight_kg: float | None, size: str | None = None,
+                    carrier: str | None = None) -> dict[str, Any] | None:
+    """The offer the form shows selected: the one chosen before (size and carrier), else the cheapest that takes the
+    parcel's weight."""
+    chosen = next((o for o in offers if o["size"] == (size or "").upper() and carrier
+                   and o["carrier"].lower() == carrier.lower()), None)
+    if chosen is None and size:          # a size chosen with "cheapest carrier"
+        same = [o for o in offers if o["size"] == size.upper()]
+        chosen = min(same, key=lambda o: o["price"]) if same else None
+    return chosen or pick_offer(offers, weight_kg)
+
+
+def pick_offer(offers: list[dict[str, Any]], weight_kg: float | None) -> dict[str, Any] | None:
+    """The cheapest offer whose weight limit takes the parcel (smaller size first on a tie); None without offers."""
+    order = {s: i for i, s in enumerate(PARCEL_SIZES)}
+    fits = [o for o in offers if not weight_kg or not o.get("max_kg") or weight_kg <= o["max_kg"]] or offers
+    return min(fits, key=lambda o: (o["price"], order.get(o["size"], 9))) if fits else None
+
 
 def suggestion_paths(raw: Any) -> list[list[dict[str, str]]]:
     """Category suggestions as categoryPath lists [{label, code}, …] root → leaf, without duplicates."""
@@ -363,17 +437,31 @@ def build_plan(form: dict[str, Any], raw_suggestions: Any, *, condition: str | N
 
 # ------------------------------------------------------------------ publish (writes, only on the user's click)
 def description_html(text: str) -> str:
-    """Plain text → the editor's HTML (paragraphs, line breaks, "• " lines as list)."""
+    """Plain text → the editor's HTML as willhaben's own editor writes it: one <p> per line, a blank line as
+    <p><br></p> (willhaben shows paragraphs without a gap, so "<p>a</p><p>b</p>" loses the blank line), runs of
+    "• "/"- " lines as a list."""
     import html as _html
 
-    blocks = []
-    for para in [p for p in (text or "").replace("\r\n", "\n").split("\n\n") if p.strip()]:
-        lines = [ln for ln in para.split("\n") if ln.strip()]
-        if lines and all(ln.lstrip().startswith(("• ", "- ")) for ln in lines):
-            items = "".join(f"<li>{_html.escape(ln.lstrip()[2:].strip())}</li>" for ln in lines)
-            blocks.append(f"<ul>{items}</ul>")
-        else:
-            blocks.append("<p>" + "<br>".join(_html.escape(ln.strip()) for ln in lines) + "</p>")
+    blocks: list[str] = []
+    items: list[str] = []
+    blank = False
+    for ln in (text or "").replace("\r\n", "\n").strip().split("\n"):
+        ln = ln.strip()
+        if ln.startswith(("• ", "- ")):
+            items.append(f"<li>{_html.escape(ln[2:].strip())}</li>")
+            continue
+        if items:
+            blocks.append(f"<ul>{''.join(items)}</ul>")
+            items = []
+        if not ln:
+            if not blank:             # several blank lines in a row: one gap
+                blocks.append("<p><br></p>")
+            blank = True
+            continue
+        blank = False
+        blocks.append(f"<p>{_html.escape(ln)}</p>")
+    if items:
+        blocks.append(f"<ul>{''.join(items)}</ul>")
     return "".join(blocks)
 
 
@@ -476,6 +564,7 @@ async def set_delivery(s: BrowserSession, ad: dict[str, Any], shipping: dict[str
                               f"{' / ' + shipping['carrier'] if shipping.get('carrier') else ''}"
                               f" (angeboten: {', '.join(sizes) or 'keine'})")
         chosen = [opt["uuid"]]
+        out["offers"] = offers_of(opts)
         out["option"] = {"size": (opt.get("parcelSize") or {}).get("size"),
                          "carrier": (opt.get("carrier") or {}).get("description"), "price": opt.get("price")}
     res = await s.api_json("PUT", "/webapi/p2p-aggregator/restapi/v2/p2pp/options/delivery",
