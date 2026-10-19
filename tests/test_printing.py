@@ -352,8 +352,11 @@ def test_print_route_prints_and_redirects_to_the_chat(monkeypatch, printer):
     with TestClient(app) as c:
         r = c.post(f"/shipments/{sid}/print", data={"which": "auto"}, follow_redirects=False)
         assert r.status_code == 303 and r.headers["location"].startswith("/chats/c1?msg=")
-        assert r.headers["location"].endswith("#shipping")
+        assert r.headers["location"].endswith("#shipping") and "job" in r.headers["location"]
         assert shipping.get(sid).status == "printed"
+        r = c.post(f"/shipments/{sid}/print", data={"which": "auto"}, headers={"HX-Request": "true"}, follow_redirects=False)
+        assert r.headers["location"] == "/chats/c1?msg=#shipping"            # the card shows the print line itself
+        assert f'hx-post="/shipments/{sid}/print" hx-target="#shipping"' in c.get("/chats/c1").text
         assert c.post(f"/shipments/{sid}/print", data={"which": "bogus"}, follow_redirects=False).status_code == 400
         assert c.post("/shipments/999/print", data={"which": "auto"}, follow_redirects=False).status_code == 404
 

@@ -1,25 +1,31 @@
 {% import "_ui.html" as ui %}
-{# Shipping card on the chat page — same context as before (shipment, ship_options, ship_all, ship_near, ship_ask, ship_option, ship_blockers, ship_grace_left, ship_sender_ok, ship_sort, ship_carriers, ship_buy_title, fmt_dist, ship_pref = the owner's carrier/delivery preference). #}
+{# Shipping card on the chat page — same context as before (shipment, ship_options, ship_all, ship_near, ship_ask, ship_option, ship_blockers, ship_grace_left, ship_sender_ok, ship_sort, ship_carriers, ship_buy_title, fmt_dist, ship_pref = the owner's carrier/delivery preference,
+   ship_detecting = Claude is preparing the parcel from the chat right now). Every form sends in the background and swaps just this card (a refusal comes along as
+   a toast, #flash); only "Create label" / "Finish in browser" load the page, since they open the browser window with the carrier's form. #}
 {% macro opt_action(o, primary, r) %}
   {% if shipment.status == 'draft' and o.online %}<form method="post" action="/shipments/{{ shipment.id }}/label"><input type="hidden" name="key" value="{{ o.key }}"><button class="btn btn-xs {{ 'btn-primary' if primary else '' }}" {% if not ship_sender_ok or not r.name %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ _("Create label") }}</button></form>
-  {% elif shipment.status == 'awaiting' and o.online and o.key != shipment.option %}<form method="post" action="/shipments/{{ shipment.id }}/option"><input type="hidden" name="key" value="{{ o.key }}"><button class="btn btn-xs">{{ _("Use") }}</button></form>
+  {% elif shipment.status == 'awaiting' and o.online and o.key != shipment.option %}<form method="post" action="/shipments/{{ shipment.id }}/option" hx-post="/shipments/{{ shipment.id }}/option" hx-target="#shipping" hx-select="#shipping" hx-swap="outerHTML" hx-select-oob="#flash"><input type="hidden" name="key" value="{{ o.key }}"><button class="btn btn-xs">{{ _("Use") }}</button></form>
   {% elif not o.online %}<small class="text-xs text-muted">{{ _("at the counter") }}</small>{% endif %}
 {% endmacro %}
 {% set st = {'draft': ('', _('to prepare')), 'awaiting': ('warn', _('paid – your go needed')), 'buying': ('brand', _('buying label')), 'labelled': ('ok', _('label created')), 'printed': ('ok', _('printed')), 'sent': ('ok', _('sent')), 'failed': ('bad', _('failed')), 'discarded': ('', _('discarded'))} %}
-<section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="shipping">
+{% set swap = 'hx-target="#shipping" hx-select="#shipping" hx-swap="outerHTML" hx-select-oob="#flash"' %}
+<section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="shipping"{% if ship_detecting %} data-pending-key="shipping:{{ conv.id }}"{% endif %}>
   <div class="flex flex-wrap items-center justify-between gap-2">
     <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Shipping") }}</h3>
     {% if shipment %}{% set stt = st.get(shipment.status, ('', shipment.status)) %}{{ ui.pill(stt[1], stt[0]) }}{% endif %}
   </div>
   {% if not ship_sender_ok %}<div class="text-[12.5px] text-warning">{{ _("Your sender address is missing:") }} <a href="/settings/shipping" class="font-semibold text-warning underline">{{ _("Settings → Shipping") }}</a></div>{% endif %}
-  {% if not shipment %}
-    <form method="post" action="/chats/{{ conv.id }}/shipping/detect" hx-disabled-elt="find button" class="flex flex-col gap-1.5"><button class="btn btn-sm w-full justify-start">{{ _("Prepare parcel from this chat") }}</button><small class="text-xs text-muted">{{ _("Claude takes the buyer's address from the chat and estimates size and weight. When a buyer sends an address, this happens by itself.") }}</small></form>
+  {% if ship_detecting %}
+    {# Claude reads the chat in the background (lane claude): the card swaps itself in when the parcel is prepared #}
+    <div>{{ ui.pending('shipping:' ~ conv.id, _("Claude is preparing the parcel from the chat…"), _("Queued: prepare the parcel")) }}</div>
+  {% elif not shipment %}
+    <form method="post" action="/chats/{{ conv.id }}/shipping/detect" hx-post="/chats/{{ conv.id }}/shipping/detect" {{ swap|safe }} hx-disabled-elt="find button" class="flex flex-col gap-1.5"><button class="btn btn-sm w-full justify-start">{{ _("Prepare parcel from this chat") }}</button><small class="text-xs text-muted">{{ _("Claude takes the buyer's address from the chat and estimates size and weight. When a buyer sends an address, this happens by itself.") }}</small></form>
   {% else %}
     {% set r = shipment.recipient or {} %}{% set p = shipment.parcel or {} %}
     {% if shipment.note %}<p class="text-[12.5px] text-muted">{{ shipment.note }}</p>{% endif %}
     <details class="text-[13px]" {% if not r or not p or shipment.status == 'draft' and (not r.name or not p.weight_kg) %}open{% endif %}>
       <summary class="cursor-pointer break-words"><strong>{{ r.name or _('Address missing') }}</strong>{% if r.city %}, {{ r.zip }} {{ r.city }}{% endif %}<br><span class="text-muted">{% if p.length_cm %}{{ p.length_cm }}×{{ p.width_cm }}×{{ p.height_cm }} cm, {{ p.weight_kg }} kg {% if p.source == 'claude' %}<span class="inline-block rounded bg-hover px-1.5 text-[10.5px] text-muted">{{ _("estimated") }}</span>{% endif %}{% else %}{{ _("size missing") }}{% endif %}</span></summary>
-      <form method="post" action="/shipments/{{ shipment.id }}" class="grid grid-cols-2 gap-1.5 pt-2">
+      <form method="post" action="/shipments/{{ shipment.id }}" hx-post="/shipments/{{ shipment.id }}" {{ swap|safe }} class="grid grid-cols-2 gap-1.5 pt-2">
         {% for n, lbl, v, extra in [('name', _("Name"), r.name, ''), ('phone', _("Phone"), r.phone, ''), ('street', _("Street"), r.street, ''), ('house_no', _("No."), r.house_no, ''), ('extra', _("Stair/door"), r.extra, ''), ('zip', _("Postcode"), r.zip, 'inputmode="numeric" maxlength="4"'), ('city', _("City"), r.city, ''), ('email', _("E-mail"), r.email, '')] %}
         <input name="{{ n }}" value="{{ v or '' }}" placeholder="{{ lbl }}" aria-label="{{ lbl }}" autocomplete="off" {{ extra|safe }} class="input input-sm w-full min-w-0 bg-base-200 text-[12.5px]">{% endfor %}
         {% for n, lbl, v, mn, mx, stp in [('length_cm', _("Length (cm)"), p.length_cm, 1, 300, 1), ('width_cm', _("Width (cm)"), p.width_cm, 1, 300, 1), ('height_cm', _("Height (cm)"), p.height_cm, 1, 300, 1), ('weight_kg', _("Weight (kg)"), p.weight_kg, 0.1, 40, 0.1)] %}
@@ -33,7 +39,7 @@
       {% if ship_shop %}<span class="break-words">{{ _("Parcel shop for the buyer:") }} <strong>{{ ship_shop.name }}</strong>, {{ ship_shop.address }}{% if not ship_shop_stored %} <span class="text-muted">({{ _("the nearest – picked unless you choose another") }})</span>{% endif %}</span>
       {% else %}<span class="text-warning">{{ _("No parcel shop found near the buyer – choose a door option, or pick the shop on the carrier's page.") }}</span>{% endif %}
       {% if ship_shops|length > 1 and shipment.status in ('draft', 'awaiting', 'failed') %}
-      <form method="post" action="/shipments/{{ shipment.id }}/shop" class="flex flex-wrap items-center gap-1.5">
+      <form method="post" action="/shipments/{{ shipment.id }}/shop" hx-post="/shipments/{{ shipment.id }}/shop" {{ swap|safe }} class="flex flex-wrap items-center gap-1.5">
         <select name="shop" aria-label="{{ _('Parcel shop') }}" class="select select-sm min-w-0 flex-1 bg-base-200 text-[12.5px]">{% for sh in ship_shops %}<option value='{{ {'name': sh.name, 'address': sh.address, 'id': sh.id or ''}|tojson }}' {% if ship_shop and sh.name == ship_shop.name and sh.address == ship_shop.address %}selected{% endif %}>{{ sh.name }}, {{ sh.address }}{% if sh.dist_m is not none %} · {{ fmt_dist(sh.dist_m) }}{% endif %}</option>{% endfor %}</select>
         <button class="btn btn-xs">{{ _("Use") }}</button>
       </form>
@@ -44,8 +50,8 @@
     {% set via = {'manual': _('by hand'), 'paylivery': _('willhaben PayLivery'), 'email': _('e-mail'), 'bank': _('bank')} %}
     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
       {% if shipment.paid_at %}{{ ui.icon('check', 14, 2.5, 'text-success') }}<span>{{ _("Paid") }} <span class="text-muted">{{ shipment.paid_at|ago }} ({{ via.get(shipment.paid_via, shipment.paid_via) }})</span></span>
-        {% if shipment.status in ('draft', 'awaiting') %}<form method="post" action="/shipments/{{ shipment.id }}/unpaid" class="ml-auto"><button class="btn btn-ghost btn-xs">{{ _("undo") }}</button></form>{% endif %}
-      {% elif shipment.status in ('draft', 'awaiting') %}<form method="post" action="/shipments/{{ shipment.id }}/paid" hx-disabled-elt="this"><button class="btn btn-xs">{{ _("Paid") }}</button></form><small class="text-xs text-muted">{% if shipment.agreed_price %}{{ _("agreed price:") }} {{ shipment.agreed_price|eur }} · {% endif %}{{ _("not paid yet") }}</small>{% endif %}
+        {% if shipment.status in ('draft', 'awaiting') %}<form method="post" action="/shipments/{{ shipment.id }}/unpaid" hx-post="/shipments/{{ shipment.id }}/unpaid" {{ swap|safe }} class="ml-auto"><button class="btn btn-ghost btn-xs">{{ _("undo") }}</button></form>{% endif %}
+      {% elif shipment.status in ('draft', 'awaiting') %}<form method="post" action="/shipments/{{ shipment.id }}/paid" hx-post="/shipments/{{ shipment.id }}/paid" {{ swap|safe }} hx-disabled-elt="find button"><button class="btn btn-xs">{{ _("Paid") }}</button></form><small class="text-xs text-muted">{% if shipment.agreed_price %}{{ _("agreed price:") }} {{ shipment.agreed_price|eur }} · {% endif %}{{ _("not paid yet") }}</small>{% endif %}
       {% if shipment.payment_claimed_at and not shipment.paid_at %}<small class="basis-full text-xs">{{ _("The buyer writes that they have paid – check your account.") }}</small>{% endif %}
     </div>
     {% if ship_ask and shipment.status == 'awaiting' %}
@@ -54,16 +60,16 @@
       <div class="break-words text-[12.5px] text-muted">{% if ship_option %}{{ ship_option.label() }} · {{ ship_option.price|eur }} · {% endif %}{{ r.name }}, {{ r.zip }} {{ r.city }}</div>
       {% if ship_blockers %}<div class="break-words text-xs text-muted">{{ _("Not automatic because: {reasons}", reasons=ship_blockers|join(', ')) }}</div>{% endif %}
       <div class="flex flex-wrap gap-1.5">
-        <form method="post" action="/shipments/{{ shipment.id }}/approve"><button class="btn btn-primary btn-sm" {% if not ship_sender_ok or not ship_option %}disabled{% endif %} onclick="this.setAttribute('aria-busy','true')">{{ ship_buy_title }}</button></form>
-        <form method="post" action="/shipments/{{ shipment.id }}/decline"><button class="btn btn-sm">{{ _("Decline") }}</button></form>
+        <form method="post" action="/shipments/{{ shipment.id }}/approve" hx-post="/shipments/{{ shipment.id }}/approve" {{ swap|safe }} hx-disabled-elt="find button"><button class="btn btn-primary btn-sm" {% if not ship_sender_ok or not ship_option %}disabled{% endif %}>{{ ship_buy_title }}</button></form>
+        <form method="post" action="/shipments/{{ shipment.id }}/decline" hx-post="/shipments/{{ shipment.id }}/decline" {{ swap|safe }}><button class="btn btn-sm">{{ _("Decline") }}</button></form>
       </div>
     </div>
     {% elif shipment.status == 'awaiting' and shipment.approval == 'declined' %}<p class="text-[12.5px] text-muted">{{ _("You declined buying this label. Choose another option, or create the label by hand.") }}</p>{% endif %}
-    {% if shipment.approval == 'auto' and shipment.status == 'awaiting' and ship_grace_left is not none %}<div class="flex flex-wrap items-center gap-2 text-[13px]"><span>{{ _("Label will be bought in {n} min", n=ship_grace_left) }}</span><form method="post" action="/shipments/{{ shipment.id }}/cancel-auto" class="ml-auto"><button class="btn btn-xs">{{ _("Cancel") }}</button></form></div>{% endif %}
+    {% if shipment.approval == 'auto' and shipment.status == 'awaiting' and ship_grace_left is not none %}<div class="flex flex-wrap items-center gap-2 text-[13px]"><span>{{ _("Label will be bought in {n} min", n=ship_grace_left) }}</span><form method="post" action="/shipments/{{ shipment.id }}/cancel-auto" hx-post="/shipments/{{ shipment.id }}/cancel-auto" {{ swap|safe }} class="ml-auto"><button class="btn btn-xs">{{ _("Cancel") }}</button></form></div>{% endif %}
     {% if shipment.status == 'buying' %}<p class="text-[13px]">{{ _("Buying the label on the carrier's website …") }}{% if shipment.error %}<br><small class="text-muted">{{ shipment.error }}</small>{% endif %}</p>{% elif shipment.status == 'failed' %}<p class="text-[13px] text-error">{{ shipment.error or _("The label could not be bought.") }}</p>{% endif %}
-    {% if shipment.status in ('buying', 'failed') %}<div class="flex flex-wrap gap-1.5"><form method="post" action="/shipments/{{ shipment.id }}/retry"><button class="btn btn-primary btn-sm" onclick="this.setAttribute('aria-busy','true')">{{ _("Retry") }}</button></form>{% if not shipment.label_path %}<form method="post" action="/shipments/{{ shipment.id }}/label"><button class="btn btn-sm">{{ _("Finish in browser") }}</button></form>{% endif %}</div>{% endif %}
+    {% if shipment.status in ('buying', 'failed') %}<div class="flex flex-wrap gap-1.5"><form method="post" action="/shipments/{{ shipment.id }}/retry" hx-post="/shipments/{{ shipment.id }}/retry" {{ swap|safe }} hx-disabled-elt="find button"><button class="btn btn-primary btn-sm">{{ _("Retry") }}</button></form>{% if not shipment.label_path %}<form method="post" action="/shipments/{{ shipment.id }}/label"><button class="btn btn-sm">{{ _("Finish in browser") }}</button></form>{% endif %}</div>{% endif %}
     {% if ship_options %}
-    <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted">{{ _("Sort:") }} <a href="?sort=price#shipping" class="hover:underline {{ 'font-semibold text-base-content' if ship_sort == 'price' else '' }}">{{ _("cheapest") }}</a> · <a href="?sort=near#shipping" class="hover:underline {{ 'font-semibold text-base-content' if ship_sort == 'near' else '' }}">{{ _("nearest drop-off") }}</a>{% if not ship_near %} <span>· {{ _("drop-off points need your sender address") }}</span>{% endif %}</div>
+    <div class="flex flex-wrap items-center gap-1.5 text-xs text-muted" hx-boost="true" {{ swap|safe }} hx-push-url="false">{{ _("Sort:") }} <a href="?sort=price#shipping" class="hover:underline {{ 'font-semibold text-base-content' if ship_sort == 'price' else '' }}">{{ _("cheapest") }}</a> · <a href="?sort=near#shipping" class="hover:underline {{ 'font-semibold text-base-content' if ship_sort == 'near' else '' }}">{{ _("nearest drop-off") }}</a>{% if not ship_near %} <span>· {{ _("drop-off points need your sender address") }}</span>{% endif %}</div>
     {% if ship_pref %}<div class="text-xs text-muted" data-ship-pref>{{ _("Preference: {pref}", pref=ship_pref) }} · <a href="/settings/selling" class="hover:underline">{{ _("Selling preferences") }}</a></div>{% endif %}
     <div class="flex flex-col text-[12.5px]">
       {% set cheapest = ship_options|map(attribute='price')|min %}
@@ -82,8 +88,8 @@
     {% elif p.length_cm %}<p class="text-[13px]">{{ _("No enabled carrier takes a parcel this size or weight.") }}</p>{% endif %}
     <div class="flex flex-wrap items-center gap-1.5">
       {% if shipment.label_path %}<a class="btn btn-xs" href="/shipments/{{ shipment.id }}/label.pdf" target="_blank">{{ _("Label") }}</a>{% include "_shipping_print.html" %}{% endif %}
-      {% if shipment.status != 'sent' %}<form method="post" action="/shipments/{{ shipment.id }}/status" class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"><input type="hidden" name="status" value="sent"><input name="tracking" placeholder="{{ _('Tracking number (optional)') }}" value="{{ shipment.tracking or '' }}" class="input input-xs min-w-0 flex-1 bg-base-200"><button class="btn btn-xs">{{ _("Sent") }}</button></form>{% elif shipment.tracking %}<small class="text-xs">{{ _("Tracking:") }} <code class="font-mono">{{ shipment.tracking }}</code></small>{% endif %}
-      <form method="post" action="/shipments/{{ shipment.id }}/status"><input type="hidden" name="status" value="discarded"><button class="btn btn-ghost btn-xs">{{ _("Discard") }}</button></form>
+      {% if shipment.status != 'sent' %}<form method="post" action="/shipments/{{ shipment.id }}/status" hx-post="/shipments/{{ shipment.id }}/status" {{ swap|safe }} class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5"><input type="hidden" name="status" value="sent"><input name="tracking" placeholder="{{ _('Tracking number (optional)') }}" value="{{ shipment.tracking or '' }}" class="input input-xs min-w-0 flex-1 bg-base-200"><button class="btn btn-xs">{{ _("Sent") }}</button></form>{% elif shipment.tracking %}<small class="text-xs">{{ _("Tracking:") }} <code class="font-mono">{{ shipment.tracking }}</code></small>{% endif %}
+      <form method="post" action="/shipments/{{ shipment.id }}/status" hx-post="/shipments/{{ shipment.id }}/status" {{ swap|safe }}><input type="hidden" name="status" value="discarded"><button class="btn btn-ghost btn-xs">{{ _("Discard") }}</button></form>
     </div>
   {% endif %}
 </section>

@@ -227,5 +227,7 @@
   "Internal instructions or AI talk in our own message ({word})": "Interne Anweisungen oder KI-Gerede in unserer Nachricht ({word})",
   "Answer is unusually long ({n} characters) – a chat answer needs a few sentences": "Antwort ist ungewöhnlich lang ({n} Zeichen) – eine Chatantwort braucht ein paar Sätze",
   "Our own message quotes the agent's instructions": "Unsere Nachricht zitiert die Anweisungen des Agenten",
-  "Settings → willhaben → Buying rules": "Einstellungen → willhaben → Regeln für Käufe"
+  "Settings → willhaben → Buying rules": "Einstellungen → willhaben → Regeln für Käufe",
+  "Contacting the seller…": "Der Verkäufer wird angeschrieben…",
+  "Queued: the first message to the seller": "Eingereiht: die erste Nachricht an den Verkäufer"
 }

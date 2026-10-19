@@ -277,8 +277,9 @@ async def purchase_start(ad_id: str = Form(""), mode: str = Form(""), max_price:
 
 
 @router.post("/purchases/{pid}/{action}")
-async def purchase_action(pid: int, action: str, value: str = Form("")):
-    """One order button. Only the actions the order's current status offers are run (purchase.actions)."""
+async def purchase_action(request: Request, pid: int, action: str, value: str = Form("")):
+    """One order button. Only the actions the order's current status offers are run (purchase.actions). Sent
+    through htmx the card swaps itself in and shows the new state, so only a refusal comes back as a notice."""
     if action not in ACTIONS:
         raise HTTPException(404)
     row = purchase.get(pid)
@@ -286,7 +287,7 @@ async def purchase_action(pid: int, action: str, value: str = Form("")):
         raise HTTPException(404)
     if action not in {a["name"] for a in purchase.actions(row)}:
         return _go(_order_page(row), t("This action is not possible now."))
-    text = t("Changes saved")
+    text = None if request.headers.get("hx-request") else t("Changes saved")
     try:
         if action == "pause":
             await purchase.pause(pid, t("Paused by you"), push=False)

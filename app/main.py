@@ -1438,6 +1438,7 @@ async def _shipping_ctx(conversation_id: str, conv: Conversation, sort: str | No
             "ship_pref": selling.preference_text(), "fmt_dist": dropoff.fmt_dist,
             "ship_shops": shops, "ship_shop": stored or (shops[0] if shops else None), "ship_shop_stored": bool(stored),
             "ship_option": shipping.by_key(s.option) if s else None, "ship_on": conv.role == "seller",
+            "ship_detecting": f"shipping:{conversation_id}" in jobs.current_keys("shipping:"),
             "ship_sender_ok": shipping.sender_complete(), "ship_carriers": shipping.CARRIERS,
             "ship_all": shipping.all_options(s.parcel) if s else [], **(shipping.page_state(s) if s else {}),
             **printing_routes.shipment_panel(s)}
@@ -3227,7 +3228,11 @@ async def chat_calendar_forget(conversation_id: str):
 
 
 # ------------------------------------------------------------------ shipping (parcel labels)
-def _chat_back(conversation_id: str, msg: str = "") -> RedirectResponse:
+def _chat_back(conversation_id: str, msg: str = "", request: Request | None = None) -> RedirectResponse:
+    """Back to the chat's shipping card. `request` (success paths): sent through htmx, the card itself shows the
+    new state, so a message that only restates the click is left out; errors come without it and stay."""
+    if request is not None and _hx(request):
+        msg = ""
     return back(f"/chats/{conversation_id}?msg={quote(msg, safe='')}#shipping")
 
 
@@ -3295,12 +3300,13 @@ async def settings_shipping_open(carrier: str):
 
 
 @app.post("/chats/{conversation_id}/shipping/detect")
-async def shipping_detect(conversation_id: str):
-    try:
-        s = await shipping.detect(conversation_id, force=True)
-    except (LLMError, shipping.ShippingError) as e:
-        return _chat_back(conversation_id, str(e))
-    return _chat_back(conversation_id, "" if s and s.recipient else t("No complete address in this chat yet – enter it by hand"))
+async def shipping_detect(request: Request, conversation_id: str):
+    """Background job (lane claude): the card shows "Preparing the parcel…" and swaps itself in when it is done."""
+    with session() as db:
+        if db.get(Conversation, conversation_id) is None:
+            raise HTTPException(404)
+    shipping.enqueue_detect(conversation_id)
+    return _chat_back(conversation_id, request=request)
 
 
 @app.post("/shipments/{shipment_id}")
@@ -3314,7 +3320,9 @@ async def shipment_save(request: Request, shipment_id: int):
         shipping.set_parcel(shipment_id, {k: f.get(k) for k in ("length_cm", "width_cm", "height_cm", "weight_kg", "contents")})
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Changes saved") if addr else t("Address incomplete: name, street, postcode and city are needed"))
+    if not addr:
+        return _chat_back(s.conversation_id, t("Address incomplete: name, street, postcode and city are needed"))
+    return _chat_back(s.conversation_id, t("Changes saved"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/option")
@@ -3328,7 +3336,7 @@ async def shipment_option(shipment_id: int, key: str = Form(...)):
 
 
 @app.post("/shipments/{shipment_id}/shop")
-async def shipment_shop(shipment_id: int, shop: str = Form("")):
+async def shipment_shop(request: Request, shipment_id: int, shop: str = Form("")):
     """The owner's parcel shop for a "→ Shop" option (one of the shops the card listed, as JSON)."""
     s = _shipment_or_404(shipment_id)
     try:
@@ -3337,7 +3345,7 @@ async def shipment_shop(shipment_id: int, shop: str = Form("")):
         return _chat_back(s.conversation_id, t("Parcel shop incomplete: name and address are needed"))
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Parcel shop saved"))
+    return _chat_back(s.conversation_id, t("Parcel shop saved"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/label")
@@ -3392,64 +3400,64 @@ async def shipment_label_file(shipment_id: int):
 
 
 @app.post("/shipments/{shipment_id}/paid")
-async def shipment_paid(shipment_id: int):
+async def shipment_paid(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.mark_paid(shipment_id, "manual")
         await shipping.after_paid(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Marked as paid"))
+    return _chat_back(s.conversation_id, t("Marked as paid"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/unpaid")
-async def shipment_unpaid(shipment_id: int):
+async def shipment_unpaid(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.unmark_paid(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Payment mark removed"))
+    return _chat_back(s.conversation_id, t("Payment mark removed"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/approve")
-async def shipment_approve(shipment_id: int):
+async def shipment_approve(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.approve(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Buying the label – this takes a moment"))
+    return _chat_back(s.conversation_id, t("Buying the label – this takes a moment"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/decline")
-async def shipment_decline(shipment_id: int):
+async def shipment_decline(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.decline(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Label not bought"))
+    return _chat_back(s.conversation_id, t("Label not bought"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/retry")
-async def shipment_retry(shipment_id: int):
+async def shipment_retry(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         shipping.retry(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Trying again"))
+    return _chat_back(s.conversation_id, t("Trying again"), request=request)
 
 
 @app.post("/shipments/{shipment_id}/cancel-auto")
-async def shipment_cancel_auto(shipment_id: int):
+async def shipment_cancel_auto(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
         await shipping.cancel_auto(shipment_id)
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
-    return _chat_back(s.conversation_id, t("Automatic purchase cancelled – approve the label below"))
+    return _chat_back(s.conversation_id, t("Automatic purchase cancelled – approve the label below"), request=request)
 
 
 # ------------------------------------------------------------------ telegram

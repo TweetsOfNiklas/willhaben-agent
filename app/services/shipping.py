@@ -402,6 +402,31 @@ async def detect(conversation_id: str, force: bool = False) -> Shipment | None:
     return _auto_option(s)
 
 
+def enqueue_detect(conversation_id: str) -> bool:
+    """"Prepare parcel from this chat" as a background job (lane claude, 10–30 s): Claude reads the buyer's address
+    and estimates the parcel while the card carries the marker "shipping:<conversation>" and refreshes itself when
+    it is done. False: already on its way, or no such chat."""
+    from app.services import jobs
+
+    key = f"shipping:{conversation_id}"
+    if key in jobs.current_keys("shipping:"):
+        return False
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+    if conv is None:
+        return False
+
+    async def run(job) -> str:
+        s = await detect(conversation_id, force=True)
+        if s and s.recipient:
+            return t("Address and parcel size taken from the chat")
+        return t("No complete address in this chat yet – enter it by hand")
+
+    jobs.submit("ship-detect", t("Prepare parcel: {name}", name=conv.partner_name or conversation_id), run,
+                lane="claude", current=key, on_cancel=lambda: None, link=f"/chats/{conversation_id}#shipping")
+    return True
+
+
 # ------------------------------------------------------------------ payment and approval
 PAID_VIA = ("manual", "paylivery", "email", "bank")
 _PAYMENT_HINT = re.compile(r"überwies|ueberwies|bezahlt|gezahlt|zahlung|paypal|gesendet.{0,30}geld|geld.{0,30}gesendet",

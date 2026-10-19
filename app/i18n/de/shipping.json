@@ -96,5 +96,9 @@
  "free shipping": "Versand gratis",
  "shipping possible": "Versand möglich",
  "+ {amount} shipping": "+ {amount} Versand",
- "Shipping as the site states it (eBay: to your postcode)": "Versand laut Seite (eBay: an deine Postleitzahl)"
+ "Shipping as the site states it (eBay: to your postcode)": "Versand laut Seite (eBay: an deine Postleitzahl)",
+ "Address and parcel size taken from the chat": "Adresse und Paketgröße aus dem Chat übernommen",
+ "Prepare parcel: {name}": "Paket vorbereiten: {name}",
+ "Claude is preparing the parcel from the chat…": "Claude bereitet das Paket aus dem Chat vor…",
+ "Queued: prepare the parcel": "Eingereiht: Paket vorbereiten"
 }

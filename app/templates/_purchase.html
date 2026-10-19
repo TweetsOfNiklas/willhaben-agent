@@ -1,14 +1,18 @@
 {# Purchase order card (chat page + order page). Same variables as before. Sized by its own width (@container): one
-   column in the chat page's narrow context column, three on the order page. #}
+   column in the chat page's narrow context column, three on the order page. Its buttons send in the background and
+   swap just this card (a refusal comes along as a toast, #flash); while the order is about to contact the seller
+   (a job with a grace period) the card waits on purchase:<id> and refreshes itself. #}
 {% import "_ui.html" as ui %}
 {% set pc = pcard if pcard is defined and pcard else purchase_card(conv) %}
 {% if pc %}
 {% set confirm_text = {"cancel": _("Cancel this purchase? The agent stops and writes no more."), "paid": _("Did you transfer the amount in your bank app? The seller is told in the chat."), "received": _("Did you receive the item?"), "collected": _("Did you collect the item and pay the cash?")} %}
 {% set tone = {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad'}.get(pc.status, 'brand') %}
-<section class="@container overflow-hidden rounded-box border border-base-300 bg-base-100" id="purchase">
+{% set swap = 'hx-target="#purchase" hx-select="#purchase" hx-swap="outerHTML" hx-select-oob="#flash"' %}
+<section class="@container overflow-hidden rounded-box border border-base-300 bg-base-100" id="purchase"{% if pc.pending %} data-pending-key="purchase:{{ pc.id }}"{% endif %}>
   <div class="flex flex-col gap-2 border-b border-base-300 px-3.5 @md:px-5 py-3.5">
     <div class="flex flex-wrap items-center justify-between gap-2"><div class="text-xs font-semibold tracking-wide text-muted uppercase">{{ _("Purchase order") }} · {{ pc.mode_label }}</div>{{ ui.pill(pc.status_label, tone) }}</div>
     <p class="text-[15px] leading-normal">{{ pc.next }}</p>
+    {% if pc.pending %}<div>{{ ui.pending('purchase:' ~ pc.id, _("Contacting the seller…"), _("Queued: the first message to the seller")) }}</div>{% endif %}
     {% if pc.note %}<p class="text-[12.5px] text-muted">{{ pc.note }}</p>{% endif %}
     {% if pc.pay_now %}
     <div class="flex flex-col gap-2 rounded-lg border-l-[3px] border-warning bg-warn-soft px-3.5 py-3">
@@ -27,9 +31,9 @@
     <div class="mt-1 flex flex-wrap items-center gap-2">
       {% for a in pc.actions %}
       {% set bcls = 'btn btn-sm btn-ghost text-error hover:bg-bad-soft' if a.name == 'cancel' else 'btn btn-sm' if a.name in ('pause', 'resume', 'max_price') else 'btn btn-sm btn-primary' %}
-      <form method="post" action="/purchases/{{ pc.id }}/{{ a.name }}" class="m-0 flex flex-wrap items-center gap-1.5">
+      <form method="post" action="/purchases/{{ pc.id }}/{{ a.name }}" hx-post="/purchases/{{ pc.id }}/{{ a.name }}" {{ swap|safe }}{% if a.confirm %} hx-confirm="{{ confirm_text[a.name] }}"{% endif %} class="m-0 flex flex-wrap items-center gap-1.5">
         {% if a.input %}<input type="number" name="value" min="1" step="0.01" value="{{ pc.max_price or '' }}" required placeholder="€" aria-label="{{ _('Maximum price in euros') }}" class="input input-sm w-[100px] bg-base-100">{% endif %}
-        <button class="{{ bcls }}" {% if a.confirm %}data-confirm="{{ confirm_text[a.name] }}" onclick="return confirm(this.dataset.confirm)"{% endif %}>{{ a.label }}</button>
+        <button class="{{ bcls }}">{{ a.label }}</button>
       </form>
       {% endfor %}
     </div>

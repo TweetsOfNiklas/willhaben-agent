@@ -58,7 +58,7 @@ async def check_printer(which: str):
 
 
 @router.post("/shipments/{shipment_id}/print")
-async def print_shipment(shipment_id: int, which: str = Form("auto")):
+async def print_shipment(request: Request, shipment_id: int, which: str = Form("auto")):
     if which not in ("auto", "label", "normal"):
         raise HTTPException(400)
     s = shipping.get(shipment_id)
@@ -66,6 +66,8 @@ async def print_shipment(shipment_id: int, which: str = Form("auto")):
         raise HTTPException(404)
     try:
         msg = t("Label sent to the printer (job {job})", job=await printing.print_label(shipment_id, which))
+        if request.headers.get("hx-request"):      # the card shows the print line itself
+            msg = ""
     except printing.PrintError as e:
         msg = str(e)
     return RedirectResponse(f"/chats/{quote(s.conversation_id, safe='')}?msg={quote(msg, safe='')}#shipping",

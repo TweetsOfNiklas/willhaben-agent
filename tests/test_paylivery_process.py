@@ -310,6 +310,13 @@ def test_chat_page_shows_the_card():
     assert r.status_code == 200
     assert 'id="paylivery"' in r.text and "Offer received" in r.text
     assert "/chats/c1/paylivery/accept" in r.text and "/chats/c1/paylivery/decline" in r.text
+    card = r.text.split('id="paylivery"')[1].split("</section>")[0]       # sends in the background, swaps the card
+    assert 'hx-post="/chats/c1/paylivery/accept" hx-target="#paylivery" hx-select="#paylivery"' in card
+    assert 'hx-confirm="Accept this offer on willhaben now?"' in card and "return confirm(" not in card
+    _chat(cid="c2", state={"role": "seller", "stage": "paid", "amount": 120.0, "history": [], "applied": []})
+    with TestClient(app) as c:
+        card = c.get("/chats/c2").text.split('id="paylivery"')[1].split("</section>")[0]
+    assert 'hx-post="/chats/c2/paylivery/mark_shipped"' in card and "hx-confirm" not in card   # local only: no confirm
 
 
 def test_settings_route_saves_switches():
@@ -333,8 +340,10 @@ def test_action_route_refuses_buying_without_paylivery_on_the_ad():
     _chat(cid="b1", role="buyer", ad_ctx={**AD_CTX, "paylivery": False})
     with TestClient(app) as c:
         r = c.post("/chats/b1/paylivery/buy", data={"amount": ""}, follow_redirects=False)
-    assert r.status_code == 303 and "#paylivery" in r.headers["location"]
-    assert "PayLivery" in r.headers["location"] or "msg=" in r.headers["location"]
+        assert r.status_code == 303 and "#paylivery" in r.headers["location"]
+        assert "PayLivery" in r.headers["location"] or "msg=" in r.headers["location"]
+        hx = c.post("/chats/b1/paylivery/buy", data={"amount": ""}, headers={"HX-Request": "true"}, follow_redirects=False)
+        assert hx.headers["location"] == r.headers["location"]                 # a refusal stays, also through htmx
 
 
 # ------------------------------------------------------------------ browser action guards (pure)

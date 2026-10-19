@@ -211,10 +211,23 @@ def test_order_buttons_call_the_mapped_functions(client, monkeypatch):  # noqa: 
         seen.append((p, note, push))
 
     monkeypatch.setattr(svc, "pause", fake_pause)
+    card = client.get("/chats/c1").text.split('id="purchase"')[1].split("</section>")[0]
+    assert f'hx-post="/purchases/{pid}/pause" hx-target="#purchase" hx-select="#purchase"' in card   # swaps the card
+    assert f'hx-post="/purchases/{pid}/cancel"' in card and 'hx-confirm="Cancel this purchase?' in card
+    assert "return confirm(" not in card
     r = client.post(f"/purchases/{pid}/pause", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/chats/c1?pn=")
     assert r.headers["location"].endswith("#purchase")
     assert seen == [(pid, "Paused by you", False)]
+    with dbmod.session() as db:
+        row = db.get(Purchase, pid)
+        row.status = "negotiating"
+        db.add(row)
+        db.commit()
+    r = client.post(f"/purchases/{pid}/pause", headers={"HX-Request": "true"}, follow_redirects=False)
+    assert r.headers["location"] == "/chats/c1#purchase" and len(seen) == 2       # the card shows the state: no notice
+    r = client.post(f"/purchases/{pid}/paid", headers={"HX-Request": "true"}, follow_redirects=False)
+    assert "This action is not possible now." in client.get(r.headers["location"]).text   # a refusal stays
 
 
 def test_max_price_button_validates_and_sets(client):  # noqa: F811
