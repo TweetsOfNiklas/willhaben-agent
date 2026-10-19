@@ -258,7 +258,7 @@ templates.env.globals.update(paylivery_offers=ad_creator.paylivery_offers, payli
                              sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
-                             wh_budget=requests_per_hour, wh_popup=access_stats.popup,
+                             wh_budget=requests_per_hour, wh_popup=access_stats.popup, wh_popups=access_stats.popups,
                              bg_jobs=jobs.snapshot, bg_working=jobs.working,   # background jobs (header, spinners)
                              live_cursor=lambda: _live_cursor())                 # the newest event (notices start there)
 
@@ -2911,6 +2911,21 @@ async def settings_platform(request: Request, pid: str):
             except (InvalidSearchUrl, PlatformError) as e:
                 return back(f"/settings/{p.id}?msg={quote(str(e), safe='')}")
     return back(f"/settings/{p.id}?msg={quote(t('Changes saved'), safe='')}")
+
+
+@app.post("/settings/platform/{pid}/budget")
+async def settings_platform_budget(pid: str, budget: str = Form(""), next: str = Form("")):
+    """The usage popover's budget of one other site (empty: as willhaben's); nothing else of the site changes."""
+    from app.db import platform_per_hour
+
+    p = _site_sections().get(pid)
+    if p is None:
+        raise HTTPException(404)
+    value = budget.strip()
+    set_setting(f"platform_{p.id}_per_hour", str(min(int(value), 2000)) if value.isdigit() else "-")
+    p.limiter.per_hour = platform_per_hour(p.id)
+    target = next if next.startswith("/") and not next.startswith("//") else f"/settings/{p.id}"
+    return back(target)
 
 
 # ------------------------------------------------------------------ VPN for the anonymous requests (app/platforms/vpn.py)

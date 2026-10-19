@@ -32,9 +32,11 @@ def test_meter_lists_the_other_sites():
     assert "12 / 90 Kleinanzeigen requests in the last hour" in page
     assert 'data-site-usage="shpock"' in page and 'data-site-usage="vinted"' not in page
     assert 'data-site-usage="willhaben"' not in page                    # willhaben keeps its own row
-    assert "Other sites" in page and 'href="/stats/requests?platform=kleinanzeigen"' in page
-    assert 'href="/settings/kleinanzeigen">Budgets per site' in page and 'href="/stats/requests?platform=all"' in page
-    assert "· 1 blocked" in page
+    # the popover: the same block for every site, chips to switch, each with its own budget form
+    assert "site = 'kleinanzeigen'" in page and "site = 'shpock'" in page and "site = 'vinted'" not in page
+    assert 'href="/stats/requests?platform=kleinanzeigen"' in page and 'href="/stats/requests?platform=all"' in page
+    assert 'action="/settings/platform/kleinanzeigen/budget"' in page and "Kleinanzeigen requests" in page
+    assert "1 blocked" in page
     assert "· Kleinanzeigen 12 / 90" in page                            # collapsed rail: the ring's tooltip
 
 
@@ -43,7 +45,7 @@ def test_no_other_site_no_extra_rows():
 
     with TestClient(app) as c:
         page = c.get("/myads").text
-    assert "data-site-usage" not in page and "Other sites" not in page
+    assert "data-site-usage" not in page and "site = '" not in page
 
 
 def test_the_phone_menu_shows_the_meters():
@@ -99,3 +101,18 @@ def test_the_budget_field_is_empty_while_the_site_follows_willhaben():
             assert 'name="budget" value="90" placeholder="as willhaben: 200"' in c.get("/settings/kleinanzeigen").text
     finally:
         willhaben_limiter().per_hour, ka.kleinanzeigen_limiter().per_hour = before
+
+
+def test_the_popover_saves_one_sites_budget_only():
+    set_setting("platform_kleinanzeigen_enabled", "1")
+    set_setting("platform_kleinanzeigen_min_gap_s", "7")
+    from app.db import get_setting
+    from app.main import app
+
+    with TestClient(app) as c:
+        r = c.post("/settings/platform/kleinanzeigen/budget", data={"budget": "120", "next": "/hits"}, follow_redirects=False)
+        assert r.headers["location"] == "/hits"
+        assert get_setting("platform_kleinanzeigen_per_hour") == "120"
+        assert get_setting("platform_kleinanzeigen_enabled") == "1" and get_setting("platform_kleinanzeigen_min_gap_s") == "7"
+        c.post("/settings/platform/kleinanzeigen/budget", data={"budget": ""})
+        assert get_setting("platform_kleinanzeigen_per_hour") == "-"                  # empty: as willhaben
