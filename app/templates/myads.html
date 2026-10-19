@@ -126,7 +126,7 @@
        the "As buyers see it" section anew #}
       <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
         <a class="link link-primary inline-flex items-center gap-1 no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open on willhaben") }}{{ ui.icon('external', 13) }}</a>
-        <a class="link link-primary inline-flex items-center gap-1 no-underline" href="https://www.willhaben.at/iad/anzeige-bearbeiten/marktplatz?adId={{ a.ad_id }}" target="_blank" rel="noopener">{{ _("Edit on willhaben") }}{{ ui.icon('external', 13) }}</a>
+        <a class="link link-primary inline-flex items-center gap-1 no-underline" href="https://www.willhaben.at/iad/anzeige-bearbeiten/marktplatz?adId={{ a.ad_id }}&amp;adTypeId=67" target="_blank" rel="noopener">{{ _("Edit on willhaben") }}{{ ui.icon('external', 13) }}</a>
         <button type="button" class="link link-primary inline-flex items-center gap-1 no-underline" title="{{ _('Fetch the ad from willhaben again (otherwise a copy up to 5 minutes old is shown)') }}"
                 hx-get="/myads/{{ a.ad_id }}/description?refresh=1" hx-target="#myad-description" hx-swap="innerHTML" hx-disabled-elt="this"><span class="busy:hidden">{{ ui.icon('refresh', 13) }}</span><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Reload") }}</button>
       </div>
