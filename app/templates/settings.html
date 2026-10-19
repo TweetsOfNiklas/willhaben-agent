@@ -72,6 +72,12 @@
         {% endfor %}
       </section>
       {% endif %}
+      {# one icon per section (the other sites' pages share the globe) #}
+      {% set section_icons = {'willhaben': 'globe', 'vpn': 'shield', 'quiet': 'moon', 'prices': 'percent', 'geizhals': 'search',
+                              'purchase': 'cart', 'paylivery': 'card', 'selling': 'tag', 'chats': 'chat', 'myads': 'box',
+                              'calendar': 'calendar', 'shipping': 'truck', 'printers': 'printer', 'claude': 'sparkle',
+                              'rules': 'edit', 'ha': 'home', 'telegram': 'send', 'browser': 'bell', 'backup': 'database',
+                              'timeline': 'clock', 'web': 'link', 'language': 'sun'} %}
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {% for g in nav_groups %}{% set wide = g.sections|length > 5 %}
         <section class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 px-3 py-3 {{ 'sm:col-span-2' if wide else '' }}">
@@ -79,7 +85,8 @@
           <div class="{{ 'grid grid-cols-1 gap-x-3 sm:grid-cols-2' if wide else 'flex flex-col' }}">
           {% for s in g.sections %}{% set flag = nav_flags.get(s.id, '') %}
           <a href="/settings/{{ s.id }}" class="flex items-start justify-between gap-3 rounded-field px-2.5 py-2 text-base-content no-underline hover:bg-hover">
-            <span class="min-w-0"><span class="block font-medium">{{ s.label }}</span><span class="block text-[12.5px] leading-snug text-muted">{{ s.description }}</span></span>
+            <span class="grid size-8 shrink-0 place-items-center rounded-field bg-brand-soft text-primary" aria-hidden="true">{{ ui.icon(section_icons.get(s.id, 'globe'), 16) }}</span>
+            <span class="min-w-0 flex-1"><span class="block font-medium">{{ s.label }}</span><span class="block text-[12.5px] leading-snug text-muted">{{ s.description }}</span></span>
             {% if flag == 'off' %}<small class="shrink-0 pt-0.5 text-[11.5px] text-muted">{{ _("off") }}</small>{% elif flag %}<span class="mt-1.5 size-2 shrink-0 rounded-full {{ dot[flag] }}"></span>{% endif %}
           </a>
           {% endfor %}
