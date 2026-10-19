@@ -328,6 +328,28 @@ def manual_option(form: dict[str, Any], code: str, *, condition: str | None,
     return {**_option(cats, attribute_values(tree), path, condition, attributes), "manual": True}
 
 
+def hint_option(form: dict[str, Any], hint: str | None, *, condition: str | None,
+                attributes: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Claude's category_hint ("KFZ-Zubehör/Motorradteile > E-Mobilität > Ladestationen/Wallboxen") as an option, when
+    willhaben's own suggestion finds nothing: a leaf whose path ends in the hint's segments, else the one leaf of that name.
+    Split only on > and ›, a slash is part of willhaben's labels."""
+    want = [_norm(p) for p in re.split(r"[>›]", hint or "") if _norm(p)]
+    if not want:
+        return None
+    tree = form.get("categoryTree") or {}
+    cats = category_index(tree)
+    leaves = [(code, info) for code, info in cats.items() if info.get("leaf")]
+    hits = [c for c, info in leaves if [_norm(p) for p in info["path"]][-len(want):] == want]
+    if not hits:
+        named = [c for c, info in leaves if _norm(info.get("label")) == want[-1]]
+        hits = named if len(named) == 1 else []
+    if not hits:
+        return None
+    info = cats[hits[0]]
+    path = [{"label": lbl, "code": c} for lbl, c in zip(info["path"], info["codes"], strict=False)]
+    return _option(cats, attribute_values(tree), path, condition, attributes)
+
+
 def build_plan(form: dict[str, Any], raw_suggestions: Any, *, condition: str | None,
                attributes: list[dict[str, Any]] | None) -> dict[str, Any]:
     """Everything the user confirms before publishing: category options and required fields per option."""

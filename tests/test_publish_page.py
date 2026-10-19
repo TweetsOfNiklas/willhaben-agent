@@ -185,6 +185,29 @@ def test_search_categories_and_manual_option():
     assert insert.manual_option(FORM, "NOPE", condition=None, attributes=None) is None
 
 
+def test_hint_option_from_claudes_category_hint():
+    kw = {"condition": "Gebraucht", "attributes": None}
+    opt = insert.hint_option(FORM, "Marktplatz › Audio > Mobile Lautsprecher", **kw)
+    assert opt["label"] == "Audio › Mobile Lautsprecher" and "manual" not in opt
+    assert opt["fields"][0]["selected"] == "gebraucht"
+    assert insert.hint_option(FORM, "Elektronik > Kopfhörer", **kw)["path"][-1]["code"] == "HEADPHONES"  # leaf name alone
+    assert insert.hint_option(FORM, "Audio", **kw) is None                                       # not a leaf
+    assert insert.hint_option(FORM, "KFZ-Zubehör/Motorradteile > Ladestationen/Wallboxen", **kw) is None
+    assert insert.hint_option(FORM, None, **kw) is None
+
+
+async def test_prepare_falls_back_to_the_category_hint(wh):
+    wh.suggest = {"categories": []}                    # live: willhaben suggested nothing for a wallbox
+    d = _draft(category_hint="Audio > Mobile Lautsprecher")
+    plan = (await ad_creator.prepare_willhaben(d.id)).wh_plan
+    assert [o["path"][-1]["code"] for o in plan["options"]] == ["MOBILE_SPEAKER"]
+    d = _draft(category_hint="Garten > Rasenmäher")
+    assert (await ad_creator.prepare_willhaben(d.id)).wh_plan["options"] == []
+    wh.suggest = SUGGEST                               # willhaben's own suggestion wins over the hint
+    d = _draft(category_hint="Audio > Mobile Lautsprecher")
+    assert [o["path"][-1]["code"] for o in (await ad_creator.prepare_willhaben(d.id)).wh_plan["options"]] == ["HEADPHONES"]
+
+
 async def test_form_cache(monkeypatch):
     calls = []
 
@@ -358,6 +381,7 @@ def test_batch_card_picker_and_inline_category(client, wh):  # noqa: F811
     wh.suggest = {"categories": []}
     card = client.post(f"/ad-drafts/{d.id}/inline/prepare", data={"category_query": "xyz"}).text
     assert "willhaben suggests no category" not in card and "Choose another category" in card
+    assert "No category found for this draft" in card                               # the click visibly did something
     assert f'data-pick="/ad-drafts/{d.id}/inline/category"' in card and f'data-target="#draft-{d.id}"' in card
     assert "/inline/publish" in card and 'name="handover"' not in card               # nothing to publish yet
 
