@@ -180,5 +180,8 @@
  "Queued: check": "Eingereiht: prüfen",
  "Check „{name}“ now": "„{name}“ jetzt prüfen",
  "Checked less than a minute ago – the next check waits a moment": "Vor weniger als einer Minute geprüft – die nächste Prüfung wartet einen Moment",
- "Shipping with buyer protection": "Versand mit Käuferschutz"
+ "Shipping with buyer protection": "Versand mit Käuferschutz",
+ "Newest hits first": "Neueste Treffer zuerst",
+ "Oldest hits first": "Älteste Treffer zuerst",
+ "Recently published first": "Zuletzt veröffentlicht zuerst"
 }

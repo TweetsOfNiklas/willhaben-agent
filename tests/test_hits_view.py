@@ -85,3 +85,29 @@ def test_shipping_with_buyer_protection():
         page = c.get("/hits?ship=protected").text
         assert set(_order(page)) == {"1", "3", "4"}
         assert 'value="protected" selected' in page
+
+
+def test_newest_hits_first_and_no_negotiable_kleinanzeigen_ads():
+    from datetime import datetime, timedelta, timezone
+
+    from app.main import app
+
+    t0 = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    with session() as db:
+        a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
+        db.add(a)
+        db.commit()
+        for ad_id, platform, display, found, published in (
+                ("1", "willhaben", "€ 10", 1, 9), ("2", "willhaben", "€ 10", 3, 1), ("3", "kleinanzeigen", "10 €", 2, 5),
+                ("4", "kleinanzeigen", "VB", 4, 4), ("5", "kleinanzeigen", "120 € VB", 5, 3)):
+            db.add(Hit(agent_id=a.id, platform=platform, ad_id=ad_id, heading=f"Ad {ad_id}", url=f"https://x/{ad_id}",
+                       price=10.0, price_display=display, first_seen_at=t0 + timedelta(days=found),
+                       published_at=t0 + timedelta(days=published)))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits").text
+        assert _order(page) == ["2", "3", "1"]                       # found last first; VB ads not shown
+        assert 'value="newest" selected' in page                   # the default
+        assert _order(c.get("/hits?sort=oldest").text) == ["1", "3", "2"]
+        assert _order(c.get("/hits?sort=published").text) == ["1", "3", "2"]
+        assert _order(c.get("/hits?state=all").text) == ["2", "3", "1"]

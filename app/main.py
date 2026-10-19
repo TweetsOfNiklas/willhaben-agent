@@ -763,7 +763,7 @@ async def agents_delete(agent_id: int):
     return back("/agents")
 
 
-HIT_SORTS = ("newest", "price", "price_desc", "total", "distance")
+HIT_SORTS = ("newest", "oldest", "published", "price", "price_desc", "total", "distance")
 HIT_SHIP = ("ship", "protected", "pickup")
 HIT_LEVELS = ("bargain", "cheap", "fair")       # "this or better"
 _LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expensive": 4}
@@ -806,6 +806,8 @@ class HitView:
             q = q.where(Hit.agent_id == self.agent_id)
         if self.platform:
             q = q.where(Hit.platform == self.platform)
+        # Kleinanzeigen ads with "VB" (price negotiable: "VB" alone or "120 € VB") are not shown
+        q = q.where(or_(Hit.platform != "kleinanzeigen", ~func.coalesce(Hit.price_display, "").like("%VB%")))
         if self.ship == "ship":
             q = q.where(or_(Hit.shipping == "ship", col(Hit.shipping_price).is_not(None)))
         elif self.ship == "protected":       # shipping paid through the site, with its buyer protection
@@ -826,8 +828,12 @@ class HitView:
             q = q.order_by(col(Hit.price).desc().nulls_last(), col(Hit.id).desc())
         elif self.sort == "total":
             q = q.order_by((func.coalesce(Hit.price, 1e12) + func.coalesce(Hit.shipping_price, 0) + func.coalesce(Hit.buyer_fee, 0)).asc(), col(Hit.id).desc())
-        else:
+        elif self.sort == "oldest":       # by when the hit was found
+            q = q.order_by(col(Hit.first_seen_at).asc(), col(Hit.id).asc())
+        elif self.sort == "published":    # by the site's (re)publishing date
             q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
+        else:                             # newest hits first
+            q = q.order_by(col(Hit.first_seen_at).desc(), col(Hit.id).desc())
         radius = geo.pickup_radius() if self.state not in ("filtered", "all") else None
         if not self.level and self.sort != "distance" and not radius:
             return list(db.exec(q.limit(limit)))

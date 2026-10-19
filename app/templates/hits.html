@@ -33,7 +33,7 @@
     {% for pid in filter_platform_ids %}<option value="{{ pid }}" {% if pid == platform %}selected{% endif %}>{{ platform_name(pid) }}</option>{% endfor %}
   </select>{% endif %}
   <select name="sort" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Sort') }}">
-    {% for v, label in [('newest', _('Newest first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home_point() else []) %}<option value="{{ v }}" {% if v == view.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    {% for v, label in [('newest', _('Newest hits first')), ('oldest', _('Oldest hits first')), ('published', _('Recently published first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home_point() else []) %}<option value="{{ v }}" {% if v == view.sort %}selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
   <select name="ship" class="select select-sm w-auto bg-base-100 max-sm:w-full" aria-label="{{ _('Shipping') }}">
     {% for v, label in [('', _('Shipping or pickup')), ('ship', _('Shipping possible')), ('protected', _('Shipping with buyer protection')), ('pickup', _('Pickup only'))] %}<option value="{{ v }}" {% if v == view.ship %}selected{% endif %}>{{ label }}</option>{% endfor %}
