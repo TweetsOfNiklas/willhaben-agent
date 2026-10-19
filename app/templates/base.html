@@ -715,9 +715,11 @@ function refreshInPlace(els) {
   const edited = el => {
     const a = document.activeElement;
     if (a && el.contains(a) && a.matches('input, textarea, select')) return true;
+    // a select without a `selected` attribute shows its first option: that is its default, not an edit
+    const picked = s => Math.max(0, [...s.options].findIndex(o => o.defaultSelected));
     return [...el.querySelectorAll('input, textarea, select')].some(f =>
       f.type === 'checkbox' || f.type === 'radio' ? f.checked !== f.defaultChecked
-        : f.tagName === 'SELECT' ? [...f.options].some(o => o.selected !== o.defaultSelected) : f.value !== f.defaultValue);
+        : f.tagName === 'SELECT' ? f.selectedIndex !== picked(f) : f.value !== f.defaultValue);
   };
   const byUrl = new Map();
   els.forEach(el => {

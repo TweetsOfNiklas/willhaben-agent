@@ -430,7 +430,7 @@ async def index(request: Request):
 
 # ------------------------------------------------------------------ search agents
 @app.get("/agents", response_class=HTMLResponse)
-async def agents_page(request: Request, error: str | None = None):
+async def agents_page(request: Request, error: str | None = None, msg: str | None = None):
     with session() as db:
         agents = list(db.exec(select(SearchAgent).order_by(SearchAgent.created_at)))
         counts = dict(db.exec(select(Hit.agent_id, func.count()).where(Hit.state == "new").group_by(Hit.agent_id)).all())
@@ -440,7 +440,7 @@ async def agents_page(request: Request, error: str | None = None):
             row = thumbs.setdefault(h.agent_id, [])
             if len(row) < 4:
                 row.append(h)
-    return render(request, "agents.html", agents=agents, counts=counts, thumbs=thumbs, error=error,
+    return render(request, "agents.html", agents=agents, counts=counts, thumbs=thumbs, error=error, msg=msg,
                   quiet=quiet_hours.state(), quiet_cfg=quiet_hours.config(), checking=set(jobs.current_keys("agent:")),
                   next_run=scheduler.next_run, settings=get_settings(), thresholds=screening.thresholds())
 

@@ -404,6 +404,11 @@ def test_several_agents_are_changed_at_once():
         r = c.post("/agents/bulk", data={"ids": [ids["a"], ids["b"]], "enabled": "0", "km_mode": "set", "max_km": "25",
                                          "interval_min": "20", "notify": ""}, follow_redirects=False)
         assert "2+search+agents+changed" in r.headers["location"] or "2%20search%20agents%20changed" in r.headers["location"]
+        # the message: a bar on top of a full load, a toast (#flash, taken along by hx-select-oob) for the bulk bar's request
+        plain = c.get(r.headers["location"]).text
+        assert "2 search agents changed" in plain.split('id="flash"')[0] and 'id="flash" class="toast' in plain
+        hx = c.get(r.headers["location"], headers={"HX-Request": "true"}).text
+        assert "2 search agents changed" in hx.split('id="flash"')[1] and "2 search agents changed" not in hx.split('id="flash"')[0]
         c.post("/agents/bulk", data={"ids": [ids["b"]], "km_mode": "off", "drops": "0"})
     with session() as db:
         rows = {a.name: a for a in db.exec(select(SearchAgent))}
