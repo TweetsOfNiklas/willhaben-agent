@@ -397,3 +397,51 @@ def test_a_published_draft_is_not_revised():
     draft_id = _ad_draft()
     ad_creator.update_draft(draft_id, status="published")
     assert not ad_creator.enqueue_refine(draft_id, "kürzer")
+
+
+async def test_a_used_up_budget_pauses_a_job_instead_of_failing_it(monkeypatch):
+    """The hourly limit is full: the job waits (the header says until when), its timeout does not run meanwhile, and
+    it goes on by itself once the budget has room again."""
+    from app.platforms import ratelimit
+    from app.platforms.ratelimit import RateLimiter
+
+    monkeypatch.setattr(ratelimit, "WAKE_S", 0.01)
+    monkeypatch.setattr(ratelimit.random, "uniform", lambda a, b: 0.0)
+    monkeypatch.setattr(jobs, "JOB_TIMEOUT_S", 0.3)
+    lim = RateLimiter(0, per_hour=1, max_wait_s=0.1, name="willhaben")
+    async with lim:
+        pass
+
+    async def send(job):
+        job.progress(0, "Answer to Anna")
+        async with lim:
+            return "sent"
+
+    job = jobs.submit("chat-send", "answer", send, lane="chat")
+    for _ in range(200):
+        if "hourly request limit reached" in job.step:
+            break
+        await asyncio.sleep(0.005)
+    assert job.status == "running" and job.step.startswith("willhaben: hourly request limit reached – goes on at ")
+    await asyncio.sleep(0.5)                  # longer than JOB_TIMEOUT_S: waiting for the budget does not count
+    assert job.status == "running"
+    lim._recent[0] -= 3600                    # the hour has passed
+    await finish_jobs()
+    assert job.status == "done" and job.result == "sent"
+
+
+async def test_a_tracked_task_shows_its_budget_wait_in_the_header():
+    import time
+
+    from app.platforms import ratelimit
+
+    async with jobs.track("ad-batch", "batch") as job:
+        job.step = "Claude writes"
+        bw = jobs.budget_wait(job)
+        bw.sites["willhaben"] = time.monotonic() + 600
+        bw.on_change(bw)
+        assert job.step.startswith("willhaben: hourly request limit reached – goes on at ")
+        bw.sites.clear()
+        bw.on_change(bw)
+        assert job.step == "Claude writes"
+        assert isinstance(bw, ratelimit.BudgetWait)

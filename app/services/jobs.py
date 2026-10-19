@@ -7,7 +7,9 @@ elsewhere (the product search, from its DB row). Lanes: "ads" (own ads: update, 
 (answers and revisions Claude writes). Within a lane
 jobs run strictly in order (an update must not overlap a delete run); the lanes run side by side, so a chat answer
 never waits behind twenty deletes. The pacing towards willhaben stays the shared limiter's: requests of both lanes
-still go out one by one. Jobs live in memory only: a restart drops the queue (callers persist their own markers and
+still go out one by one. A site's used-up hourly budget pauses a job instead of failing it: it goes on by itself
+when the budget has room again (the header says until when; the wait does not count towards JOB_TIMEOUT_S). Jobs
+live in memory only: a restart drops the queue (callers persist their own markers and
 clean them up at startup, see my_ads.recover, chats.recover_sending, ad_creator.recover_publishing).
 """
 from __future__ import annotations
@@ -15,15 +17,19 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.db import utcnow
 from app.i18n import t
+
+if TYPE_CHECKING:
+    from app.platforms.ratelimit import BudgetWait
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +135,7 @@ JOB_TIMEOUT_S = 15 * 60     # longest a job may run (a big clean-up or update fi
 
 
 async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
+    from app.platforms import ratelimit
     from app.services import timeline
 
     try:
@@ -137,7 +144,9 @@ async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
             # one timeline entry per job; Claude calls and willhaben requests inside it are its steps
             async with timeline.run("job", job.label, name=job.kind, **timeline.marker_ids(job.current)) as tl:
                 try:
-                    job.result = await asyncio.wait_for(run(job), JOB_TIMEOUT_S) or ""
+                    async with asyncio.timeout(JOB_TIMEOUT_S) as limit:
+                        with ratelimit.waiting(_budget_pause(job, limit)):
+                            job.result = await run(job) or ""
                     job.status = "done"
                 except TimeoutError:          # a stuck request (e.g. a willhaben page that never answers) frees the lane
                     log.warning("job %r timed out after %d s", job.label, JOB_TIMEOUT_S)
@@ -153,6 +162,51 @@ async def _run(job: Job, run: Callable[[Job], Awaitable[str | None]]) -> None:
         if job in _active:
             _active.remove(job)
         _finished.appendleft(job)
+
+
+def budget_wait(job: Job) -> BudgetWait:
+    """For ratelimit.waiting(): while a request of the job waits for a site's hourly budget, the header says until
+    when (the step shown before comes back afterwards, unless the job moved on meanwhile)."""
+    from app.platforms.ratelimit import BudgetWait
+
+    before: str | None = None
+    shown = ""
+
+    def changed(bw: BudgetWait) -> None:
+        nonlocal before, shown
+        if not bw.sites:
+            if before is not None and job.step == shown:
+                job.step = before
+            before = None
+            return
+        if before is None:
+            before = job.step
+        job.step = shown = "; ".join(t("{site}: hourly request limit reached – goes on at {time}", site=name,
+                                       time=at.strftime("%H:%M")) for name, at in bw.free_at().items())
+
+    return BudgetWait(changed)
+
+
+def _budget_pause(job: Job, limit: asyncio.Timeout) -> BudgetWait:
+    """budget_wait(job), and the job's deadline moves by the time waited (overlapping waits of parallel requests
+    count once)."""
+    bw = budget_wait(job)
+    note = bw.on_change
+    covered = 0.0           # loop time up to which waiting has already moved the deadline
+
+    def changed(bw: BudgetWait) -> None:
+        nonlocal covered
+        if bw.sites:
+            loop = asyncio.get_running_loop()
+            until = loop.time() + max(bw.sites.values()) - time.monotonic()
+            if until > covered and (when := limit.when()) is not None:
+                limit.reschedule(when + until - max(covered, loop.time()))
+                covered = until
+        if note:
+            note(bw)
+
+    bw.on_change = changed
+    return bw
 
 
 def working() -> set[str]:

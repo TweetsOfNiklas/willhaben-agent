@@ -1135,9 +1135,13 @@ def _set_status(draft_id: int, status: str) -> None:
 
 
 async def _send_auto(conv: Conversation, d: Draft, conversation_id: str, title: str) -> Draft:
-    """Send an automatic answer and push "answered"; on failure the draft keeps the error (status draft)."""
+    """Send an automatic answer and push "answered"; on failure the draft keeps the error (status draft). A used-up
+    hourly willhaben budget delays the answer until there is room again (nobody waits for it on a page)."""
+    from app.platforms import ratelimit
+
     try:
-        d = await send_draft(d.id, d.text)
+        with ratelimit.waiting():
+            d = await send_draft(d.id, d.text)
     except (EndpointUnknown, SendFailed, NotLoggedIn, SessionUnavailable) as e:
         with session() as db:
             row = db.get(Draft, d.id)

@@ -5,10 +5,75 @@ import asyncio
 import random
 import time
 from collections import deque
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.i18n import t
 from app.platforms.base import Blocked
+
+VIENNA = ZoneInfo("Europe/Vienna")
+WAKE_S = 60.0       # a waiting caller looks again at least this often (the budget may have been raised in Settings)
+
+
+class BudgetFull(Blocked):
+    """The hourly budget is used up and the caller does not wait for it: nothing was sent. `free_in_s`: until the
+    next request is allowed again."""
+
+    def __init__(self, msg: str, free_in_s: float) -> None:
+        super().__init__(msg)
+        self.free_in_s = free_in_s
+
+
+class BudgetWait:
+    """Background work that waits when a site's hourly budget is used up instead of giving up (jobs, the product
+    search): while `waiting(bw)` is active, the limiter sleeps outside its lock until a request is free again, so
+    page requests keep failing fast meanwhile. `sites` maps the limiters waited for right now to the monotonic time
+    they are free again; `on_change(bw)` runs whenever it changes (a page shows it, a job moves its timeout)."""
+
+    def __init__(self, on_change: Callable[[BudgetWait], None] | None = None) -> None:
+        self.sites: dict[str, float] = {}
+        self.on_change = on_change
+
+    def free_at(self) -> dict[str, datetime]:
+        """The sites waited for and when their budget lets the next request through (Vienna time, for the page)."""
+        now, wall = time.monotonic(), datetime.now(VIENNA)
+        return {name: wall + timedelta(seconds=max(0.0, until - now)) for name, until in self.sites.items()}
+
+    async def sleep(self, name: str, seconds: float) -> None:
+        self.sites[name] = time.monotonic() + seconds
+        self._changed()
+        try:
+            await asyncio.sleep(min(seconds, WAKE_S) + random.uniform(0, 2))
+        finally:
+            self.sites.pop(name, None)
+            self._changed()
+
+    def _changed(self) -> None:
+        if self.on_change:
+            self.on_change(self)
+
+
+_patience: ContextVar[BudgetWait | None] = ContextVar("budget_wait", default=None)
+
+
+@contextmanager
+def waiting(bw: BudgetWait | None = None) -> Iterator[BudgetWait]:
+    """Requests made inside (and in tasks started inside) wait for a used-up hourly budget instead of failing."""
+    bw = bw or BudgetWait()
+    token = _patience.set(bw)
+    try:
+        yield bw
+    finally:
+        _patience.reset(token)
+
+
+def waits() -> bool:
+    """True inside waiting(): a used-up budget delays the work instead of stopping it."""
+    return _patience.get() is not None
 
 
 class RateLimiter:
@@ -16,7 +81,9 @@ class RateLimiter:
 
     Waits that would block a caller for longer than `max_wait_s` (cool-down after 403/429 or an
     exhausted budget) raise Blocked instead, so dashboard requests fail fast and scheduled jobs
-    simply retry on their next run. `name` is the platform shown in those messages.
+    simply retry on their next run. Background work inside waiting() waits for an exhausted budget
+    instead (outside the lock, so nobody else hangs behind it). `name` is the platform shown in
+    those messages.
     """
 
     def __init__(self, min_gap_s: float, per_hour: int = 0, max_wait_s: float = 45.0, *, name: str = "willhaben") -> None:
@@ -38,23 +105,30 @@ class RateLimiter:
         return self._recent[0] + 3600 - now
 
     async def __aenter__(self) -> None:
-        await self._lock.acquire()
-        try:
-            now = time.monotonic()
-            if self._cooldown_until - now > self.max_wait_s:
-                raise Blocked(t("{name} pause after a block, {s} s left", name=self.name,
-                                s=f"{self._cooldown_until - now:.0f}"))
-            budget = self._budget_wait(now)
-            if budget > self.max_wait_s:
-                raise Blocked(t("{name}: request limit ({n}/h) reached, free again in {m} min", name=self.name,
-                                n=self.per_hour, m=f"{budget / 60:.0f}"))
-            wait = max(self._cooldown_until - now, self._last + self.min_gap_s - now, budget, 0.0)
-            if wait > 0:
-                await asyncio.sleep(wait + random.uniform(0, self.min_gap_s / 2))
-            self._recent.append(time.monotonic())
-        except BaseException:
-            self._lock.release()
-            raise
+        while True:
+            await self._lock.acquire()
+            try:
+                now = time.monotonic()
+                if self._cooldown_until - now > self.max_wait_s:
+                    raise Blocked(t("{name} pause after a block, {s} s left", name=self.name,
+                                    s=f"{self._cooldown_until - now:.0f}"))
+                budget = self._budget_wait(now)
+                patient = _patience.get()
+                if budget > self.max_wait_s and patient is None:
+                    raise BudgetFull(t("{name}: request limit ({n}/h) reached, free again in {m} min", name=self.name,
+                                       n=self.per_hour, m=f"{budget / 60:.0f}"), budget)
+                if budget <= self.max_wait_s:
+                    wait = max(self._cooldown_until - now, self._last + self.min_gap_s - now, budget, 0.0)
+                    if wait > 0:
+                        await asyncio.sleep(wait + random.uniform(0, self.min_gap_s / 2))
+                    self._recent.append(time.monotonic())
+                    return                                  # the lock stays held until __aexit__
+            except BaseException:
+                self._lock.release()
+                raise
+            self._lock.release()                            # wait for the budget without holding up anyone else
+            assert patient is not None
+            await patient.sleep(self.name, budget)
 
     async def __aexit__(self, *exc: Any) -> None:
         self._last = time.monotonic()

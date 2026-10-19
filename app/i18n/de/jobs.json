@@ -109,5 +109,6 @@
  "Searching the sites": "Suche auf den Seiten",
  "Claude ranks the offers": "Claude bewertet die Angebote",
  "Claude checks the photos": "Claude prüft die Fotos",
- "Claude has questions – answer them to go on": "Claude hat Rückfragen – beantworte sie, dann geht es weiter"
+ "Claude has questions – answer them to go on": "Claude hat Rückfragen – beantworte sie, dann geht es weiter",
+ "{site}: hourly request limit reached – goes on at {time}": "{site}: stündliches Anfragelimit erreicht – geht um {time} weiter"
 }

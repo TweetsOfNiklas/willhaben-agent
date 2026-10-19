@@ -27,20 +27,26 @@ _tasks: set[asyncio.Task] = set()
 
 def spawn(coro: Coroutine[Any, Any, Any], *, batch_id: int | None = None, label: str | None = None) -> None:
     """Run a slow job in the background; the page polls the batch status. With a label (and the batch) it also shows
-    among the background jobs, with a notice when it is done."""
+    among the background jobs, with a notice when it is done. A used-up hourly willhaben budget (the drafts' price
+    searches) makes it wait instead of giving up."""
+    from app.platforms import ratelimit
+
     if label and batch_id is not None:
         coro = _tracked(coro, batch_id, label)
-    task = asyncio.get_running_loop().create_task(coro)
+    with ratelimit.waiting():           # the task takes the setting along (_tracked shows the wait in the header)
+        task = asyncio.get_running_loop().create_task(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
 
 
 async def _tracked(coro: Coroutine[Any, Any, Any], batch_id: int, label: str) -> None:
+    from app.platforms import ratelimit
     from app.services import jobs
 
     async with jobs.track("ad-batch", label, link=f"/new-ad/batch/{batch_id}") as job:
         before = {g["id"] for g in (get(batch_id) or AdBatch()).groups if g.get("draft_id")}
-        await coro
+        with ratelimit.waiting(jobs.budget_wait(job)):
+            await coro
         b = get(batch_id)
         if b is None:
             return
