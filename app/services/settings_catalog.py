@@ -41,9 +41,9 @@ class Group:
 
 
 # the sections with a page of their own, in nav order (main.SETTINGS_SECTIONS); the other sites are added at runtime
-SECTION_IDS = ("willhaben", "vpn", "quiet", "prices", "geizhals", "purchase", "paylivery", "selling", "chats", "myads",
-               "calendar", "shipping", "printers", "claude", "rules", "ha", "telegram", "browser", "backup", "timeline",
-               "web", "language")
+SECTION_IDS = ("willhaben", "quiet", "prices", "geizhals", "purchase", "paylivery", "selling", "chats", "myads",
+               "calendar", "shipping", "printers", "claude", "rules", "ha", "telegram", "browser", "vpn", "backup",
+               "timeline", "web", "language")
 OVERVIEW = "overview"    # /settings: the overview, not a section of SECTION_IDS
 
 
@@ -221,14 +221,14 @@ def build(sites: Iterable[Any], t: Callable[..., str] = _t) -> list[Group]:
     language = Section("language", t("Language & appearance"), t("Language of the dashboard and notifications; light or dark theme."),
                        (Item("s-lang", t("Interface"), t("language, German, English, Deutsch")),
                         Item("s-theme", t("Theme"), t("dark mode, light, system, appearance"))))
-    return [Group(t("Platforms"), (willhaben, *others, vpn)),
+    return [Group(t("Platforms"), (willhaben, *others)),
             Group(t("Search & prices"), (quiet, prices, geizhals)),
             Group(t("Buying"), (purchase, paylivery)),
             Group(t("Selling"), (selling, chats, myads, calendar)),
             Group(t("Shipping & pickup"), (shipping, printers)),
             Group(t("AI"), (claude, rules)),
             Group(t("Notifications"), (ha, telegram, browser)),
-            Group(t("System"), (backup, timeline, web, language))]
+            Group(t("System"), (vpn, backup, timeline, web, language))]
 
 
 def sections(sites: Iterable[Any]) -> dict[str, tuple[Group, Section]]:
