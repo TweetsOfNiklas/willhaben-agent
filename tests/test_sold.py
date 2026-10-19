@@ -842,3 +842,34 @@ def test_import_follows_the_marks_made_on_willhaben():
     local = MyAd(ad_id="z", status="active", sale_status="reserved", sale_conversation_id="c-1")
     my_ads._follow_sale_status(local, "active")             # reserved here only (willhaben step still open): stays
     assert local.sale_status == "reserved"
+
+
+async def test_unreserve_puts_the_automatic_answers_back(ad_with_chats, monkeypatch):
+    """A reservation switches the automatic answers off; lifting it puts them back as they were – on, or off when
+    they were off before. "Not sold after all" leaves them off."""
+    s = FakeSession(_page(_links("markAdReserved", "removeMarkAdReserved")))
+    monkeypatch.setattr(sold, "get_session", lambda: s)
+    row, _ = sold.reserve(AD, "c-buyer")
+    assert row.auto_reply is False and row.auto_reply_before_sale is True
+    await finish_jobs()
+    row, _ = sold.unreserve(AD)
+    assert row.auto_reply is True and row.auto_reply_before_sale is None and row.sale_status is None
+    await finish_jobs()
+    with session() as db:                                  # answers off before the reservation: stay off
+        r = db.get(MyAd, AD)
+        r.auto_reply, r.status = False, "active"
+        db.add(r)
+        db.commit()
+    sold.reserve(AD, "c-2")
+    await finish_jobs()
+    row, _ = sold.unreserve(AD)
+    assert row.auto_reply is False
+    await finish_jobs()
+    with session() as db:
+        r = db.get(MyAd, AD)
+        r.auto_reply, r.status = True, "active"
+        db.add(r)
+        db.commit()
+    sold.finish(AD, "sold", "c-buyer")                     # the deal fell through: "not sold after all" keeps them off
+    sold.reset(AD)
+    assert sold.ad_row(AD).auto_reply is False and sold.ad_row(AD).auto_reply_before_sale is None

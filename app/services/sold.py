@@ -205,9 +205,10 @@ def reserve(ad_id: str, buyer: str | None) -> tuple[MyAd, bool]:
 
 
 def unreserve(ad_id: str) -> tuple[MyAd | None, bool]:
-    """"Remove reservation": gone here at once and, when willhaben shows the ad reserved, there too (background job)."""
+    """"Remove reservation": gone here at once and, when willhaben shows the ad reserved, there too (background job).
+    The automatic answers go back to what they were before the reservation (finish() noted them)."""
     row = ad_row(ad_id)
-    reset(ad_id)
+    reset(ad_id, restore_auto=True)
     queued = row is not None and row.status == "reserved" and enqueue_willhaben(row.ad_id, "reserved", undo=True)
     return ad_row(ad_id), queued
 
@@ -371,6 +372,8 @@ def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, p
             row.last_action = (t("{n} piece sold ({left} left)", n=pieces, left=left - pieces) if pieces == 1 else
                                t("{n} pieces sold ({left} left)", n=pieces, left=left - pieces))
         else:
+            if not row.sale_status:       # entering the sale status: remember the answers as they were (reset restores)
+                row.auto_reply_before_sale = row.auto_reply
             if auto_off:
                 row.auto_reply = False
             row.sale_status, row.sale_conversation_id, row.sale_at = kind, buyer or None, utcnow()
@@ -389,10 +392,11 @@ def _undo(db: Session, sales: list[Sale]) -> None:
         db.add(s)
 
 
-def reset(ad_id: str) -> None:
+def reset(ad_id: str, *, restore_auto: bool = False) -> None:
     """The deal fell through: forget the local sale status (willhaben is not touched). A single item's sale is
     undone with it. An ad with a quantity keeps its sales (each one has its own undo, undo_sale): only a
-    reservation is lifted here."""
+    reservation is lifted here. `restore_auto` ("Remove reservation"): the automatic answers go back to what
+    they were before the sale status switched them off; otherwise ("not sold after all") they stay off."""
     with session() as db:
         row = current_ad(db, ad_id)
         if row is None or (row.quantity is not None and row.sale_status == "sold"):
@@ -400,6 +404,9 @@ def reset(ad_id: str) -> None:
         if row.quantity is None:
             _undo(db, stock.active_sales(db, row.ad_id))
         row.sale_status = row.sale_conversation_id = row.sale_at = None
+        if restore_auto and row.auto_reply_before_sale is not None:
+            row.auto_reply = row.auto_reply_before_sale
+        row.auto_reply_before_sale = None
         db.add(row)
         db.commit()
 
