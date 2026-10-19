@@ -774,6 +774,18 @@ _LEVEL_RANK = {"bargain": 0, "cheap": 1, "fair": 2, "expensive": 3, "very_expens
 _SCREEN_LEVEL = {"great": "bargain", "good": "cheap", "fair": "fair", "overpriced": "expensive"}
 
 
+HIT_STATES = ("new", "pending", "saved", "seen", "ignored", "filtered")   # the states the hits page shows (not cleared)
+
+
+def _states(value: Any) -> tuple[str, ...]:
+    """The states a view shows: several (the multi-select's repeated fields, a comma list), "all", or "new" when
+    nothing valid is given."""
+    parts = _many(value)
+    if "all" in parts:
+        return HIT_STATES
+    return tuple(dict.fromkeys(p for p in parts if p in HIT_STATES)) or ("new",)
+
+
 def _many(value: Any) -> list[str]:
     """A multi-select's values: repeated fields (["1", "2"]), one comma list ("1,2") or a single value."""
     items = value if isinstance(value, (list, tuple, set)) else [value]
@@ -784,7 +796,7 @@ def _many(value: Any) -> list[str]:
 class HitView:
     """What the hits page shows: tab, agents, sites (several of each, none = all) and the sort and filters; also what
     its bulk buttons act on."""
-    state: str = "new"
+    states: tuple[str, ...] = ("new",)
     agent_ids: tuple[int, ...] = ()
     platforms: tuple[str, ...] = ()
     sort: str = "newest"
@@ -796,9 +808,20 @@ class HitView:
            level: str = "") -> "HitView":
         ids = tuple(dict.fromkeys(int(x) for x in _many(agent_id) if x.isdigit() and int(x)))
         sites = tuple(dict.fromkeys(x.lower() for x in _many(platform)))
-        return cls(state=state or "new", agent_ids=ids, platforms=sites,
+        return cls(states=_states(state), agent_ids=ids, platforms=sites,
                    sort=sort if sort in HIT_SORTS else "newest", ship=ship if ship in HIT_SHIP else "",
                    level=level if level in HIT_LEVELS else "")
+
+    @property
+    def state(self) -> str:
+        """The one state shown ("new", "filtered" …), "all" for every one, "mixed" for some (the multi-select)."""
+        if set(self.states) >= set(HIT_STATES):
+            return "all"
+        return self.states[0] if len(self.states) == 1 else "mixed"
+
+    @state.setter
+    def state(self, value: Any) -> None:
+        self.states = _states(value)
 
     @property
     def agent_id(self) -> int | None:
@@ -810,7 +833,9 @@ class HitView:
         return self.platforms[0] if len(self.platforms) == 1 else ""
 
     def params(self, **change: Any) -> dict[str, Any]:
-        d = {"state": self.state, "agent_id": ",".join(map(str, self.agent_ids)), "platform": ",".join(self.platforms),
+        state = self.state
+        d = {"state": ",".join(self.states) if state == "mixed" else state,
+             "agent_id": ",".join(map(str, self.agent_ids)), "platform": ",".join(self.platforms),
              "sort": "" if self.sort == "newest" else self.sort, "ship": self.ship, "level": self.level, **change}
         return {k: v for k, v in d.items() if v}
 
@@ -842,7 +867,7 @@ class HitView:
         elif self.ship == "pickup":
             q = q.where(Hit.shipping == "pickup")
         if state:
-            q = q.where(Hit.state == self.state) if self.state != "all" else q.where(Hit.state != search_agents_svc.CLEARED)
+            q = q.where(col(Hit.state).in_(self.states))         # every state but cleared, or some of them
         return q
 
     def hits(self, db, limit: int = 200, offset: int = 0) -> list[Hit]:
@@ -860,7 +885,7 @@ class HitView:
             q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
         else:                             # newest hits first
             q = q.order_by(col(Hit.first_seen_at).desc(), col(Hit.id).desc())
-        radius = geo.pickup_radius() if self.state not in ("filtered", "all") else None
+        radius = geo.pickup_radius() if "filtered" not in self.states and self.state != "all" else None
         if not self.level and self.sort != "distance" and not radius:
             return list(db.exec(q.offset(offset).limit(limit)))
         rows = list(db.exec(q.limit(max((offset + limit) * 10, 2000))))
@@ -891,7 +916,7 @@ async def hits_page(request: Request, state: str = "new", sort: str = "", ship: 
     """agent_id and platform: several (repeated fields of the multi-selects, or comma lists in links); all ticked or
     none = no filter."""
     qp = request.query_params
-    view = HitView.of(state, qp.getlist("agent_id"), qp.getlist("platform"), sort, ship, level)
+    view = HitView.of(qp.getlist("state") or state, qp.getlist("agent_id"), qp.getlist("platform"), sort, ship, level)
     with session() as db:
         agents = {a.id: a for a in db.exec(select(SearchAgent))}
         used = sorted({pid for a in agents.values() for pid in _agent_platforms(a)})
@@ -1082,7 +1107,8 @@ def _can_sync(h: Hit) -> bool:
 
 def _view_form(form: Any, state: str | None = None) -> HitView:
     """The hits page's view as its forms send it (hidden fields of the same names)."""
-    return HitView.of(state or form.get("state") or "new", form.getlist("agent_id") if hasattr(form, "getlist")
+    return HitView.of(state or (form.getlist("state") if hasattr(form, "getlist") else form.get("state")) or "new",
+                      form.getlist("agent_id") if hasattr(form, "getlist")
                       else form.get("agent_id"), form.getlist("platform") if hasattr(form, "getlist") else form.get("platform"),
                       form.get("sort") or "", form.get("ship") or "", form.get("level") or "")
 
@@ -1104,7 +1130,8 @@ async def hits_keep_days(request: Request):
     days = str(form.get("days") or "")
     search_agents_svc.set_keep_days(int(days) if days.strip().isdigit() else 0)
     view = _view_form(form)
-    view.state = view.state if view.state in (*search_agents_svc.EXPIRING, "saved", "all") else "new"
+    if view.state not in (*search_agents_svc.EXPIRING, "saved", "all", "mixed"):
+        view.state = "new"
     return back(view.url())
 
 

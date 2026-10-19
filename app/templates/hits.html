@@ -57,13 +57,12 @@
   document.addEventListener('htmx:afterSettle', () => { if (open) { const d = document.querySelector(`details[data-multi="${open}"]`); if (d) d.open = true; } });
 })();</script>
 <form method="get" action="/hits" class="mb-3.5 flex flex-wrap items-center gap-2.5" hx-get="/hits" hx-trigger="change" {{ swap|safe }}>
-  {% set seg_items = [] %}
-  {% set tabs = [('new', _('New'))] + ([('pending', _('Being checked'))] if state == 'pending' or state_counts.get('pending') else []) + [('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out')), ('all', _('All'))] %}
-  {% for s, label in tabs %}
-    {% set added = seg_items.append((view.url(state=s), label, state_counts.get(s) if state_counts is defined else none, s == state)) %}
-  {% endfor %}
-  <div hx-boost="true" {{ swap|safe }} class="contents">{{ ui.seg(seg_items, 'max-sm:w-full') }}</div>
-  {{ view_fields(('agent_id', 'platform', 'sort', 'ship', 'level')) }}
+  {# the states (New, Saved …): several at once; the counts next to them; "Being checked" only while there are such hits #}
+  {% set tabs = [('new', _('New'))] + ([('pending', _('Being checked'))] if 'pending' in view.states or state_counts.get('pending') else []) + [('saved', _('Saved')), ('seen', _('Seen')), ('ignored', _('Ignored')), ('filtered', _('Filtered out'))] %}
+  {% set slabels = [] %}{% for s, label in tabs %}{% set _x = slabels.append(label ~ (' · ' ~ state_counts.get(s) if state_counts.get(s) else '')) %}{% endfor %}
+  {{ multi('state', tabs|map(attribute=0)|list, slabels, [] if view.state == 'all' else view.states,
+           _("All") ~ ' · ' ~ state_counts.get('all', 0), _("{n} states"), _("State")) }}
+  {{ view_fields(('state', 'agent_id', 'platform', 'sort', 'ship', 'level')) }}
   {{ multi('agent_id', agents.values()|map(attribute='id')|list, agents.values()|map(attribute='name')|list, view.agent_ids,
            _("All search agents"), _("{n} search agents"), _("Search agents")) }}
   {% if filter_platform_ids %}{% set plabels = [] %}{% for pid in filter_platform_ids %}{% set _x = plabels.append(platform_name(pid)) %}{% endfor %}

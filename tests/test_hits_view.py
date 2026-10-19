@@ -38,7 +38,7 @@ def test_sort_and_filters():
         assert _order(c.get("/hits?level=bargain").text) == ["1"]
         assert set(_order(c.get("/hits?level=fair").text)) == {"1", "2"}
         page = c.get("/hits?sort=total&ship=ship").text
-        assert "/hits?state=saved&amp;sort=total&amp;ship=ship" in page       # the tabs keep the view
+        assert 'value="total" selected' in page and 'name="state" value="saved"' in page   # one form: the view stays
         r = c.post("/hits/mark-seen", data={"ship": "pickup", "sort": "total"}, follow_redirects=False)
         assert r.headers["location"] == "/hits?sort=total&ship=pickup"
     with session() as db:
@@ -154,7 +154,7 @@ def test_several_agents_and_sites_at_once():
         two = cl.get(f"/hits?state=filtered&agent_id={a}&agent_id={b}").text
         assert set(_order(two)) == {"1", "2", "4"}
         assert f'name="agent_id" value="{a}" checked' in two and f'name="agent_id" value="{c}" checked' not in two
-        assert "2 search agents" in two and f"agent_id={a}%2C{b}" in two              # tabs keep both
+        assert "2 search agents" in two and f'name="agent_id" value="{a},{b}"' in two     # the bulk forms keep both
         assert set(_order(cl.get(f"/hits?state=filtered&agent_id={a},{b}&platform=vinted").text)) == {"4"}
         every = cl.get(f"/hits?state=filtered&agent_id={a}&agent_id={b}&agent_id={c}").text
         assert set(_order(every)) == {"1", "2", "3", "4"} and "All search agents" in every
@@ -186,3 +186,25 @@ def test_the_list_loads_more_when_scrolled_to_its_end():
         assert f">Rad {HIT_PAGE + 4}<" in first and ">Rad 4<" not in first           # newest first
         rest = cl.get(f"/hits?offset={HIT_PAGE}").text
         assert rest.count('data-hit="') // 2 == 5 and 'id="hits-more"' not in rest and ">Rad 0<" in rest
+
+
+def test_several_states_at_once():
+    """The states (New, Saved …) are a multi-select too: New + Saved shows both; all ticked is every state."""
+    from app.main import app
+
+    _setup()
+    with session() as db:
+        db.get(Hit, 1).state = "saved"
+        db.add(db.get(Hit, 1))
+        db.get(Hit, 3).state = "seen"
+        db.add(db.get(Hit, 3))
+        db.commit()
+    with TestClient(app) as c:
+        both = c.get("/hits?state=new&state=saved").text
+        assert set(_order(both)) == {"1", "2", "4"} and "2 states" in both
+        assert 'name="state" value="new" checked' in both and 'name="state" value="seen" checked' not in both
+        assert set(_order(c.get("/hits?state=new,seen").text)) == {"2", "3", "4"}
+        every = c.get("/hits?state=new&state=saved&state=seen&state=ignored&state=filtered").text
+        assert set(_order(every)) == {"1", "2", "3", "4"}
+        r = c.post("/hits/bulk", data={"state": "new,saved", "ids": "2", "action": "ignored"}, follow_redirects=False)
+        assert r.headers["location"] == "/hits?state=new%2Csaved"

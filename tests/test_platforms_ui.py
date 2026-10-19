@@ -54,7 +54,7 @@ def test_hits_page_shows_sites_and_filters(client):
     assert 'data-ad="fake:77"' in only and 'data-ad="77"' not in only
     assert platforms.multi() is True
     assert 'name="platform"' in page and "All platforms" in page             # the site filter
-    assert 'name="platform" value="fake" checked' in only and "/hits?state=new&amp;platform=fake" in only
+    assert 'name="platform" value="fake" checked' in only and '<input type="hidden" name="platform" value="fake">' in only
     for h in (_hit("fake"), _hit("willhaben")):
         client.post(f"/hits/{h.id}/state", data={"state": "new"})
     r = client.post("/hits/mark-seen", data={"platform": "fake"}, follow_redirects=False)

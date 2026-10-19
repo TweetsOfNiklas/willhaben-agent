@@ -187,5 +187,6 @@
  "None": "Keine",
  "{n} search agents": "{n} Suchagenten",
  "{n} platforms": "{n} Plattformen",
- "Loading more hits …": "Weitere Treffer werden geladen …"
+ "Loading more hits …": "Weitere Treffer werden geladen …",
+ "{n} states": "{n} Zustände"
 }
