@@ -1231,6 +1231,32 @@ async def _search(site: str, query: str) -> dict[str, Any]:
     return data
 
 
+SITE_WAIT_S = 8.0     # someone waits on the page (ratelimit.urgent): a site that takes longer is left out
+
+
+class TooSlow(PlatformError):
+    pass
+
+
+async def _in_time(search: Any, site: str) -> dict[str, Any]:
+    """One site's comparable search; while someone waits on the page (ratelimit.urgent) at most SITE_WAIT_S – a slow
+    or refusing site (eBay's warm-up 403s are asked again after a pause, Vinted paces its requests) is left out instead
+    of holding up the whole price check. The cancelled request costs no block or penalty."""
+    from app import platforms
+    from app.platforms import ratelimit
+
+    if not ratelimit.is_urgent():
+        return await search
+    try:
+        return await asyncio.wait_for(search, SITE_WAIT_S)
+    except TimeoutError:
+        try:
+            name = platforms.get(site).name
+        except platforms.UnknownPlatform:
+            name = site
+        raise TooSlow(t("{site}: no answer within {n} s – left out", site=name, n=f"{SITE_WAIT_S:g}")) from None
+
+
 def _same_item(ads: list[dict[str, Any]], title: str | None, condition: str | None
                ) -> tuple[list[dict[str, Any]], dict[str, int], int]:
     """The ads whose title is this item (TitleMatch) and whose stated condition prices alike, how many were dropped
@@ -1280,8 +1306,8 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
     for q, sites in plan:
         if out["searches"] and titled >= MIN_COMPARABLES:     # the item's own ads, whatever their condition
             break
-        answers = await asyncio.gather(*(search_category(q) if category_url else _search(site, q) for site in sites),
-                                       return_exceptions=True)      # the sites at once, each at its own pace
+        answers = await asyncio.gather(*(_in_time(search_category(q) if category_url else _search(site, q), site)
+                                         for site in sites), return_exceptions=True)   # the sites at once, each at its own pace
         for site, data in zip(sites, answers, strict=True):
             if isinstance(data, (WillhabenError, InvalidSearchUrl, PlatformError)):
                 log.info("comparable search on %s failed for %r: %s", site, q, data)

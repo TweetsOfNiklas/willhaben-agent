@@ -76,6 +76,24 @@ def waits() -> bool:
     return _patience.get() is not None
 
 
+_urgent: ContextVar[bool] = ContextVar("urgent_request", default=False)
+
+
+@contextmanager
+def urgent() -> Iterator[None]:
+    """Requests made inside go first in each site's queue: someone waits for them on a page (the price check of the
+    ad viewer), the search agents' requests wait behind them."""
+    token = _urgent.set(True)
+    try:
+        yield
+    finally:
+        _urgent.reset(token)
+
+
+def is_urgent() -> bool:
+    return _urgent.get()
+
+
 class RateLimiter:
     """Serialises requests with a minimum gap (plus jitter), an hourly budget and a global cool-down.
 
@@ -96,6 +114,7 @@ class RateLimiter:
         self._cooldown_until = 0.0
         self._strikes = 0
         self._recent: deque[float] = deque()   # monotonic start times of the last hour
+        self._urgent_waiting = 0               # urgent() requests waiting for the lock: the others let them go first
 
     def _budget_wait(self, now: float) -> float:
         while self._recent and now - self._recent[0] >= 3600:
@@ -105,8 +124,19 @@ class RateLimiter:
         return self._recent[0] + 3600 - now
 
     async def __aenter__(self) -> None:
+        urgent = _urgent.get()
         while True:
-            await self._lock.acquire()
+            if urgent:
+                self._urgent_waiting += 1
+            try:
+                await self._lock.acquire()
+            finally:
+                if urgent:
+                    self._urgent_waiting -= 1
+            if not urgent and self._urgent_waiting:     # someone waits on a page: they go first
+                self._lock.release()
+                await asyncio.sleep(0.05)
+                continue
             try:
                 now = time.monotonic()
                 if self._cooldown_until - now > self.max_wait_s:

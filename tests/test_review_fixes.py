@@ -160,3 +160,49 @@ def test_an_ambiguous_category_hint_picks_nothing():
     assert insert.hint_option({"categoryTree": tree}, "Zubehör", **kw) is None
     assert insert.hint_option({"categoryTree": tree}, "Foto > Zubehör", **kw)["path"][-1]["code"] == "FOTO_ACC"
     assert insert.hint_option(FORM, "Audio > Mobile Lautsprecher", **kw)["path"][-1]["code"] == "MOBILE_SPEAKER"
+
+
+# ---- the price check waited for the slowest site (eBay's 403 retries, Vinted's pace) behind the search agents
+async def test_an_urgent_request_goes_first_in_the_sites_queue():
+    from app.platforms import ratelimit
+    lim = ratelimit.RateLimiter(0.0, name="x")
+    order = []
+
+    async def req(label, urgent=False, hold=0.0):
+        if urgent:
+            with ratelimit.urgent():
+                async with lim:
+                    order.append(label)
+        else:
+            async with lim:
+                order.append(label)
+                await asyncio.sleep(hold)
+
+    first = asyncio.create_task(req("agent-1", hold=0.1))           # holds the queue a moment
+    await asyncio.sleep(0.01)
+    later = asyncio.create_task(req("agent-2"))                     # a background request already waiting
+    await asyncio.sleep(0.01)
+    page = asyncio.create_task(req("price-check", urgent=True))     # the page's request comes after it
+    await asyncio.gather(first, later, page)
+    assert order == ["agent-1", "price-check", "agent-2"]
+
+
+async def test_a_slow_site_is_left_out_of_the_price_check(monkeypatch):
+    from app.platforms import ratelimit
+    from app.services import deals
+    monkeypatch.setattr(deals, "SITE_WAIT_S", 0.05)
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben", "ebay"])
+
+    async def search(site, query):
+        if site == "ebay":
+            await asyncio.sleep(5)                                   # retries after a 403
+        return {"rows_found": 3, "ads": [{"platform": site, "ad_id": str(i), "title": "Bosch GSR 18V-55",
+                                          "price": 100.0 + i} for i in range(3)]}
+
+    monkeypatch.setattr(deals, "_search", search)
+    t0 = asyncio.get_running_loop().time()
+    with ratelimit.urgent():
+        out = await deals.comparables("Bosch GSR 18V-55", None, 100.0, title="Bosch GSR 18V-55")
+    assert asyncio.get_running_loop().time() - t0 < 1
+    assert out["count"] == 3 and out["error"] is None
+    assert [s.get("error", "")[:4] for s in out["searches"]] == ["", "eBay"] and "left out" in out["searches"][1]["error"]
