@@ -359,6 +359,7 @@ def test_print_route_prints_and_redirects_to_the_chat(monkeypatch, printer):
         assert f'hx-post="/shipments/{sid}/print" hx-target="#shipping"' in c.get("/chats/c1").text
         assert c.post(f"/shipments/{sid}/print", data={"which": "bogus"}, follow_redirects=False).status_code == 400
         assert c.post("/shipments/999/print", data={"which": "auto"}, follow_redirects=False).status_code == 404
+    printing._job_states.clear()            # the page asked the printer for the job's state: not for the next test
 
 
 def test_test_and_check_routes_redirect_back_to_the_printers(printer):
