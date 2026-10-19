@@ -1,10 +1,14 @@
 {
+ "Carrier": "Paketdienst",
  "Carrier and parcel size – the buyer pays this shipping price": "Paketdienst und Paketgröße – diesen Versandpreis zahlt der Käufer",
  "Choose another category": "Andere Kategorie wählen",
+ "Claude writes draft #{id}": "Claude schreibt Entwurf #{id}",
+ "Goes live on willhaben as a free private ad – it waits a few seconds in the queue, where you can take it back.": "Geht als kostenlose Privatanzeige auf willhaben live – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst.",
  "Handover": "Übergabe",
  "Marked as published.": "Als veröffentlicht markiert.",
  "New ads are checked by willhaben first and can take a few minutes to show up.": "Neue Anzeigen prüft willhaben zuerst – es kann ein paar Minuten dauern, bis sie sichtbar sind.",
  "No category found.": "Keine Kategorie gefunden.",
+ "Parcel size": "Paketgröße",
  "Prices and limits as willhaben listed them; at publishing the current offer of this carrier and size is used.": "Preise und Grenzen, wie willhaben sie anzeigt; beim Veröffentlichen gilt das aktuelle Angebot dieses Dienstes in dieser Größe.",
  "Publish on willhaben now": "Jetzt auf willhaben veröffentlichen",
  "Published on willhaben": "Auf willhaben veröffentlicht",
@@ -15,8 +19,6 @@
  "This category cannot be chosen (not found or not a final category)": "Diese Kategorie geht nicht (nicht gefunden oder keine Endkategorie)",
  "Without PayLivery the buyer pays you directly and you send the parcel yourself.": "Ohne PayLivery zahlt der Käufer direkt an dich und du verschickst das Paket selbst.",
  "chosen by hand": "selbst gewählt",
- "with PayLivery (buyer protection)": "mit PayLivery (Käuferschutz)",
- "Goes live on willhaben as a free private ad – it waits a few seconds in the queue, where you can take it back.": "Geht als kostenlose Privatanzeige auf willhaben live – sie wartet ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst.",
- "Claude writes draft #{id}": "Claude schreibt Entwurf #{id}",
- "parcel about {kg} kg": "Paket ca. {kg} kg"
+ "parcel about {kg} kg": "Paket ca. {kg} kg",
+ "with PayLivery (buyer protection)": "mit PayLivery (Käuferschutz)"
 }
