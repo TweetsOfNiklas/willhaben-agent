@@ -25,6 +25,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
@@ -72,7 +73,8 @@ ACTION_ROLE: dict[str, str | None] = {   # None: either role
     "accept": "seller", "decline": "seller", "label": "seller", "mark_shipped": "seller",
     "offer": "buyer", "buy": "buyer", "receipt": "buyer", "problem": None,
 }
-BROWSER_ACTIONS = ("accept", "decline", "offer", "buy", "receipt", "problem")
+# label: in the browser only when its link gives no PDF (willhaben first asks to create the label in a dialog)
+BROWSER_ACTIONS = ("accept", "decline", "offer", "buy", "receipt", "problem", "label")
 MONEY_ACTIONS = ("offer", "buy")
 ACTION_STAGE = {"accept": "offer_accepted", "decline": "offer_declined", "offer": "offer_sent", "buy": "paid",
                 "receipt": "received", "problem": "problem", "mark_shipped": "shipped"}
@@ -206,6 +208,8 @@ FINAL_CLICK = {   # the one commit button per action; any other action's commit 
     "offer": re.compile(r"(?:vorschlag|angebot)\w*\s+(?:senden|abschicken|absenden)|^\s*(?:senden|abschicken|absenden)\s*$",
                         re.I),
     "buy": re.compile(r"\b(?:sofort\s+|jetzt\s+)?kaufen\b|bezahlen|zahlungspflichtig", re.I),
+    # the create dialog may confirm with a plain "Bestätigen": this action's own, not receipt's
+    "label": re.compile(r"erstell|herunterlad|download|drucken|best[äa]tig", re.I),
 }
 _SECRET_FIELD = re.compile(r"karte|card|iban|\bbic\b|cvc|cvv|cc-|kreditkarte|passwort|password|\bpin\b|\btan\b|"
                            r"kontonummer|ablauf|expir|kennwort", re.I)
@@ -602,7 +606,7 @@ def _record(conversation_id: str, action: str, ok: bool, text: str, amount: floa
         if stage:
             return _set_stage(st, stage, at, f"{action}: {text}", {"amount": amount}, action=action, ok=True,
                               amount=amount)
-        return _add_history(st, at, st.get("stage"), f"{action}: {text}", action=action, ok=False)
+        return _add_history(st, at, st.get("stage"), f"{action}: {text}", action=action, ok=ok)
 
     state = _update_state(conversation_id, change)
     if stage and state is not None:
@@ -725,7 +729,7 @@ def _source(h: dict[str, Any], notices: dict[str, Message]) -> tuple[str, Any, b
             return "notice", m, True
     pre = _ACTION_PREFIX.match(h.get("text") or "")
     if pre and pre.group(1) in BROWSER_ACTIONS:
-        return "action", pre.group(1), h.get("stage") == ACTION_STAGE[pre.group(1)]
+        return "action", pre.group(1), h.get("stage") == ACTION_STAGE.get(pre.group(1))
     if h.get("stage") == "shipped" and h.get("text") in (_MARKED_SHIPPED, catalog("de").get(_MARKED_SHIPPED)):
         return "action", "mark_shipped", True
     return "note", None, False
@@ -983,11 +987,7 @@ async def _download(shipment_id: int, urls: list[str]) -> str | None:
             replay.note(rec, "download")
             body = recorder.decode_body(rec.resp_body) or b""
             if body[:5] == b"%PDF-":
-                d = get_settings().data_dir / "labels"
-                d.mkdir(parents=True, exist_ok=True)
-                path = d / f"shipment-{shipment_id}-paylivery.pdf"
-                path.write_bytes(body)
-                return path.name
+                return _save_pdf(shipment_id, body)
         try:
             res = await sess.context.request.get(url, timeout=30000)
             body = await res.body()
@@ -998,19 +998,119 @@ async def _download(shipment_id: int, urls: list[str]) -> str | None:
         recorder.record_http("download", "download", "GET", url, status=getattr(res, "status", None),
                              resp_headers=getattr(res, "headers", None), resp_body=body,
                              duration_ms=int((time.monotonic() - started) * 1000))
-        if res.ok and body[:5] == b"%PDF-" and len(body) <= MAX_LABEL_BYTES:
-            d = get_settings().data_dir / "labels"
-            d.mkdir(parents=True, exist_ok=True)
-            path = d / f"shipment-{shipment_id}-paylivery.pdf"
-            path.write_bytes(body)
+        if res.ok and _is_pdf(body):
             log.info("PayLivery label saved for shipment %s", shipment_id)
-            return path.name
+            return _save_pdf(shipment_id, body)
         log.info("PayLivery link for shipment %s is no PDF (HTTP %s)", shipment_id, res.status)
     return None
 
 
-async def download_label(conversation_id: str) -> str:
-    """Local action "Download label": fetch the label link of the notice into the shipment (no browser clicks)."""
+def _is_pdf(body: bytes | None) -> bool:
+    return bool(body) and body[:5] == b"%PDF-" and len(body) <= MAX_LABEL_BYTES
+
+
+def _save_pdf(shipment_id: int, body: bytes) -> str:
+    d = get_settings().data_dir / "labels"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"shipment-{shipment_id}-paylivery.pdf"
+    path.write_bytes(body)
+    return path.name
+
+
+def _store_label(shipment_id: int, name: str) -> None:
+    """The saved PDF goes to the shipment; a shipment already printed or sent keeps its status (and is not printed)."""
+    s = shipping.get(shipment_id)
+    if s is not None and s.status in ("buying", "printed", "sent"):
+        shipping.update(shipment_id, label_path=name)
+    else:
+        shipping.update(shipment_id, label_path=name, status="labelled")
+        shipping.label_arrived(shipment_id)
+
+
+class _LabelCatch:
+    """The label PDF the browser receives while the label action runs. willhaben shows it in a PDF tab (a response,
+    no download event) or hands it over as a download; both are caught for the whole browser context, popups too.
+    Any host: these are the logged-in browser's own responses, not links fetched by the app."""
+
+    def __init__(self, shipment_id: int) -> None:
+        self.shipment_id = shipment_id
+        self.name: str | None = None
+        self._tasks: set[asyncio.Task] = set()
+        self._context = None
+        self._pages: list[Any] = []
+
+    def attach(self, context) -> None:
+        self._context = context
+        context.on("response", self._on_response)
+        context.on("page", self._on_page)
+        for page in list(getattr(context, "pages", []) or []):
+            self._on_page(page)
+
+    def detach(self) -> None:
+        if self._context is not None:
+            for event, fn in (("response", self._on_response), ("page", self._on_page)):
+                try:
+                    self._context.remove_listener(event, fn)
+                except Exception:  # noqa: BLE001 - the context is gone
+                    pass
+        for page in self._pages:
+            try:
+                page.remove_listener("download", self._on_download)
+            except Exception:  # noqa: BLE001 - the page is closed
+                pass
+        self._context, self._pages = None, []
+
+    async def settle(self) -> str | None:
+        """Waits for the PDFs being read right now; returns the saved file name, if any."""
+        if self._tasks:
+            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+        return self.name
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.ensure_future(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def _on_page(self, page) -> None:
+        self._pages.append(page)
+        page.on("download", self._on_download)
+
+    def _on_response(self, response) -> None:
+        headers = getattr(response, "headers", None) or {}
+        kind = str(headers.get("content-type") or "").lower()
+        if self.name is None and ("pdf" in kind or urlparse(response.url or "").path.lower().endswith(".pdf")):
+            self._spawn(self._take_response(response))
+
+    def _on_download(self, download) -> None:
+        if self.name is None:
+            self._spawn(self._take_download(download))
+
+    async def _take_response(self, response) -> None:
+        try:
+            body = await response.body()
+        except Exception as e:  # noqa: BLE001 - a PDF viewer tab may not keep the body; the download route remains
+            log.info("PayLivery label response not readable: %s", e)
+            return
+        self._keep(body)
+
+    async def _take_download(self, download) -> None:
+        try:
+            path = await download.path()
+            body = Path(path).read_bytes() if path else b""
+        except Exception as e:  # noqa: BLE001 - a cancelled download
+            log.info("PayLivery label download failed: %s", e)
+            return
+        self._keep(body)
+
+    def _keep(self, body: bytes) -> None:
+        if self.name is None and _is_pdf(body):
+            self.name = _save_pdf(self.shipment_id, body)
+            log.info("PayLivery label caught in the browser for shipment %s", self.shipment_id)
+
+
+async def download_label(conversation_id: str) -> str | None:
+    """"Get label", first try: fetch the notice's label link into the shipment (no browser clicks). None when that
+    gives no PDF – no link yet, or willhaben first asks to create the label: then the browser action "label" does it."""
     conv = _conv(conversation_id)
     s = shipping.open_for(conversation_id)
     if s is None:
@@ -1018,17 +1118,36 @@ async def download_label(conversation_id: str) -> str:
     if s.label_path:
         return t("The label is already saved.")
     url = (conv.paylivery or {}).get("label_url") if conv else None
-    if not url:
-        raise PayLiveryError(t("willhaben has not sent a label link yet"))
-    name = await _download(s.id, [url])
+    name = await _download(s.id, [url]) if url else None
     if not name:
-        raise PayLiveryError(t("The label could not be downloaded – open it on willhaben"))
-    if s.status in ("buying", "printed", "sent"):
-        shipping.update(s.id, label_path=name)
-    else:
-        shipping.update(s.id, label_path=name, status="labelled")
-        shipping.label_arrived(s.id)
+        return None
+    _store_label(s.id, name)
     return t("Label saved.")
+
+
+async def _drive_label(sess, conv: Conversation) -> tuple[bool, str]:
+    """Browser action "label": open the label link (or the chat), let Claude create the label in willhaben's dialog
+    and open it; the PDF is caught from the browser. The link is tried once more at the end: after the label was
+    created it may give the PDF directly."""
+    s = shipping.open_for(conv.id)
+    if s is None:
+        raise PayLiveryError(t("No shipment for this chat yet"))
+    if s.label_path:
+        return True, t("The label is already saved.")
+    catch = _LabelCatch(s.id)
+    catch.attach(sess.context)
+    try:
+        ok, msg = await _drive(sess, conv, "label", None, catch)
+        name = await catch.settle()
+    finally:
+        catch.detach()
+    url = (conv.paylivery or {}).get("label_url")
+    if not name and url:
+        name = await _download(s.id, [url])
+    if not name:
+        return False, msg if not ok else _stopped(t("willhaben showed no label PDF"))
+    _store_label(s.id, name)
+    return True, t("Label created and saved.")
 
 
 def mark_shipped(conversation_id: str) -> str:
@@ -1108,7 +1227,7 @@ def _ui(name: str) -> dict[str, str]:
     return {
         "accept": {"label": t("Accept offer"), "confirm": t("Accept this offer on willhaben now?")},
         "decline": {"label": t("Decline offer"), "confirm": t("Decline this offer on willhaben now?")},
-        "label": {"label": t("Download label"), "confirm": ""},
+        "label": {"label": t("Get label"), "confirm": ""},     # creates the label on willhaben if needed: no confirm
         "mark_shipped": {"label": t("Mark shipped"), "confirm": ""},     # only in this app: no confirm, no undo needed
         "offer": {"label": t("Send offer"), "confirm": t("Send this offer on willhaben for the amount entered?")},
         "buy": {"label": t("Buy now & pay"), "confirm": t("Buy now and pay with willhaben PayLivery? This runs on willhaben.")},
@@ -1207,6 +1326,9 @@ def _start_url(conv: Conversation, action: str) -> str:
     ad_url = (conv.ad_context or {}).get("url") or ""
     if action in MONEY_ACTIONS and _fetchable(ad_url):
         return ad_url
+    label_url = (conv.paylivery or {}).get("label_url") or ""
+    if action == "label" and _fetchable(label_url):
+        return label_url
     return CHAT_URL
 
 
@@ -1223,6 +1345,10 @@ def _goal(action: str, amount: float | None) -> str:
         "buy": f"Die Anzeige zum Preis {money} kaufen und mit willhaben PayLivery bezahlen: Sofort kaufen, dann "
                f"Schritt für Schritt bis zur Zahlung. Kartendaten NICHT ausfüllen. AGB und Zustimmungen NICHT "
                f"anhaken: ist ein Häkchen dafür Pflicht, status need_human.",
+        "label": "Das Versandetikett (Paketschein) dieses Verkaufs ERSTELLEN und HERUNTERLADEN: fragt ein Dialog, ob "
+                 "es erstellt werden soll, bestätigen; danach den Knopf zum Herunterladen, Öffnen oder Drucken des "
+                 "Etiketts drücken. Ist der Verkauf nicht auf der Seite, im Chat mit dem Gesprächspartner suchen. "
+                 "Sonst nichts ändern.",
     }[action]
 
 
@@ -1473,13 +1599,15 @@ async def _bank_push(conv: Conversation, amount: float | None) -> None:
         log.warning("PayLivery bank push failed: %s", e)
 
 
-async def _drive(sess, conv: Conversation, action: str, amount: float | None) -> tuple[bool, str]:
+async def _drive(sess, conv: Conversation, action: str, amount: float | None,
+                 catch: _LabelCatch | None = None) -> tuple[bool, str]:
     """The Claude-guided step loop of one action. Returns (done, message for the user)."""
     with sess.ui_in_use():      # can wait minutes for the bank: the visible page must not be parked meanwhile
-        return await _drive_steps(sess, conv, action, amount)
+        return await _drive_steps(sess, conv, action, amount, catch)
 
 
-async def _drive_steps(sess, conv: Conversation, action: str, amount: float | None) -> tuple[bool, str]:
+async def _drive_steps(sess, conv: Conversation, action: str, amount: float | None,
+                       catch: _LabelCatch | None = None) -> tuple[bool, str]:
     await sess.open_url(_start_url(conv, action))
     page = sess.ui_page
     await _settle(page)
@@ -1487,6 +1615,8 @@ async def _drive_steps(sess, conv: Conversation, action: str, amount: float | No
     goal = _goal(action, amount)
     final_clicked = card_filled = pushed = False
     for step in range(MAX_STEPS):
+        if catch is not None and await catch.settle():        # label: the PDF is there, whatever the page says
+            return True, t("Label saved.")
         reason = await _bank_reason(page)
         if reason:
             if action != "buy":
@@ -1518,6 +1648,8 @@ async def _drive_steps(sess, conv: Conversation, action: str, amount: float | No
             final_clicked = final_clicked or verdict == "final"
             await _settle(page)
             await _dismiss(page)
+        if catch is not None and await catch.settle():
+            return True, t("Label saved.")
         if plan["status"] == "done":
             if final_clicked:
                 return True, plan["note"] or t("Done.")
@@ -1550,7 +1682,10 @@ async def run_action(conversation_id: str, action: str, amount: float | None = N
             if not sess.capturing:                  # a recording the user started stays theirs
                 sess.start_capture(f"paylivery-{action}")
                 owned = True
-            ok, result = await _drive(sess, conv, action, amount)
+            if action == "label":
+                ok, result = await _drive_label(sess, conv)
+            else:
+                ok, result = await _drive(sess, conv, action, amount)
         except PayLiveryError as e:
             result = str(e)
         except Exception as e:  # noqa: BLE001 - the page stays open for the user
@@ -1596,11 +1731,11 @@ async def start_action(conversation_id: str, action: str, amount_text: str = "")
     else:
         amount = None
     check_action(conv, action, amount)
-    if action == "label":
-        return await download_label(conversation_id)
     if action == "mark_shipped":
         return mark_shipped(conversation_id)
     if conversation_id in _busy:
         raise PayLiveryError(t("A PayLivery action is already running in this chat"))
+    if action == "label" and (msg := await download_label(conversation_id)) is not None:
+        return msg                              # the link gave the PDF: no browser needed
     _spawn(run_action(conversation_id, action, amount))
     return t("Started in the browser. The result appears in the PayLivery card.")
