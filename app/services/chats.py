@@ -651,12 +651,34 @@ async def mark_read(conversation_id: str) -> int:
     return n
 
 
+class AlreadySent(ValueError):
+    """The draft went out already or is going out right now (a second tap on a push, Telegram and Home Assistant
+    together, a double click)."""
+
+
+_in_flight: set[int] = set()   # drafts between the claim and mark_sent
+
+
 async def send_draft(draft_id: int, text: str) -> Draft:
-    """Send an approved draft. Raises EndpointUnknown until the send endpoint has been captured."""
+    """Send an approved draft, once: the claim (check + mark in flight) runs without an await in between, so two
+    callers in the event loop cannot both pass it. Raises EndpointUnknown until the send endpoint has been captured."""
     with session() as db:
         draft = db.get(Draft, draft_id)
     if draft is None:
         raise ValueError(t("Draft not found"))
+    if draft.status in ("sent", "discarded"):
+        raise AlreadySent(t("This answer was already sent") if draft.status == "sent" else t("This draft was discarded"))
+    if draft_id in _in_flight:
+        raise AlreadySent(t("This answer is being sent right now"))
+    _in_flight.add(draft_id)
+    try:
+        return await _send_claimed(draft, text)
+    finally:
+        _in_flight.discard(draft_id)
+
+
+async def _send_claimed(draft: Draft, text: str) -> Draft:
+    draft_id = draft.id
     text = text.strip()
     await mark_read(draft.conversation_id)   # nobody answers without having read the message
     try:

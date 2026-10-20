@@ -146,5 +146,8 @@
  "Counted from today, so the window moves along. Empty: no limit. Older conversations are left out of the sync and of the chat list.": "Ab heute gezählt, der Zeitraum wandert also mit. Leer: keine Grenze. Ältere Unterhaltungen werden nicht synchronisiert und in der Chatliste ausgeblendet.",
  "Hide hidden and older chats": "Ausgeblendete und ältere Chats verbergen",
  "Show {n} hidden or older chats": "{n} ausgeblendete oder ältere Chats zeigen",
- "Goes out in a few seconds – until then you can take it back here.": "Geht in ein paar Sekunden raus – bis dahin kannst du sie hier zurücknehmen."
+ "Goes out in a few seconds – until then you can take it back here.": "Geht in ein paar Sekunden raus – bis dahin kannst du sie hier zurücknehmen.",
+ "This answer was already sent": "Diese Antwort wurde schon gesendet",
+ "This draft was discarded": "Dieser Entwurf wurde verworfen",
+ "This answer is being sent right now": "Diese Antwort wird gerade gesendet"
 }

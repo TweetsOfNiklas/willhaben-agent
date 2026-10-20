@@ -189,6 +189,8 @@ async def _handle(event_data: dict[str, Any]) -> str | None:
         return None
     try:
         await chats.send_draft(draft_id, text)
+    except chats.AlreadySent:
+        return None            # the other tap (or the dashboard) is sending it: nothing to report twice
     except Exception as e:  # noqa: BLE001 - report every failure back to the phone
         await notify("auto_reply", t("Sending failed"), str(e)[:200],
                      url=f"{get_settings().public_url.rstrip('/')}/chats/{d.conversation_id}")
