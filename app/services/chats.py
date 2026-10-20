@@ -559,8 +559,10 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         result = await get_backend(req["backend"]).complete(system=req["system"], prompt=req["prompt"],
                                                             schema=req["schema"])
     draft = draft_from(result, conversation_id, auto=auto, buyer=buy is not None)
-    draft.paylivery = paylivery_advice.clean((result.data or {}).get("paylivery_action"),
-                                             *paylivery_advice.for_draft(conv, ad))
+    pl_args = paylivery_advice.for_draft(conv, ad)
+    draft.paylivery = paylivery_advice.clean((result.data or {}).get("paylivery_action"), *pl_args,
+                                             before=paylivery_advice.previous_amount(
+                                                 conversation_id, (pl_args[0] or {}).get("offer")))
     with session() as db:
         db.add(draft)
         db.commit()
@@ -614,7 +616,8 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         rules = f"{rules}\n\n{line}"
     pl, pl_asking, pl_floor = paylivery_advice.for_draft(conv, ad)
     if pl:                                        # an open PayLivery offer: the draft suggests the step on willhaben too
-        rules = f"{rules}\n\n{paylivery_advice.prompt_block(pl, pl_asking, pl_floor)}"
+        before = paylivery_advice.previous_amount(conv.id, pl["offer"]) if conv.id else None
+        rules = f"{rules}\n\n{paylivery_advice.prompt_block(pl, pl_asking, pl_floor, before)}"
         schema = paylivery_advice.schema(schema)
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,

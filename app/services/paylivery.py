@@ -1258,11 +1258,16 @@ def _eur_plain(v: float) -> str:
     return f"{v:.2f}".replace(".", ",")
 
 
+_CONV_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
 def _start_url(conv: Conversation, action: str) -> str:
+    """Where the browser starts: the ad for offering and buying, else this chat itself (/iad/myprofile/chat/<id>, as
+    recorded): from the chat list the conversation may be out of sight, and the step stops there."""
     ad_url = (conv.ad_context or {}).get("url") or ""
     if action in ("offer", "buy") and _fetchable(ad_url):
         return ad_url
-    return CHAT_URL
+    return f"{CHAT_URL}/{conv.id}" if _CONV_ID.fullmatch(conv.id or "") else CHAT_URL
 
 
 def _goal(action: str, amount: float | None, role: str | None = None) -> str:

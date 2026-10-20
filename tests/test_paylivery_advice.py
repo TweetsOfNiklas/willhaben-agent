@@ -92,3 +92,19 @@ async def test_an_offer_notice_writes_a_draft(monkeypatch):
         conv = db.get(Conversation, "s-adv")
     await pa.on_stage(conv, "offer_received", conv.paylivery)
     assert asked == ["s-adv"]
+
+
+def test_a_counter_offer_without_amount_keeps_the_previous_one():
+    assert pa.clean({"action": "counter", "amount": None}, SELLER, 80, None, before=50)["amount"] == 50
+    assert "behalte diesen Betrag" in pa.prompt_block(SELLER, 80, None, 50)
+    _seller_chat()
+    with session() as db:
+        db.add(Draft(conversation_id="s-adv", text="x", paylivery={"action": "counter", "amount": 50.0, "offer": 30.0}))
+        db.commit()
+    assert pa.previous_amount("s-adv", 30.0) == 50.0 and pa.previous_amount("s-adv", 40.0) is None
+
+
+def test_chat_steps_start_in_the_conversation_itself():
+    conv = Conversation(id="f3dee5b8-9973-4ccc-8e01-013ae0bcefd9", ad_context={"url": "https://www.willhaben.at/iad/x"})
+    assert paylivery._start_url(conv, "counter") == paylivery.CHAT_URL + "/f3dee5b8-9973-4ccc-8e01-013ae0bcefd9"
+    assert paylivery._start_url(Conversation(id="c1"), "accept") == paylivery.CHAT_URL

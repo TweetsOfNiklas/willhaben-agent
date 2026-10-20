@@ -44,9 +44,11 @@ def _eur(v: float | None) -> str:
     return "-" if v is None else f"{v:.2f} €".replace(".", ",")
 
 
-def prompt_block(p: dict[str, Any], asking: float | None, floor: float | None) -> str:
+def prompt_block(p: dict[str, Any], asking: float | None, floor: float | None, before: float | None = None) -> str:
     if p["role"] == "seller":
-        return (f"Offene PayLivery-Anfrage des Käufers auf willhaben: {_eur(p['offer'])} (Angebotspreis {_eur(asking)}"
+        keep = (f"Bisher vorgesehenes Gegenangebot: {_eur(before)} – behalte diesen Betrag, außer die Anweisung "
+                "nennt einen anderen.\n") if before else ""
+        return keep + (f"Offene PayLivery-Anfrage des Käufers auf willhaben: {_eur(p['offer'])} (Angebotspreis {_eur(asking)}"
                 + (f", Mindestpreis {_eur(floor)}" if floor else "") + ").\n"
                 "Schlag in paylivery_action vor, was der Verkäufer auf willhaben damit tun soll: accept (annehmen), "
                 "counter (Gegenangebot, amount = Betrag: zwischen Anfrage und Angebotspreis, eher näher am "
@@ -63,8 +65,11 @@ def schema(base: dict[str, Any]) -> dict[str, Any]:
             "required": [*base["required"], "paylivery_action"]}
 
 
-def clean(raw: Any, p: dict[str, Any] | None, asking: float | None, floor: float | None) -> dict[str, Any] | None:
-    """The suggestion as stored on the draft ({"action", "amount", "offer"}), or None for none or nothing open."""
+def clean(raw: Any, p: dict[str, Any] | None, asking: float | None, floor: float | None,
+          before: float | None = None) -> dict[str, Any] | None:
+    """The suggestion as stored on the draft ({"action", "amount", "offer"}), or None for none or nothing open.
+    A counter offer without an amount keeps `before` (the previous draft's, maybe set by the owner), else the middle
+    between offer and price."""
     if not p or not isinstance(raw, dict) or raw.get("action") not in ACTIONS[1:]:
         return None
     offer, action = p["offer"], raw["action"]
@@ -74,7 +79,7 @@ def clean(raw: Any, p: dict[str, Any] | None, asking: float | None, floor: float
     if action == "accept" and floor and offer < floor:
         action, amount = "counter", None
     if action == "counter":
-        amount = amount or (round((offer + asking) / 2) if asking else None)
+        amount = amount or before or (round((offer + asking) / 2) if asking else None)
         if amount is not None:
             if floor:
                 amount = max(amount, floor)
@@ -84,6 +89,20 @@ def clean(raw: Any, p: dict[str, Any] | None, asking: float | None, floor: float
         if amount is None or amount <= offer:             # nothing to counter: the offer reaches the price
             action, amount = ("accept" if asking and offer >= asking - 0.005 else "decline"), None
     return {"action": action, "amount": amount if action == "counter" else None, "offer": offer}
+
+
+def previous_amount(conversation_id: str, offer: float | None) -> float | None:
+    """The counter offer amount of the newest draft for the same open offer (a redraft keeps it)."""
+    from sqlmodel import col, select
+
+    from app.db import Draft, session
+    with session() as db:
+        for d in db.exec(select(Draft).where(Draft.conversation_id == conversation_id)
+                         .order_by(col(Draft.id).desc()).limit(5)):
+            step = d.paylivery or {}
+            if step.get("offer") == offer and step.get("amount"):
+                return float(step["amount"])
+    return None
 
 
 def for_draft(conv: Conversation, ad: MyAd | None) -> tuple[dict[str, Any] | None, float | None, float | None]:
