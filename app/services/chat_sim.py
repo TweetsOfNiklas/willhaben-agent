@@ -463,7 +463,7 @@ async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[
     out = await get_backend("purchase", model=sim.model).complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
                                                                 schema=PURCHASE_OPENER_SCHEMA)
     text = str((out.data or {}).get("message") or "").strip()
-    problems = purchase.text_problems(text, max_price=p.max_price, address_ok=False) if text else [t("empty answer")]
+    problems = purchase.text_problems(text, max_price=p.max_price, address_ok=False, item_max=purchase.item_ceiling(p)) if text else [t("empty answer")]
     return {"who": "me", "text": text, "at": utcnow().isoformat(), "auto": not problems, "opener": True,
             "reason": t("Opening message of the purchase"), "blockers": problems, "intent": None,
             "price": (out.data or {}).get("opening_offer"), "notes": [], "purchase": None, "meetup": None,

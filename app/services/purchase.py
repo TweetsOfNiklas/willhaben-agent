@@ -82,7 +82,11 @@ class PurchaseError(RuntimeError):
 
 # ------------------------------------------------------------------ numbers, IBAN, text guards
 _NUMBER = r"\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+\.\d{1,2}|\d+"
-_AMOUNT = re.compile(rf"(?:€|\bEUR\b)\s*({_NUMBER})|(?<![\w.,])({_NUMBER})\s*(?:€|\bEUR\b)", re.I)
+_CURRENCY = r"(?:€|\beur(?:o|os)?\b)"
+# "€ 120", "120 €", "EUR 120", "120 Euro", and the dash forms "120,-" / "120.-" / "120,–"
+_AMOUNT = re.compile(rf"{_CURRENCY}\s*({_NUMBER})|(?<![\w.,])({_NUMBER})(?:\s*{_CURRENCY}|\s?[,.][-–](?![\d-]))", re.I)
+# an amount right after these words is a total (incl. shipping and fee): compared with the maximum itself
+_TOTAL_BEFORE = re.compile(r"(?:inkl\.?|inklusive|samt|mit\s+versand|gesamt|insgesamt|zusammen|total)\W*(?:\w+\W+){0,3}$", re.I)
 _IBAN_TEXT = re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,8}\b", re.I)
 _CARD_TEXT = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}\d(?!\d)")
 # Words of the agent's instructions or AI self-talk (topic.INTERNAL) plus the purchase's own: never to the seller
@@ -98,13 +102,21 @@ def _to_float(num: str) -> float:
 
 
 def amounts(text: str | None) -> list[float]:
-    """Every euro amount in a text: "€ 12,50", "12,50 €", "EUR 300"."""
-    out = []
-    for m in _AMOUNT.finditer(text or ""):
+    """Every euro amount in a text: "€ 12,50", "12,50 €", "EUR 300", "120 Euro", "120,-"."""
+    return [a for a, _ in _amounts_in(text)]
+
+
+def _amounts_in(text: str | None) -> list[tuple[float, bool]]:
+    """(amount, is_total) for every euro amount; is_total: "inkl. Versand 125 €", "insgesamt 125 €"."""
+    text, out = text or "", []
+    for m in _AMOUNT.finditer(text):
         try:
-            out.append(_to_float(m.group(1) or m.group(2)))
+            value = _to_float(m.group(1) or m.group(2))
         except ValueError:
             continue
+        before, after = text[max(0, m.start() - 40):m.start()], text[m.end():m.end() + 30]
+        out.append((value, bool(_TOTAL_BEFORE.search(before)
+                                or re.match(r"\W*(?:inkl|inklusive|samt|mit\s+versand|gesamt)", after, re.I))))
     return out
 
 
@@ -157,13 +169,17 @@ def _address_hits(text: str) -> list[str]:
     return hits
 
 
-def text_problems(text: str | None, *, max_price: float | None, address_ok: bool) -> list[str]:
-    """Reasons why one of our own messages must not go out (empty list = fine)."""
+def text_problems(text: str | None, *, max_price: float | None, address_ok: bool,
+                  item_max: float | None = None) -> list[str]:
+    """Reasons why one of our own messages must not go out (empty list = fine). An amount is an item price unless
+    the words around it make it a total: an item price may reach `item_max` (what the maximum leaves after shipping and
+    the fee), a total the maximum itself."""
     why = []
     if max_price:
-        for a in amounts(text):
-            if a > max_price + 0.005:
-                why.append(t("Amount {amount} is above your maximum {max}", amount=_money(a), max=_money(max_price)))
+        for a, is_total in _amounts_in(text):
+            cap = max_price if is_total or item_max is None else min(item_max, max_price)
+            if a > cap + 0.005:
+                why.append(t("Amount {amount} is above your maximum {max}", amount=_money(a), max=_money(cap)))
                 break
     if _IBAN_TEXT.search(text or ""):
         why.append(t("Bank details (IBAN) in our own message"))
@@ -703,7 +719,7 @@ async def _begin_inner(pid: int) -> None:
         text = str((out.data or {}).get("message") or "").strip()
         if not text:
             return await _fail(pid, t("Claude wrote no opening message."))
-        problems = text_problems(text, max_price=row.max_price, address_ok=False)
+        problems = text_problems(text, max_price=row.max_price, address_ok=False, item_max=item_ceiling(row))
         offer = _num((out.data or {}).get("opening_offer"))   # direct: incl. shipping, so never below the item target
         if offer and target and offer < target - max(1.0, target * WISH_SLACK):
             problems.append(t("Opening offer {amount} is below your wish price {wish}", amount=_money(offer),
@@ -838,7 +854,8 @@ def blockers(p: Purchase, d: Draft, msgs: list[Message]) -> list[str]:
     why = []
     if ps.get("stage") == "needs_user":
         why.append(t("Claude needs your decision: {reason}", reason=ps.get("reason") or "-"))
-    why += text_problems(d.text, max_price=p.max_price, address_ok=p.mode == "direct" and p.status in AFTER_AGREEMENT)
+    why += text_problems(d.text, max_price=p.max_price, address_ok=p.mode == "direct" and p.status in AFTER_AGREEMENT,
+                         item_max=item_ceiling(p))
     why += topic.too_long(d.text)                     # the instruction words are in text_problems already
     if p.max_price:
         # PayLivery: the offer is the item price, the buyer pays shipping and buyer protection on willhaben (the ceiling
