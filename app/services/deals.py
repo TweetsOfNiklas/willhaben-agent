@@ -76,6 +76,10 @@ QUANTILE_SEGMENTS = {"bargain": (0.0, 0.10), "cheap": (0.10, 0.25), "fair": (0.2
                      "expensive": (0.75, 0.90), "very_expensive": (0.90, 1.0)}
 MISMATCH_LOW, MISMATCH_HIGH = 0.15, 2.0   # comparables median outside this × new price: the new price is ignored
 MISMATCH_HINT = 1.25                      # comparables median above this × new price: a hint only
+# comparables median below this × new price: they do not rate a used item; the new price does. A used item in good
+# condition sells for about half to three quarters of new; a market at a quarter of it is cheaper models or variants
+# the filters missed (five ads at 50–90 € for a 299 € gateway made 180 € "very expensive")
+MARKET_LOW = 0.35
 # the zones bar's scale in % of the new price; it ends past the highest limit a user may set, so that zone always shows
 AXIS_MIN, AXIS_MAX = 110, price_zones.HIGH + 10
 
@@ -357,7 +361,8 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
     if new_price and new_price > 0 and comp and scale \
             and not MISMATCH_LOW <= comp["median"] / new_price <= MISMATCH_HIGH:
         ignored, new_price = round(comp["median"] * 100 / new_price), None
-    market = bool(new_price and comp and scale and price_zones.group(condition) == "used")
+    market = bool(new_price and comp and scale and price_zones.group(condition) == "used"
+                  and comp["median"] >= MARKET_LOW * new_price)
     above_new = None
     if market:
         # a used item with a market of its own: the comparables decide, but one at or above the lowest new price is
@@ -380,6 +385,8 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
                 and (scale or comp["median"] >= MISMATCH_LOW * new_price) else None,
                 "mismatch": round(comp["median"] * 100 / new_price)
                 if comp and scale and comp["median"] > MISMATCH_HINT * new_price else None,
+                "comparables_low": round(comp["median"] * 100 / new_price)
+                if comp and scale and g == "used" and comp["median"] < MARKET_LOW * new_price else None,
                 "suspicious": exact < lim[0] / 2 or bool(comp and scale and price < 0.5 * comp["p25"])}
     if comp and scale:
         lvl = comparables_level(price, comp)
@@ -1660,6 +1667,9 @@ def deal_prompt(ad: AdDetail, res: dict[str, Any], language: str, photo: str | N
                      f"Geizhals-Neupreis (Zonen des Nutzers für {'Neuware' if pos['group'] == 'new' else 'Gebrauchtes'}: "
                      f"Schnäppchen unter {z[0]} %, günstig ab {z[0]} %, fair ab {z[1]} %, teuer ab {z[2]} %, "
                      f"sehr teuer ab {z[3]} %)")
+        if pos.get("comparables_low"):
+            lines.append(f"Die Vergleichsanzeigen kosten im Mittel nur {pos['comparables_low']} % des Neupreises – "
+                         "vermutlich günstigere Modelle oder Varianten, deshalb zählt der Neupreis.")
     elif pos.get("pos") is not None:
         lines.append(f"Einordnung der App: {LEVEL_DE[pos['level']]} unter den Vergleichsanzeigen "
                      "(die mittlere Hälfte gilt als fair)"

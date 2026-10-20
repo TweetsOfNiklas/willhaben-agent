@@ -52,5 +52,6 @@
  "{price}: {level}, {n} % of the new price": "{price}: {level}, {n} % vom Neupreis",
  "{price}: {level} among the comparable ads": "{price}: {level} unter den Vergleichsanzeigen",
  "By the Geizhals new price alone; the price check of the ad also weighs comparable ads.": "Nur nach dem Geizhals-Neupreis; die Preisprüfung der Anzeige bezieht auch Vergleichsanzeigen ein.",
- "This ad costs {pct} % of the lowest new price, so it counts as expensive at best, however dear the other ads are.": "Diese Anzeige kostet {pct} % des niedrigsten Neupreises und gilt deshalb höchstens als teuer, egal wie teuer die anderen Anzeigen sind."
+ "This ad costs {pct} % of the lowest new price, so it counts as expensive at best, however dear the other ads are.": "Diese Anzeige kostet {pct} % des niedrigsten Neupreises und gilt deshalb höchstens als teuer, egal wie teuer die anderen Anzeigen sind.",
+ "Comparable ads cost only {n} % of the new price on average – probably cheaper models, so the new price rates this ad.": "Vergleichsanzeigen kosten im Mittel nur {n} % des Neupreises – vermutlich günstigere Modelle, deshalb bewertet der Neupreis diese Anzeige."
 }
