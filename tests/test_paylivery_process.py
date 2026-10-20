@@ -821,7 +821,8 @@ async def test_seller_counter_offer_fills_the_amount_and_presses_send(browser):
 def test_click_verdicts_keep_offer_and_counter_apart():
     assert paylivery.click_verdict("counter", "Gegenangebot senden") == "final"
     assert paylivery.click_verdict("offer", "Gegenangebot senden") == "refused"
-    assert paylivery.click_verdict("counter", "Preisvorschlag senden") == "refused"
+    assert paylivery.click_verdict("counter", "Angebot senden") == "final"          # willhaben's window button
+    assert paylivery.click_verdict("counter", "Anfrage annehmen") == "refused"
     assert paylivery.click_verdict("counter", "Gegenangebot machen") == "neutral"      # opens the form only
 
 

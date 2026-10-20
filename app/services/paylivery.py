@@ -211,7 +211,8 @@ FINAL_CLICK = {   # the one commit button per action; any other action's commit 
     "problem": re.compile(r"problem\s+melden", re.I),
     "offer": re.compile(r"(?<!gegen)(?:vorschlag|angebot)\w*\s+(?:senden|abschicken|absenden)|"
                         r"^\s*(?:senden|abschicken|absenden)\s*$", re.I),
-    "counter": re.compile(r"gegen(?:angebot|vorschlag)\w*\s+(?:senden|abschicken|absenden)|"
+    # willhaben's counter offer window ("Neuer Preisvorschlag") sends with "Angebot senden" (seen 2026-10-20)
+    "counter": re.compile(r"(?:gegen)?(?:angebot|(?:preis)?vorschlag)\w*\s+(?:senden|abschicken|absenden)|"
                           r"^\s*(?:senden|abschicken|absenden)\s*$", re.I),
     "buy": re.compile(r"\b(?:sofort\s+|jetzt\s+)?kaufen\b|bezahlen|zahlungspflichtig", re.I),
 }
