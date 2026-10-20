@@ -411,23 +411,59 @@ def test_system_prompt_routes(backend):
         assert c.post("/simulator-prompts/nope/save", data={"text": "x"}).status_code == 404
 
 
-def test_the_run_with_a_proposal_shows_its_answers():
-    """A scenario run with an open proposal keeps its own answers; the scenario page shows them, open, with the result."""
+async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
+    """Round 1 answers with the current rules; a 👎 with a note and feedback make Claude revise the system prompt;
+    round 2 answers with the revision (an open proposal) and can be applied."""
     from fastapi.testclient import TestClient
 
     from app.db import SimChat, session
+    from app.llm.base import LLMResult
     from app.main import app
-    run = {"at": "2026-10-20T22:32:21+00:00", "passed": True, "variant": "proposal:5", "results": [],
-           "turns": [{"who": "them", "text": "Geht 20?"}, {"who": "me", "text": "Leider nein, 65 ist das Minimum.",
-                                                          "auto": False, "blockers": ["Preis"]}]}
+    from app.services import chat_sim
+
     with session() as db:
-        s = SimChat(title="Zu niedrig", role="seller", platform="willhaben", scenario=True, expectations=[],
-                    turns=run["turns"], proposal_run=run)
+        s = SimChat(title="Zu niedrig", role="seller", platform="willhaben", turns=[
+            {"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": "alt"}])
         db.add(s)
         db.commit()
         db.refresh(s)
+    seen = []
+
+    async def replay(sim, overrides=None):
+        seen.append(overrides)
+        text = "Nein, 65 ist das Minimum." if overrides else "Ja, komm vorbei und hol es ab."
+        return [{"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": text, "auto": False}]
+
+    async def check(sim, turns):
+        return []
+    monkeypatch.setattr(chat_sim, "replay", replay)
+    monkeypatch.setattr(chat_sim, "check", check)
+    prompts = []
+
+    class Backend:
+        async def complete(self, **kw):
+            prompts.append(kw["prompt"])
+            return LLMResult(data={"findings": [], "new_text": "NEUER PROMPT", "summary": "Keine Abholung zusagen."},
+                             model="fake")
+    monkeypatch.setattr(chat_sim, "get_backend", lambda purpose=None, model=None: Backend())
+
+    started = []
+    monkeypatch.setattr(chat_sim.jobs, "submit", lambda key, label, fn, **kw: started.append(fn))
+
+    assert chat_sim.start_rounds(s.id)
+    await started.pop()(type("J", (), {"progress": lambda *a, **k: None})())
+    r1 = chat_sim.get(s.id).iterations[0]
+    assert r1["n"] == 1 and r1["proposal_id"] is None and seen == [None]
+    assert not chat_sim.next_round(s.id, "")                       # nothing to go on yet
+    chat_sim.rate_round(s.id, 1, 1, "down", "nie Abholung zusagen")
+    assert chat_sim.next_round(s.id, "kürzer")
+    await started.pop()(type("J", (), {"progress": lambda *a, **k: None})())
+    sim = chat_sim.get(s.id)
+    r2 = sim.iterations[1]
+    assert "nie Abholung zusagen" in prompts[0] and "kürzer" in prompts[0]
+    assert r2["n"] == 2 and r2["summary"] == "Keine Abholung zusagen." and seen[1] == {"auto_reply_system": "NEUER PROMPT"}
+    assert sim.iterations[0]["feedback"] == "kürzer"
     with TestClient(app) as c:
         page = c.get(f"/simulator?id={s.id}").text
-    block = page[page.index('data-sim-run="proposal"'):]
-    assert "Run with the proposal" in block[:400] and " open>" in block[:200] and "Leider nein, 65 ist das Minimum." in block
-    assert 'data-sim-run="last"' not in page
+    assert 'id="sim-rounds"' in page and "Revise and play round 3" in page and "Apply this version" in page
+    assert "Nein, 65 ist das Minimum." in page and "Claude changed the system prompt:" in page

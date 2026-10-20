@@ -1079,6 +1079,113 @@ def discard_proposal(pid: int) -> None:
             _save(s.id, proposal_run=None)
 
 
+# ------------------------------------------------------------------ rounds: refine the system prompt on one chat
+# Round 1 replays the chat's other side with the current rules; the owner rates the answers (👍/👎 + note) and writes
+# feedback; Claude revises the system prompt of the automatic answers from that round alone, and the next round
+# replays with the revision (an open proposal). Each round builds on the previous one's text; "Apply" takes it over.
+ROLE_KIND = {"seller": "auto_reply", "buyer": "purchase"}
+MAX_ROUNDS_KEPT = 12
+
+
+def _round_text(sim: SimChat, r: dict[str, Any] | None) -> str:
+    """The system prompt a round ran with: its proposal's text, else the current one."""
+    p = proposal(r.get("proposal_id")) if r else None
+    return p.new_text if p is not None else system_prompts.get(ROLE_KIND[sim.role])
+
+
+async def _play_round(sim_id: int, proposal_id: int | None, summary: str = "") -> dict[str, Any]:
+    sim = get(sim_id)
+    p = proposal(proposal_id)
+    turns = await replay(sim, overrides_of(p) if p else None)
+    results = await check(sim, turns)
+    rounds = [dict(r) for r in (get(sim_id).iterations or [])]
+    r = {"n": (rounds[-1]["n"] + 1) if rounds else 1, "at": utcnow().isoformat(), "proposal_id": proposal_id,
+         "summary": summary, "turns": turns, "results": results, "passed": all(x["passed"] for x in results),
+         "feedback": ""}
+    _save(sim_id, iterations=[*rounds, r][-MAX_ROUNDS_KEPT:])
+    return r
+
+
+def start_rounds(sim_id: int) -> bool:
+    """Round 1 with the current rules (earlier rounds of this chat are dropped)."""
+    sim = get(sim_id)
+    if sim is None or not any(x.get("who") == "partner" for x in sim.turns or []):
+        return False
+
+    async def run(job: jobs.Job) -> str:
+        _save(sim_id, iterations=[])
+        job.progress(0, t("Round 1: answers with the current rules…"), f"sim:{sim_id}")
+        await _play_round(sim_id, None)
+        return t("Round 1 played")
+
+    return _start(sim_id, "round", t("Simulator: round"), run)
+
+
+def rate_round(sim_id: int, n: int, index: int, rating: str | None, note: str | None = None) -> None:
+    sim = get(sim_id)
+    rounds = [dict(r) for r in (sim.iterations or [])] if sim else []
+    r = next((x for x in rounds if x.get("n") == n), None)
+    if r is None or not (0 <= index < len(r.get("turns") or [])) or r["turns"][index].get("who") != "me":
+        return
+    r["turns"] = [dict(x) for x in r["turns"]]
+    r["turns"][index]["rating"] = rating if rating in ("up", "down") else None
+    if note is not None:
+        r["turns"][index]["note"] = note.strip()[:500] or None
+    _save(sim_id, iterations=rounds)
+
+
+def next_round(sim_id: int, feedback: str) -> bool:
+    """Claude revises the last round's system prompt from its ratings, failed expectations and the feedback; the
+    next round replays with the revision."""
+    sim = get(sim_id)
+    rounds = [dict(r) for r in (sim.iterations or [])] if sim else []
+    if not rounds or sim.role not in ROLE_KIND:
+        return False
+    feedback = (feedback or "").strip()[:2000]
+    last = rounds[-1]
+    rated = []
+    for i, x in enumerate(last.get("turns") or []):
+        if x.get("who") == "me" and (x.get("rating") or x.get("note")):
+            before = next((y["text"] for y in reversed(last["turns"][:i]) if y.get("who") == "partner"), "")
+            rated.append({"context": before, "answer": x["text"], "rating": x.get("rating") or "down",
+                          "note": x.get("note")})
+    failed = [{"scenario": sim.title, "expectation": r["label"], "detail": r["detail"]}
+              for r in last.get("results") or [] if not r.get("passed")]
+    if not (rated or failed or feedback):
+        return False
+    last["feedback"] = feedback
+    _save(sim_id, iterations=rounds)
+    kind = ROLE_KIND[sim.role]
+
+    async def run(job: jobs.Job) -> str:
+        job.progress(0, t("Claude revises the system prompt…"), f"sim:{sim_id}")
+        text = _round_text(sim, last)
+        out = await get_backend("chat").complete(
+            system=SIM_REVIEW_SYSTEM, prompt=sim_review_prompt(t(system_prompts.KINDS[kind][0]), text, rated, failed,
+                                                               feedback or None),
+            schema=SIM_REVIEW_SCHEMA)
+        data = out.data or {}
+        new = str(data.get("new_text") or "").strip()
+        if not new or new == text.strip():
+            raise LLMError(t("Claude found nothing to improve"))
+        summary = str(data.get("summary") or "").strip()
+        _open_proposal(sim.role, f"{kind}_system", system_prompts.get(kind), new, summary)
+        pid = open_proposals_for(sim.role, f"{kind}_system")
+        job.progress(1, t("Round {n}: answers with the revision…", n=last["n"] + 1), f"sim:{sim_id}")
+        await _play_round(sim_id, pid, summary)
+        return t("Round {n} played", n=last["n"] + 1)
+
+    return _start(sim_id, "round", t("Simulator: round"), run)
+
+
+def open_proposals_for(role: str, target: str) -> int | None:
+    with session() as db:
+        row = db.exec(select(SimProposal).where(SimProposal.status == "open", SimProposal.role == role,
+                                                SimProposal.target == target)
+                      .order_by(col(SimProposal.id).desc())).first()
+        return row.id if row else None
+
+
 def recover() -> None:
     """Startup: jobs live in memory only, so nothing runs any more."""
     with session() as db:

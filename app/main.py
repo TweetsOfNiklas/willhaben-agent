@@ -1278,6 +1278,7 @@ async def simulator_page(request: Request, id: int | None = None, msg: str | Non
     return render(request, "simulator.html", msg=msg, sims=chat_sim.all_chats(), sim=sim, ads=ads, live_ad=live_ad,
                   purchases=purchase_svc.recent(20), personas=chat_sim.PERSONAS, platforms=chat_sim.PLATFORMS,
                   expectations=chat_sim.EXPECTATIONS, proposals=chat_sim.open_proposals(), sim_diff=chat_sim.diff,
+                  proposal_of=chat_sim.proposal,
                   targets=chat_sim.TARGETS, expectation_label=chat_sim.expectation_label,
                   persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
                   can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
@@ -1381,7 +1382,7 @@ async def simulator_say(sim_id: int, text: str = Form("")):
 
 @app.post("/simulator/{sim_id}/{action}")
 async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: str = Form(""),
-                           kind: str = Form(""), value: str = Form("")):
+                           kind: str = Form(""), value: str = Form(""), feedback: str = Form("")):
     _sim_or_404(sim_id)
     msg = None
     if action == "reply":
@@ -1395,6 +1396,14 @@ async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: 
     elif action == "run":
         ok = chat_sim.run_scenarios([sim_id]) > 0
         msg = None if ok else t("Nothing to run: the scenario needs messages and is not running already")
+    elif action == "rounds":                    # round 1 of refining the system prompt on this chat
+        ok = chat_sim.start_rounds(sim_id)
+        msg = None if ok else t("Busy, or the chat has no message of the other side to replay")
+    elif action == "round":                     # the next round from my ratings and feedback
+        ok = chat_sim.next_round(sim_id, feedback)
+        msg = None if ok else t("Rate an answer or write feedback first (or wait until the chat is done)")
+        if ok:
+            return back(_sim_url(sim_id, None, "#sim-rounds"))
     elif action == "clear":
         chat_sim.clear(sim_id)
         ok = True
@@ -1418,8 +1427,11 @@ async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: 
 async def simulator_prompt(request: Request, sim_id: int, index: int, run: str = ""):
     """The whole prompt Claude got for one message (of the chat, or of its last run / the proposal's run)."""
     sim = _sim_or_404(sim_id)
-    turns = (sim.last_run or {}).get("turns") if run == "last" else \
-        (sim.proposal_run or {}).get("turns") if run == "proposal" else sim.turns
+    if run.startswith("round:") and run[6:].isdigit():
+        turns = next((r.get("turns") for r in sim.iterations or [] if r.get("n") == int(run[6:])), None)
+    else:
+        turns = (sim.last_run or {}).get("turns") if run == "last" else \
+            (sim.proposal_run or {}).get("turns") if run == "proposal" else sim.turns
     turns = turns or []
     if not 0 <= index < len(turns):
         raise HTTPException(404)
@@ -1431,6 +1443,12 @@ async def simulator_prompt(request: Request, sim_id: int, index: int, run: str =
 async def simulator_expect_remove(sim_id: int, index: int):
     chat_sim.remove_expectation(sim_id, index)
     return back(_sim_url(sim_id, anchor="#sim-expect"))
+
+
+@app.post("/simulator/{sim_id}/round/{n}/rate/{index}")
+async def simulator_round_rate(sim_id: int, n: int, index: int, rating: str = Form(""), note: str | None = Form(None)):
+    chat_sim.rate_round(sim_id, n, index, rating or None, note)
+    return back(_sim_url(sim_id, anchor=f"#round-{n}-{index}"))
 
 
 @app.post("/simulator/{sim_id}/rate/{index}")

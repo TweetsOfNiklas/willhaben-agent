@@ -312,9 +312,9 @@
   </div>
 
   {# composer #}
-  <div class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-4 pt-3 pb-4 max-md:bottom-[calc(60px+env(safe-area-inset-bottom))] md:px-5" id="sim-composer"{% if sim.busy %} data-pending-key="sim:{{ sim.id }}" data-refresh-also="sim-head sim-messages sim-expect sim-list sim-proposals"{% endif %}>
+  <div class="sticky bottom-0 z-[2] flex flex-col gap-2.5 border-t border-base-300 bg-base-100 px-4 pt-3 pb-4 max-md:bottom-[calc(60px+env(safe-area-inset-bottom))] md:px-5" id="sim-composer"{% if sim.busy %} data-pending-key="sim:{{ sim.id }}" data-refresh-also="sim-head sim-messages sim-rounds sim-expect sim-list sim-proposals"{% endif %}>
     {% if sim.busy %}
-    <div>{{ ui.pending('sim:' ~ sim.id, {'run': _("Scenario is running…"), 'suggest': _("Claude looks for a better rule…"), 'play': _("Simulating the conversation…"), 'partner': _("The other side writes…")}.get(sim.busy, _("Writing the automatic answer…")), _("Queued")) }}</div>
+    <div>{{ ui.pending('sim:' ~ sim.id, {'run': _("Scenario is running…"), 'round': _("Claude works on the next round…"), 'suggest': _("Claude looks for a better rule…"), 'play': _("Simulating the conversation…"), 'partner': _("The other side writes…")}.get(sim.busy, _("Writing the automatic answer…")), _("Queued")) }}</div>
     {% else %}
     <form method="post" action="/simulator/{{ sim.id }}/say" class="flex items-end gap-1.5">
       {# a template's next message of the other side waits here, to send or change #}
@@ -332,6 +332,81 @@
     </form>
     {% endif %}
   </div>
+
+  {# rounds: refine the system prompt on this chat, step by step. Each round replays the other side's messages; I rate
+     the answers (👍/👎 + what was wrong) and write feedback, Claude revises the prompt, the next round runs with it. #}
+  {% set has_partner = (sim.turns or [])|selectattr('who', 'equalto', 'partner')|list %}
+  {% if has_partner %}
+  <div class="border-t border-base-300 px-4 py-4 text-[13px] md:px-5" id="sim-rounds">
+    <div class="mb-2 flex flex-wrap items-center gap-2">
+      <h3 class="flex items-center gap-1.5 text-[13px] font-semibold">{{ ui.icon('sparkle', 14) }}{{ _("Refine the system prompt in rounds") }}</h3>
+      <span class="flex-1"></span>
+      <form method="post" action="/simulator/{{ sim.id }}/rounds"><button class="btn btn-sm {{ '' if sim.iterations else 'btn-primary' }}" {% if sim.busy %}disabled{% endif %}
+        {% if sim.iterations %}onclick="return confirm({{ _('Start again from round 1? The rounds so far are dropped.')|tojson|forceescape }})"{% endif %}>{{ ui.icon('play', 13) }}{{ _("Start again") if sim.iterations else _("Start round 1") }}</button></form>
+    </div>
+    {% if not sim.iterations %}<p class="text-[12px] text-muted">{{ _("Round 1 answers the other side's messages of this chat with your current rules. Rate the answers and say what should change; Claude revises the system prompt and round 2 answers with it – until you like it and apply it.") }}</p>{% endif %}
+    <div class="flex flex-col gap-3">
+    {% for r in sim.iterations or [] %}{% set last = loop.last %}{% set prop = proposal_of(r.proposal_id) if r.proposal_id else none %}
+      <details class="rounded-box border border-base-300 bg-base-100" id="round-{{ r.n }}" {% if last %}open{% endif %}>
+        <summary class="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2">
+          <b>{{ _("Round {n}", n=r.n) }}</b>
+          <span class="text-muted">{{ _("current rules") if not r.proposal_id else _("Claude's revision") }} · {{ r.at|local }}</span>
+          {% if r.results %}{{ ui.pill(_("passed") if r.passed else _("failed"), 'ok' if r.passed else 'bad') }}{% endif %}
+          {% if prop and prop.status == 'applied' %}{{ ui.pill(_("applied"), 'ok') }}{% endif %}
+        </summary>
+        <div class="flex flex-col gap-2 border-t border-base-300 px-3 py-3">
+          {% if r.summary %}<div class="mx-auto flex w-full max-w-[92%] flex-col gap-1 rounded-[10px] bg-brand-soft px-3 py-2 text-[12.5px]">
+            <span class="font-semibold text-primary">{{ ui.icon('sparkle', 12, 2, 'inline -mt-px') }} {{ _("Claude changed the system prompt:") }}</span>
+            <span class="whitespace-pre-wrap">{{ r.summary }}</span>
+            {% if prop %}<details><summary class="cursor-pointer text-muted">{{ _("Show the changes") }}</summary>
+              <pre class="mt-1 max-h-72 overflow-auto rounded bg-base-100 p-2 text-[11.5px] leading-snug whitespace-pre-wrap">{% for sign, line in sim_diff(prop) if sign != ' ' %}<span class="{{ 'text-success' if sign == '+' else 'text-error line-through' }}">{{ sign }} {{ line }}</span>
+{% endfor %}</pre></details>{% endif %}
+          </div>{% endif %}
+          {% for x in r.turns or [] %}{% set i = loop.index0 %}
+          {% if x.get('who') == 'me' %}
+          <div class="chat chat-end" id="round-{{ r.n }}-{{ i }}">
+            <div class="chat-header mb-0.5 text-[11.5px]">{% if x.get('auto') %}{{ ui.pill(_("would go out automatically"), 'ok') }}{% else %}{{ ui.pill(_("held back for approval"), 'warn') }}{% endif %}</div>
+            <div class="chat-bubble chat-bubble-primary max-w-[85%] whitespace-pre-wrap [overflow-wrap:anywhere] md:max-w-[72%] {{ '' if x.get('auto') else 'opacity-80' }}">{{ x.get('text') }}</div>
+            <div class="chat-footer mt-1 flex max-w-[85%] flex-col items-end gap-1 text-[12px] md:max-w-[72%]">
+              {% for b in x.get('blockers') or [] %}<span class="text-right text-warning">{{ b }}</span>{% endfor %}
+              {% if x.get('prompt') %}{{ prompt_details(sim.id, i, 'round:' ~ r.n) }}{% endif %}
+              {% if last %}
+              <form method="post" action="/simulator/{{ sim.id }}/round/{{ r.n }}/rate/{{ i }}" class="flex flex-wrap items-center justify-end gap-1" x-data="{ open: {{ 'true' if x.get('rating') == 'down' or x.get('note') else 'false' }} }">
+                <button name="rating" value="{{ '' if x.get('rating') == 'up' else 'up' }}" class="btn btn-xs {{ 'btn-success' if x.get('rating') == 'up' else 'btn-ghost' }}" title="{{ _('Good answer') }}">👍</button>
+                <button type="button" @click="open = !open" class="btn btn-xs {{ 'btn-error' if x.get('rating') == 'down' else 'btn-ghost' }}" title="{{ _('Bad answer') }}">👎</button>
+                <span x-show="open" x-cloak class="flex items-center gap-1">
+                  <input name="note" value="{{ x.get('note') or '' }}" placeholder="{{ _('What was wrong?') }}" class="input input-xs w-56 max-w-[50vw]">
+                  <button name="rating" value="down" class="btn btn-xs">{{ _("Save") }}</button>
+                </span>
+              </form>
+              {% elif x.get('rating') %}<span class="text-right text-muted">{{ '👍' if x.get('rating') == 'up' else '👎' }} {{ x.get('note') or '' }}</span>{% endif %}
+            </div>
+          </div>
+          {% else %}
+          <div class="chat chat-start"><div class="chat-bubble max-w-[85%] border border-base-300 bg-base-100 whitespace-pre-wrap text-base-content [overflow-wrap:anywhere] md:max-w-[72%]">{{ x.get('text') }}</div></div>
+          {% endif %}
+          {% endfor %}
+          {% if r.results %}<div class="flex flex-wrap gap-1.5">{% for e in r.results %}<span class="rounded-full px-2 py-0.5 text-[11.5px] {{ 'bg-ok-soft text-success' if e.passed else 'bg-bad-soft text-error' }}" title="{{ e.detail }}">{{ '✓' if e.passed else '✗' }} {{ e.label }}</span>{% endfor %}</div>{% endif %}
+          {% if r.feedback %}<div class="ml-auto max-w-[85%] rounded-[10px] bg-base-200 px-3 py-2 text-[12.5px]"><span class="text-muted">{{ _("Your feedback:") }}</span> {{ r.feedback }}</div>{% endif %}
+          {% if last %}
+          <form method="post" action="/simulator/{{ sim.id }}/round" class="mt-1 flex flex-col gap-1.5">
+            <textarea name="feedback" rows="2" class="textarea textarea-sm w-full bg-base-200 field-sizing-content" placeholder="{{ _('What should change in the next round? e.g. never confirm pickup on a price offer, shorter answers') }}"></textarea>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button class="btn btn-primary btn-sm" {% if sim.busy %}disabled{% endif %}>{{ ui.icon('sparkle', 13) }}{{ _("Revise and play round {n}", n=r.n + 1) }}</button>
+              {% if prop and prop.status == 'open' %}
+              <span class="flex-1"></span>
+              <button class="btn btn-sm btn-success" formaction="/simulator-proposal/{{ prop.id }}/apply" name="back_to" value="{{ sim.id }}" onclick="return confirm({{ _('Use this revised system prompt for the real automatic answers from now on?')|tojson|forceescape }})">{{ ui.icon('check', 13) }}{{ _("Apply this version") }}</button>
+              {% endif %}
+            </div>
+          </form>
+          {% endif %}
+        </div>
+      </details>
+    {% endfor %}
+    {% if sim.busy == 'round' %}<div class="flex items-center gap-2 text-primary"><span class="loading loading-dots loading-sm"></span>{{ _("Claude works on the next round…") }}</div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   {# scenario: expectations and the last run #}
   <div class="border-t border-base-300 px-4 py-4 text-[13px] md:px-5" id="sim-expect">
@@ -365,19 +440,6 @@
              :placeholder="{floor: {{ _('e.g. 80')|tojson|forceescape }}, ceiling: {{ _('e.g. 120')|tojson|forceescape }}, contains: {{ _('word, or a|b for either')|tojson|forceescape }}, not_contains: {{ _('word, or a|b for either')|tojson|forceescape }}, judge: {{ _('e.g. proposes a pickup time')|tojson|forceescape }}}[kind] || ''">
       <button class="btn btn-sm">{{ ui.icon('plus', 13) }}{{ _("Add") }}</button>
     </form>
-    {% for run, kind, title in [(sim.proposal_run, 'proposal', _("Run with the proposal {time}: the answers", time=sim.proposal_run.at|local) if sim.proposal_run else ''),
-                                (sim.last_run, 'last', _("Last run {time}: the answers", time=sim.last_run.at|local) if sim.last_run else '')] if run %}
-    {# the answers of a run: the normal one (current rules) and the one with an open proposal's rule change #}
-    <details class="mt-3" data-sim-run="{{ kind }}" {% if loop.first %}open{% endif %}><summary class="cursor-pointer text-[12.5px] text-muted">{{ title }} · <span class="{{ 'text-success' if run.passed else 'text-error' }}">{{ _("passed") if run.passed else _("failed") }}</span></summary>
-      <div class="mt-2 flex flex-col gap-1.5 text-[12.5px]">
-        {% for x in run.turns %}{% set ri = loop.index0 %}<div class="{{ 'ml-8 rounded-md bg-brand-soft px-2.5 py-1.5' if x.get('who') == 'me' else 'mr-8 rounded-md bg-base-200 px-2.5 py-1.5' }}">
-          <span class="whitespace-pre-wrap">{{ x.get('text') }}</span>
-          {% if x.get('prompt') %}{{ prompt_details(sim.id, ri, kind) }}{% endif %}
-          {% if x.get('who') == 'me' %}<span class="block text-[11.5px] {{ 'text-success' if x.get('auto') else 'text-warning' }}">{{ _("would go out automatically") if x.get('auto') else (x.get('blockers') or [_("held back for approval")])|join('; ') }}</span>{% endif %}
-        </div>{% endfor %}
-      </div>
-    </details>
-    {% endfor %}
     {% else %}
     <p class="text-[12px] text-muted">{{ _("Keep a good conversation as a scenario: add expectations like “never below the minimum price” or “recognises the scam”, then run all scenarios after every rule change.") }}</p>
     {% endif %}

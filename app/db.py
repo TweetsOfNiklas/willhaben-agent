@@ -384,6 +384,9 @@ class SimChat(SQLModel, table=True):
     expectations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # [{kind, value}]
     last_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {at, passed, results, turns, variant}
     proposal_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the same with the open proposal
+    # rounds of refining the system prompt on this chat (chat_sim.iterate): [{n, at, proposal_id, summary, turns,
+    # results, passed, feedback}]
+    iterations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     busy: str | None = None                # what runs in the background right now (pending marker "sim:<id>")
     error: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
