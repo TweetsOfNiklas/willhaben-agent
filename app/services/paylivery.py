@@ -147,9 +147,6 @@ _ACCEPT = re.compile(r"angenommen|akzeptiert|zugesagt|einverstanden", re.I)
 _DECLINE = re.compile(r"abgelehnt|abgesagt|abgewiesen|nicht\s+angenommen", re.I)
 _SOLD = re.compile(r"sofort\s+gekauft|gekauft|sofortkauf", re.I)
 _SOLD_MINE = re.compile(rf"\bdein\w*\s+(?:artikel|anzeige)\b{_GAP}{{0,30}}?\bverkauft\b", re.I)   # seller: sale agreed
-_TO_YOU = re.compile(r"\b(?:hat|haben)\s+dir\b", re.I)          # "Max hat dir einen Preisvorschlag gemacht": received
-_SENT_DIR = re.compile(r"gesendet|abgeschickt|abgegeben|gemacht|gestellt|versendet", re.I)
-_RECV_DIR = re.compile(r"erhalten|bekommen|eingegangen|\bneu(?:er|es|e)?\b", re.I)
 
 # Notices also explain, announce, instruct and ask ("Wird sie angenommen, ... wird dir zugestellt", "Wir informieren
 # dich, sobald dein Artikel unterwegs ist"). event_text() keeps only what is reported as done; the patterns see nothing
@@ -423,14 +420,8 @@ def detect_stage(text: str, role: str | None) -> str | None:
         return "offer_accepted" if role == "seller" else "paid"
     if role == "seller" and _hits(_SOLD_MINE, done):
         return "offer_accepted"
-    if offer:
-        if _hits(_TO_YOU, done):
-            return "offer_received"
-        if _hits(_SENT_DIR, done):
-            return "offer_sent"
-        if _hits(_RECV_DIR, done):
-            return "offer_received"
-        return "offer_sent" if role == "buyer" else "offer_received"   # no direction word: the role decides
+    if offer:                                     # PayLivery offers go buyer -> seller only; no counter offer exists
+        return "offer_sent" if role == "buyer" else "offer_received"
     return None
 
 
@@ -1082,7 +1073,6 @@ def next_step(role: str, stage: str | None) -> str:
     return {
         None: t("Send an offer or buy now and pay with PayLivery."),
         "offer_sent": t("Offer sent. Waiting for the seller."),
-        "offer_received": t("The seller has made an offer. Answer it on willhaben."),
         "offer_declined": t("Your offer was declined. Send another or buy now."),
         "offer_accepted": t("The seller accepted. Pay the agreed price now."),
         "paid": t("Paid. Waiting for the parcel."),
@@ -1150,7 +1140,15 @@ def save_settings(notify: bool) -> None:
     set_setting(NOTIFY_SETTING, "1" if notify else "0")
 
 
-_busy: dict[str, str] = {}   # chat id -> browser action running now
+_busy: dict[str, str] = {}   # chat id -> browser action running now (or queued behind another chat's)
+
+
+def _claim(conversation_id: str, action: str) -> None:
+    """One browser action per chat: checked and taken without an await in between, so a double click, or the order
+    and the owner offering at the same time, cannot start a second one."""
+    if conversation_id in _busy:
+        raise PayLiveryError(t("A PayLivery action is already running in this chat"))
+    _busy[conversation_id] = action
 
 
 def card(conv) -> dict[str, Any] | None:
@@ -1201,6 +1199,30 @@ def check_action(conv: Conversation, action: str, amount: float | None) -> None:
             raise PayLiveryError(t("This ad has no buy-now price"))
         if not (amount and 0 < amount <= MAX_AMOUNT):
             raise PayLiveryError(t("No price known for this purchase"))
+        from app.services import purchase
+        row = purchase.for_conversation(conv.id)
+        if row is not None and row.max_price and purchase.costs_of(row, amount)["total"] > row.max_price + 0.005:
+            raise PayLiveryError(t("€{amount} incl. shipping and buyer protection is above the order's maximum of "
+                                   "€{max}", amount=_eur_plain(amount), max=_eur_plain(row.max_price)))
+
+
+# a buy without an order: the checkout's total may add shipping and the buyer protection fee to the confirmed price
+BUY_SLACK_SHARE, BUY_SLACK_EUR = 0.10, 25.0
+
+
+def buy_ceiling(conv: Conversation, amount: float) -> float:
+    """The most the checkout's total may show before the pay click: the order's maximum (it includes shipping and the
+    fee), else the confirmed price plus room for those two. The page may have changed since the ad was read (the
+    seller raised the price): this is the last look before money moves."""
+    from app.services import purchase
+    row = purchase.for_conversation(conv.id)
+    if row is not None and row.max_price:
+        return float(row.max_price)
+    return round(amount * (1 + BUY_SLACK_SHARE) + BUY_SLACK_EUR, 2)
+
+
+def _eur_plain(v: float) -> str:
+    return f"{v:.2f}".replace(".", ",")
 
 
 def _start_url(conv: Conversation, action: str) -> str:
@@ -1514,6 +1536,14 @@ async def _drive_steps(sess, conv: Conversation, action: str, amount: float | No
             verdict = click_verdict(action, el.get("label") or "")
             if verdict == "refused":
                 return False, _stopped(t("refused to click “{label}” for this action", label=el.get("label") or ""))
+            if action == "buy" and verdict == "final":
+                from app.services.label_buy import page_total
+                total, ceiling = page_total(await page.inner_text("body")), buy_ceiling(conv, amount or 0)
+                if total is None:
+                    return False, _stopped(t("no total on the page before the payment – refusing to pay"))
+                if total > ceiling + 0.005:
+                    return False, _stopped(t("the page asks €{total}, more than the allowed €{ceiling} – refusing to pay",
+                                             total=_eur_plain(total), ceiling=_eur_plain(ceiling)))
             await _click(page, el)
             final_clicked = final_clicked or verdict == "final"
             await _settle(page)
@@ -1533,33 +1563,41 @@ def _session_ready():
 
 
 @timeline.scoped(conversation_id="conversation_id", step="action")
-async def run_action(conversation_id: str, action: str, amount: float | None = None) -> str:
+async def run_action(conversation_id: str, action: str, amount: float | None = None, claimed: bool = False) -> str:
     """Drive one willhaben action in the app's browser with the API recording on. Returns the message for the user;
-    the outcome also goes into the chat's history."""
+    the outcome also goes into the chat's history. `claimed`: start_action took the chat already."""
     conv = _conv(conversation_id)
     timeline.update_context(ad_id=conv.ad_id if conv else None)
-    if conv is None or action not in BROWSER_ACTIONS:
-        raise PayLiveryError(t("Unknown action"))
-    check_action(conv, action, amount)
-    async with _lock:
-        _busy[conversation_id] = action
-        sess, owned, capture = None, False, None
-        ok, result = False, ""
-        try:
-            sess = _session_ready()
-            if not sess.capturing:                  # a recording the user started stays theirs
-                sess.start_capture(f"paylivery-{action}")
-                owned = True
-            ok, result = await _drive(sess, conv, action, amount)
-        except PayLiveryError as e:
-            result = str(e)
-        except Exception as e:  # noqa: BLE001 - the page stays open for the user
-            log.exception("PayLivery %s failed", action)
-            result = t("{action} failed: {error}", action=action, error=e)
-        finally:
+    try:
+        if conv is None or action not in BROWSER_ACTIONS:
+            raise PayLiveryError(t("Unknown action"))
+        check_action(conv, action, amount)
+    except PayLiveryError:
+        if claimed:
             _busy.pop(conversation_id, None)
-            if owned:
-                capture = await _stop_capture(sess)
+        raise
+    if not claimed:
+        _claim(conversation_id, action)
+    try:
+        async with _lock:
+            sess, owned, capture = None, False, None
+            ok, result = False, ""
+            try:
+                sess = _session_ready()
+                if not sess.capturing:                  # a recording the user started stays theirs
+                    sess.start_capture(f"paylivery-{action}")
+                    owned = True
+                ok, result = await _drive(sess, conv, action, amount)
+            except PayLiveryError as e:
+                result = str(e)
+            except Exception as e:  # noqa: BLE001 - the page stays open for the user
+                log.exception("PayLivery %s failed", action)
+                result = t("{action} failed: {error}", action=action, error=e)
+            finally:
+                if owned:
+                    capture = await _stop_capture(sess)
+    finally:
+        _busy.pop(conversation_id, None)     # also when cancelled while waiting for another chat's action
     if capture:
         result = f"{result} " + t("Recording saved as {name} – send that file for verification.", name=capture.name)
     _record(conversation_id, action, ok, result, amount)
@@ -1600,7 +1638,6 @@ async def start_action(conversation_id: str, action: str, amount_text: str = "")
         return await download_label(conversation_id)
     if action == "mark_shipped":
         return mark_shipped(conversation_id)
-    if conversation_id in _busy:
-        raise PayLiveryError(t("A PayLivery action is already running in this chat"))
-    _spawn(run_action(conversation_id, action, amount))
+    _claim(conversation_id, action)
+    _spawn(run_action(conversation_id, action, amount, claimed=True))
     return t("Started in the browser. The result appears in the PayLivery card.")

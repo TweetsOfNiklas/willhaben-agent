@@ -522,3 +522,11 @@ def test_chat_page_after_startup_shows_released_without_receipt():
     assert "Zum Versand freigegeben" in card and "Warten, bis der Verkäufer das Paket verschickt" in card
     assert "Erhalt bestätigen" not in card and "Zugestellt" not in card
     assert _state()["stage"] == "released"
+
+
+@pytest.mark.parametrize("text", ["Preisvorschlag erhalten: € 120,00", "Max hat dir einen Preisvorschlag über € 40 gemacht.",
+                                  "Neuer Preisvorschlag: € 40"])
+def test_a_buyer_never_receives_an_offer(text):
+    """PayLivery has no counter offer: in a buyer's chat every offer is the buyer's own."""
+    assert paylivery.detect_stage(text, "buyer") == "offer_sent"
+    assert paylivery.allowed_actions("buyer", "offer_sent", {"paylivery": True, "buy_now": True}) == []

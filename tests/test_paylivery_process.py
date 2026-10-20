@@ -176,7 +176,7 @@ async def test_stage_never_goes_back_after_payment():
 
 
 async def test_offer_may_restart_before_payment():
-    _chat(state={"role": "buyer", "stage": "offer_declined", "history": []})
+    _chat(role="buyer", state={"role": "buyer", "stage": "offer_declined", "history": []})
     with session() as db:
         conv = db.get(Conversation, "c1")
     paylivery.apply_notice(conv, _notice("o2", "Preisvorschlag gesendet: € 90", cid="c1"))
@@ -431,7 +431,11 @@ def browser(monkeypatch):
         return None
 
     ns = SimpleNamespace(page=SimpleNamespace(url=CHAT), elements=[], clicked=[], filled=[], bank=None,
-                         replies=[], sess=None, backend=None)
+                         replies=[], sess=None, backend=None, body="Gesamtbetrag € 12,00")
+
+    async def inner_text(selector):
+        return ns.body
+    ns.page.inner_text = inner_text            # the checkout's total, read before the pay click
 
     async def collect(page):
         return list(ns.elements)
@@ -448,6 +452,7 @@ def browser(monkeypatch):
     async def card_visible(page):
         return False
 
+    monkeypatch.setattr(paylivery, "_busy", {})          # a faked run_action never frees its chat
     monkeypatch.setattr(paylivery, "_settle", noop)
     monkeypatch.setattr(paylivery, "_dismiss", noop)
     monkeypatch.setattr(paylivery, "_collect", collect)
@@ -690,7 +695,7 @@ async def test_start_action_is_background_for_browser_actions(browser, monkeypat
     _chat(cid="b1", role="buyer")
     started = []
 
-    async def fake_run(cid, action, amount=None):
+    async def fake_run(cid, action, amount=None, claimed=False):
         started.append((cid, action, amount))
         return "ok"
 
@@ -742,3 +747,55 @@ async def test_collector_and_click_on_a_real_page(chromium_page):
     await paylivery._click(page, accept)
     assert await page.evaluate("window.clicked") == 1
     assert await paylivery._bank_reason(page) is None
+
+
+async def test_buy_refuses_a_checkout_total_above_the_limit(browser):
+    """The last look before money moves: the seller raised the price since the ad was read."""
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    browser.body = "Artikel € 60,00 · Versand € 5,90 · Gesamtbetrag € 65,90"     # confirmed: 12 € (+10 % + 25 €)
+    browser.backend.replies = [_step(action_idx=2, status="done", note="bezahlt")]
+    msg = await paylivery.run_action("b1", "buy", 12.0)
+    assert browser.clicked == [] and "65,90" in msg and "38,20" in msg
+
+
+async def test_buy_refuses_a_page_without_a_total(browser):
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    browser.body = "Zahlungsart wählen"
+    browser.backend.replies = [_step(action_idx=2, status="done", note="bezahlt")]
+    await paylivery.run_action("b1", "buy", 12.0)
+    assert browser.clicked == []
+
+
+async def test_a_double_click_starts_one_browser_action(browser, monkeypatch):
+    _chat(cid="b1", role="buyer")
+    runs = []
+
+    async def fake_drive(sess, conv, action, amount):
+        runs.append(action)
+        await asyncio.sleep(0)
+        return True, "ok"
+    monkeypatch.setattr(paylivery, "_drive", fake_drive)
+    await paylivery.start_action("b1", "offer", "100")
+    with pytest.raises(paylivery.PayLiveryError):              # before the first one ran a single step
+        await paylivery.start_action("b1", "offer", "100")
+    with pytest.raises(paylivery.PayLiveryError):              # the order's own offer at the same moment
+        await paylivery.run_action("b1", "offer", 100.0)
+    await asyncio.gather(*paylivery._tasks)
+    assert runs == ["offer"] and "b1" not in paylivery._busy
+    await paylivery.run_action("b1", "offer", 100.0)          # free again afterwards
+    assert runs == ["offer", "offer"]
+
+
+def test_buy_now_over_the_orders_maximum_is_refused_before_the_browser():
+    from app.db import Purchase
+    _chat(cid="b1", role="buyer")
+    with session() as db:
+        db.add(Purchase(ad_id="77", status="pay_now", mode="paylivery", conversation_id="b1", max_price=50.0,
+                        shipping_cost=5.0))
+        db.commit()
+    with pytest.raises(paylivery.PayLiveryError, match="maximum"):
+        paylivery.check_action(_conv("b1"), "buy", 48.0)          # 48 + shipping + fee > 50
+    paylivery.check_action(_conv("b1"), "buy", 40.0)
+    assert paylivery.buy_ceiling(_conv("b1"), 40.0) == 50.0       # and the checkout total may not pass it either
