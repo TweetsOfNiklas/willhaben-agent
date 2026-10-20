@@ -430,9 +430,17 @@ async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
         db.refresh(s)
     seen = []
 
-    async def replay(sim, overrides=None):
+    live = []
+
+    async def replay(sim, overrides=None, on_turn=None):
         seen.append(overrides)
-        return [{"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": "Nein, 65 ist das Minimum.", "auto": False}]
+        out = [{"who": "partner", "text": "Geht 20?"}]
+        on_turn(list(out))                                            # shown before the answer is written
+        r = chat_sim.get(sim.id).iterations[-1]
+        live.append((r["n"], r.get("playing"), [x["text"] for x in r["turns"]]))
+        out.append({"who": "me", "text": "Nein, 65 ist das Minimum.", "auto": False})
+        on_turn(list(out))
+        return out
 
     async def check(sim, turns):
         return []
@@ -465,6 +473,7 @@ async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
     sim = chat_sim.get(s.id)
     assert [r["n"] for r in sim.iterations] == [1, 2] and sim.iterations[0]["base"]
     assert "nie Abholung zusagen" in calls[-1]["prompt"] and seen == [{"auto_reply_system": "NEUER PROMPT"}]
+    assert live == [(2, True, ["Geht 20?"])] and not sim.iterations[1].get("playing")    # live, then done
     with TestClient(app) as c:
         page = c.get(f"/simulator?id={s.id}").text                     # the newest round is shown
         assert "data-rounds" in page and "Nein, 65 ist das Minimum." in page and "Apply this version" in page

@@ -594,20 +594,27 @@ def partner_once(sim_id: int) -> bool:
 
 
 # ------------------------------------------------------------------ scenarios
-async def replay(sim: SimChat, overrides: dict[str, str] | None = None) -> list[dict[str, Any]]:
+async def replay(sim: SimChat, overrides: dict[str, str] | None = None, on_turn=None) -> list[dict[str, Any]]:
     """The partner's messages of the test chat again, each with a fresh answer of mine (a purchase's opening
-    message stays as it was: it is part of the script the seller answered; a script without one gets one first)."""
+    message stays as it was: it is part of the script the seller answered; a script without one gets one first).
+    `on_turn(turns)`: called after every message, so a round can be shown as it is played."""
     script = sim.turns or []
     out: list[dict[str, Any]] = []
+
+    async def add(turn: dict[str, Any]) -> None:
+        out.append(turn)
+        if on_turn is not None:
+            on_turn(list(out))
+
     if sim.role == "buyer" and script and script[0].get("opener"):
-        out.append(dict(script[0]))
+        await add(dict(script[0]))
     elif sim.role == "buyer":
-        out.append(await opener(sim, overrides))
+        await add(await opener(sim, overrides))
     for x in script:
         if x.get("who") != "partner":
             continue
-        out.append({"who": "partner", "text": x["text"], "at": utcnow().isoformat()})
-        out.append(await answer(sim, out, overrides))
+        await add({"who": "partner", "text": x["text"], "at": utcnow().isoformat()})
+        await add(await answer(sim, out, overrides))
     return out
 
 
@@ -1095,17 +1102,31 @@ def _round_text(sim: SimChat, r: dict[str, Any] | None) -> str:
     return p.new_text if p is not None else system_prompts.get(ROLE_KIND[sim.role])
 
 
+def _update_round(sim_id: int, n: int, **changes: Any) -> None:
+    rounds = [dict(r) for r in (get(sim_id).iterations or [])]
+    for r in rounds:
+        if r.get("n") == n:
+            r.update(changes)
+    _save(sim_id, iterations=rounds)
+
+
 async def _play_round(sim_id: int, proposal_id: int | None, summary: str = "") -> dict[str, Any]:
+    """The next round, saved message by message ("playing" until its expectations are checked): the page shows it
+    live, like the chat itself."""
     sim = get(sim_id)
     p = proposal(proposal_id)
-    turns = await replay(sim, overrides_of(p) if p else None)
-    results = await check(sim, turns)
-    rounds = [dict(r) for r in (get(sim_id).iterations or [])]
-    r = {"n": (rounds[-1]["n"] + 1) if rounds else 1, "at": utcnow().isoformat(), "proposal_id": proposal_id,
-         "summary": summary, "turns": turns, "results": results, "passed": all(x["passed"] for x in results),
-         "feedback": ""}
+    rounds = [dict(r) for r in (sim.iterations or [])]
+    n = (rounds[-1]["n"] + 1) if rounds else 1
+    r = {"n": n, "at": utcnow().isoformat(), "proposal_id": proposal_id, "summary": summary, "turns": [],
+         "results": [], "passed": True, "feedback": "", "playing": True}
     _save(sim_id, iterations=[*rounds, r][-MAX_ROUNDS_KEPT:])
-    return r
+    try:
+        turns = await replay(sim, overrides_of(p) if p else None, on_turn=lambda ts: _update_round(sim_id, n, turns=ts))
+        results = await check(sim, turns)
+    finally:
+        _update_round(sim_id, n, playing=None)
+    _update_round(sim_id, n, turns=turns, results=results, passed=all(x["passed"] for x in results))
+    return {**r, "turns": turns, "results": results}
 
 
 def rate_round(sim_id: int, n: int, index: int, rating: str | None, note: str | None = None) -> None:

@@ -265,7 +265,7 @@
   {% set rate_base = '/simulator/' ~ sim.id ~ ('/round/' ~ rnd.n ~ '/rate/' if rnd else '/rate/') %}
   {% set prun = 'round:' ~ rnd.n if rnd else '' %}
   {% set prop = proposal_of(rnd.proposal_id) if rnd and rnd.proposal_id else none %}
-  <div id="sim-messages" class="flex flex-1 flex-col justify-end gap-2 px-4 py-5 md:px-5" data-turns="{{ (sim.turns or [])|length }}"{% if sim.busy %} data-live="1"{% endif %}>
+  <div id="sim-messages" class="flex flex-1 flex-col justify-end gap-2 px-4 py-5 md:px-5" data-turns="{{ cur_round }}-{{ view_turns|length }}-{{ played|length }}-{{ 1 if rnd and rnd.playing else 0 }}"{% if sim.busy %} data-live="1"{% endif %}>
     {% if played %}{# round 1 is this chat with the current rules; every further round replays the other side's
        messages with Claude's revised system prompt #}
     <div role="tablist" class="sticky top-[57px] z-[1] -mx-1 mb-1 flex gap-1 overflow-x-auto rounded-box bg-base-200 p-1 text-[12.5px]" data-rounds>
@@ -320,7 +320,16 @@
     {% if rnd and rnd.results %}<div class="flex flex-wrap justify-center gap-1.5">{% for e in rnd.results %}<span class="rounded-full px-2 py-0.5 text-[11.5px] {{ 'bg-ok-soft text-success' if e.passed else 'bg-bad-soft text-error' }}" title="{{ e.detail }}">{{ '✓' if e.passed else '✗' }} {{ e.label }}</span>{% endfor %}</div>{% endif %}
     {% set fb = rnd.feedback if rnd else ((rounds|first).feedback if rounds and (rounds|first).base else '') %}
     {% if fb %}<div class="ml-auto max-w-[85%] rounded-[10px] bg-base-200 px-3 py-2 text-[12.5px]"><span class="text-muted">{{ _("Your feedback:") }}</span> {{ fb }}</div>{% endif %}
-    {% if sim.busy == 'round' %}<div class="chat chat-end" data-typing aria-live="polite"><div class="chat-header mb-0.5 text-[11.5px] text-muted">{{ _("Claude works on the next round…") }}</div><div class="chat-bubble chat-bubble-primary inline-flex items-center gap-1 opacity-70"><span class="loading loading-dots loading-sm"></span></div></div>{% endif %}
+    {% if sim.busy == 'round' or sim.busy == 'review' %}
+    {# a round being played: who writes now (its last message is the other side's: my answer is next); before the round
+       starts, Claude revises the prompt; a review writes into the feedback field #}
+    {% set playing = rnd and rnd.playing %}
+    {% set lt = view_turns|last if view_turns else none %}
+    <div class="chat {{ 'chat-start' if playing and (not lt or lt.get('who') == 'me') else 'chat-end' }}" data-typing aria-live="polite">
+      <div class="chat-header mb-0.5 text-[11.5px] text-muted">{{ (_("The other side writes…") if (not lt or lt.get('who') == 'me') else _("The app writes its answer…")) if playing else (_("Claude reviews the round…") if sim.busy == 'review' else _("Claude revises the system prompt…")) }}</div>
+      <div class="chat-bubble inline-flex items-center gap-1 {{ 'border border-base-300 bg-base-100 text-base-content' if playing and (not lt or lt.get('who') == 'me') else 'chat-bubble-primary opacity-70' }}"><span class="loading loading-dots loading-sm"></span></div>
+    </div>
+    {% endif %}
     {% if sim.busy in ('reply', 'play', 'partner') %}
     {# who writes now: my answer after their message (or a purchase's opener), else the other side #}
     {% set last = (sim.turns or [])|last if sim.turns else none %}
