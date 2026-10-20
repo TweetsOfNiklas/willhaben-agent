@@ -411,9 +411,10 @@ def test_system_prompt_routes(backend):
         assert c.post("/simulator-prompts/nope/save", data={"text": "x"}).status_code == 404
 
 
+
 async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
-    """Round 1 answers with the current rules; a 👎 with a note and feedback make Claude revise the system prompt;
-    round 2 answers with the revision (an open proposal) and can be applied."""
+    """Round 1 is the chat itself; a stronger model's review fills the feedback; a revision plays round 2 with the
+    revised system prompt (an open proposal), shown as a tab of the chat, ready to apply."""
     from fastapi.testclient import TestClient
 
     from app.db import SimChat, session
@@ -423,7 +424,7 @@ async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
 
     with session() as db:
         s = SimChat(title="Zu niedrig", role="seller", platform="willhaben", turns=[
-            {"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": "alt"}])
+            {"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": "Ja, hol es ab.", "auto": True}])
         db.add(s)
         db.commit()
         db.refresh(s)
@@ -431,39 +432,44 @@ async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
 
     async def replay(sim, overrides=None):
         seen.append(overrides)
-        text = "Nein, 65 ist das Minimum." if overrides else "Ja, komm vorbei und hol es ab."
-        return [{"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": text, "auto": False}]
+        return [{"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": "Nein, 65 ist das Minimum.", "auto": False}]
 
     async def check(sim, turns):
         return []
     monkeypatch.setattr(chat_sim, "replay", replay)
     monkeypatch.setattr(chat_sim, "check", check)
-    prompts = []
+    calls = []
 
     class Backend:
         async def complete(self, **kw):
-            prompts.append(kw["prompt"])
+            calls.append(kw)
+            if "review" in kw["schema"]["properties"]:
+                return LLMResult(data={"review": "- Nie unter dem Mindestpreis zusagen."}, model="fake")
             return LLMResult(data={"findings": [], "new_text": "NEUER PROMPT", "summary": "Keine Abholung zusagen."},
                              model="fake")
-    monkeypatch.setattr(chat_sim, "get_backend", lambda purpose=None, model=None: Backend())
-
+    models = []
+    monkeypatch.setattr(chat_sim, "get_backend", lambda purpose=None, model=None: models.append(model) or Backend())
     started = []
     monkeypatch.setattr(chat_sim.jobs, "submit", lambda key, label, fn, **kw: started.append(fn))
+    job = type("J", (), {"progress": lambda *a, **k: None})()
 
-    assert chat_sim.start_rounds(s.id)
-    await started.pop()(type("J", (), {"progress": lambda *a, **k: None})())
-    r1 = chat_sim.get(s.id).iterations[0]
-    assert r1["n"] == 1 and r1["proposal_id"] is None and seen == [None]
-    assert not chat_sim.next_round(s.id, "")                       # nothing to go on yet
-    chat_sim.rate_round(s.id, 1, 1, "down", "nie Abholung zusagen")
-    assert chat_sim.next_round(s.id, "kürzer")
-    await started.pop()(type("J", (), {"progress": lambda *a, **k: None})())
-    sim = chat_sim.get(s.id)
-    r2 = sim.iterations[1]
-    assert "nie Abholung zusagen" in prompts[0] and "kürzer" in prompts[0]
-    assert r2["n"] == 2 and r2["summary"] == "Keine Abholung zusagen." and seen[1] == {"auto_reply_system": "NEUER PROMPT"}
-    assert sim.iterations[0]["feedback"] == "kürzer"
+    chat_sim.rate(s.id, 1, "down", "nie Abholung zusagen")             # round 1 = the chat: rated right there
+    assert chat_sim.review_round(s.id)
+    await started.pop()(job)
+    assert "opus" in models[-1] and "App: Ja, hol es ab." in calls[-1]["prompt"] and "nie Abholung" in calls[-1]["prompt"]
     with TestClient(app) as c:
         page = c.get(f"/simulator?id={s.id}").text
-    assert 'id="sim-rounds"' in page and "Revise and play round 3" in page and "Apply this version" in page
-    assert "Nein, 65 ist das Minimum." in page and "Claude changed the system prompt:" in page
+    assert "- Nie unter dem Mindestpreis zusagen.</textarea>" in page and "data-rounds" not in page   # no tabs yet
+    assert chat_sim.next_round(s.id, "- Nie unter dem Mindestpreis zusagen.")
+    await started.pop()(job)
+    sim = chat_sim.get(s.id)
+    assert [r["n"] for r in sim.iterations] == [1, 2] and sim.iterations[0]["base"]
+    assert "nie Abholung zusagen" in calls[-1]["prompt"] and seen == [{"auto_reply_system": "NEUER PROMPT"}]
+    with TestClient(app) as c:
+        page = c.get(f"/simulator?id={s.id}").text                     # the newest round is shown
+        assert "data-rounds" in page and "Nein, 65 ist das Minimum." in page and "Apply this version" in page
+        assert "Revise and play round 3" in page and "Claude changed the system prompt:" in page
+        r1 = c.get(f"/simulator?id={s.id}&round=1").text
+        assert "Ja, hol es ab." in r1 and "Nein, 65 ist das Minimum." not in r1
+    await chat_sim._append(s.id, {"who": "partner", "text": "Und 30?"})       # a new message: the rounds start again
+    assert chat_sim.get(s.id).iterations is None

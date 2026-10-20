@@ -1266,8 +1266,10 @@ def _sim_url(sim_id: int | None = None, msg: str | None = None, anchor: str = ""
 
 
 @app.get("/simulator", response_class=HTMLResponse)
-async def simulator_page(request: Request, id: int | None = None, msg: str | None = None):
+async def simulator_page(request: Request, id: int | None = None, msg: str | None = None, round: int | None = None):
     sim = chat_sim.get(id) if id else None
+    played = [r["n"] for r in (sim.iterations or []) if not r.get("base")] if sim else []
+    cur_round = round if round in played or round == 1 else (played[-1] if played else 1)   # default: the newest
     with session() as db:
         ads = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.hidden).is_not(True))
                            .order_by(col(MyAd.heading))))
@@ -1278,7 +1280,8 @@ async def simulator_page(request: Request, id: int | None = None, msg: str | Non
     return render(request, "simulator.html", msg=msg, sims=chat_sim.all_chats(), sim=sim, ads=ads, live_ad=live_ad,
                   purchases=purchase_svc.recent(20), personas=chat_sim.PERSONAS, platforms=chat_sim.PLATFORMS,
                   expectations=chat_sim.EXPECTATIONS, proposals=chat_sim.open_proposals(), sim_diff=chat_sim.diff,
-                  proposal_of=chat_sim.proposal,
+                  proposal_of=chat_sim.proposal, cur_round=cur_round,
+                  review_model=llm_models.resolve_alias(chat_sim.REVIEW_MODEL),
                   targets=chat_sim.TARGETS, expectation_label=chat_sim.expectation_label,
                   persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
                   can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
@@ -1396,14 +1399,13 @@ async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: 
     elif action == "run":
         ok = chat_sim.run_scenarios([sim_id]) > 0
         msg = None if ok else t("Nothing to run: the scenario needs messages and is not running already")
-    elif action == "rounds":                    # round 1 of refining the system prompt on this chat
-        ok = chat_sim.start_rounds(sim_id)
-        msg = None if ok else t("Busy, or the chat has no message of the other side to replay")
+    elif action == "review_round":              # a stronger model writes feedback for the next round
+        ok = chat_sim.review_round(sim_id, kind or None)
     elif action == "round":                     # the next round from my ratings and feedback
         ok = chat_sim.next_round(sim_id, feedback)
         msg = None if ok else t("Rate an answer or write feedback first (or wait until the chat is done)")
         if ok:
-            return back(_sim_url(sim_id, None, "#sim-rounds"))
+            return back(_sim_url(sim_id, None, "#sim-end"))
     elif action == "clear":
         chat_sim.clear(sim_id)
         ok = True
