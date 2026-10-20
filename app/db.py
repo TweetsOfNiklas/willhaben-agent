@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import JSON, Column, Index, LargeBinary, String, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, LargeBinary, String, UniqueConstraint, event
 from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from app.config import get_settings
@@ -552,8 +552,21 @@ def get_engine():
     global _engine
     if _engine is None:
         s = get_settings()
-        _engine = create_engine(f"sqlite:///{s.db_path}", connect_args={"check_same_thread": False})
+        # timeout: a writer waits up to 30 s for another one instead of failing at once with "database is locked";
+        # WAL: readers never block the writer and the writer never blocks readers (the app writes from many tasks)
+        _engine = create_engine(f"sqlite:///{s.db_path}", connect_args={"check_same_thread": False, "timeout": 30})
+        event.listen(_engine, "connect", _sqlite_pragmas)
     return _engine
+
+
+def _sqlite_pragmas(dbapi_conn, _record) -> None:
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.execute("PRAGMA synchronous=NORMAL")     # safe with WAL; a power cut may lose the last commit only
+    finally:
+        cur.close()
 
 
 def set_engine(engine) -> None:
