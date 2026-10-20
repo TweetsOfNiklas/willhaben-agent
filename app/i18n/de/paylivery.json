@@ -105,5 +105,11 @@
  "The seller made a counter offer. Accept it and pay, or decline it.": "Der Verkäufer hat ein Gegenangebot gemacht. Annehmen und bezahlen oder ablehnen.",
  "Counter offer": "Gegenangebot",
  "Send this counter offer on willhaben for the amount entered?": "Dieses Gegenangebot mit dem eingegebenen Betrag jetzt auf willhaben senden?",
- "No counter offer to accept": "Kein Gegenangebot zum Annehmen"
+ "No counter offer to accept": "Kein Gegenangebot zum Annehmen",
+ "Claude suggests:": "Claude rät:",
+ "No suggestion from Claude yet.": "Noch kein Vorschlag von Claude.",
+ "Ask Claude again": "Claude neu fragen",
+ "Ask Claude": "Claude fragen",
+ "No suggestion: Claude did not answer": "Kein Vorschlag: Claude hat nicht geantwortet",
+ "Accept": "Annehmen"
 }

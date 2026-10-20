@@ -1196,10 +1196,16 @@ def card(conv) -> dict[str, Any] | None:
         "tracking": st.get("tracking"), "history": list(reversed(st.get("history") or []))[:HISTORY_CAP],
         "actions": [_action_view(n, amount if n == "buy" else (st.get("offer") if n in ("offer", "counter") else None))
                     for n in names],
+        "advice": _advice_view(st), "counter_amount": (_advice_view(st) or {}).get("amount") or st.get("offer"),
         "busy": _busy.get(conv.id), "busy_label": _ui(_busy[conv.id])["label"] if conv.id in _busy else "",
         "open_url": CHAT_URL, "shipment_id": s.id if s else None,
         "label_saved": bool(s and s.label_path), "paylivery": flags["paylivery"],
     }
+
+
+def _advice_view(st: dict[str, Any]) -> dict[str, Any] | None:
+    from app.services import paylivery_advice
+    return paylivery_advice.view(st)
 
 
 # ------------------------------------------------------------------ actions

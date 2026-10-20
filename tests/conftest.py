@@ -98,6 +98,14 @@ def no_geizhals_cache(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_paylivery_advice(monkeypatch):
+    """An offer in a seller's chat asks Claude in the background (stage hook): never the real one in tests;
+    tests/test_paylivery_advice.py switches it on with its fake backend."""
+    from app.services import paylivery_advice
+    monkeypatch.setattr(paylivery_advice, "AUTO", False)
+
+
+@pytest.fixture(autouse=True)
 def fresh_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     dbmod.set_engine(engine)

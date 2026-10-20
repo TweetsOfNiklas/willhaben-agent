@@ -12,11 +12,15 @@
   {% if pl.busy %}{{ ui.pill(_("working in the browser…") ~ ' ' ~ pl.busy_label, 'brand', dot=false) }}{% endif %}
   <p class="break-words text-[13px]">{{ pl.next }}</p>
   {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<div class="break-words text-[12.5px] text-muted">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</div>{% endif %}
+  {% if pl.role == 'seller' and pl.stage == 'offer_received' %}<div class="flex flex-wrap items-start gap-2 rounded-md bg-base-200 px-2.5 py-2 text-[13px]" data-advice>
+    {% if pl.advice %}<span class="min-w-0 flex-1 break-words"><b>{{ _("Claude suggests:") }} {{ pl.advice.label }}</b>{% if pl.advice.reason %} – {{ pl.advice.reason }}{% endif %}</span>{% else %}<span class="min-w-0 flex-1 text-muted">{{ _("No suggestion from Claude yet.") }}</span>{% endif %}
+    <form method="post" action="/chats/{{ conv.id }}/paylivery-advice" hx-post="/chats/{{ conv.id }}/paylivery-advice" {{ swap|safe }} hx-disabled-elt="find button" class="m-0"><button class="btn btn-xs"><span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ _("Ask Claude again") if pl.advice else _("Ask Claude") }}</button></form>
+  </div>{% endif %}
   <div class="flex flex-wrap items-center gap-1.5">
     {% for a in pl.actions %}
     <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" hx-post="/chats/{{ conv.id }}/paylivery/{{ a.name }}" {{ swap|safe }}{% if a.confirm %} hx-confirm="{{ a.confirm }}"{% endif %} hx-disabled-elt="find button" class="flex max-w-full min-w-0 flex-wrap items-center gap-1.5">
-      {% if a.input %}<input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required placeholder="€" aria-label="{{ _('Offer amount in euros') }}" class="input input-sm w-[90px] bg-base-200" {% if a.disabled %}disabled{% endif %}>{% endif %}
-      <button class="btn btn-sm h-auto min-h-8 max-w-full py-1 whitespace-normal {{ 'btn-primary' if a.name == 'buy' else '' }}" {% if a.disabled %}disabled{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
+      {% if a.input %}<input type="number" name="amount" min="1" max="100000" step="0.01" value="{{ (pl.counter_amount if a.name == 'counter' else pl.offer) or '' }}" required placeholder="€" aria-label="{{ _('Offer amount in euros') }}" class="input input-sm w-[90px] bg-base-200" {% if a.disabled %}disabled{% endif %}>{% endif %}
+      <button class="btn btn-sm h-auto min-h-8 max-w-full py-1 whitespace-normal {{ 'btn-primary' if a.name == 'buy' or (pl.advice and pl.advice.action == a.name) else '' }}" {% if a.disabled %}disabled{% endif %}>{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
       {% if a.disabled %}<small class="text-xs text-muted">{{ a.note }}</small>{% endif %}
     </form>
     {% endfor %}

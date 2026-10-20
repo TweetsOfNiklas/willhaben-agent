@@ -38,6 +38,14 @@ async def chat_paylivery_action(request: Request, conversation_id: str, action: 
     return _back(f"/chats/{conversation_id}", msg, "#paylivery")
 
 
+@router.post("/chats/{conversation_id}/paylivery-advice")
+async def chat_paylivery_advice(conversation_id: str):
+    """The card's "Ask Claude (again)": a fresh suggestion for the open offer (10–30 s, the button waits)."""
+    from app.services import paylivery_advice
+    advice = await paylivery_advice.advise(conversation_id, force=True)
+    return _back(f"/chats/{conversation_id}", "" if advice else t("No suggestion: Claude did not answer"), "#paylivery")
+
+
 @router.post("/settings/paylivery")
 async def settings_paylivery(notify: str | None = Form(None)):
     paylivery.save_settings(notify=bool(notify))

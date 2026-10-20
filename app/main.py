@@ -140,6 +140,8 @@ app.include_router(purchase_routes.router)    # Kaufauftrag: buy dialog, order p
 app.include_router(style_routes.router)       # Settings → My rules → Writing style
 paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
+from app.services import paylivery_advice  # noqa: E402
+paylivery_routes.paylivery.on_stage(paylivery_advice.on_stage)          # a buyer's offer: Claude suggests the answer
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
