@@ -409,3 +409,25 @@ def test_system_prompt_routes(backend):
         c.post("/simulator-prompts/sim_partner/reset")
         assert not system_prompts.custom("sim_partner")
         assert c.post("/simulator-prompts/nope/save", data={"text": "x"}).status_code == 404
+
+
+def test_the_run_with_a_proposal_shows_its_answers():
+    """A scenario run with an open proposal keeps its own answers; the scenario page shows them, open, with the result."""
+    from fastapi.testclient import TestClient
+
+    from app.db import SimChat, session
+    from app.main import app
+    run = {"at": "2026-10-20T22:32:21+00:00", "passed": True, "variant": "proposal:5", "results": [],
+           "turns": [{"who": "them", "text": "Geht 20?"}, {"who": "me", "text": "Leider nein, 65 ist das Minimum.",
+                                                          "auto": False, "blockers": ["Preis"]}]}
+    with session() as db:
+        s = SimChat(title="Zu niedrig", role="seller", platform="willhaben", scenario=True, expectations=[],
+                    turns=run["turns"], proposal_run=run)
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+    with TestClient(app) as c:
+        page = c.get(f"/simulator?id={s.id}").text
+    block = page[page.index('data-sim-run="proposal"'):]
+    assert "Run with the proposal" in block[:400] and " open>" in block[:200] and "Leider nein, 65 ist das Minimum." in block
+    assert 'data-sim-run="last"' not in page
