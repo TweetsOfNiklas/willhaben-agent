@@ -26,11 +26,13 @@ def _back(path: str, msg: str, anchor: str) -> RedirectResponse:
 
 
 @router.post("/chats/{conversation_id}/paylivery/{action}")
-async def chat_paylivery_action(request: Request, conversation_id: str, action: str, amount: str = Form("")):
+async def chat_paylivery_action(request: Request, conversation_id: str, action: str, amount: str = Form(""),
+                                pl_amount: str = Form("")):
     """Sent through htmx the card swaps itself in and shows the state (working in the browser…, shipped), so only
-    a refusal comes back as a message; a plain form gets the confirmation too."""
+    a refusal comes back as a message; a plain form gets the confirmation too. `pl_amount`: the amount field of the
+    draft's PayLivery step ("Only PayLivery" in the composer, no message sent)."""
     try:
-        msg = await paylivery.start_action(conversation_id, action, amount)
+        msg = await paylivery.start_action(conversation_id, action, amount or pl_amount)
         if request.headers.get("hx-request"):
             msg = ""
     except paylivery.PayLiveryError as e:

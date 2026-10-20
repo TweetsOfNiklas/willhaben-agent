@@ -76,6 +76,9 @@ def test_the_composer_shows_the_step_and_send_starts_it(monkeypatch):
         assert started == [("s-adv", "counter", "90")] and queued == [d.id]
         c.post(f"/drafts/{d.id}/send", data={"text": "x"})                     # unticked: only the answer
         assert len(started) == 1 and len(queued) == 2
+        assert "Only PayLivery: Counter offer" in page
+        c.post("/chats/s-adv/paylivery/counter", data={"text": "x", "paylivery_step": "counter", "pl_amount": "88"})
+        assert started[-1] == ("s-adv", "counter", "88") and len(queued) == 2  # the step alone, no message
         paylivery._update_state("s-adv", lambda s: {**s, "stage": "counter_sent"})
         assert "data-paylivery-step" not in c.get("/chats/s-adv").text          # answered: the step is gone
 

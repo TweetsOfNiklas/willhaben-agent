@@ -110,6 +110,6 @@
  "Counter offer amount in euros": "Betrag des Gegenangebots in Euro",
  "their offer {amount}": "Vorschlag {amount}",
  "Run only the PayLivery step on willhaben now, without sending the answer?": "Nur den PayLivery-Schritt jetzt auf willhaben ausführen, ohne die Antwort zu senden?",
- "PayLivery only": "Nur PayLivery",
- "Send + PayLivery": "Senden + PayLivery"
+ "Send + PayLivery": "Senden + PayLivery",
+ "Only PayLivery: {step}": "Nur PayLivery: {step}"
 }
