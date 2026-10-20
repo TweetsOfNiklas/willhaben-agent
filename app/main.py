@@ -3640,7 +3640,7 @@ async def shipment_decline(request: Request, shipment_id: int):
 async def shipment_retry(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
-        shipping.retry(shipment_id)
+        shipping.retry(shipment_id, rebuy=(await request.form()).get("rebuy") == "1")
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
     return _chat_back(s.conversation_id, t("Trying again"), request=request)

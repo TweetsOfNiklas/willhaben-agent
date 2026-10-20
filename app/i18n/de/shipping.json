@@ -108,5 +108,8 @@
  "as willhaben shows it in the PayLivery window": "wie willhaben sie im PayLivery-Fenster zeigt",
  "not loaded": "nicht geladen",
  "Loading the buyer protection fee from willhaben …": "Käuferschutzgebühr wird bei willhaben abgefragt …",
- "willhaben did not show the fee": "willhaben hat die Gebühr nicht angezeigt"
+ "willhaben did not show the fee": "willhaben hat die Gebühr nicht angezeigt",
+ "The label was paid already (€{price}) but its PDF did not arrive – download it in your account at the carrier. Only if nothing was charged: buy again.": "Das Etikett wurde schon bezahlt (€{price}), aber das PDF kam nicht an – lade es in deinem Konto beim Versanddienst herunter. Nur wenn nichts abgebucht wurde: neu kaufen.",
+ "Buy the label again? Only if the carrier did not charge the first purchase.": "Etikett noch einmal kaufen? Nur wenn der erste Kauf nicht abgebucht wurde.",
+ "Not charged – buy again": "Nicht abgebucht – neu kaufen"
 }
