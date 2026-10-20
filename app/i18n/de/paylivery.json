@@ -106,10 +106,10 @@
  "Counter offer": "Gegenangebot",
  "Send this counter offer on willhaben for the amount entered?": "Dieses Gegenangebot mit dem eingegebenen Betrag jetzt auf willhaben senden?",
  "No counter offer to accept": "Kein Gegenangebot zum Annehmen",
- "Claude suggests:": "Claude rät:",
- "No suggestion from Claude yet.": "Noch kein Vorschlag von Claude.",
- "Ask Claude again": "Claude neu fragen",
- "Ask Claude": "Claude fragen",
- "No suggestion: Claude did not answer": "Kein Vorschlag: Claude hat nicht geantwortet",
- "Accept": "Annehmen"
+ "offer {amount}": "Vorschlag {amount}",
+ "Counter offer amount in euros": "Betrag des Gegenangebots in Euro",
+ "their offer {amount}": "Vorschlag {amount}",
+ "Run only the PayLivery step on willhaben now, without sending the answer?": "Nur den PayLivery-Schritt jetzt auf willhaben ausführen, ohne die Antwort zu senden?",
+ "PayLivery only": "Nur PayLivery",
+ "Send + PayLivery": "Senden + PayLivery"
 }

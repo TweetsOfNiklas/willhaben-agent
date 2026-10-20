@@ -165,6 +165,8 @@ class Draft(SQLModel, table=True):
     meetup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # appointment this answer fixes
     alternatives: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # Claude's other decisions: label, instruction
     purchase: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # buyer side: Claude's purchase_state
+    paylivery: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # the PayLivery step to go with it:
+    #                                  {action: accept|counter|decline, amount, offer} (app/services/paylivery_advice.py)
 
 
 class MyAd(SQLModel, table=True):

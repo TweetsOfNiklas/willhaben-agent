@@ -95,12 +95,21 @@
           hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML" hx-select-oob="#chat-messages">
       <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea min-h-20 max-h-[35dvh] w-full rounded-[10px] bg-base-200 px-3.5 py-3 text-[14.5px] leading-relaxed field-sizing-content md:min-h-24">{{ d.text }}</textarea>
       {% if d.error %}<div class="flex items-start gap-2 text-[12.5px] text-error">{{ ui.icon('alert', 14, 2, 'mt-px') }}<span class="min-w-0 break-words">{{ d.error }}</span></div>{% endif %}
+      {% set step = paylivery_step(d, conv) %}
+      {% if step %}{# Claude's PayLivery step for the open offer: runs on willhaben together with Send (or alone) #}
+      <div class="flex flex-wrap items-center gap-2 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]" data-paylivery-step>
+        <label class="flex min-w-0 cursor-pointer items-center gap-2"><input type="checkbox" name="paylivery_step" value="{{ step.action }}" checked class="checkbox checkbox-sm checkbox-primary">
+          <span class="min-w-0 break-words"><b>PayLivery:</b> {{ step.label }}{% if not step.input %} · {{ _("offer {amount}", amount=step.offer|eur) }}{% endif %}</span></label>
+        {% if step.input %}<input type="number" name="pl_amount" min="1" max="100000" step="0.5" value="{{ step.amount }}" aria-label="{{ _('Counter offer amount in euros') }}" class="input input-sm w-[90px] bg-base-100"><span class="text-muted">€ · {{ _("their offer {amount}", amount=step.offer|eur) }}</span>{% endif %}
+        <button class="btn btn-ghost btn-xs ml-auto" formaction="/chats/{{ conv.id }}/paylivery/{{ step.action }}" formnovalidate hx-post="/chats/{{ conv.id }}/paylivery/{{ step.action }}" hx-confirm="{{ _('Run only the PayLivery step on willhaben now, without sending the answer?') }}" name="amount" value="{{ step.amount or '' }}" onclick="var a=this.form.querySelector('[name=pl_amount]'); if (a) this.value=a.value">{{ _("PayLivery only") }}</button>
+      </div>
+      {% endif %}
       <div class="flex flex-wrap items-center gap-1" data-draft-actions>
         <button type="button" class="btn btn-ghost btn-sm max-sm:px-2" title="{{ _('Copy') }}" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ ui.icon('copy', 15) }}<span class="max-sm:sr-only">{{ _("Copy") }}</span></button>
         <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/mark-sent" hx-post="/drafts/{{ d.id }}/mark-sent">{{ ui.icon('check', 15) }}{{ _("Sent manually") }}</button>
         <button class="btn btn-ghost btn-sm hover:bg-bad-soft hover:text-error max-sm:px-2" title="{{ _('Discard') }}" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ ui.icon('trash', 15) }}<span class="max-sm:sr-only">{{ _("Discard") }}</span></button>
         <span class="flex-1"></span>
-        <button class="btn btn-primary px-5" hx-post="/drafts/{{ d.id }}/send" title="{{ _('Goes out in a few seconds – until then you can take it back here.') }}">{{ ui.icon('send', 16) }}{{ _("Send") }}</button>
+        <button class="btn btn-primary px-5" hx-post="/drafts/{{ d.id }}/send" title="{{ _('Goes out in a few seconds – until then you can take it back here.') }}">{{ ui.icon('send', 16) }}{{ _("Send + PayLivery") if step else _("Send") }}</button>
       </div>
     </form>
     {# 5 · or let Claude rewrite it: one of its other decisions for this situation (same buttons as in Telegram; one click

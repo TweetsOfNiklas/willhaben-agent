@@ -141,7 +141,7 @@ app.include_router(style_routes.router)       # Settings → My rules → Writin
 paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
 from app.services import paylivery_advice  # noqa: E402
-paylivery_routes.paylivery.on_stage(paylivery_advice.on_stage)          # a buyer's offer: Claude suggests the answer
+paylivery_routes.paylivery.on_stage(paylivery_advice.on_stage)          # an offer came in: a draft with its step
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -251,6 +251,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
+templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
 templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
@@ -1563,12 +1564,19 @@ async def chat_draft(request: Request, conversation_id: str, hint: str = Form(""
 
 
 @app.post("/drafts/{draft_id}/send")
-async def draft_send(draft_id: int, text: str = Form(...)):
-    """Queued: the chat page comes back at once with the message marked "sending…" (chats.enqueue_send)."""
+async def draft_send(draft_id: int, text: str = Form(...), paylivery_step: str = Form(""), pl_amount: str = Form("")):
+    """Queued: the chat page comes back at once with the message marked "sending…" (chats.enqueue_send).
+    `paylivery_step`: the draft's PayLivery step (accept, counter, decline) starts in the browser along with it."""
     with session() as db:
         d = db.get(Draft, draft_id)
     if d is None:
         raise HTTPException(404)
+    step = paylivery_step if paylivery_step and (d.paylivery or {}).get("action") == paylivery_step else ""
+    if step:              # the step first: a refusal (amount, order maximum) keeps the answer unsent as well
+        try:
+            await paylivery_routes.paylivery.start_action(d.conversation_id, step, pl_amount)
+        except paylivery_routes.paylivery.PayLiveryError as e:
+            return back(f"/chats/{d.conversation_id}?msg={quote(str(e), safe='')}")
     if not chats.enqueue_send(draft_id, text):
         return back(f"/chats/{d.conversation_id}?msg={quote(t('Not sent: the draft is not open any more or empty'), safe='')}")
     return back(f"/chats/{d.conversation_id}#draft-{draft_id}")

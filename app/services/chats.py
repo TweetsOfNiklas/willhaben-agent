@@ -25,7 +25,7 @@ from app.llm.prompts import (
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, selling, stock, style, system_prompts
+from app.services import my_ads, paylivery_advice, selling, stock, style, system_prompts
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -559,6 +559,8 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         result = await get_backend(req["backend"]).complete(system=req["system"], prompt=req["prompt"],
                                                             schema=req["schema"])
     draft = draft_from(result, conversation_id, auto=auto, buyer=buy is not None)
+    draft.paylivery = paylivery_advice.clean((result.data or {}).get("paylivery_action"),
+                                             *paylivery_advice.for_draft(conv, ad))
     with session() as db:
         db.add(draft)
         db.commit()
@@ -610,6 +612,10 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         others = _others_said(conv.id, conv.ad_id) if conv.role == "seller" else []
     if line := platform_rule(platform):
         rules = f"{rules}\n\n{line}"
+    pl, pl_asking, pl_floor = paylivery_advice.for_draft(conv, ad)
+    if pl:                                        # an open PayLivery offer: the draft suggests the step on willhaben too
+        rules = f"{rules}\n\n{paylivery_advice.prompt_block(pl, pl_asking, pl_floor)}"
+        schema = paylivery_advice.schema(schema)
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
                           rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now,
@@ -886,6 +892,8 @@ def answer_blockers(conv: Conversation | None, d: Draft, msgs: list[Message], *,
         why.append(t("Answer contains placeholders"))
     if not d.text.strip():
         why.append(t("empty answer"))
+    if d.paylivery:                       # a step on willhaben goes with it: the owner sends both
+        why.append(t("A PayLivery step goes with this answer"))
     if buyer:                             # purchase guards: maximum price, bank details, address, needs_user
         if buy is not None:
             why += purchase.blockers(buy, d, msgs)
