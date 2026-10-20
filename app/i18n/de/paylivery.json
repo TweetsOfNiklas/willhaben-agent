@@ -4,8 +4,6 @@
   "Deadline {date}": "Frist {date}",
   "No shipment for this chat yet": "Für diesen Chat gibt es noch keine Sendung",
   "The label is already saved.": "Das Etikett ist schon gespeichert.",
-  "willhaben has not sent a label link yet": "willhaben hat noch keinen Etikett-Link geschickt",
-  "The label could not be downloaded – open it on willhaben": "Das Etikett konnte nicht geladen werden – auf willhaben öffnen",
   "Label saved.": "Etikett gespeichert.",
   "Marked as shipped in this app": "In dieser App als verschickt markiert",
   "Marked as shipped.": "Als verschickt markiert.",
@@ -51,7 +49,6 @@
   "Accept this offer on willhaben now?": "Diesen Preisvorschlag jetzt auf willhaben annehmen?",
   "Decline offer": "Preisvorschlag ablehnen",
   "Decline this offer on willhaben now?": "Diesen Preisvorschlag jetzt auf willhaben ablehnen?",
-  "Download label": "Etikett laden",
   "Mark shipped": "Als verschickt markieren",
   "Mark this parcel as shipped in this app?": "Dieses Paket in dieser App als verschickt markieren?",
   "Send offer": "Preisvorschlag senden",
@@ -96,5 +93,8 @@
   "PayLivery steps (offers, payment, delivery)": "PayLivery-Schritte (Preisvorschläge, Zahlung, Zustellung)",
   "Approve the payment in your bank app": "Zahlung in deiner Banking-App freigeben",
   "the purchase continues by itself afterwards": "der Kauf läuft danach von selbst weiter",
-  "Waiting for the approval in the bank app": "Warte auf die Freigabe in der Banking-App"
+  "Waiting for the approval in the bank app": "Warte auf die Freigabe in der Banking-App",
+  "Get label": "Etikett holen",
+  "willhaben showed no label PDF": "willhaben hat kein Etikett-PDF gezeigt",
+  "Label created and saved.": "Etikett erstellt und gespeichert."
 }
