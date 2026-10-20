@@ -99,8 +99,12 @@ def parse_listing(item: dict[str, Any], host: str = HOST) -> Listing:
                    url=url if url.startswith("http") else f"https://{host}{url}",
                    image_url=p.get("thumbnailUrl") or (photos[0] if photos else None),
                    is_private=(not user.get("isBusiness")) if "isBusiness" in user else None, is_bumped=None,
-                   status="active", platform="vinted", item_condition=item_condition,
+                   status="reserved" if (p.get("is_reserved") or p.get("isReserved") or item.get("is_reserved"))
+                   else "active", platform="vinted", item_condition=item_condition,
                    item_condition_label=item_condition_label, buyer_fee=fee)
+
+
+_RESERVED = re.compile(r'"is_reserved"\s*:\s*true')     # the item page's own flag (the label: "Reserviert")
 
 
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:
@@ -181,7 +185,8 @@ def parse_item(text: str, ad_id: str, host: str = HOST, now: datetime | None = N
     item_condition, item_condition_label = condition.vinted_item(attrs)
     shipping_price, shipping = _shipping(text)
     return AdDetail(ad_id=ad_id, heading=one_line(title) or "", description=description or None, price=price,
-                    price_display=euro(price) if price is not None else None, status="active", published_at=uploaded,
+                    price_display=euro(price) if price is not None else None,
+                    status="reserved" if _RESERVED.search(text or "") else "active", published_at=uploaded,
                     first_published_at=uploaded, end_date=None, url=f"https://{host}/items/{ad_id}", images=photos,
                     seller_name=one_line(seller.get("name")),
                     is_private=(not business) if isinstance(business, bool) else None, platform="vinted",
