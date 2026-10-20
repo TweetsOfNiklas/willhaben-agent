@@ -118,8 +118,11 @@ def view(d: Any, conv: Conversation) -> dict[str, Any] | None:
     p = pending(conv)
     if not a or not p or a.get("offer") != p["offer"]:
         return None
+    from app.services import paylivery
     label = {"accept": t("Accept offer"), "counter": t("Counter offer"), "decline": t("Decline offer")}[a["action"]]
-    return {**a, "label": label, "input": a["action"] == "counter"}
+    running = paylivery._busy.get(conv.id)
+    return {**a, "label": label, "input": a["action"] == "counter",
+            "busy": paylivery._ui(running)["label"] if running in paylivery.BROWSER_ACTIONS else ""}
 
 
 async def on_stage(conv: Conversation, stage: str, state: dict[str, Any]) -> None:

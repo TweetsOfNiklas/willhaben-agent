@@ -108,3 +108,23 @@ def test_chat_steps_start_in_the_conversation_itself():
     conv = Conversation(id="f3dee5b8-9973-4ccc-8e01-013ae0bcefd9", ad_context={"url": "https://www.willhaben.at/iad/x"})
     assert paylivery._start_url(conv, "counter") == paylivery.CHAT_URL + "/f3dee5b8-9973-4ccc-8e01-013ae0bcefd9"
     assert paylivery._start_url(Conversation(id="c1"), "accept") == paylivery.CHAT_URL
+
+
+def test_a_running_step_shows_a_spinner_that_refreshes_itself():
+    _seller_chat()
+    with session() as db:
+        db.add(Draft(conversation_id="s-adv", text="x", paylivery={"action": "counter", "amount": 50.0, "offer": 30.0}))
+        db.commit()
+    from app.main import app
+    paylivery._busy["s-adv"] = "counter"
+    try:
+        with TestClient(app) as c:
+            page = c.get("/chats/s-adv").text
+        assert "data-paylivery-busy" in page and "Counter offer is running on willhaben…" in page
+        assert 'hx-trigger="every 2s" hx-select="#pl-step"' in page and 'hx-select="#paylivery"' in page
+        assert "data-paylivery-step" not in page                    # no second start while it runs
+    finally:
+        paylivery._busy.pop("s-adv", None)
+    with TestClient(app) as c:
+        page = c.get("/chats/s-adv").text
+    assert "data-paylivery-busy" not in page and "data-paylivery-step" in page and 'aria-busy="true"' not in page

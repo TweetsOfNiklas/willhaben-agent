@@ -111,5 +111,6 @@
  "their offer {amount}": "Vorschlag {amount}",
  "Run only the PayLivery step on willhaben now, without sending the answer?": "Nur den PayLivery-Schritt jetzt auf willhaben ausführen, ohne die Antwort zu senden?",
  "Send + PayLivery": "Senden + PayLivery",
- "Only PayLivery: {step}": "Nur PayLivery: {step}"
+ "Only PayLivery: {step}": "Nur PayLivery: {step}",
+ "{step} is running on willhaben…": "{step} läuft auf willhaben…"
 }

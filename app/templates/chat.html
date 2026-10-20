@@ -96,8 +96,13 @@
       <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea min-h-20 max-h-[35dvh] w-full rounded-[10px] bg-base-200 px-3.5 py-3 text-[14.5px] leading-relaxed field-sizing-content md:min-h-24">{{ d.text }}</textarea>
       {% if d.error %}<div class="flex items-start gap-2 text-[12.5px] text-error">{{ ui.icon('alert', 14, 2, 'mt-px') }}<span class="min-w-0 break-words">{{ d.error }}</span></div>{% endif %}
       {% set step = paylivery_step(d, conv) %}
-      {% if step %}{# Claude's PayLivery step for the open offer: runs on willhaben together with Send (or alone) #}
-      <div class="flex flex-wrap items-center gap-2 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]" data-paylivery-step>
+      {% if step and step.busy %}{# running on willhaben: a spinner that checks every 2 s; gone once willhaben confirmed #}
+      <div id="pl-step" class="flex items-center gap-2 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px] text-primary" role="status" data-paylivery-busy
+           hx-get="/chats/{{ conv.id }}" hx-trigger="every 2s" hx-select="#pl-step" hx-target="this" hx-swap="outerHTML">
+        <span class="loading loading-spinner loading-sm"></span><span class="min-w-0 break-words"><b>PayLivery:</b> {{ _("{step} is running on willhaben…", step=step.busy) }}</span>
+      </div>
+      {% elif step %}{# Claude's PayLivery step for the open offer: runs on willhaben together with Send (or alone) #}
+      <div id="pl-step" class="flex flex-wrap items-center gap-2 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]" data-paylivery-step>
         <label class="flex min-w-0 cursor-pointer items-center gap-2"><input type="checkbox" name="paylivery_step" value="{{ step.action }}" checked class="checkbox checkbox-sm checkbox-primary">
           <span class="min-w-0 break-words"><b>PayLivery:</b> {{ step.label }}{% if not step.input %} · {{ _("offer {amount}", amount=step.offer|eur) }}{% endif %}</span></label>
         {% if step.input %}<input type="number" name="pl_amount" min="1" max="100000" step="0.5" value="{{ step.amount }}" aria-label="{{ _('Counter offer amount in euros') }}" class="input input-sm w-[90px] bg-base-100"><span class="text-muted">€ · {{ _("their offer {amount}", amount=step.offer|eur) }}</span>{% endif %}
