@@ -838,3 +838,40 @@ def test_buyer_accepts_a_counter_offer_only_within_the_order():
     with pytest.raises(paylivery.PayLiveryError, match="maximum"):
         paylivery.check_action(_conv("b1"), "accept", None)
     assert paylivery._goal("accept", None, "buyer").startswith("Das Gegenangebot des Verkäufers ANNEHMEN")
+
+
+async def test_the_paylivery_window_iframe_is_read_and_clicked_in():
+    """The counter offer dialog is willhaben's iframe: its fields come first (marked), clicks go into that frame."""
+    class Loc:
+        def __init__(self, fr, sel):
+            self.fr, self.sel, self.first = fr, sel, self
+
+        async def click(self, timeout=None):
+            self.fr.clicked.append(self.sel)
+
+    class Frame:
+        def __init__(self, url, els, text=""):
+            self.url, self.els, self.text, self.clicked = url, els, text, []
+
+        async def evaluate(self, js, start):
+            return [{**e, "idx": start + i} for i, e in enumerate(self.els)]
+
+        def locator(self, sel):
+            return Loc(self, sel)
+
+        async def inner_text(self, sel):
+            return self.text
+
+    window = Frame("https://www.willhaben.at/p2p/offer/x", [{"kind": "field", "label": "Betrag"},
+                                                            {"kind": "button", "label": "Preisvorschlag senden"}],
+                   "Gesamt € 50,00")
+    ad = Frame("https://ads.example.com/x", [{"kind": "button", "label": "Werbung"}])
+    page = Frame("https://www.willhaben.at/iad/myprofile/chat/x", [{"kind": "button", "label": "Neuer Preisvorschlag"}],
+                 "Chat")
+    page.main_frame, page.frames = page, [page, window, ad]
+    els = await paylivery._collect(page)
+    assert [(e["idx"], e["label"], e.get("fenster")) for e in els] == [
+        (1, "Betrag", True), (2, "Preisvorschlag senden", True), (3, "Neuer Preisvorschlag", None)]
+    await paylivery._click(page, els[1])
+    assert window.clicked == ['[data-plidx="2"]'] and page.clicked == []
+    assert "Gesamt € 50,00" in await paylivery._all_text(page)
