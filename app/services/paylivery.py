@@ -61,28 +61,33 @@ STATUSES = ("continue", "done", "need_human", "abort")
 
 # most advanced first within a role; offers may restart until payment, problems and cancellations always apply.
 # released: the paid purchase is accepted and waits for the parcel ("Der Kauf wurde freigegeben ... zum Versand bereit")
-RANK = {"offer_received": 1, "offer_sent": 1, "offer_declined": 2, "offer_accepted": 2, "paid": 3, "released": 4,
+RANK = {"offer_received": 1, "offer_sent": 1, "counter_sent": 1, "counter_received": 1, "offer_declined": 2, "offer_accepted": 2, "paid": 3, "released": 4,
         "label_ready": 5, "shipped": 6, "delivered": 7, "received": 8, "paid_out": 9}
-OFFER_STAGES = ("offer_received", "offer_sent", "offer_accepted", "offer_declined")
+# counter: the seller answers a buyer's offer with an amount of his own (counter_sent in the seller's chat,
+# counter_received in the buyer's); the buyer then accepts or declines it
+OFFER_STAGES = ("offer_received", "offer_sent", "counter_sent", "counter_received", "offer_accepted", "offer_declined")
 FACT_KEYS = ("amount", "offer", "deadline", "tracking", "label_url")
 LINK_FACTS = ("tracking", "label_url")   # taken from every notice, also one that sets no stage
 RULES = 2   # version of the notice rules; a state from older rules is rechecked once (recheck)
 
 ACTION_ROLE: dict[str, str | None] = {   # None: either role
-    "accept": "seller", "decline": "seller", "label": "seller", "mark_shipped": "seller",
+    "accept": None, "decline": None, "counter": "seller", "label": "seller", "mark_shipped": "seller",
     "offer": "buyer", "buy": "buyer", "receipt": "buyer", "problem": None,
 }
-BROWSER_ACTIONS = ("accept", "decline", "offer", "buy", "receipt", "problem")
-MONEY_ACTIONS = ("offer", "buy")
-ACTION_STAGE = {"accept": "offer_accepted", "decline": "offer_declined", "offer": "offer_sent", "buy": "paid",
+BROWSER_ACTIONS = ("accept", "decline", "counter", "offer", "buy", "receipt", "problem")
+MONEY_ACTIONS = ("offer", "counter", "buy")
+ACTION_STAGE = {"accept": "offer_accepted", "decline": "offer_declined", "offer": "offer_sent", "counter": "counter_sent",
+                "buy": "paid",
                 "receipt": "received", "problem": "problem", "mark_shipped": "shipped"}
 SELLER_ACTIONS: dict[str | None, list[str]] = {
-    None: [], "offer_received": ["accept", "decline"], "offer_accepted": [], "offer_declined": [],
+    None: [], "offer_received": ["accept", "counter", "decline"], "counter_sent": [], "offer_accepted": [],
+    "offer_declined": [],
     "paid": ["label", "mark_shipped"], "released": ["label", "mark_shipped"], "label_ready": ["label", "mark_shipped"],
     "shipped": [], "delivered": [], "received": [], "paid_out": [], "problem": [], "cancelled": [],
 }
 BUYER_ACTIONS: dict[str | None, list[str]] = {
-    None: ["offer", "buy"], "offer_sent": [], "offer_received": [], "offer_declined": ["offer", "buy"],
+    None: ["offer", "buy"], "offer_sent": [], "counter_received": ["accept", "decline"],
+    "offer_declined": ["offer", "buy"],
     "offer_accepted": ["buy"], "paid": ["problem"], "released": ["problem"], "label_ready": ["problem"],
     "shipped": ["problem"], "delivered": ["receipt", "problem"], "received": [], "paid_out": [], "problem": [],
     "cancelled": [],
@@ -141,10 +146,14 @@ _PURCHASE_DECLINED = re.compile(rf"{_PURCHASE}{_GAP}{{0,40}}?(?:\babgelehnt\b|\b
 # buyer: bought (and paid), the seller has not accepted yet: "Der Verkäufer hat jetzt 24 Stunden Zeit, deinen Kauf
 # zu akzeptieren"
 _BOUGHT_WAIT = re.compile(r"\bzeit\b[^\n]{0,12}?\bdeinen\s+kauf\s+zu\s+(?:akzeptieren|best[äa]tigen|annehmen)\b", re.I)
+_COUNTER = re.compile(r"gegen(?:angebot|vorschlag)\w*", re.I)
+_YOU_SENT = re.compile(r"\bdu\s+hast\b[^.!?\n]{0,60}?\b(?:gesendet|abgeschickt|abgegeben|gemacht|gestellt|versendet)\b", re.I)
 _OFFER_NOUN = re.compile(r"\b(?:preis)?vorschl[aä]g\w*|\bangebot\b|\b(?:kauf)?anfrage", re.I)
 _OFFER_WORD = re.compile(r"vorschl[aä]g\w*|\bangebot\b|\b(?:kauf)?anfrage|\bkauf\w*|gekauft", re.I)
 _ACCEPT = re.compile(r"angenommen|akzeptiert|zugesagt|einverstanden", re.I)
 _DECLINE = re.compile(r"abgelehnt|abgesagt|abgewiesen|nicht\s+angenommen", re.I)
+_TO_YOU = re.compile(r"\b(?:hat|haben)\s+dir\b", re.I)          # "Max hat dir einen Preisvorschlag gemacht": received
+_RECV_DIR = re.compile(r"erhalten|bekommen|eingegangen|\bneu(?:er|es|e)?\b", re.I)
 _SOLD = re.compile(r"sofort\s+gekauft|gekauft|sofortkauf", re.I)
 _SOLD_MINE = re.compile(rf"\bdein\w*\s+(?:artikel|anzeige)\b{_GAP}{{0,30}}?\bverkauft\b", re.I)   # seller: sale agreed
 
@@ -200,8 +209,10 @@ FINAL_CLICK = {   # the one commit button per action; any other action's commit 
     "decline": re.compile(r"ablehnen", re.I),
     "receipt": re.compile(r"erhalt|best[äa]tig", re.I),
     "problem": re.compile(r"problem\s+melden", re.I),
-    "offer": re.compile(r"(?:vorschlag|angebot)\w*\s+(?:senden|abschicken|absenden)|^\s*(?:senden|abschicken|absenden)\s*$",
-                        re.I),
+    "offer": re.compile(r"(?<!gegen)(?:vorschlag|angebot)\w*\s+(?:senden|abschicken|absenden)|"
+                        r"^\s*(?:senden|abschicken|absenden)\s*$", re.I),
+    "counter": re.compile(r"gegen(?:angebot|vorschlag)\w*\s+(?:senden|abschicken|absenden)|"
+                          r"^\s*(?:senden|abschicken|absenden)\s*$", re.I),
     "buy": re.compile(r"\b(?:sofort\s+|jetzt\s+)?kaufen\b|bezahlen|zahlungspflichtig", re.I),
 }
 _SECRET_FIELD = re.compile(r"karte|card|iban|\bbic\b|cvc|cvv|cc-|kreditkarte|passwort|password|\bpin\b|\btan\b|"
@@ -411,7 +422,7 @@ def detect_stage(text: str, role: str | None) -> str | None:
         return "released"
     if _paid(done) or (role == "buyer" and _hits(_BOUGHT_WAIT, done)):
         return "paid"
-    offer_word = _hits(_OFFER_WORD, done)
+    offer_word = _hits(_OFFER_WORD, done) or _hits(_COUNTER, done)
     if offer_word and _hits(_DECLINE, done):
         return "offer_declined"
     if offer_word and _hits(_ACCEPT, done):
@@ -420,8 +431,14 @@ def detect_stage(text: str, role: str | None) -> str | None:
         return "offer_accepted" if role == "seller" else "paid"
     if role == "seller" and _hits(_SOLD_MINE, done):
         return "offer_accepted"
-    if offer:                                     # PayLivery offers go buyer -> seller only; no counter offer exists
-        return "offer_sent" if role == "buyer" else "offer_received"
+    if offer or _hits(_COUNTER, done):
+        # the buyer offers, the seller may answer with a counter offer: an offer that reached the buyer, or one the
+        # seller sent, is a counter offer
+        counter = bool(_hits(_COUNTER, done))
+        if role == "buyer":
+            return "counter_received" if counter or _hits(_TO_YOU, done) or (
+                _hits(_RECV_DIR, done) and not _hits(_YOU_SENT, done)) else "offer_sent"
+        return "counter_sent" if counter or _hits(_YOU_SENT, done) else "offer_received"
     return None
 
 
@@ -1038,6 +1055,8 @@ def stage_label(stage: str | None) -> str:
     return {
         "offer_received": t("Offer received"),
         "offer_sent": t("Offer sent"),
+        "counter_sent": t("Counter offer sent"),
+        "counter_received": t("Counter offer received"),
         "offer_accepted": t("Offer accepted"),
         "offer_declined": t("Offer declined"),
         "paid": t("Paid"),
@@ -1057,7 +1076,8 @@ def next_step(role: str, stage: str | None) -> str:
     if role == "seller":
         return {
             None: t("Nothing from willhaben yet. Wait for the buyer's offer or payment."),
-            "offer_received": t("Accept or decline the offer. Accepting asks the buyer to pay."),
+            "offer_received": t("Accept, counter or decline the offer. Accepting asks the buyer to pay."),
+            "counter_sent": t("Counter offer sent. Waiting for the buyer."),
             "offer_declined": t("Offer declined. Wait for a new offer."),
             "offer_accepted": t("Waiting for the buyer's payment."),
             "paid": t("Paid. Download the label, attach it to the parcel, then mark it shipped."),
@@ -1073,6 +1093,7 @@ def next_step(role: str, stage: str | None) -> str:
     return {
         None: t("Send an offer or buy now and pay with PayLivery."),
         "offer_sent": t("Offer sent. Waiting for the seller."),
+        "counter_received": t("The seller made a counter offer. Accept it and pay, or decline it."),
         "offer_declined": t("Your offer was declined. Send another or buy now."),
         "offer_accepted": t("The seller accepted. Pay the agreed price now."),
         "paid": t("Paid. Waiting for the parcel."),
@@ -1101,6 +1122,8 @@ def _ui(name: str) -> dict[str, str]:
         "label": {"label": t("Download label"), "confirm": ""},
         "mark_shipped": {"label": t("Mark shipped"), "confirm": ""},     # only in this app: no confirm, no undo needed
         "offer": {"label": t("Send offer"), "confirm": t("Send this offer on willhaben for the amount entered?")},
+        "counter": {"label": t("Counter offer"),
+                    "confirm": t("Send this counter offer on willhaben for the amount entered?")},
         "buy": {"label": t("Buy now & pay"), "confirm": t("Buy now and pay with willhaben PayLivery? This runs on willhaben.")},
         "receipt": {"label": t("Confirm receipt"), "confirm": t("Confirm on willhaben that you received the parcel?")},
         "problem": {"label": t("Report a problem"), "confirm": t("Report a problem with this purchase on willhaben now?")},
@@ -1128,7 +1151,7 @@ def buy_amount(conv: Conversation) -> float | None:
 
 
 def _action_view(name: str, amount: float | None) -> dict[str, Any]:
-    return {**_ui(name), "name": name, "amount": amount, "input": name == "offer",
+    return {**_ui(name), "name": name, "amount": amount, "input": name in ("offer", "counter"),
             "amount_text": _money(amount), "disabled": False, "note": ""}
 
 
@@ -1171,7 +1194,7 @@ def card(conv) -> dict[str, Any] | None:
         "role": role, "stage": stage, "stage_label": stage_label(stage), "next": next_step(role, stage),
         "amount": st.get("amount"), "offer": st.get("offer"), "deadline": _date_text(st.get("deadline")),
         "tracking": st.get("tracking"), "history": list(reversed(st.get("history") or []))[:HISTORY_CAP],
-        "actions": [_action_view(n, amount if n == "buy" else (st.get("offer") if n == "offer" else None))
+        "actions": [_action_view(n, amount if n == "buy" else (st.get("offer") if n in ("offer", "counter") else None))
                     for n in names],
         "busy": _busy.get(conv.id), "busy_label": _ui(_busy[conv.id])["label"] if conv.id in _busy else "",
         "open_url": CHAT_URL, "shipment_id": s.id if s else None,
@@ -1187,8 +1210,13 @@ def check_action(conv: Conversation, action: str, amount: float | None) -> None:
     need = ACTION_ROLE[action]
     if need and conv.role != need:
         raise PayLiveryError(t("Not available for this side of the chat"))
-    if action == "offer" and not (amount and 0 < amount <= MAX_AMOUNT):
+    if action in ("offer", "counter") and not (amount and 0 < amount <= MAX_AMOUNT):
         raise PayLiveryError(t("Enter the offer amount in euros"))
+    if action == "accept" and conv.role == "buyer":
+        offer = (conv.paylivery or {}).get("offer")
+        if (conv.paylivery or {}).get("stage") != "counter_received" or not offer:
+            raise PayLiveryError(t("No counter offer to accept"))
+        _within_order(conv, float(offer))
     if action == "buy":
         flags = {"paylivery": bool((conv.ad_context or {}).get("paylivery")),
                  "buy_now": bool((conv.ad_context or {}).get("buy_now"))}
@@ -1199,11 +1227,16 @@ def check_action(conv: Conversation, action: str, amount: float | None) -> None:
             raise PayLiveryError(t("This ad has no buy-now price"))
         if not (amount and 0 < amount <= MAX_AMOUNT):
             raise PayLiveryError(t("No price known for this purchase"))
-        from app.services import purchase
-        row = purchase.for_conversation(conv.id)
-        if row is not None and row.max_price and purchase.costs_of(row, amount)["total"] > row.max_price + 0.005:
-            raise PayLiveryError(t("€{amount} incl. shipping and buyer protection is above the order's maximum of "
-                                   "€{max}", amount=_eur_plain(amount), max=_eur_plain(row.max_price)))
+        _within_order(conv, amount)
+
+
+def _within_order(conv: Conversation, amount: float) -> None:
+    """A buyer's chat with an order: the item price with shipping and the buyer protection fee must fit its maximum."""
+    from app.services import purchase
+    row = purchase.for_conversation(conv.id)
+    if row is not None and row.max_price and purchase.costs_of(row, amount)["total"] > row.max_price + 0.005:
+        raise PayLiveryError(t("€{amount} incl. shipping and buyer protection is above the order's maximum of "
+                               "€{max}", amount=_eur_plain(amount), max=_eur_plain(row.max_price)))
 
 
 # a buy without an order: the checkout's total may add shipping and the buyer protection fee to the confirmed price
@@ -1227,19 +1260,26 @@ def _eur_plain(v: float) -> str:
 
 def _start_url(conv: Conversation, action: str) -> str:
     ad_url = (conv.ad_context or {}).get("url") or ""
-    if action in MONEY_ACTIONS and _fetchable(ad_url):
+    if action in ("offer", "buy") and _fetchable(ad_url):
         return ad_url
     return CHAT_URL
 
 
-def _goal(action: str, amount: float | None) -> str:
+def _goal(action: str, amount: float | None, role: str | None = None) -> str:
     money = _money(amount)
+    if role == "buyer" and action in ("accept", "decline"):
+        word = "ANNEHMEN" if action == "accept" else "ABLEHNEN"
+        return (f"Das Gegenangebot des Verkäufers {word}: nur den {word.capitalize()}-Knopf dieses Gegenangebots drücken. "
+                "Nicht bezahlen: führt die Seite zur Zahlung, status done.")
     return {
         "accept": "Den Preisvorschlag des Käufers ANNEHMEN: nur den Annehmen-Knopf dieses Vorschlags drücken.",
         "decline": "Den Preisvorschlag des Käufers ABLEHNEN: nur den Ablehnen-Knopf dieses Vorschlags drücken.",
         "receipt": "Den Erhalt des Pakets BESTÄTIGEN (Erhalt bestätigen). Nichts anderes.",
         "problem": "Für diese Bestellung ein PROBLEM MELDEN: das Problem-Formular öffnen. Einen Grund nur wählen, "
                    "wenn er eindeutig passt, sonst need_human.",
+        "counter": f"Dem Preisvorschlag des Käufers ein GEGENANGEBOT über {money} machen: den Gegenangebot-Knopf "
+                   f"dieses Vorschlags öffnen, der Betrag ist bereits von der App gesetzt, dann absenden. NICHT "
+                   f"annehmen und NICHT ablehnen.",
         "offer": f"Einen Preisvorschlag über {money} senden: Preisvorschlag-Formular öffnen, den Betrag ist bereits "
                  f"von der App gesetzt, dann absenden.",
         "buy": f"Die Anzeige zum Preis {money} kaufen und mit willhaben PayLivery bezahlen: Sofort kaufen, dann "
@@ -1447,7 +1487,7 @@ async def _apply_fills(page, elements: list[dict[str, Any]], fills: list[dict[st
                        amount: float | None) -> None:
     """Claude's fills, guarded; the offer amount is always the code's (the confirmed one), never Claude's."""
     by_idx = {e["idx"]: e for e in elements}
-    amount_idx = {e["idx"] for e in elements if _is_amount_field(e)} if action == "offer" and amount else set()
+    amount_idx = {e["idx"] for e in elements if _is_amount_field(e)} if action in ("offer", "counter") and amount else set()
     plan = [(by_idx.get(f.get("idx")), str(f.get("value") or "")) for f in fills if f.get("idx") not in amount_idx]
     if amount_idx:
         plan += [(by_idx[i], _amount_text(by_idx[i], amount)) for i in amount_idx]
@@ -1506,7 +1546,7 @@ async def _drive_steps(sess, conv: Conversation, action: str, amount: float | No
     page = sess.ui_page
     await _settle(page)
     await _dismiss(page)
-    goal = _goal(action, amount)
+    goal = _goal(action, amount, conv.role)
     final_clicked = card_filled = pushed = False
     for step in range(MAX_STEPS):
         reason = await _bank_reason(page)
@@ -1627,7 +1667,7 @@ async def start_action(conversation_id: str, action: str, amount_text: str = "")
     conv = _conv(conversation_id)
     if conv is None:
         raise PayLiveryError(t("Conversation not found"))
-    if action == "offer":
+    if action in ("offer", "counter"):
         amount = parse_money(amount_text)
     elif action == "buy":
         amount = buy_amount(conv)

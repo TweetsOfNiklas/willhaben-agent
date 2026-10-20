@@ -23,7 +23,6 @@
  "Cancelled": "Storniert",
  "No PayLivery notice yet": "Noch keine PayLivery-Mitteilung",
  "Nothing from willhaben yet. Wait for the buyer's offer or payment.": "Von willhaben noch nichts. Auf den Preisvorschlag oder die Zahlung des Käufers warten.",
- "Accept or decline the offer. Accepting asks the buyer to pay.": "Preisvorschlag annehmen oder ablehnen. Annehmen fordert den Käufer zur Zahlung auf.",
  "Offer declined. Wait for a new offer.": "Preisvorschlag abgelehnt. Auf einen neuen Vorschlag warten.",
  "Waiting for the buyer's payment.": "Warten auf die Zahlung des Käufers.",
  "Paid. Download the label, attach it to the parcel, then mark it shipped.": "Bezahlt. Etikett laden, auf das Paket kleben, dann als verschickt markieren.",
@@ -98,5 +97,13 @@
  "Waiting for the approval in the bank app": "Warte auf die Freigabe in der Banking-App",
  "€{amount} incl. shipping and buyer protection is above the order's maximum of €{max}": "€{amount} samt Versand und Käuferschutz liegt über dem Höchstpreis des Auftrags von €{max}",
  "no total on the page before the payment – refusing to pay": "kein Gesamtbetrag auf der Seite vor der Zahlung – zahle nicht",
- "the page asks €{total}, more than the allowed €{ceiling} – refusing to pay": "die Seite verlangt €{total}, mehr als die erlaubten €{ceiling} – zahle nicht"
+ "the page asks €{total}, more than the allowed €{ceiling} – refusing to pay": "die Seite verlangt €{total}, mehr als die erlaubten €{ceiling} – zahle nicht",
+ "Counter offer sent": "Gegenangebot gesendet",
+ "Counter offer received": "Gegenangebot erhalten",
+ "Accept, counter or decline the offer. Accepting asks the buyer to pay.": "Preisvorschlag annehmen, mit einem Gegenangebot beantworten oder ablehnen. Annehmen fordert den Käufer zur Zahlung auf.",
+ "Counter offer sent. Waiting for the buyer.": "Gegenangebot gesendet. Warten auf den Käufer.",
+ "The seller made a counter offer. Accept it and pay, or decline it.": "Der Verkäufer hat ein Gegenangebot gemacht. Annehmen und bezahlen oder ablehnen.",
+ "Counter offer": "Gegenangebot",
+ "Send this counter offer on willhaben for the amount entered?": "Dieses Gegenangebot mit dem eingegebenen Betrag jetzt auf willhaben senden?",
+ "No counter offer to accept": "Kein Gegenangebot zum Annehmen"
 }

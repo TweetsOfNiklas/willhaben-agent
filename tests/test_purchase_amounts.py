@@ -22,3 +22,21 @@ def test_an_item_price_is_held_to_the_item_ceiling_a_total_to_the_maximum():
     assert not tp("Also 98 € inkl. Versand und Käuferschutz?")     # a total: up to the maximum
     assert not tp("Insgesamt 99 €, passt das?")
     assert tp("Insgesamt 101 €, passt das?")
+
+
+async def test_a_counter_offer_is_pushed_with_whether_it_fits(monkeypatch):
+    from app.db import Conversation, session
+    pushes = []
+
+    async def push(row, title, text, **kw):
+        pushes.append((title, text))
+    monkeypatch.setattr(purchase, "_push", push)
+    with session() as db:
+        db.add(Conversation(id="b-ctr", role="buyer", partner_name="x"))
+        db.add(Purchase(ad_id="1", mode="paylivery", status="negotiating", max_price=50.0, shipping_cost=5.0,
+                        conversation_id="b-ctr"))
+        db.commit()
+        conv = db.get(Conversation, "b-ctr")
+    await purchase.on_paylivery_stage(conv, "counter_received", {"offer": 40.0})
+    await purchase.on_paylivery_stage(conv, "counter_received", {"offer": 49.0})
+    assert "fits your maximum" in pushes[0][1] and "above your maximum" in pushes[1][1]

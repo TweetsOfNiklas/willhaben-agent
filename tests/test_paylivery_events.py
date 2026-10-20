@@ -524,9 +524,19 @@ def test_chat_page_after_startup_shows_released_without_receipt():
     assert _state()["stage"] == "released"
 
 
-@pytest.mark.parametrize("text", ["Preisvorschlag erhalten: € 120,00", "Max hat dir einen Preisvorschlag über € 40 gemacht.",
-                                  "Neuer Preisvorschlag: € 40"])
-def test_a_buyer_never_receives_an_offer(text):
-    """PayLivery has no counter offer: in a buyer's chat every offer is the buyer's own."""
-    assert paylivery.detect_stage(text, "buyer") == "offer_sent"
-    assert paylivery.allowed_actions("buyer", "offer_sent", {"paylivery": True, "buy_now": True}) == []
+
+@pytest.mark.parametrize("text,role,stage", [
+    ("Du hast eine Anfrage über € 30 erhalten. Wenn der Preis für dich passt, nimm die Anfrage gleich an!", "seller",
+     "offer_received"),
+    ("Du hast ein Gegenangebot über € 45 gesendet.", "seller", "counter_sent"),
+    ("Du hast einen Preisvorschlag über € 45 gesendet.", "seller", "counter_sent"),
+    ("Gegenangebot erhalten: € 45", "buyer", "counter_received"),
+    ("Max hat dir ein Gegenangebot über € 45 gemacht.", "buyer", "counter_received"),
+    ("Max hat dir einen Preisvorschlag über € 45 gemacht.", "buyer", "counter_received"),
+    ("Du hast einen Preisvorschlag über € 30 gesendet.", "buyer", "offer_sent"),
+    ("Dein Gegenangebot wurde angenommen.", "seller", "offer_accepted"),
+    ("Das Gegenangebot wurde abgelehnt.", "buyer", "offer_declined"),
+])
+def test_counter_offers(text, role, stage):
+    """The seller may answer a buyer's offer with a counter offer; the buyer accepts or declines it."""
+    assert paylivery.detect_stage(text, role) == stage

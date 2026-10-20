@@ -1208,6 +1208,13 @@ async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, An
                                              _move(r, "pay_now", t("The seller accepted the PayLivery offer"))))
             await notify_agreement(row)
             await _push_paylivery_pay(row)
+    elif stage == "counter_received":              # the seller answered with an amount of his own: the owner decides
+        amount = state.get("offer")
+        if amount and row.status in OPEN:
+            fits = not row.max_price or costs_of(row, float(amount))["total"] <= row.max_price + 0.005
+            await _push(row, t("Counter offer {amount}", amount=_money(float(amount))),
+                        t("The seller made a PayLivery counter offer. It fits your maximum – accept it in the chat.")
+                        if fits else t("The seller made a PayLivery counter offer above your maximum."))
     elif stage == "offer_declined":
         if row.status == "agreed":
             _change(row.id, lambda r: _move(r, "negotiating", t("The seller declined the PayLivery offer"),

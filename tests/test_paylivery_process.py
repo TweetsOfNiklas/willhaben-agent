@@ -254,9 +254,10 @@ def test_card_hidden_without_state_and_without_paylivery():
     assert _card("buyer", None, ad_ctx={}) is None
 
 
-def test_card_seller_offer_received_has_accept_and_decline():
+def test_card_seller_offer_received_has_accept_counter_and_decline():
     c = _card("seller", "offer_received")
-    assert [a["name"] for a in c["actions"]] == ["accept", "decline"]
+    assert [a["name"] for a in c["actions"]] == ["accept", "counter", "decline"]
+    assert [a["input"] for a in c["actions"]] == [False, True, False]          # the counter offer takes an amount
     assert c["stage_label"] == "Offer received" and c["offer"] == 120.0          # the test locale is English
 
 
@@ -799,3 +800,41 @@ def test_buy_now_over_the_orders_maximum_is_refused_before_the_browser():
         paylivery.check_action(_conv("b1"), "buy", 48.0)          # 48 + shipping + fee > 50
     paylivery.check_action(_conv("b1"), "buy", 40.0)
     assert paylivery.buy_ceiling(_conv("b1"), 40.0) == 50.0       # and the checkout total may not pass it either
+
+
+
+async def test_seller_counter_offer_fills_the_amount_and_presses_send(browser):
+    _chat(cid="s1", role="seller", state={"role": "seller", "stage": "offer_received", "offer": 30.0, "history": []})
+    browser.elements = [_btn(1, "Annehmen"), _btn(2, "Ablehnen"), _field(3, "Dein Gegenangebot (€)", "number", "amount"),
+                        _btn(4, "Gegenangebot senden")]
+    browser.backend.replies = [_step(fills=[{"idx": 3, "value": "99"}], action_idx=1, status="continue"),  # refused
+                               ]
+    msg = await paylivery.run_action("s1", "counter", 45.0)
+    assert browser.clicked == [] and "Annehmen" in msg                          # never accept while countering
+    browser.backend.replies = [_step(fills=[{"idx": 3, "value": "99"}], action_idx=4, status="done", note="gesendet")]
+    msg = await paylivery.run_action("s1", "counter", 45.0)
+    assert browser.clicked == ["Gegenangebot senden"] and (3, "45.00") in browser.filled and (3, "99") not in browser.filled
+    st = _state("s1")
+    assert st["stage"] == "counter_sent" and st["offer"] == 45.0
+
+
+def test_click_verdicts_keep_offer_and_counter_apart():
+    assert paylivery.click_verdict("counter", "Gegenangebot senden") == "final"
+    assert paylivery.click_verdict("offer", "Gegenangebot senden") == "refused"
+    assert paylivery.click_verdict("counter", "Preisvorschlag senden") == "refused"
+    assert paylivery.click_verdict("counter", "Gegenangebot machen") == "neutral"      # opens the form only
+
+
+def test_buyer_accepts_a_counter_offer_only_within_the_order():
+    from app.db import Purchase
+    _chat(cid="b1", role="buyer", state={"role": "buyer", "stage": "counter_received", "offer": 48.0, "history": []})
+    c = paylivery.card(_conv("b1"))
+    assert [a["name"] for a in c["actions"]] == ["accept", "decline"] and c["stage_label"] == "Counter offer received"
+    paylivery.check_action(_conv("b1"), "accept", None)
+    with session() as db:
+        db.add(Purchase(ad_id="77", status="negotiating", mode="paylivery", conversation_id="b1", max_price=50.0,
+                        shipping_cost=5.0))
+        db.commit()
+    with pytest.raises(paylivery.PayLiveryError, match="maximum"):
+        paylivery.check_action(_conv("b1"), "accept", None)
+    assert paylivery._goal("accept", None, "buyer").startswith("Das Gegenangebot des Verkäufers ANNEHMEN")
