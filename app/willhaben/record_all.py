@@ -96,7 +96,9 @@ async def _request(request, failed: bool = False) -> None:
                 raw = await resp.body()
                 size = len(raw)
                 ctype = (await resp.header_value("content-type") or "").lower()
-                if any(k in ctype for k in ("json", "text", "javascript", "xml", "html", "x-www-form")) or not ctype:
+                # scripts: address and size only (a site's bundles are megabytes on every page, 84 MB in 13 min)
+                if request.resource_type != "script" and (
+                        any(k in ctype for k in ("json", "text", "xml", "html", "x-www-form")) or not ctype):
                     limit = DOC_LIMIT if request.resource_type == "document" else BODY_LIMIT
                     body = raw[:limit].decode("utf-8", "replace")
             except Exception:  # noqa: BLE001 - redirects and aborted answers have no body

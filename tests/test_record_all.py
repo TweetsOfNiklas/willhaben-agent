@@ -73,3 +73,13 @@ def test_the_switch_on_the_session_page():
         assert record_all.on()
         c.post("/session/record-all", data={"on": "0"}, follow_redirects=False)
     assert not record_all.on()
+
+
+async def test_scripts_keep_no_body(monkeypatch, tmp_path):
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    record_all.set_on(True)
+    js = Req()
+    js.resource_type, js.url = "script", "https://assets.example.com/_next/static/chunk.js"
+    await record_all._request(js)
+    line = json.loads(next((tmp_path / "captures" / "all").glob("*.jsonl")).read_text().splitlines()[0])
+    assert line["response_body"] is None and line["size"] == 11
