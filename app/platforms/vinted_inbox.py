@@ -394,7 +394,7 @@ _LIVE_JS = r"""
   window.fetch = async function (input, init) {
     const resp = await real.apply(this, arguments);
     try {
-      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const url = String((input && (input.url || input.href)) || input || '');   // a string, Request or URL
       if (url.includes('/messaging/real-time/subscribe') && resp.body) {
         window.__whVintedLive(JSON.stringify({_state: 'open', status: resp.status}));
         const reader = resp.clone().body.getReader(), dec = new TextDecoder();
