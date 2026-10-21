@@ -118,7 +118,7 @@
   <article class="relative flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') else '' }}" id="hit-{{ h.id }}">
     <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="hits-bulk" name="ids" value="{{ h.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}"></label>
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block">
-      {{ ui.thumb(h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
+      {{ ui.thumb('/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
       {# agent and site in one row right of the checkbox: the agent's name gives way (truncated), the site keeps its width #}
       {% set show_agent = not agent_id and agents.get(h.agent_id) %}
       {% if show_agent or platform_ids %}<div class="pointer-events-none absolute top-2 right-2 left-10 flex items-center gap-1.5 max-sm:hidden">

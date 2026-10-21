@@ -1054,6 +1054,8 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
         db.add(h)
         db.commit()
         db.refresh(h)
+    if state == "saved" and not h.image_path:      # its photo, before the site drops it (sold, deleted)
+        search_agents_svc.keep_image_later(hit_id)
     if request.headers.get("hx-request"):
         return HTMLResponse("")
     return back("/hits")
@@ -1088,6 +1090,18 @@ async def ad_shipping(request: Request, pid: str, ad_id: str):
     text = shipping_info.label(got[1], got[2])
     return HTMLResponse(templates.get_template("_ui.html").module.ship({"shipping_price": got[1], "shipping": got[2]})
                         if text else "")
+
+
+@app.get("/hits/{hit_id}/image")
+async def hit_image(hit_id: int):
+    """A saved hit's thumbnail as kept locally (search_agents.keep_image)."""
+    with session() as db:
+        h = db.get(Hit, hit_id)
+    folder = get_settings().hit_images_dir
+    path = (folder / h.image_path) if h is not None and h.image_path else None
+    if path is None or path.parent != folder or not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.post("/hits/{hit_id}/sync", response_class=HTMLResponse)

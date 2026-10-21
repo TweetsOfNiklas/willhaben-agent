@@ -1,0 +1,55 @@
+"""A saved hit keeps its photo locally: the sites drop the photos of sold or deleted ads (Vinted's links expire)."""
+import httpx
+from fastapi.testclient import TestClient
+
+from app.config import get_settings
+from app.db import Hit, session
+from app.services import ad_images, search_agents
+
+
+def _hit(**kw):
+    with session() as db:
+        h = Hit(agent_id=1, platform="vinted", ad_id="9", heading="HomePod", state="saved", url="https://www.vinted.at/items/9",
+                image_url="https://images1.vinted.net/t/x.webp?s=1", **kw)
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+        return h.id
+
+
+async def test_a_saved_hit_keeps_its_photo_and_the_card_shows_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    real = ad_images.download
+    asked = []
+
+    async def download(url, folder, name, transport=None, platform=None):
+        asked.append(url)
+        ok = httpx.MockTransport(lambda r: httpx.Response(200, content=b"img", headers={"content-type": "image/webp"})
+                                 if "fresh" in str(r.url) else httpx.Response(404))
+        return await real(url, folder, name, transport=ok, platform=platform)
+    monkeypatch.setattr(ad_images, "download", download)
+    hid = _hit()
+    assert await search_agents.keep_image(hid, "https://images1.vinted.net/t/fresh.webp")
+    with session() as db:
+        h = db.get(Hit, hid)
+    assert h.image_path == f"hit-{hid}.webp" and (tmp_path / "hit-images" / h.image_path).read_bytes() == b"img"
+    assert asked == ["https://images1.vinted.net/t/fresh.webp"]
+    from app.main import app
+    with TestClient(app) as c:
+        assert c.get(f"/hits/{hid}/image").content == b"img"
+        page = c.get("/hits?state=saved").text
+    assert f'src="/hits/{hid}/image"' in page
+    assert await search_agents.keep_image(hid) and len(asked) == 1      # kept once
+
+
+async def test_no_photo_when_both_links_are_dead(monkeypatch, tmp_path):
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+
+    async def download(url, folder, name, transport=None, platform=None):
+        return None
+    monkeypatch.setattr(ad_images, "download", download)
+    hid = _hit()
+    assert not await search_agents.keep_image(hid, "https://images1.vinted.net/t/gone.webp")
+    from app.main import app
+    with TestClient(app) as c:
+        assert c.get(f"/hits/{hid}/image").status_code == 404

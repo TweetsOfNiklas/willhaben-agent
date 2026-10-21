@@ -103,6 +103,10 @@ class Settings(BaseSettings):
         return self.data_dir / "ad-drafts"
 
     @property
+    def hit_images_dir(self) -> Path:
+        return self.data_dir / "hit-images"
+
+    @property
     def wireguard_dir(self) -> Path:
         return self.data_dir / "wireguard"
 

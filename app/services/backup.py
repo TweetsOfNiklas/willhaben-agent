@@ -54,9 +54,10 @@ FORMAT_VERSION = 1
 SUPPORTED_VERSIONS = {1}
 MANIFEST = "manifest.json"
 DB_NAME = "app.db"
-TREES = ("ad-drafts", "labels", "wireguard")   # always part of a backup (wireguard: the VPN configs, Settings → VPN)
+TREES = ("ad-drafts", "labels", "wireguard", "hit-images")   # always part of a backup (wireguard: the VPN configs,
+#                                                              Settings → VPN; hit-images: saved hits' kept photos)
 PROFILE = "browser-profile"               # only on request (can be large)
-TREE_KINDS = {"ad-drafts": "photo", "labels": "label", "wireguard": "vpn", PROFILE: "profile"}
+TREE_KINDS = {"ad-drafts": "photo", "labels": "label", "wireguard": "vpn", "hit-images": "photo", PROFILE: "profile"}
 KNOWN_SECRETS = ("claude-token", "ha-token", "telegram-token", "action-secret", "google-calendar.json")
 _SECRET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}(?:-token|-secret|\.json)")
 SECRET_MAX = 1 << 20                      # a token/secret file larger than 1 MiB is not a token

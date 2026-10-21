@@ -71,6 +71,9 @@ class Hit(SQLModel, table=True):
     end_date: datetime | None = None
     url: str
     image_url: str | None = None
+    # the thumbnail kept locally once the hit is saved (data/hit-images): the sites drop the photos of sold or deleted
+    # ads and Vinted's photo links expire, so the card would lose it
+    image_path: str | None = None
     is_private: bool | None = None
     first_seen_at: datetime = Field(default_factory=utcnow)
     last_seen_at: datetime = Field(default_factory=utcnow)
