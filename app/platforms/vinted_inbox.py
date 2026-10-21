@@ -19,7 +19,7 @@ from app.db import get_setting, set_setting, utcnow
 log = logging.getLogger(__name__)
 
 SETTING = "vinted_inbox_explored"       # the version of the exploration that ran (once per version)
-VERSION = "3"          # 1 blocked the token refresh: Vinted then expired its cookies (logged out); 2 ran logged out
+VERSION = "4"          # 1 blocked the token refresh: Vinted then expired its cookies (logged out); 2, 3 ran logged out
 ORIGIN = "https://www.vinted.at"
 _CONV_ID = re.compile(r"/inbox/(\d{5,})")
 _ID_IN_JSON = re.compile(r'"(?:conversation_id|id)"\s*:\s*(\d{6,})')
