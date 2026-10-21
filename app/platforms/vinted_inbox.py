@@ -395,6 +395,7 @@ _LIVE_JS = r"""
     const resp = await real.apply(this, arguments);
     try {
       const url = String((input && (input.url || input.href)) || input || '');   // a string, Request or URL
+      if (/sse|subscribe|real-time/.test(url)) window.__whVintedLive(JSON.stringify({_state: 'fetch', url}));
       if (url.includes('/messaging/real-time/subscribe') && resp.body) {
         window.__whVintedLive(JSON.stringify({_state: 'open', status: resp.status}));
         const reader = resp.clone().body.getReader(), dec = new TextDecoder();
@@ -434,6 +435,8 @@ async def _on_live(payload: str) -> None:
     except ValueError:
         return
     if "_state" in ev:
+        if ev["_state"] == "fetch":
+            log.info("vinted live: the page calls %s", ev.get("url"))
         if ev["_state"] in ("open", "closed"):
             state = "connected" if ev["_state"] == "open" and ev.get("status") == 200 else \
                 f"{ev['_state']} {ev.get('status') or ''}".strip()
@@ -490,6 +493,12 @@ async def start_live() -> bool:
     page.on("response", lambda r: _live_spawn(_on_live_response(r)))
     live.update(page=page, state="connecting", since=utcnow())
     await page.goto(f"{ORIGIN}/inbox", wait_until="domcontentloaded", timeout=30000)
+    await page.wait_for_timeout(8000)
+    try:
+        wrapped = await page.evaluate("Boolean(window.__whVintedWrapped)")
+    except Exception:  # noqa: BLE001 - navigated meanwhile
+        wrapped = None
+    log.info("vinted live tab: %s, wrapper %s, state %s", page.url, wrapped, live.get("state"))
     if "/member/" in page.url:                     # logged out: nothing to listen to
         site_accounts._save("vinted", False)
         live.update(state="logged out", since=utcnow())
