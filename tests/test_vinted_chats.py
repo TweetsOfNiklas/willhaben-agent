@@ -10,7 +10,7 @@ from app.services import chats
 INBOX = {"conversations": [{
     "id": "01a1-uuid", "conversation_type": "order", "created_at": "2026-10-20T10:00:00+02:00",
     "is_unread_by_current_user": True,
-    "data": {"inventory_items": [{"id": 555, "title": "HomePod mini", "photos": []}]},
+    "data": {"inventory_items": [{"id": 555, "title": "HomePod mini", "photos": [{"url": "https://img/inbox.webp"}]}]},
     "last_message": {"id": "m2", "created_at": "2026-10-21T12:00:00+02:00", "sender_id": "77",
                      "message_type": "legacy_last_message", "data": {"content": "Ist versendet!"}},
     "opposite_users": [{"type": "user", "data": {"id": 77, "login_name": "verkaeufer_x"}}]}],
@@ -272,3 +272,19 @@ def test_each_chat_carries_its_sites_coloured_mark():
         page = c.get("/chats").text
     assert 'data-site-mark="vinted"' in page and 'data-site-mark="willhaben"' in page
     assert "color: #0f9fa8" in page and "color: #2f7fd8" in page
+
+
+async def test_a_sold_items_card_keeps_the_inbox_photo(monkeypatch):
+    from app import platforms
+    from app.platforms.types import AdDetail
+    vinted_inbox.apply_inbox(INBOX)
+
+    class V:
+        async def detail(self, ad_id, url=None):
+            return AdDetail(ad_id=ad_id, heading="HomePod mini", description="", price=50.0, price_display="50 €",
+                            status="sold", published_at=None, first_published_at=None, end_date=None, url=url,
+                            images=[], platform="vinted")
+    real_get = platforms.get
+    monkeypatch.setattr(platforms, "get", lambda pid: V() if pid == "vinted" else real_get(pid))
+    conv = await chats.ensure_ad_context("01a1-uuid")
+    assert conv.ad_context["images"] == ["https://img/inbox.webp"] and conv.ad_context["status"] == "sold"

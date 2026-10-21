@@ -198,8 +198,12 @@ def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list
             row.last_message_text = text or row.last_message_text
             row.last_message_at = at or row.last_message_at
             if row.ad_id:
-                row.ad_context = {**(row.ad_context or {}), "title": row.ad_title,
-                                  "url": f"{ORIGIN}/items/{row.ad_id}", "platform": "vinted"}
+                photos = [p.get("url") for p in item.get("photos") or [] if isinstance(p, dict) and p.get("url")]
+                ctx = {**(row.ad_context or {}), "title": row.ad_title, "url": f"{ORIGIN}/items/{row.ad_id}",
+                       "platform": "vinted"}
+                if photos and not ctx.get("images"):        # the inbox's photo: a sold item's page has none left
+                    ctx["images"] = photos[:1]
+                row.ad_context = ctx
             row.synced_at = utcnow()
             db.add(row)
             empty = known and db.exec(select(Message.id).where(Message.conversation_id == cid).limit(1)).first() is None
