@@ -45,6 +45,12 @@ RUN uv export --frozen --no-dev --no-hashes -o /tmp/requirements.txt \
  && uv venv /opt/venv \
  && uv pip install --python /opt/venv/bin/python -r /tmp/requirements.txt
 
+# Google Chrome (stable) for the app's browser, driven through patchright: the bundled Chromium-for-Testing and
+# Playwright's automation traces are what bot protections (Vinted's DataDome) block at login. amd64 only (Google
+# ships no arm64 Linux Chrome); elsewhere the bundled Chromium stays in use (app/willhaben/session.py).
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then /opt/venv/bin/patchright install --with-deps chrome \
+      && google-chrome --version; fi
+
 COPY app ./app
 COPY docker/supervisord.conf /etc/supervisor/conf.d/willhaben.conf
 COPY docker/entrypoint.sh docker/start-vnc.sh /usr/local/bin/

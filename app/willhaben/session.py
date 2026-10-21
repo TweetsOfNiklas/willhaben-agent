@@ -17,7 +17,7 @@ import asyncio
 import json
 import logging
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -83,6 +83,7 @@ class BrowserSession:
         self.context = None
         self.ui_page = None
         self.api_page = None
+        self.engine: str | None = None   # "chrome" (Google Chrome via patchright) or "chromium" (bundled)
         self.home_page = None          # the willhaben window; Kleinanzeigen and Vinted get tabs of their own
         self.site_pages: dict[str, Any] = {}
         self.logged_in: bool | None = None
@@ -105,20 +106,51 @@ class BrowserSession:
     def started(self) -> bool:
         return self.context is not None
 
+    async def _launch_chrome(self) -> bool:
+        """Google Chrome through patchright (Playwright without the automation traces): what bot protections such as
+        Vinted's DataDome let log in; the bundled Chromium-for-Testing is blocked there ("Sie wurden gesperrt", seen
+        2026-10-21). No custom flags: patchright sets what hides the automation. False when Chrome or patchright is
+        missing (arm64 images, tests) or the launch fails: then the bundled Chromium is used."""
+        import shutil
+
+        if not self.settings.browser_chrome or not shutil.which("google-chrome"):
+            return False
+        try:
+            from patchright.async_api import async_playwright as stealth_playwright
+        except ImportError:
+            return False
+        try:
+            self._pw = await stealth_playwright().start()
+            self.context = await self._pw.chromium.launch_persistent_context(
+                str(self.settings.profile_dir), channel="chrome", headless=self.settings.browser_headless,
+                locale="de-AT", timezone_id="Europe/Vienna", viewport={"width": 1280, "height": 860})
+        except Exception as e:  # noqa: BLE001 - the bundled Chromium still works
+            log.warning("Chrome did not start (%s), using the bundled Chromium", e)
+            with suppress(Exception):
+                if self._pw:
+                    await self._pw.stop()
+            self._pw = self.context = None
+            return False
+        self.engine = "chrome"
+        return True
+
     async def start(self) -> None:
         from playwright.async_api import async_playwright
 
         self.settings.profile_dir.mkdir(parents=True, exist_ok=True)
         try:
-            self._pw = await async_playwright().start()
-            self.context = await self._pw.chromium.launch_persistent_context(
-                str(self.settings.profile_dir),
-                headless=self.settings.browser_headless,
-                locale="de-AT",
-                timezone_id="Europe/Vienna",
-                viewport={"width": 1280, "height": 860},
-                args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
-            )
+            if not await self._launch_chrome():
+                self._pw = await async_playwright().start()
+                self.context = await self._pw.chromium.launch_persistent_context(
+                    str(self.settings.profile_dir),
+                    headless=self.settings.browser_headless,
+                    locale="de-AT",
+                    timezone_id="Europe/Vienna",
+                    viewport={"width": 1280, "height": 860},
+                    args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                )
+                self.engine = "chromium"
+            log.info("browser started: %s", self.engine)
             from app.willhaben import record_all
             record_all.attach(self.context)          # everything the browser does, while switched on (session page)
             self.ui_page = self.context.pages[0] if self.context.pages else await self.context.new_page()
@@ -846,6 +878,7 @@ class BrowserSession:
             "error": self.error,
             "capturing": self.capturing,
             "capture_count": len(self._capture["entries"]) if self._capture else 0,
+            "engine": self.engine,
             "chat_live": dict(self.chat_live),
         }
 

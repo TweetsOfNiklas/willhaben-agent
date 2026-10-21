@@ -151,3 +151,17 @@ def test_the_sites_tab_on_its_signup_page_means_logged_out():
     site_accounts._save("vinted", True)
     site_accounts.seen_in_tab("vinted", "https://www.vinted.at/inbox")
     assert site_accounts.state("vinted")["logged_in"] is True
+
+
+async def test_chrome_is_used_when_installed_else_chromium(monkeypatch):
+    import shutil
+
+    sess = session_mod.BrowserSession.__new__(session_mod.BrowserSession)
+    sess.settings = type("S", (), {"browser_chrome": True, "browser_headless": False, "profile_dir": "/tmp/p"})()
+    sess._pw = sess.context = None
+    sess.engine = None
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert await sess._launch_chrome() is False and sess.engine is None        # no Chrome: the bundled Chromium
+    sess.settings.browser_chrome = False
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/google-chrome")
+    assert await sess._launch_chrome() is False                                  # switched off

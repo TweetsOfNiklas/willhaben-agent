@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # --- logged-in browser session (Playwright persistent profile) ---
     browser_enabled: bool = True
     browser_headless: bool = False
+    browser_chrome: bool = True        # Google Chrome via patchright when installed (BROWSER_CHROME=0: bundled Chromium)
     novnc_url: str | None = None  # e.g. http://homeserver:6080/vnc.html?autoconnect=1&resize=scale
     chat_poll_interval_s: int = 300
     humanize_chat: bool = True   # human-like delays + read receipts for auto replies (settings can switch off)
