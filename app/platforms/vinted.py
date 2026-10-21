@@ -107,6 +107,18 @@ def parse_listing(item: dict[str, Any], host: str = HOST) -> Listing:
 _RESERVED = re.compile(r'"is_reserved"\s*:\s*true')     # the item page's own flag (the label: "Reserviert")
 
 
+# the item page's "buyer_item_status" plugin: {"theme": "SUCCESS", "title": "Verkauft"} on a sold item (seen
+# 2026-10-21, the one sold to the owner); "Reserviert" on a reserved one
+_STATUS_TITLES = {"verkauft": "sold", "sold": "sold", "reserviert": "reserved", "reserved": "reserved"}
+
+
+def _item_status(plugins: dict[str, dict[str, Any]], text: str) -> str:
+    title = str((plugins.get("buyer_item_status") or {}).get("title") or "").strip().lower()
+    if title in _STATUS_TITLES:
+        return _STATUS_TITLES[title]
+    return "reserved" if _RESERVED.search(text or "") else "active"
+
+
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:
     """The flight data of a catalog page -> SearchPage. PlatformError when the answer holds no result list."""
     i = (text or "").find(_ITEMS)
@@ -186,7 +198,7 @@ def parse_item(text: str, ad_id: str, host: str = HOST, now: datetime | None = N
     shipping_price, shipping = _shipping(text)
     return AdDetail(ad_id=ad_id, heading=one_line(title) or "", description=description or None, price=price,
                     price_display=euro(price) if price is not None else None,
-                    status="reserved" if _RESERVED.search(text or "") else "active", published_at=uploaded,
+                    status=_item_status(plugins, text), published_at=uploaded,
                     first_published_at=uploaded, end_date=None, url=f"https://{host}/items/{ad_id}", images=photos,
                     seller_name=one_line(seller.get("name")),
                     is_private=(not business) if isinstance(business, bool) else None, platform="vinted",

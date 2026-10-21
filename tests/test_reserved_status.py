@@ -48,3 +48,11 @@ def test_the_file_database_waits_and_uses_wal(tmp_path, monkeypatch):
             assert c.execute(text("PRAGMA busy_timeout")).scalar() == 30000
     finally:
         db._engine.dispose()
+
+
+def test_vinted_sold_item_from_its_status_plugin():
+    sold = {"buyer_item_status": {"item_id": "1", "theme": "SUCCESS", "title": "Verkauft"}}
+    assert vinted._item_status(sold, "") == "sold"
+    assert vinted._item_status({"buyer_item_status": {"title": "Reserviert"}}, "") == "reserved"
+    assert vinted._item_status({}, '"is_reserved":true') == "reserved"
+    assert vinted._item_status({}, '"is_reserved":false') == "active"
