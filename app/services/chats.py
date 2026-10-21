@@ -695,13 +695,20 @@ async def send_draft(draft_id: int, text: str) -> Draft:
 
 async def _send_claimed(draft: Draft, text: str) -> Draft:
     from app.platforms import vinted_inbox
-    if vinted_inbox.is_vinted(draft.conversation_id):
-        raise SendFailed(t("Sending on Vinted is not built yet – copy the answer and send it in Vinted"))
     draft_id = draft.id
     text = text.strip()
-    await mark_read(draft.conversation_id)   # nobody answers without having read the message
+    vinted = vinted_inbox.is_vinted(draft.conversation_id)
+    sent_on_vinted = None
+    if not vinted:
+        await mark_read(draft.conversation_id)   # nobody answers without having read the message
     try:
-        await _account().send_message(draft.conversation_id, text)
+        if vinted:                               # its page in a tab, typed and sent there (vinted_inbox.send)
+            try:
+                sent_on_vinted = await vinted_inbox.send(draft.conversation_id, text)
+            except vinted_inbox.SendError as e:
+                raise SendFailed(t("Vinted did not confirm the message: {error}", error=e)) from e
+        else:
+            await _account().send_message(draft.conversation_id, text)
     except (EndpointUnknown, SendFailed, NotLoggedIn, SessionUnavailable, ValueError) as e:   # keep the edited text
         with session() as db:
             draft = db.get(Draft, draft_id)
@@ -709,10 +716,12 @@ async def _send_claimed(draft: Draft, text: str) -> Draft:
             db.add(draft)
             db.commit()
         raise
-    if get_setting("send_verified") != "1":
+    if not vinted and get_setting("send_verified") != "1":
         set_setting("send_verified", "1")     # sending works on this account: auto replies may now send
         log.info("first send confirmed via history; auto replies enabled")
     sent = mark_sent(draft_id, text)
+    if sent_on_vinted:                            # the local copy under Vinted's id: the next sync finds it, no double
+        vinted_inbox.record_sent(draft_id, sent_on_vinted)
     try:
         await meetups.on_sent(sent)           # agreed appointment -> "add to calendar?" push
     except Exception as e:  # noqa: BLE001 - the message is out; the calendar offer is a bonus

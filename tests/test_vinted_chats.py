@@ -40,15 +40,49 @@ def test_inbox_and_conversation_become_rows():
     assert vinted_inbox.apply_inbox(INBOX) == []                    # nothing new: not opened again
 
 
-async def test_sending_on_vinted_is_refused_for_now():
+async def test_sending_on_vinted_goes_through_its_page_and_keeps_vinteds_id(monkeypatch):
     vinted_inbox.apply_inbox(INBOX)
     with session() as db:
         d = chats.Draft(conversation_id="01a1-uuid", text="Danke!")
         db.add(d)
         db.commit()
         db.refresh(d)
+    sent = []
+
+    async def send(cid, text):
+        sent.append((cid, text))
+        return {"id": "m9", "created_at": "2026-10-21T22:00:00+02:00", "message_type": "reply_plain",
+                "data": {"content": text}}
+    monkeypatch.setattr(vinted_inbox, "send", send)
+    marked = []
+
+    async def no_read(cid):
+        marked.append(cid)
+    monkeypatch.setattr(chats, "mark_read", no_read)
+    out = await chats.send_draft(d.id, "Danke!")
+    assert out.status == "sent" and sent == [("01a1-uuid", "Danke!")] and marked == []      # no willhaben receipt
+    vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [
+        {"id": "m9", "created_at": "2026-10-21T22:00:00+02:00", "sender_id": "5", "message_type": "reply_plain",
+         "data": {"content": "Danke!"}}]})
+    assert [m.text for m in chats.messages_of("01a1-uuid")].count("Danke!") == 1                # no double
+
+
+async def test_an_unconfirmed_vinted_send_keeps_the_draft(monkeypatch):
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        d = chats.Draft(conversation_id="01a1-uuid", text="Danke!")
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+
+    async def send(cid, text):
+        raise vinted_inbox.SendError("Vinted answered HTTP 403")
+    monkeypatch.setattr(vinted_inbox, "send", send)
     with pytest.raises(chats.SendFailed, match="Vinted"):
         await chats.send_draft(d.id, "Danke!")
+    with session() as db:
+        row = db.get(chats.Draft, d.id)
+    assert row.status == "draft" and "403" in row.error
     assert await chats.mark_read("01a1-uuid") == 0
 
 
