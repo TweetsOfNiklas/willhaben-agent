@@ -390,6 +390,11 @@ _LIVE_JS = r"""
 (() => {
   if (window.__whVintedWrapped) return;
   window.__whVintedWrapped = true;
+  // the app's binding arrives a moment after the page's first scripts (patchright): events wait in a queue
+  const queue = [];
+  const flush = () => { while (queue.length && typeof window.__whVintedLiveApp === 'function') window.__whVintedLiveApp(queue.shift()); };
+  window.__whVintedLive = (x) => { queue.push(x); flush(); };
+  setInterval(flush, 500);
   const real = window.fetch;
   window.fetch = async function (input, init) {
     const resp = await real.apply(this, arguments);
@@ -488,14 +493,14 @@ async def start_live() -> bool:
     finally:
         sess._creating_internal = False
         sess.ui_page = ui
-    await page.expose_function("__whVintedLive", lambda payload: _live_spawn(_on_live(payload)))
+    await page.expose_function("__whVintedLiveApp", lambda payload: _live_spawn(_on_live(payload)))
     await page.add_init_script(_LIVE_JS)
     page.on("response", lambda r: _live_spawn(_on_live_response(r)))
     live.update(page=page, state="connecting", since=utcnow())
     await page.goto(f"{ORIGIN}/inbox", wait_until="domcontentloaded", timeout=30000)
     await page.wait_for_timeout(8000)
     try:
-        wrapped = await page.evaluate("Boolean(window.__whVintedWrapped)")
+        wrapped = await page.evaluate("Boolean(window.__whVintedWrapped)", isolated_context=False)
     except Exception:  # noqa: BLE001 - navigated meanwhile
         wrapped = None
     log.info("vinted live tab: %s, wrapper %s, state %s", page.url, wrapped, live.get("state"))
