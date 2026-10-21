@@ -219,7 +219,7 @@ def test_the_live_lines_name_their_site():
     live = page[page.index('id="chat-live-state"'):page.index('id="chat-filters"')]
     assert 'data-live-site="willhaben" data-live="0"' in live and "text-error" in live      # not live in tests
     assert 'data-live-site="vinted" data-vinted-live data-live="1"' in live and "text-success" in live
-    assert "live since" not in live.split('title="')[0]                                       # no visible text
+    assert ">offline</span>" in live and ">online</span>" in live
     vinted_inbox.live.update(state="off")
 
 
