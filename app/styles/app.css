@@ -1,4 +1,4 @@
-/* willhaben Agent UI: Tailwind CSS + daisyUI with the dashboard's design tokens.
+/* SecondHandler UI: Tailwind CSS + daisyUI with the dashboard's design tokens.
    Build: scripts/build-css.sh -> app/static/app.css (committed). Guide: docs/ui-guide.md */
 @import "tailwindcss" source(none);
 @source "../templates";

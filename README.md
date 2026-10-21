@@ -1,4 +1,6 @@
-# willhaben Agent
+# SecondHandler
+
+Your agent for second-hand sites: willhaben, Vinted, Kleinanzeigen and more. (Formerly *SecondHandler*; the repository, image and container keep that name.)
 
 > [!WARNING]
 > **This tool was written entirely by AI (Claude).** It has been tested, but its correctness and safety cannot be
@@ -530,4 +532,4 @@ connections drop.
 
 ---
 
-willhaben Agent is an independent project by lumascet and is not affiliated with willhaben.
+SecondHandler is an independent project by lumascet and is not affiliated with willhaben, Vinted or any other site it talks to.

@@ -284,7 +284,7 @@ def test_page_pdf(media: str) -> bytes:
     m = 3 * 72 / 25.4
     size = ipp.media_size_mm(media) or (210, 297)
     content = (f"{m:.2f} {m:.2f} {w - 2 * m:.2f} {h - 2 * m:.2f} re S\n"
-               f"BT /F1 14 Tf {m + 6:.2f} {h - m - 20:.2f} Td (willhaben Agent test page) Tj ET\n"
+               f"BT /F1 14 Tf {m + 6:.2f} {h - m - 20:.2f} Td (SecondHandler test page) Tj ET\n"
                f"BT /F1 10 Tf {m + 6:.2f} {h - m - 36:.2f} Td ({size[0]:g} x {size[1]:g} mm, {media}) Tj ET\n")
     writer = PdfWriter()
     page = writer.add_blank_page(width=w, height=h)

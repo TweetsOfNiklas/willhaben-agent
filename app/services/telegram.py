@@ -193,7 +193,7 @@ async def link(cid: int) -> str | None:
     set_setting("telegram_chat_id", str(cid))
     set_setting("telegram_chat_name", found)
     _candidates.clear()
-    await _say("✅ " + t("Linked. Notifications from willhaben Agent now arrive here.") + "\n\n" + _help())
+    await _say("✅ " + t("Linked. Notifications from SecondHandler now arrive here.") + "\n\n" + _help())
     return found
 
 

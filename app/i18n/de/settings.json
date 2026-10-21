@@ -117,7 +117,7 @@
  "Address of your Home Assistant, e.g. https://homeassistant.local:8123": "Adresse deines Home Assistant, z. B. https://homeassistant.local:8123",
  "Connect": "Verbinden",
  "You sign in to Home Assistant and are brought back here automatically.": "Du meldest dich bei Home Assistant an und kommst automatisch hierher zurück.",
- "The app creates a token “willhaben Agent” in your HA profile.": "Die App legt dabei in deinem HA-Profil ein Token „willhaben Agent“ an.",
+ "The app creates a token “SecondHandler” in your HA profile.": "Die App legt dabei in deinem HA-Profil ein Token „SecondHandler“ an.",
  "For automations": "Für Automationen",
  "Events:": "Events:",
  "Included in every Claude prompt: chat replies, automatic replies and new listings.": "Gehen in jeden Claude-Prompt: Chat-Antworten, automatische Antworten und neue Inserate.",

@@ -399,7 +399,7 @@ def test_page_and_downloads(client):
     assert r.status_code == 200 and "## App" in preview and "Max Muster" not in preview
     token = r.text.split('href="/bugreport/')[1].split(".txt")[0]
     t = client.get(f"/bugreport/{token}.txt")
-    assert t.status_code == 200 and t.text.startswith("# willhaben Agent bug report")
+    assert t.status_code == 200 and t.text.startswith("# SecondHandler bug report")
     assert "attachment" in t.headers["content-disposition"] and t.headers["content-disposition"].endswith('.txt"')
     j = client.get(f"/bugreport/{token}.json")
     assert j.status_code == 200 and j.json()["description"] == "<name>: Seite leer"

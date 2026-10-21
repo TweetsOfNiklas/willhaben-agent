@@ -249,7 +249,7 @@ def test_label_pdf_refuses_garbage():
 def test_test_page_has_the_size_of_the_medium():
     reader = PdfReader(io.BytesIO(printing.test_page_pdf("custom_100x150mm_100x150mm")))
     assert [round(float(v), 2) for v in reader.pages[0].mediabox] == box(LABEL)
-    assert "willhaben Agent test page" in reader.pages[0].extract_text()
+    assert "SecondHandler test page" in reader.pages[0].extract_text()
 
 
 # ------------------------------------------------------------------ printing

@@ -2,7 +2,7 @@
 
 OAuth as HA implements it for any web app (IndieAuth style): client_id is the dashboard's own base
 URL, the redirect goes back to the dashboard, so the browser lands here automatically. With the
-short-lived access token the app then creates a long-lived token named "willhaben Agent" over the
+short-lived access token the app then creates a long-lived token named "SecondHandler" over the
 websocket API (visible and revocable in the HA profile), stores it in DATA_DIR/ha-token (mode 600)
 and revokes the temporary login. The stored token and URL take precedence over HA_URL/HA_TOKEN.
 """
@@ -25,7 +25,7 @@ from app.i18n import t
 log = logging.getLogger(__name__)
 
 NO_PUSH = "-"            # stored as ha_notify_service when push is switched off explicitly
-CLIENT_NAME = "willhaben Agent"
+CLIENT_NAME = "SecondHandler"
 _transport: httpx.AsyncBaseTransport | None = None  # tests inject a mock transport
 _pending: dict[str, tuple[str, str, float]] = {}     # state -> (ha_url, client_id, created)
 

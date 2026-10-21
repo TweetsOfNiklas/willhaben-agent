@@ -1,4 +1,4 @@
-{# willhaben Agent: page shell (dashboard design on Tailwind CSS + daisyUI, Alpine.js, htmx). Guide: docs/ui-guide.md
+{# SecondHandler: page shell (dashboard design on Tailwind CSS + daisyUI, Alpine.js, htmx). Guide: docs/ui-guide.md
    Expects: ui_lang(), _(), session_status, app_version, app_author, auth_enabled(), wh_limiter(), wh_used(), wh_budget(), wh_popup(),
    purchase_notice(), ui_lang_pref(), ui_langs, embed, msg, error. Optional: nav_counts, claude_usage, inbox_items, inbox_unread, current_user.
    Pages choose the layout with top-level sets: {% set layout = "split" %} (list → detail) and {% set has_detail = true %}
@@ -9,7 +9,7 @@
 <head>
   <meta charset="utf-8">
   {% include "_app_head.html" %}
-  <title>{% block title %}willhaben Agent{% endblock %}</title>
+  <title>{% block title %}SecondHandler{% endblock %}</title>
   <script>
     try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
           document.documentElement.dataset.rail = localStorage.getItem('rail') === 'expanded' ? 'expanded' : 'collapsed'; } catch (e) {}
@@ -62,7 +62,7 @@
        class="sticky top-0 hidden h-screen flex-col gap-1 overflow-x-hidden overflow-y-auto border-r border-base-300 bg-base-100 px-3 py-4 md:flex">
   <a href="/" class="mb-3.5 flex h-8 shrink-0 items-center gap-2.5 px-1.5 text-[15px] font-semibold whitespace-nowrap text-base-content no-underline">
     <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-primary text-[17px] font-extrabold text-primary-content">w</span>
-    <span class="hidden rail-x:inline">willhaben Agent</span>
+    <span class="hidden rail-x:inline">SecondHandler</span>
   </a>
   {{ item('/', 'home', _("Home")) }}
   {{ item('/agents', 'detective', _("Search agents")) }}
@@ -139,7 +139,7 @@
       <span class="relative grid size-8 shrink-0 place-items-center rounded-full bg-brand-soft text-[13px] font-bold text-primary">{{ (who or 'w')[:1]|upper }}
         {% if wh_state == 'bad' %}<span class="absolute -top-1 -right-1 min-w-4 rounded-full bg-error px-1 text-center text-[10px] leading-4 font-bold text-error-content rail-x:hidden" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}</span>
       <span class="hidden min-w-0 flex-1 rail-x:block">
-        <span class="block truncate font-medium">{{ who or 'willhaben Agent' }}</span>
+        <span class="block truncate font-medium">{{ who or 'SecondHandler' }}</span>
         <span class="block truncate text-xs {{ {'bad': 'text-error', 'off': 'text-muted'}.get(wh_state, 'text-muted') }}">{% if wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben {{ '✓' if wh_state == 'ok' else '✗' }}{% for name, st in other_logins %} · {{ name }} {{ '✓' if st.logged_in else '?' if st.logged_in is none else '✗' }}{% endfor %}{% endif %}</span>
       </span>
       {% if wh_state == 'bad' %}<span class="hidden min-w-[18px] rounded-full bg-error px-1.5 text-center text-[11px] leading-[18px] font-bold text-error-content rail-x:inline" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}
@@ -176,7 +176,7 @@
   <div class="{{ layer_box }} flex w-[248px] flex-col gap-0.5 p-1.5 max-md:max-h-[calc(100dvh-92px-env(safe-area-inset-bottom))] max-md:overflow-y-auto" role="menu">
     <div class="mb-1 flex items-center gap-2.5 border-b border-base-300 px-2 pt-2 pb-2.5">
       <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-sm font-bold text-primary">{{ (who or 'w')[:1]|upper }}</span>
-      <span class="min-w-0"><span class="block truncate font-semibold">{{ who or 'willhaben Agent' }}</span>
+      <span class="min-w-0"><span class="block truncate font-semibold">{{ who or 'SecondHandler' }}</span>
         <span class="mt-0.5 flex flex-col gap-0.5">{{ login_lines() }}</span></span>
     </div>
     {# phone: the pages the tab bar has no room for #}
@@ -210,7 +210,7 @@
       <li class="mt-1 border-t border-base-300 pt-1"><form method="post" action="/logout" class="p-0"><button class="flex w-full items-center gap-2 px-3 py-1.5 text-error" role="menuitem">{{ ui.icon('logout', 16) }}{{ _("Log out") }}</button></form></li>
       {% endif %}
     </ul>
-    <div class="flex items-center gap-2 px-2.5 pt-1.5 pb-1 text-[11.5px] text-muted"><span class="flex-1">willhaben Agent v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span><a class="link link-primary no-underline" href="/credits">{{ _("Credits") }}</a></div>
+    <div class="flex items-center gap-2 px-2.5 pt-1.5 pb-1 text-[11.5px] text-muted"><span class="flex-1">SecondHandler v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span><a class="link link-primary no-underline" href="/credits">{{ _("Credits") }}</a></div>
   </div>
 </div>
 

@@ -1,4 +1,4 @@
-# willhaben Agent: FastAPI dashboard + headed Chromium (Xvfb/noVNC for the one-time login) + Claude Code CLI
+# SecondHandler: FastAPI dashboard + headed Chromium (Xvfb/noVNC for the one-time login) + Claude Code CLI
 FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
 
 ENV DEBIAN_FRONTEND=noninteractive \

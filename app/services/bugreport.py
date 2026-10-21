@@ -713,7 +713,7 @@ def _kv(d: dict[str, Any], indent: str = "") -> list[str]:
 
 
 def render_text(r: dict[str, Any]) -> str:
-    lines = ["# willhaben Agent bug report", "",
+    lines = ["# SecondHandler bug report", "",
              f"Generated {r['generated_at']} UTC. Anonymised and created locally; the app sent it nowhere.",
              "Removed: " + "; ".join(r.get("removed", [])) + ".", "",
              "## What happened", "", r.get("description") or "(no description)", ""]

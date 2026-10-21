@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   {% include "_app_head.html" %}
-  <title>{{ _("Log in") }} · willhaben Agent</title>
+  <title>{{ _("Log in") }} · SecondHandler</title>
   <script>try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="stylesheet" href="/static/app.css?v={{ asset_version() }}">
 </head>
@@ -13,7 +13,7 @@
     <div class="flex flex-col gap-5 rounded-[16px] border border-base-300 bg-base-100 px-7 pt-7 pb-[22px] shadow-[0_1px_2px_rgba(0,0,0,.05),0_16px_48px_rgba(0,0,0,.08)]">
       <div class="flex items-center gap-3">
         <span class="grid size-10 shrink-0 place-items-center rounded-[11px] bg-primary text-[21px] font-extrabold text-primary-content">w</span>
-        <div><div class="text-[17px] font-semibold tracking-tight">willhaben Agent</div><div class="text-[13px] text-muted">{{ _("Log in to the dashboard") }}</div></div>
+        <div><div class="text-[17px] font-semibold tracking-tight">SecondHandler</div><div class="text-[13px] text-muted">{{ _("Log in to the dashboard") }}</div></div>
       </div>
       {% if error %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-[13px] text-error">{{ error }}</div>{% endif %}
       <div id="tg-login" role="status" hidden class="flex items-center gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]"><span class="loading loading-spinner loading-xs text-primary"></span><span>{{ _("Logging in with Telegram…") }}</span></div>

@@ -3,7 +3,7 @@
 {# Request statistics (app/stats_web.py): data = access_stats.series(), chart = access_stats.chart(data). data.platform: a site id
    or 'all' (every site: one row per site, its last hour against its own budget and its trend over the range); data.stack: what
    the bars stack by (type | channel), data.stacks: the choices of this view, the first is the default. #}
-{% block title %}{{ _("Requests to the sites") if data.platform == 'all' else _("{platform} requests", platform=platform_name(data.platform)) }} · willhaben Agent{% endblock %}
+{% block title %}{{ _("Requests to the sites") if data.platform == 'all' else _("{platform} requests", platform=platform_name(data.platform)) }} · SecondHandler{% endblock %}
 {% block content %}
 {% set every = data.platform == 'all' %}
 {% set pname = platform_name(data.platform) %}

@@ -140,7 +140,7 @@ async def lifespan(app: FastAPI):
 
 
 _background: set[asyncio.Task] = set()
-app = FastAPI(title="willhaben Agent", lifespan=lifespan)
+app = FastAPI(title="SecondHandler", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 app.include_router(backup_routes.router)   # Settings → Backup
 app.include_router(label_buy_routes.router)   # Settings → Shipping → payment card, checkout
@@ -3891,14 +3891,14 @@ async def settings_telegram_forget():
 
 @app.post("/settings/telegram/test")
 async def settings_telegram_test():
-    ok = await telegram.send("test", "willhaben Agent", t("Test notification"))
+    ok = await telegram.send("test", "SecondHandler", t("Test notification"))
     return _tg_back(t("Test message sent") if ok else t("Telegram not linked or error (see log)"))
 
 
 @app.post("/settings/ha/test")
 @app.post("/settings/test-notify")
 async def settings_test_notify():
-    ok = await notify("test", "willhaben Agent", t("Test notification"), url=get_settings().public_url)
+    ok = await notify("test", "SecondHandler", t("Test notification"), url=get_settings().public_url)
     msg = t("HA event sent") if ok else t("HA not configured or error (see log)")
     return back(f"/settings/ha?msg={quote(msg, safe='')}")
 

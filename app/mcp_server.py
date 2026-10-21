@@ -1,4 +1,4 @@
-"""MCP server (stdio) that exposes the running willhaben Agent to Claude Desktop / Claude Code.
+"""MCP server (stdio) that exposes the running SecondHandler to Claude Desktop / Claude Code.
 
 It is a thin client of the agent's JSON API, so it can run on any machine:
 
@@ -24,7 +24,7 @@ AUTH = (os.environ.get("WH_AGENT_USER") or os.environ.get("WH_HELPER_USER") or "
 mcp = MCPServer(
     "willhaben-agent",
     instructions=(
-        "Access to your willhaben Agent: search on willhaben.at and the other second-hand sites it knows "
+        "Access to your SecondHandler: search on willhaben.at and the other second-hand sites it knows "
         "(list_platforms), your search agents and their hits, willhaben chats with reply drafts, your own ads. "
         "Messages are only sent with send_reply; always ask for confirmation of the exact text first."
     ),

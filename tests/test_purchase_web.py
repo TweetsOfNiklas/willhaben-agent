@@ -365,7 +365,7 @@ def test_dialog_is_a_fragment_for_the_script_and_a_page_without_it(client, monke
     assert "<html" not in client.get(DIALOG.format(sid=3), headers={"HX-Request": "true"}).text.lower()
     page = client.get(DIALOG.format(sid=3)).text
     assert "<!doctype html>" in page.lower()
-    assert 'class="bd-form"' in page and "willhaben Agent" in page
+    assert 'class="bd-form"' in page and "SecondHandler" in page
 
 
 def test_dialog_prefill_is_the_asking_price_plus_the_shipping_of_the_mode(client, monkeypatch):  # noqa: F811
