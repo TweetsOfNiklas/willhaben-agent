@@ -142,3 +142,12 @@ async def test_a_site_gets_its_own_tab_and_willhaben_its_window_back():
     assert sess.ui_page is tab and len(sess.context.made) == 1
     sess.show_home()
     assert sess.ui_page is home
+
+
+def test_the_sites_tab_on_its_signup_page_means_logged_out():
+    site_accounts._save("vinted", True)
+    site_accounts.seen_in_tab("vinted", "https://www.vinted.at/member/signup/select_type?ref_url=%2Finbox")
+    assert site_accounts.state("vinted")["logged_in"] is False
+    site_accounts._save("vinted", True)
+    site_accounts.seen_in_tab("vinted", "https://www.vinted.at/inbox")
+    assert site_accounts.state("vinted")["logged_in"] is True

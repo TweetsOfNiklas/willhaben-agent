@@ -2562,6 +2562,9 @@ async def session_page(request: Request, msg: str | None = None, embed: bool = F
     kleinanzeigen: that site's own tab, with its login state only (no willhaben state, no label checkout)."""
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
     site_mode = site_accounts.get(site) if site else None
+    if site_mode is not None:                     # what its tab shows right now counts more than an old check
+        tab = get_session().site_pages.get(site_mode.id) if get_session().started else None
+        site_accounts.seen_in_tab(site_mode.id, tab.url if tab is not None and not tab.is_closed() else None)
     nxt = "/session?embed=1" + (f"&site={site_mode.id}" if site_mode else "") if embed else "/session"
     return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),
                   label_form=None if site_mode else label_fill.active(), session_next=nxt, embed=embed,

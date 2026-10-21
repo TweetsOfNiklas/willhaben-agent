@@ -92,6 +92,14 @@ async def open_login(pid: str) -> None:
     await get_session().open_site(pid, site.login_url)        # its own tab: the willhaben window stays
 
 
+def seen_in_tab(pid: str, url: str | None) -> None:
+    """The site's own tab shows its login or sign-up page: logged out, no request needed (a stored "logged in" from
+    an earlier check would say otherwise)."""
+    site = SITES.get(pid)
+    if site is not None and url and logged_out_url(site, url) and state(pid)["logged_in"] is not False:
+        _save(pid, False)
+
+
 async def forget(pid: str) -> int:
     """Delete every cookie of the site in the app's browser (login, the bot protection's mark): a fresh start after
     the site blocked this browser ("Deine Sitzung wurde blockiert"). Returns how many went."""
