@@ -165,3 +165,21 @@ async def test_chrome_is_used_when_installed_else_chromium(monkeypatch):
     sess.settings.browser_chrome = False
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/google-chrome")
     assert await sess._launch_chrome() is False                                  # switched off
+
+
+def test_browser_willhaben_and_vinted_have_separate_status_lines():
+    from types import SimpleNamespace
+
+    from app.db import set_setting
+    from app.main import templates
+    set_setting("platform_vinted_enabled", "1")
+    site_accounts._save("vinted", False)
+    status = SimpleNamespace(started=True, logged_in=True, user={"nickname": "wh"}, last_check=None, error=None,
+                             capturing=False, capture_count=0, engine="chrome", chat_live={})
+    req = SimpleNamespace(url=SimpleNamespace(path="/x"), query_params={}, headers={}, cookies={})
+    page = templates.env.get_template("base.html").render(session_status=status, request=req)
+    menu = page[page.index('id="account-menu"'):]
+    assert 'data-status="browser"' in menu and "Browser: running (Chrome)" in menu
+    assert 'data-status="willhaben"' in menu and "willhaben: logged in" in menu
+    assert 'data-status="vinted"' in menu and "Vinted: not logged in" in menu
+    assert 'href="/settings/vinted" role="menuitem"' in menu

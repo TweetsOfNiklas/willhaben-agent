@@ -264,5 +264,6 @@
  "Name of the recording": "Name der Aufnahme",
  "Recordings ({n})": "Aufnahmen ({n})",
  "Start and stop a recording under the browser window.": "Aufnahmen startest und beendest du unter dem Browserfenster.",
- "requests so far": "Anfragen bisher"
+ "requests so far": "Anfragen bisher",
+ "not running": "läuft nicht"
 }

@@ -14,26 +14,27 @@
   <form method="post" action="/session/site-check/{{ site_mode.id }}"><input type="hidden" name="next" value="{{ session_next }}"><button class="btn btn-xs">{{ _("Check login") }}</button></form>
 </div>
 {% elif embed and session_status.started %}
-<div class="embed-status mb-2 flex flex-wrap items-center gap-1.5">{{ ui.pill(_("logged in") if logged else _("unknown") if logged is none else _("not logged in"), 'ok' if logged else '' if logged is none else 'bad') }}{% if logged and session_status.user %}<small class="text-xs text-muted">{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}
+<div class="embed-status mb-2 flex flex-wrap items-center gap-1.5">{{ ui.pill('willhaben: ' ~ (_("logged in") if logged else _("unknown") if logged is none else _("not logged in")), 'ok' if logged else '' if logged is none else 'bad') }}{% if logged and session_status.user %}<small class="text-xs text-muted">{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}
   <span class="flex-1"></span>
   <form method="post" action="/session/login"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn btn-xs">{{ _("Open login page") }}</button></form>
   <form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-xs">{{ _("Check login") }}</button></form>
 </div>
 {% else %}
-<div class="mb-3.5 flex flex-wrap items-center justify-between gap-3">
-  <div class="flex min-w-0 items-center gap-2.5">
-    <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if logged else 'bg-off' if not session_status.started else 'bg-error' }}"></span>
-    <div class="min-w-0">{% if not session_status.started %}<div class="font-semibold">{{ _("The browser is not running.") }}</div><div class="text-[12.5px] text-muted break-words">{{ session_status.error or '' }}</div>
-      {% else %}<div class="font-semibold">willhaben: {{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}{% if logged and session_status.user %} {{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}{% endif %}</div>
-        {% for name, st in site_logins() %}<div class="text-[13px]" data-site-login="{{ name }}"><span class="mr-1 inline-block size-1.5 rounded-full align-middle {{ 'bg-success' if st.logged_in else 'bg-off' if st.logged_in is none else 'bg-error' }}"></span>{{ name }}: {{ _("logged in") if st.logged_in else _("unknown") if st.logged_in is none else _("not logged in") }}{% if st.checked_at %} <span class="text-muted">· {{ _("checked {t}", t=st.checked_at|ago) }}</span>{% endif %}</div>{% endfor %}
-        <div class="text-[12.5px] text-muted">{{ _("Browser running") }}{% if session_status.engine %} ({{ 'Google Chrome' if session_status.engine == 'chrome' else 'Chromium' }}){% endif %} · {{ _("checked {t}", t=session_status.last_check|ago) }}</div>{% endif %}</div>
+{# the browser itself; the sites' logins only as status lines (each is set up in its own settings) #}
+<div class="mb-3.5 flex flex-col gap-2.5" data-browser-status>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex min-w-0 items-center gap-2.5">
+      <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if session_status.started else 'bg-off' }}"></span>
+      <div class="min-w-0"><div class="font-semibold">{% if session_status.started %}{{ _("Browser running") }}{% if session_status.engine %} ({{ 'Google Chrome' if session_status.engine == 'chrome' else 'Chromium' }}){% endif %}{% else %}{{ _("The browser is not running.") }}{% endif %}</div>
+        {% if session_status.error %}<div class="text-[12.5px] text-muted break-words">{{ session_status.error }}</div>{% endif %}</div>
+    </div>
+    {% if not session_status.started %}<form method="post" action="/session/start"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn btn-primary">{{ _("Start browser") }}</button></form>{% endif %}
   </div>
-  <div class="flex flex-wrap gap-2">
-    {% if not session_status.started %}<form method="post" action="/session/start"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn btn-primary">{{ _("Start browser") }}</button></form>
-    {% else %}<form method="post" action="/session/login" class="join"><input type="hidden" name="next" value="{{ next_open }}"><select name="site" class="select join-item w-auto bg-base-200" aria-label="{{ _('Platform') }}">{% for pid, name in login_sites() %}<option value="{{ pid }}">{{ name }}</option>{% endfor %}</select><button class="btn join-item">{{ _("Open login page") }}</button></form><form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn">{{ _("Check login") }}</button></form>{% endif %}
-  </div>
+  {% if session_status.started %}<div class="flex flex-wrap gap-x-4 gap-y-1 text-[13px]" data-site-logins>
+    <a href="/settings/willhaben" class="flex items-center gap-1.5 no-underline hover:underline" data-site-login="willhaben"><span class="size-1.5 rounded-full {{ 'bg-success' if logged else 'bg-off' if logged is none else 'bg-error' }}"></span>willhaben: {{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}</a>
+    {% for name, st in site_logins() %}<a href="/settings/{{ name|lower }}" class="flex items-center gap-1.5 no-underline hover:underline" data-site-login="{{ name }}"><span class="size-1.5 rounded-full {{ 'bg-success' if st.logged_in else 'bg-off' if st.logged_in is none else 'bg-error' }}"></span>{{ name }}: {{ _("logged in") if st.logged_in else _("unknown") if st.logged_in is none else _("not logged in") }}</a>{% endfor %}
+  </div>{% endif %}
 </div>
-{% if session_status.started %}<p class="mb-3.5 text-[12.5px] text-muted">{{ _("You log in in the app's real browser window (below, right here in the dashboard).") }} {{ _("The session then stays stored in the browser profile and is renewed automatically as long as willhaben allows it.") }}</p>{% endif %}
 {% endif %}
 
 {% if session_status.started %}
@@ -167,8 +168,6 @@
       <small class="text-muted">{{ _("Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in") }} <code class="font-mono">data/captures</code>). {{ _("Start and stop a recording under the browser window.") }}</small>
       <div class="flex flex-wrap items-center gap-2">
         <form method="post" action="/session/open" class="flex flex-wrap items-center gap-1.5"><input type="hidden" name="next" value="{{ next_open }}"><select name="url" class="select select-sm bg-base-200 text-[13px]"><option value="https://www.willhaben.at/iad/myprofile/chat">{{ _("Open chat") }}</option><option value="https://www.willhaben.at/iad/myprofile/myadverts">{{ _("Open My ads") }}</option><option value="https://www.willhaben.at/iad/anzeigenaufgabe">{{ _("Open “Post an ad”") }}</option><option value="https://www.kleinanzeigen.de/m-nachrichten.html">{{ _("Kleinanzeigen: messages") }}</option><option value="https://www.vinted.at/inbox">{{ _("Vinted: inbox") }}</option></select><button class="btn btn-sm">{{ _("Open in the browser window") }}</button></form>
-        <form method="post" action="/session/forget/vinted" class="flex items-center" onsubmit="return confirm({{ _('Delete all Vinted cookies of this browser? Vinted is logged out here and starts afresh.')|tojson|forceescape }})"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-sm" title="{{ _('After “Deine Sitzung wurde blockiert”: the bot protection marked this browser') }}">{{ _("Reset Vinted") }}</button></form>
-        <form method="post" action="/session/vinted-explore" class="flex items-center"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-sm" title="{{ _('Reads the Vinted inbox and one conversation once, read-only, in a hidden tab – right after logging in to Vinted here') }}">{{ _("Explore the Vinted inbox") }}</button></form>
         {% if settings.novnc_url %}<a href="{{ settings.novnc_url }}" target="_blank" rel="noopener" class="link link-primary ml-auto">{{ _("noVNC in a new tab") }}{{ ui.icon('external', 13) }}</a>{% endif %}
       </div>
       {% set ra = record_all_stats() %}

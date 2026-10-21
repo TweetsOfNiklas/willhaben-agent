@@ -29,6 +29,13 @@
 {% set path = request.url.path if request is defined else '' %}
 {# willhaben login: off = browser not running, bad = running but logged out, ok = logged in #}
 {% set wh_state = 'off' if not session_status.started else ('ok' if session_status.logged_in else 'bad') %}
+{# the other sites' logins (switched on), each on its own: (name, {logged_in, ...}) #}
+{% set other_logins = site_logins() if session_status.started else [] %}
+{% macro login_lines() -%}
+  <span class="flex items-center gap-1.5 text-xs text-muted" data-status="browser"><span class="size-1.5 rounded-full {{ 'bg-success' if session_status.started else 'bg-off' }}"></span>{{ _("Browser") }}: {{ (_("running") ~ (' (Chrome)' if session_status.engine == 'chrome' else '')) if session_status.started else _("not running") }}</span>
+  {% if session_status.started %}<span class="flex items-center gap-1.5 text-xs text-muted" data-status="willhaben"><span class="size-1.5 rounded-full {{ 'bg-success' if wh_state == 'ok' else 'bg-error' }}"></span>willhaben: {{ _("logged in") if wh_state == 'ok' else _("not logged in") }}</span>
+  {% for name, st in other_logins %}<span class="flex items-center gap-1.5 text-xs text-muted" data-status="{{ name|lower }}"><span class="size-1.5 rounded-full {{ 'bg-success' if st.logged_in else 'bg-off' if st.logged_in is none else 'bg-error' }}"></span>{{ name }}: {{ _("logged in") if st.logged_in else _("unknown") if st.logged_in is none else _("not logged in") }}</span>{% endfor %}{% endif %}
+{%- endmacro %}
 {% set who = current_user if current_user is defined else (session_status.user.nickname if session_status.user else '') %}
 {% macro is_current(href) -%}
   {{- 'page' if path == href or (href != '/' and path.startswith(href + '/')) or (href == '/new-ad' and path.startswith('/ad-')) else '' -}}
@@ -133,7 +140,7 @@
         {% if wh_state == 'bad' %}<span class="absolute -top-1 -right-1 min-w-4 rounded-full bg-error px-1 text-center text-[10px] leading-4 font-bold text-error-content rail-x:hidden" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}</span>
       <span class="hidden min-w-0 flex-1 rail-x:block">
         <span class="block truncate font-medium">{{ who or 'willhaben Agent' }}</span>
-        <span class="block truncate text-xs {{ {'bad': 'text-error', 'off': 'text-muted'}.get(wh_state, 'text-muted') }}">{% if wh_state == 'bad' %}{{ _("not logged in") }}{% elif wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben · {{ _("logged in") }}{% endif %}</span>
+        <span class="block truncate text-xs {{ {'bad': 'text-error', 'off': 'text-muted'}.get(wh_state, 'text-muted') }}">{% if wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben {{ '✓' if wh_state == 'ok' else '✗' }}{% for name, st in other_logins %} · {{ name }} {{ '✓' if st.logged_in else '?' if st.logged_in is none else '✗' }}{% endfor %}{% endif %}</span>
       </span>
       {% if wh_state == 'bad' %}<span class="hidden min-w-[18px] rounded-full bg-error px-1.5 text-center text-[11px] leading-[18px] font-bold text-error-content rail-x:inline" title="{{ _('Not logged in to willhaben') }}">!</span>{% endif %}
     </button>
@@ -170,7 +177,7 @@
     <div class="mb-1 flex items-center gap-2.5 border-b border-base-300 px-2 pt-2 pb-2.5">
       <span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-sm font-bold text-primary">{{ (who or 'w')[:1]|upper }}</span>
       <span class="min-w-0"><span class="block truncate font-semibold">{{ who or 'willhaben Agent' }}</span>
-        <span class="flex items-center gap-1.5 text-xs text-muted"><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span>{% if wh_state == 'bad' %}{{ _("not logged in to willhaben") }}{% elif wh_state == 'off' %}{{ _("Browser is not running") }}{% else %}willhaben {{ _("logged in") }}{% endif %}</span></span>
+        <span class="mt-0.5 flex flex-col gap-0.5">{{ login_lines() }}</span></span>
     </div>
     {# phone: the pages the tab bar has no room for #}
     <ul class="menu mb-1 w-full gap-0.5 border-b border-base-300 p-0 pb-1 md:hidden">
@@ -181,8 +188,9 @@
     {# phone: the sidebar's meters (requests per site and hour, Claude tokens); a tap opens their popover #}
     <div class="mb-1 flex flex-col gap-3 border-b border-base-300 px-2.5 pt-1.5 pb-3 md:hidden">{{ meters }}</div>
     <ul class="menu w-full gap-0.5 p-0">
-      <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}{{ _("willhaben account") }}</a></li>
-      <li><a href="/session" data-remote role="menuitem">{{ ui.icon('monitor', 16) }}<span class="flex-1">{{ _("Browser window") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
+      <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}<span class="flex-1">{{ _("willhaben account") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
+      {% for name, st in other_logins %}<li><a href="/settings/{{ name|lower }}" role="menuitem">{{ ui.icon('tag', 16) }}<span class="flex-1">{{ _("{site} account", site=name) }}</span><span class="size-1.5 rounded-full {{ 'bg-success' if st.logged_in else 'bg-off' if st.logged_in is none else 'bg-error' }}"></span></a></li>{% endfor %}
+      <li><a href="/session" data-remote role="menuitem">{{ ui.icon('monitor', 16) }}<span class="flex-1">{{ _("Browser window") }}</span><span class="size-1.5 rounded-full {{ 'bg-success' if session_status.started else 'bg-off' }}"></span></a></li>
       <li><a href="/settings/claude" role="menuitem">{{ ui.icon('bot', 16) }}{{ _("Claude & usage") }}</a></li>
       <li><a href="/timeline" role="menuitem">{{ ui.icon('clock', 16) }}{{ _("Timeline") }}</a></li>
       <li><a href="/settings" role="menuitem">{{ ui.icon('settings', 16) }}{{ _("Settings") }}</a></li>
