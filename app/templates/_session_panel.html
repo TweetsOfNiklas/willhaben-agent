@@ -55,7 +55,7 @@
     {# recording what this window does (a named capture, data/captures) and the captures so far #}
     <div class="flex flex-wrap items-center gap-2 text-[12.5px]" data-remote-record>
       {% if session_status.capturing %}
-      {{ ui.pill(_("recording") ~ ' · ' ~ _("{n} requests", n=session_status.capture_count), 'bad') }}
+      <span data-capture-count x-data="{ n: {{ session_status.capture_count }} }" x-init="setInterval(async () => { try { const r = await fetch('/session/capture/state'); if (r.ok) { const s = await r.json(); n = s.n; } } catch (e) {} }, 2000)">{{ ui.pill(_("recording"), 'bad') }} <b x-text="n">{{ session_status.capture_count }}</b> {{ _("requests so far") }}</span>
       <form method="post" action="/session/capture/stop"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-xs btn-error">■ {{ _("Stop recording") }}</button></form>
       {% else %}
       <form method="post" action="/session/capture/start" class="flex items-center gap-1.5"><input type="hidden" name="next" value="{{ session_next or '/session' }}">

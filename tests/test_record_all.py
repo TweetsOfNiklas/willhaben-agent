@@ -101,4 +101,4 @@ def test_the_remote_view_has_scroll_and_record_controls():
     status.capturing, status.capture_count = True, 12
     page = templates.env.get_template("_session_panel.html").render(
         session_status=status, captures=[], settings=get_settings(), embed=True)
-    assert "12 requests" in page and 'action="/session/capture/stop"' in page
+    assert "requests so far" in page and ">12<" in page and 'action="/session/capture/stop"' in page

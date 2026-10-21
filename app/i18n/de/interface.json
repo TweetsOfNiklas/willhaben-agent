@@ -263,5 +263,6 @@
  "Scroll down": "Nach unten scrollen",
  "Name of the recording": "Name der Aufnahme",
  "Recordings ({n})": "Aufnahmen ({n})",
- "Start and stop a recording under the browser window.": "Aufnahmen startest und beendest du unter dem Browserfenster."
+ "Start and stop a recording under the browser window.": "Aufnahmen startest und beendest du unter dem Browserfenster.",
+ "requests so far": "Anfragen bisher"
 }

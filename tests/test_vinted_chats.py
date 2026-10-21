@@ -99,3 +99,10 @@ def test_the_chat_list_filters_by_site():
     assert "data-chat-site" in both and "verkaeufer_x" in both and "wh_partner" in both
     assert "verkaeufer_x" in only_v and "wh_partner" not in only_v
     assert "wh_partner" in only_w and "verkaeufer_x" not in only_w
+
+
+def test_the_side_of_an_items_conversation_is_the_role():
+    vinted_inbox.apply_inbox(INBOX)
+    vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "data": {"current_user_side": "buyer", "items": []}})
+    with session() as db:
+        assert db.get(Conversation, "01a1-uuid").role == "buyer"

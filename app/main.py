@@ -2720,6 +2720,13 @@ async def session_record_all(on: str = Form("0"), next: str = Form("/session")):
     return _session_back(next, t("Recording everything") if on == "1" else t("Recording everything stopped"))
 
 
+@app.get("/session/capture/state")
+async def capture_state():
+    """The running recording's request count (the remote view counts along every 2 s)."""
+    st = get_session().status() if get_session().started else {}
+    return {"capturing": bool(st.get("capturing")), "n": st.get("capture_count", 0)}
+
+
 @app.post("/session/capture/stop")
 async def capture_stop(next: str = Form("/session")):
     path = await get_session().stop_capture()

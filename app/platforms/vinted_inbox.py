@@ -216,6 +216,9 @@ def apply_conversation(cid: str, data: dict[str, Any]) -> int:
         row = db.get(Conversation, cid)
         if row is not None:
             row.messages_synced_at = utcnow()
+            side = (data.get("data") or {}).get("current_user_side")   # an item's conversation: buyer | seller
+            if side in ("buyer", "seller"):
+                row.role = side
             order = (data.get("data") or {}).get("order_id")
             if order:
                 row.ad_context = {**(row.ad_context or {}), "order_id": str(order)}
