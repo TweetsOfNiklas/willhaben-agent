@@ -160,6 +160,23 @@ def message_text(m: dict[str, Any]) -> tuple[str, str | None]:
     return "", None
 
 
+def message_key(m: dict[str, Any]) -> str:
+    """A stable id of one Vinted message: Vinted gives its order events a new id on every load (seen 2026-10-21:
+    the same "Gekauft!" twice), so an event is keyed by its kind, title and time; a written message by its number
+    (data.entity.id of legacy_reply, data.id of the reply_plain a send answers with – the same number)."""
+    import hashlib
+    d = m.get("data") or {}
+    e = d.get("entity") or {}
+    if d.get("entity_type") == "message" and e.get("id"):
+        return f"vinted-msg-{e['id']}"
+    if m.get("message_type") == "reply_plain" and d.get("id"):
+        return f"vinted-msg-{d['id']}"
+    if m.get("message_type") == "legacy_action" or "entity" in d:
+        raw = "|".join(str(x or "") for x in (d.get("event_type"), e.get("title"), e.get("subtitle"), m.get("created_at")))
+        return "vinted-ev-" + hashlib.sha1(raw.encode()).hexdigest()[:16]
+    return f"vinted-{m.get('id')}"
+
+
 def _partner(c: dict[str, Any]) -> dict[str, Any]:
     users = c.get("opposite_users") or [{}]
     return (users[0] or {}).get("data") or {}
@@ -168,7 +185,7 @@ def _partner(c: dict[str, Any]) -> dict[str, Any]:
 def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list[str]:
     """The inbox list into Conversation rows (platform vinted). Returns the ids whose last message is new here;
     `incoming` gets those where the other person wrote it (unread), for the push."""
-    from sqlmodel import select
+    from sqlmodel import col, select
 
     from app.db import Conversation, Message, session
 
@@ -207,9 +224,12 @@ def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list
             row.synced_at = utcnow()
             db.add(row)
             empty = known and db.exec(select(Message.id).where(Message.conversation_id == cid).limit(1)).first() is None
+            stale = known and db.exec(select(Message.id).where(        # stored under Vinted's unstable ids
+                Message.conversation_id == cid, col(Message.ext_id).like("vinted-%"),
+                ~col(Message.ext_id).like("vinted-msg-%"), ~col(Message.ext_id).like("vinted-ev-%")).limit(1)).first() is not None
             no_side = (row.role is None and c.get("conversation_type") == "order"     # its order says the side;
                        and not (row.ad_context or {}).get("side_tried"))                    # tried once
-            if newer or row.messages_synced_at is None or empty or no_side:
+            if newer or row.messages_synced_at is None or empty or no_side or stale:
                 changed.append(cid)
                 partner_wrote = str(last.get("sender_id") or "") == str(partner.get("id") or "-")
                 if incoming is not None and known and partner_wrote and c.get("is_unread_by_current_user"):
@@ -224,16 +244,25 @@ def apply_conversation(cid: str, data: dict[str, Any], escrow: dict[str, Any] | 
     from app.db import Conversation, session
     from app.services import chats
 
+    from sqlmodel import col, select
+
+    from app.db import Message
     partner_id = str(_partner(data).get("id") or "")
     msgs = data.get("messages") or []
     with session() as db:
+        # rows stored under Vinted's own (unstable) ids before the stable keys: dropped, read again below
+        for old in db.exec(select(Message).where(Message.conversation_id == cid, col(Message.ext_id).like("vinted-%"),
+                                                 ~col(Message.ext_id).like("vinted-msg-%"),
+                                                 ~col(Message.ext_id).like("vinted-ev-%"))):
+            db.delete(old)
+        db.flush()
         for m in msgs:
             text, kind = message_text(m)
             if not text:
                 continue
             sender = str(m.get("sender_id") or "")
             direction = "unknown" if kind == "integration" else ("in" if sender and sender == partner_id else "out")
-            chats._upsert_message(db, cid, f"vinted-{m.get('id')}", direction, text, _when(m.get("created_at")),
+            chats._upsert_message(db, cid, message_key(m), direction, text, _when(m.get("created_at")),
                                   authoritative=True, kind=kind)
         row = db.get(Conversation, cid)
         if row is not None:
@@ -379,7 +408,7 @@ def record_sent(draft_id: int, reply: dict[str, Any]) -> None:
         m = db.exec(select(Message).where(Message.ext_id == f"draft-{draft_id}")).first()
         if m is None:
             return
-        m.ext_id = f"vinted-{reply.get('id')}"
+        m.ext_id = message_key(reply)
         m.created_at = _when(reply.get("created_at")) or m.created_at
         db.add(m)
         db.commit()

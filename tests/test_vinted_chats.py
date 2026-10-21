@@ -51,8 +51,8 @@ async def test_sending_on_vinted_goes_through_its_page_and_keeps_vinteds_id(monk
 
     async def send(cid, text):
         sent.append((cid, text))
-        return {"id": "m9", "created_at": "2026-10-21T22:00:00+02:00", "message_type": "reply_plain",
-                "data": {"content": text}}
+        return {"id": "uuid-9", "created_at": "2026-10-21T22:00:00+02:00", "message_type": "reply_plain",
+                "data": {"content": text, "id": "m9"}}
     monkeypatch.setattr(vinted_inbox, "send", send)
     marked = []
 
@@ -62,8 +62,8 @@ async def test_sending_on_vinted_goes_through_its_page_and_keeps_vinteds_id(monk
     out = await chats.send_draft(d.id, "Danke!")
     assert out.status == "sent" and sent == [("01a1-uuid", "Danke!")] and marked == []      # no willhaben receipt
     vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [
-        {"id": "m9", "created_at": "2026-10-21T22:00:00+02:00", "sender_id": "5", "message_type": "reply_plain",
-         "data": {"content": "Danke!"}}]})
+        {"id": "x-uuid", "created_at": "2026-10-21T22:00:00+02:00", "sender_id": "5", "message_type": "legacy_reply",
+         "data": {"entity_type": "message", "entity": {"id": "m9", "body": "Danke!"}}}]})
     assert [m.text for m in chats.messages_of("01a1-uuid")].count("Danke!") == 1                # no double
 
 
@@ -310,3 +310,24 @@ def test_no_side_no_tag():
         page = c.get("/chats").text
     row = page[page.index("verkaeufer_x"):][:900]
     assert "Selling" not in row and "Buying" not in row
+
+
+def test_an_event_with_a_new_id_on_every_load_is_stored_once():
+    vinted_inbox.apply_inbox(INBOX)
+    ev = {"created_at": "2026-10-21T18:44:03+02:00", "sender_id": "1", "message_type": "legacy_action",
+          "data": {"event_type": "success", "entity_type": "action_message", "entity": {"title": "Gekauft!", "subtitle": "x"}}}
+    vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [{**ev, "id": "a1"}]})
+    vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [{**ev, "id": "b2"}]})
+    assert [m.text for m in chats.messages_of("01a1-uuid")] == ["Gekauft! – x"]
+
+
+def test_old_unstable_rows_are_replaced():
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        db.add(Message(conversation_id="01a1-uuid", ext_id="vinted-oldid", direction="unknown", text="Gekauft! – x",
+                       kind="integration"))
+        db.commit()
+    ev = {"id": "c3", "created_at": "2026-10-21T18:44:03+02:00", "sender_id": "1", "message_type": "legacy_action",
+          "data": {"event_type": "success", "entity": {"title": "Gekauft!", "subtitle": "x"}}}
+    vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [ev]})
+    assert [m.ext_id.startswith("vinted-ev-") for m in chats.messages_of("01a1-uuid")] == [True]
