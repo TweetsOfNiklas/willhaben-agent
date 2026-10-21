@@ -207,7 +207,9 @@ def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list
             row.synced_at = utcnow()
             db.add(row)
             empty = known and db.exec(select(Message.id).where(Message.conversation_id == cid).limit(1)).first() is None
-            if newer or row.messages_synced_at is None or empty:     # empty: read before its messages were understood
+            no_side = (row.role is None and c.get("conversation_type") == "order"     # its order says the side;
+                       and not (row.ad_context or {}).get("side_tried"))                    # tried once
+            if newer or row.messages_synced_at is None or empty or no_side:
                 changed.append(cid)
                 partner_wrote = str(last.get("sender_id") or "") == str(partner.get("id") or "-")
                 if incoming is not None and known and partner_wrote and c.get("is_unread_by_current_user"):
@@ -216,8 +218,9 @@ def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list
     return changed
 
 
-def apply_conversation(cid: str, data: dict[str, Any]) -> int:
-    """One conversation's messages into Message rows; returns how many it holds."""
+def apply_conversation(cid: str, data: dict[str, Any], escrow: dict[str, Any] | None = None) -> int:
+    """One conversation's messages into Message rows; returns how many it holds. The side (buyer/seller) comes from
+    an item conversation's current_user_side or, for an order, the order's (`escrow`)."""
     from app.db import Conversation, session
     from app.services import chats
 
@@ -235,9 +238,12 @@ def apply_conversation(cid: str, data: dict[str, Any]) -> int:
         row = db.get(Conversation, cid)
         if row is not None:
             row.messages_synced_at = utcnow()
-            side = (data.get("data") or {}).get("current_user_side")   # an item's conversation: buyer | seller
+            side = (data.get("data") or {}).get("current_user_side") or \
+                ((escrow or {}).get("escrow_order") or {}).get("current_user_side")   # buyer | seller
             if side in ("buyer", "seller"):
                 row.role = side
+            elif row.role is None:
+                row.ad_context = {**(row.ad_context or {}), "side_tried": True}
             order = (data.get("data") or {}).get("order_id")
             if order:
                 row.ad_context = {**(row.ad_context or {}), "order_id": str(order)}
@@ -246,9 +252,13 @@ def apply_conversation(cid: str, data: dict[str, Any]) -> int:
     return len(msgs)
 
 
-async def _catch(url: str, part: str, timeout_ms: int = 30000) -> dict[str, Any] | None:
+_ESCROW = re.compile(r"/escrow-orders/api/v2/escrow-orders/\d+(?:\?|$)")
+
+
+async def _catch(url: str, part: str, timeout_ms: int = 30000, extra: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Open `url` (a page of Vinted's web app) in a short-lived tab and return the JSON answer of its own call whose
-    address contains `part` – waiting for that answer, not for the page's text. None when it did not come."""
+    address contains `part` – waiting for that answer, not for the page's text. None when it did not come.
+    `extra`: gets the page's order call too ("escrow": escrow_order with current_user_side), when it makes one."""
     from app.willhaben.session import get_session
 
     sess = get_session()
@@ -260,11 +270,23 @@ async def _catch(url: str, part: str, timeout_ms: int = 30000) -> dict[str, Any]
     finally:
         sess._creating_internal = False
         sess.ui_page = ui
+    seen: list[Any] = []
+    if extra is not None:
+        page.on("response", lambda r: seen.append(r) if _ESCROW.search(r.url) and r.status == 200 else None)
     try:
         async with page.expect_response(lambda r: part in r.url and r.request.method == "GET" and r.status == 200,
                                         timeout=timeout_ms) as got:
             await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-        return _parse(await (await got.value).text())
+        body = _parse(await (await got.value).text())
+        if extra is not None:
+            if not seen:
+                await page.wait_for_timeout(2500)       # the order is asked right after the conversation
+            for r in seen[:1]:
+                try:
+                    extra["escrow"] = _parse(await r.text())
+                except Exception:  # noqa: BLE001 - closed meanwhile
+                    pass
+        return body
     except Exception as e:  # noqa: BLE001 - logged out (a redirect), slow: nothing caught
         log.info("vinted: no %s answer on %s (%s)", part, url, type(e).__name__)
         if "/member/" in page.url:
@@ -281,8 +303,9 @@ async def sync_one(cid: str) -> int:
 
     if not get_session().started:
         return 0
-    conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}")
-    n = apply_conversation(cid, conv) if conv is not None else 0
+    extra: dict[str, Any] = {}
+    conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}", extra=extra)
+    n = apply_conversation(cid, conv, extra.get("escrow")) if conv is not None else 0
     from app.services import chats
     await chats.ensure_ad_context(cid)            # the item's card (photo, price) like a willhaben ad's
     return n
@@ -578,9 +601,10 @@ async def sync(force: bool = False) -> dict[str, Any]:
     read = 0
     from app.services import chats
     for cid in changed[:MAX_DETAILS]:
-        conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}")
+        extra: dict[str, Any] = {}
+        conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}", extra=extra)
         if conv is not None:
-            read += apply_conversation(cid, conv)
+            read += apply_conversation(cid, conv, extra.get("escrow"))
 
     for c in (inbox.get("conversations") or [])[:MAX_DETAILS * 2]:   # the item cards (photo, price); kept fresh a while
         if c.get("id"):

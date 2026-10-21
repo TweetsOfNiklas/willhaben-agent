@@ -105,7 +105,7 @@ async def test_sync_reads_inbox_then_changed_conversations(monkeypatch):
     sess = Sess()
     monkeypatch.setattr("app.willhaben.session.get_session", lambda: sess)
 
-    async def catch(url, part, timeout_ms=0):
+    async def catch(url, part, timeout_ms=0, extra=None):
         sess.opened.append(url)
         return json.loads(json.dumps(INBOX if url.endswith("/inbox") else CONV))
     monkeypatch.setattr(vinted_inbox, "_catch", catch)
@@ -158,7 +158,7 @@ async def test_a_new_message_from_the_other_side_is_pushed(monkeypatch):
         started = True
     monkeypatch.setattr("app.willhaben.session.get_session", lambda: Sess())
 
-    async def catch(url, part, timeout_ms=0):
+    async def catch(url, part, timeout_ms=0, extra=None):
         return json.loads(json.dumps(state["inbox"] if url.endswith("/inbox") else CONV))
     monkeypatch.setattr(vinted_inbox, "_catch", catch)
     await vinted_inbox.sync(force=True)
@@ -288,3 +288,21 @@ async def test_a_sold_items_card_keeps_the_inbox_photo(monkeypatch):
     monkeypatch.setattr(platforms, "get", lambda pid: V() if pid == "vinted" else real_get(pid))
     conv = await chats.ensure_ad_context("01a1-uuid")
     assert conv.ad_context["images"] == ["https://img/inbox.webp"] and conv.ad_context["status"] == "sold"
+
+
+def test_an_orders_side_comes_from_the_order():
+    vinted_inbox.apply_inbox(INBOX)
+    vinted_inbox.apply_conversation("01a1-uuid", CONV, {"escrow_order": {"current_user_side": "buyer"}})
+    with session() as db:
+        assert db.get(Conversation, "01a1-uuid").role == "buyer"
+
+
+def test_no_side_no_tag():
+    vinted_inbox.apply_inbox(INBOX)
+    from app.db import set_setting
+    from app.main import app
+    set_setting("platform_vinted_enabled", "1")
+    with TestClient(app) as c:
+        page = c.get("/chats").text
+    row = page[page.index("verkaeufer_x"):][:900]
+    assert "Selling" not in row and "Buying" not in row

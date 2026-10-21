@@ -387,7 +387,8 @@ async def _vinted_ad_context(conv: Conversation) -> Conversation:
         row = db.get(Conversation, conv.id)
         if detail is not None:
             old = row.ad_context or {}
-            ctx = {**detail.as_context(), **{k: v for k, v in old.items() if k in ("order_id",)}, "platform": "vinted"}
+            ctx = {**detail.as_context(), **{k: v for k, v in old.items() if k in ("order_id", "side_tried")},
+                   "platform": "vinted"}
             if not ctx.get("images") and old.get("images"):   # a sold item's page has no photos: the inbox's stays
                 ctx["images"] = old["images"]
             row.ad_context = ctx
