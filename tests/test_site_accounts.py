@@ -9,16 +9,19 @@ from app.willhaben import session as session_mod
 class _Sess:
     started = True
 
-    def __init__(self, final):
-        self.final, self.opened, self.loaded = final, [], []
+    def __init__(self, final, text=""):
+        self.final, self.text, self.opened, self.loaded = final, text, [], []
 
-    async def load_hidden(self, url, timeout_ms=30000):
+    async def load_hidden(self, url, timeout_ms=30000, with_text=False):
         self.loaded.append(url)
         if isinstance(self.final, Exception):
             raise self.final
-        return self.final
+        return (self.final, self.text) if with_text else self.final
 
     async def open_url(self, url):
+        self.opened.append(url)
+
+    async def open_site(self, pid, url):
         self.opened.append(url)
 
     async def stop(self):
@@ -34,6 +37,13 @@ async def test_check_reads_the_redirect(monkeypatch):
     assert (await site_accounts.check("kleinanzeigen"))["logged_in"] is False
     sess.final = "https://www.vinted.at/member/signup/select_type?ref_url=%2Finbox"
     assert (await site_accounts.check("vinted"))["logged_in"] is False
+    sess.final, sess.text = "https://www.vinted.at/inbox", "Deine Sitzung wurde blockiert. Wir haben festgestellt …"
+    st = await site_accounts.check("vinted")                      # the block page keeps the address
+    assert st["logged_in"] is False and "blocks this browser" in st["error"]
+    sess.text = "Katalog Registrieren | Einloggen Artikel verkaufen"   # the logged-out header on the inbox address
+    assert (await site_accounts.check("vinted"))["logged_in"] is False
+    sess.text = "Posteingang"
+    assert (await site_accounts.check("vinted"))["logged_in"] is True
     sess.final = TimeoutError("slow")
     st = await site_accounts.check("vinted")
     assert st["logged_in"] is None and "slow" in st["error"]
@@ -53,7 +63,7 @@ def test_settings_page_shows_the_account_card(monkeypatch):
         assert r.headers["location"].startswith("/settings/vinted?msg=Logged")
         assert "Vinted account: logged in" in c.get("/settings/vinted").text
         r = c.post("/settings/account/vinted/login", follow_redirects=False)
-        assert "remote=1" in r.headers["location"] and sess.opened
+        assert r.headers["location"] == "/settings/vinted?remote=vinted" and sess.opened   # its own overlay
         assert c.post("/settings/account/ebay/check").status_code == 404
         assert "data-site-account" not in c.get("/settings/ebay").text
 
@@ -76,3 +86,59 @@ def test_the_browser_window_opens_the_sites_message_pages(monkeypatch):
         r = c.post("/session/open", data={"url": "https://evil.example/"}, follow_redirects=False)
         assert "msg=Only" in r.headers["location"]
     assert sess.opened == ["https://www.kleinanzeigen.de/m-nachrichten.html", "https://www.vinted.at/inbox"]
+
+
+def test_the_sites_own_overlay_shows_no_willhaben_state():
+    from types import SimpleNamespace
+
+    from app.config import get_settings
+    from app.main import templates
+    status = SimpleNamespace(started=True, logged_in=True, user={"nickname": "wh-user"}, last_check=None, error=None,
+                             capturing=False, capture_count=0)
+    page = templates.env.get_template("_session_panel.html").render(
+        session_status=status, captures=[], settings=get_settings(), embed=True,
+        site_mode=site_accounts.SITES["vinted"], site_state={"logged_in": False, "error": None}, site_checked=None,
+        session_next="/session?embed=1&site=vinted")
+    head = page[:page.index("</div>")]
+    assert 'data-site-mode="vinted"' in head and "Vinted: not logged in" in head and "wh-user" not in head
+    assert 'name="site" value="vinted"' in head and "/session/site-check/vinted" in head
+
+
+async def test_a_site_gets_its_own_tab_and_willhaben_its_window_back():
+    class Page:
+        def __init__(self):
+            self.urls, self.closed = [], False
+
+        def is_closed(self):
+            return self.closed
+
+        def on(self, *a):
+            pass
+
+        async def bring_to_front(self):
+            pass
+
+        async def goto(self, url, **kw):
+            self.urls.append(url)
+
+    class Ctx:
+        def __init__(self):
+            self.made = []
+
+        async def new_page(self):
+            p = Page()
+            self.made.append(p)
+            return p
+
+    sess = session_mod.BrowserSession.__new__(session_mod.BrowserSession)
+    home = Page()
+    sess.context, sess.ui_page, sess.home_page, sess.site_pages = Ctx(), home, home, {}
+    sess._creating_internal, sess._ui_used_at, sess._ui_holds = False, 0, 0
+    sess._require = lambda: None
+    await sess.open_site("vinted", "https://www.vinted.at/member/login")
+    tab = sess.ui_page
+    assert tab is not home and tab.urls == ["https://www.vinted.at/member/login"] and home.urls == []
+    await sess.open_url("https://www.vinted.at/inbox")                   # the same tab again
+    assert sess.ui_page is tab and len(sess.context.made) == 1
+    sess.show_home()
+    assert sess.ui_page is home

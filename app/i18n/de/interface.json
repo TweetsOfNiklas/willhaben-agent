@@ -255,5 +255,8 @@
  "{n} cookies of {site} deleted – log in again": "{n} Cookies von {site} gelöscht – bitte neu anmelden",
  "Delete all Vinted cookies of this browser? Vinted is logged out here and starts afresh.": "Alle Vinted-Cookies dieses Browsers löschen? Vinted ist hier dann abgemeldet und beginnt von vorn.",
  "After “Deine Sitzung wurde blockiert”: the bot protection marked this browser": "Nach „Deine Sitzung wurde blockiert“: Die Bot-Erkennung hat diesen Browser markiert",
- "Reset Vinted": "Vinted zurücksetzen"
+ "Reset Vinted": "Vinted zurücksetzen",
+ "{site} blocks this browser – use “Reset {site}” on the session page, then log in again": "{site} sperrt diesen Browser – auf der Sitzungsseite „{site} zurücksetzen“ drücken und neu anmelden",
+ "Vinted – its own tab in the app's browser": "Vinted – eigener Tab im Browser der App",
+ "Kleinanzeigen – its own tab in the app's browser": "Kleinanzeigen – eigener Tab im Browser der App"
 }

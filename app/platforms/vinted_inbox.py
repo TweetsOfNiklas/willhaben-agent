@@ -93,6 +93,8 @@ def summary(res: dict[str, Any] | None) -> str:
         return t("Browser session is not running")
     inbox = res["inbox"]
     if any("/member/" in r["url"] or "signup" in r["url"] for r in inbox["requests"] if r.get("type") == "document"):
+        from app.services import site_accounts
+        site_accounts._save("vinted", False)          # the stored state follows what the inbox showed
         return t("Vinted: not logged in in the browser window – log in there, then press again right away")
     calls = sum(1 for r in inbox["requests"] if _vinted_data(r["url"]) and not r.get("blocked"))
     conv = t("conversation read") if res.get("conversation") else t("no conversation found")

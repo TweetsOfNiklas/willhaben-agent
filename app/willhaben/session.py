@@ -83,6 +83,8 @@ class BrowserSession:
         self.context = None
         self.ui_page = None
         self.api_page = None
+        self.home_page = None          # the willhaben window; Kleinanzeigen and Vinted get tabs of their own
+        self.site_pages: dict[str, Any] = {}
         self.logged_in: bool | None = None
         self.user: dict[str, Any] | None = None
         self.last_check: datetime | None = None
@@ -120,6 +122,7 @@ class BrowserSession:
             from app.willhaben import record_all
             record_all.attach(self.context)          # everything the browser does, while switched on (session page)
             self.ui_page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            self.home_page = self.ui_page
             self.api_page = await self.context.new_page()
             self.context.on("page", self._on_new_page)
             await self._goto(self.api_page, PARK_URL, wait_until="domcontentloaded")
@@ -136,7 +139,8 @@ class BrowserSession:
             if self.context:
                 await self.context.close()
         finally:
-            self.context = self.ui_page = self.api_page = None
+            self.context = self.ui_page = self.api_page = self.home_page = None
+            self.site_pages = {}
             if self._pw:
                 await self._pw.stop()
                 self._pw = None
@@ -425,15 +429,50 @@ class BrowserSession:
         log.info("visible browser page idle, parked on about:blank")
         return True
 
+    def show_home(self) -> None:
+        """The remote view back on the willhaben window (after a Kleinanzeigen or Vinted tab was shown)."""
+        if self.ui_page in self.site_pages.values() and self.home_page is not None and not self.home_page.is_closed():
+            self.ui_page = self.home_page
+
+    async def open_site(self, pid: str, url: str) -> None:
+        """Kleinanzeigen, Vinted: `url` in the site's own tab (created once), shown in the remote view; the willhaben
+        window stays as it is."""
+        self._require()
+        page = self.site_pages.get(pid)
+        if page is None or page.is_closed():
+            ui = self.ui_page
+            self._creating_internal = True
+            try:
+                page = await self.context.new_page()
+            finally:
+                self._creating_internal = False
+                self.ui_page = ui
+            page.on("close", self._on_page_closed)
+            self.site_pages[pid] = page
+        self.ui_page = page
+        self.touch_ui()
+        await page.bring_to_front()
+        await page.goto(url, wait_until="domcontentloaded")
+
+    def site_of(self, url: str) -> str | None:
+        from urllib.parse import urlsplit
+
+        from app.services.site_accounts import SITES
+
+        host = (urlsplit(url).hostname or "").lower()
+        return next((s.id for s in SITES.values() for h in s.hosts if host == h or host.endswith("." + h)), None)
+
     async def open_login(self) -> None:
         self._require()
+        self.show_home()
         self.touch_ui()
         await self.ui_page.bring_to_front()
         await self._goto(self.ui_page, LOGIN_URL, "login", wait_until="domcontentloaded")
 
-    async def load_hidden(self, url: str, timeout_ms: int = 30000) -> str:
+    async def load_hidden(self, url: str, timeout_ms: int = 30000, with_text: bool = False) -> Any:
         """Open `url` in a short-lived tab of the logged-in browser (not the visible one) and return where it ended
-        up after redirects and scripts (the other sites' login checks, app/services/site_accounts.py)."""
+        up after redirects and scripts (the other sites' login checks, app/services/site_accounts.py); `with_text`:
+        (url, the page's text) – a block page or a captcha stays on the same address."""
         self._require()
         ui = self.ui_page
         self._creating_internal = True
@@ -448,7 +487,14 @@ class BrowserSession:
                 await page.wait_for_load_state("networkidle", timeout=8000)   # a script's redirect to the login
             except Exception:  # noqa: BLE001 - busy pages never get idle: what loaded counts
                 pass
-            return page.url
+            if not with_text:
+                return page.url
+            try:
+                text = await page.inner_text("body", timeout=3000)
+            except Exception:  # noqa: BLE001 - a page without a body (a captcha frame only)
+                text = ""
+            frames = " ".join(f.url for f in page.frames)
+            return page.url, f"{text}\n{frames}"
         finally:
             await page.close()
 
@@ -529,6 +575,10 @@ class BrowserSession:
 
     async def open_url(self, url: str) -> None:
         self._require()
+        if (pid := self.site_of(url)) is not None:
+            await self.open_site(pid, url)
+            return
+        self.show_home()
         self.touch_ui()
         await self.ui_page.bring_to_front()
         if url.startswith(ORIGIN):
@@ -705,6 +755,10 @@ class BrowserSession:
                     self.chat_live.update(state=t("Error: {error}", error=e), since=utcnow())
 
     def _on_page_closed(self, page) -> None:
+        self.site_pages = {k: p for k, p in self.site_pages.items() if p is not page}
+        if page is self.ui_page and self.home_page is not None and not self.home_page.is_closed():
+            self.ui_page = self.home_page
+            return
         if page is self.ui_page and self.context:
             rest = [p for p in self.context.pages
                     if p is not self.api_page and p is not self.chat_page and not p.is_closed()]

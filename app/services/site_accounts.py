@@ -32,6 +32,7 @@ class SiteAccount:
     check_url: str                   # a page only a logged-in visitor gets (else a redirect to the login)
     logged_out: tuple[str, ...]      # parts of the URL a logged-out visitor lands on
     hosts: tuple[str, ...]           # what the request recorder keeps of this site
+    logged_out_text: str = ""        # text of a logged-out page that keeps the address (regex)
 
 
 SITES: dict[str, SiteAccount] = {
@@ -42,7 +43,7 @@ SITES: dict[str, SiteAccount] = {
     "vinted": SiteAccount(
         "vinted", "Vinted", "https://www.vinted.at/member/signup/select_type?ref_url=%2Finbox",
         "https://www.vinted.at/inbox", ("/member/signup", "/member/login", "/auth/"),
-        ("vinted.at", "vinted.de", "vinted.com")),
+        ("vinted.at", "vinted.de", "vinted.com"), r"Registrieren\s*\|\s*Einloggen|Weiter mit Google"),
 }
 
 
@@ -73,6 +74,12 @@ def _save(pid: str, logged_in: bool | None, error: str | None = None) -> dict[st
     return data
 
 
+# the bot protection's block page or captcha (DataDome on Vinted: "Deine Sitzung wurde blockiert", seen 2026-10-21);
+# it stays on the page's own address, so only its text tells
+_BLOCKED = re.compile(r"Sitzung wurde blockiert|session (?:has been|was) blocked|captcha-delivery\.com|"
+                      r"Zugriff verweigert|Access (?:denied|blocked)", re.I)
+
+
 def logged_out_url(site: SiteAccount, url: str) -> bool:
     return any(part in (url or "") for part in site.logged_out)
 
@@ -82,7 +89,7 @@ async def open_login(pid: str) -> None:
     from app.willhaben.session import get_session
 
     site = SITES[pid]
-    await get_session().open_url(site.login_url)
+    await get_session().open_site(pid, site.login_url)        # its own tab: the willhaben window stays
 
 
 async def forget(pid: str) -> int:
@@ -107,13 +114,18 @@ async def check(pid: str) -> dict[str, Any]:
     site = SITES[pid]
     sess = get_session()
     try:
-        final = await sess.load_hidden(site.check_url)
+        final, text = await sess.load_hidden(site.check_url, with_text=True)
     except SessionUnavailable as e:
         return _save(pid, None, str(e))
     except Exception as e:  # noqa: BLE001 - a timeout or a closed browser: unknown, said so
         log.info("%s login check failed: %s", site.name, e)
         return _save(pid, None, t("The check did not finish: {error}", error=str(e) or type(e).__name__))
-    return _save(pid, not logged_out_url(site, final))
+    if _BLOCKED.search(text or ""):
+        return _save(pid, False, t("{site} blocks this browser – use “Reset {site}” on the session page, then log in "
+                                   "again", site=site.name))
+    if logged_out_url(site, final) or (site.logged_out_text and re.search(site.logged_out_text, text or "")):
+        return _save(pid, False)
+    return _save(pid, True)
 
 
 async def check_job() -> None:
