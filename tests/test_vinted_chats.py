@@ -203,3 +203,17 @@ def test_a_site_not_set_up_does_not_show():
     with TestClient(app) as c:
         page = c.get("/chats").text                      # no chats, not logged in anywhere, Vinted off
     assert "data-vinted-live" not in page and "data-chat-site" not in page and "Not logged in to willhaben" not in page
+
+
+def test_the_live_lines_name_their_site():
+    from app.db import set_setting
+    from app.main import app
+    set_setting("platform_vinted_enabled", "1")
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        db.add(Conversation(id="wh-1", partner_name="wh_partner"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/chats").text
+    live = page[page.index('id="chat-live-state"'):page.index('data-vinted-live')]
+    assert "willhaben:" in live and "Vinted:" in page[page.index('data-vinted-live'):][:400]
