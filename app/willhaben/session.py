@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.config import get_settings
 from app.db import utcnow
@@ -450,11 +450,13 @@ class BrowserSession:
         finally:
             await page.close()
 
-    async def read_hidden(self, url: str, wait_for: str, timeout_ms: int = 25000) -> dict[str, Any]:
+    async def read_hidden(self, url: str, wait_for: str, timeout_ms: int = 25000,
+                          keep: Callable[[str], bool] | None = None) -> dict[str, Any]:
         """Open `url` in a short-lived tab of the logged-in browser and read it, strictly read-only: every request but
         GET/HEAD/OPTIONS is blocked (nothing can be sent, offered or bought). Waits until the page text contains the
         regex `wait_for` (or the timeout). Returns {"text", "found", "requests": [{method, url, status, blocked,
-        type}], "bodies": {url: JSON text of willhaben's data calls}}."""
+        type}], "bodies": {url: JSON text of willhaben's data calls}}. `keep(url)`: which data calls' bodies to keep
+        (default: willhaben's)."""
         import re as _re
 
         self._require()
@@ -479,7 +481,8 @@ class BrowserSession:
         async def seen(resp) -> None:
             req = resp.request
             reqs.append({"method": req.method, "url": req.url, "type": req.resource_type, "status": resp.status})
-            if req.resource_type in ("fetch", "xhr") and "willhaben" in req.url and len(bodies) < 40:
+            if req.resource_type in ("fetch", "xhr") and (keep(req.url) if keep else "willhaben" in req.url) \
+                    and len(bodies) < 40:
                 try:
                     bodies[req.url] = (await resp.text())[:200_000]
                 except Exception:  # noqa: BLE001 - redirects and aborted responses have no body

@@ -107,6 +107,9 @@ async def lifespan(app: FastAPI):
             tasks.append(asyncio.create_task(sess.chat_watchdog()))
         except Exception as e:  # noqa: BLE001 - polling still works
             log.warning("live chat not started: %s", e)
+    if sess.started:                               # once: how Vinted's web app reads its inbox (read-only)
+        from app.platforms import vinted_inbox
+        tasks.append(asyncio.create_task(vinted_inbox.explore_once()))
     app.state.listener_tasks = tasks             # Settings → Backup stops them before a restore
     yield
     for task in tasks:
