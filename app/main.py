@@ -50,7 +50,7 @@ from app import backup_routes, label_buy_routes, paylivery_routes, platforms, pr
 from app import style_routes
 from app.services import search_agents as search_agents_svc
 from app.services.search_agents import refile_screened
-from app.willhaben import access_log
+from app.willhaben import access_log, record_all
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
 from app.platforms import PlatformError, ad_ref, vpn
@@ -107,9 +107,6 @@ async def lifespan(app: FastAPI):
             tasks.append(asyncio.create_task(sess.chat_watchdog()))
         except Exception as e:  # noqa: BLE001 - polling still works
             log.warning("live chat not started: %s", e)
-    if sess.started:                               # once: how Vinted's web app reads its inbox (read-only)
-        from app.platforms import vinted_inbox
-        tasks.append(asyncio.create_task(vinted_inbox.explore_once()))
     app.state.listener_tasks = tasks             # Settings → Backup stops them before a restore
     yield
     for task in tasks:
@@ -254,6 +251,8 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
+templates.env.globals.update(record_all_stats=lambda: {**record_all.stats(), "on": record_all.on()})   # session page
+templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
 templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
@@ -2573,9 +2572,13 @@ async def session_start(next: str = Form("/session")):
 
 
 @app.post("/session/login")
-async def session_login(next: str = Form("/session")):
+async def session_login(next: str = Form("/session"), site: str = Form("willhaben")):
+    """The login page of willhaben, or of Kleinanzeigen / Vinted (site), in the browser window."""
     try:
-        await get_session().open_login()
+        if site_accounts.get(site):
+            await site_accounts.open_login(site)
+        else:
+            await get_session().open_login()
     except SessionUnavailable as e:
         return _session_back(next, str(e))
     return _session_back(next, t('Login page opened in the browser window'))
@@ -2668,6 +2671,13 @@ async def session_vinted_explore(next: str = Form("/session")):
     except Exception as e:  # noqa: BLE001 - shown on the page
         return _session_back(next, str(e) or type(e).__name__)
     return _session_back(next, vinted_inbox.summary(res))
+
+
+@app.post("/session/record-all")
+async def session_record_all(on: str = Form("0"), next: str = Form("/session")):
+    """Record everything the browser does (willhaben/record_all.py), on or off at once."""
+    record_all.set_on(on == "1")
+    return _session_back(next, t("Recording everything") if on == "1" else t("Recording everything stopped"))
 
 
 @app.post("/session/capture/stop")

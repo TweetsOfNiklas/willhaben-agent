@@ -3,7 +3,6 @@ calls kept in a local capture file, once per version."""
 import json
 from types import SimpleNamespace
 
-from app.db import get_setting
 from app.platforms import vinted_inbox
 
 
@@ -23,16 +22,22 @@ class Sess:
         return {"text": "Nachricht", "found": True, "bodies": {}, "requests": []}
 
 
-async def test_explore_once_reads_inbox_and_a_conversation(tmp_path, monkeypatch):
+async def test_explore_reads_inbox_and_a_conversation(tmp_path, monkeypatch):
     sess = Sess(tmp_path)
     monkeypatch.setattr("app.willhaben.session.get_session", lambda: sess)
-    await vinted_inbox.explore_once(delay_s=0)
+    await vinted_inbox.explore()
     assert sess.opened == ["https://www.vinted.at/inbox", "https://www.vinted.at/inbox/12345678"]
     saved = json.loads(next(tmp_path.glob("*-vinted-inbox-explore.json")).read_text())
-    assert saved["conversation_id"] == "12345678" and get_setting(vinted_inbox.SETTING) == vinted_inbox.VERSION
-    await vinted_inbox.explore_once(delay_s=0)
-    assert len(sess.opened) == 2                                   # once per version
+    assert saved["conversation_id"] == "12345678"
 
+
+def test_the_bot_protection_and_the_token_refresh_pass_writes_do_not():
+    allow = vinted_inbox._allow
+    assert allow("POST", "https://dd.vinted.lt/js") and allow("POST", "https://api.vinted.at/tracking-events/batch")
+    assert allow("POST", "https://www.vinted.at/web/api/auth/refresh")
+    assert not allow("POST", "https://www.vinted.at/api/v2/conversations/1/replies")
+    assert not allow("PUT", "https://www.vinted.at/api/v2/conversations/1/read")
+    assert not allow("POST", "https://www.vinted.at/api/v2/transactions/1/checkout")
 
 def test_summary_names_a_missing_login():
     out = {"inbox": {"requests": [{"url": "https://www.vinted.at/member/signup/select_type?ref_url=%2Finbox",
@@ -41,3 +46,18 @@ def test_summary_names_a_missing_login():
     ok = {"inbox": {"requests": [{"url": "https://www.vinted.at/api/v2/inbox", "type": "fetch", "status": 200}]},
           "conversation": {"requests": []}}
     assert vinted_inbox.summary(ok) == "Vinted inbox read (1 data calls), conversation read"
+
+
+def test_the_login_button_picks_the_platform(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.services import site_accounts
+    opened = []
+
+    async def open_login(pid):
+        opened.append(pid)
+    monkeypatch.setattr(site_accounts, "open_login", open_login)
+    with TestClient(app) as c:
+        c.post("/session/login", data={"site": "vinted", "next": "/session"}, follow_redirects=False)
+    assert opened == ["vinted"]

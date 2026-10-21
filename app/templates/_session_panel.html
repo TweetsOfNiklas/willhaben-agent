@@ -20,7 +20,7 @@
   </div>
   <div class="flex flex-wrap gap-2">
     {% if not session_status.started %}<form method="post" action="/session/start"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn btn-primary">{{ _("Start browser") }}</button></form>
-    {% else %}<form method="post" action="/session/login"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn">{{ _("Open login page") }}</button></form><form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn">{{ _("Check login") }}</button></form>{% endif %}
+    {% else %}<form method="post" action="/session/login" class="join"><input type="hidden" name="next" value="{{ next_open }}"><select name="site" class="select join-item w-auto bg-base-200" aria-label="{{ _('Platform') }}">{% for pid, name in login_sites() %}<option value="{{ pid }}">{{ name }}</option>{% endfor %}</select><button class="btn join-item">{{ _("Open login page") }}</button></form><form method="post" action="/session/check"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn">{{ _("Check login") }}</button></form>{% endif %}
   </div>
 </div>
 {% if session_status.started %}<p class="mb-3.5 text-[12.5px] text-muted">{{ _("You log in in the app's real browser window (below, right here in the dashboard).") }} {{ _("The session then stays stored in the browser profile and is renewed automatically as long as willhaben allows it.") }}</p>{% endif %}
@@ -146,6 +146,12 @@
         {% if settings.novnc_url %}<a href="{{ settings.novnc_url }}" target="_blank" rel="noopener" class="link link-primary ml-auto">{{ _("noVNC in a new tab") }}{{ ui.icon('external', 13) }}</a>{% endif %}
       </div>
       {% endif %}
+      {% set ra = record_all_stats() %}
+      <form method="post" action="/session/record-all" class="flex flex-wrap items-center gap-2 rounded-md bg-base-200 px-2.5 py-2" data-record-all>
+        <input type="hidden" name="next" value="{{ session_next or '/session' }}"><input type="hidden" name="on" value="{{ '0' if ra.on else '1' }}">
+        <label class="flex cursor-pointer items-center gap-2"><input type="checkbox" class="toggle toggle-sm toggle-error" {% if ra.on %}checked{% endif %} onchange="this.form.submit()"><b>{{ _("Record everything") }}</b></label>
+        <span class="text-[12px] text-muted">{{ _("every request and WebSocket message of this browser, all sites, with the answers – for working out how a site works. Cookies, tokens and passwords are left out; kept {days} days in data/captures/all.", days=7) }}{% if ra.files %} · {{ _("{n} files, {mb} MB", n=ra.files, mb=(ra.bytes / 1048576)|round(1)) }}{% endif %}</span>
+      </form>
       {% if captures %}<div class="flex flex-wrap gap-1.5">{% for c in captures %}{{ ui.chip('/session/captures/' ~ c, c) }}{% endfor %}</div>{% endif %}
     </div>
   </details>

@@ -1,6 +1,6 @@
 """Vinted messages: first step, finding out how Vinted's web app reads its inbox (not seen in the app's recordings yet).
 
-explore_once() runs once after a start with the browser logged in to Vinted: it opens the inbox and its newest
+explore() (the session page's "Explore the Vinted inbox", pressed right after logging in) opens the inbox and its newest
 conversation in a hidden tab of the app's browser that is strictly read-only (session.read_hidden blocks every request
 but GET/HEAD/OPTIONS, so nothing can be sent or changed), and keeps Vinted's own data calls in a capture file in
 data/captures (local, like every capture: it holds chat content). The log names only the calls and their status.
@@ -14,12 +14,10 @@ import logging
 import re
 from typing import Any
 
-from app.db import get_setting, set_setting, utcnow
+from app.db import utcnow
 
 log = logging.getLogger(__name__)
 
-SETTING = "vinted_inbox_explored"       # the version of the exploration that ran (once per version)
-VERSION = "4"          # 1 blocked the token refresh: Vinted then expired its cookies (logged out); 2, 3 ran logged out
 ORIGIN = "https://www.vinted.at"
 _CONV_ID = re.compile(r"/inbox/(\d{5,})")
 _ID_IN_JSON = re.compile(r'"(?:conversation_id|id)"\s*:\s*(\d{6,})')
@@ -29,14 +27,20 @@ def _vinted_data(url: str) -> bool:
     return "vinted." in url and "/api/" in url
 
 
-# Vinted's page renews its access token with a POST before the inbox loads (/session-refresh); blocked, it calls
-# /web/api/auth/expire-cookies and the browser is logged out (seen 2026-10-21). The refresh only renews the login.
+# What the read-only tab lets through besides GET (seen 2026-10-21):
+# - the token refresh before the inbox loads (/web/api/auth/refresh): blocked, Vinted calls expire-cookies and the
+#   browser is logged out
+# - the bot protection's report (dd.vinted.lt/js), metrics, logs and tracking: blocked, the browser looks like a bot
+#   and Vinted blocks the connection for a while ("Deine Sitzung wurde blockiert")
+# Never through: writes to Vinted's own data API (/api/v2/…: messages, offers, purchases) and anything else.
 _REFRESH = re.compile(r"^https://www\.vinted\.[a-z.]+/web/api/auth/refresh(?:\?|$)")
 _EXPIRE = re.compile(r"^https://www\.vinted\.[a-z.]+/web/api/auth/expire-cookies")
+_TELEMETRY = re.compile(r"^https://(?:dd\.vinted\.lt/|metrics\.vinted\.lt/|logs-ingress\.svc\.vinted\.com/|"
+                        r"api\.vinted\.[a-z.]+/(?:j3r4zw/|tracking-events/))")
 
 
 def _allow(method: str, url: str) -> bool:
-    return method == "POST" and bool(_REFRESH.match(url))
+    return method == "POST" and bool(_REFRESH.match(url) or _TELEMETRY.match(url))
 
 
 def _deny(method: str, url: str) -> bool:
@@ -93,14 +97,3 @@ def summary(res: dict[str, Any] | None) -> str:
     calls = sum(1 for r in inbox["requests"] if _vinted_data(r["url"]) and not r.get("blocked"))
     conv = t("conversation read") if res.get("conversation") else t("no conversation found")
     return t("Vinted inbox read ({n} data calls), {conv}", n=calls, conv=conv)
-
-
-async def explore_once(delay_s: float = 60) -> None:
-    """Startup: the exploration once per VERSION (a failure is logged and tried again at the next start)."""
-    if get_setting(SETTING) == VERSION:
-        return
-    try:
-        if await explore(delay_s) is not None:
-            set_setting(SETTING, VERSION)
-    except Exception as e:  # noqa: BLE001 - only an exploration
-        log.warning("vinted inbox exploration failed: %s", e)
