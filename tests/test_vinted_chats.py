@@ -102,16 +102,13 @@ async def test_sync_reads_inbox_then_changed_conversations(monkeypatch):
     class Sess:
         started = True
         opened = []
-
-        async def read_hidden(self, url, wait_for, timeout_ms=0, keep=None, allow=None, deny=None):
-            self.opened.append(url)
-            assert allow("POST", "https://www.vinted.at/anything")         # Vinted's own page: nothing blocked
-            body = INBOX if url.endswith("/inbox") else CONV
-            key = "https://api.vinted.at/messaging/main/inbox" if url.endswith("/inbox") else \
-                "https://api.vinted.at/messaging/main/conversations/01a1-uuid"
-            return {"text": "", "found": True, "requests": [], "bodies": {key: json.dumps(body)}}
     sess = Sess()
     monkeypatch.setattr("app.willhaben.session.get_session", lambda: sess)
+
+    async def catch(url, part, timeout_ms=0):
+        sess.opened.append(url)
+        return json.loads(json.dumps(INBOX if url.endswith("/inbox") else CONV))
+    monkeypatch.setattr(vinted_inbox, "_catch", catch)
     res = await vinted_inbox.sync(force=True)
     assert res == {"conversations": 1, "opened": 1}
     assert sess.opened == ["https://www.vinted.at/inbox", "https://www.vinted.at/inbox/01a1-uuid"]
@@ -157,13 +154,11 @@ async def test_a_new_message_from_the_other_side_is_pushed(monkeypatch):
 
     class Sess:
         started = True
-
-        async def read_hidden(self, url, wait_for, timeout_ms=0, keep=None, allow=None, deny=None):
-            body = state["inbox"] if url.endswith("/inbox") else CONV
-            key = "https://api.vinted.at/messaging/main/inbox" if url.endswith("/inbox") else \
-                "https://api.vinted.at/messaging/main/conversations/01a1-uuid"
-            return {"text": "", "found": True, "requests": [], "bodies": {key: json.dumps(body)}}
     monkeypatch.setattr("app.willhaben.session.get_session", lambda: Sess())
+
+    async def catch(url, part, timeout_ms=0):
+        return json.loads(json.dumps(state["inbox"] if url.endswith("/inbox") else CONV))
+    monkeypatch.setattr(vinted_inbox, "_catch", catch)
     await vinted_inbox.sync(force=True)
     assert pushes == []                                                  # the first sync: no news
     state["inbox"]["conversations"][0]["last_message"] = {

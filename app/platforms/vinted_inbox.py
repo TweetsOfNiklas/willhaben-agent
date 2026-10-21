@@ -233,16 +233,42 @@ def apply_conversation(cid: str, data: dict[str, Any]) -> int:
     return len(msgs)
 
 
-async def sync_one(cid: str) -> int:
-    """One conversation again (the chat's Reload): its page in a hidden tab."""
+async def _catch(url: str, part: str, timeout_ms: int = 30000) -> dict[str, Any] | None:
+    """Open `url` (a page of Vinted's web app) in a short-lived tab and return the JSON answer of its own call whose
+    address contains `part` – waiting for that answer, not for the page's text. None when it did not come."""
     from app.willhaben.session import get_session
 
     sess = get_session()
-    if not sess.started:
+    sess._require()
+    ui = sess.ui_page
+    sess._creating_internal = True
+    try:
+        page = await sess.context.new_page()
+    finally:
+        sess._creating_internal = False
+        sess.ui_page = ui
+    try:
+        async with page.expect_response(lambda r: part in r.url and r.request.method == "GET" and r.status == 200,
+                                        timeout=timeout_ms) as got:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+        return _parse(await (await got.value).text())
+    except Exception as e:  # noqa: BLE001 - logged out (a redirect), slow: nothing caught
+        log.info("vinted: no %s answer on %s (%s)", part, url, type(e).__name__)
+        if "/member/" in page.url:
+            from app.services import site_accounts
+            site_accounts._save("vinted", False)
+        return None
+    finally:
+        await page.close()
+
+
+async def sync_one(cid: str) -> int:
+    """One conversation again (the chat's Reload, a live event): its page in a short-lived tab."""
+    from app.willhaben.session import get_session
+
+    if not get_session().started:
         return 0
-    r = await sess.read_hidden(f"{ORIGIN}/inbox/{cid}", r"Nachricht|Artikel|Bestellung|Zahlung", timeout_ms=30000,
-                               keep=_messaging, allow=lambda method, url: True)
-    conv = next((_parse(b) for u, b in r["bodies"].items() if f"/conversations/{cid}" in u), None)
+    conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}")
     return apply_conversation(cid, conv) if conv is not None else 0
 
 
@@ -409,8 +435,11 @@ async def _on_live(payload: str) -> None:
         return
     if "_state" in ev:
         if ev["_state"] in ("open", "closed"):
-            live.update(state="connected" if ev["_state"] == "open" and ev.get("status") == 200 else ev["_state"],
-                        since=utcnow())
+            state = "connected" if ev["_state"] == "open" and ev.get("status") == 200 else \
+                f"{ev['_state']} {ev.get('status') or ''}".strip()
+            if state != live.get("state"):
+                log.info("vinted live: %s", state)
+            live.update(state=state, since=utcnow())
         live["last_event"] = utcnow()
         return
     live["last_event"], live["events"] = utcnow(), live["events"] + 1
@@ -509,13 +538,9 @@ async def sync(force: bool = False) -> dict[str, Any]:
     if not force and time.monotonic() - _last_sync[0] < SYNC_EVERY_S:
         return {"skipped": "recently"}
     _last_sync[0] = time.monotonic()
-    every = lambda method, url: True  # noqa: E731 - Vinted's own page, as a person opens it: nothing blocked
-    res = await sess.read_hidden(f"{ORIGIN}/inbox", r"Posteingang|Nachrichten|Inbox", timeout_ms=30000,
-                                 keep=_messaging, allow=every)
-    inbox = next((_parse(b) for u, b in res["bodies"].items() if "/messaging/main/inbox" in u), None)
+    inbox = await _catch(f"{ORIGIN}/inbox", "/messaging/main/inbox")
     if inbox is None:
-        if any("/member/" in r["url"] for r in res["requests"] if r.get("type") == "document"):
-            site_accounts._save("vinted", False)
+        if site_accounts.state("vinted")["logged_in"] is False:
             return {"skipped": "not logged in"}
         return {"error": "no inbox answer"}
     first = not _known_any()
@@ -523,9 +548,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
     changed = apply_inbox(inbox, incoming)
     read = 0
     for cid in changed[:MAX_DETAILS]:
-        r = await sess.read_hidden(f"{ORIGIN}/inbox/{cid}", r"Nachricht|Artikel|Bestellung|Zahlung", timeout_ms=30000,
-                                   keep=_messaging, allow=every)
-        conv = next((_parse(b) for u, b in r["bodies"].items() if f"/conversations/{cid}" in u), None)
+        conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}")
         if conv is not None:
             read += apply_conversation(cid, conv)
     log.info("vinted chats: %d conversations, %d opened, %d messages", len(inbox.get("conversations") or []),
