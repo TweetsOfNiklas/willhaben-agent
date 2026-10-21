@@ -16,7 +16,9 @@
   <div class="flex min-w-0 items-center gap-2.5">
     <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if logged else 'bg-off' if not session_status.started else 'bg-error' }}"></span>
     <div class="min-w-0">{% if not session_status.started %}<div class="font-semibold">{{ _("The browser is not running.") }}</div><div class="text-[12.5px] text-muted break-words">{{ session_status.error or '' }}</div>
-      {% else %}<div class="font-semibold">{{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}{% if logged and session_status.user %} {{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}{% endif %}</div><div class="text-[12.5px] text-muted">{{ _("Browser running") }} · {{ _("checked {t}", t=session_status.last_check|ago) }}</div>{% endif %}</div>
+      {% else %}<div class="font-semibold">willhaben: {{ _("logged in") if logged else _("unknown") if logged is none else _("not logged in") }}{% if logged and session_status.user %} {{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}{% endif %}</div>
+        {% for name, st in site_logins() %}<div class="text-[13px]" data-site-login="{{ name }}"><span class="mr-1 inline-block size-1.5 rounded-full align-middle {{ 'bg-success' if st.logged_in else 'bg-off' if st.logged_in is none else 'bg-error' }}"></span>{{ name }}: {{ _("logged in") if st.logged_in else _("unknown") if st.logged_in is none else _("not logged in") }}{% if st.checked_at %} <span class="text-muted">· {{ _("checked {t}", t=st.checked_at|ago) }}</span>{% endif %}</div>{% endfor %}
+        <div class="text-[12.5px] text-muted">{{ _("Browser running") }} · {{ _("checked {t}", t=session_status.last_check|ago) }}</div>{% endif %}</div>
   </div>
   <div class="flex flex-wrap gap-2">
     {% if not session_status.started %}<form method="post" action="/session/start"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn btn-primary">{{ _("Start browser") }}</button></form>

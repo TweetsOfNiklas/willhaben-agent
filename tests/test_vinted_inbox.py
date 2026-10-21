@@ -81,3 +81,16 @@ async def test_reset_deletes_only_the_sites_cookies(monkeypatch):
     assert await site_accounts.forget("vinted") == 3
     assert jar == [{"name": "bbxauth", "domain": ".willhaben.at"}]
     assert site_accounts.state("vinted")["logged_in"] is False
+
+
+def test_the_session_page_names_each_sites_login():
+    from app.db import set_setting
+    from app.main import templates
+    set_setting("platform_vinted_enabled", "1")
+    set_setting("account_vinted", '{"logged_in": false, "checked_at": "2026-10-21T21:00:00+00:00"}')
+    status = SimpleNamespace(started=True, logged_in=True, user={"nickname": "x"}, last_check=None, error=None,
+                             capturing=False, capture_count=0)
+    from app.config import get_settings
+    page = templates.env.get_template("_session_panel.html").render(session_status=status, captures=[],
+                                                                    settings=get_settings())
+    assert 'data-site-login="Vinted"' in page and "Vinted: not logged in" in page and "willhaben: logged in" in page

@@ -252,6 +252,8 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
 templates.env.globals.update(record_all_stats=lambda: {**record_all.stats(), "on": record_all.on()})   # session page
+templates.env.globals.update(site_logins=lambda: [(s.name, {**site_accounts.state(s.id), "checked_at": site_accounts.checked_at(s.id)})
+                                                  for s in site_accounts.SITES.values() if platforms.enabled(s.id)])   # session page
 templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
@@ -2607,8 +2609,16 @@ async def site_account_check(pid: str):
 
 @app.post("/session/check")
 async def session_check(next: str = Form("/session")):
-    ok = await get_session().check_login() if get_session().started else False
-    return _session_back(next, t('Logged in') if ok else t('Not logged in'))
+    """willhaben's login, and that of the other sites with an account (switched on): each in a hidden tab."""
+    sess = get_session()
+    ok = await sess.check_login() if sess.started else False
+    parts = [f"willhaben: {t('logged in') if ok else t('not logged in')}"]
+    if sess.started:
+        for site in site_accounts.SITES.values():
+            if platforms.enabled(site.id):
+                st = await site_accounts.check(site.id)
+                parts.append(f"{site.name}: {t('logged in') if st['logged_in'] else t('unknown') if st['logged_in'] is None else t('not logged in')}")
+    return _session_back(next, " · ".join(parts))
 
 
 @app.post("/session/open")
