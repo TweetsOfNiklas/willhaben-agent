@@ -7,7 +7,7 @@
   <div class="modal-box flex h-[calc(100vh-32px)] max-h-none w-[min(1280px,calc(100vw-32px))] max-w-none flex-col overflow-hidden p-0 max-md:h-dvh max-md:w-screen max-md:rounded-none">
     <header class="flex shrink-0 items-center gap-2 border-b border-base-300 bg-base-100 px-3.5 py-2.5">
       <span class="font-semibold">{{ _("Browser window") }}</span>
-      <small class="min-w-0 truncate text-muted">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
+      <small class="min-w-0 truncate text-muted" data-remote-sub data-default="{{ _("willhaben, carrier forms – the app's own browser") }}">{{ _("willhaben, carrier forms – the app's own browser") }}</small>
       <span class="flex-1"></span>
       <button type="button" class="btn btn-ghost btn-sm btn-square" data-close aria-label="{{ _('Close') }}" title="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
     </header>
@@ -17,7 +17,11 @@
 <script>
 (() => {
   const dlg = document.getElementById('remote-overlay'), frame = dlg.querySelector('iframe');
+  const sub = dlg.querySelector('[data-remote-sub]');
+  const SITES = {{ {"vinted": _("Vinted – its own tab in the app's browser"), "kleinanzeigen": _("Kleinanzeigen – its own tab in the app's browser")}|tojson }};
   const open = (path) => {
+    const site = new URLSearchParams((path || '').split('?')[1] || '').get('site');
+    sub.textContent = SITES[site] || sub.dataset.default;
     frame.src = path || '/session?embed=1';
     if (!dlg.open) dlg.showModal();
   };
@@ -45,7 +49,9 @@
     open(a.dataset.remote && a.dataset.remote.startsWith('/session') ? a.dataset.remote : '/session?embed=1');
   });
   const q = new URLSearchParams(location.search);
-  if (q.get('remote') === '1') open('/session?embed=1' + (q.get('msg') ? '&msg=' + encodeURIComponent(q.get('msg')) : ''));
+  const rq = q.get('remote'), msgq = q.get('msg') ? '&msg=' + encodeURIComponent(q.get('msg')) : '';
+  if (rq === '1') open('/session?embed=1' + msgq);
+  else if (rq && SITES[rq]) open('/session?embed=1&site=' + rq + msgq);
   window.whRemote = {open, close};
 })();
 </script>

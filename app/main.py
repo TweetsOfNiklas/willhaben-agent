@@ -2557,12 +2557,27 @@ def _session_back(next_url: str | None, msg: str | None = None) -> RedirectRespo
 
 
 @app.get("/session", response_class=HTMLResponse)
-async def session_page(request: Request, msg: str | None = None, embed: bool = False):
-    """embed=1: bare page for the remote-view overlay (base.html opens it in a dialog on any page)."""
+async def session_page(request: Request, msg: str | None = None, embed: bool = False, site: str | None = None):
+    """embed=1: bare page for the remote-view overlay (base.html opens it in a dialog on any page). site=vinted /
+    kleinanzeigen: that site's own tab, with its login state only (no willhaben state, no label checkout)."""
     caps = sorted(get_settings().captures_dir.glob("*.json"), reverse=True)[:30]
+    site_mode = site_accounts.get(site) if site else None
+    nxt = "/session?embed=1" + (f"&site={site_mode.id}" if site_mode else "") if embed else "/session"
     return render(request, "session.html", captures=[c.name for c in caps], msg=msg, settings=get_settings(),
-                  label_form=label_fill.active(), session_next="/session?embed=1" if embed else "/session",
-                  embed=embed)
+                  label_form=None if site_mode else label_fill.active(), session_next=nxt, embed=embed,
+                  site_mode=site_mode, site_state=site_accounts.state(site_mode.id) if site_mode else None,
+                  site_checked=site_accounts.checked_at(site_mode.id) if site_mode else None)
+
+
+@app.post("/session/site-check/{pid}")
+async def session_site_check(pid: str, next: str = Form("/session")):
+    """A site's login check from its own overlay (Vinted, Kleinanzeigen)."""
+    site = site_accounts.get(pid)
+    if site is None:
+        raise HTTPException(404)
+    st = await site_accounts.check(pid)
+    word = t("logged in") if st["logged_in"] else t("unknown") if st["logged_in"] is None else t("not logged in")
+    return _session_back(next, f"{site.name}: {word}" + (f" – {st['error']}" if st.get("error") else ""))
 
 
 @app.post("/session/start")
@@ -2595,7 +2610,7 @@ async def site_account_login(pid: str):
         await site_accounts.open_login(pid)
     except SessionUnavailable as e:
         return back(f"/settings/{pid}?msg={quote(str(e), safe='')}")
-    return back(f"/settings/{pid}?remote=1&msg={quote(t('Login page opened in the browser window'), safe='')}")
+    return back(f"/settings/{pid}?remote={pid}")     # the overlay of this site's own tab, without willhaben's state
 
 
 @app.post("/settings/account/{pid}/check")

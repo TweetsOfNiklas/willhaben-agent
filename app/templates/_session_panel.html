@@ -5,7 +5,15 @@
 {% set logged = session_status.logged_in %}
 {% set remote_open = not remote_folded or (request is defined and request.query_params.get('browser') == '1') %}
 {% set next_open = (session_next or '/session') ~ ('?browser=1' if remote_folded else '') %}
-{% if embed and session_status.started %}
+{% if embed and session_status.started and site_mode %}
+{# a site's own tab (Vinted, Kleinanzeigen): its login only, nothing of willhaben's #}
+{% set sl = site_state.logged_in %}
+<div class="embed-status mb-2 flex flex-wrap items-center gap-1.5" data-site-mode="{{ site_mode.id }}">{{ ui.pill(site_mode.name ~ ': ' ~ (_("logged in") if sl else _("unknown") if sl is none else _("not logged in")), 'ok' if sl else '' if sl is none else 'bad') }}{% if site_checked %}<small class="text-xs text-muted">{{ _("checked {t}", t=site_checked|ago) }}</small>{% endif %}{% if site_state.error %}<small class="text-xs text-error">{{ site_state.error }}</small>{% endif %}
+  <span class="flex-1"></span>
+  <form method="post" action="/session/login"><input type="hidden" name="site" value="{{ site_mode.id }}"><input type="hidden" name="next" value="{{ session_next }}"><button class="btn btn-xs">{{ _("Open login page") }}</button></form>
+  <form method="post" action="/session/site-check/{{ site_mode.id }}"><input type="hidden" name="next" value="{{ session_next }}"><button class="btn btn-xs">{{ _("Check login") }}</button></form>
+</div>
+{% elif embed and session_status.started %}
 <div class="embed-status mb-2 flex flex-wrap items-center gap-1.5">{{ ui.pill(_("logged in") if logged else _("unknown") if logged is none else _("not logged in"), 'ok' if logged else '' if logged is none else 'bad') }}{% if logged and session_status.user %}<small class="text-xs text-muted">{{ _("as") }} {{ session_status.user.nickname or session_status.user.email }}</small>{% endif %}
   <span class="flex-1"></span>
   <form method="post" action="/session/login"><input type="hidden" name="next" value="{{ next_open }}"><button class="btn btn-xs">{{ _("Open login page") }}</button></form>
