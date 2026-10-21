@@ -35,7 +35,8 @@ from app.platforms import fees
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
     PURCHASE_OPENER_SCHEMA, PURCHASE_OPENER_SYSTEM, SIM_JUDGE_SCHEMA, SIM_JUDGE_SYSTEM, SIM_PARTNER_SCHEMA,
-    SIM_REVIEW_SCHEMA, SIM_REVIEW_SYSTEM, SIM_SUGGEST_SYSTEM, purchase_opener_prompt, sim_judge_prompt, sim_partner_prompt,
+    SIM_REVIEW_SCHEMA, SIM_REVIEW_SYSTEM, SIM_ROUND_REVIEW_SCHEMA, SIM_ROUND_REVIEW_SYSTEM, SIM_SUGGEST_SYSTEM,
+    sim_round_review_prompt, purchase_opener_prompt, sim_judge_prompt, sim_partner_prompt,
     sim_review_prompt, sim_suggest_prompt, sim_suggest_schema,
 )
 from app.services import jobs, min_price, system_prompts
@@ -278,7 +279,7 @@ def delete(sim_id: int) -> None:
 
 
 def clear(sim_id: int) -> None:
-    _save(sim_id, turns=[], error=None, last_run=None, proposal_run=None)
+    _save(sim_id, turns=[], error=None, last_run=None, proposal_run=None, iterations=None)
 
 
 def set_scenario(sim_id: int, on: bool) -> None:
@@ -463,7 +464,7 @@ async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[
     out = await get_backend("purchase", model=sim.model).complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
                                                                 schema=PURCHASE_OPENER_SCHEMA)
     text = str((out.data or {}).get("message") or "").strip()
-    problems = purchase.text_problems(text, max_price=p.max_price, address_ok=False) if text else [t("empty answer")]
+    problems = purchase.text_problems(text, max_price=p.max_price, address_ok=False, item_max=purchase.item_ceiling(p)) if text else [t("empty answer")]
     return {"who": "me", "text": text, "at": utcnow().isoformat(), "auto": not problems, "opener": True,
             "reason": t("Opening message of the purchase"), "blockers": problems, "intent": None,
             "price": (out.data or {}).get("opening_offer"), "notes": [], "purchase": None, "meetup": None,
@@ -518,7 +519,7 @@ def _turns(sim_id: int) -> list[dict[str, Any]]:
 
 async def _append(sim_id: int, turn: dict[str, Any]) -> list[dict[str, Any]]:
     turns = _turns(sim_id)[-(MAX_TURNS - 1):] + [turn]
-    _save(sim_id, turns=turns)
+    _save(sim_id, turns=turns, iterations=None)        # another chat: its rounds are about the old one
     return turns
 
 
@@ -593,20 +594,27 @@ def partner_once(sim_id: int) -> bool:
 
 
 # ------------------------------------------------------------------ scenarios
-async def replay(sim: SimChat, overrides: dict[str, str] | None = None) -> list[dict[str, Any]]:
+async def replay(sim: SimChat, overrides: dict[str, str] | None = None, on_turn=None) -> list[dict[str, Any]]:
     """The partner's messages of the test chat again, each with a fresh answer of mine (a purchase's opening
-    message stays as it was: it is part of the script the seller answered; a script without one gets one first)."""
+    message stays as it was: it is part of the script the seller answered; a script without one gets one first).
+    `on_turn(turns)`: called after every message, so a round can be shown as it is played."""
     script = sim.turns or []
     out: list[dict[str, Any]] = []
+
+    async def add(turn: dict[str, Any]) -> None:
+        out.append(turn)
+        if on_turn is not None:
+            on_turn(list(out))
+
     if sim.role == "buyer" and script and script[0].get("opener"):
-        out.append(dict(script[0]))
+        await add(dict(script[0]))
     elif sim.role == "buyer":
-        out.append(await opener(sim, overrides))
+        await add(await opener(sim, overrides))
     for x in script:
         if x.get("who") != "partner":
             continue
-        out.append({"who": "partner", "text": x["text"], "at": utcnow().isoformat()})
-        out.append(await answer(sim, out, overrides))
+        await add({"who": "partner", "text": x["text"], "at": utcnow().isoformat()})
+        await add(await answer(sim, out, overrides))
     return out
 
 
@@ -1077,6 +1085,154 @@ def discard_proposal(pid: int) -> None:
     for s in all_chats():
         if s.proposal_run and s.proposal_run.get("variant") == f"proposal:{pid}":
             _save(s.id, proposal_run=None)
+
+
+# ------------------------------------------------------------------ rounds: refine the system prompt on one chat
+# Round 1 is the test chat itself (current rules; kept as {"n": 1, "base": True, "feedback"}); the owner rates the
+# answers (👍/👎 + note) and writes feedback; Claude revises the system prompt of the automatic answers from that round
+# alone, and the next round replays the chat's other side with the revision (an open proposal). Each round builds on
+# the previous one's text; "Apply" takes it over. A new message in the chat starts the rounds again.
+ROLE_KIND = {"seller": "auto_reply", "buyer": "purchase"}
+MAX_ROUNDS_KEPT = 12
+
+
+def _round_text(sim: SimChat, r: dict[str, Any] | None) -> str:
+    """The system prompt a round ran with: its proposal's text, else the current one."""
+    p = proposal(r.get("proposal_id")) if r else None
+    return p.new_text if p is not None else system_prompts.get(ROLE_KIND[sim.role])
+
+
+def _update_round(sim_id: int, n: int, **changes: Any) -> None:
+    rounds = [dict(r) for r in (get(sim_id).iterations or [])]
+    for r in rounds:
+        if r.get("n") == n:
+            r.update(changes)
+    _save(sim_id, iterations=rounds)
+
+
+async def _play_round(sim_id: int, proposal_id: int | None, summary: str = "") -> dict[str, Any]:
+    """The next round, saved message by message ("playing" until its expectations are checked): the page shows it
+    live, like the chat itself."""
+    sim = get(sim_id)
+    p = proposal(proposal_id)
+    rounds = [dict(r) for r in (sim.iterations or [])]
+    n = (rounds[-1]["n"] + 1) if rounds else 1
+    r = {"n": n, "at": utcnow().isoformat(), "proposal_id": proposal_id, "summary": summary, "turns": [],
+         "results": [], "passed": True, "feedback": "", "playing": True}
+    _save(sim_id, iterations=[*rounds, r][-MAX_ROUNDS_KEPT:])
+    try:
+        turns = await replay(sim, overrides_of(p) if p else None, on_turn=lambda ts: _update_round(sim_id, n, turns=ts))
+        results = await check(sim, turns)
+    finally:
+        _update_round(sim_id, n, playing=None)
+    _update_round(sim_id, n, turns=turns, results=results, passed=all(x["passed"] for x in results))
+    return {**r, "turns": turns, "results": results}
+
+
+def rate_round(sim_id: int, n: int, index: int, rating: str | None, note: str | None = None) -> None:
+    sim = get(sim_id)
+    rounds = [dict(r) for r in (sim.iterations or [])] if sim else []
+    r = next((x for x in rounds if x.get("n") == n), None)
+    if r is None or not (0 <= index < len(r.get("turns") or [])) or r["turns"][index].get("who") != "me":
+        return
+    r["turns"] = [dict(x) for x in r["turns"]]
+    r["turns"][index]["rating"] = rating if rating in ("up", "down") else None
+    if note is not None:
+        r["turns"][index]["note"] = note.strip()[:500] or None
+    _save(sim_id, iterations=rounds)
+
+
+def next_round(sim_id: int, feedback: str) -> bool:
+    """Claude revises the last round's system prompt from its ratings, failed expectations and the feedback; the
+    next round replays with the revision."""
+    sim = get(sim_id)
+    if sim is None or sim.role not in ROLE_KIND or not any(x.get("who") == "partner" for x in sim.turns or []):
+        return False
+    rounds = [dict(r) for r in (sim.iterations or [])]
+    if not rounds:                   # round 1 is the chat itself, with the current rules
+        rounds = [{"n": 1, "base": True, "proposal_id": None, "feedback": ""}]
+    feedback = (feedback or "").strip()[:2000]
+    last = rounds[-1]
+    if last.get("base"):
+        last["turns"] = sim.turns or []
+    rated = []
+    for i, x in enumerate(last.get("turns") or []):
+        if x.get("who") == "me" and (x.get("rating") or x.get("note")):
+            before = next((y["text"] for y in reversed(last["turns"][:i]) if y.get("who") == "partner"), "")
+            rated.append({"context": before, "answer": x["text"], "rating": x.get("rating") or "down",
+                          "note": x.get("note")})
+    failed = [{"scenario": sim.title, "expectation": r["label"], "detail": r["detail"]}
+              for r in last.get("results") or [] if not r.get("passed")]
+    if not (rated or failed or feedback):
+        return False
+    last["feedback"] = feedback
+    _save(sim_id, iterations=[{k: v for k, v in r.items() if not (r.get("base") and k == "turns")} for r in rounds])
+    kind = ROLE_KIND[sim.role]
+
+    async def run(job: jobs.Job) -> str:
+        job.progress(0, t("Claude revises the system prompt…"), f"sim:{sim_id}")
+        text = _round_text(sim, last)
+        out = await get_backend("chat").complete(
+            system=SIM_REVIEW_SYSTEM, prompt=sim_review_prompt(t(system_prompts.KINDS[kind][0]), text, rated, failed,
+                                                               feedback or None),
+            schema=SIM_REVIEW_SCHEMA)
+        data = out.data or {}
+        new = str(data.get("new_text") or "").strip()
+        if not new or new == text.strip():
+            raise LLMError(t("Claude found nothing to improve"))
+        summary = str(data.get("summary") or "").strip()
+        _open_proposal(sim.role, f"{kind}_system", system_prompts.get(kind), new, summary)
+        pid = open_proposals_for(sim.role, f"{kind}_system")
+        job.progress(1, t("Round {n}: answers with the revision…", n=last["n"] + 1), f"sim:{sim_id}")
+        await _play_round(sim_id, pid, summary)
+        return t("Round {n} played", n=last["n"] + 1)
+
+    return _start(sim_id, "round", t("Simulator: round"), run)
+
+
+REVIEW_MODEL = "opus"          # the round review: the most capable line (the answers themselves use the chat model)
+
+
+def review_round(sim_id: int, model: str | None = None) -> bool:
+    """A stronger model reviews the newest round (answers, ratings, expectations) and writes feedback for the next
+    one; it lands in the feedback field to edit before "Revise and play"."""
+    from app.llm import models as llm_models
+
+    sim = get(sim_id)
+    if sim is None or sim.role not in ROLE_KIND or not any(x.get("who") == "partner" for x in sim.turns or []):
+        return False
+    model = llm_models.resolve_alias(model or REVIEW_MODEL)
+    if model not in llm_models.ids():
+        model = llm_models.resolve_alias(REVIEW_MODEL)
+    kind = ROLE_KIND[sim.role]
+
+    async def run(job: jobs.Job) -> str:
+        job.progress(0, t("Claude reviews the round…"), f"sim:{sim_id}")
+        cur = get(sim_id)
+        rounds = [dict(r) for r in (cur.iterations or [])] or [{"n": 1, "base": True, "proposal_id": None,
+                                                                "feedback": ""}]
+        last = rounds[-1]
+        turns = (cur.turns or []) if last.get("base") else (last.get("turns") or [])
+        out = await get_backend("chat", model=model).complete(
+            system=SIM_ROUND_REVIEW_SYSTEM, schema=SIM_ROUND_REVIEW_SCHEMA,
+            prompt=sim_round_review_prompt(t(system_prompts.KINDS[kind][0]), _round_text(cur, last), turns,
+                                           last.get("results") or []))
+        review = str((out.data or {}).get("review") or "").strip()[:4000]
+        if not review:
+            raise LLMError(t("Claude wrote no review"))
+        last["review"], last["review_model"] = review, model
+        _save(sim_id, iterations=rounds)
+        return t("Review written")
+
+    return _start(sim_id, "review", t("Simulator: review of the round"), run)
+
+
+def open_proposals_for(role: str, target: str) -> int | None:
+    with session() as db:
+        row = db.exec(select(SimProposal).where(SimProposal.status == "open", SimProposal.role == role,
+                                                SimProposal.target == target)
+                      .order_by(col(SimProposal.id).desc())).first()
+        return row.id if row else None
 
 
 def recover() -> None:

@@ -4,12 +4,12 @@
 {% set pl = paylivery_card(conv) %}
 {% if pl %}
 {% set swap = 'hx-target="#paylivery" hx-select="#paylivery" hx-swap="outerHTML" hx-select-oob="#flash"' %}
-<section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="paylivery">
+<section class="flex min-w-0 flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-3.5 py-3" id="paylivery"{% if pl.busy %} hx-get="/chats/{{ conv.id }}" hx-trigger="every 2s" hx-select="#paylivery" hx-target="this" hx-swap="outerHTML" aria-busy="true"{% endif %}>
   <div class="flex flex-wrap items-center justify-between gap-2">
     <h3 class="text-xs font-semibold tracking-wide text-muted uppercase">PayLivery <span class="font-normal tracking-normal normal-case">· {{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span></h3>
     {{ ui.pill(pl.stage_label, 'ok' if pl.stage in ('paid_out', 'received') else 'warn' if pl.actions else '') }}
   </div>
-  {% if pl.busy %}{{ ui.pill(_("working in the browser…") ~ ' ' ~ pl.busy_label, 'brand', dot=false) }}{% endif %}
+  {% if pl.busy %}<div class="flex items-center gap-2 text-[13px] text-primary" role="status"><span class="loading loading-spinner loading-sm"></span>{{ _("working in the browser…") }} {{ pl.busy_label }}</div>{% endif %}
   <p class="break-words text-[13px]">{{ pl.next }}</p>
   {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<div class="break-words text-[12.5px] text-muted">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</div>{% endif %}
   <div class="flex flex-wrap items-center gap-1.5">

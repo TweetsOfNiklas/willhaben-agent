@@ -25,7 +25,7 @@ from app.llm.prompts import (
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, selling, stock, style, system_prompts
+from app.services import my_ads, paylivery_advice, selling, stock, style, system_prompts
 from app.services.notify import notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -559,6 +559,10 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         result = await get_backend(req["backend"]).complete(system=req["system"], prompt=req["prompt"],
                                                             schema=req["schema"])
     draft = draft_from(result, conversation_id, auto=auto, buyer=buy is not None)
+    pl_args = paylivery_advice.for_draft(conv, ad)
+    draft.paylivery = paylivery_advice.clean((result.data or {}).get("paylivery_action"), *pl_args,
+                                             before=paylivery_advice.previous_amount(
+                                                 conversation_id, (pl_args[0] or {}).get("offer")))
     with session() as db:
         db.add(draft)
         db.commit()
@@ -610,6 +614,11 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         others = _others_said(conv.id, conv.ad_id) if conv.role == "seller" else []
     if line := platform_rule(platform):
         rules = f"{rules}\n\n{line}"
+    pl, pl_asking, pl_floor = paylivery_advice.for_draft(conv, ad)
+    if pl:                                        # an open PayLivery offer: the draft suggests the step on willhaben too
+        before = paylivery_advice.previous_amount(conv.id, pl["offer"]) if conv.id else None
+        rules = f"{rules}\n\n{paylivery_advice.prompt_block(pl, pl_asking, pl_floor, before)}"
+        schema = paylivery_advice.schema(schema)
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
                           rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now,
@@ -651,12 +660,34 @@ async def mark_read(conversation_id: str) -> int:
     return n
 
 
+class AlreadySent(ValueError):
+    """The draft went out already or is going out right now (a second tap on a push, Telegram and Home Assistant
+    together, a double click)."""
+
+
+_in_flight: set[int] = set()   # drafts between the claim and mark_sent
+
+
 async def send_draft(draft_id: int, text: str) -> Draft:
-    """Send an approved draft. Raises EndpointUnknown until the send endpoint has been captured."""
+    """Send an approved draft, once: the claim (check + mark in flight) runs without an await in between, so two
+    callers in the event loop cannot both pass it. Raises EndpointUnknown until the send endpoint has been captured."""
     with session() as db:
         draft = db.get(Draft, draft_id)
     if draft is None:
         raise ValueError(t("Draft not found"))
+    if draft.status in ("sent", "discarded"):
+        raise AlreadySent(t("This answer was already sent") if draft.status == "sent" else t("This draft was discarded"))
+    if draft_id in _in_flight:
+        raise AlreadySent(t("This answer is being sent right now"))
+    _in_flight.add(draft_id)
+    try:
+        return await _send_claimed(draft, text)
+    finally:
+        _in_flight.discard(draft_id)
+
+
+async def _send_claimed(draft: Draft, text: str) -> Draft:
+    draft_id = draft.id
     text = text.strip()
     await mark_read(draft.conversation_id)   # nobody answers without having read the message
     try:
@@ -864,6 +895,8 @@ def answer_blockers(conv: Conversation | None, d: Draft, msgs: list[Message], *,
         why.append(t("Answer contains placeholders"))
     if not d.text.strip():
         why.append(t("empty answer"))
+    if d.paylivery:                       # a step on willhaben goes with it: the owner sends both
+        why.append(t("A PayLivery step goes with this answer"))
     if buyer:                             # purchase guards: maximum price, bank details, address, needs_user
         if buy is not None:
             why += purchase.blockers(buy, d, msgs)

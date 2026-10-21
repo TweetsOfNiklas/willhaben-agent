@@ -32,9 +32,11 @@ def test_meter_lists_the_other_sites():
     assert "12 / 90 Kleinanzeigen requests in the last hour" in page
     assert 'data-site-usage="shpock"' in page and 'data-site-usage="vinted"' not in page
     assert 'data-site-usage="willhaben"' not in page                    # willhaben keeps its own row
-    assert "Other sites" in page and 'href="/stats/requests?platform=kleinanzeigen"' in page
-    assert 'href="/settings/kleinanzeigen">Budgets per site' in page and 'href="/stats/requests?platform=all"' in page
-    assert "· 1 blocked" in page
+    # the popover: the same block for every site, chips to switch, each with its own budget form
+    assert "site = 'kleinanzeigen'" in page and "site = 'shpock'" in page and "site = 'vinted'" not in page
+    assert 'href="/stats/requests?platform=kleinanzeigen"' in page and 'href="/stats/requests?platform=all"' in page
+    assert 'action="/settings/platform/kleinanzeigen/budget"' in page and "Kleinanzeigen requests" in page
+    assert "1 blocked" in page
     assert "· Kleinanzeigen 12 / 90" in page                            # collapsed rail: the ring's tooltip
 
 
@@ -43,7 +45,7 @@ def test_no_other_site_no_extra_rows():
 
     with TestClient(app) as c:
         page = c.get("/myads").text
-    assert "data-site-usage" not in page and "Other sites" not in page
+    assert "data-site-usage" not in page and "site = '" not in page
 
 
 def test_the_phone_menu_shows_the_meters():
@@ -81,7 +83,10 @@ def test_an_old_default_the_form_saved_follows_willhaben_after_the_update():
     assert get_setting("platform_vinted_per_hour") == "40"
 
 
-def test_the_budget_field_is_empty_while_the_site_follows_willhaben():
+def test_every_site_follows_all_platforms_until_it_has_its_own():
+    """Settings → All platforms holds the default budget and gap; a site (willhaben too) uses them while its own
+    field is empty."""
+    from app.db import get_setting
     from app.main import app
     from app.platforms import kleinanzeigen as ka
     from app.willhaben.public import willhaben_limiter
@@ -90,12 +95,33 @@ def test_the_budget_field_is_empty_while_the_site_follows_willhaben():
     try:
         with TestClient(app) as c:
             page = c.get("/settings/kleinanzeigen").text
-            assert 'name="budget" value="" placeholder="as willhaben: 240"' in page
-            c.post("/settings/willhaben", data={"requests_per_hour": "300"}, follow_redirects=False)
-            assert ka.kleinanzeigen_limiter().per_hour == 300                  # follows the new willhaben budget
+            assert 'name="budget" value="" placeholder="as all platforms: 240"' in page
+            c.post("/settings/platforms", data={"requests_per_hour": "300", "gap": ""}, follow_redirects=False)
+            assert ka.kleinanzeigen_limiter().per_hour == 300 and willhaben_limiter().per_hour == 300   # both follow
             c.post("/settings/platform/kleinanzeigen", data={"enabled": "on", "budget": "90"}, follow_redirects=False)
-            c.post("/settings/willhaben", data={"requests_per_hour": "200"}, follow_redirects=False)
-            assert ka.kleinanzeigen_limiter().per_hour == 90                   # its own budget stays
-            assert 'name="budget" value="90" placeholder="as willhaben: 200"' in c.get("/settings/kleinanzeigen").text
+            c.post("/settings/willhaben", data={"requests_per_hour": "150"}, follow_redirects=False)  # popover: its own
+            assert willhaben_limiter().per_hour == 150 and get_setting("platform_willhaben_per_hour") == "150"
+            c.post("/settings/platforms", data={"requests_per_hour": "200", "gap": "5"}, follow_redirects=False)
+            assert ka.kleinanzeigen_limiter().per_hour == 90 and willhaben_limiter().per_hour == 150   # own ones stay
+            assert 'name="budget" value="90" placeholder="as all platforms: 200"' in c.get("/settings/kleinanzeigen").text
+            assert willhaben_limiter().min_gap_s == 5.0                       # no own gap: the default of all
+            c.post("/settings/willhaben", data={"budget": "", "gap": "2"}, follow_redirects=False)
+            assert willhaben_limiter().per_hour == 200 and willhaben_limiter().min_gap_s == 2.0
     finally:
         willhaben_limiter().per_hour, ka.kleinanzeigen_limiter().per_hour = before
+        willhaben_limiter().min_gap_s = ka.kleinanzeigen_limiter().min_gap_s = 0
+
+
+def test_the_popover_saves_one_sites_budget_only():
+    set_setting("platform_kleinanzeigen_enabled", "1")
+    set_setting("platform_kleinanzeigen_min_gap_s", "7")
+    from app.db import get_setting
+    from app.main import app
+
+    with TestClient(app) as c:
+        r = c.post("/settings/platform/kleinanzeigen/budget", data={"budget": "120", "next": "/hits"}, follow_redirects=False)
+        assert r.headers["location"] == "/hits"
+        assert get_setting("platform_kleinanzeigen_per_hour") == "120"
+        assert get_setting("platform_kleinanzeigen_enabled") == "1" and get_setting("platform_kleinanzeigen_min_gap_s") == "7"
+        c.post("/settings/platform/kleinanzeigen/budget", data={"budget": ""})
+        assert get_setting("platform_kleinanzeigen_per_hour") == "-"                  # empty: as willhaben

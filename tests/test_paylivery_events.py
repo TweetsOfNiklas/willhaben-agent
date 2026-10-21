@@ -522,3 +522,21 @@ def test_chat_page_after_startup_shows_released_without_receipt():
     assert "Zum Versand freigegeben" in card and "Warten, bis der Verkäufer das Paket verschickt" in card
     assert "Erhalt bestätigen" not in card and "Zugestellt" not in card
     assert _state()["stage"] == "released"
+
+
+
+@pytest.mark.parametrize("text,role,stage", [
+    ("Du hast eine Anfrage über € 30 erhalten. Wenn der Preis für dich passt, nimm die Anfrage gleich an!", "seller",
+     "offer_received"),
+    ("Du hast ein Gegenangebot über € 45 gesendet.", "seller", "counter_sent"),
+    ("Du hast einen Preisvorschlag über € 45 gesendet.", "seller", "counter_sent"),
+    ("Gegenangebot erhalten: € 45", "buyer", "counter_received"),
+    ("Max hat dir ein Gegenangebot über € 45 gemacht.", "buyer", "counter_received"),
+    ("Max hat dir einen Preisvorschlag über € 45 gemacht.", "buyer", "counter_received"),
+    ("Du hast einen Preisvorschlag über € 30 gesendet.", "buyer", "offer_sent"),
+    ("Dein Gegenangebot wurde angenommen.", "seller", "offer_accepted"),
+    ("Das Gegenangebot wurde abgelehnt.", "buyer", "offer_declined"),
+])
+def test_counter_offers(text, role, stage):
+    """The seller may answer a buyer's offer with a counter offer; the buyer accepts or declines it."""
+    assert paylivery.detect_stage(text, role) == stage

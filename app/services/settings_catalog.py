@@ -41,7 +41,7 @@ class Group:
 
 
 # the sections with a page of their own, in nav order (main.SETTINGS_SECTIONS); the other sites are added at runtime
-SECTION_IDS = ("willhaben", "quiet", "prices", "geizhals", "purchase", "paylivery", "selling", "chats", "myads",
+SECTION_IDS = ("platforms", "willhaben", "quiet", "prices", "geizhals", "purchase", "paylivery", "selling", "chats", "myads",
                "calendar", "shipping", "printers", "claude", "rules", "ha", "telegram", "browser", "vpn", "backup",
                "timeline", "web", "language")
 OVERVIEW = "overview"    # /settings: the overview, not a section of SECTION_IDS
@@ -221,7 +221,10 @@ def build(sites: Iterable[Any], t: Callable[..., str] = _t) -> list[Group]:
     language = Section("language", t("Language & appearance"), t("Language of the dashboard and notifications; light or dark theme."),
                        (Item("s-lang", t("Interface"), t("language, German, English, Deutsch")),
                         Item("s-theme", t("Theme"), t("dark mode, light, system, appearance"))))
-    return [Group(t("Platforms"), (willhaben, *others)),
+    allp = Section("platforms", t("All platforms"), t("The request budget and the gap between requests every platform uses unless it has its own."),
+                   (Item("s-all-budget", t("Request budget per hour (0 = none)"), t("default, rate limit, requests, every site")),
+                    Item("s-all-gap", t("Minimum gap between requests (s)"), t("default, pace, pacing, throttle, every site"))))
+    return [Group(t("Platforms"), (allp, willhaben, *others)),
             Group(t("Search & prices"), (quiet, prices, geizhals)),
             Group(t("Buying"), (purchase, paylivery)),
             Group(t("Selling"), (selling, chats, myads, calendar)),

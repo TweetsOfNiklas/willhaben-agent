@@ -28,10 +28,10 @@ ALL = "all"                                # pseudo platform: every site togethe
 
 # display types of the logged kinds: what a site's chart stacks by (order = stack order, bottom first); "messages",
 # not "chat", so a type never shares its name with the channel "chat" or the kind "chat"
-TYPES = ("search", "detail", "messages", "account", "other")
-TYPE_OF = {"search": "search", "filters": "search", "detail": "detail", "chat": "messages", "send": "messages",
-           "categories": "account", "myads": "account", "publish": "account", "upload": "account", "login": "account",
-           "navigation": "account", "other": "other"}
+TYPES = ("search", "detail", "photos", "messages", "account", "other")
+TYPE_OF = {"search": "search", "filters": "search", "detail": "detail", "image": "photos", "chat": "messages",
+           "send": "messages", "categories": "account", "myads": "account", "publish": "account", "upload": "account",
+           "login": "account", "navigation": "account", "other": "other"}
 
 
 def channel_label(ch: str) -> str:
@@ -42,7 +42,8 @@ def kind_label(k: str) -> str:
     return {
         "search": t("search"), "detail": t("ad detail"), "filters": t("search filters"), "categories": t("categories"),
         "myads": t("my ads"), "chat": t("chat"), "send": t("send message"), "publish": t("publish ad"),
-        "upload": t("photo upload"), "login": t("login / profile"), "navigation": t("page navigation"), "other": t("other"),
+        "upload": t("photo upload"), "login": t("login / profile"), "navigation": t("page navigation"),
+        "image": t("photos of ads"), "other": t("other"),
     }.get(k, k)
 
 
@@ -51,7 +52,7 @@ SPARK_W, SPARK_H = 120, 24
 
 
 def type_label(k: str) -> str:
-    return {"search": t("search"), "detail": t("ad detail"), "messages": t("chats & messages"),
+    return {"search": t("search"), "detail": t("ad detail"), "photos": t("photos of ads"), "messages": t("chats & messages"),
             "account": t("my ads & account"), "other": t("other")}.get(k, k)
 
 
@@ -426,22 +427,46 @@ def _spark(row: dict[str, Any], data: dict[str, Any]) -> dict[str, Any] | None:
 CHANNEL_COLORS = {"anonymous": "#2a78d6", "account": "#eb6834", "chat": "#1baf7a"}
 
 
-def popup(now: float | None = None) -> dict[str, Any]:
-    """The willhaben usage popover in the sidebar: the last hour per channel and the last 6 hours in 15-min bars."""
-    hour = series("1h", now)
-    six = series("6h", now)                           # 5-min buckets, merged into 15-min bars
+TYPE_COLORS = {k: f"var(--wh-type-{k})" for k in TYPES}     # the statistics page's colours (app/styles/app.css)
+
+
+def popup(now: float | None = None, platform: str = "willhaben", usage: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One site's block of the usage popover in the sidebar, the same for every site: the last hour against its
+    budget, split by what its chart stacks by (willhaben: channel, the others: type), the last 6 hours in 15-min bars.
+    `usage`: its site_usage() row (the last hour, budget, pause), for the other sites."""
+    hour = series("1h", now, platform)
+    six = series("6h", now, platform)                 # 5-min buckets, merged into 15-min bars
+    stack = stacks(platform)[0]
+    keys = list(six["channels"]) if stack == "channel" else list(TYPES)
+    colors = CHANNEL_COLORS if stack == "channel" else TYPE_COLORS
+
+    def value(b: dict[str, Any], k: str) -> int:
+        return b.get(k, 0) if stack == "channel" else b["by_type"].get(k, 0)
+
     bars = []
     for i in range(0, len(six["buckets"]), 3):
         group = six["buckets"][i:i + 3]
-        bar = {c: sum(b.get(c, 0) for b in group) for c in six["channels"]}
+        bar = {k: sum(value(b, k) for b in group) for k in keys}
         bar["total"] = sum(bar.values())
         bar["title"] = f"{group[0]['label']}–{group[-1]['end_label']}: " + ", ".join(
-            f"{channel_label(c)} {bar[c]}" for c in six["channels"] if bar[c]) if bar["total"] else f"{group[0]['label']}: 0"
+            f"{stack_label(stack, k)} {bar[k]}" for k in keys if bar[k]) if bar["total"] else f"{group[0]['label']}: 0"
         bars.append(bar)
     top = max([b["total"] for b in bars] + [1])
     for b in bars:
         b["h"] = round(b["total"] * 100 / top)
-        b["parts"] = [(c, round(b[c] * 100 / b["total"]) if b["total"] else 0) for c in six["channels"]]
-    return {"channels": [{"key": c, "label": channel_label(c), "n": hour["by_channel"].get(c, 0),
-                          "color": CHANNEL_COLORS.get(c, "var(--muted)")} for c in hour["channels"]],
-            "total": hour["total"], "bars": bars}
+        b["parts"] = [(k, round(b[k] * 100 / b["total"]) if b["total"] else 0) for k in keys]
+    totals = hour["by_channel"] if stack == "channel" else hour["by_type"]
+    out = {"id": platform, "name": site_label(platform),
+           "channels": [{"key": k, "label": stack_label(stack, k), "n": totals.get(k, 0),
+                         "color": colors.get(k, "var(--muted)")} for k in keys],
+           "colors": {k: colors.get(k, "var(--muted)") for k in keys}, "total": hour["total"], "bars": bars}
+    if usage is not None:
+        out.update(used=usage["n"], budget=usage["budget"], pct=usage["pct"], tone=usage["tone"],
+                   blocked=usage["blocked"], cooling_min=-(-int(usage["cooling_down_s"]) // 60))
+    return out
+
+
+def popups(now: float | None = None) -> list[dict[str, Any]]:
+    """The other sites' blocks of the usage popover, each like willhaben's (popup): the switched-on ones and any
+    used within the hour (as the sidebar meter lists them)."""
+    return [popup(now, u["id"], u) for u in site_usage(now) if u["id"] != "willhaben" and (u["enabled"] or u["n"])]

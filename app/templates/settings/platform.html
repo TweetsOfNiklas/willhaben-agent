@@ -29,8 +29,8 @@
   </div>
   {% if p.about() %}<p class="text-[12.5px] text-muted">{{ p.about() }}</p>{% endif %}
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-    <label id="s-gap" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minimum gap between requests (s)") }}</span><input name="gap" value="{{ site.min_gap_s }}" inputmode="decimal" class="input w-full min-w-0 bg-base-200"></label>
-    <label id="s-budget" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none, empty = as willhaben)") }}</span><input name="budget" value="{{ site.per_hour if site.per_hour is not none else '' }}" placeholder="{{ _('as willhaben: {n}', n=site.wh_per_hour) }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
+    <label id="s-gap" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minimum gap between requests (s)") }}</span><input name="gap" value="{{ site.own_gap }}" placeholder="{{ _('as all platforms: {n}', n='%g'|format(site.default_gap)) }}" inputmode="decimal" class="input w-full min-w-0 bg-base-200"></label>
+    <label id="s-budget" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none, empty = as all platforms)") }}</span><input name="budget" value="{{ site.per_hour if site.per_hour is not none else '' }}" placeholder="{{ _('as all platforms: {n}', n=site.wh_per_hour) }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
   </div>
   {% if p.id == 'kleinanzeigen' %}
   <label id="s-auth" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("App credentials (user:password) – only when the bundled ones stop working") }}</span><input name="auth" value="{{ site.auth or '' }}" placeholder="{{ _('bundled default in use') if site.auth_default else '' }}" autocomplete="off" class="input w-full min-w-0 bg-base-200"></label>

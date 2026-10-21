@@ -266,7 +266,7 @@ async def test_begin_retries_a_refused_opener_once(fx):
             return LLMResult(data=next(openers), model="fake")
         return await orig(**kw)
     fx.backend.complete = quoting
-    pid = await open_order(fx, max_price=280)
+    pid = await open_order(fx, max_price=295)          # 270 € item + shipping + buyer protection fit
     assert row(pid).status == "contacting"
     assert fx.account.created == [("555", OPENER["message"])]
     assert len(prompts) == 2
@@ -349,7 +349,9 @@ def _p(**kw):
 
 async def test_blockers_amount_above_maximum(fx):
     assert any("above your maximum" in w for w in purchase.blockers(_p(), _draft("Ich biete 260 €."), []))
-    assert purchase.blockers(_p(), _draft("Ich biete 240 €."), []) == []
+    assert any("above your maximum" in w for w in purchase.blockers(_p(), _draft("Ich biete 240 €."), []))  # + fee
+    assert purchase.blockers(_p(), _draft("Ich biete 240 € inkl. Versand und Käuferschutz."), []) == []
+    assert purchase.blockers(_p(), _draft("Ich biete 230 €."), []) == []
 
 
 async def test_blockers_suggested_price_above_maximum(fx):

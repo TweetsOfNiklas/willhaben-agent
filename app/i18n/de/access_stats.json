@@ -65,5 +65,8 @@
  "{start}–{end}: {n} requests ({parts})": "{start}–{end}: {n} Zugriffe ({parts})",
  "{start}–{end}: {n} {platform} requests ({parts})": "{start}–{end}: {n} {platform}-Zugriffe ({parts})",
  "{n} blocked ({parts})": "{n} blockiert ({parts})",
- "{start}–{end}: {n} {platform} requests": "{start}–{end}: {n} {platform}-Zugriffe"
+ "{start}–{end}: {n} {platform} requests": "{start}–{end}: {n} {platform}-Zugriffe",
+ "{site} requests": "{site}-Anfragen",
+ "Its own budget; empty follows willhaben's. Requests to this site wait for the next hour when it is used up.": "Eigenes Budget; leer folgt dem von willhaben. Ist es aufgebraucht, warten die Anfragen an diese Seite auf die nächste Stunde.",
+ "photos of ads": "Fotos von Anzeigen"
 }

@@ -177,7 +177,7 @@ async def test_stage_never_goes_back_after_payment():
 
 
 async def test_offer_may_restart_before_payment():
-    _chat(state={"role": "buyer", "stage": "offer_declined", "history": []})
+    _chat(role="buyer", state={"role": "buyer", "stage": "offer_declined", "history": []})
     with session() as db:
         conv = db.get(Conversation, "c1")
     paylivery.apply_notice(conv, _notice("o2", "Preisvorschlag gesendet: € 90", cid="c1"))
@@ -255,9 +255,10 @@ def test_card_hidden_without_state_and_without_paylivery():
     assert _card("buyer", None, ad_ctx={}) is None
 
 
-def test_card_seller_offer_received_has_accept_and_decline():
+def test_card_seller_offer_received_has_accept_counter_and_decline():
     c = _card("seller", "offer_received")
-    assert [a["name"] for a in c["actions"]] == ["accept", "decline"]
+    assert [a["name"] for a in c["actions"]] == ["accept", "counter", "decline"]
+    assert [a["input"] for a in c["actions"]] == [False, True, False]          # the counter offer takes an amount
     assert c["stage_label"] == "Offer received" and c["offer"] == 120.0          # the test locale is English
 
 
@@ -432,7 +433,11 @@ def browser(monkeypatch):
         return None
 
     ns = SimpleNamespace(page=SimpleNamespace(url=CHAT), elements=[], clicked=[], filled=[], bank=None,
-                         replies=[], sess=None, backend=None)
+                         replies=[], sess=None, backend=None, body="Gesamtbetrag € 12,00")
+
+    async def inner_text(selector):
+        return ns.body
+    ns.page.inner_text = inner_text            # the checkout's total, read before the pay click
 
     async def collect(page):
         return list(ns.elements)
@@ -449,6 +454,7 @@ def browser(monkeypatch):
     async def card_visible(page):
         return False
 
+    monkeypatch.setattr(paylivery, "_busy", {})          # a faked run_action never frees its chat
     monkeypatch.setattr(paylivery, "_settle", noop)
     monkeypatch.setattr(paylivery, "_dismiss", noop)
     monkeypatch.setattr(paylivery, "_collect", collect)
@@ -756,6 +762,7 @@ async def test_get_label_uses_the_link_when_it_gives_the_pdf(label_chat):
     msg = await paylivery.start_action("c1", "label")
     assert "saved" in msg or "gespeichert" in msg
     assert label_chat.sess.opened == []                       # no browser for a ready PDF
+    assert paylivery._busy == {}                              # and the chat is free again
     s = _shipment()
     assert s.status == "labelled" and s.label_path == f"shipment-{s.id}-paylivery.pdf"
 
@@ -763,14 +770,16 @@ async def test_get_label_uses_the_link_when_it_gives_the_pdf(label_chat):
 async def test_get_label_starts_the_browser_when_willhaben_asks_to_create_it(label_chat, monkeypatch):
     started = []
 
-    async def fake_run(cid, action, amount=None):
-        started.append((cid, action))
+    async def fake_run(cid, action, amount=None, claimed=False):
+        started.append((cid, action, claimed))
+        paylivery._busy.pop(cid, None)
         return "ok"
 
     monkeypatch.setattr(paylivery, "run_action", fake_run)
     msg = await paylivery.start_action("c1", "label")
+    assert paylivery._busy == {"c1": "label"}                 # the chat is taken until the browser action ends
     await asyncio.gather(*paylivery._tasks)
-    assert started == [("c1", "label")] and label_chat.req.urls == [LABEL_LINK]
+    assert started == [("c1", "label", True)] and label_chat.req.urls == [LABEL_LINK]
     assert "Started" in msg or "Im Browser" in msg
     assert paylivery.card(_conv("c1"))["actions"][0]["confirm"] == ""   # one click: no confirm dialog
 
@@ -846,7 +855,7 @@ async def test_start_action_is_background_for_browser_actions(browser, monkeypat
     _chat(cid="b1", role="buyer")
     started = []
 
-    async def fake_run(cid, action, amount=None):
+    async def fake_run(cid, action, amount=None, claimed=False):
         started.append((cid, action, amount))
         return "ok"
 
@@ -898,3 +907,131 @@ async def test_collector_and_click_on_a_real_page(chromium_page):
     await paylivery._click(page, accept)
     assert await page.evaluate("window.clicked") == 1
     assert await paylivery._bank_reason(page) is None
+
+
+async def test_buy_refuses_a_checkout_total_above_the_limit(browser):
+    """The last look before money moves: the seller raised the price since the ad was read."""
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    browser.body = "Artikel € 60,00 · Versand € 5,90 · Gesamtbetrag € 65,90"     # confirmed: 12 € (+10 % + 25 €)
+    browser.backend.replies = [_step(action_idx=2, status="done", note="bezahlt")]
+    msg = await paylivery.run_action("b1", "buy", 12.0)
+    assert browser.clicked == [] and "65,90" in msg and "38,20" in msg
+
+
+async def test_buy_refuses_a_page_without_a_total(browser):
+    _chat(cid="b1", role="buyer")
+    browser.elements = [_btn(2, "Jetzt bezahlen")]
+    browser.body = "Zahlungsart wählen"
+    browser.backend.replies = [_step(action_idx=2, status="done", note="bezahlt")]
+    await paylivery.run_action("b1", "buy", 12.0)
+    assert browser.clicked == []
+
+
+async def test_a_double_click_starts_one_browser_action(browser, monkeypatch):
+    _chat(cid="b1", role="buyer")
+    runs = []
+
+    async def fake_drive(sess, conv, action, amount):
+        runs.append(action)
+        await asyncio.sleep(0)
+        return True, "ok"
+    monkeypatch.setattr(paylivery, "_drive", fake_drive)
+    await paylivery.start_action("b1", "offer", "100")
+    with pytest.raises(paylivery.PayLiveryError):              # before the first one ran a single step
+        await paylivery.start_action("b1", "offer", "100")
+    with pytest.raises(paylivery.PayLiveryError):              # the order's own offer at the same moment
+        await paylivery.run_action("b1", "offer", 100.0)
+    await asyncio.gather(*paylivery._tasks)
+    assert runs == ["offer"] and "b1" not in paylivery._busy
+    await paylivery.run_action("b1", "offer", 100.0)          # free again afterwards
+    assert runs == ["offer", "offer"]
+
+
+def test_buy_now_over_the_orders_maximum_is_refused_before_the_browser():
+    from app.db import Purchase
+    _chat(cid="b1", role="buyer")
+    with session() as db:
+        db.add(Purchase(ad_id="77", status="pay_now", mode="paylivery", conversation_id="b1", max_price=50.0,
+                        shipping_cost=5.0))
+        db.commit()
+    with pytest.raises(paylivery.PayLiveryError, match="maximum"):
+        paylivery.check_action(_conv("b1"), "buy", 48.0)          # 48 + shipping + fee > 50
+    paylivery.check_action(_conv("b1"), "buy", 40.0)
+    assert paylivery.buy_ceiling(_conv("b1"), 40.0) == 50.0       # and the checkout total may not pass it either
+
+
+
+async def test_seller_counter_offer_fills_the_amount_and_presses_send(browser):
+    _chat(cid="s1", role="seller", state={"role": "seller", "stage": "offer_received", "offer": 30.0, "history": []})
+    browser.elements = [_btn(1, "Annehmen"), _btn(2, "Ablehnen"), _field(3, "Dein Gegenangebot (€)", "number", "amount"),
+                        _btn(4, "Gegenangebot senden")]
+    browser.backend.replies = [_step(fills=[{"idx": 3, "value": "99"}], action_idx=1, status="continue"),  # refused
+                               ]
+    msg = await paylivery.run_action("s1", "counter", 45.0)
+    assert browser.clicked == [] and "Annehmen" in msg                          # never accept while countering
+    browser.backend.replies = [_step(fills=[{"idx": 3, "value": "99"}], action_idx=4, status="done", note="gesendet")]
+    msg = await paylivery.run_action("s1", "counter", 45.0)
+    assert browser.clicked == ["Gegenangebot senden"] and (3, "45.00") in browser.filled and (3, "99") not in browser.filled
+    st = _state("s1")
+    assert st["stage"] == "counter_sent" and st["offer"] == 45.0
+
+
+def test_click_verdicts_keep_offer_and_counter_apart():
+    assert paylivery.click_verdict("counter", "Gegenangebot senden") == "final"
+    assert paylivery.click_verdict("offer", "Gegenangebot senden") == "refused"
+    assert paylivery.click_verdict("counter", "Angebot senden") == "final"          # willhaben's window button
+    assert paylivery.click_verdict("counter", "Anfrage annehmen") == "refused"
+    assert paylivery.click_verdict("counter", "Gegenangebot machen") == "neutral"      # opens the form only
+
+
+def test_buyer_accepts_a_counter_offer_only_within_the_order():
+    from app.db import Purchase
+    _chat(cid="b1", role="buyer", state={"role": "buyer", "stage": "counter_received", "offer": 48.0, "history": []})
+    c = paylivery.card(_conv("b1"))
+    assert [a["name"] for a in c["actions"]] == ["accept", "decline"] and c["stage_label"] == "Counter offer received"
+    paylivery.check_action(_conv("b1"), "accept", None)
+    with session() as db:
+        db.add(Purchase(ad_id="77", status="negotiating", mode="paylivery", conversation_id="b1", max_price=50.0,
+                        shipping_cost=5.0))
+        db.commit()
+    with pytest.raises(paylivery.PayLiveryError, match="maximum"):
+        paylivery.check_action(_conv("b1"), "accept", None)
+    assert paylivery._goal("accept", None, "buyer").startswith("Das Gegenangebot des Verkäufers ANNEHMEN")
+
+
+async def test_the_paylivery_window_iframe_is_read_and_clicked_in():
+    """The counter offer dialog is willhaben's iframe: its fields come first (marked), clicks go into that frame."""
+    class Loc:
+        def __init__(self, fr, sel):
+            self.fr, self.sel, self.first = fr, sel, self
+
+        async def click(self, timeout=None):
+            self.fr.clicked.append(self.sel)
+
+    class Frame:
+        def __init__(self, url, els, text=""):
+            self.url, self.els, self.text, self.clicked = url, els, text, []
+
+        async def evaluate(self, js, start):
+            return [{**e, "idx": start + i} for i, e in enumerate(self.els)]
+
+        def locator(self, sel):
+            return Loc(self, sel)
+
+        async def inner_text(self, sel):
+            return self.text
+
+    window = Frame("https://www.willhaben.at/p2p/offer/x", [{"kind": "field", "label": "Betrag"},
+                                                            {"kind": "button", "label": "Preisvorschlag senden"}],
+                   "Gesamt € 50,00")
+    ad = Frame("https://ads.example.com/x", [{"kind": "button", "label": "Werbung"}])
+    page = Frame("https://www.willhaben.at/iad/myprofile/chat/x", [{"kind": "button", "label": "Neuer Preisvorschlag"}],
+                 "Chat")
+    page.main_frame, page.frames = page, [page, window, ad]
+    els = await paylivery._collect(page)
+    assert [(e["idx"], e["label"], e.get("fenster")) for e in els] == [
+        (1, "Betrag", True), (2, "Preisvorschlag senden", True), (3, "Neuer Preisvorschlag", None)]
+    await paylivery._click(page, els[1])
+    assert window.clicked == ['[data-plidx="2"]'] and page.clicked == []
+    assert "Gesamt € 50,00" in await paylivery._all_text(page)

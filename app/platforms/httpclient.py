@@ -370,7 +370,7 @@ class HttpPlatformClient:
 
         Every call is counted in the access log and, when switched on, recorded; `kind` defaults to classify(url).
         """
-        kind = kind or self.classify(url)
+        kind = kind or access_log.image_kind(url) or self.classify(url)     # photos: "image" on every site
         full = str(httpx.URL(url).copy_merge_params(params)) if params else url   # the request as one URL
         key = (full, (headers or {}).get("accept"))
         hit = self._cache.get(key)

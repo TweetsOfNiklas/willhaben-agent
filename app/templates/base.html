@@ -206,46 +206,52 @@
   </div>
 </div>
 
-{# ---- willhaben usage: last hour per channel, last 6 h, hourly budget; then the other sites' last hour ---- #}
-{% set wp = wh_popup() %}
-<div id="usage-pop" x-cloak x-show="layer === 'usage'" class="fixed inset-0 z-[90]" @click.self="close()">
-  <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5">
+{# ---- request usage, the same block for every site: the last hour against the budget, split (willhaben: channel, the
+     others: type), the last 6 hours, the hourly budget; chips switch between willhaben and the switched-on sites ---- #}
+{% set wp = wh_popup() %}{% set others = wh_popups() %}
+{% macro usage_block(u, used, budget, pct, ring, pause_min, blocked, action, field, value, hint, full_stats) %}
     <div class="flex items-center gap-2.5">
-      {{ ui.ring(pct / 100, ring_tone) }}
-      <div class="min-w-0 flex-1"><div class="font-semibold">{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _("willhaben requests") }}</div>
-        <div class="text-[12.5px] text-muted">{% if lim.cooling_down_s %}{{ _("willhaben pause: {n} min left", n=(lim.cooling_down_s / 60)|round(0, 'ceil')|int) }}{% else %}{{ _("in the last hour") }}{% if budget %} · {{ _("{n} % of the budget", n=pct) }}{% endif %}{% endif %}</div></div>
-      <button type="button" class="btn btn-ghost btn-sm btn-square text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
+      {{ ui.ring(pct / 100, ring) }}
+      <div class="min-w-0 flex-1"><div class="font-semibold">{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _("{site} requests", site=u.name) }}</div>
+        <div class="text-[12.5px] text-muted">{% if pause_min %}<span class="text-error">{{ _("pause: {n} min left", n=pause_min) }}</span>{% else %}{{ _("in the last hour") }}{% if budget %} · {{ _("{n} % of the budget", n=pct) }}{% endif %}{% if blocked %} · <span class="text-warning">{{ _("{n} blocked", n=blocked) }}</span>{% endif %}{% endif %}</div></div>
     </div>
-    {% set denom = budget if budget and budget > wp.total else (wp.total or 1) %}
-    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for c in wp.channels if c.n %}<span title="{{ c.label }} {{ c.n }}" class="h-full" style="width:{{ [c.n * 100 / denom, 1.5]|max|round(1) }}%;background:{{ c.color }}"></span>{% endfor %}</div>
-    <div class="grid grid-cols-3 gap-2 text-[12.5px]">{% for c in wp.channels %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ c.color }}"></span><span class="truncate text-muted">{{ c.label }}</span><span class="ml-auto tabular-nums">{{ c.n }}</span></div>{% endfor %}</div>
+    {% set denom = budget if budget and budget > u.total else (u.total or 1) %}
+    <div class="flex h-1.5 overflow-hidden rounded-sm bg-base-300">{% for c in u.channels if c.n %}<span title="{{ c.label }} {{ c.n }}" class="h-full" style="width:{{ [c.n * 100 / denom, 1.5]|max|round(1) }}%;background:{{ c.color }}"></span>{% endfor %}</div>
+    <div class="grid grid-cols-3 gap-2 text-[12.5px]">{% for c in u.channels %}<div class="flex min-w-0 items-center gap-1.5"><span class="size-2 shrink-0 rounded-xs" style="background:{{ c.color }}"></span><span class="truncate text-muted">{{ c.label }}</span><span class="ml-auto tabular-nums">{{ c.n }}</span></div>{% endfor %}</div>
     <div class="flex flex-col gap-1">
       <div class="flex justify-between text-xs text-muted"><span>{{ _("Last 6 hours") }}</span><span>{{ _("per 15 min") }}</span></div>
-      <div class="flex h-10 items-end gap-0.5 border-b border-base-300">{% for b in wp.bars %}<span title="{{ b.title }}" class="flex flex-1 flex-col-reverse overflow-hidden rounded-t-xs" style="height:{{ [b.h, 2 if b.total else 0]|max }}%">{% for c, share in b.parts %}{% if share %}<span style="height:{{ share }}%;background:{{ (wp.channels|selectattr('key', 'equalto', c)|first).color }}"></span>{% endif %}{% endfor %}</span>{% endfor %}</div>
+      <div class="flex h-10 items-end gap-0.5 border-b border-base-300">{% for b in u.bars %}<span title="{{ b.title }}" class="flex flex-1 flex-col-reverse overflow-hidden rounded-t-xs" style="height:{{ [b.h, 2 if b.total else 0]|max }}%">{% for c, share in b.parts %}{% if share %}<span style="height:{{ share }}%;background:{{ u.colors[c] }}"></span>{% endif %}{% endfor %}</span>{% endfor %}</div>
     </div>
-    {% if sites %}
-    <div class="flex flex-col gap-1.5 border-t border-base-300 pt-3">
-      <div class="flex justify-between text-xs text-muted"><span>{{ _("Other sites") }}</span><span>{{ _("in the last hour") }}</span></div>
-      {% for s in sites %}
-      <a href="{{ s.href }}" class="grid grid-cols-[1fr_auto] items-center gap-x-2.5 gap-y-1 text-[12.5px] text-base-content no-underline hover:text-primary">
-        <span class="truncate">{{ s.name }}{% if s.cooling_min %} <span class="text-error">· {{ _("pause: {n} min left", n=s.cooling_min) }}</span>{% elif s.blocked %} <span class="text-warning">· {{ _("{n} blocked", n=s.blocked) }}</span>{% endif %}</span>
-        <span class="tabular-nums">{{ s.used }}{% if s.budget %}<span class="text-muted"> / {{ s.budget }}</span>{% endif %}</span>
-        {% if s.budget %}{{ ui.bar(s.pct, s.tone, 'col-span-2 h-1') }}{% endif %}
-      </a>
-      {% endfor %}
-      <div class="flex justify-end gap-3 text-[12.5px]"><a class="link link-primary no-underline" href="/settings/{{ sites[0].id }}">{{ _("Budgets per site") }}</a><a class="link link-primary no-underline" href="/stats/requests?platform=all">{{ _("All sites") }} →</a></div>
-    </div>
-    {% endif %}
-    <form method="post" action="/settings/willhaben" class="flex flex-col gap-1.5 border-t border-base-300 pt-3" x-data="{ v: {{ budget|int }} }">
+    <form method="post" action="{{ action }}" class="flex flex-col gap-1.5 border-t border-base-300 pt-3" x-data="{ v: {{ value|int }} }">
       <input type="hidden" name="next" :value="location.pathname + location.search">
-      <div class="flex items-center justify-between gap-2.5"><span class="text-[13px] font-medium">{{ _("Hourly budget") }}</span><a class="link link-primary text-[12.5px] no-underline" href="/stats/willhaben">{{ _("Full statistics") }} →</a></div>
+      <div class="flex items-center justify-between gap-2.5"><span class="text-[13px] font-medium">{{ _("Hourly budget") }}</span><a class="link link-primary text-[12.5px] no-underline" href="{{ full_stats }}">{{ _("Full statistics") }} →</a></div>
       <div class="flex items-center gap-2.5">
         <input type="range" min="0" max="600" step="10" x-model.number="v" class="range range-primary range-xs flex-1" aria-label="{{ _('Hourly budget') }}">
-        <label class="input input-sm w-[86px] gap-1 bg-base-200 pr-2"><input name="requests_per_hour" x-model.number="v" inputmode="numeric" class="text-right font-semibold" aria-label="{{ _('Hourly budget') }}"><span class="text-muted">/ h</span></label>
+        <label class="input input-sm w-[86px] gap-1 bg-base-200 pr-2"><input name="{{ field }}" x-model.number="v" inputmode="numeric" class="text-right font-semibold" aria-label="{{ _('Hourly budget') }}"><span class="text-muted">/ h</span></label>
         <button class="btn btn-sm">{{ _("Save") }}</button>
       </div>
-      <span class="text-xs text-muted">{{ _("All requests run one after another with a pause. When the budget is used up, agents wait for the next hour; product search and price checks count too.") }}</span>
+      <span class="text-xs text-muted">{{ hint }}</span>
     </form>
+{% endmacro %}
+<div id="usage-pop" x-cloak x-show="layer === 'usage'" class="fixed inset-0 z-[90]" @click.self="close()">
+  <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5" x-data="{ site: 'willhaben' }">
+    <div class="flex items-start gap-2">
+      <div class="flex min-w-0 flex-1 flex-wrap gap-1">{% if others %}{% for x in [wp] + others %}
+        <button type="button" @click="site = '{{ x.id }}'" :class="site === '{{ x.id }}' ? 'border-primary bg-brand-soft text-primary font-semibold' : 'border-base-300 text-muted'" class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[12.5px]">{{ ui.icon('site-' ~ x.id, 12) }}{{ x.name }}{% if x.cooling_min %}<span class="size-1.5 rounded-full bg-error"></span>{% elif x.tone == 'warn' %}<span class="size-1.5 rounded-full bg-warning"></span>{% endif %}</button>
+        {% endfor %}{% else %}<span class="text-xs text-muted">{{ _("Requests to the sites") }}</span>{% endif %}</div>
+      <button type="button" class="btn btn-ghost btn-sm btn-square -mt-1 text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
+    </div>
+    <div class="flex flex-col gap-3" x-show="site === 'willhaben'">
+      {{ usage_block(wp, used, budget, pct, ring_tone, (lim.cooling_down_s / 60)|round(0, 'ceil')|int if lim.cooling_down_s else 0, 0,
+                     '/settings/willhaben', 'requests_per_hour', budget, _("All requests run one after another with a pause. When the budget is used up, agents wait for the next hour; product search and price checks count too."), '/stats/willhaben') }}
+    </div>
+    {% for x in others %}
+    <div class="flex flex-col gap-3" x-show="site === '{{ x.id }}'" x-cloak>
+      {{ usage_block(x, x.used, x.budget, x.pct, {'full': 'bad', 'warn': 'warn'}.get(x.tone, 'ok'), x.cooling_min, x.blocked,
+                     '/settings/platform/' ~ x.id ~ '/budget', 'budget', x.budget, _("Its own budget; empty follows willhaben's. Requests to this site wait for the next hour when it is used up."), '/stats/requests?platform=' ~ x.id) }}
+    </div>
+    {% endfor %}
+    {% if others %}<a class="link link-primary self-end text-[12.5px] no-underline" href="/stats/requests?platform=all">{{ _("All sites") }} →</a>{% endif %}
   </div>
 </div>
 

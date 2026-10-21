@@ -703,13 +703,23 @@ async def cancel_auto(shipment_id: int) -> Shipment:
     return s
 
 
-def retry(shipment_id: int) -> None:
-    """Buy again after a failure (or finish a purchase that stopped); a bought label is only printed again."""
+def retry(shipment_id: int, rebuy: bool = False) -> None:
+    """Buy again after a failure (or finish a purchase that stopped); a bought label is only printed again.
+
+    A purchase that got as far as the pay click (`paid_price` set, no PDF) is not bought again unless the owner says
+    it was not charged (`rebuy`): the label may be paid and only its download failed."""
     s = _require(shipment_id)
     if (not s.paid_at or s.paid_via == "paylivery" or s.status not in ("failed", "buying")
             or s.approval not in ("approved", "buy_only", "auto")):
         raise ShippingError(t("Nothing to retry"))
+    if rebuy and not s.label_path:
+        update(s.id, paid_price=None)
     start_pipeline(s.id)
+
+
+def paid_without_label(s: Shipment) -> bool:
+    """The checkout's pay button was clicked, but no label PDF came: buying again could pay twice."""
+    return s.paid_price is not None and not s.label_path
 
 
 def start_pipeline(shipment_id: int) -> asyncio.Task:
@@ -734,6 +744,11 @@ async def _pipeline(shipment_id: int) -> None:
     s = get(shipment_id)
     if (s is None or not s.paid_at or s.paid_via == "paylivery" or s.status not in ("draft", "awaiting", "failed", "buying")
             or s.approval not in ("approved", "buy_only", "auto")):
+        return
+    if paid_without_label(s):
+        await _fail(s, t("Label purchase failed"),
+                    t("The label was paid already (€{price}) but its PDF did not arrive – download it in your account at "
+                      "the carrier. Only if nothing was charged: buy again.", price=f"{s.paid_price:.2f}".replace(".", ",")))
         return
     if not s.label_path and not await _buy(s):
         return

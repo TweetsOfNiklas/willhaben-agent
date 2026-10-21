@@ -25,10 +25,14 @@
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   {% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}
   {% set pct = ([100, (used * 100 / budget)|round|int]|min) if budget else 0 %}
-  <form method="post" action="/settings/willhaben" class="grid grid-cols-1 gap-3 sm:grid-cols-2">{# keep the old field names #}
-    <label id="s-budget" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour") }}</span>
-      <input type="number" name="requests_per_hour" value="{{ budget }}" min="0" max="2000" class="input w-full min-w-0 bg-base-200"></label>
-    <div class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Used this hour") }}</span>
+  {% set own = wh_own_limits() %}
+  <form method="post" action="/settings/willhaben" class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    {# its own values, as every site has; empty: Settings → All platforms #}
+    <label id="s-budget" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Request budget per hour (0 = none, empty = as all platforms)") }}</span>
+      <input name="budget" value="{{ own.budget if own.budget is not none else '' }}" placeholder="{{ _('as all platforms: {n}', n=own.default_budget) }}" inputmode="numeric" class="input w-full min-w-0 bg-base-200"></label>
+    <label id="s-gap" class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Minimum gap between requests (s)") }}</span>
+      <input name="gap" value="{{ own.gap }}" placeholder="{{ _('as all platforms: {n}', n='%g'|format(own.default_gap)) }}" inputmode="decimal" class="input w-full min-w-0 bg-base-200"></label>
+    <div class="flex min-w-0 flex-col gap-1.5 sm:col-span-2"><span class="text-[12.5px] text-muted">{{ _("Used this hour") }}</span>
       <div class="flex min-w-0 items-center gap-3 py-2"><span class="shrink-0 tabular-nums">{{ used }} / {{ budget }}</span>{{ ui.bar(pct, 'ok', 'h-1.5 min-w-0 flex-1') }}</div></div>
     <input type="hidden" name="has_product_search" value="1">
     <label id="s-product-search" class="flex cursor-pointer items-center justify-between gap-3 sm:col-span-2"><span class="min-w-0 font-medium">{{ _("Use for the product search") }}</span><input type="checkbox" class="toggle toggle-primary" name="product_search" {% if values.platform_willhaben_product_search != '0' %}checked{% endif %}></label>

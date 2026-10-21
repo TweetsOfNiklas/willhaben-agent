@@ -122,7 +122,7 @@ def _common(ad: dict[str, Any]) -> dict[str, Any]:
     ad_id = str(_val(ad.get("id")) or "")
     category = ad.get("category") or {}
     item_condition, item_condition_label = condition.kleinanzeigen(ad)
-    return {"ad_id": ad_id, "heading": _text(ad.get("title")) or "", "price": price, "price_display": display, "vb": vb,
+    return {"ad_id": ad_id, "status": _status(ad), "heading": _text(ad.get("title")) or "", "price": price, "price_display": display, "vb": vb,
             "location": " ".join(x for x in (postcode, city) if x) or None, "postcode": postcode,
             "published_at": parse_iso(_val(ad.get("start-date-time"))),
             "url": url or f"{WEB}/s-anzeige/{ad_id}", "images": _pictures(ad),
@@ -134,6 +134,16 @@ def _common(ad: dict[str, Any]) -> dict[str, Any]:
             "item_condition": item_condition, "item_condition_label": item_condition_label, "shipping": _shipping(ad)}
 
 
+# ad-status: ACTIVE, PAUSED (the seller marked it reserved: "Reserviert" on the site), DELETED; seen in the app's
+# recordings 2026-10-20
+_AD_STATUS = {"ACTIVE": "active", "PAUSED": "reserved", "DELETED": "deleted", "SOLD": "sold"}
+
+
+def _status(ad: dict[str, Any]) -> str:
+    raw = str(_val(ad.get("ad-status")) or "ACTIVE").upper()
+    return _AD_STATUS.get(raw, raw.lower())
+
+
 def parse_listing(ad: dict[str, Any]) -> Listing:
     c = _common(ad)
     body = c["description"]
@@ -141,7 +151,7 @@ def parse_listing(ad: dict[str, Any]) -> Listing:
                    price_display=c["price_display"], old_price=None, location=c["location"], postcode=c["postcode"],
                    state=None, published_at=c["published_at"], changed_at=None, end_date=None, url=c["url"],
                    image_url=c["images"][0] if c["images"] else None, is_private=c["is_private"], is_bumped=None,
-                   status="active", category_ids=[c["category_id"]] if c["category_id"] else [], platform="kleinanzeigen",
+                   status=c["status"], category_ids=[c["category_id"]] if c["category_id"] else [], platform="kleinanzeigen",
                    lat=c["lat"], lon=c["lon"], item_condition=c["item_condition"],
                    item_condition_label=c["item_condition_label"], shipping=c["shipping"])
 
@@ -163,7 +173,7 @@ def parse_ad(data: dict[str, Any]) -> AdDetail | None:
     c = _common(ad)
     seller = _text(ad.get("contact-name")) or _text((ad.get("contact") or {}).get("name"))
     return AdDetail(ad_id=c["ad_id"], heading=c["heading"], description=c["description"], price=c["price"],
-                    price_display=c["price_display"], status="active", published_at=c["published_at"],
+                    price_display=c["price_display"], status=c["status"], published_at=c["published_at"],
                     first_published_at=c["published_at"], end_date=None, url=c["url"], images=c["images"],
                     location=c["location"], seller_name=seller, is_private=c["is_private"],
                     category_path=[c["category_name"]] if c["category_name"] else [], category_id=c["category_id"],

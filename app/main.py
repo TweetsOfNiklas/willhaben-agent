@@ -27,6 +27,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app import AUTHOR, __version__, auth, i18n, scheduler
 from app.i18n import t
 from app.config import address_check, get_settings
+from app.db import platform_per_hour as _platform_per_hour  # noqa: E402,I001  (willhaben's budget: own or all platforms')
 from app.db import (
     SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, Message, MyAd, Purchase, SearchAgent, SimChat, apply_public_url,
     current_ad, get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
@@ -139,6 +140,8 @@ app.include_router(purchase_routes.router)    # Kaufauftrag: buy dialog, order p
 app.include_router(style_routes.router)       # Settings → My rules → Writing style
 paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
+from app.services import paylivery_advice  # noqa: E402
+paylivery_routes.paylivery.on_stage(paylivery_advice.on_stage)          # an offer came in: a draft with its step
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
@@ -248,6 +251,7 @@ templates.env.globals.update(deal_label=screening.deal_label, screen_labels=scre
                              screen_hide_set=screening.hide_set, screen_default_hide=screening.DEFAULT_HIDE)   # Claude verdict on hit cards
 templates.env.globals.update(scam_warnings=scam.warnings, scam_for_viewer=scam.for_viewer)   # scam check badges
 templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _paylivery.html on the chat page
+templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
 templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
@@ -258,7 +262,8 @@ templates.env.globals.update(paylivery_offers=ad_creator.paylivery_offers, payli
                              sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
                              app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
-                             wh_budget=requests_per_hour, wh_popup=access_stats.popup,
+                             wh_budget=lambda: _platform_per_hour("willhaben"), wh_popup=access_stats.popup,
+                             wh_popups=access_stats.popups,
                              bg_jobs=jobs.snapshot, bg_working=jobs.working,   # background jobs (header, spinners)
                              live_cursor=lambda: _live_cursor())                 # the newest event (notices start there)
 
@@ -1261,8 +1266,10 @@ def _sim_url(sim_id: int | None = None, msg: str | None = None, anchor: str = ""
 
 
 @app.get("/simulator", response_class=HTMLResponse)
-async def simulator_page(request: Request, id: int | None = None, msg: str | None = None):
+async def simulator_page(request: Request, id: int | None = None, msg: str | None = None, round: int | None = None):
     sim = chat_sim.get(id) if id else None
+    played = [r["n"] for r in (sim.iterations or []) if not r.get("base")] if sim else []
+    cur_round = round if round in played or round == 1 else (played[-1] if played else 1)   # default: the newest
     with session() as db:
         ads = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.hidden).is_not(True))
                            .order_by(col(MyAd.heading))))
@@ -1273,6 +1280,8 @@ async def simulator_page(request: Request, id: int | None = None, msg: str | Non
     return render(request, "simulator.html", msg=msg, sims=chat_sim.all_chats(), sim=sim, ads=ads, live_ad=live_ad,
                   purchases=purchase_svc.recent(20), personas=chat_sim.PERSONAS, platforms=chat_sim.PLATFORMS,
                   expectations=chat_sim.EXPECTATIONS, proposals=chat_sim.open_proposals(), sim_diff=chat_sim.diff,
+                  proposal_of=chat_sim.proposal, cur_round=cur_round,
+                  review_model=llm_models.resolve_alias(chat_sim.REVIEW_MODEL),
                   targets=chat_sim.TARGETS, expectation_label=chat_sim.expectation_label,
                   persona_label=chat_sim.persona_label, ad_view=chat_sim.ad_view, sim_stage=chat_sim.stage_of,
                   can_suggest=chat_sim.can_suggest, intent_label=chats.intent_label,
@@ -1376,7 +1385,7 @@ async def simulator_say(sim_id: int, text: str = Form("")):
 
 @app.post("/simulator/{sim_id}/{action}")
 async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: str = Form(""),
-                           kind: str = Form(""), value: str = Form("")):
+                           kind: str = Form(""), value: str = Form(""), feedback: str = Form("")):
     _sim_or_404(sim_id)
     msg = None
     if action == "reply":
@@ -1390,6 +1399,13 @@ async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: 
     elif action == "run":
         ok = chat_sim.run_scenarios([sim_id]) > 0
         msg = None if ok else t("Nothing to run: the scenario needs messages and is not running already")
+    elif action == "review_round":              # a stronger model writes feedback for the next round
+        ok = chat_sim.review_round(sim_id, kind or None)
+    elif action == "round":                     # the next round from my ratings and feedback
+        ok = chat_sim.next_round(sim_id, feedback)
+        msg = None if ok else t("Rate an answer or write feedback first (or wait until the chat is done)")
+        if ok:
+            return back(_sim_url(sim_id, None, "#sim-end"))
     elif action == "clear":
         chat_sim.clear(sim_id)
         ok = True
@@ -1413,8 +1429,11 @@ async def simulator_action(sim_id: int, action: str, rounds: int = Form(3), on: 
 async def simulator_prompt(request: Request, sim_id: int, index: int, run: str = ""):
     """The whole prompt Claude got for one message (of the chat, or of its last run / the proposal's run)."""
     sim = _sim_or_404(sim_id)
-    turns = (sim.last_run or {}).get("turns") if run == "last" else \
-        (sim.proposal_run or {}).get("turns") if run == "proposal" else sim.turns
+    if run.startswith("round:") and run[6:].isdigit():
+        turns = next((r.get("turns") for r in sim.iterations or [] if r.get("n") == int(run[6:])), None)
+    else:
+        turns = (sim.last_run or {}).get("turns") if run == "last" else \
+            (sim.proposal_run or {}).get("turns") if run == "proposal" else sim.turns
     turns = turns or []
     if not 0 <= index < len(turns):
         raise HTTPException(404)
@@ -1426,6 +1445,12 @@ async def simulator_prompt(request: Request, sim_id: int, index: int, run: str =
 async def simulator_expect_remove(sim_id: int, index: int):
     chat_sim.remove_expectation(sim_id, index)
     return back(_sim_url(sim_id, anchor="#sim-expect"))
+
+
+@app.post("/simulator/{sim_id}/round/{n}/rate/{index}")
+async def simulator_round_rate(sim_id: int, n: int, index: int, rating: str = Form(""), note: str | None = Form(None)):
+    chat_sim.rate_round(sim_id, n, index, rating or None, note)
+    return back(_sim_url(sim_id, anchor=f"#round-{n}-{index}"))
 
 
 @app.post("/simulator/{sim_id}/rate/{index}")
@@ -1559,12 +1584,19 @@ async def chat_draft(request: Request, conversation_id: str, hint: str = Form(""
 
 
 @app.post("/drafts/{draft_id}/send")
-async def draft_send(draft_id: int, text: str = Form(...)):
-    """Queued: the chat page comes back at once with the message marked "sending…" (chats.enqueue_send)."""
+async def draft_send(draft_id: int, text: str = Form(...), paylivery_step: str = Form(""), pl_amount: str = Form("")):
+    """Queued: the chat page comes back at once with the message marked "sending…" (chats.enqueue_send).
+    `paylivery_step`: the draft's PayLivery step (accept, counter, decline) starts in the browser along with it."""
     with session() as db:
         d = db.get(Draft, draft_id)
     if d is None:
         raise HTTPException(404)
+    step = paylivery_step if paylivery_step and (d.paylivery or {}).get("action") == paylivery_step else ""
+    if step:              # the step first: a refusal (amount, order maximum) keeps the answer unsent as well
+        try:
+            await paylivery_routes.paylivery.start_action(d.conversation_id, step, pl_amount)
+        except paylivery_routes.paylivery.PayLiveryError as e:
+            return back(f"/chats/{d.conversation_id}?msg={quote(str(e), safe='')}")
     if not chats.enqueue_send(draft_id, text):
         return back(f"/chats/{d.conversation_id}?msg={quote(t('Not sent: the draft is not open any more or empty'), safe='')}")
     return back(f"/chats/{d.conversation_id}#draft-{draft_id}")
@@ -2796,24 +2828,82 @@ async def settings_claude(request: Request):
     return back(f"/settings/claude?msg={quote(t('Changes saved'), safe='')}")
 
 
-@app.post("/settings/willhaben")
-async def settings_willhaben(requests_per_hour_: int = Form(0, alias="requests_per_hour"), next: str = Form(""),
-                             product_search: str = Form(""), has_product_search: str = Form("")):
-    """The hourly willhaben request budget (REQUESTS_PER_HOUR from .env until changed here; 0 = none) and, from the
-    settings page (has_product_search), whether the product search uses willhaben. `next`: the page of the usage
-    popover the slider was moved on (that form has the budget only)."""
-    from app.db import platform_per_hour
+def _apply_limits() -> None:
+    """Every site's limiter takes its budget and gap now (own value, else the default of all platforms)."""
+    from app.db import platform_min_gap_s, platform_per_hour
 
-    n = min(max(0, requests_per_hour_), 2000)
-    set_setting("requests_per_hour", str(n))
-    willhaben_limiter().per_hour = n
-    for p in _site_sections().values():          # the sites without a budget of their own follow it
-        p.limiter.per_hour = platform_per_hour(p.id)
-    if has_product_search:
-        set_setting("platform_willhaben_product_search", "1" if product_search else "0")
-    target = next if next.startswith("/") and not next.startswith("//") else "/settings/willhaben"
+    lim = willhaben_limiter()
+    lim.per_hour, lim.min_gap_s = platform_per_hour("willhaben"), platform_min_gap_s("willhaben")
+    for p in _site_sections().values():
+        p.limiter.per_hour, p.limiter.min_gap_s = platform_per_hour(p.id), platform_min_gap_s(p.id)
+
+
+def _own_number(raw: Any, *, decimal: bool = False) -> str:
+    """A site's own value as typed: a number, or "-" when left empty (the default of all platforms applies)."""
+    value = str(raw or "").strip().replace(",", ".")
+    ok = re.fullmatch(r"\d+(\.\d+)?" if decimal else r"\d+", value)
+    return (value if decimal else str(min(int(value), 2000))) if ok else "-"
+
+
+@app.post("/settings/willhaben")
+async def settings_willhaben(request: Request):
+    """willhaben's own budget and gap (empty: the default of all platforms) and, from the settings page
+    (has_product_search), whether the product search uses willhaben. The usage popover's slider sends
+    requests_per_hour (its budget only) and `next`, the page it was moved on."""
+    form = await request.form()
+    if "requests_per_hour" in form:                  # the popover's slider: willhaben's own budget
+        set_setting("platform_willhaben_per_hour", _own_number(form.get("requests_per_hour")))
+    if "budget" in form:
+        set_setting("platform_willhaben_per_hour", _own_number(form.get("budget")))
+    if "gap" in form:
+        gap = _own_number(form.get("gap"), decimal=True)
+        set_setting("platform_willhaben_min_gap_s", "" if gap == "-" else gap)
+    if form.get("has_product_search"):
+        set_setting("platform_willhaben_product_search", "1" if form.get("product_search") else "0")
+    _apply_limits()
+    nxt = str(form.get("next") or "")
+    target = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/settings/willhaben"
     sep = "&" if "?" in target else "?"
     return back(f"{target}{sep}msg={quote(t('Changes saved'), safe='')}")
+
+
+def _platform_defaults() -> dict[str, Any]:
+    """Settings → All platforms: the defaults and what each platform uses (own value or the default)."""
+    from app.db import default_min_gap_s, platform_min_gap_s, platform_own_per_hour
+
+    rows = []
+    for pid, name, on in [("willhaben", "willhaben", True)] + [(p.id, p.name, platforms.enabled(p.id))
+                                                             for p in _site_sections().values()]:
+        rows.append({"id": pid, "name": name, "enabled": on, "budget": _platform_per_hour(pid),
+                     "own_budget": platform_own_per_hour(pid) is not None, "gap": platform_min_gap_s(pid),
+                     "own_gap": bool(get_setting(f"platform_{pid}_min_gap_s").strip())})
+    return {"budget": requests_per_hour(), "gap": default_min_gap_s(), "sites": rows}
+
+
+def _wh_own_limits() -> dict[str, Any]:
+    """Settings → willhaben: its own budget and gap ("" / None: the defaults of all platforms) and those defaults."""
+    from app.db import default_min_gap_s, default_site_gap_s, platform_own_per_hour
+
+    gap = default_min_gap_s()
+    return {"budget": platform_own_per_hour("willhaben"), "gap": get_setting("platform_willhaben_min_gap_s").strip(),
+            "default_budget": requests_per_hour(), "default_gap": gap if gap is not None else default_site_gap_s("willhaben")}
+
+
+templates.env.globals.update(platform_defaults=_platform_defaults, wh_own_limits=_wh_own_limits)
+
+
+@app.post("/settings/platforms")
+async def settings_all_platforms(request: Request):
+    """Settings → All platforms: the hourly budget and the gap between requests every platform uses unless it has
+    its own (0 = no budget; an empty gap keeps each site's built-in pace)."""
+    form = await request.form()
+    budget = str(form.get("requests_per_hour") or "").strip()
+    if budget.isdigit():
+        set_setting("requests_per_hour", str(min(int(budget), 2000)))
+    gap = _own_number(form.get("gap"), decimal=True)
+    set_setting("platforms_min_gap_s", "" if gap == "-" else gap)
+    _apply_limits()
+    return back(f"/settings/platforms?msg={quote(t('Changes saved'), safe='')}")
 
 
 @app.get("/settings/{section}", response_class=HTMLResponse)
@@ -2821,8 +2911,6 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     """One settings section per page (settings.html index + settings/<section>.html); the other platforms each have
     one (settings/platform.html). /settings/platforms, the former page of all sites, leads to the first of them."""
     sites = _site_sections()
-    if section == "platforms":
-        return back(f"/settings/{next(iter(sites), 'willhaben')}")
     if section not in SETTINGS_SECTIONS and section not in sites:
         raise HTTPException(404)
     keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "chat_sync_limit", "chat_sync_days", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
@@ -2859,12 +2947,16 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
 
 def _platform_row(p: Any) -> dict[str, Any]:
     """Context of settings/platform.html: the site's switch, pacing, status and (kleinanzeigen) app credentials.
-    per_hour: the site's own budget, None while it follows willhaben's (wh_per_hour)."""
-    from app.db import platform_min_gap_s, platform_own_per_hour
+    per_hour / own_gap: the site's own values ("" / None: it follows Settings → All platforms, default_per_hour /
+    default_gap, else its built-in pace)."""
+    from app.db import default_min_gap_s, default_site_gap_s, platform_min_gap_s, platform_own_per_hour
 
     st = p.status()
+    default_gap = default_min_gap_s()
     return {"p": p, "enabled": platforms.enabled(p.id), "status": st,
             "per_hour": platform_own_per_hour(p.id), "wh_per_hour": requests_per_hour(), "min_gap_s": platform_min_gap_s(p.id),
+            "own_gap": get_setting(f"platform_{p.id}_min_gap_s").strip(),
+            "default_gap": default_gap if default_gap is not None else default_site_gap_s(p.id),
             "product_search": get_setting(f"platform_{p.id}_product_search") != "0",
             "last_hour": access_stats.last_hour(platform=p.id),
             "auth": get_setting(f"{p.id}_api_auth") if p.id == "kleinanzeigen" else None,
@@ -2892,7 +2984,7 @@ async def settings_platform(request: Request, pid: str):
     gap = str(form.get("gap") or "").strip().replace(",", ".")
     budget = str(form.get("budget") or "").strip()
     set_setting(f"platform_{p.id}_min_gap_s", gap if re.fullmatch(r"\d+(\.\d+)?", gap) else "")
-    set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "-")     # empty: as willhaben
+    set_setting(f"platform_{p.id}_per_hour", budget if budget.isdigit() else "-")     # empty: all platforms' default
     p.limiter.min_gap_s, p.limiter.per_hour = platform_min_gap_s(p.id), platform_per_hour(p.id)
     if p.id == "kleinanzeigen":
         from app.platforms import kleinanzeigen as ka
@@ -2911,6 +3003,21 @@ async def settings_platform(request: Request, pid: str):
             except (InvalidSearchUrl, PlatformError) as e:
                 return back(f"/settings/{p.id}?msg={quote(str(e), safe='')}")
     return back(f"/settings/{p.id}?msg={quote(t('Changes saved'), safe='')}")
+
+
+@app.post("/settings/platform/{pid}/budget")
+async def settings_platform_budget(pid: str, budget: str = Form(""), next: str = Form("")):
+    """The usage popover's budget of one other site (empty: as willhaben's); nothing else of the site changes."""
+    from app.db import platform_per_hour
+
+    p = _site_sections().get(pid)
+    if p is None:
+        raise HTTPException(404)
+    value = budget.strip()
+    set_setting(f"platform_{p.id}_per_hour", str(min(int(value), 2000)) if value.isdigit() else "-")
+    p.limiter.per_hour = platform_per_hour(p.id)
+    target = next if next.startswith("/") and not next.startswith("//") else f"/settings/{p.id}"
+    return back(target)
 
 
 # ------------------------------------------------------------------ VPN for the anonymous requests (app/platforms/vpn.py)
@@ -3563,7 +3670,7 @@ async def shipment_decline(request: Request, shipment_id: int):
 async def shipment_retry(request: Request, shipment_id: int):
     s = _shipment_or_404(shipment_id)
     try:
-        shipping.retry(shipment_id)
+        shipping.retry(shipment_id, rebuy=(await request.form()).get("rebuy") == "1")
     except shipping.ShippingError as e:
         return _chat_back(s.conversation_id, str(e))
     return _chat_back(s.conversation_id, t("Trying again"), request=request)

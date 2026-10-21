@@ -189,5 +189,18 @@
  "Ads that ran out longer ago are listed with the inactive ones. 0 = always show.": "Länger abgelaufene Anzeigen stehen bei den inaktiven. 0 = immer zeigen.",
  "Haiku price for prompts up to 100K tokens": "Haiku-Preis für Prompts bis 100K Token",
  "Show browser window": "Browserfenster anzeigen",
- "Hide browser window": "Browserfenster ausblenden"
+ "Hide browser window": "Browserfenster ausblenden",
+ "The request budget and the gap between requests every platform uses unless it has its own.": "Das Anfragebudget und der Abstand zwischen Anfragen, die jede Plattform verwendet, solange sie keine eigenen hat.",
+ "default, rate limit, requests, every site": "Standard, Limit, Anfragen, alle Seiten",
+ "default, pace, pacing, throttle, every site": "Standard, Tempo, Abstand, Drosselung, alle Seiten",
+ "as all platforms: {n}": "wie alle Plattformen: {n}",
+ "Request budget per hour (0 = none, empty = as all platforms)": "Anfragebudget pro Stunde (0 = keins, leer = wie alle Plattformen)",
+ "These values apply to every platform – willhaben too – unless its own page sets a value of its own.": "Diese Werte gelten für jede Plattform – auch willhaben –, solange ihre eigene Seite keinen eigenen Wert festlegt.",
+ "Request budget per hour (0 = none)": "Anfragebudget pro Stunde (0 = keins)",
+ "each site its own pace": "jede Seite ihr eigenes Tempo",
+ "When a site's budget is used up, its searches wait until the next hour; product search and price checks count too. Without a gap here each site keeps its built-in pace (slower where a bot manager watches, e.g. Vinted and eBay).": "Ist das Budget einer Seite aufgebraucht, warten ihre Suchen auf die nächste Stunde; Produktsuche und Preisprüfungen zählen mit. Ohne Abstand hier behält jede Seite ihr eingebautes Tempo (langsamer, wo ein Bot-Schutz aufpasst, z. B. Vinted und eBay).",
+ "What each platform uses": "Was jede Plattform verwendet",
+ "Budget / h": "Budget / h",
+ "Gap (s)": "Abstand (s)",
+ "built-in": "eingebaut"
 }

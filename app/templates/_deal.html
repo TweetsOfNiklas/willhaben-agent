@@ -27,6 +27,7 @@
   {% endif %}
   {% if p.suspicious %}<div class="self-start rounded-md bg-bad-soft px-2 py-1 text-[12.5px] font-semibold text-error">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</div>{% endif %}
   {% if p.mismatch %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Comparable ads cost {n} % of the new price on average – is the Geizhals product the right one?", n=p.mismatch)|nb }}</div>{% endif %}
+  {% if p.comparables_low %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Comparable ads cost only {n} % of the new price on average – probably cheaper models, so the new price rates this ad.", n=p.comparables_low)|nb }}</div>{% endif %}
   {% if p.new_price_ignored %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Geizhals new price not used: the comparable ads cost {n} % of it on average – probably another product.", n=p.new_price_ignored)|nb }}</div>{% endif %}
   {% set cond_line = (_("Condition assumed: {label}.", label=cond) if guessed else _("Condition according to the ad: {label}.", label=cond)) if cond else '' %}
   <p class="text-[12.5px] text-muted">

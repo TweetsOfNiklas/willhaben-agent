@@ -10,9 +10,9 @@
 {% set heading = _("Requests to the sites") if every else _("{platform} requests", platform=pname) %}
 {# colours: whole class names, Tailwind only emits what it finds literally (docs/ui-guide.md) #}
 {% set fills = {'channel': {'anonymous': 'fill-ch-anonymous', 'account': 'fill-ch-account', 'chat': 'fill-ch-chat'},
-                'type': {'search': 'fill-type-search', 'detail': 'fill-type-detail', 'messages': 'fill-type-messages', 'account': 'fill-type-account', 'other': 'fill-type-other'}} %}
+                'type': {'search': 'fill-type-search', 'detail': 'fill-type-detail', 'photos': 'fill-type-photos', 'messages': 'fill-type-messages', 'account': 'fill-type-account', 'other': 'fill-type-other'}} %}
 {% set bgs = {'channel': {'anonymous': 'bg-ch-anonymous', 'account': 'bg-ch-account', 'chat': 'bg-ch-chat'},
-              'type': {'search': 'bg-type-search', 'detail': 'bg-type-detail', 'messages': 'bg-type-messages', 'account': 'bg-type-account', 'other': 'bg-type-other'}} %}
+              'type': {'search': 'bg-type-search', 'detail': 'bg-type-detail', 'photos': 'bg-type-photos', 'messages': 'bg-type-messages', 'account': 'bg-type-account', 'other': 'bg-type-other'}} %}
 {% set fill_of = fills[data.stack] %}{% set bg_of = bgs[data.stack] %}
 {% set stack_totals = data.by_type if data.stack == 'type' else data.by_channel %}
 {% set non_default = data.stack != data.stacks[0] %}

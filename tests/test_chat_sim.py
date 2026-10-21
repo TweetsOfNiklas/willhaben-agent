@@ -409,3 +409,76 @@ def test_system_prompt_routes(backend):
         c.post("/simulator-prompts/sim_partner/reset")
         assert not system_prompts.custom("sim_partner")
         assert c.post("/simulator-prompts/nope/save", data={"text": "x"}).status_code == 404
+
+
+
+async def test_rounds_refine_the_system_prompt_step_by_step(monkeypatch):
+    """Round 1 is the chat itself; a stronger model's review fills the feedback; a revision plays round 2 with the
+    revised system prompt (an open proposal), shown as a tab of the chat, ready to apply."""
+    from fastapi.testclient import TestClient
+
+    from app.db import SimChat, session
+    from app.llm.base import LLMResult
+    from app.main import app
+    from app.services import chat_sim
+
+    with session() as db:
+        s = SimChat(title="Zu niedrig", role="seller", platform="willhaben", turns=[
+            {"who": "partner", "text": "Geht 20?"}, {"who": "me", "text": "Ja, hol es ab.", "auto": True}])
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+    seen = []
+
+    live = []
+
+    async def replay(sim, overrides=None, on_turn=None):
+        seen.append(overrides)
+        out = [{"who": "partner", "text": "Geht 20?"}]
+        on_turn(list(out))                                            # shown before the answer is written
+        r = chat_sim.get(sim.id).iterations[-1]
+        live.append((r["n"], r.get("playing"), [x["text"] for x in r["turns"]]))
+        out.append({"who": "me", "text": "Nein, 65 ist das Minimum.", "auto": False})
+        on_turn(list(out))
+        return out
+
+    async def check(sim, turns):
+        return []
+    monkeypatch.setattr(chat_sim, "replay", replay)
+    monkeypatch.setattr(chat_sim, "check", check)
+    calls = []
+
+    class Backend:
+        async def complete(self, **kw):
+            calls.append(kw)
+            if "review" in kw["schema"]["properties"]:
+                return LLMResult(data={"review": "- Nie unter dem Mindestpreis zusagen."}, model="fake")
+            return LLMResult(data={"findings": [], "new_text": "NEUER PROMPT", "summary": "Keine Abholung zusagen."},
+                             model="fake")
+    models = []
+    monkeypatch.setattr(chat_sim, "get_backend", lambda purpose=None, model=None: models.append(model) or Backend())
+    started = []
+    monkeypatch.setattr(chat_sim.jobs, "submit", lambda key, label, fn, **kw: started.append(fn))
+    job = type("J", (), {"progress": lambda *a, **k: None})()
+
+    chat_sim.rate(s.id, 1, "down", "nie Abholung zusagen")             # round 1 = the chat: rated right there
+    assert chat_sim.review_round(s.id)
+    await started.pop()(job)
+    assert "opus" in models[-1] and "App: Ja, hol es ab." in calls[-1]["prompt"] and "nie Abholung" in calls[-1]["prompt"]
+    with TestClient(app) as c:
+        page = c.get(f"/simulator?id={s.id}").text
+    assert "- Nie unter dem Mindestpreis zusagen.</textarea>" in page and "data-rounds" not in page   # no tabs yet
+    assert chat_sim.next_round(s.id, "- Nie unter dem Mindestpreis zusagen.")
+    await started.pop()(job)
+    sim = chat_sim.get(s.id)
+    assert [r["n"] for r in sim.iterations] == [1, 2] and sim.iterations[0]["base"]
+    assert "nie Abholung zusagen" in calls[-1]["prompt"] and seen == [{"auto_reply_system": "NEUER PROMPT"}]
+    assert live == [(2, True, ["Geht 20?"])] and not sim.iterations[1].get("playing")    # live, then done
+    with TestClient(app) as c:
+        page = c.get(f"/simulator?id={s.id}").text                     # the newest round is shown
+        assert "data-rounds" in page and "Nein, 65 ist das Minimum." in page and "Apply this version" in page
+        assert "Revise and play round 3" in page and "Claude changed the system prompt:" in page
+        r1 = c.get(f"/simulator?id={s.id}&round=1").text
+        assert "Ja, hol es ab." in r1 and "Nein, 65 ist das Minimum." not in r1
+    await chat_sim._append(s.id, {"who": "partner", "text": "Und 30?"})       # a new message: the rounds start again
+    assert chat_sim.get(s.id).iterations is None

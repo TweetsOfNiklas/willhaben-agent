@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import JSON, Column, Index, LargeBinary, String, UniqueConstraint
+from sqlalchemy import JSON, Column, Index, LargeBinary, String, UniqueConstraint, event
 from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from app.config import get_settings
@@ -165,6 +165,8 @@ class Draft(SQLModel, table=True):
     meetup: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # appointment this answer fixes
     alternatives: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # Claude's other decisions: label, instruction
     purchase: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # buyer side: Claude's purchase_state
+    paylivery: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # the PayLivery step to go with it:
+    #                                  {action: accept|counter|decline, amount, offer} (app/services/paylivery_advice.py)
 
 
 class MyAd(SQLModel, table=True):
@@ -382,6 +384,9 @@ class SimChat(SQLModel, table=True):
     expectations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))   # [{kind, value}]
     last_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # {at, passed, results, turns, variant}
     proposal_run: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))   # the same with the open proposal
+    # rounds of refining the system prompt on this chat (chat_sim.iterate): [{n, at, proposal_id, summary, turns,
+    # results, passed, feedback}]
+    iterations: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
     busy: str | None = None                # what runs in the background right now (pending marker "sim:<id>")
     error: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -550,8 +555,21 @@ def get_engine():
     global _engine
     if _engine is None:
         s = get_settings()
-        _engine = create_engine(f"sqlite:///{s.db_path}", connect_args={"check_same_thread": False})
+        # timeout: a writer waits up to 30 s for another one instead of failing at once with "database is locked";
+        # WAL: readers never block the writer and the writer never blocks readers (the app writes from many tasks)
+        _engine = create_engine(f"sqlite:///{s.db_path}", connect_args={"check_same_thread": False, "timeout": 30})
+        event.listen(_engine, "connect", _sqlite_pragmas)
     return _engine
+
+
+def _sqlite_pragmas(dbapi_conn, _record) -> None:
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.execute("PRAGMA synchronous=NORMAL")     # safe with WAL; a power cut may lose the last commit only
+    finally:
+        cur.close()
 
 
 def set_engine(engine) -> None:
@@ -742,15 +760,17 @@ def current_ad(db: Session, ad_id: str) -> MyAd | None:
 
 
 def requests_per_hour() -> int:
-    """The hourly willhaben request budget: set in Settings → willhaben, else REQUESTS_PER_HOUR from .env (0 = none)."""
+    """The default hourly request budget of every platform (Settings → All platforms; before it was willhaben's, the
+    others followed it), else REQUESTS_PER_HOUR from .env (0 = none). A platform's own budget wins
+    (platform_per_hour)."""
     raw = get_setting("requests_per_hour")
     return int(raw) if raw.isdigit() else get_settings().requests_per_hour
 
 
 def platform_per_hour(platform: str) -> int:
-    """The hourly request budget of a platform: its own (platform_own_per_hour), else willhaben's, so every site has
-    the same budget until one is set apart."""
-    own = None if platform == "willhaben" else platform_own_per_hour(platform)
+    """The hourly request budget of a platform, willhaben included: its own (platform_own_per_hour), else the default
+    of all platforms (requests_per_hour)."""
+    own = platform_own_per_hour(platform)
     return requests_per_hour() if own is None else own
 
 
@@ -760,7 +780,7 @@ def platform_own_per_hour(platform: str) -> int | None:
     raw = get_setting(f"platform_{platform}_per_hour")
     if raw.isdigit():
         return int(raw)
-    if raw == "-":
+    if raw == "-" or platform == "willhaben":
         return None
     own = getattr(get_settings(), f"platform_{platform}_per_hour", None)
     return None if own is None else int(own)
@@ -780,14 +800,34 @@ def _follow_willhaben_budget() -> None:
     set_setting("site_budgets_follow_wh", "1")
 
 
-def platform_min_gap_s(platform: str) -> float:
-    if platform == "willhaben":
-        return get_settings().request_min_gap_s
-    raw = get_setting(f"platform_{platform}_min_gap_s").strip()
+def default_min_gap_s() -> float | None:
+    """The minimum gap between two requests to one site for every platform without its own (Settings → All
+    platforms); None: each site keeps its built-in pace (default_site_gap_s)."""
     try:
-        return float(raw) if raw else float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+        raw = get_setting("platforms_min_gap_s").strip().replace(",", ".")
+        return float(raw) if raw else None
     except ValueError:
-        return float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+        return None
+
+
+def default_site_gap_s(platform: str) -> float:
+    """A site's built-in pace (.env / config: slower where a bot manager watches, e.g. Vinted, eBay)."""
+    if platform == "willhaben":
+        return float(get_settings().request_min_gap_s)
+    return float(getattr(get_settings(), f"platform_{platform}_min_gap_s", 3.0))
+
+
+def platform_min_gap_s(platform: str) -> float:
+    """The gap between two requests to a site: its own (Settings → the site), else the default of all platforms,
+    else its built-in pace."""
+    raw = get_setting(f"platform_{platform}_min_gap_s").strip().replace(",", ".")
+    try:
+        if raw:
+            return float(raw)
+    except ValueError:
+        pass
+    default = default_min_gap_s()
+    return default if default is not None else default_site_gap_s(platform)
 
 
 def get_setting(key: str) -> str:

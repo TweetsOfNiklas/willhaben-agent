@@ -509,7 +509,24 @@ def _apply(hit: Hit, ad: Listing) -> None:
     apply_shipping(hit, ad)         # the same: a list without shipping keeps what the ad page told
     if ad.lat is not None and ad.lon is not None:
         hit.lat, hit.lon = ad.lat, ad.lon
+    _list_status(hit, ad)
     hit.last_seen_at = utcnow()
+
+
+# sites whose search list states an ad's real status (willhaben's advertStatus, Kleinanzeigen's ad-status, Facebook's
+# is_pending); the others' lists say "active" for every ad, so only their ad page tells
+LIST_STATUS = {"willhaben", "kleinanzeigen", "facebook"}
+
+
+def _list_status(hit: Hit, ad: Listing) -> None:
+    """A reserved (or sold) ad in a search list is marked on the hit at once; one listed as active again clears a
+    reservation the hit had. Sites whose lists do not state it keep what their ad page said."""
+    raw = (getattr(ad, "status", None) or "").lower()
+    status = STATUS_WORDS.get(raw)
+    if status in ("reserved", "sold"):
+        hit.site_status, hit.status_checked_at = status, utcnow()
+    elif raw == "active" and hit.site_status == "reserved" and (hit.platform or "willhaben") in LIST_STATUS:
+        hit.site_status, hit.status_checked_at = "active", utcnow()
 
 
 _checking: dict[int, asyncio.Future] = {}     # agent id -> resolved when its current check ends
