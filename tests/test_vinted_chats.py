@@ -84,3 +84,18 @@ async def test_sync_reads_inbox_then_changed_conversations(monkeypatch):
     with session() as db:
         assert db.get(Conversation, "01a1-uuid").messages_synced_at is not None
         assert len(list(db.exec(Message.__table__.select()))) == 3
+
+
+def test_the_chat_list_filters_by_site():
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        db.add(Conversation(id="wh-1", partner_name="wh_partner", ad_title="Router"))
+        db.commit()
+    from app.main import app
+    with TestClient(app) as c:
+        both = c.get("/chats").text
+        only_v = c.get("/chats?site=vinted").text
+        only_w = c.get("/chats?site=willhaben").text
+    assert "data-chat-site" in both and "verkaeufer_x" in both and "wh_partner" in both
+    assert "verkaeufer_x" in only_v and "wh_partner" not in only_v
+    assert "wh_partner" in only_w and "verkaeufer_x" not in only_w

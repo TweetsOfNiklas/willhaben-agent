@@ -9,9 +9,12 @@
 {% set role_filter = request.query_params.get('role') if request is defined else none %}
 {% set show_filter = request.query_params.get('show') if request is defined else none %}
 {% set show_filter = show_filter if show_filter in ('unread', 'reply', 'draft') else none %}
+{% set site_filter = request.query_params.get('site') if request is defined else none %}
+{% set site_filter = site_filter if site_filter in ('willhaben', 'vinted') else none %}
+{% set has_vinted = convs|selectattr('platform', 'equalto', 'vinted')|list %}
 {# the list's address with one filter changed (role: selling/buying, show: unread/reply/draft, hidden ones) #}
-{% macro chats_url(role=role_filter, show=show_filter, hidden=show_hidden) -%}
-{{ '/chats/' ~ conv.id if has_detail else '/chats' }}{% set q = [] %}{% if role %}{% set _ = q.append('role=' ~ role) %}{% endif %}{% if show %}{% set _ = q.append('show=' ~ show) %}{% endif %}{% if hidden %}{% set _ = q.append('show_hidden=1') %}{% endif %}{% if q %}?{{ q|join('&') }}{% endif %}
+{% macro chats_url(role=role_filter, show=show_filter, hidden=show_hidden, site=site_filter) -%}
+{{ '/chats/' ~ conv.id if has_detail else '/chats' }}{% set q = [] %}{% if site %}{% set _ = q.append('site=' ~ site) %}{% endif %}{% if role %}{% set _ = q.append('role=' ~ role) %}{% endif %}{% if show %}{% set _ = q.append('show=' ~ show) %}{% endif %}{% if hidden %}{% set _ = q.append('show_hidden=1') %}{% endif %}{% if q %}?{{ q|join('&') }}{% endif %}
 {%- endmacro %}
 <div x-data="chatList" x-init="splitResize($el, 'chats')"
      class="flex min-w-0 flex-col border-base-300 md:h-screen md:overflow-x-hidden md:overflow-y-auto md:border-r {{ 'max-md:hidden' if has_detail else '' }}">
@@ -35,6 +38,12 @@
     </div>
     {# the filters swap the list (and themselves) and keep the open chat; the address follows #}
     <div id="chat-filters" hx-boost="true" hx-target="#chat-list-items" hx-select="#chat-list-items" hx-swap="outerHTML" hx-select-oob="#chat-filters" hx-push-url="true">
+    {% if has_vinted or site_filter %}{# which site's chats: both, willhaben's, Vinted's #}
+    <div class="mb-2" data-chat-site>{{ ui.seg([
+         (chats_url(site=none), _("All sites"), none, not site_filter),
+         (chats_url(site='willhaben'), 'willhaben', none, site_filter == 'willhaben'),
+         (chats_url(site='vinted'), 'Vinted', none, site_filter == 'vinted')], 'text-[13px]') }}</div>
+    {% endif %}
     {{ ui.seg([
          (chats_url(role=none), _("All"), none, not role_filter),
          (chats_url(role='seller'), _("Selling"), none, role_filter == 'seller'),
@@ -62,7 +71,8 @@
   </form>
 
   <div id="chat-list-items" class="flex flex-col gap-0.5 px-2.5 pb-4">
-    {% for c in convs if (not role_filter or c.role == role_filter)
+    {% for c in convs if (not site_filter or (c.platform or 'willhaben') == site_filter)
+                         and (not role_filter or c.role == role_filter)
                          and (not show_filter or (show_filter == 'unread' and c.unread_count) or (show_filter == 'reply' and c.id in waiting)
                               or (show_filter == 'draft' and c.id in open_drafts)) %}
     <a href="/chats/{{ c.id }}" @click="rowClick($event)"
