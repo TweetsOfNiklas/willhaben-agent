@@ -141,17 +141,23 @@ def _when(raw: Any):
     return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def message_text(m: dict[str, Any]) -> tuple[str, str]:
-    """(text, kind) of one Vinted message: a written one ("text"), or an event of the order ("integration")."""
+def message_text(m: dict[str, Any]) -> tuple[str, str | None]:
+    """(text, kind) of one Vinted message: a written one (kind None, like willhaben's), or an event of the order
+    ("integration": shown as a notice)."""
     d = m.get("data") or {}
+    e = d.get("entity") or {}
+    if d.get("entity_type") == "message" or m.get("message_type") in ("legacy_reply", "reply_plain"):
+        # a written message: legacy_reply carries it in data.entity.body (entity_type "message", seen 2026-10-21),
+        # reply_plain (the answer to a send) in data.content
+        text = e.get("body") or d.get("content") or d.get("body") or ""
+        return (text.strip() if isinstance(text, str) else ""), None
     if m.get("message_type") == "legacy_action" or "entity" in d:
-        e = d.get("entity") or {}
         text = " – ".join(x for x in (e.get("title"), e.get("subtitle")) if x) or str(d.get("event_type") or "")
         return text, "integration"
     for key in ("body", "content", "text", "message"):
         if isinstance(d.get(key), str) and d[key].strip():
-            return d[key].strip(), "text"
-    return "", "text"
+            return d[key].strip(), None
+    return "", None
 
 
 def _partner(c: dict[str, Any]) -> dict[str, Any]:
@@ -162,7 +168,9 @@ def _partner(c: dict[str, Any]) -> dict[str, Any]:
 def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list[str]:
     """The inbox list into Conversation rows (platform vinted). Returns the ids whose last message is new here;
     `incoming` gets those where the other person wrote it (unread), for the push."""
-    from app.db import Conversation, session
+    from sqlmodel import select
+
+    from app.db import Conversation, Message, session
 
     changed = []
     with session() as db:
@@ -194,7 +202,8 @@ def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list
                                   "url": f"{ORIGIN}/items/{row.ad_id}", "platform": "vinted"}
             row.synced_at = utcnow()
             db.add(row)
-            if newer or row.messages_synced_at is None:
+            empty = known and db.exec(select(Message.id).where(Message.conversation_id == cid).limit(1)).first() is None
+            if newer or row.messages_synced_at is None or empty:     # empty: read before its messages were understood
                 changed.append(cid)
                 partner_wrote = str(last.get("sender_id") or "") == str(partner.get("id") or "-")
                 if incoming is not None and known and partner_wrote and c.get("is_unread_by_current_user"):

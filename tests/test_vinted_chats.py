@@ -36,7 +36,7 @@ def test_inbox_and_conversation_become_rows():
     msgs = chats.messages_of("01a1-uuid")
     assert [(m.direction, m.kind, m.text) for m in msgs] == [
         ("unknown", "integration", "Bestellung bezahlt – Der Verkäufer verschickt sie."),
-        ("out", "text", "Danke, wann schickst du?"), ("in", "text", "Ist versendet!")]
+        ("out", None, "Danke, wann schickst du?"), ("in", None, "Ist versendet!")]
     assert vinted_inbox.apply_inbox(INBOX) == []                    # nothing new: not opened again
 
 
@@ -217,3 +217,15 @@ def test_the_live_lines_name_their_site():
         page = c.get("/chats").text
     live = page[page.index('id="chat-live-state"'):page.index('data-vinted-live')]
     assert "willhaben:" in live and "Vinted:" in page[page.index('data-vinted-live'):][:400]
+
+
+def test_a_legacy_reply_is_a_written_message():
+    vinted_inbox.apply_inbox(INBOX)
+    vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [
+        {"id": "r1", "created_at": "2026-10-21T21:56:44+02:00", "sender_id": "5", "message_type": "legacy_reply",
+         "data": {"entity_type": "message", "created_at_ts": "x", "entity": {"body": "Ist das noch da?", "id": 1,
+                                                                                "user_id": 5, "photos": []}}},
+        {"id": "r2", "created_at": "2026-10-21T22:30:00+02:00", "sender_id": "77", "message_type": "legacy_reply",
+         "data": {"entity_type": "message", "entity": {"body": "Ja!", "id": 2, "user_id": 77}}}]})
+    assert [(m.direction, m.kind, m.text) for m in chats.messages_of("01a1-uuid")] == [
+        ("out", None, "Ist das noch da?"), ("in", None, "Ja!")]
