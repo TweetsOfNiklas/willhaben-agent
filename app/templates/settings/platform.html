@@ -19,6 +19,7 @@
     </div>
   </div>
   <p class="text-[12.5px] text-muted">{{ _("You log in once in the app's browser window; the session stays in its profile like willhaben's. It is used for your messages on {site} only: search agents, price checks and the product search stay anonymous.", site=account_site.name) }}</p>
+  {% if p.id == 'vinted' %}{% with cred_site = 'vinted' %}{% include "_credentials.html" %}{% endwith %}{% endif %}
 </section>
 {% endif %}
 <form method="post" action="/settings/platform/{{ p.id }}" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">

@@ -202,5 +202,16 @@
  "What each platform uses": "Was jede Plattform verwendet",
  "Budget / h": "Budget / h",
  "Gap (s)": "Abstand (s)",
- "built-in": "eingebaut"
+ "built-in": "eingebaut",
+ "Login details": "Zugangsdaten",
+ "stored for {user}": "gespeichert für {user}",
+ "stored – leave empty to keep": "gespeichert – leer lassen zum Behalten",
+ "Delete the stored login details?": "Die gespeicherten Zugangsdaten löschen?",
+ "Log in automatically": "Automatisch anmelden",
+ "Kept on this server only (data folder, readable by the app alone) and in backups. “Log in automatically” opens the login page in the browser window and types them in as a person would; if the site asks for more (a captcha, a code), finish it there.": "Nur auf diesem Server gespeichert (Datenordner, nur für die App lesbar) und in Backups. „Automatisch anmelden“ öffnet die Login-Seite im Browserfenster und tippt sie ein wie ein Mensch; will die Seite mehr (Captcha, Code), dort fertig machen.",
+ "Login details deleted": "Zugangsdaten gelöscht",
+ "Login details saved": "Zugangsdaten gespeichert",
+ "E-mail and password are needed": "E-Mail und Passwort sind nötig",
+ "Sent – finish the login in the browser window if the site asks for more": "Gesendet – falls die Seite mehr verlangt, im Browserfenster fertig anmelden",
+ "The login form was not found – log in in the browser window": "Login-Formular nicht gefunden – im Browserfenster anmelden"
 }

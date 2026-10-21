@@ -40,6 +40,7 @@ from app.services import access_stats, ad_batch, ad_creator, chat_sim, chats, my
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones, site_accounts
+from app.services import credentials as credentials_svc
 from app.services import deals as deals_svc
 from app.services import min_price as min_price_svc
 from app.services import scam, selling
@@ -264,6 +265,7 @@ templates.env.globals.update(record_all_stats=lambda: {**record_all.stats(), "on
 templates.env.globals.update(site_logins=lambda: [(s.name, {**site_accounts.state(s.id), "checked_at": site_accounts.checked_at(s.id)})
                                                   for s in site_accounts.SITES.values() if platforms.enabled(s.id)])   # session page
 templates.env.globals.update(vinted_live=lambda: vinted_inbox_mod.live)   # the chat list's Vinted line
+templates.env.globals.update(credentials_state=credentials_svc.stored)   # login details card (services/credentials.py)
 templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
@@ -1226,8 +1228,13 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
     hidden_count = sum(1 for c in convs if c.hidden_at or c.id in old)
     if not show_hidden:
         convs = [c for c in convs if not c.hidden_at and c.id not in old]
+    # a site shows (its login hint, live line, filter) only when it is set up: willhaben logged in or with chats,
+    # Vinted switched on and logged in or with chats
+    have = {c.platform or "willhaben" for c in convs}
+    wh_on = "willhaben" in have or bool(get_session().logged_in)
+    vinted_on = platforms.enabled("vinted") and ("vinted" in have or bool(site_accounts.state("vinted")["logged_in"]))
     return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden,
-            "waiting": waiting}
+            "waiting": waiting, "wh_on": wh_on, "vinted_on": vinted_on}
 
 
 @app.get("/chats", response_class=HTMLResponse)
@@ -2612,6 +2619,58 @@ async def session_login(next: str = Form("/session"), site: str = Form("willhabe
     except SessionUnavailable as e:
         return _session_back(next, str(e))
     return _session_back(next, t('Login page opened in the browser window'))
+
+
+@app.post("/settings/credentials/{site}")
+async def save_credentials(site: str, user: str = Form(""), password: str = Form(""), action: str = Form("save")):
+    """The login details of willhaben or Vinted (services/credentials.py): save, or forget them."""
+    from app.services import credentials
+    if site not in credentials.SITES:
+        raise HTTPException(404)
+    if action == "forget":
+        credentials.forget(site)
+        msg = t("Login details deleted")
+    else:
+        try:
+            credentials.save(site, user, password)
+            msg = t("Login details saved")
+        except ValueError:
+            msg = t("E-mail and password are needed")
+    return back(f"/settings/{site}?msg={quote(msg, safe='')}#s-credentials")
+
+
+@app.post("/settings/credentials/{site}/login")
+async def credentials_login(site: str):
+    """"Log in automatically": the site's login page in the remote view, the stored details typed in and sent; the
+    overlay stays open for whatever the site asks next (a captcha, a code)."""
+    from app.services import credentials, label_fill
+    if site not in credentials.SITES or credentials.get(site) is None:
+        raise HTTPException(404)
+    sess = get_session()
+    try:
+        if site == "willhaben":
+            await sess.open_login()
+            page, remote = sess.ui_page, "1"
+        else:
+            await sess.open_site(site, credentials.LOGIN_PAGES[site])
+            page, remote = sess.site_pages[site], site
+        try:
+            await label_fill.dismiss_consent(page)          # a cookie banner over the form
+        except Exception:  # noqa: BLE001 - no banner
+            pass
+        await credentials.type_in(page, site)
+        await page.wait_for_timeout(4000)
+        if site == "willhaben":
+            ok = await sess.check_login()
+        else:
+            ok = bool((await site_accounts.check(site))["logged_in"])
+        msg = t("Logged in") if ok else t("Sent – finish the login in the browser window if the site asks for more")
+    except SessionUnavailable as e:
+        return back(f"/settings/{site}?msg={quote(str(e), safe='')}")
+    except Exception as e:  # noqa: BLE001 - a field not found: the window shows why
+        log.info("automatic login on %s stopped: %s", site, type(e).__name__)
+        msg, remote = t("The login form was not found – log in in the browser window"), ("1" if site == "willhaben" else site)
+    return back(f"/settings/{site}?remote={remote}&msg={quote(msg, safe='')}")
 
 
 @app.post("/settings/account/{pid}/login")

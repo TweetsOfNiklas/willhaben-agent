@@ -118,6 +118,8 @@ async def test_sync_reads_inbox_then_changed_conversations(monkeypatch):
 
 
 def test_the_chat_list_filters_by_site():
+    from app.db import set_setting
+    set_setting("platform_vinted_enabled", "1")
     vinted_inbox.apply_inbox(INBOX)
     with session() as db:
         db.add(Conversation(id="wh-1", partner_name="wh_partner", ad_title="Router"))
@@ -194,3 +196,10 @@ async def test_live_events_and_the_reloaded_inbox(monkeypatch):
     await vinted_inbox._on_live_response(Resp())
     with session() as db:
         assert db.get(Conversation, "01a1-uuid").partner_name == "verkaeufer_x"
+
+
+def test_a_site_not_set_up_does_not_show():
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats").text                      # no chats, not logged in anywhere, Vinted off
+    assert "data-vinted-live" not in page and "data-chat-site" not in page and "Not logged in to willhaben" not in page

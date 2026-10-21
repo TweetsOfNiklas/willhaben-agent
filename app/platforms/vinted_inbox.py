@@ -400,7 +400,6 @@ _LIVE_JS = r"""
     const resp = await real.apply(this, arguments);
     try {
       const url = String((input && (input.url || input.href)) || input || '');   // a string, Request or URL
-      if (/sse|subscribe|real-time/.test(url)) window.__whVintedLive(JSON.stringify({_state: 'fetch', url}));
       if (url.includes('/messaging/real-time/subscribe') && resp.body) {
         window.__whVintedLive(JSON.stringify({_state: 'open', status: resp.status}));
         const reader = resp.clone().body.getReader(), dec = new TextDecoder();
