@@ -50,6 +50,7 @@ from app import backup_routes, label_buy_routes, paylivery_routes, platforms, pr
 from app import style_routes
 from app.services import search_agents as search_agents_svc
 from app.services.search_agents import refile_screened
+from app.platforms import vinted_inbox as vinted_inbox_mod
 from app.willhaben import access_log, record_all
 from app.willhaben import insert as _wh_insert
 from app.willhaben.account import EndpointUnknown, SendFailed
@@ -107,6 +108,14 @@ async def lifespan(app: FastAPI):
             tasks.append(asyncio.create_task(sess.chat_watchdog()))
         except Exception as e:  # noqa: BLE001 - polling still works
             log.warning("live chat not started: %s", e)
+    if sess.started and platforms.enabled("vinted"):   # Vinted's push stream, through its own inbox tab
+        from app.platforms import vinted_inbox
+        try:
+            if await vinted_inbox.start_live():
+                await vinted_inbox.sync(force=True)       # what came while the app was down
+        except Exception as e:  # noqa: BLE001 - the chat list's Sync still works
+            log.warning("vinted live not started: %s", e)
+        tasks.append(asyncio.create_task(vinted_inbox.live_watchdog()))
     app.state.listener_tasks = tasks             # Settings → Backup stops them before a restore
     yield
     for task in tasks:
@@ -254,6 +263,7 @@ templates.env.globals.update(paylivery_card=paylivery_routes.card)   # _payliver
 templates.env.globals.update(record_all_stats=lambda: {**record_all.stats(), "on": record_all.on()})   # session page
 templates.env.globals.update(site_logins=lambda: [(s.name, {**site_accounts.state(s.id), "checked_at": site_accounts.checked_at(s.id)})
                                                   for s in site_accounts.SITES.values() if platforms.enabled(s.id)])   # session page
+templates.env.globals.update(vinted_live=lambda: vinted_inbox_mod.live)   # the chat list's Vinted line
 templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
 templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page

@@ -351,6 +351,144 @@ async def _push_incoming(cids: list[str]) -> None:
             log.warning("vinted message push failed: %s", e)
 
 
+# ------------------------------------------------------------------ live: Vinted's own push stream
+# Vinted's web app keeps a server-sent events stream open while a page of it is open (seen 2026-10-21 in its
+# messaging bundle): fetch("https://sse.vinted.<tld>/messaging/real-time/subscribe", credentials include, headers
+# Platform, X-Next-App, X-Anon-Id, Locale, Accept text/event-stream); comments are heartbeats (12 s, then it
+# reconnects), a 401 makes it renew the token; events are JSON {message_type: "refresh_inbox" |
+# "refresh_conversation", data: {conversation_id, user_msg_thread_id}}. The app keeps Vinted's inbox open in a tab
+# of its own: Vinted's web app holds the stream (login, token, reconnects); a wrapper around that tab's fetch passes a
+# copy of the stream's events to the app, and the inbox answers the page loads on them are read like a sync. No
+# request of the app's own, no polling.
+_LIVE_JS = r"""
+(() => {
+  if (window.__whVintedWrapped) return;
+  window.__whVintedWrapped = true;
+  const real = window.fetch;
+  window.fetch = async function (input, init) {
+    const resp = await real.apply(this, arguments);
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.includes('/messaging/real-time/subscribe') && resp.body) {
+        window.__whVintedLive(JSON.stringify({_state: 'open', status: resp.status}));
+        const reader = resp.clone().body.getReader(), dec = new TextDecoder();
+        let buf = '';
+        (async () => {
+          for (;;) {
+            const {done, value} = await reader.read();
+            if (done) { window.__whVintedLive(JSON.stringify({_state: 'closed'})); break; }
+            buf += dec.decode(value, {stream: true});
+            let i;
+            while ((i = buf.indexOf('\n\n')) >= 0) {
+              const block = buf.slice(0, i); buf = buf.slice(i + 2);
+              const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('\n');
+              window.__whVintedLive(data || JSON.stringify({_state: 'beat'}));
+            }
+          }
+        })().catch(() => window.__whVintedLive(JSON.stringify({_state: 'closed'})));
+      }
+    } catch (e) {}
+    return resp;
+  };
+})();
+"""
+live = {"state": "off", "since": None, "last_event": None, "events": 0, "page": None}
+_live_tasks: set = set()
+
+
+def _live_spawn(coro) -> None:
+    task = asyncio.ensure_future(coro)
+    _live_tasks.add(task)
+    task.add_done_callback(_live_tasks.discard)
+
+
+async def _on_live(payload: str) -> None:
+    try:
+        ev = json.loads(payload)
+    except ValueError:
+        return
+    if "_state" in ev:
+        if ev["_state"] in ("open", "closed"):
+            live.update(state="connected" if ev["_state"] == "open" and ev.get("status") == 200 else ev["_state"],
+                        since=utcnow())
+        live["last_event"] = utcnow()
+        return
+    live["last_event"], live["events"] = utcnow(), live["events"] + 1
+    if ev.get("message_type") == "refresh_conversation":
+        cid = str((ev.get("data") or {}).get("conversation_id") or "")
+        if cid:
+            await sync_one(cid)                    # its messages; the inbox the page reloads brings the list
+
+
+async def _on_live_response(resp) -> None:
+    """The inbox the live tab reloads on an event: read like a sync (with the push for a new message)."""
+    url = resp.url
+    if resp.request.method != "GET" or resp.status != 200 or "/messaging/main/inbox" not in url:
+        return
+    try:
+        data = _parse(await resp.text())
+    except Exception:  # noqa: BLE001 - a page that navigated away meanwhile
+        return
+    if isinstance(data, dict):
+        first = not _known_any()
+        incoming: list[str] = []
+        apply_inbox(data, incoming)
+        if not first:
+            await _push_incoming(incoming)
+
+
+async def start_live() -> bool:
+    """Open (or reopen) the live tab: Vinted's inbox with the stream wrapper. False when the browser does not run or
+    Vinted is logged out."""
+    from app.services import site_accounts
+    from app.willhaben.session import get_session
+
+    sess = get_session()
+    if not sess.started or site_accounts.state("vinted")["logged_in"] is False:
+        return False
+    old = live.get("page")
+    if old is not None and not old.is_closed():
+        await old.close()
+    ui = sess.ui_page
+    sess._creating_internal = True
+    try:
+        page = await sess.context.new_page()
+    finally:
+        sess._creating_internal = False
+        sess.ui_page = ui
+    await page.expose_function("__whVintedLive", lambda payload: _live_spawn(_on_live(payload)))
+    await page.add_init_script(_LIVE_JS)
+    page.on("response", lambda r: _live_spawn(_on_live_response(r)))
+    live.update(page=page, state="connecting", since=utcnow())
+    await page.goto(f"{ORIGIN}/inbox", wait_until="domcontentloaded", timeout=30000)
+    if "/member/" in page.url:                     # logged out: nothing to listen to
+        site_accounts._save("vinted", False)
+        live.update(state="logged out", since=utcnow())
+        await page.close()
+        return False
+    return True
+
+
+async def live_watchdog() -> None:
+    """Every minute, locally: the live tab still open and its stream alive (an event or heartbeat within 3 min)?
+    Else it is opened again. No request to Vinted while it runs."""
+    from app import platforms
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if not platforms.enabled("vinted"):
+                continue
+            page, last = live.get("page"), live.get("last_event") or live.get("since")
+            dead = page is None or page.is_closed() or last is None or (utcnow() - last).total_seconds() > 180
+            from app.services import site_accounts
+            logged_in_again = live.get("state") == "logged out" and site_accounts.state("vinted")["logged_in"]
+            if dead and (live.get("state") != "logged out" or logged_in_again):
+                log.info("vinted live: reopening (%s)", live.get("state"))
+                await start_live()
+        except Exception as e:  # noqa: BLE001 - next minute again
+            log.info("vinted live watchdog: %s", e)
+
+
 def is_vinted(conversation_id: str) -> bool:
     from app.db import Conversation, session
 

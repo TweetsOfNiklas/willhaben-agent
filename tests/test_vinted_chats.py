@@ -172,3 +172,30 @@ async def test_a_new_message_from_the_other_side_is_pushed(monkeypatch):
     await vinted_inbox.sync(force=True)
     assert pushes == [("message", "Vinted: message from verkaeufer_x", "HomePod mini: Noch Fragen?")]
 
+
+
+async def test_live_events_and_the_reloaded_inbox(monkeypatch):
+    import json
+
+    opened = []
+
+    async def sync_one(cid):
+        opened.append(cid)
+    monkeypatch.setattr(vinted_inbox, "sync_one", sync_one)
+    await vinted_inbox._on_live(json.dumps({"_state": "open", "status": 200}))
+    assert vinted_inbox.live["state"] == "connected"
+    await vinted_inbox._on_live(json.dumps({"message_type": "refresh_conversation",
+                                            "data": {"conversation_id": "01a1-uuid", "user_msg_thread_id": 5}}))
+    await vinted_inbox._on_live(json.dumps({"message_type": "refresh_inbox", "data": {}}))
+    assert opened == ["01a1-uuid"]
+
+    class Resp:
+        url = "https://api.vinted.at/messaging/main/inbox?page=1"
+        status = 200
+        request = type("Q", (), {"method": "GET"})()
+
+        async def text(self):
+            return json.dumps(INBOX)
+    await vinted_inbox._on_live_response(Resp())
+    with session() as db:
+        assert db.get(Conversation, "01a1-uuid").partner_name == "verkaeufer_x"
