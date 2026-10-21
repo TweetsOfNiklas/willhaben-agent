@@ -74,7 +74,7 @@
       <span class="grid size-9 shrink-0 place-items-center rounded-full bg-hover text-[13px] font-bold text-base-content">{{ (c.partner_name or '?')[:1]|upper }}</span>
       <span class="min-w-0">
         <span class="flex min-w-0 items-center justify-between gap-2">
-          <span class="truncate {{ 'font-bold' if c.unread_count else 'font-semibold' }}">{{ c.partner_name or _('unknown') }}</span>
+          <span class="truncate {{ 'font-bold' if c.unread_count else 'font-semibold' }}">{{ c.partner_name or _('unknown') }}</span>{% if c.platform == 'vinted' %}{{ ui.pill('Vinted', '', false) }}{% endif %}
           <span class="shrink-0 whitespace-nowrap text-[12px] text-muted">{{ c.last_message_at|ago }}</span>
         </span>
         <span class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">{{ ui.tag(_("Buying") if c.role == 'buyer' else _("Selling"), c.role == 'buyer') }}<span class="truncate">{{ c.ad_title or c.ad_id or '–' }}</span></span>

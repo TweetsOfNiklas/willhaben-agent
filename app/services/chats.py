@@ -286,6 +286,10 @@ def _upsert_message(db, conversation_id: str, ext_id: str, direction: str, text:
 
 async def sync_messages(conversation_id: str) -> str:
     """Fetch the full history; falls back to the list's last message while the endpoint is unverified."""
+    from app.platforms import vinted_inbox
+    if vinted_inbox.is_vinted(conversation_id):   # Vinted: its conversation page in a hidden tab
+        await vinted_inbox.sync_one(conversation_id)
+        return "full"
     acct = _account()
     try:
         msgs = await acct.messages(conversation_id)
@@ -339,8 +343,8 @@ async def ensure_ad_context(conversation_id: str, force: bool = False) -> Conver
     at once, also for an ad stored as gone."""
     with session() as db:
         conv = db.get(Conversation, conversation_id)
-    if conv is None or not conv.ad_id or (not force and _ad_context_fresh(conv)):
-        return conv
+    if conv is None or not conv.ad_id or conv.platform == "vinted" or (not force and _ad_context_fresh(conv)):
+        return conv                       # a Vinted chat keeps what its inbox said (no willhaben ad page)
     try:
         detail = await get_public().get_detail(conv.ad_id)
     except WillhabenError as e:
@@ -644,6 +648,9 @@ def draft_from(result: Any, conversation_id: str, *, auto: bool, buyer: bool) ->
 
 async def mark_read(conversation_id: str) -> int:
     """Read receipts for the buyer's unread messages (best effort: never blocks answering)."""
+    from app.platforms import vinted_inbox
+    if vinted_inbox.is_vinted(conversation_id):  # opening it on Vinted marks it read; nothing to send from here
+        return 0
     try:
         n = await _account().mark_read(conversation_id)
     except Exception as e:  # noqa: BLE001 - read receipts are cosmetic, answering must go on
@@ -687,6 +694,9 @@ async def send_draft(draft_id: int, text: str) -> Draft:
 
 
 async def _send_claimed(draft: Draft, text: str) -> Draft:
+    from app.platforms import vinted_inbox
+    if vinted_inbox.is_vinted(draft.conversation_id):
+        raise SendFailed(t("Sending on Vinted is not built yet – copy the answer and send it in Vinted"))
     draft_id = draft.id
     text = text.strip()
     await mark_read(draft.conversation_id)   # nobody answers without having read the message
@@ -810,7 +820,14 @@ def enqueue_sync() -> jobs.Job:
     """"Sync" as a background job (lane chat): every conversation in the window is read again (one request per
     chat); the list updates itself (live view). A sync already waiting is reused."""
     async def run(job: jobs.Job) -> str:
+        from app.platforms import vinted_inbox
         res = await sync(force=True)
+        from app import platforms
+        if platforms.enabled("vinted"):
+            try:
+                await vinted_inbox.sync(force=True)       # Vinted's chats with it (hidden tab of its inbox)
+            except Exception as e:  # noqa: BLE001 - willhaben's result counts
+                log.warning("vinted chat sync failed: %s", e)
         if res.get("skipped"):           # not logged in / browser off: shown with a warning sign
             job.problems = 1
             return res["skipped"]

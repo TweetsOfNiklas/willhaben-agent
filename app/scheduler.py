@@ -133,6 +133,19 @@ async def _chat_sync() -> None:
         log.warning("chat sync failed: %s", e)
 
 
+async def _vinted_chat_sync() -> None:
+    """Vinted's inbox every 10 minutes while Vinted is switched on (a hidden tab of the logged-in browser)."""
+    from app import platforms
+    from app.platforms import vinted_inbox
+    if not platforms.enabled("vinted") or quiet_hours.holds(None):
+        return
+    try:
+        with timeline.fresh(actor="scheduler"):
+            await vinted_inbox.sync()
+    except Exception as e:  # noqa: BLE001 - keep the job alive
+        log.warning("vinted chat sync failed: %s", e)
+
+
 async def _myads_check() -> None:
     with timeline.fresh(actor="scheduler"):
         await my_ads.scheduled_update()
@@ -146,6 +159,8 @@ def start() -> None:
         schedule_agent(a, run_soon=False)
     scheduler.add_job(_session_check, IntervalTrigger(seconds=s.session_check_interval_s), id="session-check",
                       replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(_vinted_chat_sync, IntervalTrigger(minutes=10, jitter=120), id="vinted-chat-sync",
+                      max_instances=1, coalesce=True)
     scheduler.add_job(_chat_sync, IntervalTrigger(seconds=s.chat_poll_interval_s, jitter=30), id="chat-sync",
                       replace_existing=True, max_instances=1, coalesce=True,
                       next_run_time=datetime.now().astimezone() + timedelta(seconds=30))

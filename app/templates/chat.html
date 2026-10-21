@@ -11,11 +11,12 @@
     <a href="/chats" class="btn btn-ghost btn-sm btn-square -ml-2 md:hidden" aria-label="{{ _('Chats') }}">{{ ui.icon('back', 18) }}</a>
     <div class="min-w-0 flex-1">
       <div class="truncate text-base font-semibold">{{ conv.partner_name or _('unknown') }}{% if conv.hidden_at %} {{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}</div>
-      <div class="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}<span class="truncate">{{ conv.ad_title or '' }}</span></div>
+      <div class="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">{% if conv.platform == 'vinted' %}{{ ui.pill('Vinted', '', false) }}{% else %}{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}{% endif %}<span class="truncate">{{ conv.ad_title or '' }}</span></div>
     </div>
     <div class="flex shrink-0 items-center gap-1.5">
       <form method="post" action="/chats/{{ conv.id }}/refresh" hx-post="/chats/{{ conv.id }}/refresh" hx-swap="none"><button class="btn btn-sm max-sm:px-2" title="{{ _('Reload') }}">{{ ui.icon('refresh', 14) }}<span class="max-sm:sr-only">{{ _("Reload") }}</span></button></form>
-      <a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" rel="noopener" class="btn btn-sm">willhaben{{ ui.icon('external', 14) }}</a>
+      {% if conv.platform == 'vinted' %}<a href="https://www.vinted.at/inbox/{{ conv.id }}" target="_blank" rel="noopener" class="btn btn-sm">Vinted{{ ui.icon('external', 14) }}</a>
+      {% else %}<a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" rel="noopener" class="btn btn-sm">willhaben{{ ui.icon('external', 14) }}</a>{% endif %}
       {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
     </div>
   </div>

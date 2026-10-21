@@ -110,6 +110,7 @@ class Hit(SQLModel, table=True):
 
 class Conversation(SQLModel, table=True):
     id: str = Field(primary_key=True)
+    platform: str | None = None      # None: willhaben; "vinted" (app/platforms/vinted_inbox.py)
     ad_id: str | None = Field(default=None, index=True)
     ad_title: str | None = None
     partner_name: str | None = None
