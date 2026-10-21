@@ -213,10 +213,14 @@ def test_the_live_lines_name_their_site():
     with session() as db:
         db.add(Conversation(id="wh-1", partner_name="wh_partner"))
         db.commit()
+    vinted_inbox.live.update(state="connected")
     with TestClient(app) as c:
         page = c.get("/chats").text
-    live = page[page.index('id="chat-live-state"'):page.index('data-vinted-live')]
-    assert "willhaben:" in live and "Vinted:" in page[page.index('data-vinted-live'):][:400]
+    live = page[page.index('id="chat-live-state"'):page.index('id="chat-filters"')]
+    assert 'data-live-site="willhaben" data-live="0"' in live and "text-error" in live      # not live in tests
+    assert 'data-live-site="vinted" data-vinted-live data-live="1"' in live and "text-success" in live
+    assert "live since" not in live.split('title="')[0]                                       # no visible text
+    vinted_inbox.live.update(state="off")
 
 
 def test_a_legacy_reply_is_a_written_message():

@@ -32,14 +32,14 @@
       </div>
     </div>
     {% if wh_on and not session_status.logged_in %}<div role="status" class="mb-2.5 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ _("Not logged in to willhaben.") }} <a class="font-semibold text-warning underline" href="/settings/willhaben">{{ _("Log in now") }}</a></div>{% endif %}
-    <div id="chat-live-state" class="mb-3 flex items-center gap-2 text-[12.5px] text-muted{{ '' if wh_on else ' hidden' }}">
-      <span class="size-2 shrink-0 rounded-full {{ {'connected': 'bg-success', 'off': 'bg-off'}.get(live.state, 'bg-warning') }}"></span>
-      willhaben: {% if live.state == 'connected' %}{{ _("live since {time}", time=live.since|local('%H:%M')) }}{% elif live.state == 'off' %}{{ _("Live chat off · polls every few minutes") }}{% else %}{{ live.state }} · {{ _("until then it polls every few minutes") }}{% endif %}
+    {# live connection per site: its mark, green while live, red otherwise; the details only in the tooltip #}
+    {% set vl = vinted_live() if has_vinted else none %}
+    <div id="chat-live-state" class="mb-3 flex items-center gap-1.5{{ '' if (wh_on or has_vinted) else ' hidden' }}">
+      {% if wh_on %}{% set wl = live.state == 'connected' %}<span class="inline-flex {{ 'text-success' if wl else 'text-error' }}" data-live-site="willhaben" data-live="{{ 1 if wl else 0 }}" role="img"
+        title="willhaben: {{ _('live since {time}', time=live.since|local('%H:%M')) if wl else (_('Live chat off · polls every few minutes') if live.state == 'off' else live.state) }}" aria-label="willhaben: {{ 'live' if wl else live.state }}">{{ ui.icon('site-willhaben', 18) }}</span>{% endif %}
+      {% if vl %}{% set vlive = vl.state == 'connected' %}<span class="inline-flex {{ 'text-success' if vlive else 'text-error' }}" data-live-site="vinted" data-vinted-live data-live="{{ 1 if vlive else 0 }}" role="img"
+        title="Vinted: {{ _('live since {time}', time=vl.since|local('%H:%M')) if vlive else (_('not logged in') if vl.state == 'logged out' else _('not connected') if vl.state == 'off' else vl.state) }}" aria-label="Vinted: {{ 'live' if vlive else vl.state }}">{{ ui.icon('site-vinted', 18) }}</span>{% endif %}
     </div>
-    {% if has_vinted %}{% set vl = vinted_live() %}<div class="-mt-2 mb-3 flex items-center gap-2 text-[12.5px] text-muted" data-vinted-live>
-      <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if vl.state == 'connected' else 'bg-off' if vl.state in ('off', 'logged out') else 'bg-warning' }}"></span>
-      Vinted: {% if vl.state == 'connected' %}{{ _("live since {time}", time=vl.since|local('%H:%M')) }}{% elif vl.state == 'logged out' %}{{ _("not logged in") }}{% elif vl.state == 'off' %}{{ _("not connected") }}{% else %}{{ vl.state }}{% endif %}
-    </div>{% endif %}
     {# the filters swap the list (and themselves) and keep the open chat; the address follows #}
     <div id="chat-filters" hx-boost="true" hx-target="#chat-list-items" hx-select="#chat-list-items" hx-swap="outerHTML" hx-select-oob="#chat-filters" hx-push-url="true">
     {% if (has_vinted and wh_on) or site_filter %}{# which site's chats: both, willhaben's, Vinted's #}
