@@ -577,7 +577,10 @@ async def sync(force: bool = False) -> dict[str, Any]:
         conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}")
         if conv is not None:
             read += apply_conversation(cid, conv)
-        await chats.ensure_ad_context(cid)        # the item's card (photo, price), at most once in a while
+
+    for c in (inbox.get("conversations") or [])[:MAX_DETAILS * 2]:   # the item cards (photo, price); kept fresh a while
+        if c.get("id"):
+            await chats.ensure_ad_context(str(c["id"]))
     log.info("vinted chats: %d conversations, %d opened, %d messages", len(inbox.get("conversations") or []),
              min(len(changed), MAX_DETAILS), read)
     if not first:                                  # the first sync of all: what was there is no news
