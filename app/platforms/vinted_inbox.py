@@ -174,7 +174,7 @@ def message_key(m: dict[str, Any]) -> str:
     if m.get("message_type") == "legacy_action" or "entity" in d:
         raw = "|".join(str(x or "") for x in (d.get("event_type"), e.get("title"), e.get("subtitle"), m.get("created_at")))
         return "vinted-ev-" + hashlib.sha1(raw.encode()).hexdigest()[:16]
-    return f"vinted-{m.get('id')}"
+    return f"vinted-msg-{d.get('id') or m.get('id')}"      # another kind of written message
 
 
 def _partner(c: dict[str, Any]) -> dict[str, Any]:
