@@ -34,7 +34,7 @@
     {% if wh_on and not session_status.logged_in %}<div role="status" class="mb-2.5 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">{{ _("Not logged in to willhaben.") }} <a class="font-semibold text-warning underline" href="/settings/willhaben">{{ _("Log in now") }}</a></div>{% endif %}
     <div id="chat-live-state" class="mb-3 flex items-center gap-2 text-[12.5px] text-muted{{ '' if wh_on else ' hidden' }}">
       <span class="size-2 shrink-0 rounded-full {{ {'connected': 'bg-success', 'off': 'bg-off'}.get(live.state, 'bg-warning') }}"></span>
-      willhaben: {% if live.state == 'connected' %}{{ _("Live since {time} · messages arrive instantly", time=live.since|local('%H:%M')) }}{% elif live.state == 'off' %}{{ _("Live chat off · polls every few minutes") }}{% else %}{{ live.state }} · {{ _("until then it polls every few minutes") }}{% endif %}
+      willhaben: {% if live.state == 'connected' %}{{ _("live since {time}", time=live.since|local('%H:%M')) }}{% elif live.state == 'off' %}{{ _("Live chat off · polls every few minutes") }}{% else %}{{ live.state }} · {{ _("until then it polls every few minutes") }}{% endif %}
     </div>
     {% if has_vinted %}{% set vl = vinted_live() %}<div class="-mt-2 mb-3 flex items-center gap-2 text-[12.5px] text-muted" data-vinted-live>
       <span class="size-2 shrink-0 rounded-full {{ 'bg-success' if vl.state == 'connected' else 'bg-off' if vl.state in ('off', 'logged out') else 'bg-warning' }}"></span>
