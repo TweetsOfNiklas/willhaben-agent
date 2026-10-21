@@ -140,3 +140,35 @@ def test_the_side_of_an_items_conversation_is_the_role():
     vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "data": {"current_user_side": "buyer", "items": []}})
     with session() as db:
         assert db.get(Conversation, "01a1-uuid").role == "buyer"
+
+
+async def test_a_new_message_from_the_other_side_is_pushed(monkeypatch):
+    import copy
+    import json
+
+    from app.db import set_setting
+    set_setting("notify_messages", "1")
+    pushes = []
+
+    async def notify(kind, title, message, **kw):
+        pushes.append((kind, title, message))
+    monkeypatch.setattr("app.services.notify.notify", notify)
+    state = {"inbox": copy.deepcopy(INBOX)}
+
+    class Sess:
+        started = True
+
+        async def read_hidden(self, url, wait_for, timeout_ms=0, keep=None, allow=None, deny=None):
+            body = state["inbox"] if url.endswith("/inbox") else CONV
+            key = "https://api.vinted.at/messaging/main/inbox" if url.endswith("/inbox") else \
+                "https://api.vinted.at/messaging/main/conversations/01a1-uuid"
+            return {"text": "", "found": True, "requests": [], "bodies": {key: json.dumps(body)}}
+    monkeypatch.setattr("app.willhaben.session.get_session", lambda: Sess())
+    await vinted_inbox.sync(force=True)
+    assert pushes == []                                                  # the first sync: no news
+    state["inbox"]["conversations"][0]["last_message"] = {
+        "id": "m3", "created_at": "2026-10-21T23:00:00+02:00", "sender_id": "77",
+        "message_type": "legacy_last_message", "data": {"content": "Noch Fragen?"}}
+    await vinted_inbox.sync(force=True)
+    assert pushes == [("message", "Vinted: message from verkaeufer_x", "HomePod mini: Noch Fragen?")]
+

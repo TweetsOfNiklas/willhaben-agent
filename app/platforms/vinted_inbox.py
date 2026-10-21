@@ -159,8 +159,9 @@ def _partner(c: dict[str, Any]) -> dict[str, Any]:
     return (users[0] or {}).get("data") or {}
 
 
-def apply_inbox(data: dict[str, Any]) -> list[str]:
-    """The inbox list into Conversation rows (platform vinted). Returns the ids whose last message is new here."""
+def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list[str]:
+    """The inbox list into Conversation rows (platform vinted). Returns the ids whose last message is new here;
+    `incoming` gets those where the other person wrote it (unread), for the push."""
     from app.db import Conversation, session
 
     changed = []
@@ -169,7 +170,9 @@ def apply_inbox(data: dict[str, Any]) -> list[str]:
             cid = str(c.get("id") or "")
             if not cid:
                 continue
-            row = db.get(Conversation, cid) or Conversation(id=cid, platform="vinted")
+            row = db.get(Conversation, cid)
+            known = row is not None                    # a chat seen before: its new message is news
+            row = row or Conversation(id=cid, platform="vinted")
             if row.removed:
                 continue
             items = (c.get("data") or {}).get("inventory_items") or [{}]
@@ -193,6 +196,9 @@ def apply_inbox(data: dict[str, Any]) -> list[str]:
             db.add(row)
             if newer or row.messages_synced_at is None:
                 changed.append(cid)
+                partner_wrote = str(last.get("sender_id") or "") == str(partner.get("id") or "-")
+                if incoming is not None and known and partner_wrote and c.get("is_unread_by_current_user"):
+                    incoming.append(cid)
         db.commit()
     return changed
 
@@ -314,6 +320,37 @@ def record_sent(draft_id: int, reply: dict[str, Any]) -> None:
         db.commit()
 
 
+def _known_any() -> bool:
+    from sqlmodel import select
+
+    from app.db import Conversation, session
+    with session() as db:
+        return db.exec(select(Conversation).where(Conversation.platform == "vinted").limit(1)).first() is not None
+
+
+async def _push_incoming(cids: list[str]) -> None:
+    """A message the other person wrote on Vinted: the same push as willhaben's new messages (Settings → Chats)."""
+    from app.config import get_settings
+    from app.db import Conversation, get_setting, session
+    from app.i18n import t
+    from app.services.notify import notify
+
+    if get_setting("notify_messages") != "1":
+        return
+    for cid in cids:
+        with session() as db:
+            row = db.get(Conversation, cid)
+        if row is None:
+            continue
+        try:
+            await notify("message", t("Vinted: message from {name}", name=row.partner_name or t("unknown")),
+                         f"{row.ad_title or ''}: {(row.last_message_text or '')[:140]}",
+                         url=f"{get_settings().public_url.rstrip('/')}/chats/{cid}",
+                         data={"conversation_id": cid, "platform": "vinted"}, tag=f"wh-msg-{cid}")
+        except Exception as e:  # noqa: BLE001 - a failed push never stops the sync
+            log.warning("vinted message push failed: %s", e)
+
+
 def is_vinted(conversation_id: str) -> bool:
     from app.db import Conversation, session
 
@@ -343,7 +380,9 @@ async def sync(force: bool = False) -> dict[str, Any]:
             site_accounts._save("vinted", False)
             return {"skipped": "not logged in"}
         return {"error": "no inbox answer"}
-    changed = apply_inbox(inbox)
+    first = not _known_any()
+    incoming: list[str] = []
+    changed = apply_inbox(inbox, incoming)
     read = 0
     for cid in changed[:MAX_DETAILS]:
         r = await sess.read_hidden(f"{ORIGIN}/inbox/{cid}", r"Nachricht|Artikel|Bestellung|Zahlung", timeout_ms=30000,
@@ -353,5 +392,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
             read += apply_conversation(cid, conv)
     log.info("vinted chats: %d conversations, %d opened, %d messages", len(inbox.get("conversations") or []),
              min(len(changed), MAX_DETAILS), read)
+    if not first:                                  # the first sync of all: what was there is no news
+        await _push_incoming(incoming)
     return {"conversations": len(inbox.get("conversations") or []), "opened": min(len(changed), MAX_DETAILS)}
 

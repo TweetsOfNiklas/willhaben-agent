@@ -151,5 +151,6 @@
  "This draft was discarded": "Dieser Entwurf wurde verworfen",
  "This answer is being sent right now": "Diese Antwort wird gerade gesendet",
  "A PayLivery step goes with this answer": "Zu dieser Antwort gehört ein PayLivery-Schritt",
- "Vinted did not confirm the message: {error}": "Vinted hat die Nachricht nicht bestätigt: {error}"
+ "Vinted did not confirm the message: {error}": "Vinted hat die Nachricht nicht bestätigt: {error}",
+ "Vinted: message from {name}": "Vinted: Nachricht von {name}"
 }
