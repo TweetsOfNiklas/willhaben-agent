@@ -82,6 +82,19 @@ async def explore(delay_s: float = 0) -> dict[str, Any] | None:
     return out
 
 
+def summary(res: dict[str, Any] | None) -> str:
+    """One line for the page: logged in or not, the inbox and the conversation read."""
+    from app.i18n import t
+    if res is None:
+        return t("Browser session is not running")
+    inbox = res["inbox"]
+    if any("/member/" in r["url"] or "signup" in r["url"] for r in inbox["requests"] if r.get("type") == "document"):
+        return t("Vinted: not logged in in the browser window – log in there, then press again right away")
+    calls = sum(1 for r in inbox["requests"] if _vinted_data(r["url"]) and not r.get("blocked"))
+    conv = t("conversation read") if res.get("conversation") else t("no conversation found")
+    return t("Vinted inbox read ({n} data calls), {conv}", n=calls, conv=conv)
+
+
 async def explore_once(delay_s: float = 60) -> None:
     """Startup: the exploration once per VERSION (a failure is logged and tried again at the next start)."""
     if get_setting(SETTING) == VERSION:

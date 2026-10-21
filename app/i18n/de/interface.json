@@ -240,5 +240,11 @@
  "Not linked yet": "Noch nicht verknüpft",
  "Not connected yet": "Noch nicht verbunden",
  "No ad expires in the next {n} days.": "Keine Anzeige läuft in den nächsten {n} Tagen ab.",
- "Shipping & pickup": "Versand & Abholung"
+ "Shipping & pickup": "Versand & Abholung",
+ "Vinted: not logged in in the browser window – log in there, then press again right away": "Vinted: im Browserfenster nicht angemeldet – dort anmelden und gleich danach noch einmal drücken",
+ "conversation read": "Unterhaltung gelesen",
+ "no conversation found": "keine Unterhaltung gefunden",
+ "Vinted inbox read ({n} data calls), {conv}": "Vinted-Posteingang gelesen ({n} Datenaufrufe), {conv}",
+ "Reads the Vinted inbox and one conversation once, read-only, in a hidden tab – right after logging in to Vinted here": "Liest den Vinted-Posteingang und eine Unterhaltung einmal, nur lesend, in einem versteckten Tab – gleich nach der Anmeldung bei Vinted hier",
+ "Explore the Vinted inbox": "Vinted-Posteingang erkunden"
 }

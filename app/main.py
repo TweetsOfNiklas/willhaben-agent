@@ -2656,6 +2656,20 @@ async def capture_start(label: str = Form("capture"), next: str = Form("/session
     return _session_back(next, t('Recording in progress'))
 
 
+@app.post("/session/vinted-explore")
+async def session_vinted_explore(next: str = Form("/session")):
+    """Read Vinted's inbox and its newest conversation once, read-only, in hidden tabs (platforms/vinted_inbox.py):
+    pressed right after logging in to Vinted in the browser window, no restart in between."""
+    from app.platforms import vinted_inbox
+    if not get_session().started:
+        return _session_back(next, t("Browser session is not running"))
+    try:
+        res = await vinted_inbox.explore()
+    except Exception as e:  # noqa: BLE001 - shown on the page
+        return _session_back(next, str(e) or type(e).__name__)
+    return _session_back(next, vinted_inbox.summary(res))
+
+
 @app.post("/session/capture/stop")
 async def capture_stop(next: str = Form("/session")):
     path = await get_session().stop_capture()

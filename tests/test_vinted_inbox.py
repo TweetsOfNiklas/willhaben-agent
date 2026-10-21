@@ -32,3 +32,12 @@ async def test_explore_once_reads_inbox_and_a_conversation(tmp_path, monkeypatch
     assert saved["conversation_id"] == "12345678" and get_setting(vinted_inbox.SETTING) == vinted_inbox.VERSION
     await vinted_inbox.explore_once(delay_s=0)
     assert len(sess.opened) == 2                                   # once per version
+
+
+def test_summary_names_a_missing_login():
+    out = {"inbox": {"requests": [{"url": "https://www.vinted.at/member/signup/select_type?ref_url=%2Finbox",
+                                   "type": "document", "status": 307}]}, "conversation": None}
+    assert "not logged in" in vinted_inbox.summary(out)
+    ok = {"inbox": {"requests": [{"url": "https://www.vinted.at/api/v2/inbox", "type": "fetch", "status": 200}]},
+          "conversation": {"requests": []}}
+    assert vinted_inbox.summary(ok) == "Vinted inbox read (1 data calls), conversation read"
