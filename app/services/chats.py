@@ -343,8 +343,10 @@ async def ensure_ad_context(conversation_id: str, force: bool = False) -> Conver
     at once, also for an ad stored as gone."""
     with session() as db:
         conv = db.get(Conversation, conversation_id)
-    if conv is None or not conv.ad_id or conv.platform == "vinted" or (not force and _ad_context_fresh(conv)):
-        return conv                       # a Vinted chat keeps what its inbox said (no willhaben ad page)
+    if conv is None or not conv.ad_id or (not force and _ad_context_fresh(conv)):
+        return conv
+    if conv.platform == "vinted":         # its item page on Vinted (anonymous, like a hit's), not willhaben's
+        return await _vinted_ad_context(conv)
     try:
         detail = await get_public().get_detail(conv.ad_id)
     except WillhabenError as e:
@@ -368,6 +370,29 @@ async def ensure_ad_context(conversation_id: str, force: bool = False) -> Conver
         db.commit()
         db.refresh(conv)
     return conv
+
+
+async def _vinted_ad_context(conv: Conversation) -> Conversation:
+    """A Vinted chat's item from its public item page (title, price, photos, condition, description, status), kept
+    like a willhaben ad's; what the inbox said (order) stays. A failure keeps what was there."""
+    from app import platforms
+    from app.platforms import PlatformError
+    url = (conv.ad_context or {}).get("url")
+    try:
+        detail = await platforms.get("vinted").detail(conv.ad_id, url=url)
+    except (PlatformError, Exception) as e:  # noqa: BLE001 - the chat stays usable without it
+        log.info("vinted item %s not loaded: %s", conv.ad_id, e)
+        return conv
+    with session() as db:
+        row = db.get(Conversation, conv.id)
+        if detail is not None:
+            keep = {k: v for k, v in (row.ad_context or {}).items() if k in ("order_id",)}
+            row.ad_context = {**detail.as_context(), **keep, "platform": "vinted"}
+        row.ad_context_at = utcnow()
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
 
 
 async def _own_ad_context(conv: Conversation) -> Conversation:

@@ -229,3 +229,46 @@ def test_a_legacy_reply_is_a_written_message():
          "data": {"entity_type": "message", "entity": {"body": "Ja!", "id": 2, "user_id": 77}}}]})
     assert [(m.direction, m.kind, m.text) for m in chats.messages_of("01a1-uuid")] == [
         ("out", None, "Ist das noch da?"), ("in", None, "Ja!")]
+
+
+async def test_the_item_card_comes_from_vinteds_item_page(monkeypatch):
+    from app import platforms
+    from app.platforms.types import AdDetail
+    vinted_inbox.apply_inbox(INBOX)
+    asked = []
+
+    class V:
+        async def detail(self, ad_id, url=None):
+            asked.append((ad_id, url))
+            return AdDetail(ad_id=ad_id, heading="HomePod mini", description="Wie neu", price=50.0,
+                            price_display="€ 50,00", status="sold", published_at=None, first_published_at=None,
+                            end_date=None, url="https://www.vinted.at/items/555", images=["https://img/1.webp"],
+                            platform="vinted")
+    real_get = platforms.get
+    monkeypatch.setattr(platforms, "get", lambda pid: V() if pid == "vinted" else real_get(pid))
+    conv = await chats.ensure_ad_context("01a1-uuid")
+    assert asked == [("555", "https://www.vinted.at/items/555")]
+    assert conv.ad_context["price"] == "€ 50,00" and conv.ad_context["images"] == ["https://img/1.webp"]
+    assert conv.ad_context["platform"] == "vinted"
+    await chats.ensure_ad_context("01a1-uuid")
+    assert len(asked) == 1                                               # fresh: not asked again
+    from app.db import set_setting
+    from app.main import app
+    set_setting("platform_vinted_enabled", "1")
+    with TestClient(app) as c:
+        page = c.get("/chats/01a1-uuid").text
+    assert 'src="https://img/1.webp"' in page and "€ 50,00" in page
+
+
+def test_each_chat_carries_its_sites_coloured_mark():
+    from app.db import set_setting
+    from app.main import app
+    set_setting("platform_vinted_enabled", "1")
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        db.add(Conversation(id="wh-1", partner_name="wh_partner"))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/chats").text
+    assert 'data-site-mark="vinted"' in page and 'data-site-mark="willhaben"' in page
+    assert "color: #0f9fa8" in page and "color: #2f7fd8" in page
