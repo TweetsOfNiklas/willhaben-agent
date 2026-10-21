@@ -79,7 +79,7 @@ def test_pages_render(client):
     for path in ["/", "/agents", "/hits", "/chats", "/myads", "/new-ad", "/session", "/settings"]:
         r = client.get(path)
         assert r.status_code == 200, path
-        assert "willhaben Agent" in r.text
+        assert "SecondHandler" in r.text
 
 
 def test_chat_page_offers_claudes_alternatives(client):
@@ -404,19 +404,18 @@ def test_remote_overlay_compact_header(client, monkeypatch):
     assert 'class="embed-status' not in full and 'id="remote"' in full
 
 
-def test_settings_fold_the_browser_window_until_asked(client, monkeypatch):
-    """Settings → willhaben shows the live view only on "Show browser window" (a closed one fetches no frames); the
-    actions that need it come back with it open. /session itself always shows it."""
+def test_settings_link_to_the_browser_window(client, monkeypatch):
+    """Settings → willhaben is the account's page: it links to the browser window (/session) instead of embedding
+    it; /session shows the live view itself, unfolded."""
     from app.willhaben.session import get_session
 
     sess = get_session()
     status = {**sess.status(), "started": True, "logged_in": False}
     monkeypatch.setattr(sess, "status", lambda: status)
     page = client.get("/settings/willhaben").text
-    assert '<details class="group">' in page and "Show browser window" in page and 'id="remote"' in page
-    assert 'name="next" value="/settings/willhaben?browser=1"' in page            # the login page comes back open
-    assert '<details class="group" open>' in client.get("/settings/willhaben", params={"browser": 1}).text
-    assert '<details class="group"' not in client.get("/session").text
+    assert 'id="s-browser-window" href="/session"' in page and 'id="remote"' not in page
+    session_page = client.get("/session").text
+    assert 'id="remote"' in session_page and '<details class="group"' not in session_page
 
 
 def test_agent_create_form_is_not_a_squeezing_grid(client):
