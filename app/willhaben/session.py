@@ -451,12 +451,15 @@ class BrowserSession:
             await page.close()
 
     async def read_hidden(self, url: str, wait_for: str, timeout_ms: int = 25000,
-                          keep: Callable[[str], bool] | None = None) -> dict[str, Any]:
+                          keep: Callable[[str], bool] | None = None,
+                          allow: Callable[[str, str], bool] | None = None,
+                          deny: Callable[[str, str], bool] | None = None) -> dict[str, Any]:
         """Open `url` in a short-lived tab of the logged-in browser and read it, strictly read-only: every request but
         GET/HEAD/OPTIONS is blocked (nothing can be sent, offered or bought). Waits until the page text contains the
         regex `wait_for` (or the timeout). Returns {"text", "found", "requests": [{method, url, status, blocked,
         type}], "bodies": {url: JSON text of willhaben's data calls}}. `keep(url)`: which data calls' bodies to keep
-        (default: willhaben's)."""
+        (default: willhaben's). `allow(method, url)`: a non-GET request that may pass all the same (a site's own token
+        refresh); `deny(method, url)`: a GET that must not (a site's "expire cookies" redirect would log it out)."""
         import re as _re
 
         self._require()
@@ -472,7 +475,8 @@ class BrowserSession:
 
         async def guard(route) -> None:
             req = route.request
-            if req.method not in ("GET", "HEAD", "OPTIONS"):
+            if (req.method not in ("GET", "HEAD", "OPTIONS") and not (allow and allow(req.method, req.url))) \
+                    or (deny and deny(req.method, req.url)):
                 reqs.append({"method": req.method, "url": req.url, "type": req.resource_type, "blocked": True})
                 await route.abort()
                 return

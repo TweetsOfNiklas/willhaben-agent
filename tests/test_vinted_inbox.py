@@ -12,8 +12,10 @@ class Sess:
         self.started, self.opened = True, []
         self.settings = SimpleNamespace(captures_dir=tmp)
 
-    async def read_hidden(self, url, wait_for, timeout_ms=0, keep=None):
+    async def read_hidden(self, url, wait_for, timeout_ms=0, keep=None, allow=None, deny=None):
         self.opened.append(url)
+        assert allow("POST", "https://www.vinted.at/web/api/auth/refresh") and not allow("POST", "https://www.vinted.at/api/v2/conversations/1/replies")
+        assert deny("GET", "https://www.vinted.at/web/api/auth/expire-cookies") and not deny("GET", "https://www.vinted.at/inbox")
         assert keep("https://www.vinted.at/api/v2/inbox?page=1") and not keep("https://www.willhaben.at/webapi/x")
         if url.endswith("/inbox"):
             return {"text": "Posteingang", "found": True, "bodies": {"https://www.vinted.at/api/v2/inbox": '{"conversations":[{"id":12345678}]}'},

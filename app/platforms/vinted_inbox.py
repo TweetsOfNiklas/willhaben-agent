@@ -19,7 +19,7 @@ from app.db import get_setting, set_setting, utcnow
 log = logging.getLogger(__name__)
 
 SETTING = "vinted_inbox_explored"       # the version of the exploration that ran (once per version)
-VERSION = "1"
+VERSION = "2"          # 1 blocked the token refresh: Vinted then expired its cookies (logged out)
 ORIGIN = "https://www.vinted.at"
 _CONV_ID = re.compile(r"/inbox/(\d{5,})")
 _ID_IN_JSON = re.compile(r'"(?:conversation_id|id)"\s*:\s*(\d{6,})')
@@ -27,6 +27,20 @@ _ID_IN_JSON = re.compile(r'"(?:conversation_id|id)"\s*:\s*(\d{6,})')
 
 def _vinted_data(url: str) -> bool:
     return "vinted." in url and "/api/" in url
+
+
+# Vinted's page renews its access token with a POST before the inbox loads (/session-refresh); blocked, it calls
+# /web/api/auth/expire-cookies and the browser is logged out (seen 2026-10-21). The refresh only renews the login.
+_REFRESH = re.compile(r"^https://www\.vinted\.[a-z.]+/web/api/auth/refresh(?:\?|$)")
+_EXPIRE = re.compile(r"^https://www\.vinted\.[a-z.]+/web/api/auth/expire-cookies")
+
+
+def _allow(method: str, url: str) -> bool:
+    return method == "POST" and bool(_REFRESH.match(url))
+
+
+def _deny(method: str, url: str) -> bool:
+    return bool(_EXPIRE.match(url))
 
 
 async def explore(delay_s: float = 0) -> dict[str, Any] | None:
@@ -37,8 +51,9 @@ async def explore(delay_s: float = 0) -> dict[str, Any] | None:
     sess = get_session()
     if not sess.started:
         return None
-    inbox = await sess.read_hidden(f"{ORIGIN}/inbox", r"Posteingang|Nachrichten|Inbox|Anmelden|Einloggen",
-                                   timeout_ms=30000, keep=_vinted_data)
+    inbox = await sess.read_hidden(f"{ORIGIN}/inbox", r"Posteingang|Nachrichten|Inbox",
+                                   timeout_ms=30000, keep=_vinted_data,
+                                   allow=_allow, deny=_deny)
     conv_id = next(iter(_CONV_ID.findall(inbox["text"] or "")), None)
     if conv_id is None:
         for url, body in inbox["bodies"].items():
@@ -49,7 +64,8 @@ async def explore(delay_s: float = 0) -> dict[str, Any] | None:
     conv = None
     if conv_id:
         conv = await sess.read_hidden(f"{ORIGIN}/inbox/{conv_id}", r"Nachricht|Artikel|Bestellung",
-                                      timeout_ms=30000, keep=_vinted_data)
+                                      timeout_ms=30000, keep=_vinted_data,
+                                   allow=_allow, deny=_deny)
     out = {"label": "vinted-inbox-explore", "started_at": utcnow().isoformat(), "inbox": inbox, "conversation": conv,
            "conversation_id": conv_id}
     path = sess.settings.captures_dir / f"{utcnow():%Y%m%d-%H%M%S}-vinted-inbox-explore.json"
