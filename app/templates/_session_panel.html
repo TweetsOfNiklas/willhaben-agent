@@ -47,9 +47,26 @@
       <button type="button" class="btn btn-xs" data-act="back">{{ ui.icon('back', 12, 2.5) }}{{ _("Back") }}</button><button type="button" class="btn btn-xs" data-act="reload">{{ ui.icon('refresh', 12, 2.5) }}{{ _("Reload") }}</button>
       <form class="remote-text flex min-w-[200px] flex-1 flex-nowrap items-center gap-1.5" autocomplete="off"><input name="t" placeholder="{{ _('Send text (e.g. from a phone)') }}" autocomplete="off" class="input input-sm min-w-0 flex-1 bg-base-200"><button class="btn btn-xs">{{ _("Send") }}</button></form>
       <button type="button" class="btn btn-xs font-mono" data-key="Tab">Tab</button><button type="button" class="btn btn-xs font-mono" data-key="Enter">Enter</button>
+      {# scrolling without a mouse wheel (phones): a screen up or down, at the middle of the page #}
+      <button type="button" class="btn btn-xs" data-scroll="-650" title="{{ _('Scroll up') }}" aria-label="{{ _('Scroll up') }}">▲</button><button type="button" class="btn btn-xs" data-scroll="650" title="{{ _('Scroll down') }}" aria-label="{{ _('Scroll down') }}">▼</button>
       {% if embed %}<span class="remote-state text-xs text-muted"></span>{% endif %}
     </div>
     <div class="remote-screen overflow-hidden rounded-lg border-2 border-base-300 bg-white leading-[0] outline-none focus:border-primary" tabindex="0" title="{{ _('Click, then type') }}"><img alt="{{ _('Loading browser window …') }}" draggable="false" class="w-full cursor-pointer touch-none select-none"></div>
+    {# recording what this window does (a named capture, data/captures) and the captures so far #}
+    <div class="flex flex-wrap items-center gap-2 text-[12.5px]" data-remote-record>
+      {% if session_status.capturing %}
+      {{ ui.pill(_("recording") ~ ' · ' ~ _("{n} requests", n=session_status.capture_count), 'bad') }}
+      <form method="post" action="/session/capture/stop"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-xs btn-error">■ {{ _("Stop recording") }}</button></form>
+      {% else %}
+      <form method="post" action="/session/capture/start" class="flex items-center gap-1.5"><input type="hidden" name="next" value="{{ session_next or '/session' }}">
+        <input name="label" value="{{ site_mode.id if site_mode else 'aufnahme' }}" maxlength="40" class="input input-xs w-32 bg-base-200" aria-label="{{ _('Name of the recording') }}">
+        <button class="btn btn-xs"><span class="text-error">●</span> {{ _("Start recording") }}</button></form>
+      {% endif %}
+    </div>
+    {% if captures %}<details class="text-[12.5px]" {% if session_status.capturing %}open{% endif %} data-remote-captures>
+      <summary class="cursor-pointer text-muted">{{ _("Recordings ({n})", n=captures|length) }}</summary>
+      <div class="mt-1.5 flex flex-wrap gap-1.5">{% for c in captures %}{{ ui.chip('/session/captures/' ~ c, c) }}{% endfor %}</div>
+    </details>{% endif %}
   </section>
   {% if remote_folded %}</details>{% endif %}
   <script>
@@ -135,6 +152,8 @@
       if (t) send({type: 'text', text: t});
     });
     document.querySelectorAll('#remote [data-act]').forEach(b => b.onclick = () => send({type: b.dataset.act}));
+    document.querySelectorAll('#remote [data-scroll]').forEach(b => b.onclick = () =>
+      send({type: 'scroll', dy: Number(b.dataset.scroll), x: (img.naturalWidth || 1280) / 2, y: (img.naturalHeight || 860) / 2}));
     document.querySelectorAll('#remote [data-key]').forEach(b => b.onclick = () => send({type: 'key', key: b.dataset.key}));
     document.querySelector('.remote-text').addEventListener('submit', e => {
       e.preventDefault(); const f = e.target.t; if (f.value) send({type: 'text', text: f.value}); f.value = '';
@@ -145,25 +164,19 @@
   {% if not embed %}
   <details class="mt-3 text-[12.5px] text-muted"><summary class="cursor-pointer">{{ _("Advanced") }} · {{ _("API recording") }}{% if settings.novnc_url %} · noVNC{% endif %}</summary>
     <div class="mt-2 flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-4 py-3 text-base-content">
-      <small class="text-muted">{{ _("Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in") }} <code class="font-mono">data/captures</code>). {{ _("This captures the endpoints still missing for sending, My ads, reactivating and posting an ad.") }}</small>
-      {% if session_status.capturing %}<div class="flex flex-wrap items-center gap-2">{{ ui.pill(_("recording"), 'bad') }}<span>{{ _("{n} requests", n=session_status.capture_count) }}</span><form method="post" action="/session/capture/stop" class="ml-auto"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-sm">{{ _("Stop recording") }}</button></form></div>
-      {% else %}
+      <small class="text-muted">{{ _("Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in") }} <code class="font-mono">data/captures</code>). {{ _("Start and stop a recording under the browser window.") }}</small>
       <div class="flex flex-wrap items-center gap-2">
-        <form method="post" action="/session/capture/start" class="flex flex-wrap items-center gap-1.5"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><select name="label" class="select select-sm bg-base-200 text-[13px]">{% for v, l in [('chat', _("open a conversation")), ('chat-senden', _("send a test message")), ('meine-anzeigen', _("open the list")), ('reaktivieren', _("reactivate an expired ad")), ('anzeige-aufgeben', _("the flow up to just before publishing")), ('kleinanzeigen-chat', _("Kleinanzeigen: open the messages and a conversation")), ('vinted-chat', _("Vinted: open the inbox and a conversation"))] %}<option value="{{ v }}">{{ v }}: {{ l }}</option>{% endfor %}</select><button class="btn btn-sm">{{ _("Start recording") }}</button></form>
-        <span class="h-5 w-px bg-base-300"></span>
         <form method="post" action="/session/open" class="flex flex-wrap items-center gap-1.5"><input type="hidden" name="next" value="{{ next_open }}"><select name="url" class="select select-sm bg-base-200 text-[13px]"><option value="https://www.willhaben.at/iad/myprofile/chat">{{ _("Open chat") }}</option><option value="https://www.willhaben.at/iad/myprofile/myadverts">{{ _("Open My ads") }}</option><option value="https://www.willhaben.at/iad/anzeigenaufgabe">{{ _("Open “Post an ad”") }}</option><option value="https://www.kleinanzeigen.de/m-nachrichten.html">{{ _("Kleinanzeigen: messages") }}</option><option value="https://www.vinted.at/inbox">{{ _("Vinted: inbox") }}</option></select><button class="btn btn-sm">{{ _("Open in the browser window") }}</button></form>
         <form method="post" action="/session/forget/vinted" class="flex items-center" onsubmit="return confirm({{ _('Delete all Vinted cookies of this browser? Vinted is logged out here and starts afresh.')|tojson|forceescape }})"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-sm" title="{{ _('After “Deine Sitzung wurde blockiert”: the bot protection marked this browser') }}">{{ _("Reset Vinted") }}</button></form>
         <form method="post" action="/session/vinted-explore" class="flex items-center"><input type="hidden" name="next" value="{{ session_next or '/session' }}"><button class="btn btn-sm" title="{{ _('Reads the Vinted inbox and one conversation once, read-only, in a hidden tab – right after logging in to Vinted here') }}">{{ _("Explore the Vinted inbox") }}</button></form>
         {% if settings.novnc_url %}<a href="{{ settings.novnc_url }}" target="_blank" rel="noopener" class="link link-primary ml-auto">{{ _("noVNC in a new tab") }}{{ ui.icon('external', 13) }}</a>{% endif %}
       </div>
-      {% endif %}
       {% set ra = record_all_stats() %}
       <form method="post" action="/session/record-all" class="flex flex-wrap items-center gap-2 rounded-md bg-base-200 px-2.5 py-2" data-record-all>
         <input type="hidden" name="next" value="{{ session_next or '/session' }}"><input type="hidden" name="on" value="{{ '0' if ra.on else '1' }}">
         <label class="flex cursor-pointer items-center gap-2"><input type="checkbox" class="toggle toggle-sm toggle-error" {% if ra.on %}checked{% endif %} onchange="this.form.submit()"><b>{{ _("Record everything") }}</b></label>
         <span class="text-[12px] text-muted">{{ _("every request and WebSocket message of this browser, all sites, with the answers – for working out how a site works. Cookies, tokens and passwords are left out; kept {days} days in data/captures/all.", days=7) }}{% if ra.files %} · {{ _("{n} files, {mb} MB", n=ra.files, mb=(ra.bytes / 1048576)|round(1)) }}{% endif %}</span>
       </form>
-      {% if captures %}<div class="flex flex-wrap gap-1.5">{% for c in captures %}{{ ui.chip('/session/captures/' ~ c, c) }}{% endfor %}</div>{% endif %}
     </div>
   </details>
   {% endif %}

@@ -83,3 +83,22 @@ async def test_scripts_keep_no_body(monkeypatch, tmp_path):
     await record_all._request(js)
     line = json.loads(next((tmp_path / "captures" / "all").glob("*.jsonl")).read_text().splitlines()[0])
     assert line["response_body"] is None and line["size"] == 11
+
+
+def test_the_remote_view_has_scroll_and_record_controls():
+    from types import SimpleNamespace
+
+    from app.config import get_settings
+    from app.main import templates
+    status = SimpleNamespace(started=True, logged_in=True, user=None, last_check=None, error=None, capturing=False,
+                             capture_count=0, engine="chrome")
+    page = templates.env.get_template("_session_panel.html").render(
+        session_status=status, captures=["20261021-2200-vinted.json"], settings=get_settings(), embed=True)
+    assert 'data-scroll="-650"' in page and 'data-scroll="650"' in page
+    rec = page[page.index("data-remote-record"):]
+    assert 'action="/session/capture/start"' in rec[:800] and "20261021-2200-vinted.json" in page
+    assert page.count('action="/session/capture/start"') == 1                 # only under the window now
+    status.capturing, status.capture_count = True, 12
+    page = templates.env.get_template("_session_panel.html").render(
+        session_status=status, captures=[], settings=get_settings(), embed=True)
+    assert "12 requests" in page and 'action="/session/capture/stop"' in page

@@ -258,5 +258,10 @@
  "Reset Vinted": "Vinted zurücksetzen",
  "{site} blocks this browser – use “Reset {site}” on the session page, then log in again": "{site} sperrt diesen Browser – auf der Sitzungsseite „{site} zurücksetzen“ drücken und neu anmelden",
  "Vinted – its own tab in the app's browser": "Vinted – eigener Tab im Browser der App",
- "Kleinanzeigen – its own tab in the app's browser": "Kleinanzeigen – eigener Tab im Browser der App"
+ "Kleinanzeigen – its own tab in the app's browser": "Kleinanzeigen – eigener Tab im Browser der App",
+ "Scroll up": "Nach oben scrollen",
+ "Scroll down": "Nach unten scrollen",
+ "Name of the recording": "Name der Aufnahme",
+ "Recordings ({n})": "Aufnahmen ({n})",
+ "Start and stop a recording under the browser window.": "Aufnahmen startest und beendest du unter dem Browserfenster."
 }
