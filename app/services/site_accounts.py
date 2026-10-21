@@ -12,6 +12,7 @@ error}); it is checked on demand and every few hours once the owner logged in.
 from __future__ import annotations
 
 import json
+import re
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -82,6 +83,21 @@ async def open_login(pid: str) -> None:
 
     site = SITES[pid]
     await get_session().open_url(site.login_url)
+
+
+async def forget(pid: str) -> int:
+    """Delete every cookie of the site in the app's browser (login, the bot protection's mark): a fresh start after
+    the site blocked this browser ("Deine Sitzung wurde blockiert"). Returns how many went."""
+    from app.willhaben.session import get_session
+
+    site = SITES[pid]
+    sess = get_session()
+    sess._require()
+    pattern = re.compile(r"(?:^|\.)(?:" + "|".join(re.escape(h.split(".")[0]) for h in site.hosts) + r")\.[a-z.]+$")
+    gone = [c for c in await sess.context.cookies() if pattern.search((c.get("domain") or "").lstrip("."))]
+    await sess.context.clear_cookies(domain=re.compile(pattern.pattern))
+    _save(pid, False)
+    return len(gone)
 
 
 async def check(pid: str) -> dict[str, Any]:

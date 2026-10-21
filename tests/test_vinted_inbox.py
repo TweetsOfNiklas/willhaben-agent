@@ -61,3 +61,23 @@ def test_the_login_button_picks_the_platform(monkeypatch):
     with TestClient(app) as c:
         c.post("/session/login", data={"site": "vinted", "next": "/session"}, follow_redirects=False)
     assert opened == ["vinted"]
+
+
+async def test_reset_deletes_only_the_sites_cookies(monkeypatch):
+    from app.services import site_accounts
+
+    jar = [{"name": "datadome", "domain": ".vinted.at"}, {"name": "access_token_web", "domain": "www.vinted.at"},
+           {"name": "x", "domain": "dd.vinted.lt"}, {"name": "bbxauth", "domain": ".willhaben.at"}]
+
+    class Ctx:
+        async def cookies(self):
+            return list(jar)
+
+        async def clear_cookies(self, domain=None):
+            jar[:] = [c for c in jar if not domain.search(c["domain"].lstrip("."))]
+
+    sess = SimpleNamespace(context=Ctx(), _require=lambda: None)
+    monkeypatch.setattr("app.willhaben.session.get_session", lambda: sess)
+    assert await site_accounts.forget("vinted") == 3
+    assert jar == [{"name": "bbxauth", "domain": ".willhaben.at"}]
+    assert site_accounts.state("vinted")["logged_in"] is False

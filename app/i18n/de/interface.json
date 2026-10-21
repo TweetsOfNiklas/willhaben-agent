@@ -251,5 +251,9 @@
  "Recording everything": "Alles wird aufgezeichnet",
  "Recording everything stopped": "Daueraufzeichnung beendet",
  "every request and WebSocket message of this browser, all sites, with the answers – for working out how a site works. Cookies, tokens and passwords are left out; kept {days} days in data/captures/all.": "jede Anfrage und WebSocket-Nachricht dieses Browsers, alle Seiten, mit Antworten – um herauszufinden, wie eine Seite funktioniert. Cookies, Tokens und Passwörter werden weggelassen; {days} Tage aufbewahrt in data/captures/all.",
- "{n} files, {mb} MB": "{n} Dateien, {mb} MB"
+ "{n} files, {mb} MB": "{n} Dateien, {mb} MB",
+ "{n} cookies of {site} deleted – log in again": "{n} Cookies von {site} gelöscht – bitte neu anmelden",
+ "Delete all Vinted cookies of this browser? Vinted is logged out here and starts afresh.": "Alle Vinted-Cookies dieses Browsers löschen? Vinted ist hier dann abgemeldet und beginnt von vorn.",
+ "After “Deine Sitzung wurde blockiert”: the bot protection marked this browser": "Nach „Deine Sitzung wurde blockiert“: Die Bot-Erkennung hat diesen Browser markiert",
+ "Reset Vinted": "Vinted zurücksetzen"
 }

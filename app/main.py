@@ -2673,6 +2673,18 @@ async def session_vinted_explore(next: str = Form("/session")):
     return _session_back(next, vinted_inbox.summary(res))
 
 
+@app.post("/session/forget/{pid}")
+async def session_forget_site(pid: str, next: str = Form("/session")):
+    """Delete a site's cookies in the app's browser (Kleinanzeigen, Vinted): after the site blocked this browser."""
+    if not site_accounts.get(pid):
+        raise HTTPException(404)
+    try:
+        n = await site_accounts.forget(pid)
+    except SessionUnavailable as e:
+        return _session_back(next, str(e))
+    return _session_back(next, t("{n} cookies of {site} deleted – log in again", n=n, site=site_accounts.get(pid).name))
+
+
 @app.post("/session/record-all")
 async def session_record_all(on: str = Form("0"), next: str = Form("/session")):
     """Record everything the browser does (willhaben/record_all.py), on or off at once."""
