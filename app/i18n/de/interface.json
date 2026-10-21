@@ -246,5 +246,10 @@
  "no conversation found": "keine Unterhaltung gefunden",
  "Vinted inbox read ({n} data calls), {conv}": "Vinted-Posteingang gelesen ({n} Datenaufrufe), {conv}",
  "Reads the Vinted inbox and one conversation once, read-only, in a hidden tab – right after logging in to Vinted here": "Liest den Vinted-Posteingang und eine Unterhaltung einmal, nur lesend, in einem versteckten Tab – gleich nach der Anmeldung bei Vinted hier",
- "Explore the Vinted inbox": "Vinted-Posteingang erkunden"
+ "Explore the Vinted inbox": "Vinted-Posteingang erkunden",
+ "Record everything": "Alles aufzeichnen",
+ "Recording everything": "Alles wird aufgezeichnet",
+ "Recording everything stopped": "Daueraufzeichnung beendet",
+ "every request and WebSocket message of this browser, all sites, with the answers – for working out how a site works. Cookies, tokens and passwords are left out; kept {days} days in data/captures/all.": "jede Anfrage und WebSocket-Nachricht dieses Browsers, alle Seiten, mit Antworten – um herauszufinden, wie eine Seite funktioniert. Cookies, Tokens und Passwörter werden weggelassen; {days} Tage aufbewahrt in data/captures/all.",
+ "{n} files, {mb} MB": "{n} Dateien, {mb} MB"
 }

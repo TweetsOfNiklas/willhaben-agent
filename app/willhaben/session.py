@@ -117,6 +117,8 @@ class BrowserSession:
                 viewport={"width": 1280, "height": 860},
                 args=["--disable-blink-features=AutomationControlled", "--no-first-run"],
             )
+            from app.willhaben import record_all
+            record_all.attach(self.context)          # everything the browser does, while switched on (session page)
             self.ui_page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             self.api_page = await self.context.new_page()
             self.context.on("page", self._on_new_page)
