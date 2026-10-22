@@ -387,3 +387,12 @@ def test_the_chat_shows_where_the_other_person_is_from():
     set_setting("platform_vinted_enabled", "1")
     with TestClient(app) as c:
         assert "🇮🇹 Italien" in c.get("/chats/01a1-uuid").text
+
+
+def test_the_place_found_after_the_page_opened_comes_in_by_itself():
+    vinted_inbox.apply_inbox(INBOX)
+    before = chats.live_state("01a1-uuid")["presence"]
+    with session() as db:
+        conv = db.get(Conversation, "01a1-uuid")
+    chats._keep_place(conv, {"country": "IT", "country_title": "Italien", "city": "Brescia"})
+    assert chats.live_state("01a1-uuid")["presence"] != before         # the open page swaps the header part

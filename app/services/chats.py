@@ -708,7 +708,7 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
             buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
             out["messages"] = fp(list(msgs))
-            out["presence"] = fp(presence_of(conv))
+            out["presence"] = fp(presence_of(conv), partner_place(conv))
             out["composer"] = fp([list(d) for d in drafts], conv.drafting, conv.draft_error)
             out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
                                 ad and [ad.sale_status, ad.sale_conversation_id, ad.status, stock.numbers(ad),
