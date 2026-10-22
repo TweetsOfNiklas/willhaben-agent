@@ -479,14 +479,17 @@ def overview(db) -> dict[str, Any]:
     open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
     last_dir: dict[str, str] = {}       # each chat's newest real message (not a site notice): in = they wrote last
     incoming: dict[str, list[datetime]] = {}
-    answered: dict[str, datetime] = {}  # my newest message: whoever answers has read what came before
-    for cid, direction, at in db.exec(select(Message.conversation_id, Message.direction, Message.created_at)
-                                      .where(col(Message.kind).is_(None))
-                                      .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
+    answered: dict[str, datetime] = {}  # my newest own message: whoever answers has read what came before –
+    # not one the app sent by itself (an automatic answer): nobody looked at the chat for that
+    auto_sent = set(db.exec(select(Draft.conversation_id, Draft.text).where(Draft.auto == True,  # noqa: E712
+                                                                             Draft.status == "sent")).all())
+    for cid, direction, at, text in db.exec(select(Message.conversation_id, Message.direction, Message.created_at,
+                                                   Message.text).where(col(Message.kind).is_(None))
+                                            .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
         last_dir[cid] = direction
         if direction == "in" and at is not None:
             incoming.setdefault(cid, []).append(_aware(at))
-        elif direction == "out" and at is not None:
+        elif direction == "out" and at is not None and (cid, text) not in auto_sent:
             answered[cid] = _aware(at)
     base = _seen_baseline()
     unread = {}

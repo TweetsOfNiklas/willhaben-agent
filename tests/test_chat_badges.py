@@ -67,3 +67,24 @@ def test_an_answer_on_its_way_stands_in_the_thread_with_its_countdown():
         page = c.get("/chats/c1").text
     thread = page[page.index('id="chat-messages"'):page.index('id="chat-composer"')]
     assert f'data-undo-here="draft:{did}"' in thread and "Ja, noch da." in thread and "data-sending" in thread
+
+
+def test_an_automatic_answer_does_not_count_as_read():
+    set_setting("chats_app_seen_since", (T0 - timedelta(hours=1)).isoformat())
+    _chat("c1", ("in", -5), ("out", -2))
+    with session() as db:
+        db.add(Draft(conversation_id="c1", text="m1", status="sent", auto=True))     # the app answered by itself
+        db.commit()
+    assert _counts() == {"chats": 1, "chats_action": 0}       # answered, but nobody looked at it yet
+
+
+def test_the_list_marks_unread_in_blue_and_awaiting_my_reply_with_a_yellow_dot():
+    set_setting("chats_app_seen_since", (T0 - timedelta(hours=1)).isoformat())
+    _chat("c1", ("in", -5))                    # new and unanswered: both
+    _chat("c2", ("in", -9), ("out", -8))       # answered: neither
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats").text.split('id="chat-list-items"')[1]
+    rows = {cid: page[page.index(f"/chats/{cid}"):][:4000].split("</a>")[0] for cid in ("c1", "c2")}
+    assert "badge-primary" in rows["c1"] and "data-awaiting" in rows["c1"]
+    assert "badge-primary" not in rows["c2"] and "data-awaiting" not in rows["c2"]

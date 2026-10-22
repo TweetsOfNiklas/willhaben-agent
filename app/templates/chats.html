@@ -95,7 +95,9 @@
         <span class="mt-0.5 block truncate text-[13px] {{ 'text-base-content' if unread_by_chat.get(c.id) else 'text-muted' }}">{{ (c.last_message_text or '')[:120] }}</span>
       </span>
       <span class="flex flex-col items-end gap-1 pt-[18px]">
-        {% if unread_by_chat.get(c.id) %}<span class="badge badge-primary badge-sm">{{ unread_by_chat[c.id] }}</span>{% endif %}
+        {# blue number: unread here; yellow dot: they wrote last, my answer is due (the sidebar's two badges) #}
+        {% if unread_by_chat.get(c.id) %}<span class="badge badge-primary badge-sm" title="{{ _('Unread messages') }}">{{ unread_by_chat[c.id] }}</span>{% endif %}
+        {% if c.id in waiting %}<span class="size-2.5 rounded-full bg-warning" data-awaiting title="{{ _('Awaiting my reply') }}"><span class="sr-only">{{ _("Awaiting my reply") }}</span></span>{% endif %}
         {% if c.id in open_drafts %}{{ ui.pill(_("Draft"), 'ok', dot=false) }}{% endif %}
         {% if c.hidden_at %}{{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}
       </span>
