@@ -21,8 +21,7 @@
   <div id="s-sell-payment" class="flex min-w-0 flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("Payment") }}</span>
     <div class="flex flex-wrap gap-1.5">{% for v, l in [('transfer', _("Bank transfer")), ('paylivery', "willhaben PayLivery"), ('cash', _("Cash on pickup"))] %}<label class="{{ chip }}"><input type="checkbox" name="sell_payment" value="{{ v }}" {% if v in sell.payment %}checked{% endif %} class="sr-only">{{ l }}</label>{% endfor %}</div>
     <small class="text-[12.5px] text-muted">{{ _("Claude only names what fits the handover: PayLivery with shipping, cash with pickup.") }}</small></div>
-  <label id="s-sell-notes" class="flex flex-col gap-1.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("More selling facts for Claude") }}</span>
-    <textarea name="sell_notes" rows="4" placeholder="{{ _('e.g. Shipping on weekdays only. Invoice available.') }}" class="textarea w-full min-w-0 bg-base-200">{{ sell.notes }}</textarea></label>
+  <div id="s-sell-notes" class="flex flex-col gap-0.5 border-t border-base-300 pt-3.5"><span class="text-[12.5px] text-muted">{{ _("More selling facts for Claude") }}</span><a href="/settings/rules#ai-sell_notes" class="link link-hover text-[12.5px]">{{ _("Edited under AI rules and prompts, with all other rules") }} →</a></div>
   <div class="flex items-center gap-3"><button class="btn btn-primary">{{ _("Save") }}</button><small class="text-muted" aria-live="polite" x-text="state"></small></div>
 </form>
 <section id="s-sell-always" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">

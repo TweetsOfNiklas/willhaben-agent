@@ -17,10 +17,12 @@ def test_the_page_shows_rules_prompts_and_built_ins_and_saves_and_resets():
     set_setting("reply_rules", DEFAULT_SETTINGS["reply_rules"] + "\n- Immer mit € schreiben.")
     with TestClient(app) as c:
         page = c.get("/settings/rules").text
-        for key in ("reply_rules", "auto_reply_rules", "purchase_rules", "auto_reply", "purchase", "sim_partner"):
+        for key in ("reply_rules", "sell_notes", "auto_reply_rules", "purchase_rules", "auto_reply", "purchase", "sim_partner"):
             assert f'id="ai-{key}"' in page
         assert 'data-ai-builtin="SCREEN_SYSTEM"' in page and 'data-ai-builtin="DEAL_SYSTEM"' in page
-        card = page[page.index('id="ai-reply_rules"'):page.index('id="ai-auto_reply_rules"')]
+        card = page[page.index('id="ai-reply_rules"'):page.index('id="ai-sell_notes"')]
+        order = [page.index(f'data-ai-group="{g}"') for g in ("general", "sell", "buy", "sim")]
+        assert order == sorted(order) and page.index('id="ai-sell_notes"') < page.index('data-ai-group="buy"')
         assert "data-ai-diff" in card and "Immer mit € schreiben." in card and "data-ai-reset" in card
         assert "data-ai-diff" not in page[page.index('id="ai-auto_reply"'):page.index('id="ai-purchase"')]   # default
 
@@ -29,7 +31,7 @@ def test_the_page_shows_rules_prompts_and_built_ins_and_saves_and_resets():
         c.post("/settings/ai/rule/purchase_rules", data={"text": "- Nur Privat."})
         assert get_setting("purchase_rules") == "- Nur Privat."
         c.post("/settings/ai/rule/purchase_rules", data={"do": "reset"})
-        assert get_setting("purchase_rules") == "" and ai_rules.rule_value(ai_rules.RULES[2]) == purchase.DEFAULT_RULES
+        assert get_setting("purchase_rules") == "" and ai_rules.rule_value(next(r for r in ai_rules.RULES if r.key == "purchase_rules")) == purchase.DEFAULT_RULES
 
         c.post("/settings/ai/prompt/auto_reply", data={"text": "Mein eigener Prompt."})
         assert system_prompts.get("auto_reply") == "Mein eigener Prompt." and system_prompts.custom("auto_reply")
@@ -57,5 +59,5 @@ def test_the_page_is_in_german():
     with TestClient(app) as c:
         c.cookies.set("lang", "de")
         page = c.get("/settings/rules", headers={"accept-language": "de"}).text
-    assert "Regeln für Antworten" in page or "Antworten und Anzeigen" in page
+    assert "Allgemeine Regeln" in page and "Regeln beim Verkaufen" in page and "Regeln für Kaufaufträge" in page
     assert "Neue Treffer prüfen (Screening)" in page and "Checking new hits (screening)" not in page

@@ -59,8 +59,11 @@ def test_settings_page_renders_and_saves():
         page = c.get("/settings/selling").text
         assert 'name="sell_handover" value="shipping" checked' in page and '<option value="dpd" selected>' in page
         assert 'value="paylivery" checked' in page and 'value="cash" checked' not in page
-        assert "Rechnung vorhanden</textarea>" in page
+        assert "/settings/rules#ai-sell_notes" in page                   # the free text lives on the AI rules page now
+        assert "Rechnung vorhanden</textarea>" in c.get("/settings/rules").text
     assert selling.config()["carrier"] == "dpd" and get_setting("reply_rules")   # the rules were not touched
+    selling.save({"sell_handover": "pickup"})                                  # a form without the text keeps it
+    assert get_setting("sell_notes") == "Rechnung vorhanden"
 
 
 @pytest.mark.parametrize("data", [{"section": "unknown", "reply_rules": ""}, {"reply_rules": "", "auto_draft": "1"}])
@@ -399,4 +402,4 @@ async def test_seller_drafts_get_the_style_profile_and_the_other_chats(env):  # 
     for auto in (False, True):
         await chats.draft_reply("c1", auto=auto)
         p = backend.calls[-1]["prompt"]
-        assert "Mein Schreibstil" not in p and "Was ich anderen Interessenten" not in p and "Höchstpreis: 250 €" in p
+        assert "Mein Schreibstil" in p and "Was ich anderen Interessenten" not in p and "Höchstpreis: 250 €" in p   # buying sounds like me too

@@ -21,12 +21,17 @@ def _(text: str) -> str:
     return text
 
 
+GROUPS = (("general", _("For every task")), ("sell", _("Selling")), ("buy", _("Buying")), ("sim", _("Simulator")))
+
+
 @dataclass(frozen=True)
 class Rule:
     key: str
     label: str
     help: str
+    group: str = "general"
     empty_is_default: bool = False      # empty = the default applies (stored empty on reset)
+    max_chars: int = MAX_CHARS
 
     def default(self) -> str:
         if self.key == "purchase_rules":
@@ -36,41 +41,45 @@ class Rule:
 
 
 RULES = (
-    Rule("reply_rules", _("Rules for replies and listings"),
-         _("In every Claude prompt: chat replies, automatic answers and new listings.")),
-    Rule("auto_reply_rules", _("General instruction for automatic answers"),
-         _("Automatic answers when selling, in addition to the rules above and each ad's own instruction.")),
-    Rule("purchase_rules", _("My rules for purchases"),
-         _("Purchase orders: the first message and the negotiation as buyer. Empty: the default applies."),
-         empty_is_default=True),
+    Rule("reply_rules", _("General rules"),
+         _("Tone, form of address, what always holds: in every chat answer (buying and selling) and in new listings.")),
+    Rule("sell_notes", _("Rules when selling"),
+         _("For answers to buyers, by hand and automatic, and for new listings. Handover, shipping and payment are chosen "
+           "under Selling preferences."), group="sell", max_chars=2000),
+    Rule("auto_reply_rules", _("Additionally for automatic answers"),
+         _("What the app may answer on its own when selling; each ad's own instruction comes on top."), group="sell"),
+    Rule("purchase_rules", _("Rules for purchase orders (automatic negotiation)"),
+         _("The automatic instructions for buying: the first message and the negotiation of every purchase order. "
+           "Empty: the default applies."), group="buy", empty_is_default=True),
 )
 _BY_KEY = {r.key: r for r in RULES}
 
-# read only: (module, constant, label)
+# read only: (module, constant, label, task)
 BUILT_IN = (
-    ("app.llm.prompts", "REPLY_SYSTEM", _("Reply drafts")),
-    ("app.llm.prompts", "PURCHASE_OPENER_SYSTEM", _("First message of a purchase")),
-    ("app.llm.prompts", "SCREEN_SYSTEM", _("Checking new hits (screening)")),
-    ("app.llm.prompts", "AD_SYSTEM", _("Writing new ads")),
-    ("app.llm.prompts", "SORT_SYSTEM", _("Sorting photos into ads")),
-    ("app.llm.prompts", "MEETUP_SYSTEM", _("Finding agreed appointments in chats")),
-    ("app.llm.prompts", "SEARCH_PLAN_SYSTEM", _("Product search: the plan")),
-    ("app.llm.prompts", "SEARCH_RANK_SYSTEM", _("Product search: choosing the best offers")),
-    ("app.llm.prompts", "SEARCH_PHOTO_SYSTEM", _("Product search from a photo")),
-    ("app.services.deals", "DEAL_SYSTEM", _("Price check of an ad")),
-    ("app.services.deals", "GH_QUERIES_SYSTEM", _("Geizhals: search words")),
-    ("app.services.deals", "GH_PICK_SYSTEM", _("Geizhals: picking the product")),
-    ("app.services.geizhals_check", "CHECK_SYSTEM", _("Geizhals: checking a match")),
-    ("app.services.geizhals_check", "PICK_SYSTEM", _("Geizhals: picking a match")),
-    ("app.services.style", "STYLE_SYSTEM", _("Deriving my writing style")),
-    ("app.services.paylivery", "STEP_SYSTEM", _("PayLivery: the next step")),
-    ("app.services.shipping", "EXTRACT_SYSTEM", _("Reading a shipping address from a chat")),
-    ("app.services.label_fill", "FILL_SYSTEM", _("Filling in a shipping label form")),
-    ("app.services.label_buy", "BUY_SYSTEM", _("Buying a shipping label")),
-    ("app.llm.prompts", "SIM_JUDGE_SYSTEM", _("Simulator: checking expectations")),
-    ("app.llm.prompts", "SIM_SUGGEST_SYSTEM", _("Simulator: proposing a rule change")),
-    ("app.llm.prompts", "SIM_REVIEW_SYSTEM", _("Simulator: reviewing a prompt")),
-    ("app.llm.prompts", "SIM_ROUND_REVIEW_SYSTEM", _("Simulator: reviewing a round")),
+    ("app.llm.prompts", "REPLY_SYSTEM", _("Reply drafts"), "general"),
+    ("app.services.style", "STYLE_SYSTEM", _("Deriving my writing style"), "general"),
+    ("app.llm.prompts", "MEETUP_SYSTEM", _("Finding agreed appointments in chats"), "general"),
+    ("app.llm.prompts", "AD_SYSTEM", _("Writing new ads"), "sell"),
+    ("app.llm.prompts", "SORT_SYSTEM", _("Sorting photos into ads"), "sell"),
+    ("app.services.paylivery", "STEP_SYSTEM", _("PayLivery: the next step"), "sell"),
+    ("app.services.shipping", "EXTRACT_SYSTEM", _("Reading a shipping address from a chat"), "sell"),
+    ("app.services.label_fill", "FILL_SYSTEM", _("Filling in a shipping label form"), "sell"),
+    ("app.services.label_buy", "BUY_SYSTEM", _("Buying a shipping label"), "sell"),
+    ("app.llm.prompts", "PURCHASE_OPENER_SYSTEM", _("First message of a purchase"), "buy"),
+    ("app.llm.prompts", "SCREEN_SYSTEM", _("Checking new hits (screening)"), "buy"),
+    ("app.llm.prompts", "SEARCH_PLAN_SYSTEM", _("Product search: the plan"), "buy"),
+    ("app.llm.prompts", "SEARCH_RANK_SYSTEM", _("Product search: choosing the best offers"), "buy"),
+    ("app.llm.prompts", "SEARCH_PHOTO_SYSTEM", _("Product search from a photo"), "buy"),
+    ("app.services.deals", "DEAL_SYSTEM", _("Price check of an ad"), "buy"),
+    ("app.services.deals", "GH_QUERIES_SYSTEM", _("Geizhals: search words"), "buy"),
+    ("app.services.deals", "GH_PICK_SYSTEM", _("Geizhals: picking the product"), "buy"),
+    ("app.services.geizhals_check", "CHECK_SYSTEM", _("Geizhals: checking a match"), "buy"),
+    ("app.services.geizhals_check", "PICK_SYSTEM", _("Geizhals: picking a match"), "buy"),
+    ("app.llm.prompts", "SIM_JUDGE_SYSTEM", _("Simulator: checking expectations"), "sim"),
+    ("app.llm.prompts", "SIM_SUGGEST_SYSTEM", _("Simulator: proposing a rule change"), "sim"),
+    ("app.llm.prompts", "SIM_REVIEW_SYSTEM", _("Simulator: reviewing a prompt"), "sim"),
+    ("app.llm.prompts", "SIM_ROUND_REVIEW_SYSTEM", _("Simulator: reviewing a round"), "sim"),
+    ("app.services.chat_sim", "FILL_SYSTEM", _("Simulator: filling the owner's gaps"), "sim"),
 )
 
 
@@ -101,14 +110,14 @@ def rules() -> list[dict]:
     out = []
     for r in RULES:
         value, default = rule_value(r), r.default()
-        out.append({"key": r.key, "label": r.label, "help": r.help, "value": value, "default": default,
+        out.append({"key": r.key, "label": r.label, "help": r.help, "group": r.group, "value": value, "default": default,
                     "custom": value.strip() != default.strip(), "diff": diff(default, value)})
     return out
 
 
 def save_rule(key: str, text: str) -> None:
     r = _BY_KEY[key]
-    text = (text or "").replace("\r\n", "\n").strip()[:MAX_CHARS]
+    text = (text or "").replace("\r\n", "\n").strip()[:r.max_chars]
     if r.empty_is_default and text == r.default().strip():
         text = ""
     set_setting(key, text)
@@ -126,9 +135,10 @@ def is_rule(key: str) -> bool:
 def prompts() -> list[dict]:
     """The editable system prompts (automatic answers when selling and buying, the simulator's other side)."""
     out = []
+    groups = {"auto_reply": "sell", "purchase": "buy", "sim_partner": "sim"}
     for kind, (label, _role, _default) in system_prompts.KINDS.items():
         value, default = system_prompts.get(kind), system_prompts.default(kind)
-        out.append({"key": kind, "label": label, "value": value, "default": default,
+        out.append({"key": kind, "label": label, "group": groups.get(kind, "general"), "value": value, "default": default,
                     "custom": system_prompts.custom(kind), "diff": diff(default, value)})
     return out
 
@@ -136,8 +146,8 @@ def prompts() -> list[dict]:
 def built_in() -> list[dict]:
     """The other prompts, read only, in the order above; a constant that is gone is left out."""
     out = []
-    for module, name, label in BUILT_IN:
+    for module, name, label, group in BUILT_IN:
         text = getattr(importlib.import_module(module), name, None)
         if isinstance(text, str) and text.strip():
-            out.append({"key": name, "label": label, "text": text.strip()})
+            out.append({"key": name, "label": label, "group": group, "text": text.strip()})
     return out

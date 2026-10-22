@@ -3168,7 +3168,8 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **_settings_nav(), **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
-                  **({"ai": {"rules": ai_rules.rules(), "prompts": ai_rules.prompts(), "built_in": ai_rules.built_in()}}
+                  **({"ai": {"groups": ai_rules.GROUPS, "rules": ai_rules.rules(), "prompts": ai_rules.prompts(),
+                            "built_in": ai_rules.built_in()}}
                      if section == "rules" else {}),
                   **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
                       "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),

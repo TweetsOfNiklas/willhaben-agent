@@ -185,9 +185,10 @@ def build(sites: Iterable[Any], t: Callable[..., str] = _t) -> list[Group]:
                       Item("s-claude-usage", t("Token usage"), t("statistics, calls, API price, per task"))),
                      t("Claude is not signed in."))
     rules = Section("rules", t("AI rules and prompts"), t("Everything Claude is told: your rules, your writing style, the system prompts with their defaults, and the built-in prompts."),
-                    (Item("s-rules", t("Rules for replies and listings"), t("instructions, prompt, free text")),
-                     Item("s-ai-auto-rules", t("General instruction for automatic answers"), t("auto-reply, instruction, prompt")),
-                     Item("s-ai-purchase-rules", t("My rules for purchases"), t("private sellers, invoice, pickup")),
+                    (Item("s-rules", t("General rules"), t("instructions, prompt, free text, tone")),
+                     Item("s-ai-sell-rules", t("Rules when selling"), t("selling, buyers, facts, invoice")),
+                     Item("s-ai-auto-rules", t("Additionally for automatic answers"), t("auto-reply, instruction, prompt")),
+                     Item("s-ai-purchase-rules", t("Rules for purchase orders (automatic negotiation)"), t("buying, private sellers, invoice, pickup")),
                      Item("style-card", t("Writing style"), t("style, how I write, derive")),
                      Item("s-ai-prompts", t("System prompts"), t("system prompt, default, reset, difference")),
                      Item("s-ai-builtin", t("Built-in prompts (read only)"), t("screening, product search, Geizhals, shipping")),

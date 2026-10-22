@@ -61,7 +61,8 @@ def save(form: Any) -> None:
     set_setting("sell_carrier", _pick(form.get("sell_carrier"), ("", *CARRIERS), cur["carrier"]))
     ways = form.getlist("sell_payment") if hasattr(form, "getlist") else form.get("sell_payment")
     set_setting("sell_payment", ",".join(_ways(ways)))      # none ticked: no payment line for Claude
-    set_setting("sell_notes", str(form.get("sell_notes") or "").replace("\r\n", "\n").strip()[:MAX_NOTES])
+    if "sell_notes" in form:          # edited under Settings → AI rules (Selling) now; a form without it keeps it
+        set_setting("sell_notes", str(form.get("sell_notes") or "").replace("\r\n", "\n").strip()[:MAX_NOTES])
 
 
 def handover() -> str:
