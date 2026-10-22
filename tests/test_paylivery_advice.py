@@ -66,7 +66,7 @@ def test_the_composer_shows_the_step_and_send_starts_it(monkeypatch):
         started.append((cid, action, amount))
         return "ok"
     monkeypatch.setattr(paylivery, "start_action", start)
-    monkeypatch.setattr(chats, "enqueue_send", lambda did, text: queued.append(did) or True)
+    monkeypatch.setattr(chats, "enqueue_send", lambda did, text, now=False: queued.append(did) or True)
     from app.main import app
     with TestClient(app) as c:
         page = c.get("/chats/s-adv").text

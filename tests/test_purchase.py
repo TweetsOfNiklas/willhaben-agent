@@ -1178,3 +1178,11 @@ def test_no_promises_of_undone_actions_and_nothing_invented_about_me():
     from app.llm.prompts import AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM
     for system in (AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM):
         assert "Anzeige reservieren" in system and "Wo wärst du?" in system
+
+
+def test_paylivery_shipping_and_insurance_are_willhabens():
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, reply_prompt
+    assert "Versandkosten, Versicherung und Käuferschutz legt willhaben fest" in AUTO_REPLY_SYSTEM
+    p = reply_prompt(role="seller", ad={"title": "Uhr", "paylivery": True}, partner=None, messages=[], rules="",
+                     examples=[], hint=None)
+    assert "der Käufer sieht sie beim Kauf" in p

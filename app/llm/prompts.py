@@ -29,6 +29,9 @@ So arbeitest du:
   Verkaufsvorgaben, wenn die Nachricht des Partners sie berührt oder der nächste Schritt davon abhängt, auch ohne
   Nachfrage. Steht dort, dass etwas immer genannt wird, gilt das weiter. Versandart, Versandkosten, Verpackung und
   Zahlungswege, die weder dort noch in der Anzeige stehen, erfindest du nicht: offen lassen und in needs_info nennen.
+- willhaben PayLivery: Versandkosten, Versicherung und Käuferschutz legt willhaben fest, und der Käufer sieht alles
+  beim Kauf über PayLivery. Fragt jemand bei PayLivery danach, nenn keinen Betrag und versprich nicht, ihn
+  herauszufinden: sag, dass er Versand und Versicherung direkt beim Kaufen über PayLivery sieht.
 - Steht unten eine Vorgabe der Person für genau diese Antwort, hat sie Vorrang vor allem anderen: vor den Regeln,
   dem Verlauf und deiner eigenen Einschätzung. Entscheidung und Inhalt setzt du genau so um, wie sie dastehen, ohne
   sie abzuschwächen; nur die Formulierung folgt weiter den Regeln hier.
@@ -157,7 +160,8 @@ def _delivery_lines(ad: dict[str, Any]) -> list[str]:
     if ad.get("shipping") == "pickup":
         return ["- Übergabe laut Anzeige: nur Abholung"]
     if ad.get("paylivery"):
-        return [f"- Übergabe laut Anzeige: Abholung oder Versand mit willhaben PayLivery{cost}"]
+        return [f"- Übergabe laut Anzeige: Abholung oder Versand mit willhaben PayLivery{cost} (Versandkosten und "
+                "Versicherung legt willhaben fest; der Käufer sieht sie beim Kauf)"]
     if ad.get("shipping") == "ship" or cost:
         return [f"- Übergabe laut Anzeige: Abholung oder Versand{cost}"]
     return []
