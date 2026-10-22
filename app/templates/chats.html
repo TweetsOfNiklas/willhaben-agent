@@ -84,12 +84,12 @@
                               or (show_filter == 'draft' and c.id in open_drafts)) %}
     <a href="/chats/{{ c.id }}{{ filter_q }}" @click="rowClick($event)"
        hx-get="/chats/{{ c.id }}{{ filter_q }}" hx-target="#chat-pane" hx-select="#chat-pane" hx-swap="outerHTML" hx-select-oob="#chat-list-items,#chat-live" hx-push-url="true" hx-trigger="open-row"
-       class="grid w-full grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if conv is defined and conv and conv.id == c.id else '' }}"
-       :class="selecting && 'grid-cols-[24px_36px_minmax(0,1fr)_auto]!'">
+       class="grid w-full grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] p-2.5 text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if conv is defined and conv and conv.id == c.id else '' }}"
+       :class="selecting && 'grid-cols-[24px_56px_minmax(0,1fr)_auto]!'">
       <input type="checkbox" class="sel chat-sel checkbox checkbox-primary checkbox-sm mt-1" name="ids" value="{{ c.id }}" form="chat-bulk"
              x-show="selecting" x-cloak x-model="picked" aria-label="{{ _('Select') }}">
-      {# the item's picture in a rounded square (the partner's initial when there is none, or it fails to load) #}
-      <span class="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-[9px] bg-hover text-[13px] font-bold text-base-content">{{ (c.partner_name or '?')[:1]|upper }}{% if thumbs.get(c.id) %}<img src="{{ thumbs[c.id] }}" alt="" loading="lazy" class="absolute inset-0 size-full object-cover" data-chat-thumb onerror="this.remove()">{% endif %}</span>
+      {# the item's picture in a rounded square as tall as the entry (the partner's initial when there is none, or it fails to load) #}
+      <span class="relative grid min-h-14 w-14 shrink-0 self-stretch place-items-center overflow-hidden rounded-[10px] bg-hover text-[15px] font-bold text-base-content">{{ (c.partner_name or '?')[:1]|upper }}{% if thumbs.get(c.id) %}<img src="{{ thumbs[c.id] }}" alt="" loading="lazy" class="absolute inset-0 size-full object-cover" data-chat-thumb onerror="this.remove()">{% endif %}</span>
       <span class="min-w-0">
         <span class="flex min-w-0 items-center justify-between gap-2">
           <span class="flex min-w-0 items-center gap-1.5"><span class="truncate {{ 'font-bold' if unread_by_chat.get(c.id) else 'font-semibold' }}">{{ c.partner_name or _('unknown') }}</span>{% if vinted_on %}{{ ui.site_mark(c.platform or 'willhaben') }}{% endif %}</span>
