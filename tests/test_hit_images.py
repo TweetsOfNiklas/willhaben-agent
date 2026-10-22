@@ -74,3 +74,35 @@ def test_the_ad_viewer_shows_the_kept_photo_when_the_sold_page_has_none(monkeypa
     with TestClient(app) as c:
         frag = c.get(f"/hits/ad/vinted/9?hit={hid}").text
     assert f'src="/hits/{hid}/image"' in frag and "No photos" not in frag
+
+
+async def test_a_saved_hit_keeps_every_photo_the_viewer_showed(monkeypatch, tmp_path):
+    """Saving after the viewer showed the ad keeps all its photos; once sold, the viewer shows them from the disk."""
+    from app import platforms
+    from app.main import app
+
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+
+    async def download(url, folder, name, transport=None, platform=None):
+        p = folder / f"{name}.webp"
+        p.write_bytes(url.encode())
+        return p
+    monkeypatch.setattr(ad_images, "download", download)
+    hid = _hit()
+    shots = [f"https://images1.vinted.net/t/{i}.webp" for i in range(3)]
+    search_agents.remember_photos(hid, shots)
+    assert await search_agents.keep_image(hid, search_agents.shown_photos(hid))
+    with session() as db:
+        h = db.get(Hit, hid)
+    assert search_agents.kept_photos(h) == [f"hit-{hid}.webp", f"hit-{hid}-1.webp", f"hit-{hid}-2.webp"]
+    sold = platforms.AdDetail.from_hit(h)
+    sold.images, sold.status = [], "sold"
+
+    async def detail(ad_id, url=None):
+        return sold
+    monkeypatch.setattr(platforms.get("vinted"), "detail", detail)
+    with TestClient(app) as c:
+        frag = c.get(f"/hits/ad/vinted/9?hit={hid}").text
+        assert c.get(f"/hits/{hid}/image/2").content == shots[2].encode()
+        assert c.get(f"/hits/{hid}/image/5").status_code == 404
+    assert f'src="/hits/{hid}/image"' in frag and f'data-full="/hits/{hid}/image/2"' in frag

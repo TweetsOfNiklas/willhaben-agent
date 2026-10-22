@@ -1271,33 +1271,66 @@ def site_status(detail: Any) -> str:
 
 
 _image_tasks: set[asyncio.Task] = set()
+MAX_KEPT_PHOTOS = 12                       # a saved hit's photos kept locally (the viewer shows as many thumbnails)
+_shown_photos: dict[int, list[str]] = {}   # hit id -> the photos its ad page showed last (the viewer), for a save
 
 
-async def keep_image(hit_id: int, url: str | None = None) -> bool:
-    """A saved hit's thumbnail into data/hit-images (url: a fresh photo of the ad page, else the list's). True when
-    one is kept (also when it already was)."""
+def remember_photos(hit_id: int, photos: list[str] | None) -> None:
+    """The photos the ad viewer just showed for a hit: saving it then keeps them all, without asking the site again."""
+    if photos:
+        _shown_photos.pop(hit_id, None)
+        _shown_photos[hit_id] = list(photos)
+        while len(_shown_photos) > 200:
+            _shown_photos.pop(next(iter(_shown_photos)))
+
+
+def shown_photos(hit_id: int) -> list[str]:
+    return _shown_photos.get(hit_id, [])
+
+
+def kept_photos(h: Hit) -> list[str]:
+    """The file names of a hit's kept photos, the first (image_path) first."""
+    if not h.image_path or h.id is None:
+        return []
+    folder = get_settings().hit_images_dir
+    more = sorted(folder.glob(f"hit-{h.id}-*"), key=lambda p: int(p.stem.rsplit("-", 1)[1]) if p.stem.rsplit("-", 1)[1].isdigit() else 0)
+    return [h.image_path] + [p.name for p in more]
+
+
+async def keep_image(hit_id: int, url: str | list[str] | None = None) -> bool:
+    """A saved hit's photos into data/hit-images (url: the ad page's photos, fresh, else the list's thumbnail), so
+    they still show once the site drops them (sold, deleted). True when the first one is kept (also when it already
+    was)."""
     from app.services import ad_images
 
     with session() as db:
         h = db.get(Hit, hit_id)
-    if h is None or h.image_path:
-        return h is not None and bool(h.image_path)
+    if h is None:
+        return False
+    photos = [url] if isinstance(url, str) else list(url or [])
     folder = get_settings().hit_images_dir
     folder.mkdir(parents=True, exist_ok=True)
-    for src in dict.fromkeys(u for u in (url, h.image_url) if u):
-        p = await ad_images.download(src, folder, f"hit-{hit_id}", platform=h.platform)
-        if p is not None:
-            with session() as db:
-                row = db.get(Hit, hit_id)
-                if row is not None:
-                    row.image_path = p.name
-                    db.add(row)
-                    db.commit()
-            return True
-    return False
+    if not h.image_path:
+        for src in dict.fromkeys(u for u in (photos[:1] + [h.image_url]) if u):
+            p = await ad_images.download(src, folder, f"hit-{hit_id}", platform=h.platform)
+            if p is not None:
+                with session() as db:
+                    row = db.get(Hit, hit_id)
+                    if row is not None:
+                        row.image_path = p.name
+                        db.add(row)
+                        db.commit()
+                h.image_path = p.name
+                break
+        else:
+            return False
+    for i, src in enumerate(photos[1:MAX_KEPT_PHOTOS], 1):     # the others, each once
+        if src and not any(folder.glob(f"hit-{hit_id}-{i}.*")):
+            await ad_images.download(src, folder, f"hit-{hit_id}-{i}", platform=h.platform)
+    return True
 
 
-def keep_image_later(hit_id: int, url: str | None = None) -> None:
+def keep_image_later(hit_id: int, url: str | list[str] | None = None) -> None:
     try:
         task = asyncio.get_running_loop().create_task(keep_image(hit_id, url))
     except RuntimeError:           # no loop (a sync caller in tests): nothing to keep
@@ -1322,9 +1355,9 @@ def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None)
                     if agent is not None and passes(agent, h):
                         h.state = "new"
             db.add(h)
-            if h.state == "saved" and not h.image_path:      # still online: keep its photo before it is gone
-                photos = getattr(detail, "images", None) or []
-                keep_image_later(h.id, photos[0] if photos else None)
+            photos = getattr(detail, "images", None) or []
+            if h.state == "saved" and (not h.image_path or len(kept_photos(h)) < min(len(photos), MAX_KEPT_PHOTOS)):
+                keep_image_later(h.id, photos)              # still online: keep its photos before they are gone
         db.commit()
 
 

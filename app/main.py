@@ -1024,10 +1024,13 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
         search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d), d)
         with session() as db:
             h = db.get(Hit, h.id) or h                       # the pane shows the status just loaded
-    if d is not None and h is not None and not d.images:    # a sold ad's page drops its photos: the hit's own
-        kept = f"/hits/{h.id}/image" if h.image_path else h.image_url
-        if kept:
-            d.images = [kept]
+    if d is not None and h is not None:
+        if d.images and not reduced:
+            search_agents_svc.remember_photos(h.id, d.images)       # saving it now keeps them all
+        elif not d.images:                  # a sold ad's page drops its photos: the ones the hit kept
+            kept = search_agents_svc.kept_photos(h)
+            d.images = ([f"/hits/{h.id}/image"] + [f"/hits/{h.id}/image/{i}" for i in range(1, len(kept))] if kept
+                        else [h.image_url] if h.image_url else [])
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,
@@ -1071,8 +1074,8 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
         db.add(h)
         db.commit()
         db.refresh(h)
-    if state == "saved" and not h.image_path:      # its photo, before the site drops it (sold, deleted)
-        search_agents_svc.keep_image_later(hit_id)
+    if state == "saved":                # its photos, before the site drops them (sold, deleted)
+        search_agents_svc.keep_image_later(hit_id, search_agents_svc.shown_photos(hit_id))
     if request.headers.get("hx-request"):
         return HTMLResponse("")
     return back("/hits")
@@ -1116,6 +1119,16 @@ async def hit_image(hit_id: int):
         h = db.get(Hit, hit_id)
     folder = get_settings().hit_images_dir
     path = (folder / h.image_path) if h is not None and h.image_path else None
+    if path is None or path.parent != folder or not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.get("/hits/{hit_id}/image/{n}")
+async def hit_image_n(hit_id: int, n: int):
+    """A saved hit's further kept photos (the ad page's second, third, …)."""
+    folder = get_settings().hit_images_dir
+    path = next(iter(sorted(folder.glob(f"hit-{hit_id}-{n}.*"))), None) if n > 0 else None
     if path is None or path.parent != folder or not path.is_file():
         raise HTTPException(404)
     return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
