@@ -17,6 +17,10 @@
       <form method="post" action="/chats/{{ conv.id }}/refresh" hx-post="/chats/{{ conv.id }}/refresh" hx-swap="none"><button class="btn btn-sm max-sm:px-2" title="{{ _('Reload') }}">{{ ui.icon('refresh', 14) }}<span class="max-sm:sr-only">{{ _("Reload") }}</span></button></form>
       {% if conv.platform == 'vinted' %}<a href="https://www.vinted.at/inbox/{{ conv.id }}" target="_blank" rel="noopener" class="btn btn-sm">Vinted{{ ui.icon('external', 14) }}</a>
       {% else %}<a href="https://www.willhaben.at/iad/myprofile/chat" target="_blank" rel="noopener" class="btn btn-sm">willhaben{{ ui.icon('external', 14) }}</a>{% endif %}
+      {# finished: no answer due (the yellow dot goes); a new message from them opens it again #}
+      {% set done = conv.id in finished %}
+      <form method="post" action="/chats/{{ conv.id }}/finished"><input type="hidden" name="finished" value="{{ '0' if done else '1' }}">
+        <button class="btn btn-sm max-sm:px-2 {{ 'border-success text-success' if done else '' }}" data-finished="{{ 1 if done else 0 }}" title="{{ _('Open again') if done else _('Nothing more to answer: no yellow dot, not counted as action needed') }}">{{ ui.icon('check', 14) }}<span class="max-sm:sr-only">{{ _("Marked finished") if done else _("Mark as finished") }}</span></button></form>
       {% with c = conv %}{% include "_chat_actions.html" %}{% endwith %}
     </div>
   </div>

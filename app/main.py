@@ -1240,7 +1240,7 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
     wh_on = "willhaben" in have or bool(get_session().logged_in)
     vinted_on = platforms.enabled("vinted") and ("vinted" in have or bool(site_accounts.state("vinted")["logged_in"]))
     return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden,
-            "waiting": waiting, "unread_by_chat": o["unread"], "wh_on": wh_on, "vinted_on": vinted_on}
+            "waiting": waiting, "finished": o["finished"], "unread_by_chat": o["unread"], "wh_on": wh_on, "vinted_on": vinted_on}
 
 
 @app.get("/chats", response_class=HTMLResponse)
@@ -1284,6 +1284,13 @@ async def chats_bulk(request: Request, action: str):
 async def chat_hide(conversation_id: str, hidden: str = Form("1")):
     chats.hide(conversation_id, hidden == "1")
     return back(f"/chats?msg={quote(t('Chat hidden here (still on willhaben); it comes back when they write again') if hidden == '1' else '', safe='')}")
+
+
+@app.post("/chats/{conversation_id}/finished")
+async def chat_finished(conversation_id: str, finished: str = Form("1")):
+    """Mark as finished (or open again): no answer due; a new message from them opens it again by itself."""
+    chats.set_finished(conversation_id, finished == "1")
+    return back(f"/chats/{conversation_id}")
 
 
 @app.post("/chats/{conversation_id}/remove")

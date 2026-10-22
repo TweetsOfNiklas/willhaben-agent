@@ -3,7 +3,9 @@ them read there first) and the chats that need me (the other person wrote last, 
 way stands in the thread with its countdown, not as a notice at the edge."""
 from datetime import timedelta
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import select
 
 from app.db import Conversation, Draft, Message, session, set_setting, utcnow
 from app.services import chats
@@ -88,3 +90,32 @@ def test_the_list_marks_unread_in_blue_and_awaiting_my_reply_with_a_yellow_dot()
     rows = {cid: page[page.index(f"/chats/{cid}"):][:4000].split("</a>")[0] for cid in ("c1", "c2")}
     assert "badge-primary" in rows["c1"] and "data-awaiting" in rows["c1"]
     assert "badge-primary" not in rows["c2"] and "data-awaiting" not in rows["c2"]
+
+
+@pytest.mark.parametrize("text,closes", [
+    ("Danke, passt!", True), ("Ist angekommen, danke 👍", True), ("Ok super, bis morgen", True),
+    ("Vielen Dank und schönen Abend", True), ("Thanks, have a nice day", True), ("Passt lg", True),
+    ("Passt, wann kann ich kommen?", False), ("Danke, geht auch 40?", False), ("Ok", True),
+    ("Ok, ich nehme es um 50", False), ("Noch da", False), ("", False)])
+def test_a_message_that_only_thanks_or_says_goodbye_ends_the_chat(text, closes):
+    assert chats.closes_chat(text) is closes
+
+
+def test_a_finished_chat_needs_no_answer_until_they_write_again():
+    set_setting("chats_app_seen_since", (T0 - timedelta(hours=1)).isoformat())
+    _chat("c1", ("out", -9), ("in", -5))
+    _chat("c2", ("out", -9), ("in", -5))
+    with session() as db:
+        db.get(Message, db.exec(select(Message.id).where(Message.ext_id == "c2-1")).one()).text = "Danke, passt!"
+        db.commit()
+    assert _counts()["chats_action"] == 1                 # c2 ended by their thanks
+    from app.main import app
+    with TestClient(app) as c:
+        c.post("/chats/c1/finished", data={"finished": "1"})
+        assert 'data-finished="1"' in c.get("/chats/c1").text
+    assert _counts()["chats_action"] == 0
+    with session() as db:
+        db.add(Message(conversation_id="c1", ext_id="c1-later", direction="in", text="Doch noch eine Frage",
+                       created_at=utcnow() + timedelta(minutes=1)))
+        db.commit()
+    assert _counts()["chats_action"] == 1                 # they wrote again: open again

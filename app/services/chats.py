@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -461,6 +462,44 @@ def messages_of(conversation_id: str) -> list[Message]:
                             .order_by(col(Message.created_at).asc().nulls_first(), Message.id)))
 
 
+# a last message that only thanks, agrees or says goodbye ends the conversation: no answer is due ("Danke, passt!",
+# "Ist angekommen, danke 👍", "Thanks, bye"). A question mark, or any other word, keeps it open.
+_CLOSING_PHRASES = sorted([
+    "vielen dank", "danke schön", "danke sehr", "dankeschön", "danke", "merci", "passt", "ok", "okay", "oki", "alles klar",
+    "super", "perfekt", "top", "prima", "sehr gut", "gut", "gerne", "gern", "bis dann", "bis morgen", "bis später",
+    "bis bald", "schönen abend", "schönen tag", "schönes wochenende", "schönen sonntag", "dir auch", "ihnen auch",
+    "ebenso", "gleichfalls", "liebe grüße", "lg", "glg", "mfg", "lg lukas", "thanks", "thank you", "thx", "great",
+    "perfect", "cheers", "bye", "have a nice day", "you too", "tschüss", "baba", "ciao", "servus"], key=len, reverse=True)
+_CLOSING_FILLER = {"und", "auch", "nochmal", "nochmals", "vielmals", "echt", "sehr", "ja", "jo", "alles", "bestens",
+                   "ist", "gut", "angekommen", "erhalten", "bekommen", "hat", "geklappt", "dir", "euch", "so", "dann",
+                   "a", "lot", "so much", "much", "nice", "all", "good", "arrived", "received", "it", "has", "the",
+                   "package", "paket", "artikel", "wieder", "freut", "mich"}
+_NOT_WORD = re.compile(r"[^\w\s]", re.U)
+
+
+def closes_chat(text: str | None) -> bool:
+    """The other person's message ends the conversation (thanks, agreed, goodbye – nothing to answer)."""
+    s = (text or "").strip().lower()
+    if not s or "?" in s or len(s) > 120:
+        return False
+    s = " " + " ".join(_NOT_WORD.sub(" ", s).split()) + " "
+    hit = False
+    for phrase in _CLOSING_PHRASES:
+        if f" {phrase} " in s:
+            s, hit = s.replace(f" {phrase} ", " "), True
+    return hit and all(w in _CLOSING_FILLER for w in s.split())
+
+
+def set_finished(conversation_id: str, on: bool = True) -> None:
+    """Mark as finished: no answer due (the yellow dot and the sidebar's count leave it out) until they write again."""
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.finished_at = utcnow() if on else None
+            db.add(conv)
+            db.commit()
+
+
 def _seen_baseline() -> datetime:
     """Chats never opened in the app count as read up to the moment this was first asked (no badge for history)."""
     raw = get_setting("chats_app_seen_since")
@@ -472,7 +511,8 @@ def _seen_baseline() -> datetime:
 
 def overview(db) -> dict[str, Any]:
     """The chat list's state: the chats it shows (not hidden, not older than the sync window), those where the other
-    person wrote last ("waiting"), those with an answer drafted, and per chat the messages from the other person that
+    person wrote last and it is not finished ("waiting"; "finished": marked so, or their last message only thanks or
+    says goodbye), those with an answer drafted, and per chat the messages from the other person that
     came after it was last opened in the app ("unread"). The sidebar badges count the same."""
     convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
                          .order_by(col(Conversation.last_message_at).desc().nulls_last())))
@@ -483,10 +523,13 @@ def overview(db) -> dict[str, Any]:
     # not one the app sent by itself (an automatic answer): nobody looked at the chat for that
     auto_sent = set(db.exec(select(Draft.conversation_id, Draft.text).where(Draft.auto == True,  # noqa: E712
                                                                              Draft.status == "sent")).all())
+    last_in: dict[str, tuple[datetime | None, str | None]] = {}
     for cid, direction, at, text in db.exec(select(Message.conversation_id, Message.direction, Message.created_at,
                                                    Message.text).where(col(Message.kind).is_(None))
                                             .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
         last_dir[cid] = direction
+        if direction == "in":
+            last_in[cid] = (_aware(at) if at is not None else None, text)
         if direction == "in" and at is not None:
             incoming.setdefault(cid, []).append(_aware(at))
         elif direction == "out" and at is not None and (cid, text) not in auto_sent:
@@ -505,8 +548,15 @@ def overview(db) -> dict[str, Any]:
     since = sync_window()[1]
     old = {c.id for c in convs if since is not None and c.last_message_at is not None and _aware(c.last_message_at) < since}
     shown = [c for c in convs if not c.hidden_at and c.id not in old]
-    return {"convs": convs, "shown": shown, "old": old, "open_drafts": open_drafts,
-            "waiting": {cid for cid, d in last_dir.items() if d == "in"}, "unread": unread}
+    by_id = {c.id: c for c in convs}
+
+    def finished(cid: str) -> bool:      # marked finished since their last message, or that message ends it
+        at, text = last_in.get(cid, (None, None))
+        mark = by_id[cid].finished_at if cid in by_id else None
+        return bool(mark and (at is None or _aware(mark) >= at)) or closes_chat(text)
+    done = {cid for cid in by_id if finished(cid)}
+    return {"convs": convs, "shown": shown, "old": old, "open_drafts": open_drafts, "finished": done,
+            "waiting": {cid for cid, d in last_dir.items() if d == "in" and cid not in done}, "unread": unread}
 
 
 def badge_counts(db) -> dict[str, int]:
@@ -543,7 +593,7 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
     with session() as db:
         convs = db.exec(select(Conversation.id, Conversation.last_message_at, Conversation.unread_count,
                                Conversation.last_message_text, Conversation.hidden_at, Conversation.removed,
-                               Conversation.app_seen_at)).all()
+                               Conversation.app_seen_at, Conversation.finished_at)).all()
         open_drafts = sorted(set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all()))
         out = {"list": fp([list(r) for r in convs], open_drafts, get_session().chat_live.get("state"))}
         conv = db.get(Conversation, conversation_id) if conversation_id else None

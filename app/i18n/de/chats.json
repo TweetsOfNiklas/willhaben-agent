@@ -159,5 +159,9 @@
  "Take back": "Zurückholen",
  "Your answer is on its way (above).": "Deine Antwort ist unterwegs (oben im Verlauf).",
  "Unread messages": "Ungelesene Nachrichten",
- "Action needed": "Aktion erforderlich"
+ "Action needed": "Aktion erforderlich",
+ "Open again": "Wieder öffnen",
+ "Nothing more to answer: no yellow dot, not counted as action needed": "Nichts mehr zu beantworten: kein gelber Punkt, zählt nicht als Aktion erforderlich",
+ "Mark as finished": "Als erledigt markieren",
+ "Marked finished": "Erledigt"
 }

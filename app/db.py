@@ -134,6 +134,8 @@ class Conversation(SQLModel, table=True):
     # when the owner last looked at this chat in the app: newer messages from the other person count as unread here
     # (the sidebar badge), whatever the site says (an automatic answer marks them read there before anyone looked)
     app_seen_at: datetime | None = None
+    # marked finished by me ("Mark as finished"): no answer due any more; a newer message from them opens it again
+    finished_at: datetime | None = None
 
 
 class Message(SQLModel, table=True):
