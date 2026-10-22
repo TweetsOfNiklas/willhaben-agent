@@ -31,17 +31,12 @@ def codes(item, ctx=CTX):
 
 # --- price ------------------------------------------------------------------------------------------------
 
-def test_price_far_below_median_is_high_and_explains_itself():
-    fl = scam.flags(ad(price=250), CTX)
-    assert fl[0]["code"] == "price_far_below" and fl[0]["severity"] == "high"
-    assert fl[0]["label"] == "Price only 28 % of the usual 900 €"
-    i18n.set_request_lang("de")
-    assert scam.label(fl[0]) == "Preis nur 28 % vom Üblichen (900 €)"
-
-
-def test_price_below_half_is_warn():
-    fl = scam.flags(ad(price=400), CTX)
-    assert [(f["code"], f["severity"]) for f in fl] == [("price_below", "warn")]
+def test_a_low_price_alone_is_no_scam_sign():
+    """Owner's decision (2026-10-22): too many good deals were flagged; a photo that does not match the text is
+    the stronger sign, and Claude's screening looks for that."""
+    assert codes(ad(price=250)) == [] and codes(ad(price=90)) == []
+    assert codes(ad(heading="iPhone 16 Pro 256GB neu OVP", body="Originalverpackt, nur Versand.", price=380)) == []
+    assert codes(ad(price=300, body="Nur Versand, keine Abholung.")) == []
 
 
 @pytest.mark.parametrize("item,ctx", [
@@ -83,13 +78,10 @@ def test_prepayment_as_an_option_is_fine(body):
     assert codes(ad(body=body)) == []
 
 
-def test_courier_abroad_and_shipping_only_cheap():
+def test_courier_abroad():
     body = "Ich bin derzeit in Spanien, eine Spedition liefert das Rad zu dir."
     assert "courier_abroad" in codes(ad(body=body))
     assert codes(ad(body="Versand per Spedition möglich, Abholung bevorzugt.")) == []   # furniture-style, normal price
-    fl = codes(ad(price=300, body="Nur Versand, keine Abholung."))
-    assert fl[0] == "price_far_below" and "ship_only_cheap" in fl
-    assert "ship_only_cheap" not in codes(ad(price=850, body="Nur Versand, keine Abholung."))
 
 
 def test_off_platform_contact():
@@ -138,16 +130,6 @@ def test_iban():
 
 # --- luxury ------------------------------------------------------------------------------------------------
 
-def test_brand_new_luxury_at_a_fraction():
-    ctx = {"median": 1100.0, "count": 20}
-    fl = scam.flags(ad(heading="iPhone 16 Pro 256GB neu OVP", body="Originalverpackt, nur Versand.", price=380), ctx)
-    assert fl[0]["code"] == "luxury_new_cheap" and fl[0]["severity"] == "high"
-    assert "price_far_below" not in [f["code"] for f in fl]          # one price flag is enough
-    # without agent statistics only the clear floor cases
-    assert codes(ad(heading="Rolex Submariner neu", body="Ungetragen.", price=900), None) == ["luxury_new_cheap"]
-    assert codes(ad(heading="Rolex Submariner neu", body="Ungetragen.", price=9000), None) == []
-
-
 @pytest.mark.parametrize("heading,price", [
     ("iPhone 16 Pro Hülle neu", 15),                # accessory
     ("Rolex Box und Papiere", 300),
@@ -182,22 +164,18 @@ def test_normal_ads_have_no_flags():
         assert scam.flags(item, {"median": 700.0, "count": 30, "p25": 400.0, "p75": 1100.0}) == [], item
 
 
-def test_wide_price_spread_disables_the_price_rule():
-    # a broad "Fahrrad" search: kids' bikes at 120 €, e-bikes at 3000 € -> the median says nothing
+def test_median_context_for_the_price_bands():
     prices = [90, 120, 150, 180, 250, 400, 700, 900, 1500, 2400, 3000, 3200]
     ctx = scam.median_context(prices)
     assert ctx["count"] == 12 and ctx["p75"] / ctx["p25"] > scam.MAX_SPREAD
-    assert codes(ad(heading="Kinderfahrrad 20 Zoll", price=120), ctx) == []
-    tight = scam.median_context([800, 820, 850, 880, 900, 900, 920, 950, 990, 1000])
-    assert codes(ad(price=250), tight) == ["price_far_below"]
     assert scam.median_context([0, 1, 500])["count"] == 1               # 0/1 € placeholders left out
 
 
 def test_sorting_headline_and_level():
-    fl = scam.flags(ad(price=250, body="Erreichbar unter 0664 1234567, nur per WhatsApp."), CTX)
+    fl = scam.flags(ad(body="Zahlung per Western Union. Erreichbar unter 0664 1234567, nur per WhatsApp."), CTX)
     assert [f["severity"] for f in fl] == ["high", "warn", "info"]
     assert scam.level(fl) == "high"
-    assert scam.headline(fl) == "Price only 28 % of the usual 900 €"
+    assert scam.headline(fl) == fl[0]["label"] and fl[0]["code"] == "money_transfer"
     assert scam.level([]) is None and scam.headline(None) == ""
 
 
@@ -255,7 +233,7 @@ async def test_run_agent_flags_new_hits_and_warns(responses, ha):  # noqa: F811
         flagged = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == "1000000101")).one()
         fine = db.exec(select(dbmod.Hit).where(dbmod.Hit.ad_id == "1000000102")).one()
     got = {f["code"] for f in flagged.scam_flags}
-    assert {"price_far_below", "money_transfer", "courier_abroad"} <= got
+    assert {"money_transfer", "courier_abroad"} <= got
     assert fine.scam_flags is None
 
     events = {b["ad_id"]: b for p, b in ha if p.endswith("willhaben_hit")}
@@ -301,7 +279,7 @@ def test_hit_card_and_viewer_render_badges():
         db.commit()
     with TestClient(app) as c:
         html = c.get("/hits", headers={"accept-language": "de"}).text
-    assert "Preis nur 28 % vom Üblichen (900 €)" in html and "Will Kontakt außerhalb der Plattform" in html
+    assert "Preis nur" not in html and "Will Kontakt außerhalb der Plattform" in html
     assert "Telefonnummer im Text" not in html          # info flags stay out of the hit cards
 
 
@@ -311,12 +289,6 @@ def test_hit_card_and_viewer_render_badges():
 def test_wanted_and_swap_ads_are_not_luxury_scams(heading, price):
     assert codes(ad(heading=heading, body="Bitte melden.", price=price), None) == []
     assert codes(ad(heading=heading, body="Bitte melden.", price=price), {"median": 1000.0, "count": 20}) == []
-
-
-@pytest.mark.parametrize("body", ["Neu im Originalkarton, Versand gratis.", "Inkl. Hülle und Case.",
-                                  "Ich suche einen schnellen Käufer.", "Tausch ausgeschlossen."])
-def test_common_body_words_do_not_switch_off_the_price_rule(body):
-    assert codes(ad(price=250, body=body)) == ["price_far_below"]
 
 
 def test_viewer_counts_unscreened_hits():
@@ -341,7 +313,7 @@ def test_viewer_counts_unscreened_hits():
     d = AdDetail(ad_id="1000000499", heading="Rennrad Carbon", description="Abholung in Wien.", price=250,
                  price_display="€ 250", status="active", published_at=None, first_published_at=None, end_date=None,
                  url="https://www.willhaben.at/iad/object?adId=1000000499")
-    assert [f["code"] for f in scam.for_viewer(d, h)] == ["price_far_below"]
+    assert scam.for_viewer(d, h) == []                      # cheap, but nothing in the text
 
 
 def test_scam_context_leaves_out_rejected_page_ads():

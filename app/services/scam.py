@@ -1,7 +1,7 @@
-"""Cheap scam check for search-agent hits: rules on price and text, no LLM.
+"""Cheap scam check for search-agent hits: rules on the text, no LLM (no price rules: a low price is no scam sign).
 
 `flags(item, context)` returns [{code, label, severity, params}] sorted most severe first. Severity:
-- "high": classic scam pattern (Western Union, brand-new luxury item at a fraction of the price, far too cheap)
+- "high": classic scam pattern (Western Union, crypto, a far-away foreign IBAN)
 - "warn": worth a second look (prepayment only, contact only outside willhaben, foreign IBAN/phone, ...)
 - "info": shown only in the ad viewer, never in pushes (phone number in the text, dealer/private mismatch)
 
@@ -172,13 +172,12 @@ def agent_context(agent_id: int, exclude: set[int] | None = None) -> dict[str, A
 
 def flags(item: Any, context: dict[str, Any] | None = None, *, home_country: str = "AT") -> list[dict[str, Any]]:
     """Scam flags for a Hit, Listing, AdDetail or dict (heading, body/description, price, is_private).
-    `home_country` is the site's country (an IBAN from there is normal)."""
-    ctx = context or {}
+    `home_country` is the site's country (an IBAN from there is normal). `context` (the agent's prices) is no longer
+    used: there are no price rules."""
     home = (home_country or "AT").upper()
     heading = _get(item, "heading", "title") or ""
     body = _get(item, "body", "description") or ""
     text = f"{heading}\n{body}"
-    price = _get(item, "price")
     private = _get(item, "is_private", "private")
     out: list[dict[str, Any]] = []
 
@@ -186,29 +185,8 @@ def flags(item: Any, context: dict[str, Any] | None = None, *, home_country: str
         if not any(f["code"] == code for f in out):
             out.append({"code": code, "label": _label(code, **params), "severity": severity, "params": params})
 
-    # --- price against the agent's median
-    ratio = None
-    median, count = ctx.get("median"), ctx.get("count") or 0
-    p25, p75 = ctx.get("p25"), ctx.get("p75")
-    spread_ok = not (p25 and p75) or p75 / p25 <= MAX_SPREAD
-    if price and price > 1 and median and count >= MIN_SAMPLES and spread_ok:
-        ratio = price / median
-    cheap_ok = bool(CHEAP_OK.search(text) or CHEAP_OK_HEADING.search(heading))
-    low = ratio is not None and FLOOR_RATIO <= ratio < WARN_RATIO and not cheap_ok
-    very_low = low and ratio < HIGH_RATIO
-
-    # --- brand-new luxury item at a fraction of the price
-    luxury = bool(LUXURY.search(heading) and NEW_WORD.search(text) and not NOT_THE_ITEM.search(heading))
-    if luxury and price and price > 1 and not cheap_ok:       # wanted/swap/defect ads are not offers
-        floor_hit = any(rx.search(heading) and price < floor for rx, floor in LUXURY_FLOOR)
-        if (ratio is not None and ratio < WARN_RATIO) or floor_hit:
-            add("luxury_new_cheap", "high")
-    if low and not out:
-        pct, med = round(ratio * 100), f"{median:,.0f}".replace(",", ".")
-        if very_low:
-            add("price_far_below", "high", pct=pct, median=med)
-        else:
-            add("price_below", "warn", pct=pct, median=med)
+    # no price rules: a low price alone is no scam sign (owner's decision, 2026-10-22) – too many good deals were
+    # flagged. The screening (Claude) looks for the stronger sign instead: a photo that does not match the text.
 
     # --- payment
     m = MONEY_TRANSFER.search(text)
@@ -226,13 +204,8 @@ def flags(item: Any, context: dict[str, Any] | None = None, *, home_country: str
                 add("foreign_iban", "warn" if raw[:2] in NEAR_IBAN.get(home, ()) else "high", cc=raw[:2])
 
     # --- delivery
-    if COURIER.search(text):
-        if ABROAD.search(text):
-            add("courier_abroad", "warn")
-        elif low:
-            add("courier_cheap", "warn")
-    if low and SHIP_ONLY.search(text):
-        add("ship_only_cheap", "warn")
+    if COURIER.search(text) and ABROAD.search(text):
+        add("courier_abroad", "warn")
 
     # --- leaving the platform
     if OFF_PLATFORM.search(text):
@@ -294,10 +267,9 @@ def for_viewer(d: Any, h: Any = None) -> list[dict[str, Any]]:
     """Ad viewer: re-check with the full description of the detail page; falls back to the stored hit flags."""
     if d is None:
         return all_flags(getattr(h, "scam_flags", None))
-    ctx = agent_context(h.agent_id, {h.id}) if h is not None and getattr(h, "agent_id", None) else None
     item = {"heading": d.heading, "description": d.description, "price": d.price,
             "is_private": d.is_private if d.is_private is not None else getattr(h, "is_private", None)}
-    return all_flags(flags(item, ctx, home_country=home_country_of(getattr(d, "platform", None))))
+    return all_flags(flags(item, home_country=home_country_of(getattr(d, "platform", None))))
 
 
 def home_country_of(platform: str | None) -> str:
