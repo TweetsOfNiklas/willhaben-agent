@@ -49,8 +49,9 @@ _PRICING = '"pricingServices":{'
 _dec = json.JSONDecoder()
 
 # "6 Min.", "2 Std.", "3 Tage", "1 Woche", "vor 2 Monaten", "Hochgeladen 6 min.", "just now" -> an age
-_UNITS = [(r"sek|sec", 1), (r"min", 60), (r"std|stunde|hour|hr", 3600), (r"tag|day", 86400), (r"woche|week", 7 * 86400),
-          (r"monat|month", 30 * 86400), (r"jahr|year", 365 * 86400)]
+# written out ("2 Std.", "3 Tage") or short ("9 h", "2 d", "1 T"; Vinted switched to these, seen 2026-10-23)
+_UNITS = [(r"s$|sek|sec", 1), (r"min|m$", 60), (r"h$|std|stunde|hour|hr", 3600), (r"d$|t$|tag|day", 86400),
+          (r"w$|wo|week", 7 * 86400), (r"mon|month", 30 * 86400), (r"j$|y$|jahr|year", 365 * 86400)]
 
 
 def parse_age(text: str | None, now: datetime | None = None) -> datetime | None:

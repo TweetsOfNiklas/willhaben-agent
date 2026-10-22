@@ -81,7 +81,9 @@ def test_item_page_shipping(services, price, kind):
                                       ("3 Tage", timedelta(days=3)), ("1 Woche", timedelta(days=7)),
                                       ("vor 2 Monaten", timedelta(days=60)), ("eine Stunde", timedelta(hours=1)),
                                       ("Hochgeladen 6 min.", timedelta(minutes=6)), ("gerade eben", timedelta(0)),
-                                      ("2 hours ago", timedelta(hours=2))])
+                                      ("2 hours ago", timedelta(hours=2)), ("9 h", timedelta(hours=9)),
+                                      ("2 d", timedelta(days=2)), ("5 min", timedelta(minutes=5)),
+                                      ("3 Mon.", timedelta(days=90)), ("1 T", timedelta(days=1))])
 def test_upload_age(text, age):
     assert vi.parse_age(text, NOW) == NOW - age
 
