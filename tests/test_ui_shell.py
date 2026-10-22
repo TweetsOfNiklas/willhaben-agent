@@ -62,3 +62,13 @@ def test_the_usage_popover_opens_on_all_sites_when_there_are_several():
         page = c.get("/hits").text
     assert 'data-usage-tab="all"' in page and "data-usage-all" in page and "site: 'all'" in page
     assert 'href="/stats/requests" data-pop="usage"' in page
+
+
+def test_the_offline_worker_and_page_are_served_without_login(monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "dashboard_password", "secret")
+    with TestClient(app) as c:
+        r = c.get("/sw.js")
+        assert r.status_code == 200 and r.headers["service-worker-allowed"] == "/" and "offline.html" in r.text
+        assert "Die App startet gerade neu" in c.get("/static/offline.html").text
+        assert "serviceWorker.register('/sw.js')" in c.get("/login").text

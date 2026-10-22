@@ -432,6 +432,13 @@ async def logout():
 
 
 # ------------------------------------------------------------------ dashboard
+@app.get("/sw.js")
+async def service_worker():
+    """The service worker at the root, so its scope is the whole app: the offline page while the app is away."""
+    return FileResponse(Path(__file__).resolve().parent / "static" / "sw.js", media_type="text/javascript",
+                        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "browser": get_session().started, "logged_in": get_session().logged_in}

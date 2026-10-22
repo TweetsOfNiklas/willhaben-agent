@@ -17,3 +17,5 @@
 {# Opened from a Telegram button (a Mini App, telegram.open_button): tell Telegram the page is there (it hides its
    placeholder) and take the full height. The bridge Telegram's app injects; nothing is loaded from telegram.org. #}
 <script>if (window.TelegramWebviewProxy) for (const e of ['web_app_ready', 'web_app_expand']) try { TelegramWebviewProxy.postEvent(e) } catch (_) {}</script>
+{# the offline page (app/static/sw.js): shown instead of the proxy's "404 page not found" while the app restarts #}
+<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));</script>

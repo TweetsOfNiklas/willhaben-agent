@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b8ea2">
+<title>SecondHandler · startet neu</title>
+<!-- shown by the service worker (/sw.js) when the app does not answer: a restart or deploy, the network, or the
+     reverse proxy's "404 page not found" while the container is away. It checks /healthz and reloads by itself. -->
+<style>
+  :root { --bg: #f4f6f8; --card: #fff; --text: #14212b; --muted: #5d6b76; --brand: #0b8ea2; --line: #dde3e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0e141a; --card: #151d24; --text: #e6edf2; --muted: #93a1ac; --line: #26313b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 16px; background: var(--bg);
+         color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .card { width: min(420px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+          padding: 28px 24px; text-align: center; box-shadow: 0 12px 32px rgba(0, 0, 0, .08); }
+  img { width: 64px; height: 64px; border-radius: 16px; }
+  h1 { font-size: 19px; margin: 16px 0 6px; }
+  p { margin: 0; color: var(--muted); }
+  .status { margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
+  .spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--brand); border-radius: 50%;
+          animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  button { margin-top: 18px; border: 1px solid var(--line); background: transparent; color: var(--text); border-radius: 10px;
+           padding: 8px 16px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--brand); color: var(--brand); }
+</style>
+</head>
+<body>
+<main class="card">
+  <img src="/static/icons/icon.svg" alt="">
+  <h1>SecondHandler ist gleich wieder da</h1>
+  <p>Die App startet gerade neu oder ist kurz nicht erreichbar. Die Seite lädt von selbst, sobald sie wieder antwortet.</p>
+  <div class="status" role="status" aria-live="polite"><span class="spin"></span><span id="state">verbinde …</span></div>
+  <div><button type="button" id="now">Jetzt versuchen</button></div>
+</main>
+<script>
+(function () {
+  var tries = 0, timer = null, state = document.getElementById('state');
+  function wait(s) {
+    var left = s;
+    state.textContent = 'Versuch ' + tries + ' · nächster in ' + left + ' s';
+    clearInterval(timer);
+    timer = setInterval(function () {
+      left -= 1;
+      if (left <= 0) { clearInterval(timer); check(); } else state.textContent = 'Versuch ' + tries + ' · nächster in ' + left + ' s';
+    }, 1000);
+  }
+  function check() {
+    tries += 1;
+    state.textContent = 'verbinde …';
+    fetch('/healthz', {cache: 'no-store'}).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (d) {
+      if (d && d.ok !== undefined) location.reload(); else wait(Math.min(15, 2 + tries));
+    }).catch(function () { wait(Math.min(15, 2 + tries)); });
+  }
+  document.getElementById('now').addEventListener('click', function () { clearInterval(timer); check(); });
+  check();
+})();
+</script>
+</body>
+</html>
