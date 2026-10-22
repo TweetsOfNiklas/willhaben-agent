@@ -98,27 +98,42 @@ def haiku() -> str:
     return models.newest("haiku") or HAIKU
 
 
-def month_start():
-    now = utcnow()
-    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+PERIOD_SETTING = "claude_limit_days"     # the token limit's period in days (Settings → Claude); rolling, default a week
+DEFAULT_DAYS, MAX_DAYS = 7, 90
+
+
+def period_days() -> int:
+    try:
+        return min(max(int(get_setting(PERIOD_SETTING) or DEFAULT_DAYS), 1), MAX_DAYS)
+    except ValueError:
+        return DEFAULT_DAYS
+
+
+def period_start():
+    """Start of the token limit's period: the last N days (rolling; Settings → Claude, a week by default)."""
+    return utcnow() - timedelta(days=period_days())
+
+
+month_start = period_start    # the per-task, per-model and cost totals below count over the same period
 
 
 def month_tokens() -> int:
-    """Input + output tokens of all Claude calls since the 1st of this month (UTC)."""
+    """Input + output tokens of all Claude calls in the limit's period (period_start)."""
     with session() as db:
         return int(db.exec(select(func.coalesce(func.sum(col(LLMCall.input_tokens) + col(LLMCall.output_tokens)), 0))
                            .where(LLMCall.ts >= month_start())).one() or 0)
 
 
 def limit() -> dict[str, Any]:
-    """The monthly token limit (Settings → Claude): {"used", "limit", "mode", "over"}; limit 0 = none."""
+    """The token limit of the period (Settings → Claude): {"used", "limit", "mode", "over", "days"}; limit 0 = none."""
     try:
         lim = int(float(get_setting("claude_token_limit_m") or 0) * 1_000_000)
     except ValueError:
         lim = 0
     mode = get_setting("claude_limit_mode") or "notify"
     used = month_tokens()
-    return {"used": used, "limit": lim, "mode": mode if mode in LIMIT_MODES else "notify", "over": bool(lim) and used >= lim}
+    return {"used": used, "limit": lim, "mode": mode if mode in LIMIT_MODES else "notify", "over": bool(lim) and used >= lim,
+            "days": period_days()}
 
 
 TASK_COLORS = {"chat": "var(--brand)", "ads": "#8b5cf6", "screen": "#eb6834", "search": "#1baf7a", "shipping": "#3b82f6",
@@ -168,23 +183,30 @@ def month_cost_by_model() -> list[dict[str, Any]]:
 
 
 def _limit_reached_push() -> None:
-    """Once per month: a push when the token limit is reached (whatever the mode)."""
+    """Once per period: a push when the token limit is reached (whatever the mode)."""
     import asyncio
+    from datetime import datetime
 
     st = limit()
-    month = month_start().strftime("%Y-%m")
-    if not st["over"] or get_setting("claude_limit_notified") == month:
+    last = get_setting("claude_limit_notified") or ""
+    try:
+        recent = bool(last) and datetime.fromisoformat(last) >= period_start()
+    except ValueError:                  # a month ("2026-10") from before the period could be chosen
+        recent = False
+    if not st["over"] or recent:
         return
-    set_setting("claude_limit_notified", month)
+    set_setting("claude_limit_notified", utcnow().isoformat())
     from app.i18n import t
     from app.services.notify import notify
 
-    text = {"pause": t("Hit screening is paused until next month."), "haiku": t("All tasks now use Haiku until next month."),
+    text = {"pause": t("Hit screening is paused until usage drops below the limit."),
+            "haiku": t("All tasks use Haiku until usage drops below the limit."),
             "notify": t("Nothing is throttled.")}[st["mode"]]
     try:
         asyncio.get_running_loop().create_task(notify(
-            "health", t("Claude token limit reached"), t("{used} M of {limit} M tokens this month.", used=f"{st['used'] / 1e6:.1f}",
-                                                         limit=f"{st['limit'] / 1e6:g}") + " " + text, url="/settings/claude"))
+            "health", t("Claude token limit reached"), t("{used} M of {limit} M tokens in the last {n} days.",
+                                                         used=f"{st['used'] / 1e6:.1f}", limit=f"{st['limit'] / 1e6:g}",
+                                                         n=st["days"]) + " " + text, url="/settings/claude"))
     except RuntimeError:
         pass    # no event loop (scripts, tests): the dashboard meter still shows it
 

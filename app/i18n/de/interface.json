@@ -267,5 +267,18 @@
  "requests so far": "Anfragen bisher",
  "not running": "läuft nicht",
  "found {ago}": "gefunden {ago}",
- "Requests in the last hour": "Anfragen in der letzten Stunde"
+ "Requests in the last hour": "Anfragen in der letzten Stunde",
+ "Token limit": "Token-Limit",
+ "per": "pro",
+ "day": "Tag",
+ "week": "Woche",
+ "days": "Tage",
+ "Period in days": "Zeitraum in Tagen",
+ "Claude tokens in the last {n} days": "Claude-Tokens der letzten {n} Tage",
+ "Claude usage in the last {n} days: {used} M of your {limit} M token limit (covered by the subscription)": "Claude-Verbrauch der letzten {n} Tage: {used} M von deinem Limit von {limit} M Tokens (im Abo enthalten)",
+ "tokens in the last {n} days": "Tokens in den letzten {n} Tagen",
+ "Hit screening is paused until usage drops below the limit.": "Die Treffer-Prüfung pausiert, bis der Verbrauch wieder unter dem Limit liegt.",
+ "All tasks use Haiku until usage drops below the limit.": "Alle Aufgaben laufen mit Haiku, bis der Verbrauch wieder unter dem Limit liegt.",
+ "{used} M of {limit} M tokens in the last {n} days.": "{used} M von {limit} M Tokens in den letzten {n} Tagen.",
+ "month (30 days)": "Monat (30 Tage)"
 }

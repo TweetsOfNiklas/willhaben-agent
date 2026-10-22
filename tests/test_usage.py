@@ -124,3 +124,19 @@ def test_record_prices_the_call_and_old_rows_are_repriced():
     with session() as db:
         costs = {r.model: r.cost_usd for r in db.exec(select(LLMCall))}
     assert costs == {"claude-haiku-5-5": 0.0006, "claude-sonnet-5-5": 0.1, "mystery": 0.5}
+
+
+def test_the_token_limit_counts_a_rolling_period_a_week_by_default():
+    from app.db import set_setting
+    with session() as db:
+        db.add(LLMCall(ts=utcnow() - timedelta(days=3), purpose="chat", model="m", call_part=0, input_tokens=1000, output_tokens=0))
+        db.add(LLMCall(ts=utcnow() - timedelta(days=10), purpose="chat", model="m", call_part=0, input_tokens=5000, output_tokens=0))
+        db.commit()
+    set_setting("claude_token_limit_m", "0.002")
+    st = usage.limit()
+    assert st["days"] == 7 and st["used"] == 1000 and not st["over"]      # the 10-day-old call is outside the week
+    set_setting("claude_limit_days", "30")
+    st = usage.limit()
+    assert st["days"] == 30 and st["used"] == 6000 and st["over"]
+    set_setting("claude_limit_days", "500")
+    assert usage.period_days() == usage.MAX_DAYS

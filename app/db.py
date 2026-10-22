@@ -686,7 +686,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "expiry_warn_days": "3",
     "myads_expired_days": "30",
     "claude_token_limit_m": "10",   # Settings → Claude: monthly token limit in millions (sidebar meter); empty/0 = none
-    "claude_limit_mode": "notify",  # My ads: expired ads older than this are listed with the inactive ones; 0 = always shown
+    "claude_limit_mode": "notify",
+    "claude_limit_days": "7",       # Settings → Claude: the token limit's period in days (rolling)  # My ads: expired ads older than this are listed with the inactive ones; 0 = always shown
     "auto_reply_rules": (
         "- Automatisch nur einfache Fragen beantworten: ob der Artikel noch da ist, Abholung/Versand, Zustand laut Inserat.\n"
         "- Keine Preiszusagen und kein Handeln: bei Preisfragen auf den Inseratspreis verweisen oder nicht automatisch antworten.\n"

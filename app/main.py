@@ -3015,7 +3015,7 @@ def _claude_section() -> dict[str, Any]:
     return {"models": {p: _alias(model_for(p)) for p in PURPOSES}, "model_choices": choices,   # full model ids
             "model_list": llm_models.last_fetch,                   # {ok, at, error}: where the list comes from
             "model_costs": [(names[m], f) for m, f in fac.items()],   # relative token price, cheapest first
-            "claude_usage": {"used": lim["used"], "limit": lim["limit"]},
+            "claude_usage": {"used": lim["used"], "limit": lim["limit"], "days": lim["days"]},
             "claude_limit_mode": lim["mode"], "token_usage": rows,
             **({"claude_last_call": last_call["at"]} if last_call.get("at") else {})}
 
@@ -3035,6 +3035,9 @@ async def settings_claude(request: Request):
     except ValueError:
         lim = 0.0
     set_setting("claude_token_limit_m", f"{lim:g}" if lim else "")
+    days = str(form.get("claude_limit_days") or "").strip()
+    if days.isdigit():
+        set_setting(llm_usage.PERIOD_SETTING, str(min(max(int(days), 1), llm_usage.MAX_DAYS)))
     if form.get("claude_limit_mode") in llm_usage.LIMIT_MODES:
         set_setting("claude_limit_mode", str(form.get("claude_limit_mode")))
     return back(f"/settings/claude?msg={quote(t('Changes saved'), safe='')}")
