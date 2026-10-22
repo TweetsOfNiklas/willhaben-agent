@@ -906,8 +906,9 @@ async def _send_claimed(draft: Draft, text: str) -> Draft:
     return sent
 
 
-def enqueue_send(draft_id: int, text: str) -> bool:
-    """The answer is marked "sending" right away and goes out as a background job (chat lane, never behind ad jobs).
+def enqueue_send(draft_id: int, text: str, now: bool = False) -> bool:
+    """The answer is marked "sending" right away and goes out as a background job (chat lane, never behind ad jobs);
+    it waits the grace period to be taken back, unless `now` (Send now).
 
     The state lives in the database, so a restart cannot lose it silently (recover_sending). False: nothing queued
     (draft gone, not open any more, or empty text).
@@ -933,7 +934,7 @@ def enqueue_send(draft_id: int, text: str) -> bool:
 
     # a sent message cannot be taken back: it waits the grace period in the queue (cancel instead of a confirm)
     jobs.submit("chat-send", t("Answer to {name}", name=who), lambda job: _send_job(draft_id), lane="chat",
-                current=f"draft:{draft_id}", on_cancel=cancelled, grace=True, quiet=True)
+                current=f"draft:{draft_id}", on_cancel=cancelled, grace=not now, quiet=True)
     return True
 
 

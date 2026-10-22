@@ -37,6 +37,14 @@ async def test_lanes_run_side_by_side_and_in_order_within():
     assert order == ["chat-1", "ads-1", "ads-2"] and a1.status == a2.status == "done"
 
 
+async def test_send_now_skips_the_countdown(monkeypatch):
+    monkeypatch.setattr(jobs, "grace_s", lambda: 30)
+    draft_id = _conv_and_draft()
+    assert chats.enqueue_send(draft_id, "Ja, noch da!", now=True)
+    assert jobs.snapshot()["active"][0]["grace_s"] == 0          # nothing to take back: it goes right away
+    await finish_jobs()
+
+
 async def test_queued_answer_is_marked_and_sent(monkeypatch):
     draft_id = _conv_and_draft()
     sent = []
