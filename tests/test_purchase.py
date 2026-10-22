@@ -1172,3 +1172,9 @@ def test_the_reply_prompt_names_a_first_name_only_when_there_is_one():
     assert "(Vorname: Erika)" in prompt("Erika Mustermann")
     assert "kein normaler Vorname" in prompt("marco_85") and "kein normaler Vorname" in prompt(None)
     assert "€-Zeichen" in REPLY_SYSTEM and "Nachlass-Regeln" in REPLY_SYSTEM
+
+
+def test_no_promises_of_undone_actions_and_nothing_invented_about_me():
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM
+    for system in (AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM):
+        assert "Anzeige reservieren" in system and "Wo wärst du?" in system
