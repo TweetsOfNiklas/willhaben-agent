@@ -101,6 +101,29 @@ async def test_play_lets_claude_be_the_other_side(backend):
     assert any("Schnäppchenjäger" in c["prompt"] for c in backend.calls)
 
 
+async def test_play_stops_where_my_answer_needs_the_owner(backend):
+    """A gap like [Uhrzeit] waits for the owner in a real chat: the simulated other side never gets it."""
+    sim = await chat_sim.create("seller", ad_id="111", persona="pickup")
+    backend.reply = {"reply": "Ja, abholen geht am [Tag] um [Uhrzeit].", "auto_send": False, "auto_reason": "Termin fehlt"}
+    assert chat_sim.play(sim.id, 3)
+    await _done()
+    assert [x["who"] for x in chat_sim.get(sim.id).turns] == ["partner", "me"]
+
+
+async def test_buying_answers_and_the_first_message_get_my_style(backend):
+    set_setting("reply_style", "- schreibt kurz, Lg Lukas am Ende")
+    sim = await chat_sim.create("buyer", platform="willhaben")
+    chat_sim.update_setup(sim.id, {"title": "Fahrrad", "price": 100, "max_price": 95, "mode": "pickup",
+                                   "seller_name": "Martin Muster"})
+    assert chat_sim.reply(sim.id)
+    await _done()
+    chat_sim.say(sim.id, "Unter 100 geht nichts.")
+    await _done()
+    opener, answer = backend.calls[-2]["prompt"], backend.calls[-1]["prompt"]
+    assert "Lg Lukas am Ende" in opener and "Lg Lukas am Ende" in answer
+    assert "Martin" not in opener                              # no name to address him by
+
+
 async def test_buyer_chat_opens_and_follows_the_purchase(backend):
     sim = await chat_sim.create("buyer", platform="willhaben")
     chat_sim.update_setup(sim.id, {"title": "Fahrrad", "price": 100, "max_price": 95, "mode": "pickup"})

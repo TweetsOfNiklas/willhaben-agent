@@ -768,7 +768,7 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         availability = None
         system, schema = ((overrides.get("purchase_system") or system_prompts.get("purchase"), PURCHASE_SCHEMA)
                           if auto else (REPLY_SYSTEM, REPLY_SCHEMA))
-        examples: list[str] = []
+        examples = style.examples()                       # buying sounds like me too
         stock_now, others = None, []
     else:
         rules = get_setting("reply_rules")
@@ -803,7 +803,7 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
     ad_ctx = conv.ad_context or ({"title": conv.ad_title} if conv.ad_title else None)   # title at least, price unknown
     prompt = reply_prompt(role=conv.role, ad=ad_ctx, partner=conv.partner_name, messages=msgs_t,
                           rules=rules, examples=examples, hint=hint, availability=availability, stock=stock_now,
-                          style=(style.profile() or None) if buy is None else None, others=others)
+                          style=style.profile() or None, others=others)
     return {"system": system, "schema": schema, "prompt": prompt, "ad_ctx": ad_ctx,
             "backend": "purchase" if buy is not None else "chat"}   # chats of a purchase order: Settings → "Purchases"
 

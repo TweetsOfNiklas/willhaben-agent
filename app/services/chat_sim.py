@@ -39,7 +39,7 @@ from app.llm.prompts import (
     sim_round_review_prompt, purchase_opener_prompt, sim_judge_prompt, sim_partner_prompt,
     sim_review_prompt, sim_suggest_prompt, sim_suggest_schema,
 )
-from app.services import jobs, min_price, system_prompts
+from app.services import jobs, min_price, style, system_prompts
 
 log = logging.getLogger(__name__)
 
@@ -457,7 +457,8 @@ async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[
                                     rules=rules, seller_name=ad.get("seller_name"), shipping_cost=cost,
                                     shipping_source=src, item_ceiling=purchase.item_ceiling(p),
                                     fee=purchase.fee_rule(purchase.rule_of(p)) if p.mode == "paylivery" else None,
-                                    questions=[q["question"] for q in p.questions or []], asking=p.asking_price)
+                                    questions=[q["question"] for q in p.questions or []], asking=p.asking_price,
+                                    style=style.profile() or None, examples=style.examples())
     from app.llm.prompts import platform_rule
     if line := platform_rule(sim.platform):
         prompt = f"{prompt}\n\n{line}"
@@ -576,11 +577,19 @@ def play(sim_id: int, rounds: int = 3) -> bool:
                 turns = await _append(sim_id, await partner(sim, turns))
             job.progress(i, t("Writing the automatic answer…"), f"sim:{sim_id}")
             turns = await _append(sim_id, await answer(get(sim_id), turns))
-            if turns[-2].get("done"):
+            if turns[-2].get("done") or needs_owner(turns[-1]):
                 break
         return t("{n} turns simulated", n=len(turns))
 
     return _start(sim_id, "play", t("Simulator: conversation"), run)
+
+
+def needs_owner(turn: dict[str, Any]) -> bool:
+    """My answer has gaps only the owner can fill ([Uhrzeit], [ja/nein]): in a real chat it waits for them, so the
+    simulated other side never gets it – the conversation stops there (the owner writes the answer, or edits the
+    setup, and plays on)."""
+    text = turn.get("text") or ""
+    return turn.get("who") == "me" and "[" in text and "]" in text
 
 
 def partner_once(sim_id: int) -> bool:

@@ -29,7 +29,7 @@ from app.i18n import t
 from app.config import address_check, get_settings
 from app.db import platform_per_hour as _platform_per_hour  # noqa: E402,I001  (willhaben's budget: own or all platforms')
 from app.db import (
-    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, Message, MyAd, Purchase, SearchAgent, SimChat, apply_public_url,
+    SETTING_PUBLIC_URL, AdBatch, AdDraft, Conversation, Draft, EventLog, Hit, MyAd, Purchase, SearchAgent, SimChat, apply_public_url,
     current_ad, get_setting, init_db, recent_events, requests_per_hour, session, set_setting, utcnow,
 )
 from app.llm import usage as llm_usage

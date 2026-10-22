@@ -706,7 +706,7 @@ async def test_begin_stores_market_and_paylivery_shipping_of_the_ad(fx):
     assert purchase.item_ceiling(p) == 282.39 and purchase.shipping_of(p) == (4.9, "ad")
     prompt = fx.backend.calls[0]["prompt"]
     assert "Vergleichbare Anzeigen" not in prompt and "Median" not in prompt   # comparables are no argument
-    assert "4,90 €" in prompt and "Vorname des Verkäufers: Anna" in prompt
+    assert "4,90 €" in prompt and "Anna" not in prompt                       # no name to address the seller by
 
 
 async def test_begin_without_comparables_stores_no_market(fx):
@@ -854,15 +854,13 @@ def test_rules_block_states_ceiling_shipping_and_mode():
     assert "Versand: keiner (Abholung)" in pu and "inkl. Versand" not in pu
 
 
-def test_rules_block_first_name_and_market_argument():
+def test_rules_block_no_name_and_no_market_argument():
     conv = Conversation(id="c-x", role="buyer", partner_name="Anna Muster")
     p = _p(mode="paylivery", status="negotiating", max_price=300.0, asking_price=300.0,
            market={"min": 180.0, "p25": 200.0, "median": 220.0, "count": 9})   # no argument any more
     text = purchase.rules_block(p, conv)
-    assert "Vorname des Verkäufers: Anna." in text and "Muster" not in text
+    assert "Anna" not in text and "nicht mit Namen" in text                 # the owner never uses names
     assert "Vergleichbare Anzeigen" not in text and "180 €" not in text
-    assert "Vorname" in purchase.rules_block(p, Conversation(id="c-y", role="buyer", partner_name="Autohaus Müller GmbH"))
-    assert "keine Anrede" in purchase.rules_block(p, Conversation(id="c-y", role="buyer", partner_name="Autohaus Müller GmbH"))
 
 
 @pytest.mark.parametrize("name, first", [
@@ -874,13 +872,13 @@ def test_seller_first_name(name, first):
     assert seller_first_name(name) == first
 
 
-def test_opener_prompt_direct_with_market_and_name():
+def test_opener_prompt_direct_with_market_and_no_name():
     from app.llm.prompts import purchase_opener_prompt
     prompt = purchase_opener_prompt({"title": "MX Master", "price": "300 €"}, target=270.0, max_price=300.0, mode="direct",
                                     rules="", seller_name="Anna Muster", shipping_cost=6.0,
                                     shipping_source="estimate", item_ceiling=294.0,
                                     asking=300.0)
-    assert "Vorname des Verkäufers: Anna" in prompt and "Muster" not in prompt
+    assert "Anna" not in prompt
     assert "Wunschpreis inkl. Versand: 276 €" in prompt and "Versand: 6 € (Schätzung)" in prompt
     assert "Frag, ob der Artikel noch zu haben ist" not in purchase.PURCHASE_OPENER_SYSTEM
 

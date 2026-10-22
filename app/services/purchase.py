@@ -38,7 +38,7 @@ from app.services.notify import notify
 from app.willhaben.account import OpenerUnconfirmed, SendFailed
 from app.willhaben.public import WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable
-from app.services import timeline
+from app.services import style, timeline
 
 log = logging.getLogger(__name__)
 
@@ -713,7 +713,8 @@ async def _begin_inner(pid: int) -> None:
                                         item_ceiling=item_ceiling(row),
                                         fee=fee_rule(rule_of(row)) if row.mode == "paylivery" else None,
                                         questions=[q["question"] for q in row.questions or []],
-                                        asking=detail.price, refused=refused)
+                                        asking=detail.price, refused=refused,
+                                        style=style.profile() or None, examples=style.examples())
         out = await get_backend("purchase").complete(system=PURCHASE_OPENER_SYSTEM, prompt=prompt,
                                                  schema=PURCHASE_OPENER_SCHEMA)
         text = str((out.data or {}).get("message") or "").strip()

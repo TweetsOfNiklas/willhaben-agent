@@ -27,7 +27,8 @@ So arbeitest du:
   dir aus.
 - Abweichend davon nennst du Abholung, Versand und Zahlungsweg (auch PayLivery) aus meinen Regeln oder
   Verkaufsvorgaben, wenn die Nachricht des Partners sie berührt oder der nächste Schritt davon abhängt, auch ohne
-  Nachfrage. Steht dort, dass etwas immer genannt wird, gilt das weiter.
+  Nachfrage. Steht dort, dass etwas immer genannt wird, gilt das weiter. Versandart, Versandkosten, Verpackung und
+  Zahlungswege, die weder dort noch in der Anzeige stehen, erfindest du nicht: offen lassen und in needs_info nennen.
 - Steht unten eine Vorgabe der Person für genau diese Antwort, hat sie Vorrang vor allem anderen: vor den Regeln,
   dem Verlauf und deiner eigenen Einschätzung. Entscheidung und Inhalt setzt du genau so um, wie sie dastehen, ohne
   sie abzuschwächen; nur die Formulierung folgt weiter den Regeln hier.
@@ -41,7 +42,15 @@ So arbeitest du:
 - So kurz wie möglich: ein bis zwei Sätze, nur die Sache selbst, wie eine echte Kleinanzeigen-Nachricht. Keine
   Begrüßung ("Hallo"), kein Einfühlen oder Einleiten ("ich verstehe, dass …", "danke für deine Nachricht"), keine
   Höflichkeitsfloskeln, keine Wiederholung dessen, was der Partner geschrieben hat. Kein Gruß mit Namen am Ende,
-  keine Signatur.
+  keine Signatur. Sprich den Partner nicht mit seinem Namen an.
+- Keine Wiederholungen: Lies deine eigenen Nachrichten im Verlauf und verwende keinen Satz und keinen Satzanfang
+  noch einmal. Bleibt es inhaltlich gleich (z. B. beim Preis), wird die Antwort kürzer als die vorige („Nein, 45 fix“).
+  „Sorry“ und „leider“ höchstens ab und zu, nicht in jeder Nachricht.
+- Verhandeln wie ein Mensch, in Schritten: Gib deinen Spielraum (Untergrenze, erlaubter Nachlass, beim Kauf die
+  Obergrenze) nicht beim ersten Angebot ganz her. Auf ein niedriges erstes Angebot bleibst du beim Angebotspreis
+  oder gehst einen kleinen Schritt; näher an die Grenze erst, wenn der Partner selbst nachlegt. „Letzter Preis“ sagst
+  du erst beim letzten Schritt, dann bleibt es dabei. Den zu niedrigen Betrag des Partners wiederholst du nicht
+  („45 geht nicht“), du nennst nur deinen. Beim Kauf genauso, nur nach oben.
 - Schreib wie ein Mensch, der auf dem Handy eine Kleinanzeigen-Nachricht tippt, nicht wie eine KI: kein
   Assistententon, keine perfekt ausformulierten Sätze, kein Aufzählen, keine Emojis, die ich selbst nicht verwende.
 - Den Stil (Länge, Ton, Wortwahl, Satzzeichen, Umgangssprache, Groß-/Kleinschreibung) schaust du dir nur von meinen
@@ -1114,12 +1123,7 @@ def purchase_rules(*, asking: float | None, target: float | None, max_price: flo
         lines.append(f"- Wunschzeit der Person für die Abholung: {pickup_window}. Nur Zeiten in diesem Fenster vorschlagen.")
     if mode == "pickup" and availability:
         lines += ["", "Freie Zeiten der Person laut Kalender (nur diese vorschlagen):", availability]
-    first = seller_first_name(seller_name)
-    if first:
-        lines.append(f"- Vorname des Verkäufers: {first}. Sprich ihn so an (Du-Form), nie einen anderen Namen erfinden.")
-    else:
-        lines.append("- Kein Vorname des Verkäufers bekannt: keine Anrede mit einem Namen erfinden.")
-    lines.append("- Schreib persönlich: ein konkreter Bezug zur Anzeige, freundlich, ohne Textbaustein.")
+    lines.append("- Sprich den Verkäufer nicht mit Namen an; schreib so kurz und locker wie ich (Mein Schreibstil).")
     lines += _questions_lines(questions)
     lines.append(f"- Stand des Kaufs: {stage}")
     if note:
@@ -1152,9 +1156,11 @@ PURCHASE_OPENER_SYSTEM = """\
 Du schreibst die ERSTE Nachricht einer Privatperson an den Verkäufer eines Artikels auf willhaben.at
 (österreichisches Kleinanzeigenportal). Die Person möchte den Artikel zu ihrem Wunschpreis kaufen.
 
-- Kurz, freundlich, Du-Form, österreichisches Deutsch, keine Emojis, kein Gruß mit Namen am Ende.
-- Persönlich: Ist ein Vorname des Verkäufers angegeben, sprich ihn damit an (nur der Vorname, nichts erfinden).
-  Nimm einen konkreten Bezug zur Anzeige (Zustand, Zubehör, ein Detail aus der Beschreibung). Kein Textbaustein.
+- Kurz wie eine echte Kleinanzeigen-Nachricht vom Handy: ein bis zwei Sätze, Du-Form, österreichisches Deutsch,
+  keine Emojis. Ton, Länge, Begrüßung, Gruß am Ende und Schreibweise übernimmst du aus "Mein Schreibstil" und meinen
+  Beispielnachrichten unten (meine Erstnachrichten zeigen, wie ich anfange und aufhöre), nicht aus dem Anzeigentext.
+- Sprich den Verkäufer nicht mit Namen an. Kein „ich interessiere mich für …“, kein Lob der Anzeige und keine
+  Begründung für dein Angebot (Mängel, Marktpreise aufzählen): nur die Frage oder das Angebot selbst.
 - Ohne PayLivery (Überweisung): Verhandle inklusive Versand von der ersten Nachricht an. opening_offer ist dann der
   Gesamtpreis inkl. Versand, und die Nachricht sagt „inkl. Versand“.
 - Mit PayLivery: opening_offer ist nur der Artikelpreis. Über Versand und Käuferschutzgebühr schreibst du nichts, die
@@ -1186,24 +1192,29 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
                            shipping_cost: float | None = None, shipping_source: str | None = None,
                            item_ceiling: float | None = None,
                            fee: dict[str, Any] | None = None, questions: list[str] | None = None,
-                           asking: float | None = None, refused: tuple[str, list[str]] | None = None) -> str:
-    """`refused`: the previous attempt and why the code refused it, for the one retry."""
+                           asking: float | None = None, refused: tuple[str, list[str]] | None = None,
+                           style: str | None = None, examples: list[str] | None = None) -> str:
+    """`refused`: the previous attempt and why the code refused it, for the one retry. `style`/`examples`: how I write
+    (app/services/style.py), so the message sounds like me."""
     ctx = ad_context or {}
-    first = seller_first_name(seller_name or ctx.get("seller_name"))
     lines = ["Anzeige:",
              f"- Titel: {ctx.get('title')}",
              f"- Preis: {ctx.get('price')}",
              f"- Ort: {ctx.get('location')}",
              f"- Beschreibung: {(ctx.get('description') or '')[:1500]}",
-             "", f"Vorname des Verkäufers: {first}" if first else "Vorname des Verkäufers: unbekannt (keine Anrede mit Namen)",
-             f"Modus: {'Abholung' if mode == 'pickup' else 'mit willhaben PayLivery' if mode == 'paylivery' else 'Überweisung'}",
+             "", f"Modus: {'Abholung' if mode == 'pickup' else 'mit willhaben PayLivery' if mode == 'paylivery' else 'Überweisung'}",
              *_ceiling_lines(mode, shipping_cost, shipping_source, max_price, item_ceiling, fee),
              *_amount_cap_lines(max_price, asking),
              *_wish_lines(target, asking, mode, shipping_cost)]
     if questions:
         lines += ["", "Fragen der Person an den Verkäufer (in dieser Nachricht stellen):", *[f"- {q}" for q in questions]]
-    lines += ["", "Regeln der Person für Käufe:", (rules or "").strip() or "(keine)",
-              "", "Aufgabe: Schreib die erste Nachricht an den Verkäufer."]
+    lines += ["", "Regeln der Person für Käufe:", (rules or "").strip() or "(keine)"]
+    if style:
+        lines += ["", "Mein Schreibstil (aus meinen eigenen Nachrichten abgeleitet):", style.strip()]
+    if examples:
+        lines += ["", "Nachrichten, die ich selbst geschrieben habe (nur als Stilbeispiel):",
+                  *[f"- {e}" for e in examples[:MAX_STYLE_EXAMPLES]]]
+    lines += ["", "Aufgabe: Schreib die erste Nachricht an den Verkäufer."]
     if refused:
         text, why = refused
         lines += ["", f"Dein erster Entwurf wurde nicht gesendet ({'; '.join(why)}):", f"„{text}“",
