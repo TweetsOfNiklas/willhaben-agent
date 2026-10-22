@@ -53,3 +53,24 @@ async def test_no_photo_when_both_links_are_dead(monkeypatch, tmp_path):
     from app.main import app
     with TestClient(app) as c:
         assert c.get(f"/hits/{hid}/image").status_code == 404
+
+
+def test_the_ad_viewer_shows_the_kept_photo_when_the_sold_page_has_none(monkeypatch, tmp_path):
+    """Vinted's page of a sold item has no photos any more: the viewer shows the hit's kept one."""
+    from app import platforms
+    from app.main import app
+
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    hid = _hit(image_path="hit-x.webp", site_status="sold")
+    with session() as db:
+        h = db.get(Hit, hid)
+    sold = platforms.AdDetail.from_hit(h)
+    sold.images, sold.status = [], "sold"
+
+    async def detail(ad_id, url=None):
+        return sold
+    monkeypatch.setattr(platforms.get("vinted"), "detail", detail)
+    monkeypatch.setattr(search_agents, "keep_image_later", lambda *a, **kw: None)
+    with TestClient(app) as c:
+        frag = c.get(f"/hits/ad/vinted/9?hit={hid}").text
+    assert f'src="/hits/{hid}/image"' in frag and "No photos" not in frag

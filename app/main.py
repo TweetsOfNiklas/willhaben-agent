@@ -1024,6 +1024,10 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
         search_agents_svc.record_status(platform.id, ad_id, search_agents_svc.site_status(d), d)
         with session() as db:
             h = db.get(Hit, h.id) or h                       # the pane shows the status just loaded
+    if d is not None and h is not None and not d.images:    # a sold ad's page drops its photos: the hit's own
+        kept = f"/hits/{h.id}/image" if h.image_path else h.image_url
+        if kept:
+            d.images = [kept]
     # the price verdict is the lazily loaded deals section (/hits/ad/{id}/deal), one verdict per ad
     return templates.TemplateResponse(request, "_ad_detail.html", {"d": d, "h": h, "ad_id": ad_id, "error": error,
                                                                    "platform": platform, "reduced": reduced,
