@@ -1186,3 +1186,9 @@ def test_paylivery_shipping_and_insurance_are_willhabens():
     p = reply_prompt(role="seller", ad={"title": "Uhr", "paylivery": True}, partner=None, messages=[], rules="",
                      examples=[], hint=None)
     assert "der Käufer sieht sie beim Kauf" in p
+
+
+def test_no_discount_unless_the_other_side_asks():
+    from app.llm.prompts import AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM, REPLY_SYSTEM
+    for system in (REPLY_SYSTEM, AUTO_REPLY_SYSTEM, PURCHASE_SYSTEM):
+        assert "Nie von dir aus nachlassen" in system
