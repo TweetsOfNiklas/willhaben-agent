@@ -149,3 +149,26 @@ def test_mark_as_unread_until_opened_again_and_the_live_line_in_the_chat():
         assert _counts()["chats"] == 1
         c.get("/chats/c1")                                     # opened: read again
     assert _counts()["chats"] == 0
+
+
+def test_opening_a_chat_keeps_the_lists_filter():
+    _chat("c1", ("in", -1), role="seller")
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats?role=seller&show=reply").text
+        assert 'href="/chats/c1?role=seller&amp;show=reply"' in page
+        opened = c.get("/chats/c1?role=seller&show=reply").text
+        assert 'href="/chats/c1?role=seller&amp;show=reply"' in opened         # the list beside it: still filtered
+
+
+def test_each_chat_shows_its_items_picture_in_the_list():
+    from app.db import MyAd
+    _chat("c1", ("in", -1), ad_id="77", ad_context={"images": ["https://img/item.webp"]})
+    _chat("c2", ("in", -1), ad_id="88")
+    with session() as db:
+        db.add(MyAd(ad_id="88", heading="Lampe", image_url="https://img/mine.jpg"))
+        db.commit()
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats").text
+    assert 'src="https://img/item.webp"' in page and 'src="https://img/mine.jpg"' in page and "data-chat-thumb" in page

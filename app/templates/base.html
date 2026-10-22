@@ -386,6 +386,15 @@
   </button>
 </div>
 
+{# ---- the app does not answer (restart, deploy, network): a bar at the top that reconnects by itself ---- #}
+<div x-data x-show="$store.jobs.offline" x-cloak role="status" aria-live="assertive" data-offline-bar
+     class="fixed inset-x-0 top-0 z-[96] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-warning px-4 py-2 text-[13px] font-medium text-warning-content shadow-md">
+  <span class="loading loading-spinner loading-xs"></span>
+  <span>{{ _("No connection to the app") }}</span>
+  <span class="tabular-nums opacity-80" x-text="$store.jobs.retryText()"></span>
+  <button type="button" class="btn btn-xs border-warning-content/30 bg-transparent text-warning-content" @click="$store.jobs.poll()">{{ _("Try now") }}</button>
+</div>
+
 {# ---- notices: inbox events and finished background jobs since the page was opened (jobs store) ---- #}
 <div x-data x-show="$store.jobs.notices.length" x-cloak aria-live="polite" class="toast toast-end toast-top z-[95]">
   <template x-for="n in $store.jobs.notices" :key="n.key">
@@ -533,7 +542,25 @@ document.addEventListener('alpine:init', () => {
     T: {running: {{ _("{n} running")|tojson }}, queued: {{ _("{n} queued")|tojson }}, idle: {{ _("Background")|tojson }},
         waiting: {{ _("queued")|tojson }}, starting: {{ _("starting…")|tojson }}, done: {{ _("done")|tojson }}, failed: {{ _("failed")|tojson }},
         cancelled: {{ _("taken back")|tojson }}, startsIn: {{ _("starts in {n} s")|tojson }}, taken: {{ _("Taken back – nothing happened")|tojson }},
-        tooLate: {{ _("Too late to take back – it has already started")|tojson }}},
+        tooLate: {{ _("Too late to take back – it has already started")|tojson }},
+        retry: {{ _("reconnecting in {n} s · attempt {k}")|tojson }}, retrying: {{ _("reconnecting…")|tojson }},
+        back: {{ _("Connected to the app again")|tojson }}},
+    // the app not answering (restart, deploy, network): offline bar, retries with a growing pause (1, 2, 4, 8, 15 s)
+    offline: false, tries: 0, retryAt: 0, offTick: null,
+    retryText() { const n = Math.max(0, Math.ceil((this.retryAt - this.now) / 1000));
+      return n ? this.T.retry.replace('{n}', n).replace('{k}', this.tries) : this.T.retrying; },
+    lost() {
+      this.offline = true; this.tries += 1;
+      const ms = Math.min(15000, 1000 * 2 ** Math.min(this.tries - 1, 4));
+      this.retryAt = Date.now() + ms; this.now = Date.now();
+      if (!this.offTick) this.offTick = setInterval(() => { this.now = Date.now(); }, 500);
+      clearTimeout(this.timer); this.timer = setTimeout(() => this.poll(), ms);
+    },
+    back() {
+      if (!this.offline) return;
+      this.offline = false; this.tries = 0; clearInterval(this.offTick); this.offTick = null;
+      this.notice({key: 'back' + Date.now(), title: this.T.back, text: '', ms: 4000});
+    },
     init() {
       try { this.apply(JSON.parse(document.getElementById('bg-jobs-data').textContent)); } catch (e) {}
       if (document.querySelector('[data-pending-key]')) this.poll();       // markers on the page: their state now
@@ -586,8 +613,12 @@ document.addEventListener('alpine:init', () => {
       // hidden: goes on when shown again, unless browser notifications are on here (Settings → Browser)
       if (document.hidden && !document.querySelector('[data-pending-key]') && !browserNotify.on()) return;   // else: keep asking
       const url = '/jobs' + (this.live && this.cursor !== null ? '?since=' + this.cursor : '');
-      fetch(url, {headers: {accept: 'application/json'}}).then(r => r.ok ? r.json() : null)
-        .then(d => d ? this.apply(d) : this.later(this.IDLE)).catch(() => this.later(10000));
+      fetch(url, {headers: {accept: 'application/json'}})
+        .then(r => { if (r.status >= 502 && r.status <= 504) throw new Error('gateway'); return r.ok ? r.json() : null; })
+        .then(d => {          // a slip in applying the answer is not a lost connection
+          this.back();
+          try { if (d) this.apply(d); else this.later(this.IDLE); } catch (e) { console.error(e); this.later(this.IDLE); }
+        }, () => this.lost());
     },
     later(ms) { clearTimeout(this.timer); this.timer = setTimeout(() => this.poll(), document.hidden ? Math.max(ms, this.HIDDEN) : ms); },
     notice(n) {

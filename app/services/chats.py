@@ -568,7 +568,24 @@ def overview(db) -> dict[str, Any]:
         return bool(mark and (at is None or _aware(mark) >= at)) or closes_chat(text)
     done = {cid for cid in by_id if finished(cid)}
     return {"convs": convs, "shown": shown, "old": old, "open_drafts": open_drafts, "finished": done,
+            "thumbs": _thumbs(db, convs),
             "waiting": {cid for cid, d in last_dir.items() if d == "in" and cid not in done}, "unread": unread}
+
+
+def _thumbs(db, convs: list[Conversation]) -> dict[str, str]:
+    """Each chat's item picture for the list: the item page's photo, else my own ad's, the purchase's or a hit's."""
+    from app.db import Hit, Purchase
+    out = {c.id: ((c.ad_context or {}).get("images") or [None])[0] for c in convs}
+    missing = [c for c in convs if not out.get(c.id) and c.ad_id]
+    if missing:
+        ad_ids = {c.ad_id for c in missing}
+        mine = dict(db.exec(select(MyAd.ad_id, MyAd.image_url).where(col(MyAd.ad_id).in_(ad_ids))).all())
+        bought = dict(db.exec(select(Purchase.conversation_id, Purchase.image_url).where(
+            col(Purchase.conversation_id).in_([c.id for c in missing]))).all())
+        hits = dict(db.exec(select(Hit.ad_id, Hit.image_url).where(col(Hit.ad_id).in_(ad_ids))).all())
+        for c in missing:
+            out[c.id] = mine.get(c.ad_id) or bought.get(c.id) or hits.get(c.ad_id)
+    return {k: v for k, v in out.items() if v}
 
 
 def badge_counts(db) -> dict[str, int]:

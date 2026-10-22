@@ -115,5 +115,10 @@
  "Taken back – nothing happened": "Zurückgenommen – nichts passiert",
  "Taken back": "Zurückgenommen",
  "taken back": "zurückgenommen",
- "Too late to take back – it has already started": "Zu spät zum Zurücknehmen – es läuft schon"
+ "Too late to take back – it has already started": "Zu spät zum Zurücknehmen – es läuft schon",
+ "No connection to the app": "Keine Verbindung zur App",
+ "Try now": "Jetzt versuchen",
+ "reconnecting in {n} s · attempt {k}": "verbinde neu in {n} s · Versuch {k}",
+ "reconnecting…": "verbinde neu …",
+ "Connected to the app again": "Wieder mit der App verbunden"
 }
