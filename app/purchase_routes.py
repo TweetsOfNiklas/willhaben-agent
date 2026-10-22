@@ -373,7 +373,7 @@ async def purchase_detail(request: Request, pid: int):
 
 # ------------------------------------------------------------------ settings
 @router.post("/settings/purchase")
-async def settings_purchase(enabled_: str | None = Form(None, alias="enabled"), rules: str = Form(""),
+async def settings_purchase(enabled_: str | None = Form(None, alias="enabled"), rules: str | None = Form(None),
                             discount_pct: str = Form(""), prefer_paylivery: str | None = Form(None)):
     raw = _float(discount_pct) if discount_pct.strip() else float(purchase.DEFAULT_DISCOUNT_PCT)
     if raw is None:
@@ -381,6 +381,7 @@ async def settings_purchase(enabled_: str | None = Form(None, alias="enabled"), 
     pct = min(max(raw, 0.0), 50.0)
     set_setting(purchase.SETTING_ENABLED, "1" if enabled_ else "0")
     set_setting(purchase.SETTING_PREFER_PAYLIVERY, "1" if (enabled_ and prefer_paylivery) else "0")   # only with orders on
-    set_setting(purchase.SETTING_RULES, rules.strip()[:4000])
+    if rules is not None:          # edited under Settings → AI rules now; a form without it keeps them
+        set_setting(purchase.SETTING_RULES, rules.strip()[:4000])
     set_setting(purchase.SETTING_DISCOUNT, f"{pct:g}")
     return _go("/settings/purchase", t("Changes saved"))

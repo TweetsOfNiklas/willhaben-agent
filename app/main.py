@@ -36,7 +36,7 @@ from app.llm import usage as llm_usage
 from app.llm import models as llm_models
 from app.llm.base import PURPOSES, LLMError, get_backend, model_for
 from app.llm.claude_login import claude_token, forget_token, get_login, token_source
-from app.services import access_stats, ad_batch, ad_creator, chat_sim, chats, my_ads, screening, sold
+from app.services import access_stats, ad_batch, ai_rules, ad_creator, chat_sim, chats, my_ads, screening, sold
 from app.services import purchase as purchase_svc
 from app.services import gcal, geizhals, ha_auth, label_fill, meetups, quiet_hours, shipping, telegram
 from app.services import adaptive_pace, geo, health, human_pace, jobs, price_zones, site_accounts
@@ -3120,6 +3120,8 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     return render(request, "settings.html", section=section, ship_sender_ok=shipping.sender_complete(), llm_ok=bool(claude_token()),
                   **_settings_nav(), **(_claude_section() if section == "claude" else {}),
                   **(_timeline_section() if section == "timeline" else {}),
+                  **({"ai": {"rules": ai_rules.rules(), "prompts": ai_rules.prompts(), "built_in": ai_rules.built_in()}}
+                     if section == "rules" else {}),
                   **({"sell": selling.config(), "sell_preview": selling.prompt_block(),
                       "contact_rule": selling.CONTACT_RULE} if section == "selling" else {}),
                   **({"site": _platform_row(sites[section])} if section in sites else {}),
@@ -3403,6 +3405,32 @@ async def settings_quiet(enabled: str | None = Form(None), start: str = Form("01
     return back(f"/settings/quiet?msg={quote(t('Quiet hours saved'), safe='')}")
 
 
+@app.post("/settings/ai/rule/{key}")
+async def settings_ai_rule(key: str, text: str = Form(""), do: str = Form("save")):
+    """One of my rules (Settings → AI rules): save it, or reset it to its default."""
+    if not ai_rules.is_rule(key):
+        raise HTTPException(404)
+    if do == "reset":
+        ai_rules.reset_rule(key)
+    else:
+        ai_rules.save_rule(key, text)
+    msg = t("Reset to the default") if do == "reset" else t("Changes saved")
+    return back(f"/settings/rules?msg={quote(msg, safe='')}#ai-{key}")
+
+
+@app.post("/settings/ai/prompt/{kind}")
+async def settings_ai_prompt(kind: str, text: str = Form(""), do: str = Form("save")):
+    """An editable system prompt: save my version (the default itself means the default), or reset it."""
+    if kind not in system_prompts.KINDS:
+        raise HTTPException(404)
+    if do == "reset":
+        system_prompts.reset(kind)
+    else:
+        system_prompts.save(kind, text)
+    msg = t("Reset to the default") if do == "reset" else t("Changes saved")
+    return back(f"/settings/rules?msg={quote(msg, safe='')}#ai-{kind}")
+
+
 @app.post("/settings")
 async def settings_save(request: Request):
     """The general settings. Each section posts only its own fields (hidden "section"); an unknown or missing section
@@ -3424,11 +3452,13 @@ async def settings_save(request: Request):
             return default
 
     if "reply_rules" in todo:
-        set_setting("reply_rules", str(form.get("reply_rules", "")).strip())
+        if "reply_rules" in form:          # the rules have their own form now (Settings → AI rules); the style card posts here
+            set_setting("reply_rules", str(form.get("reply_rules", "")).strip())
         if "reply_style" in form:          # the style card is part of the rules form; a POST without it keeps the profile
             set_setting("reply_style", str(form.get("reply_style", "")).replace("\r\n", "\n").strip()[:style_svc.MAX_PROFILE])
     if "auto_reply_rules" in todo:
-        set_setting("auto_reply_rules", str(form.get("auto_reply_rules", "")).strip())
+        if "auto_reply_rules" in form:     # edited under Settings → AI rules now; a form without it keeps it
+            set_setting("auto_reply_rules", str(form.get("auto_reply_rules", "")).strip())
         set_setting("auto_draft", "1" if form.get("auto_draft") else "0")
         set_setting("notify_messages", "1" if form.get("notify_messages") else "0")
         set_setting("chat_sync_limit", str(min(max(1, num("chat_sync_limit", 10)), 50)))

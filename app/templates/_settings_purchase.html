@@ -11,10 +11,7 @@
                   {% if not pu.enabled %}disabled{% endif %} data-needs="enabled"></label>
     <script>(function (f) { var a = f.elements.enabled, b = f.elements.prefer_paylivery;
       a.addEventListener("change", function () { b.disabled = !a.checked; if (!a.checked) b.checked = false; }); })(document.currentScript.parentNode);</script>
-    <label id="s-purchase-rules" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("My rules for purchases") }}</span>
-      <textarea name="rules" rows="6" maxlength="4000" class="textarea w-full min-w-0 bg-base-200"
-                placeholder="{{ _('e.g. only private sellers, ask for the invoice, pickup only in Vienna') }}">{{ pu.rules }}</textarea></label>
-    <p class="text-[12.5px] text-muted">{{ _("Empty rules use the built-in default: only buy at a fair price, no prepayment to third parties, short and friendly messages.") }}</p>
+    <div id="s-purchase-rules" class="flex flex-col gap-0.5"><span class="text-[12.5px] text-muted">{{ _("My rules for purchases") }}</span><a href="/settings/rules#ai-purchase_rules" class="link link-hover text-[12.5px]">{{ _("Edited under AI rules and prompts, with all other rules") }} →</a></div>
     <label id="s-purchase-discount" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Discount for the suggested wish price (%)") }}</span>
       <input type="number" name="discount_pct" min="0" max="50" step="1" value="{{ pu.discount_pct }}" class="input w-36 min-w-0 bg-base-200"></label>
     <p class="text-[12.5px] text-muted">{{ _("The buy dialog suggests your wish price this much below the asking price (plus shipping and fee); you can change it per order. The agent offers the wish price first and goes up to the maximum price at most (default: the asking price).") }}</p>

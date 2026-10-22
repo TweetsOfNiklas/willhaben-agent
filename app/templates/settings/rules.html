@@ -1,12 +1,67 @@
-{# Settings → rules: the general rules textarea (posted with section=rules) and the Geizhals switch #}
-<form id="general" method="post" action="/settings"><input type="hidden" name="section" value="rules"></form>
-<section id="rules-card" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-<p class="text-muted">{{ _("Included in every Claude prompt: chat replies, automatic replies and new listings.") }}</p>
-<label id="s-rules" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Rules for replies and listings") }}</span>
-  <textarea name="reply_rules" form="general" rows="10" class="textarea w-full min-w-0 bg-base-200">{{ values.reply_rules }}</textarea></label>
-<div><button type="submit" form="general" formaction="/settings" class="btn btn-primary">{{ _("Save") }}</button></div>
+{# Settings → AI rules and prompts (app/services/ai_rules.py): everything Claude is told, in one place. My free-text
+   rules and the editable system prompts each save, reset to their default and show the difference to it; the
+   writing style; the built-in prompts of the other tasks, read only; links to the rules kept per ad and per agent. #}
+{% import "_ui.html" as ui %}
+
+{% macro diff_view(item) -%}
+{% if item.diff %}<details class="rounded-[10px] border border-base-300 bg-base-200 px-3 py-2" data-ai-diff>
+  <summary class="cursor-pointer text-[12.5px] font-medium text-muted">{{ _("Difference to the default") }}</summary>
+  <pre class="mt-2 overflow-x-auto text-[12px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{% for kind, line in item.diff %}<span class="{{ 'text-error' if kind == '-' else 'text-success' if kind == '+' else 'text-muted' }}">{{ {'-': '− ', '+': '+ ', '@': '', ' ': '  '}[kind] }}{{ line }}</span>
+{% endfor %}</pre>
+  <small class="text-[12px] text-muted"><span class="text-error">− {{ _("default") }}</span> · <span class="text-success">+ {{ _("yours") }}</span></small>
+</details>{% endif %}
+{%- endmacro %}
+
+{% macro editable(item, action, rows=8, help=none) -%}
+<section id="ai-{{ item.key }}" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4" data-ai-item="{{ item.key }}">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h3 class="text-[15px] font-semibold">{{ item.label }}</h3>
+    {{ ui.pill(_("changed") if item.custom else _("default"), 'warn' if item.custom else '', dot=false) }}
+  </div>
+  {% if help %}<p class="text-[12.5px] text-muted">{{ help }}</p>{% endif %}
+  <form method="post" action="{{ action }}" class="flex flex-col gap-2.5">
+    <textarea name="text" rows="{{ rows }}" class="textarea w-full min-w-0 bg-base-200 font-mono text-[12.5px] leading-relaxed">{{ item.value }}</textarea>
+    <div class="flex flex-wrap items-center gap-2">
+      <button class="btn btn-primary btn-sm" name="do" value="save">{{ _("Save") }}</button>
+      {% if item.custom %}<button class="btn btn-sm" name="do" value="reset" data-ai-reset
+              onclick="return confirm({{ _('Reset to the default? Your version is lost.')|tojson|forceescape }})">{{ ui.icon('undo', 13) }}{{ _("Reset to default") }}</button>{% endif %}
+    </div>
+  </form>
+  {{ diff_view(item) }}
 </section>
+{%- endmacro %}
+
+<p class="text-muted">{{ _("Everything Claude is told: your rules, your writing style and the system prompts. Your rules apply on top of the system prompts; the ad's own instruction and a search agent's description stay with the ad and the agent.") }}</p>
+
+<h2 class="mt-1 text-[13px] font-semibold tracking-wide text-muted uppercase">{{ _("Your rules") }}</h2>
+{# a fixed anchor per rule for the settings search (the cards' own ids come from their keys) #}
+<div id="rules-card" class="flex flex-col gap-3.5">
+{% for r in ai.rules %}{% if r.key == 'reply_rules' %}<div id="s-rules" class="contents">{% elif r.key == 'auto_reply_rules' %}<div id="s-ai-auto-rules" class="contents">{% else %}<div id="s-ai-purchase-rules" class="contents">{% endif %}{{ editable(r, '/settings/ai/rule/' ~ r.key, 6, r.help) }}</div>{% endfor %}
+</div>
+
+<form id="general" method="post" action="/settings"><input type="hidden" name="section" value="rules"></form>{# the style card's form #}
 {% include "settings/_style.html" %}
+
+<h2 class="mt-3 text-[13px] font-semibold tracking-wide text-muted uppercase" id="s-ai-prompts">{{ _("System prompts") }}</h2>
+<p class="text-[12.5px] text-muted">{{ _("What Claude is told for automatic answers and in the simulator. A saved version applies to real answers at once; the simulator can try a change on its tests first.") }}</p>
+{% for p in ai.prompts %}{{ editable(p, '/settings/ai/prompt/' ~ p.key, 14) }}{% endfor %}
+
+<section id="s-ai-builtin" class="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <h3 class="text-[15px] font-semibold">{{ _("Built-in prompts (read only)") }}</h3>
+  <p class="text-[12.5px] text-muted">{{ _("The other tasks Claude does. They follow your rules above where those apply.") }}</p>
+  {% for b in ai.built_in %}<details class="rounded-[10px] border border-base-300 px-3 py-2" data-ai-builtin="{{ b.key }}">
+    <summary class="cursor-pointer text-[13.5px] font-medium">{{ b.label }}</summary>
+    <pre class="mt-2 max-h-[50vh] overflow-auto text-[12px] leading-relaxed whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{{ b.text }}</pre>
+  </details>{% endfor %}
+</section>
+
+<section id="s-ai-elsewhere" class="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+  <h3 class="text-[15px] font-semibold">{{ _("Rules kept elsewhere") }}</h3>
+  <a href="/settings/selling" class="link link-hover text-[13.5px]">{{ _("Selling preferences: handover, shipping, payment") }} →</a>
+  <a href="/myads" class="link link-hover text-[13.5px]">{{ _("Instructions for automatic answers of one ad (My ads)") }} →</a>
+  <a href="/agents" class="link link-hover text-[13.5px]">{{ _("Descriptions of the search agents (what Claude checks hits against)") }} →</a>
+</section>
+
 <form method="post" action="/settings/listings" class="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <label id="s-rules-geizhals" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0 font-medium">{{ _("Always add the Geizhals spec sheet to new listings when the product is found") }}</span>
     <input type="checkbox" class="toggle toggle-primary" name="geizhals_auto_specs" data-autosubmit {% if geizhals_auto_specs %}checked{% endif %}></label>
