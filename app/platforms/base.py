@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from app.i18n import t
 from app.platforms.types import DEFAULT_PLATFORM, AdDetail, SearchFilters, SearchPage, SearchSpec, ad_ref
 
 if TYPE_CHECKING:
@@ -122,7 +123,7 @@ class Platform(ABC):
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:
         """One ad in full; None when it is gone. Only when can("detail")."""
-        raise PlatformError(f"{self.name}: no ad details")
+        raise PlatformError(t("{site}: no ad details", site=self.name))
 
     @abstractmethod
     def ad_url(self, ad_id: str) -> str: ...

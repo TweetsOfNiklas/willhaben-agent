@@ -50,3 +50,12 @@ def test_the_old_pages_link_here_and_keep_the_rules():
         assert get_setting("purchase_rules") == "- Nur Privat."
         c.post("/settings", data={"section": "rules", "reply_style": "- kurz"})       # the style card
         assert get_setting("reply_rules") == DEFAULT_SETTINGS["reply_rules"] or get_setting("reply_rules")
+
+
+def test_the_page_is_in_german():
+    from app.main import app
+    with TestClient(app) as c:
+        c.cookies.set("lang", "de")
+        page = c.get("/settings/rules", headers={"accept-language": "de"}).text
+    assert "Regeln für Antworten" in page or "Antworten und Anzeigen" in page
+    assert "Neue Treffer prüfen (Screening)" in page and "Checking new hits (screening)" not in page

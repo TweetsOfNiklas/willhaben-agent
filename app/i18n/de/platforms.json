@@ -121,5 +121,6 @@
  "Pickup possible": "Abholung möglich",
  "Shpock answered with made-up ads (its bot trap); nothing was taken over": "Shpock hat mit erfundenen Anzeigen geantwortet (seine Bot-Falle); nichts wurde übernommen",
  "{site} cannot load a single ad": "{site} kann keine einzelne Anzeige laden",
- "Vinted member {id}: HTTP {status}": "Vinted-Mitglied {id}: HTTP {status}"
+ "Vinted member {id}: HTTP {status}": "Vinted-Mitglied {id}: HTTP {status}",
+ "{site}: no ad details": "{site}: keine Anzeigendetails"
 }

@@ -15,10 +15,10 @@
 {% macro editable(item, action, rows=8, help=none) -%}
 <section id="ai-{{ item.key }}" class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4" data-ai-item="{{ item.key }}">
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <h3 class="text-[15px] font-semibold">{{ item.label }}</h3>
+    <h3 class="text-[15px] font-semibold">{{ _(item.label) }}</h3>
     {{ ui.pill(_("changed") if item.custom else _("default"), 'warn' if item.custom else '', dot=false) }}
   </div>
-  {% if help %}<p class="text-[12.5px] text-muted">{{ help }}</p>{% endif %}
+  {% if help %}<p class="text-[12.5px] text-muted">{{ _(help) }}</p>{% endif %}
   <form method="post" action="{{ action }}" class="flex flex-col gap-2.5">
     <textarea name="text" rows="{{ rows }}" class="textarea w-full min-w-0 bg-base-200 font-mono text-[12.5px] leading-relaxed">{{ item.value }}</textarea>
     <div class="flex flex-wrap items-center gap-2">
@@ -50,7 +50,7 @@
   <h3 class="text-[15px] font-semibold">{{ _("Built-in prompts (read only)") }}</h3>
   <p class="text-[12.5px] text-muted">{{ _("The other tasks Claude does. They follow your rules above where those apply.") }}</p>
   {% for b in ai.built_in %}<details class="rounded-[10px] border border-base-300 px-3 py-2" data-ai-builtin="{{ b.key }}">
-    <summary class="cursor-pointer text-[13.5px] font-medium">{{ b.label }}</summary>
+    <summary class="cursor-pointer text-[13.5px] font-medium">{{ _(b.label) }}</summary>
     <pre class="mt-2 max-h-[50vh] overflow-auto text-[12px] leading-relaxed whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{{ b.text }}</pre>
   </details>{% endfor %}
 </section>
