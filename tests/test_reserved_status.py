@@ -56,3 +56,26 @@ def test_vinted_sold_item_from_its_status_plugin():
     assert vinted._item_status({"buyer_item_status": {"title": "Reserviert"}}, "") == "reserved"
     assert vinted._item_status({}, '"is_reserved":true') == "reserved"
     assert vinted._item_status({}, '"is_reserved":false') == "active"
+
+
+def test_a_vinted_hit_gets_its_upload_time_from_the_item_page_and_keeps_it():
+    from datetime import timedelta
+
+    from app.db import Hit, SearchAgent, session, utcnow
+    from app.platforms.types import AdDetail
+    from app.services import search_agents
+    up = utcnow().replace(microsecond=0) - timedelta(minutes=6)
+    with session() as db:
+        a = SearchAgent(name="x", source_url="https://www.vinted.at/catalog", webapi_url="/x")
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        db.add(Hit(agent_id=a.id, platform="vinted", ad_id="77", heading="HomePod", url="https://www.vinted.at/items/77"))
+        db.commit()
+    d = AdDetail(ad_id="77", heading="HomePod", description="", price=50.0, price_display="€ 50", status="active",
+                 published_at=None, first_published_at=up, end_date=None, url="https://www.vinted.at/items/77",
+                 platform="vinted")
+    search_agents.record_status("vinted", "77", "active", d)
+    with session() as db:
+        h = db.exec(__import__("sqlmodel").select(Hit)).one()
+    assert h.published_at.replace(tzinfo=None) == up.replace(tzinfo=None)

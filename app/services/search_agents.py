@@ -499,7 +499,7 @@ def _apply(hit: Hit, ad: Listing) -> None:
     hit.old_price = ad.old_price
     hit.location = ad.location
     hit.postcode = ad.postcode
-    hit.published_at = ad.published_at
+    hit.published_at = ad.published_at or hit.published_at   # Vinted's list has no date: the item page's stays
     hit.end_date = ad.end_date
     hit.url = ad.url
     hit.image_url = ad.image_url
@@ -1381,6 +1381,8 @@ def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None)
             if detail is not None:
                 was_far = h.state == "filtered" and not ships(h)
                 apply_shipping(h, detail)
+                if not h.published_at:      # Vinted: only its item page says when it went up ("vor 6 Min.")
+                    h.published_at = getattr(detail, "first_published_at", None) or getattr(detail, "published_at", None)
                 if was_far and ships(h) and status == "active":
                     agent = agents.get(h.agent_id) or db.get(SearchAgent, h.agent_id)
                     agents[h.agent_id] = agent
