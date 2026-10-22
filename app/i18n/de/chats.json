@@ -154,5 +154,10 @@
  "Vinted did not confirm the message: {error}": "Vinted hat die Nachricht nicht bestätigt: {error}",
  "Vinted: message from {name}": "Vinted: Nachricht von {name}",
  "live since {time}": "live seit {time}",
- "not connected": "nicht verbunden"
+ "not connected": "nicht verbunden",
+ "Goes out in {n} s": "Wird in {n} s gesendet",
+ "Take back": "Zurückholen",
+ "Your answer is on its way (above).": "Deine Antwort ist unterwegs (oben im Verlauf).",
+ "Unread messages": "Ungelesene Nachrichten",
+ "Action needed": "Aktion erforderlich"
 }

@@ -40,11 +40,13 @@
 {% macro is_current(href) -%}
   {{- 'page' if path == href or (href != '/' and path.startswith(href + '/')) or (href == '/new-ad' and path.startswith('/ad-')) else '' -}}
 {%- endmacro %}
-{% macro item(href, icon, label, count=0, key=none) -%}
+{% macro item(href, icon, label, count=0, key=none, act=none) -%}
   <a href="{{ href }}" title="{{ label }}" {% if is_current(href) %}aria-current="page"{% endif %}
      class="relative flex h-11 w-full shrink-0 items-center gap-3 rounded-[10px] px-[13px] whitespace-nowrap text-base-content no-underline hover:bg-hover aria-[current=page]:bg-brand-soft aria-[current=page]:font-semibold aria-[current=page]:text-primary">
     {{ ui.icon(icon) }}<span class="hidden min-w-0 flex-1 truncate rail-x:block">{{ label }}</span>
-    {% if count or key %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static rail-x:min-w-[18px] rail-x:text-[11px] rail-x:leading-[18px]"{% if key %} data-nav-count="{{ key }}"{% endif %}{% if count %} data-count="{{ count }}"{% else %} hidden{% endif %}>{{ count or '' }}</span>{% endif %}
+    {% if count or key %}<span class="absolute top-1.5 left-[26px] min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-bold text-primary-content rail-x:static rail-x:min-w-[18px] rail-x:text-[11px] rail-x:leading-[18px]"{% if key %} data-nav-count="{{ key }}"{% endif %}{% if count %} data-count="{{ count }}"{% else %} hidden{% endif %}{% if act %} title="{{ _('Unread messages') }}"{% endif %}>{{ count or '' }}</span>{% endif %}
+    {# act = (count, key): a second badge, amber, under the first while collapsed – the chats that need me #}
+    {% if act %}<span class="absolute bottom-1 left-[26px] min-w-4 rounded-full bg-warning px-1 text-center text-[10px] leading-4 font-bold text-warning-content rail-x:static rail-x:min-w-[18px] rail-x:text-[11px] rail-x:leading-[18px]" data-nav-count="{{ act[1] }}" title="{{ _('Action needed') }}"{% if act[0] %} data-count="{{ act[0] }}"{% else %} hidden{% endif %}>{{ act[0] or '' }}</span>{% endif %}
   </a>
 {%- endmacro %}
 {% set lim = wh_limiter() %}{% set used = wh_used() %}{% set budget = wh_budget() %}{% set sites = site_usage() %}
@@ -69,7 +71,7 @@
   {{ item('/hits', 'target', _("Hits"), counts.get('hits', 0), 'hits') }}
   {{ item('/deals', 'search', _("Product search")) }}
   {{ item('/purchases', 'cart', _("Purchases"), counts.get('purchases', 0), 'purchases') }}
-  {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0), 'chats') }}
+  {{ item('/chats', 'chat', _("Chats"), counts.get('chats', 0), 'chats', (counts.get('chats_action', 0), 'chats_action')) }}
   {{ item('/myads', 'tag', _("My ads")) }}
   {{ item('/new-ad', 'plus', _("New ad")) }}
   <div class="min-h-4 flex-1"></div>
@@ -403,7 +405,7 @@
   {% for href, icon, label, count, key in [('/', 'home', _("Home"), 0, none), ('/hits', 'target', _("Hits"), counts.get('hits', 0), 'hits'), ('/chats', 'chat', _("Chats"), counts.get('chats', 0), 'chats'), ('/myads', 'tag', _("My ads"), 0, none)] %}
   <a href="{{ href }}" {% if is_current(href) %}aria-current="page"{% endif %}
      class="relative flex min-h-12 flex-col items-center gap-[3px] py-1 text-[10.5px] font-medium text-muted no-underline aria-[current=page]:font-semibold aria-[current=page]:text-primary">
-    {{ ui.icon(icon) }}<span class="text-center leading-tight">{{ label }}</span>{% if count or key %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content"{% if key %} data-nav-count="{{ key }}"{% endif %}{% if not count %} hidden{% endif %}>{{ count or '' }}</span>{% endif %}</a>
+    {{ ui.icon(icon) }}<span class="text-center leading-tight">{{ label }}</span>{% if count or key %}<span class="absolute top-0 right-[calc(50%-20px)] min-w-[18px] rounded-full bg-primary px-1.5 text-center text-[11px] leading-[18px] font-bold text-primary-content"{% if key %} data-nav-count="{{ key }}"{% endif %}{% if not count %} hidden{% endif %}>{{ count or '' }}</span>{% endif %}{% if key == 'chats' %}<span class="absolute top-0 left-[calc(50%-20px)] min-w-[18px] rounded-full bg-warning px-1.5 text-center text-[11px] leading-[18px] font-bold text-warning-content" data-nav-count="chats_action" title="{{ _('Action needed') }}"{% if not counts.get('chats_action') %} hidden{% endif %}>{{ counts.get('chats_action') or '' }}</span>{% endif %}</a>
   {% endfor %}
   {% set more = namespace(count=0, current=false) %}
   {% for href, icon, label, count in more_pages %}{% set more.count = more.count + count %}{% if is_current(href) %}{% set more.current = true %}{% endif %}{% endfor %}
@@ -548,14 +550,17 @@ document.addEventListener('alpine:init', () => {
     left(j) { return j && j.until ? Math.max(0, Math.ceil((j.until - this.now) / 1000)) : 0; },
     leftFor(id) { return this.left(this.active.find(j => j.id === id)); },
     graceText(key) { const n = this.leftFor(this.cancelFor(key)); return n ? ' · ' + this.T.startsIn.replace('{n}', n) : ''; },
-    async cancel(id) {
+    // shownHere: the page shows this job's countdown itself (data-undo-here, ui.pending, the chat thread)
+    shownHere(j) { return [j.current, ...(j.keys || [])].some(k => k && document.querySelector('[data-undo-here="' + CSS.escape(k) + '"]')); },
+    // quiet: taken back where it was shown (the element itself changes): a notice only when it was too late
+    async cancel(id, quiet) {
       if (!id) return;
       this.dismiss('g' + id);
       // the job may have started meanwhile (the click came in the last moment): then say so, it runs on
       let ok = false;
       try { ok = !!(await (await fetch('/jobs/' + id + '/cancel', {method: 'POST'})).json()).ok; } catch (e) {}
       const j = this.active.find(x => x.id === id) || {};
-      this.notice({key: 'c' + id, title: j.label || '', text: ok ? this.T.taken : this.T.tooLate, ms: 6000});
+      if (!ok || !quiet) this.notice({key: 'c' + id, title: j.label || '', text: ok ? this.T.taken : this.T.tooLate, ms: 6000});
       this.poll();
     },
     ticking() {
@@ -608,7 +613,7 @@ document.addEventListener('alpine:init', () => {
       if (this.seenActive === null) this.seenActive = new Set(this.active.map(j => j.id));
       this.active.filter(j => !this.seenActive.has(j.id)).forEach(j => {
         this.seenActive.add(j.id);
-        if (this.live && j.until && j.cancellable) this.notice({key: 'g' + j.id, title: j.label, text: '', undo: j.id, ms: j.grace_s * 1000});
+        if (this.live && j.until && j.cancellable && !this.shownHere(j)) this.notice({key: 'g' + j.id, title: j.label, text: '', undo: j.id, ms: j.grace_s * 1000});
       });
       this.notices.filter(n => n.undo && !this.active.some(j => j.id === n.undo && j.status === 'queued')).forEach(n => this.dismiss(n.key));
       const todo = new Set();

@@ -342,14 +342,13 @@ def _inbox_seen_at() -> datetime:
 
 
 def _nav_counts() -> dict[str, int]:
-    """Badges in the sidebar: new hits, unread messages (hidden chats left out), purchases waiting for your payment,
+    """Badges in the sidebar: new hits, unread messages and chats that need you (chats.badge_counts), purchases waiting for your payment,
     and notifications since the inbox was last opened (those sent without a push left out)."""
     with session() as db:
         return {"inbox": db.exec(select(func.count()).select_from(EventLog).where(
                     EventLog.ts > _inbox_seen_at(), col(EventLog.quiet).is_not(True))).one(),
                 "hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
-                "chats": db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))
-                                 .where(col(Conversation.hidden_at).is_(None))).one(),
+                **chats.badge_counts(db),
                 "purchases": db.exec(select(func.count()).select_from(Purchase).where(Purchase.status == "pay_now")).one()}
 
 
@@ -1229,29 +1228,19 @@ async def hits_mark_seen(request: Request):
 def _chat_list(show_hidden: bool) -> dict[str, Any]:
     """The conversation list (chats.html); the open chat (chat.html) shows it next to the thread."""
     with session() as db:
-        convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
-                             .order_by(col(Conversation.last_message_at).desc().nulls_last())))
-        open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
-        last_dir: dict[str, str] = {}       # each chat's newest real message (not a site notice): in = they wrote last
-        for cid, direction in db.exec(select(Message.conversation_id, Message.direction).where(col(Message.kind).is_(None))
-                                      .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
-            last_dir[cid] = direction
-    waiting = {cid for cid, d in last_dir.items() if d == "in"}
+        o = chats.overview(db)
     # older than the sync's window (Settings → Automatic answers: the last N days): out of the list like hidden ones,
     # which the sync no longer updates anyway; "Show hidden chats" brings both back
-    since = chats.sync_window()[1]
-    old = {c.id for c in convs if since is not None and c.last_message_at is not None
-           and chats._aware(c.last_message_at) < since}
-    hidden_count = sum(1 for c in convs if c.hidden_at or c.id in old)
-    if not show_hidden:
-        convs = [c for c in convs if not c.hidden_at and c.id not in old]
+    convs = o["convs"] if show_hidden else o["shown"]
+    hidden_count = len(o["convs"]) - len(o["shown"])
+    open_drafts, waiting = o["open_drafts"], o["waiting"]
     # a site shows (its login hint, live line, filter) only when it is set up: willhaben logged in or with chats,
     # Vinted switched on and logged in or with chats
     have = {c.platform or "willhaben" for c in convs}
     wh_on = "willhaben" in have or bool(get_session().logged_in)
     vinted_on = platforms.enabled("vinted") and ("vinted" in have or bool(site_accounts.state("vinted")["logged_in"]))
     return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden,
-            "waiting": waiting, "wh_on": wh_on, "vinted_on": vinted_on}
+            "waiting": waiting, "unread_by_chat": o["unread"], "wh_on": wh_on, "vinted_on": vinted_on}
 
 
 @app.get("/chats", response_class=HTMLResponse)
@@ -1263,6 +1252,8 @@ async def chats_page(request: Request, msg: str | None = None, show_hidden: bool
 async def chats_live_state(c: str | None = None):
     """What the open chat page shows, as fingerprints: it polls this (local database only, no willhaben request)
     and swaps just the part that changed – new messages appear without a reload."""
+    if c:
+        chats.seen_in_app(c)            # the open chat shows its new messages: read here (the sidebar badge)
     return chats.live_state(c)
 
 
@@ -1276,6 +1267,7 @@ async def chats_bulk(request: Request, action: str):
         if action == "hide":
             chats.hide(cid)
         else:
+            chats.seen_in_app(cid)
             if get_session().logged_in:
                 await chats.mark_read(cid)
             with session() as db:
@@ -1576,6 +1568,7 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
         conv = db.get(Conversation, conversation_id)
     if conv is None:
         raise HTTPException(404)
+    chats.seen_in_app(conversation_id)                   # the sidebar badge: read here
     if conv.unread_count and get_session().logged_in:   # you read it here, so the buyer sees "read" (background)
         task = asyncio.create_task(chats.mark_read(conversation_id))
         _background.add(task)

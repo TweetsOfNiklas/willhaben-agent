@@ -437,6 +437,74 @@ def messages_of(conversation_id: str) -> list[Message]:
                             .order_by(col(Message.created_at).asc().nulls_first(), Message.id)))
 
 
+def _seen_baseline() -> datetime:
+    """Chats never opened in the app count as read up to the moment this was first asked (no badge for history)."""
+    raw = get_setting("chats_app_seen_since")
+    if not raw:
+        raw = utcnow().isoformat()
+        set_setting("chats_app_seen_since", raw)
+    return _aware(datetime.fromisoformat(raw))
+
+
+def overview(db) -> dict[str, Any]:
+    """The chat list's state: the chats it shows (not hidden, not older than the sync window), those where the other
+    person wrote last ("waiting"), those with an answer drafted, and per chat the messages from the other person that
+    came after it was last opened in the app ("unread"). The sidebar badges count the same."""
+    convs = list(db.exec(select(Conversation).where(col(Conversation.removed).is_not(True))
+                         .order_by(col(Conversation.last_message_at).desc().nulls_last())))
+    open_drafts = set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all())
+    last_dir: dict[str, str] = {}       # each chat's newest real message (not a site notice): in = they wrote last
+    incoming: dict[str, list[datetime]] = {}
+    answered: dict[str, datetime] = {}  # my newest message: whoever answers has read what came before
+    for cid, direction, at in db.exec(select(Message.conversation_id, Message.direction, Message.created_at)
+                                      .where(col(Message.kind).is_(None))
+                                      .order_by(col(Message.created_at).asc().nulls_first(), col(Message.id).asc())):
+        last_dir[cid] = direction
+        if direction == "in" and at is not None:
+            incoming.setdefault(cid, []).append(_aware(at))
+        elif direction == "out" and at is not None:
+            answered[cid] = _aware(at)
+    base = _seen_baseline()
+    unread = {}
+    for c in convs:
+        seen = max([base] + [x for x in (_aware(c.app_seen_at), answered.get(c.id)) if x is not None])
+        n = sum(1 for at in incoming.get(c.id, []) if at > seen)
+        # the site's own count too, for messages not fetched yet – unless the chat was opened here since
+        if c.unread_count and not (c.app_seen_at and c.last_message_at
+                                   and _aware(c.app_seen_at) >= _aware(c.last_message_at)):
+            n = max(n, c.unread_count)
+        if n:
+            unread[c.id] = n
+    since = sync_window()[1]
+    old = {c.id for c in convs if since is not None and c.last_message_at is not None and _aware(c.last_message_at) < since}
+    shown = [c for c in convs if not c.hidden_at and c.id not in old]
+    return {"convs": convs, "shown": shown, "old": old, "open_drafts": open_drafts,
+            "waiting": {cid for cid, d in last_dir.items() if d == "in"}, "unread": unread}
+
+
+def badge_counts(db) -> dict[str, int]:
+    """Sidebar: unread messages (as above) and chats that need me: the other person wrote last, or a draft waits."""
+    o = overview(db)
+    ids = {c.id for c in o["shown"]}
+    return {"chats": sum(n for cid, n in o["unread"].items() if cid in ids),
+            "chats_action": len(ids & (o["waiting"] | o["open_drafts"]))}
+
+
+def seen_in_app(conversation_id: str) -> None:
+    """The owner looked at the chat in the app: what came so far is read here."""
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is None:
+            return
+        newest = db.exec(select(func.max(Message.created_at)).where(Message.conversation_id == conversation_id,
+                                                                    Message.direction == "in")).one()
+        if conv.app_seen_at is not None and (newest is None or _aware(newest) <= _aware(conv.app_seen_at)):
+            return                          # nothing new since: no write
+        conv.app_seen_at = utcnow()
+        db.add(conv)
+        db.commit()
+
+
 def live_state(conversation_id: str | None = None) -> dict[str, str]:
     """Short fingerprints of what the chat pages show: "list" and, for an open conversation, "messages", "composer"
     and "context". The pages poll them (local database only, never willhaben) and swap just the part that changed."""
@@ -447,7 +515,8 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
 
     with session() as db:
         convs = db.exec(select(Conversation.id, Conversation.last_message_at, Conversation.unread_count,
-                               Conversation.last_message_text, Conversation.hidden_at, Conversation.removed)).all()
+                               Conversation.last_message_text, Conversation.hidden_at, Conversation.removed,
+                               Conversation.app_seen_at)).all()
         open_drafts = sorted(set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all()))
         out = {"list": fp([list(r) for r in convs], open_drafts, get_session().chat_live.get("state"))}
         conv = db.get(Conversation, conversation_id) if conversation_id else None

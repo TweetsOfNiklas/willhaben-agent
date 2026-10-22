@@ -23,6 +23,7 @@
 
   {# the first message takes the free space above (mt-auto): a short thread sits at the bottom, a long one scrolls
      (justify-end would push the oldest messages out of reach above the scroller) #}
+  {% set sending = drafts|selectattr('status', 'equalto', 'sending')|list %}
   <div id="chat-messages" class="flex min-h-0 flex-1 flex-col gap-2 px-4 py-5 md:px-5 xl:overflow-y-auto">
     {# my messages: ✓ sent, ✓✓ seen by the other person (Message.read, chats.mark_seen); the newest one says it in words #}
     {% set last_out = messages|selectattr('direction', 'equalto', 'out')|rejectattr('kind')|list|last %}
@@ -38,11 +39,23 @@
         {% if last_out and m.id == last_out.id %}<div class="chat-footer mt-0.5 text-[11.5px] text-muted" aria-hidden="true">{{ state }}</div>{% endif %}
       </div>
       {% endif %}
-    {% else %}<p class="mt-auto text-muted">{{ _("No history stored.") }}</p>{% endfor %}
+    {% else %}{% if not sending %}<p class="mt-auto text-muted">{{ _("No history stored.") }}</p>{% endif %}{% endfor %}
+    {# an answer on its way (chats.enqueue_send) stands where it will appear: until the grace period is over it can be
+       taken back right here (the countdown under it), then a spinner while it goes out; no notice at the edge #}
+    {% if sending %}{% set d = sending|first %}
+    <div id="draft-{{ d.id }}" class="chat chat-end {{ 'mt-auto' if not messages else '' }}" data-sending data-undo-here="draft:{{ d.id }}" x-data="{ k: {{ ('draft:' ~ d.id)|tojson|forceescape }} }">
+      <div class="chat-bubble chat-bubble-primary max-w-[85%] whitespace-pre-wrap opacity-60 [overflow-wrap:anywhere] md:max-w-[72%]">{{ d.text }}</div>
+      <div class="chat-footer mt-1 flex items-center gap-2 text-[12px] text-muted">
+        <span x-show="$store.jobs.isWorking(k)" x-cloak class="inline-flex items-center gap-1.5 text-primary"><span class="loading loading-spinner loading-xs"></span>{{ _("Sending…") }}</span>
+        <span x-show="!$store.jobs.isWorking(k)" class="inline-flex items-center gap-1.5 tabular-nums">{{ ui.icon('clock', 13) }}<span x-text="$store.jobs.leftFor($store.jobs.cancelFor(k)) ? {{ _('Goes out in {n} s')|tojson|forceescape }}.replace('{n}', $store.jobs.leftFor($store.jobs.cancelFor(k))) : {{ _('Queued: send')|tojson|forceescape }}">{{ _("Queued: send") }}</span></span>
+        <button type="button" x-show="!$store.jobs.isWorking(k) && $store.jobs.cancelFor(k)" x-cloak @click="$store.jobs.cancel($store.jobs.cancelFor(k), true)"
+                class="btn btn-xs h-6 min-h-6 gap-1 px-2 font-medium">{{ ui.icon('undo', 12) }}{{ _("Take back") }}</button>
+      </div>
+    </div>
+    {% endif %}
   </div>
 
   {# drafts come newest first (chats.drafts_of): the composer shows the newest open one, never an older, stale draft #}
-  {% set sending = drafts|selectattr('status', 'equalto', 'sending')|list %}
   {% set open = drafts|selectattr('status', 'equalto', 'draft')|list %}
   {# One flow: what the draft is → what to read first → the text → send → or have Claude rewrite it.
      An answer on its way (chats.enqueue_send): spinner while it goes out, clock while queued; swaps itself when done. #}
@@ -59,9 +72,8 @@
       <span class="h-2.5 w-3/5 animate-pulse rounded-full bg-base-300"></span>
     </div>
     <small class="text-[12.5px] text-muted">{{ _("Takes 10–60 seconds – you can leave the chat.") }}</small>
-    {% elif sending %}{% set d = sending|first %}
-    <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">{{ ui.pending('draft:' ~ d.id, _("Sending…"), _("Queued: send"), 'font-semibold') }}</div>
-    <p class="rounded-[10px] bg-base-200 px-3.5 py-3 break-words whitespace-pre-wrap text-muted">{{ d.text }}</p>
+    {% elif sending %}{# it stands in the thread above, with its countdown #}
+    <p class="text-[12.5px] text-muted">{{ _("Your answer is on its way (above).") }}</p>
     {% elif open %}{% set d = open|first %}
     {% set label = intent_label(d.intent) %}
     {% set scam = d.intent == 'scam_suspect' %}

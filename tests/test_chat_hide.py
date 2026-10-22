@@ -3,7 +3,7 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from app.db import Conversation, Draft, Message, session, utcnow
+from app.db import Conversation, Draft, Message, session, set_setting, utcnow
 from app.services import chats
 from app.willhaben.account import ConversationSummary
 
@@ -112,6 +112,7 @@ def test_chat_list_filters_unread_awaiting_reply_and_drafts():
                        created_at=at + timedelta(seconds=1)))          # a site notice does not count as their message
         db.add(Draft(conversation_id="d", text="Ja"))
         db.commit()
+    set_setting("chats_app_seen_since", (at + timedelta(seconds=5)).isoformat())   # all of it seen in the app
     names = ("Ungelesen-Person", "Wartet-Person", "Entwurf-Person", "Erledigt-Person")
     with TestClient(app) as c:
         def shown(url):

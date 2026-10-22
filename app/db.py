@@ -131,6 +131,9 @@ class Conversation(SQLModel, table=True):
     removed: bool | None = None    # also hidden, and its messages/drafts deleted here; the row stays so sync skips it
     drafting: bool | None = None   # Claude is writing an answer as a background job (chats.enqueue_draft)
     draft_error: str | None = None # why the last background draft failed (shown next to "Prepare answer")
+    # when the owner last looked at this chat in the app: newer messages from the other person count as unread here
+    # (the sidebar badge), whatever the site says (an automatic answer marks them read there before anyone looked)
+    app_seen_at: datetime | None = None
 
 
 class Message(SQLModel, table=True):

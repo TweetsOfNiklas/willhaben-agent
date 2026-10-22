@@ -77,7 +77,7 @@
   <div id="chat-list-items" class="flex flex-col gap-0.5 px-2.5 pb-4">
     {% for c in convs if (not site_filter or (c.platform or 'willhaben') == site_filter)
                          and (not role_filter or c.role == role_filter)
-                         and (not show_filter or (show_filter == 'unread' and c.unread_count) or (show_filter == 'reply' and c.id in waiting)
+                         and (not show_filter or (show_filter == 'unread' and unread_by_chat.get(c.id)) or (show_filter == 'reply' and c.id in waiting)
                               or (show_filter == 'draft' and c.id in open_drafts)) %}
     <a href="/chats/{{ c.id }}" @click="rowClick($event)"
        hx-get="/chats/{{ c.id }}" hx-target="#chat-pane" hx-select="#chat-pane" hx-swap="outerHTML" hx-select-oob="#chat-list-items,#chat-live" hx-push-url="true" hx-trigger="open-row"
@@ -88,14 +88,14 @@
       <span class="grid size-9 shrink-0 place-items-center rounded-full bg-hover text-[13px] font-bold text-base-content">{{ (c.partner_name or '?')[:1]|upper }}</span>
       <span class="min-w-0">
         <span class="flex min-w-0 items-center justify-between gap-2">
-          <span class="flex min-w-0 items-center gap-1.5"><span class="truncate {{ 'font-bold' if c.unread_count else 'font-semibold' }}">{{ c.partner_name or _('unknown') }}</span>{% if vinted_on %}{{ ui.site_mark(c.platform or 'willhaben') }}{% endif %}</span>
+          <span class="flex min-w-0 items-center gap-1.5"><span class="truncate {{ 'font-bold' if unread_by_chat.get(c.id) else 'font-semibold' }}">{{ c.partner_name or _('unknown') }}</span>{% if vinted_on %}{{ ui.site_mark(c.platform or 'willhaben') }}{% endif %}</span>
           <span class="shrink-0 whitespace-nowrap text-[12px] text-muted">{{ c.last_message_at|ago }}</span>
         </span>
         <span class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">{% if c.role %}{{ ui.tag(_("Buying") if c.role == 'buyer' else _("Selling"), c.role == 'buyer') }}{% endif %}<span class="truncate">{{ c.ad_title or c.ad_id or '–' }}</span></span>
-        <span class="mt-0.5 block truncate text-[13px] {{ 'text-base-content' if c.unread_count else 'text-muted' }}">{{ (c.last_message_text or '')[:120] }}</span>
+        <span class="mt-0.5 block truncate text-[13px] {{ 'text-base-content' if unread_by_chat.get(c.id) else 'text-muted' }}">{{ (c.last_message_text or '')[:120] }}</span>
       </span>
       <span class="flex flex-col items-end gap-1 pt-[18px]">
-        {% if c.unread_count %}<span class="badge badge-primary badge-sm">{{ c.unread_count }}</span>{% endif %}
+        {% if unread_by_chat.get(c.id) %}<span class="badge badge-primary badge-sm">{{ unread_by_chat[c.id] }}</span>{% endif %}
         {% if c.id in open_drafts %}{{ ui.pill(_("Draft"), 'ok', dot=false) }}{% endif %}
         {% if c.hidden_at %}{{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}
       </span>
