@@ -136,14 +136,14 @@ def test_my_own_text_goes_out_directly(monkeypatch):
     assert d.text == "Passt, bis morgen" and d.model == "manual" and queued == [(d.id, "Passt, bis morgen", True)]
 
 
-def test_mark_as_unread_until_opened_again_and_the_live_line_in_the_chat():
+def test_mark_as_unread_until_opened_again():
     set_setting("chats_app_seen_since", (T0 - timedelta(hours=1)).isoformat())
     _chat("c1", ("in", -9), ("out", -5))                      # answered: read
     assert _counts()["chats"] == 0
     from app.main import app
     with TestClient(app) as c:
         page = c.get("/chats/c1").text
-        assert "data-mark-unread" in page and 'data-chat-live="0"' in page and "willhaben offline" in page
+        assert "data-mark-unread" in page and 'id="chat-presence"' in page
         r = c.post("/chats/c1/unread", follow_redirects=False)
         assert r.headers["location"].startswith("/chats") and "/c1" not in r.headers["location"]
         assert _counts()["chats"] == 1
@@ -172,3 +172,37 @@ def test_each_chat_shows_its_items_picture_in_the_list():
     with TestClient(app) as c:
         page = c.get("/chats").text
     assert 'src="https://img/item.webp"' in page and 'src="https://img/mine.jpg"' in page and "data-chat-thumb" in page
+
+
+def test_the_other_persons_online_state_from_willhaben_and_vinted(monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.platforms import vinted
+    from app.willhaben.session import get_session
+    _chat("c1", ("in", -1), partner_uuid="u-1")
+    sess = get_session()
+    asked = []
+
+    async def track(uuid):
+        asked.append(uuid)
+        return True
+    monkeypatch.setattr(sess, "track_presence", track)
+    with session() as db:
+        conv = db.get(Conversation, "c1")
+    import asyncio
+    asyncio.run(chats.ask_presence(conv))
+    assert asked == ["u-1"] and chats.presence_of(conv) is None              # asked; the answer comes as a frame
+    asyncio.run(sess._on_chat_frame('{"type": "update_presence", "payload": {"user_uuid": "u-1", "online": false, '
+                                    '"last_seen": "2026-10-22T10:00:00Z"}}'))
+    p = chats.presence_of(conv)
+    assert p == {"online": False, "last_seen": datetime(2026, 10, 22, 10, tzinfo=timezone.utc)}
+    from app.main import app
+    with TestClient(app) as c:
+        assert 'data-presence="offline"' in c.get("/chats/c1").text
+    sess.presence["u-1"]["online"] = True
+    with TestClient(app) as c:
+        page = c.get("/chats/c1").text
+    assert 'data-presence="online"' in page
+
+    page = '"login":"x","last_loged_on_ts":"2026-10-22T21:23:00+02:00","last_loged_on":"heute","is_online":true,"country_iso_code":"DE"'
+    assert vinted.parse_member(page) == {"country": "DE", "online": True, "last_seen": "2026-10-22T21:23:00+02:00"}

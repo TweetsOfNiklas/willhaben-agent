@@ -265,6 +265,7 @@ templates.env.globals.update(record_all_stats=lambda: {**record_all.stats(), "on
 templates.env.globals.update(site_logins=lambda: [(s.name, {**site_accounts.state(s.id), "checked_at": site_accounts.checked_at(s.id)})
                                                   for s in site_accounts.SITES.values() if platforms.enabled(s.id)])   # session page
 templates.env.globals.update(vinted_live=lambda: vinted_inbox_mod.live)   # the chat list's Vinted line
+templates.env.globals.update(presence_of=lambda conv: chats.presence_of(conv))   # the open chat: their online state
 templates.env.globals.update(credentials_state=credentials_svc.stored)   # login details card (services/credentials.py)
 templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
@@ -1583,6 +1584,9 @@ async def chat_page(request: Request, conversation_id: str, msg: str | None = No
     if conv is None:
         raise HTTPException(404)
     chats.seen_in_app(conversation_id)                   # the sidebar badge: read here
+    task = asyncio.create_task(chats.ask_presence(conv))   # their online state: the header shows it once it is known
+    _background.add(task)
+    task.add_done_callback(_background.discard)
     if conv.unread_count and get_session().logged_in:   # you read it here, so the buyer sees "read" (background)
         task = asyncio.create_task(chats.mark_read(conversation_id))
         _background.add(task)

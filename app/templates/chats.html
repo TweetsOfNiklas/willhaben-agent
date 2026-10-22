@@ -135,6 +135,7 @@
     if (b && b !== box) { box = b; shown = JSON.parse(b.dataset.state); conv = b.dataset.conv; }
   };
   const parts = {list: ['chat-live-state', 'chat-list-items'], messages: ['chat-messages'], composer: ['chat-composer'],
+                 presence: ['chat-presence'],
                  context: ['chat-context']};
   const edited = el => {
     const a = document.activeElement;

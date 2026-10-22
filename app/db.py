@@ -137,6 +137,7 @@ class Conversation(SQLModel, table=True):
     # marked finished by me ("Mark as finished"): no answer due any more; a newer message from them opens it again
     finished_at: datetime | None = None
     marked_unread: bool | None = None   # "Mark as unread": counts as unread here until I open it again
+    partner_uuid: str | None = None     # the other person's willhaben user uuid: their online state (presence)
 
 
 class Message(SQLModel, table=True):

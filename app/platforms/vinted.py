@@ -124,9 +124,20 @@ def _item_status(plugins: dict[str, dict[str, Any]], text: str) -> str:
 _COUNTRY = re.compile(r'"country_iso_code"\s*:\s*"([A-Z]{2})"|"country_code"\s*:\s*"([A-Z]{2})"')
 
 
+_ONLINE = re.compile(r'"is_online"\s*:\s*(true|false)')
+_LAST_SEEN = re.compile(r'"last_loged_on_ts"\s*:\s*"([^"]+)"')      # sic: Vinted's spelling
+
+
 def parse_member_country(text: str) -> str | None:
     m = _COUNTRY.search(text or "")
     return (m.group(1) or m.group(2)) if m else None
+
+
+def parse_member(text: str) -> dict[str, Any]:
+    """The profile page's own user: {country, online (bool or None), last_seen (ISO time or None)}."""
+    on, seen = _ONLINE.search(text or ""), _LAST_SEEN.search(text or "")
+    return {"country": parse_member_country(text), "online": (on.group(1) == "true") if on else None,
+            "last_seen": seen.group(1) if seen else None}
 
 
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:
@@ -252,12 +263,16 @@ class VintedClient(HttpPlatformClient):
             raise PlatformError(t("Vinted search returned HTTP {status}", status=r.status_code))
         return parse_catalog(r.text, host)
 
-    async def member_country(self, user_id: str, host: str = HOST) -> str | None:
-        """A member's country (ISO code, "DE") from their public profile page; None when it says none."""
-        r = await self._get(f"https://{host}/member/{user_id}", headers=RSC_HEADERS, cache_s=86400, kind="detail")
+    async def member(self, user_id: str, host: str = HOST, cache_s: float = 86400) -> dict[str, Any]:
+        """A member's public profile: {country, online, last_seen} (parse_member)."""
+        r = await self._get(f"https://{host}/member/{user_id}", headers=RSC_HEADERS, cache_s=cache_s, kind="detail")
         if r.status_code != 200:
             raise PlatformError(t("Vinted member {id}: HTTP {status}", id=user_id, status=r.status_code))
-        return parse_member_country(r.text)
+        return parse_member(r.text)
+
+    async def member_country(self, user_id: str, host: str = HOST) -> str | None:
+        """A member's country (ISO code, "DE") from their public profile page; None when it says none."""
+        return (await self.member(user_id, host))["country"]
 
     async def item(self, ad_id: str, host: str = HOST) -> AdDetail | None:
         r = await self._get(f"https://{host}/items/{ad_id}", headers=RSC_HEADERS, cache_s=300, kind="detail")
@@ -404,4 +419,4 @@ class VintedPlatform(Platform):
 
 
 __all__ = ["VintedClient", "VintedPlatform", "get_client", "set_client", "parse_catalog", "parse_item", "parse_listing",
-           "parse_age", "parse_member_country"]
+           "parse_age", "parse_member", "parse_member_country"]

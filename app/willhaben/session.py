@@ -100,6 +100,7 @@ class BrowserSession:
         self._creating_internal = False
         self._chat_cb = None
         self.chat_live: dict[str, Any] = {"state": "off", "since": None, "last_frame": None, "events": 0}
+        self.presence: dict[str, dict[str, Any]] = {}   # user uuid -> {online, last_seen, at} (update_presence frames)
 
     # ---------------------------------------------------------------- lifecycle
     @property
@@ -700,11 +701,19 @@ class BrowserSession:
         const connect = () => {
             ws = new WebSocket(url);
             ws.onopen = () => { delay = 2000; window.__whChat(JSON.stringify({_state: 'open'}));
+                                (window.__whTracked || []).forEach(window.__whTrack);    // presence again after a reconnect
                                 ping = setInterval(() => { try { ws.send(JSON.stringify({req_type: 'ping'})); } catch (e) {} }, 10000); };
             ws.onmessage = (e) => window.__whChat(typeof e.data === 'string' ? e.data : '{}');
             ws.onclose = (e) => { clearInterval(ping); window.__whChat(JSON.stringify({_state: 'closed', code: e.code}));
                                   setTimeout(connect, delay); delay = Math.min(delay * 2, 60000); };
             ws.onerror = () => {};
+        };
+        // the other person's online state, as the chat web app asks for it: answered by "update_presence" frames
+        window.__whTrack = (uuid) => {
+            window.__whTracked = window.__whTracked || [];
+            if (!window.__whTracked.includes(uuid)) window.__whTracked.push(uuid);
+            try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({request_id: crypto.randomUUID(),
+                req_type: 'track_presence', payload: {partner_user_uuid: uuid}})); } catch (e) {}
         };
         connect();
         return 'started';
@@ -719,6 +728,18 @@ class BrowserSession:
         self._require()
         self._chat_cb = on_event
         await self._open_chat_page()
+
+    async def track_presence(self, user_uuid: str) -> bool:
+        """Ask the live socket for this person's online state (and again after every reconnect); the answer comes as
+        an update_presence frame into self.presence. False when the live chat is not running."""
+        if not user_uuid or self.chat_page is None or self.chat_page.is_closed():
+            return False
+        try:
+            await self.chat_page.evaluate("(u) => window.__whTrack && window.__whTrack(u)", user_uuid)
+        except Exception as e:  # noqa: BLE001 - the online state is a nicety
+            log.info("presence request failed: %s", e)
+            return False
+        return True
 
     async def _open_chat_page(self) -> None:
         from app.willhaben.account import CHAT_WS
@@ -756,6 +777,12 @@ class BrowserSession:
                 self.chat_live.update(state=state, since=now)
             return
         if msg.get("req_type") == "ping":
+            return
+        if msg.get("type") == "update_presence":       # {payload: {user_uuid, online, last_seen}}
+            p = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+            if p.get("user_uuid"):
+                self.presence[str(p["user_uuid"])] = {"online": bool(p.get("online")), "last_seen": p.get("last_seen"),
+                                                      "at": now}
             return
         from app.willhaben.account import CHAT_WS
         recorder.record_push(CHAT_WS, msg)     # kept for the timeline and replay; pings and socket states are not

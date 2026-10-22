@@ -10,11 +10,12 @@
   <div class="sticky top-0 z-[2] flex items-center gap-2.5 border-b border-base-300 bg-base-100 px-4 py-3 md:px-5 md:py-3.5">
     <a href="/chats" class="btn btn-ghost btn-sm btn-square -ml-2 md:hidden" aria-label="{{ _('Chats') }}">{{ ui.icon('back', 18) }}</a>
     <div class="min-w-0 flex-1">
-      {# this chat's site live (willhaben's chat socket, Vinted's push): new messages arrive at once, else by polling #}
-      {% set lv = vinted_live() if conv.platform == 'vinted' else (session_status.chat_live or {}) %}
-      {% set on = (lv or {}).get('state') == 'connected' %}
+      {# the other person's online state, as their site shows it: "online", else when they were last online #}
+      {% set pr = presence_of(conv) %}
       <div class="flex min-w-0 items-center gap-2"><span class="truncate text-base font-semibold">{{ conv.partner_name or _('unknown') }}</span>{% if conv.hidden_at %} {{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}
-        <span class="inline-flex shrink-0 items-center gap-1 text-[12px] {{ 'text-success' if on else 'text-error' }}" data-chat-live="{{ 1 if on else 0 }}" title="{{ ('Vinted' if conv.platform == 'vinted' else 'willhaben') ~ ': ' ~ (_('live since {time}', time=lv.since|local('%H:%M')) if on else _('not connected')) }}"><span class="size-2 rounded-full bg-current"></span>{{ ('Vinted' if conv.platform == 'vinted' else 'willhaben') }} {{ 'online' if on else 'offline' }}</span></div>
+        <span id="chat-presence" class="inline-flex shrink-0 items-center gap-1 text-[12px] {{ 'text-success' if pr and pr.online else 'text-muted' }}" data-presence="{{ 'online' if pr and pr.online else 'offline' if pr else '' }}">
+          {%- if pr and pr.online %}<span class="size-2 rounded-full bg-current"></span>{{ _("online") }}
+          {%- elif pr and pr.last_seen %}{{ _("last online {ago}", ago=pr.last_seen|ago) }}{% endif %}</span></div>
       <div class="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">{% if vinted_on %}{{ ui.site_mark(conv.platform or 'willhaben', 16) }}{% endif %}{% if conv.role %}{{ ui.tag(_("Selling") if selling else _("Buying"), not selling) }}{% endif %}<span class="truncate">{{ conv.ad_title or '' }}</span></div>
     </div>
     <div class="flex shrink-0 items-center gap-1.5">

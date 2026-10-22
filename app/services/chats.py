@@ -93,6 +93,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
             row.ad_id = c.ad_id or row.ad_id
             row.ad_title = c.ad_title or row.ad_title
             row.partner_name = c.partner_name or row.partner_name
+            row.partner_uuid = c.partner_uuid or row.partner_uuid
             row.role = c.role or row.role
             row.unread_count = c.unread_count
             row.last_message_text = c.last_text or row.last_message_text
@@ -490,6 +491,47 @@ def closes_chat(text: str | None) -> bool:
     return hit and all(w in _CLOSING_FILLER for w in s.split())
 
 
+# ------------------------------------------------------------------ the other person's online state
+PRESENCE_VINTED_CACHE_S = 300       # Vinted: their profile page, at most every 5 minutes per person
+_vinted_presence: dict[str, dict[str, Any]] = {}    # conversation id -> {online, last_seen}
+
+
+def _when_iso(raw: Any) -> datetime | None:
+    try:
+        return _aware(datetime.fromisoformat(str(raw).replace("Z", "+00:00"))) if raw else None
+    except ValueError:
+        return None
+
+
+def presence_of(conv: Conversation) -> dict[str, Any] | None:
+    """{online: bool, last_seen: datetime | None} of the other person, as their site last said; None when unknown."""
+    if conv.platform == "vinted":
+        p = _vinted_presence.get(conv.id)
+    else:
+        p = get_session().presence.get(conv.partner_uuid or "") if conv.partner_uuid else None
+    if not p or (p.get("online") is None and not p.get("last_seen")):
+        return None
+    return {"online": bool(p.get("online")), "last_seen": _when_iso(p.get("last_seen"))}
+
+
+async def ask_presence(conv: Conversation) -> None:
+    """Ask the site for the other person's online state (the open chat shows it): willhaben over the live chat
+    socket (the answer arrives as a frame), Vinted from their public profile page."""
+    if conv.platform == "vinted":
+        partner = (conv.ad_context or {}).get("partner_id")
+        if not partner:
+            return
+        from app.platforms import PlatformError, vinted
+        try:
+            m = await vinted.get_client().member(partner, cache_s=PRESENCE_VINTED_CACHE_S)
+        except (PlatformError, Exception) as e:  # noqa: BLE001 - a nicety
+            log.info("vinted presence of %s not loaded: %s", partner, e)
+            return
+        _vinted_presence[conv.id] = {"online": m.get("online"), "last_seen": m.get("last_seen")}
+    elif conv.partner_uuid:
+        await get_session().track_presence(conv.partner_uuid)
+
+
 def mark_unread(conversation_id: str) -> None:
     """Unread again here (the blue badge, at least 1) until I open the chat; the site is not told."""
     with session() as db:
@@ -636,6 +678,7 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
             buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
             out["messages"] = fp(list(msgs))
+            out["presence"] = fp(presence_of(conv))
             out["composer"] = fp([list(d) for d in drafts], conv.drafting, conv.draft_error)
             out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
                                 ad and [ad.sale_status, ad.sale_conversation_id, ad.status, stock.numbers(ad),

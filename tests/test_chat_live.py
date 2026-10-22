@@ -18,7 +18,7 @@ def _add(obj):
 def test_fingerprints_change_only_where_something_changed():
     _conversation()
     before = chats.live_state("c1")
-    assert set(before) == {"list", "messages", "composer", "context"}
+    assert set(before) == {"list", "messages", "composer", "context", "presence"}
     assert chats.live_state("c1") == before                                   # stable while nothing happens
 
     _add(dbmod.Message(conversation_id="c1", ext_id="m2", direction="in", text="Noch da?",
@@ -47,7 +47,7 @@ def test_fingerprints_change_only_where_something_changed():
 def test_pages_carry_the_baseline_and_the_route_answers(client):  # noqa: F811
     _conversation()
     r = client.get("/chats/live-state", params={"c": "c1"})
-    assert r.status_code == 200 and set(r.json()) == {"list", "messages", "composer", "context"}   # not taken as a chat id
+    assert r.status_code == 200 and set(r.json()) == {"list", "messages", "composer", "context", "presence"}   # not taken as a chat id
     page = client.get("/chats/c1").text
     for part in ('id="chat-messages"', 'id="chat-composer"', 'id="chat-context"', 'id="chat-list-items"',
                  'id="chat-live-state"', 'data-conv="c1"', "/chats/live-state"):
