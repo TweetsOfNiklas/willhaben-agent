@@ -439,10 +439,48 @@ async def answer(sim: SimChat, turns: list[dict[str, Any]], overrides: dict[str,
         blockers.append(t("The purchase is paused for your decision"))
     if buyer and p is not None and p.status in purchase.TERMINAL:
         blockers.append(t("The purchase has ended"))
-    return {"who": "me", "text": d.text, "at": utcnow().isoformat(), "auto": not blockers,
+    turn = {"who": "me", "text": d.text, "at": utcnow().isoformat(), "auto": not blockers,
             "reason": (d.auto_reason or "").lstrip("✓✗ ").strip(), "blockers": blockers, "intent": d.intent,
             "price": d.suggested_price, "notes": [n for n in d.needs_info or []], "purchase": d.purchase,
             "meetup": d.meetup, "model": result.model, "prompt": {"system": req["system"], "user": req["prompt"]}}
+    if needs_owner(turn):            # in a real chat the owner fills the gaps: here the simulator does it for them
+        filled = await fill_gaps(sim, turns, d.text)
+        if filled:
+            turn.update(text=filled, draft=d.text)
+            turn["blockers"] = [*blockers, t("Gaps filled by the simulator in your place")]
+    return turn
+
+
+FILL_SYSTEM = """\
+Du spielst im Chat-Simulator die Person, der die Anzeige gehört bzw. die kauft, und gibst einen Antwortentwurf frei.
+Im Entwurf stehen Lücken in eckigen Klammern ([Uhrzeit], [ja/nein], [Set]), die nur die Person füllen kann.
+- Ersetze jede Lücke durch eine konkrete, plausible Angabe, passend zu Anzeige und Verlauf. Termine: ein konkreter Tag
+  und eine Uhrzeit; Adressen: eine erfundene, aber realistische Straße im Ort der Anzeige.
+- Stehen Möglichkeiten zur Wahl (in der Lücke wie [ja/nein], im Verlauf oder in der Anzeige aufgezählt), nimm die mit
+  der Nummer aus „Zufallswahl“ (ab 1 gezählt; ist sie größer als die Zahl der Möglichkeiten, zähl von vorne weiter).
+- Sonst nichts ändern: gleiche Wörter, gleicher Stil, keine eckigen Klammern mehr im Ergebnis.
+"""
+FILL_SCHEMA = {"type": "object", "properties": {"filled": {"type": "string"}}, "required": ["filled"],
+               "additionalProperties": False}
+
+
+async def fill_gaps(sim: SimChat, turns: list[dict[str, Any]], text: str, rng: random.Random | None = None) -> str | None:
+    """The draft with its gaps filled as the owner would (a random pick where there is a choice); None when Claude
+    could not fill them all, so the conversation stops there as before."""
+    ad = ad_view(sim)
+    pick = (rng or random.Random()).randint(1, 6)
+    lines = ["Anzeige:", f"- Titel: {ad.get('title')}", f"- Preis: {ad.get('price')}", f"- Ort: {ad.get('location')}",
+             f"- Beschreibung: {(ad.get('description') or '')[:1200]}", "", "Verlauf (älteste zuerst):",
+             *[f"{'Ich' if x.get('who') == 'me' else 'Partner'}: {x.get('text')}" for x in turns[-8:]],
+             "", f"Zufallswahl: {pick}", "", "Entwurf mit Lücken:", text]
+    try:
+        out = await get_backend("chat", model=sim.partner_model).complete(system=FILL_SYSTEM, prompt="\n".join(lines),
+                                                                         schema=FILL_SCHEMA)
+    except LLMError as e:
+        log.info("simulator could not fill the gaps: %s", e)
+        return None
+    filled = str((out.data or {}).get("filled") or "").strip()
+    return filled if filled and "[" not in filled else None
 
 
 async def opener(sim: SimChat, overrides: dict[str, str] | None = None) -> dict[str, Any]:

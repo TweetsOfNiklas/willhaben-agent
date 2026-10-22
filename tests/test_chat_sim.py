@@ -32,6 +32,8 @@ class _Backend:
         if "target" in props:
             return LLMResult(data={"target": props["target"]["enum"][0], "new_text": "- Nie unter 15 € gehen.",
                                    "summary": "Klare Untergrenze."}, model=self.model)
+        if "filled" in props:                       # the simulator fills the owner's gaps
+            return LLMResult(data={"filled": "Ja, abholen geht am Samstag um 10:00."}, model=self.model)
         if "opening_offer" in props:
             return LLMResult(data={"message": "Hallo, wäre 90 € ok?", "opening_offer": 90}, model=self.model)
         base = {"reply": "Ja, ist noch da. Abholung in Wien ist möglich.", "intent": "availability", "needs_info": [],
@@ -101,13 +103,18 @@ async def test_play_lets_claude_be_the_other_side(backend):
     assert any("Schnäppchenjäger" in c["prompt"] for c in backend.calls)
 
 
-async def test_play_stops_where_my_answer_needs_the_owner(backend):
-    """A gap like [Uhrzeit] waits for the owner in a real chat: the simulated other side never gets it."""
+async def test_play_fills_the_owners_gaps_instead_of_sending_them(backend):
+    """A gap like [Uhrzeit] is for the owner: the simulator fills it in their place (a random pick where there is a
+    choice), so the other side never gets brackets and the conversation goes on."""
     sim = await chat_sim.create("seller", ad_id="111", persona="pickup")
     backend.reply = {"reply": "Ja, abholen geht am [Tag] um [Uhrzeit].", "auto_send": False, "auto_reason": "Termin fehlt"}
-    assert chat_sim.play(sim.id, 3)
+    assert chat_sim.play(sim.id, 2)
     await _done()
-    assert [x["who"] for x in chat_sim.get(sim.id).turns] == ["partner", "me"]
+    turns = chat_sim.get(sim.id).turns
+    mine = [x for x in turns if x["who"] == "me"]
+    assert len(mine) == 2 and all("[" not in x["text"] for x in mine)
+    assert mine[0]["draft"] == "Ja, abholen geht am [Tag] um [Uhrzeit]." and not mine[0]["auto"]
+    assert any("Zufallswahl" in c["prompt"] for c in backend.calls)
 
 
 async def test_buying_answers_and_the_first_message_get_my_style(backend):

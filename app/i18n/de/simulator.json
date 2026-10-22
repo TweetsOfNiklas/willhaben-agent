@@ -236,5 +236,6 @@
  "Review written": "Review geschrieben",
  "Simulator: review of the round": "Simulator: Review der Runde",
  "Review by {model} – edit it before revising:": "Review von {model} – vor dem Überarbeiten anpassbar:",
- "A stronger model reviews this round and writes the feedback for the next one": "Ein stärkeres Modell prüft diese Runde und schreibt das Feedback für die nächste"
+ "A stronger model reviews this round and writes the feedback for the next one": "Ein stärkeres Modell prüft diese Runde und schreibt das Feedback für die nächste",
+ "Gaps filled by the simulator in your place": "Lücken hat der Simulator an deiner Stelle gefüllt"
 }
