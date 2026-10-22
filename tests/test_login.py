@@ -81,7 +81,7 @@ def test_the_home_screen_app_gets_its_manifest_and_icons_before_any_login(pw):
         page = c.get("/login").text
         c.post("/login", data={"username": "admin", "password": "geheim", "next": "/"})
         for html in (page, c.get("/").text):
-            assert '<link rel="manifest" href="/static/manifest.json?v=2">' in html
+            assert '<link rel="manifest" href="/static/manifest.json?v=4">' in html
             assert 'name="apple-mobile-web-app-title" content="SecondHandler"' in html
             assert 'name="apple-mobile-web-app-capable" content="yes"' in html and "viewport-fit=cover" in html
             assert 'rel="apple-touch-icon"' in html
