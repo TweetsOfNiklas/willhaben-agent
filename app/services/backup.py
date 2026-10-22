@@ -49,7 +49,8 @@ from app.i18n import t
 
 log = logging.getLogger(__name__)
 
-FORMAT = "willhaben-agent-backup"
+FORMAT = "secondhandler-backup"
+OLD_FORMATS = {"willhaben-agent-backup"}   # backups made before the rename still restore
 FORMAT_VERSION = 1
 SUPPORTED_VERSIONS = {1}
 MANIFEST = "manifest.json"
@@ -256,7 +257,7 @@ def purge_exports(max_age_s: int = 3600) -> None:
 
 
 def export_name(encrypted: bool) -> str:
-    return f"willhaben-agent-backup-{datetime.now():%Y%m%d-%H%M%S}.zip" + (".enc" if encrypted else "")
+    return f"secondhandler-backup-{datetime.now():%Y%m%d-%H%M%S}.zip" + (".enc" if encrypted else "")
 
 
 # ------------------------------------------------------------------ encryption
@@ -359,7 +360,7 @@ def _manifest(zf: zipfile.ZipFile) -> dict[str, Any]:
         m = json.loads(zf.read(MANIFEST))
     except (ValueError, zipfile.BadZipFile, OSError) as e:
         raise BackupError(t("manifest.json is unreadable: {error}", error=e)) from None
-    if not isinstance(m, dict) or m.get("format") != FORMAT:
+    if not isinstance(m, dict) or m.get("format") not in {FORMAT, *OLD_FORMATS}:
         raise BackupError(t("Not a backup of this app (unknown format)."))
     if m.get("version") not in SUPPORTED_VERSIONS:
         raise BackupError(t("Backup format version {v} is not supported by this app version.", v=m.get("version")))

@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 TTL_S = 12 * 3600
 TIMEOUT_S = 8
-NOMINATIM_UA = "willhaben-agent/0.1 (self-hosted; parcel drop-off lookup)"
+NOMINATIM_UA = "secondhandler/0.1 (self-hosted; parcel drop-off lookup)"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/130.0.0.0 Safari/537.36")
 GLS_KEY = "wpYvQxm7hN363U9lpSrWQL6qkTLx3kPl"   # public, embedded in gls-group.eu's shop finder

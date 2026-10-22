@@ -209,7 +209,7 @@ Requirements: Docker with Compose, on a machine with a **home internet connectio
 datacenter and VPN IP ranges.
 
 ```bash
-mkdir willhaben-agent && cd willhaben-agent
+mkdir secondhandler && cd secondhandler
 curl -fsSLO https://raw.githubusercontent.com/lumascet/willhaben-agent/master/compose.yaml
 docker compose up -d
 ```

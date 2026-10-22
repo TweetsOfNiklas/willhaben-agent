@@ -22,7 +22,7 @@ _PW = os.environ.get("WH_AGENT_PASSWORD") or os.environ.get("WH_HELPER_PASSWORD"
 AUTH = (os.environ.get("WH_AGENT_USER") or os.environ.get("WH_HELPER_USER") or "admin", _PW) if _PW else None
 
 mcp = MCPServer(
-    "willhaben-agent",
+    "secondhandler",
     instructions=(
         "Access to your SecondHandler: search on willhaben.at and the other second-hand sites it knows "
         "(list_platforms), your search agents and their hits, willhaben chats with reply drafts, your own ads. "

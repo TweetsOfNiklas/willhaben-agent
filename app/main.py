@@ -60,7 +60,7 @@ from app.willhaben.parse import InvalidSearchUrl, to_webapi_url, url_param, with
 from app.willhaben.public import WillhabenError, get_public, willhaben_limiter
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
 
-log = logging.getLogger("willhaben_agent")
+log = logging.getLogger("secondhandler")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 VIENNA = ZoneInfo("Europe/Vienna")
 BASE_DIR = Path(__file__).parent

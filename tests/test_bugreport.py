@@ -342,7 +342,7 @@ def test_unhandled_route_exception_logged_and_anonymised(client):
         assert r.status_code == 500
     finally:
         app.router.routes[:] = [rt for rt in app.router.routes if getattr(rt, "path", "") != "/__test_boom/{ad_id}"]
-    recs = [x for x in logbuffer.records() if x["logger"] == "willhaben_agent.errors"]
+    recs = [x for x in logbuffer.records() if x["logger"] == "secondhandler.errors"]
     assert recs and recs[-1]["message"] == "unhandled error: GET /__test_boom/{ad_id} -> 500 (RuntimeError)"
     assert "RuntimeError: cannot load ad" in recs[-1]["traceback"]
     text = bugreport.render_text(bugreport.build("it broke"))
@@ -377,7 +377,7 @@ def test_report_sections_and_anonymity(client):
                  "Waldviertel", "Hauptstraße 5"):
         assert leak not in text, leak
     assert "conv#1" in text and "<redacted>" not in rep["description"]
-    assert json.loads(json.dumps(rep, default=str))["format"] == "willhaben-agent-bugreport/1"
+    assert json.loads(json.dumps(rep, default=str))["format"] == "secondhandler-bugreport/1"
     no_settings = bugreport.build("", include_settings=False)
     assert "settings" not in no_settings
 

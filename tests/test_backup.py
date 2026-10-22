@@ -174,6 +174,12 @@ def test_rejects_bad_checksum(ddir, tmp_path):
         backup.validate_zip(p)
 
 
+def test_a_backup_from_before_the_rename_still_restores(ddir, tmp_path):
+    p = _zip(tmp_path, {"app.db": _db_bytes(tmp_path)}, manifest={"format": "willhaben-agent-backup"})
+    backup.validate_zip(p)
+    assert backup.FORMAT == "secondhandler-backup" and backup.export_name(False).startswith("secondhandler-backup-")
+
+
 def test_rejects_unknown_version_and_foreign_zip(ddir, tmp_path):
     p = _zip(tmp_path, {"app.db": _db_bytes(tmp_path)}, manifest={"version": 99})
     with pytest.raises(backup.BackupError, match="99"):

@@ -1,7 +1,7 @@
 [project]
-name = "willhaben-agent"
+name = "secondhandler"
 version = "0.4.1"
-description = "Self-hosted willhaben.at agent: search agents, chat drafts with Claude, ad expiry tracking, ad drafting, dashboard"
+description = "Self-hosted second-hand agent (willhaben, Vinted and more): search agents, chat drafts with Claude, ad expiry tracking, ad drafting, dashboard"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

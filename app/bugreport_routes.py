@@ -19,7 +19,7 @@ from app.db import utcnow
 from app.services import bugreport, logbuffer
 
 router = APIRouter()
-errlog = logging.getLogger("willhaben_agent.errors")
+errlog = logging.getLogger("secondhandler.errors")
 KEEP = 5
 _reports: OrderedDict[str, dict[str, Any]] = OrderedDict()   # token -> {"text", "json", "name"}; memory only
 
@@ -53,7 +53,7 @@ async def bugreport_create(request: Request, description: str = Form(""), includ
     text = bugreport.render_text(report)
     token = secrets.token_urlsafe(12)
     _reports[token] = {"text": text, "json": json.dumps(report, ensure_ascii=False, indent=1, default=str),
-                       "name": f"willhaben-agent-bugreport-{utcnow():%Y%m%d-%H%M%S}"}
+                       "name": f"secondhandler-bugreport-{utcnow():%Y%m%d-%H%M%S}"}
     while len(_reports) > KEEP:
         _reports.popitem(last=False)
     return _render(request, report=text, token=token, description=description, include_info=bool(include_info),

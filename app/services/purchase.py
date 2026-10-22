@@ -1,4 +1,4 @@
-"""Kaufauftrag: the buyer side of the willhaben agent. The app starts a purchase for one ad, opens a chat with the
+"""Kaufauftrag: the buyer side of SecondHandler. The app starts a purchase for one ad, opens a chat with the
 seller, negotiates as buyer (chats.auto_reply with the buyer prompt) and stops before any money moves.
 
 Modes:

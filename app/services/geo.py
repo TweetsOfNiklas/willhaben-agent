@@ -25,7 +25,7 @@ from app.services import dropoff
 log = logging.getLogger(__name__)
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "willhaben-agent (self-hosted; distance to ads)"
+USER_AGENT = "secondhandler (self-hosted; distance to ads)"
 MIN_GAP_S = 1.1
 DOWN_S = 600
 CACHE_KEY = "geo_postcodes"

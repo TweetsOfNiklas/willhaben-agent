@@ -678,7 +678,7 @@ def build(description: str = "", *, include_info: bool = False, include_settings
     """The whole report as a dict (JSON download); `render_text` turns it into the text version."""
     anon = build_anonymizer()
     report: dict[str, Any] = {
-        "format": "willhaben-agent-bugreport/1",
+        "format": "secondhandler-bugreport/1",
         "generated_at": utcnow().isoformat(timespec="seconds"),
         "removed": list(REMOVED),
         "description": anon(description.strip()[:5000]),

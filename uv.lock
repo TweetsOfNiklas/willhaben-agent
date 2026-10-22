@@ -1580,7 +1580,7 @@ wheels = [
 ]
 
 [[package]]
-name = "willhaben-agent"
+name = "secondhandler"
 version = "0.4.1"
 source = { virtual = "." }
 dependencies = [
