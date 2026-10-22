@@ -1,7 +1,7 @@
 [project]
 name = "secondhandler"
 version = "0.4.2"
-description = "Self-hosted second-hand agent (willhaben, Vinted and more): search agents, chat drafts with Claude, ad expiry tracking, ad drafting, dashboard"
+description = "Self-hosted, LLM-powered agent for second-hand marketplaces (willhaben, Vinted, Kleinanzeigen and more): it searches and curates listings, estimates which one is the best deal, and handles buying and selling for you."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

@@ -1,6 +1,6 @@
 # SecondHandler
 
-Your agent for second-hand sites: willhaben, Vinted, Kleinanzeigen and more. (Formerly *SecondHandler*; the repository, image and container keep that name.)
+Self-hosted, LLM-powered agent for second-hand marketplaces (willhaben, Vinted, Kleinanzeigen and more): it searches and curates listings, estimates which one is the best deal, and handles buying and selling for you.
 
 > [!WARNING]
 > **This tool was written entirely by AI (Claude).** It has been tested, but its correctness and safety cannot be
