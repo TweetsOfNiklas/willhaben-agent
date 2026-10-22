@@ -208,3 +208,29 @@ def test_several_states_at_once():
         assert set(_order(every)) == {"1", "2", "3", "4"}
         r = c.post("/hits/bulk", data={"state": "new,saved", "ids": "2", "action": "ignored"}, follow_redirects=False)
         assert r.headers["location"] == "/hits?state=new%2Csaved"
+
+
+def test_cards_show_when_a_hit_was_found_the_order_of_newest():
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from app.db import Hit, SearchAgent, session, utcnow
+    from app.main import app
+    now = utcnow()
+    with session() as db:
+        a = SearchAgent(name="SSD", source_url="https://www.willhaben.at/iad/x", webapi_url="/x")
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        db.add(Hit(agent_id=a.id, platform="vinted", ad_id="v1", heading="Vinted SSD", url="https://x/1", state="new",
+                   first_seen_at=now - timedelta(hours=3), last_seen_at=now - timedelta(hours=3)))
+        db.add(Hit(agent_id=a.id, platform="willhaben", ad_id="w1", heading="Older find", url="https://x/2", state="new",
+                   first_seen_at=now - timedelta(hours=7), last_seen_at=now, published_at=now - timedelta(hours=8)))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits?state=new").text
+    assert page.index("Vinted SSD") < page.index("Older find")
+    assert page.count("data-found") == 2 and "found 3 h ago" in page.replace(" ", " ") or "found" in page
+    first = page[page.index("Vinted SSD"):page.index("Older find")]
+    assert "published" not in first.split("data-found")[1][:200]            # no date: nothing shown for it
