@@ -64,6 +64,7 @@ class ConversationSummary:
     last_is_mine: bool | None = None  # the newest message was written by me (not news for a push)
     last_read: bool | None = None     # the newest message's read flag: with last_is_mine, the other person has seen it
     partner_uuid: str | None = None   # participant_info.uuid: asked for their online state (track_presence)
+    ad_uuid: str | None = None        # ad_info.uuid: the profile page of the other person hangs off it
 
 
 @dataclass
@@ -133,6 +134,7 @@ def parse_conversations(data: Any) -> list[ConversationSummary]:
             last_is_mine=_pick(c, "last_message.is_mine") if isinstance(_pick(c, "last_message.is_mine"), bool) else None,
             last_read=_pick(c, "last_message.read") if isinstance(_pick(c, "last_message.read"), bool) else None,
             partner_uuid=_pick(c, "participant_info.uuid"),
+            ad_uuid=_pick(c, "ad_info.uuid"),
         ))
     return out
 

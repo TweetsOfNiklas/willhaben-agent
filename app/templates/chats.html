@@ -57,6 +57,7 @@
          (chats_url(role='buyer'), _("Buying"), none, role_filter == 'buyer')], 'text-[13px]') }}
     {# which chats: every one, unread ones, those where the other person wrote last, those with an answer drafted #}
     <div class="mt-2 flex flex-wrap gap-1.5 text-[12.5px]" data-chat-show>
+      {# "awaiting my reply": my move – they wrote last, or my answer waits as a draft (the sidebar's yellow count) #}
       {% for v, label in [(none, _("All")), ('unread', _("Unread")), ('reply', _("Awaiting my reply")), ('draft', _("Draft ready"))] %}
       <a href="{{ chats_url(show=v) }}" class="rounded-full border px-2.5 py-0.5 no-underline {{ 'border-primary bg-brand-soft text-primary' if v == show_filter else 'border-base-300 text-muted hover:text-base-content' }}">{{ label }}</a>
       {% endfor %}
@@ -80,7 +81,7 @@
   <div id="chat-list-items" class="flex flex-col gap-0.5 px-2.5 pb-4">
     {% for c in convs if (not site_filter or (c.platform or 'willhaben') == site_filter)
                          and (not role_filter or c.role == role_filter)
-                         and (not show_filter or (show_filter == 'unread' and unread_by_chat.get(c.id)) or (show_filter == 'reply' and c.id in waiting)
+                         and (not show_filter or (show_filter == 'unread' and unread_by_chat.get(c.id)) or (show_filter == 'reply' and (c.id in waiting or c.id in open_drafts))
                               or (show_filter == 'draft' and c.id in open_drafts)) %}
     <a href="/chats/{{ c.id }}{{ filter_q }}" @click="rowClick($event)"
        hx-get="/chats/{{ c.id }}{{ filter_q }}" hx-target="#chat-pane" hx-select="#chat-pane" hx-swap="outerHTML" hx-select-oob="#chat-list-items,#chat-live" hx-push-url="true" hx-trigger="open-row"
@@ -107,7 +108,7 @@
       </span>
     </a>
     {% else %}
-    <p class="px-2.5 py-3.5 text-muted">{{ _("No conversations synced yet.") }}</p>
+    <p class="px-2.5 py-3.5 text-muted" data-chat-empty>{{ _("No chats match these filters.") if (show_filter or role_filter or site_filter) and convs else _("No conversations synced yet.") }}</p>
     {% endfor %}
     {% if hidden_count %}<a href="{{ chats_url(hidden=not show_hidden) }}" hx-boost="true" hx-target="#chat-list-items" hx-select="#chat-list-items" hx-swap="outerHTML" hx-select-oob="#chat-filters" hx-push-url="true" class="p-2.5 text-[12.5px] text-muted no-underline hover:underline">{{ _("Hide hidden and older chats") if show_hidden else _("Show {n} hidden or older chats", n=hidden_count) }}</a>{% endif %}
   </div>

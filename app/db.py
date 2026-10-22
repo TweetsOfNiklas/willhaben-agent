@@ -138,6 +138,9 @@ class Conversation(SQLModel, table=True):
     finished_at: datetime | None = None
     marked_unread: bool | None = None   # "Mark as unread": counts as unread here until I open it again
     partner_uuid: str | None = None     # the other person's willhaben user uuid: their online state (presence)
+    ad_uuid: str | None = None          # willhaben's internal ad uuid (ad_info.uuid): with partner_uuid, their profile page
+    partner_place: str | None = None    # where they are, from their public profile ("8530 Deutschlandsberg")
+    partner_place_tried: bool | None = None   # their profile was read once (a place or none)
 
 
 class Message(SQLModel, table=True):

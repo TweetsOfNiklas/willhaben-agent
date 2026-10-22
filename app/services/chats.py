@@ -94,6 +94,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
             row.ad_title = c.ad_title or row.ad_title
             row.partner_name = c.partner_name or row.partner_name
             row.partner_uuid = c.partner_uuid or row.partner_uuid
+            row.ad_uuid = c.ad_uuid or row.ad_uuid
             row.role = c.role or row.role
             row.unread_count = c.unread_count
             row.last_message_text = c.last_text or row.last_message_text
@@ -434,7 +435,10 @@ def _keep_place(conv: Conversation, member: dict[str, Any]) -> None:
 
 
 def partner_place(conv: Conversation) -> str:
-    """"🇮🇹 Italien", "Milano, 🇮🇹 Italien" or "" – what the other person's profile says (Vinted)."""
+    """"🇮🇹 Italien", "Milano, 🇮🇹 Italien" (Vinted), "8530 Deutschlandsberg" (willhaben) or "" – what the other
+    person's profile says."""
+    if conv.platform != "vinted":
+        return conv.partner_place or ""
     ctx = conv.ad_context or {}
     cc = (ctx.get("partner_country") or "").upper()
     if len(cc) != 2 or not cc.isalpha():
@@ -551,6 +555,19 @@ async def ask_presence(conv: Conversation) -> None:
             _keep_place(conv, m)
     elif conv.partner_uuid:
         await get_session().track_presence(conv.partner_uuid)
+        if conv.ad_uuid and not conv.partner_place_tried:       # their place: once, from their public profile
+            from app.willhaben.public import WillhabenError, get_public
+            try:
+                place = await get_public().member_place(conv.ad_uuid, conv.partner_uuid)
+            except (WillhabenError, Exception) as e:  # noqa: BLE001 - a nicety
+                log.info("willhaben profile of %s not loaded: %s", conv.id, e)
+                return
+            with session() as db:
+                row = db.get(Conversation, conv.id)
+                if row is not None:
+                    row.partner_place, row.partner_place_tried = place, True
+                    db.add(row)
+                    db.commit()
 
 
 def mark_unread(conversation_id: str) -> None:

@@ -237,3 +237,18 @@ def test_seen_hits_and_chats_leave_the_inbox_and_the_phone(monkeypatch):
     with session() as db:
         h = db.exec(select(Hit).where(Hit.ad_id == "555")).one()
     assert search_agents.hit_tag(h) == "wh-hit-willhaben-555"
+
+
+def test_the_yellow_count_and_awaiting_my_reply_list_the_same_chats():
+    set_setting("chats_app_seen_since", (T0 - timedelta(hours=1)).isoformat())
+    _chat("c1", ("in", -9), ("out", -5))                     # answered, but a draft waits
+    with session() as db:
+        db.add(Draft(conversation_id="c1", text="Noch was?", status="draft"))
+        db.commit()
+    assert _counts()["chats_action"] == 1
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats?show=reply").text.split('id="chat-list-items"')[1]
+        assert "/chats/c1" in page
+        empty = c.get("/chats?show=unread").text
+    assert "data-chat-empty" in empty and "No chats match these filters." in empty

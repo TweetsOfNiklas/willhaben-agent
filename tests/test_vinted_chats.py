@@ -396,3 +396,19 @@ def test_the_place_found_after_the_page_opened_comes_in_by_itself():
         conv = db.get(Conversation, "01a1-uuid")
     chats._keep_place(conv, {"country": "IT", "country_title": "Italien", "city": "Brescia"})
     assert chats.live_state("01a1-uuid")["presence"] != before         # the open page swaps the header part
+
+
+
+def test_the_willhaben_partners_place_from_their_profile():
+    from app.willhaben.public import parse_member_place
+    page = {"props": {"pageProps": {"sellerProfileWrapper": {"sellerProfile": {"location": "8530 Deutschlandsberg"}}}}}
+    assert parse_member_place(page) == "8530 Deutschlandsberg"
+    ads = [{"attributes": {"attribute": [{"name": "POSTCODE", "values": ["1160"]}, {"name": "LOCATION", "values": ["Wien"]}]}}] * 2
+    page = {"props": {"pageProps": {"sellerProfileWrapper": {"sellerProfile": {"location": None}},
+                                    "searchResult": {"advertSummaryList": {"advertSummary": ads}}}}}
+    assert parse_member_place(page) == "1160 Wien" and parse_member_place({}) is None
+    with session() as db:
+        db.add(Conversation(id="w1", partner_name="Erika", partner_place="8530 Deutschlandsberg"))
+        db.commit()
+        conv = db.get(Conversation, "w1")
+    assert chats.partner_place(conv) == "8530 Deutschlandsberg"

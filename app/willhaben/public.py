@@ -116,6 +116,34 @@ class PublicClient(httpclient.HttpPlatformClient):
         return parse_detail((nd.get("props") or {}).get("pageProps") or {})
 
 
+    async def member_place(self, ad_uuid: str, user_uuid: str) -> str | None:
+        """Where someone is, from their public profile page (the one the chat links, /iad/advert/<ad uuid>/seller/
+        <user uuid>/profile): its location, else the place most of their ads are in; None when it says nothing."""
+        r = await self._get(f"https://www.willhaben.at/iad/advert/{ad_uuid}/seller/{user_uuid}/profile", json_api=False,
+                            cache_s=86400, kind="detail")
+        if r.status_code != 200:
+            raise WillhabenError(t("Profile: HTTP {status}", status=r.status_code))
+        return parse_member_place(extract_next_data(r.text) or {})
+
+
+def parse_member_place(nd: dict) -> str | None:
+    """sellerProfile.location ("8530 Deutschlandsberg"), else its district, else their ads' most common place."""
+    page = (nd.get("props") or {}).get("pageProps") or {}
+    profile = ((page.get("sellerProfileWrapper") or {}).get("sellerProfile")) or {}
+    for key in ("location", "district"):
+        if isinstance(profile.get(key), str) and profile[key].strip():
+            return profile[key].strip()
+    places: dict[str, int] = {}
+    ads = (((page.get("searchResult") or {}).get("advertSummaryList") or {}).get("advertSummary")) or []
+    for ad in ads:
+        attrs = {a.get("name"): (a.get("values") or [None])[0] for a in ((ad.get("attributes") or {}).get("attribute") or [])
+                 if isinstance(a, dict)}
+        place = " ".join(x for x in (attrs.get("POSTCODE"), attrs.get("LOCATION")) if x)
+        if place:
+            places[place] = places.get(place, 0) + 1
+    return max(places, key=places.get) if places else None
+
+
 _client: PublicClient | None = None
 
 

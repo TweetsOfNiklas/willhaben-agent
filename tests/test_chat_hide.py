@@ -120,7 +120,7 @@ def test_chat_list_filters_unread_awaiting_reply_and_drafts():
             return {n for n in names if n in page}
         assert shown("/chats") == set(names)
         assert shown("/chats?show=unread") == {"Ungelesen-Person"}
-        assert shown("/chats?show=reply") == {"Wartet-Person", "Entwurf-Person"}
+        assert shown("/chats?show=reply") == {"Wartet-Person", "Entwurf-Person"}   # my move: they wrote, or a draft waits
         assert shown("/chats?show=draft") == {"Entwurf-Person"}
         assert shown("/chats?show=reply&role=buyer") == set()
         assert 'href="/chats?role=seller&amp;show=reply"' in c.get("/chats?show=reply").text
