@@ -2913,7 +2913,7 @@ def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
     return out
 
 
-CONTRIBUTORS_URL = "https://api.github.com/repos/lumascet/willhaben-agent/contributors"
+CONTRIBUTORS_URL = "https://api.github.com/repos/lumascet/secondhandler/contributors"
 _contributors_cache: dict[str, Any] = {"at": 0.0, "list": None}
 
 

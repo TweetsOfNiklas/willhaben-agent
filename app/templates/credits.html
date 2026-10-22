@@ -2,7 +2,7 @@
 {% import "_ui.html" as ui %}
 {% block title %}{{ _("Credits") }} · SecondHandler{% endblock %}
 {% block content %}
-{# contributors: pass `contributors = [{login, html_url, avatar_url, contributions}]` from a cached GitHub API call (GET /repos/lumascet/willhaben-agent/contributors), bots filtered. #}
+{# contributors: pass `contributors = [{login, html_url, avatar_url, contributions}]` from a cached GitHub API call (GET /repos/lumascet/secondhandler/contributors), bots filtered. #}
 <div class="mb-5 flex items-start gap-4">
   <img src="/static/icons/icon.svg?v=4" alt="" class="size-12 shrink-0 rounded-[14px]">
   <div class="min-w-0"><h1>{{ _("Credits") }}</h1><p class="mt-1 text-muted">SecondHandler v{{ app_version }} — {{ _("an independent, self-hosted project by {author}. Not affiliated with willhaben.", author=app_author) }}</p></div>
@@ -30,7 +30,7 @@
   <section class="flex flex-col gap-2.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
     <h3>{{ _("Contribute") }}</h3>
     <p class="text-[13px] text-muted">{{ _("Bugs, ideas and German translations are welcome. Fixture recordings from real willhaben responses help most – redact them first.") }}</p>
-    <div class="flex flex-wrap gap-2"><a class="btn" href="https://github.com/{{ app_author }}/willhaben-agent" target="_blank" rel="noopener">github.com/{{ app_author }}/willhaben-agent ↗</a><a class="btn" href="/bugreport">{{ _("Report a bug") }}</a></div>
+    <div class="flex flex-wrap gap-2"><a class="btn" href="https://github.com/{{ app_author }}/secondhandler" target="_blank" rel="noopener">github.com/{{ app_author }}/secondhandler ↗</a><a class="btn" href="/bugreport">{{ _("Report a bug") }}</a></div>
     <p class="text-[12px] text-muted">{{ _("willhaben's terms forbid automated access; this tool polls sparingly, writes nothing without your click and is used at your own risk.") }}</p>
   </section>
 </div>

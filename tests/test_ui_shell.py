@@ -38,7 +38,7 @@ def test_credits_lists_github_contributors_without_the_author(monkeypatch):
     from app import main
 
     def handler(request):
-        assert request.url.path == "/repos/lumascet/willhaben-agent/contributors"
+        assert request.url.path == "/repos/lumascet/secondhandler/contributors"
         return httpx.Response(200, json=[
             {"login": "lumascet", "type": "User", "contributions": 85, "html_url": "https://github.com/lumascet", "avatar_url": ""},
             {"login": "TweetsOfNiklas", "type": "User", "contributions": 12, "html_url": "https://github.com/TweetsOfNiklas",

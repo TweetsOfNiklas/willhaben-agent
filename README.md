@@ -210,11 +210,11 @@ datacenter and VPN IP ranges.
 
 ```bash
 mkdir secondhandler && cd secondhandler
-curl -fsSLO https://raw.githubusercontent.com/lumascet/willhaben-agent/master/compose.yaml
+curl -fsSLO https://raw.githubusercontent.com/lumascet/secondhandler/master/compose.yaml
 docker compose up -d
 ```
 
-This pulls the prebuilt image `ghcr.io/lumascet/willhaben-agent:latest`, which GitHub Actions builds for every release
+This pulls the prebuilt image `ghcr.io/lumascet/secondhandler:latest`, which GitHub Actions builds for every release
 (also as `0.2.1` and `0.2`). A push to master that raises the version in `pyproject.toml` is a release: the workflow
 builds the image, creates the tag `v0.2.1` and publishes a GitHub release listing the changes since the previous version.
 Update later with `docker compose pull && docker compose up -d`. To build from source instead, clone the repository and run
