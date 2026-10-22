@@ -61,7 +61,7 @@ def test_the_usage_popover_opens_on_all_sites_when_there_are_several():
     with TestClient(app) as c:
         page = c.get("/hits").text
     assert 'data-usage-tab="all"' in page and "data-usage-all" in page and "site: 'all'" in page
-    assert 'href="/stats/requests" data-pop="usage"' in page
+    assert 'data-pop="usage"' in page
 
 
 def test_the_offline_worker_and_page_are_served_without_login(monkeypatch):
@@ -72,3 +72,12 @@ def test_the_offline_worker_and_page_are_served_without_login(monkeypatch):
         assert r.status_code == 200 and r.headers["service-worker-allowed"] == "/" and "offline.html" in r.text
         assert "Die App startet gerade neu" in c.get("/static/offline.html").text
         assert "serviceWorker.register('/sw.js')" in c.get("/login").text
+
+
+def test_the_request_meter_treats_every_site_alike_and_the_ring_sums_them():
+    from app.db import set_setting
+    set_setting("platform_vinted_enabled", "1")
+    with TestClient(app) as c:
+        page = c.get("/hits").text
+    assert 'data-site-usage="willhaben"' in page and 'data-site-usage="vinted"' in page
+    assert page.count('data-pop="usage"') >= 2 and "data-usage-ring" in page

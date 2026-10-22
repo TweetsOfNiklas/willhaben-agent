@@ -53,6 +53,14 @@
 {% set pct = ([100, (used * 100 / budget)|round|int]|min) if budget else 0 %}
 {% set tone = 'full' if (budget and (pct >= 90 or lim.cooling_down_s)) else ('warn' if pct >= 60 else 'ok') %}
 {% set ring_tone = {'full': 'bad', 'warn': 'warn'}.get(tone, 'ok') %}
+{# every site alike (willhaben first): one row each, and the collapsed ring sums them, filled by the fullest #}
+{% set meters = namespace(rows=[{'id': 'willhaben', 'name': 'willhaben', 'used': used, 'budget': budget,
+     'pct': 100 if lim.cooling_down_s else pct, 'tone': tone, 'href': '/stats/requests?platform=willhaben',
+     'cooling_min': ((lim.cooling_down_s / 60)|round(0, 'ceil')|int) if lim.cooling_down_s else 0}]) %}
+{% for x in sites %}{% set meters.rows = meters.rows + [x] %}{% endfor %}
+{% set all_used = meters.rows|sum(attribute='used') %}
+{% set all_pct = meters.rows|selectattr('budget')|map(attribute='pct')|max|default(0) if meters.rows|selectattr('budget')|list else 0 %}
+{% set all_tone = 'full' if meters.rows|selectattr('tone', 'equalto', 'full')|list else ('warn' if meters.rows|selectattr('tone', 'equalto', 'warn')|list else 'ok') %}
 {% set cu = claude_usage if claude_usage is defined and claude_usage else none %}
 {% set cpct = ([100, (cu.used * 100 / cu.limit)|round|int]|min) if cu and cu.limit else 0 %}
 {% set ctone = 'bad' if cpct >= 90 else 'warn' if cpct >= 60 else 'brand' %}
@@ -87,16 +95,10 @@
       {{ ui.bar(cpct, {'bad': 'full', 'warn': 'warn'}.get(ctone, 'brand'), 'col-span-3 h-1') }}
     </a>
     {% endif %}
-    <a href="/stats/requests" data-pop="usage" @click="pop($event, 'usage')"
-       title="{% if budget %}{{ _('{used} / {budget} willhaben requests in the last hour', used=used, budget=budget) }}{% else %}{{ _('{used} willhaben requests in the last hour', used=used) }}{% endif %}"
+    {% for s in meters.rows %}
+    <a href="{{ s.href }}" data-pop="usage" @click="pop($event, 'usage')" data-site-usage="{{ s.id }}"
+       title="{% if s.cooling_min %}{{ _('{site} pause: {n} min left', site=s.name, n=s.cooling_min) }}{% elif s.budget %}{{ _('{used} / {budget} {site} requests in the last hour', used=s.used, budget=s.budget, site=s.name) }}{% else %}{{ _('{used} {site} requests in the last hour', used=s.used, site=s.name) }}{% endif %}"
        class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content">
-      {{ ui.icon('globe', 12) }}<span>willhaben / h</span>
-      <span class="font-semibold text-base-content tabular-nums">{{ used }}{% if budget %}<span class="font-normal text-muted"> / {{ budget }}</span>{% endif %}</span>
-      {% if budget %}{{ ui.bar(100 if lim.cooling_down_s else pct, tone, 'col-span-3 h-1') }}{% endif %}
-    </a>
-    {% for s in sites %}
-    <a href="{{ s.href }}" title="{% if s.cooling_min %}{{ _('{site} pause: {n} min left', site=s.name, n=s.cooling_min) }}{% elif s.budget %}{{ _('{used} / {budget} {site} requests in the last hour', used=s.used, budget=s.budget, site=s.name) }}{% else %}{{ _('{used} {site} requests in the last hour', used=s.used, site=s.name) }}{% endif %}"
-       class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content" data-site-usage="{{ s.id }}">
       {{ ui.icon('globe', 12) }}<span class="truncate">{{ s.name }} / h</span>
       <span class="font-semibold text-base-content tabular-nums">{{ s.used }}{% if s.budget %}<span class="font-normal text-muted"> / {{ s.budget }}</span>{% endif %}</span>
       {% if s.budget %}{{ ui.bar(s.pct, s.tone, 'col-span-3 h-1') }}{% endif %}
@@ -111,8 +113,8 @@
   </a>
   {% endif %}
   <a href="/stats/requests" @click="pop($event, 'usage')" class="relative grid h-11 shrink-0 place-items-center text-muted rail-x:hidden"
-     title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}{% for s in sites %} · {{ s.name }} {{ s.used }}{% if s.budget %} / {{ s.budget }}{% endif %}{% endfor %}">
-    {{ ui.ring(pct / 100, ring_tone) }}<span class="absolute inset-0 grid place-items-center text-[9px] font-bold text-base-content">{{ used }}</span>
+     title="{{ _('Requests in the last hour') }}:{% for s in meters.rows %} {{ s.name }} {{ s.used }}{% if s.budget %} / {{ s.budget }}{% endif %}{% if not loop.last %} ·{% endif %}{% endfor %}" data-usage-ring>
+    {{ ui.ring(all_pct / 100, {'full': 'bad', 'warn': 'warn'}.get(all_tone, 'ok')) }}<span class="absolute inset-0 grid place-items-center text-[9px] font-bold text-base-content">{{ all_used }}</span>
   </a>
 
   {# background jobs (app/services/jobs.py): what runs, what is queued, the last results – opens the jobs popover #}
