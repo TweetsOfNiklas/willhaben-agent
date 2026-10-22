@@ -53,3 +53,12 @@ def test_credits_lists_github_contributors_without_the_author(monkeypatch):
     special = page.split("Special thanks")[1].split("Built with")[0]
     assert "TweetsOfNiklas" in special and "12 commits" in special
     assert "lumascet" not in special and "dependabot" not in special
+
+
+def test_the_usage_popover_opens_on_all_sites_when_there_are_several():
+    from app.db import set_setting
+    set_setting("platform_vinted_enabled", "1")
+    with TestClient(app) as c:
+        page = c.get("/hits").text
+    assert 'data-usage-tab="all"' in page and "data-usage-all" in page and "site: 'all'" in page
+    assert 'href="/stats/requests" data-pop="usage"' in page

@@ -87,7 +87,7 @@
       {{ ui.bar(cpct, {'bad': 'full', 'warn': 'warn'}.get(ctone, 'brand'), 'col-span-3 h-1') }}
     </a>
     {% endif %}
-    <a href="/stats/willhaben" data-pop="usage" @click="pop($event, 'usage')"
+    <a href="/stats/requests" data-pop="usage" @click="pop($event, 'usage')"
        title="{% if budget %}{{ _('{used} / {budget} willhaben requests in the last hour', used=used, budget=budget) }}{% else %}{{ _('{used} willhaben requests in the last hour', used=used) }}{% endif %}"
        class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content">
       {{ ui.icon('globe', 12) }}<span>willhaben / h</span>
@@ -110,7 +110,7 @@
     {{ ui.ring(cpct / 100, ctone) }}<span class="absolute inset-0 grid place-items-center text-base-content">{{ ui.icon('bot', 12, 2.5) }}</span>
   </a>
   {% endif %}
-  <a href="/stats/willhaben" @click="pop($event, 'usage')" class="relative grid h-11 shrink-0 place-items-center text-muted rail-x:hidden"
+  <a href="/stats/requests" @click="pop($event, 'usage')" class="relative grid h-11 shrink-0 place-items-center text-muted rail-x:hidden"
      title="{{ used }}{% if budget %} / {{ budget }}{% endif %} {{ _('willhaben requests in the last hour') }}{% for s in sites %} · {{ s.name }} {{ s.used }}{% if s.budget %} / {{ s.budget }}{% endif %}{% endfor %}">
     {{ ui.ring(pct / 100, ring_tone) }}<span class="absolute inset-0 grid place-items-center text-[9px] font-bold text-base-content">{{ used }}</span>
   </a>
@@ -244,14 +244,28 @@
     </form>
 {% endmacro %}
 <div id="usage-pop" x-cloak x-show="layer === 'usage'" class="fixed inset-0 z-[90]" @click.self="close()">
-  <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5" x-data="{ site: 'willhaben' }">
+  <div class="{{ layer_box }} flex w-[380px] max-w-[calc(100vw-100px)] flex-col gap-3 px-4 py-3.5" x-data="{ site: '{{ 'all' if others else 'willhaben' }}' }">
     <div class="flex items-start gap-2">
-      <div class="flex min-w-0 flex-1 flex-wrap gap-1">{% if others %}{% for x in [wp] + others %}
+      <div class="flex min-w-0 flex-1 flex-wrap gap-1">{% if others %}
+        <button type="button" @click="site = 'all'" :class="site === 'all' ? 'border-primary bg-brand-soft text-primary font-semibold' : 'border-base-300 text-muted'" class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[12.5px]" data-usage-tab="all">{{ _("All") }}</button>
+        {% for x in [wp] + others %}
         <button type="button" @click="site = '{{ x.id }}'" :class="site === '{{ x.id }}' ? 'border-primary bg-brand-soft text-primary font-semibold' : 'border-base-300 text-muted'" class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[12.5px]">{{ ui.icon('site-' ~ x.id, 12) }}{{ x.name }}{% if x.cooling_min %}<span class="size-1.5 rounded-full bg-error"></span>{% elif x.tone == 'warn' %}<span class="size-1.5 rounded-full bg-warning"></span>{% endif %}</button>
         {% endfor %}{% else %}<span class="text-xs text-muted">{{ _("Requests to the sites") }}</span>{% endif %}</div>
       <button type="button" class="btn btn-ghost btn-sm btn-square -mt-1 text-muted" @click="close()" aria-label="{{ _('Close') }}">{{ ui.icon('x', 16) }}</button>
     </div>
-    <div class="flex flex-col gap-3" x-show="site === 'willhaben'">
+    {# all sites at once (the default with more than one): each site's last hour against its own budget #}
+    {% if others %}<div class="flex flex-col gap-2.5" x-show="site === 'all'" data-usage-all>
+      <div class="flex items-baseline justify-between gap-2"><span class="font-semibold">{{ _("Requests in the last hour") }}</span>
+        <span class="text-[18px] font-bold tabular-nums">{{ used + others|sum(attribute='used') }}</span></div>
+      {% set rows = namespace(all=[(wp.name, used, budget)]) %}{% for x in others %}{% set rows.all = rows.all + [(x.name, x.used, x.budget)] %}{% endfor %}
+      {% for name, xused, xbudget in rows.all %}{% set xpct = ((xused / xbudget * 100) if xbudget else 0)|round|int %}
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
+        <span class="min-w-0 truncate text-[13px]">{{ name }}</span>
+        <span class="text-[12.5px] tabular-nums text-muted">{{ xused }}{% if xbudget %} / {{ xbudget }}{% endif %}</span>
+        {{ ui.bar([xpct, 100]|min, 'full' if xpct >= 100 else 'warn' if xpct >= 80 else 'ok', 'col-span-2 h-1') }}
+      </div>{% endfor %}
+    </div>{% endif %}
+    <div class="flex flex-col gap-3" x-show="site === 'willhaben'"{% if others %} x-cloak{% endif %}>
       {{ usage_block(wp, used, budget, pct, ring_tone, (lim.cooling_down_s / 60)|round(0, 'ceil')|int if lim.cooling_down_s else 0, 0,
                      '/settings/willhaben', 'requests_per_hour', budget, _("All requests run one after another with a pause. When the budget is used up, agents wait for the next hour; product search and price checks count too."), '/stats/willhaben') }}
     </div>

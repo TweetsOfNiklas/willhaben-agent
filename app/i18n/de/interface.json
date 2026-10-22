@@ -266,5 +266,6 @@
  "Start and stop a recording under the browser window.": "Aufnahmen startest und beendest du unter dem Browserfenster.",
  "requests so far": "Anfragen bisher",
  "not running": "läuft nicht",
- "found {ago}": "gefunden {ago}"
+ "found {ago}": "gefunden {ago}",
+ "Requests in the last hour": "Anfragen in der letzten Stunde"
 }
