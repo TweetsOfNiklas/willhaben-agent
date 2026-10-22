@@ -391,7 +391,7 @@ async def _vinted_ad_context(conv: Conversation) -> Conversation:
             old = row.ad_context or {}
             ctx = {**detail.as_context(), **{k: v for k, v in old.items()
                                              if k in ("order_id", "side_tried", "partner_id", "partner_country",
-                                                      "partner_country_tried")},
+                                                      "partner_country_tried", "partner_country_title", "partner_city")},
                    "platform": "vinted"}
             if not ctx.get("images") and old.get("images"):   # a sold item's page has no photos: the inbox's stays
                 ctx["images"] = old["images"]
@@ -411,18 +411,37 @@ async def _vinted_partner_country(conv: Conversation) -> str | None:
         return ctx.get("partner_country")
     from app.platforms import PlatformError, vinted
     try:
-        country = await vinted.get_client().member_country(ctx["partner_id"])
+        m = await vinted.get_client().member(ctx["partner_id"])
     except (PlatformError, Exception) as e:  # noqa: BLE001 - the answer is written all the same
         log.info("vinted member %s: country not loaded: %s", ctx["partner_id"], e)
         return None
+    _keep_place(conv, m)
+    return m.get("country")
+
+
+def _keep_place(conv: Conversation, member: dict[str, Any]) -> None:
+    """Where the other person on Vinted is from (their profile), kept with the chat: the language of the answers
+    and the place shown in the chat's header."""
     with session() as db:
         row = db.get(Conversation, conv.id)
         if row is not None:
-            row.ad_context = {**(row.ad_context or {}), "partner_country": country, "partner_country_tried": True}
+            row.ad_context = {**(row.ad_context or {}), "partner_country": member.get("country"),
+                              "partner_country_title": member.get("country_title"),
+                              "partner_city": member.get("city"), "partner_country_tried": True}
             db.add(row)
             db.commit()
             conv.ad_context = row.ad_context
-    return country
+
+
+def partner_place(conv: Conversation) -> str:
+    """"🇮🇹 Italien", "Milano, 🇮🇹 Italien" or "" – what the other person's profile says (Vinted)."""
+    ctx = conv.ad_context or {}
+    cc = (ctx.get("partner_country") or "").upper()
+    if len(cc) != 2 or not cc.isalpha():
+        return ""
+    flag = "".join(chr(0x1F1E6 + ord(ch) - 65) for ch in cc)
+    land = f"{flag} {ctx.get('partner_country_title') or cc}"
+    return f"{ctx['partner_city']}, {land}" if ctx.get("partner_city") else land
 
 
 async def _own_ad_context(conv: Conversation) -> Conversation:
@@ -528,6 +547,8 @@ async def ask_presence(conv: Conversation) -> None:
             log.info("vinted presence of %s not loaded: %s", partner, e)
             return
         _vinted_presence[conv.id] = {"online": m.get("online"), "last_seen": m.get("last_seen")}
+        if not (conv.ad_context or {}).get("partner_country"):
+            _keep_place(conv, m)
     elif conv.partner_uuid:
         await get_session().track_presence(conv.partner_uuid)
 
@@ -831,8 +852,10 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
     answers here too, with unsaved rows. The system prompts of automatic answers are the owner's edited ones, if any
     (app/services/system_prompts.py). `overrides` replaces them or the owner's rules for a test run:
     "auto_reply_system", "purchase_system", "auto_reply_rules", "purchase_rules", "ad_instructions"; `platform`
-    names a site other than willhaben."""
+    names a site other than willhaben (default: the chat's own; real drafts of a Vinted chat got neither the Vinted
+    rule nor the language rule before it was taken from there)."""
     overrides = overrides or {}
+    platform = platform or conv.platform
     cal = gcal.config()
     if buy is not None:                           # buyer: the purchase's rules replace the seller's rules
         availability = await gcal.availability_text() if (buy.mode == "pickup" and gcal.connected()) else None

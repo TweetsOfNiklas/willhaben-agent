@@ -126,6 +126,8 @@ _COUNTRY = re.compile(r'"country_iso_code"\s*:\s*"([A-Z]{2})"|"country_code"\s*:
 
 _ONLINE = re.compile(r'"is_online"\s*:\s*(true|false)')
 _LAST_SEEN = re.compile(r'"last_loged_on_ts"\s*:\s*"([^"]+)"')      # sic: Vinted's spelling
+_COUNTRY_TITLE = re.compile(r'"country_title"\s*:\s*"([^"]{2,60})"')   # in the page's language (de-AT asked)
+_CITY = re.compile(r'"expose_location"\s*:\s*true\s*,\s*"city"\s*:\s*"([^"]{1,60})"')   # only when shown
 
 
 def parse_member_country(text: str) -> str | None:
@@ -136,8 +138,10 @@ def parse_member_country(text: str) -> str | None:
 def parse_member(text: str) -> dict[str, Any]:
     """The profile page's own user: {country, online (bool or None), last_seen (ISO time or None)}."""
     on, seen = _ONLINE.search(text or ""), _LAST_SEEN.search(text or "")
+    title, city = _COUNTRY_TITLE.search(text or ""), _CITY.search(text or "")
     return {"country": parse_member_country(text), "online": (on.group(1) == "true") if on else None,
-            "last_seen": seen.group(1) if seen else None}
+            "last_seen": seen.group(1) if seen else None, "country_title": title.group(1) if title else None,
+            "city": city.group(1) if city else None}
 
 
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:

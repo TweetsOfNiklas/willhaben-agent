@@ -205,4 +205,5 @@ def test_the_other_persons_online_state_from_willhaben_and_vinted(monkeypatch):
     assert 'data-presence="online"' in page
 
     page = '"login":"x","last_loged_on_ts":"2026-10-22T21:23:00+02:00","last_loged_on":"heute","is_online":true,"country_iso_code":"DE"'
-    assert vinted.parse_member(page) == {"country": "DE", "online": True, "last_seen": "2026-10-22T21:23:00+02:00"}
+    m = vinted.parse_member(page)
+    assert (m["country"], m["online"], m["last_seen"]) == ("DE", True, "2026-10-22T21:23:00+02:00")

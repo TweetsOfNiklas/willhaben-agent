@@ -350,13 +350,14 @@ async def test_answers_on_vinted_are_in_german_or_english_by_the_partners_countr
     asked = []
 
     class Client:
-        async def member_country(self, user_id):
+        async def member(self, user_id, cache_s=None):
             asked.append(user_id)
-            return country
+            return {"country": country, "country_title": None, "city": None, "online": None, "last_seen": None}
     monkeypatch.setattr(vinted, "get_client", lambda: Client())
     with session() as db:
         conv = db.get(Conversation, "01a1-uuid")
-    out = await chats.compose(conv, [("in", None, "Hi, still available?")], auto=True, ad=None, platform="vinted")
+    out = await chats.compose(conv, [("in", None, "Hi, still available?")], auto=True, ad=None)   # as real drafts do
+    assert "Vinted" in out["prompt"]                          # the chat's own site, without being told
     rules = out["prompt"].split("Meine Regeln:")[1]
     if says:
         assert "Sprache:" in rules and says in rules
@@ -366,3 +367,23 @@ async def test_answers_on_vinted_are_in_german_or_english_by_the_partners_countr
         conv = db.get(Conversation, "01a1-uuid")
     await chats.compose(conv, [("in", None, "Hi")], auto=False, ad=None, platform="vinted")
     assert asked == ["77"]                                    # read once, kept with the chat
+
+
+
+def test_the_chat_shows_where_the_other_person_is_from():
+    from app.platforms.vinted import parse_member
+    page = ('"login":"x","expose_location":true,"city":"Milano","country_code":"IT","is_online":false,'
+            '"country_title_local":"Italia","country_iso_code":"IT","country_title":"Italien"')
+    m = parse_member(page)
+    assert (m["country"], m["country_title"], m["city"]) == ("IT", "Italien", "Milano")
+    assert parse_member(page.replace('"expose_location":true', '"expose_location":false'))["city"] is None
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        conv = db.get(Conversation, "01a1-uuid")
+    chats._keep_place(conv, m)
+    assert chats.partner_place(conv) == "Milano, 🇮🇹 Italien"
+    from app.main import app
+    from app.db import set_setting
+    set_setting("platform_vinted_enabled", "1")
+    with TestClient(app) as c:
+        assert "🇮🇹 Italien" in c.get("/chats/01a1-uuid").text

@@ -265,7 +265,8 @@ templates.env.globals.update(record_all_stats=lambda: {**record_all.stats(), "on
 templates.env.globals.update(site_logins=lambda: [(s.name, {**site_accounts.state(s.id), "checked_at": site_accounts.checked_at(s.id)})
                                                   for s in site_accounts.SITES.values() if platforms.enabled(s.id)])   # session page
 templates.env.globals.update(vinted_live=lambda: vinted_inbox_mod.live)   # the chat list's Vinted line
-templates.env.globals.update(presence_of=lambda conv: chats.presence_of(conv))   # the open chat: their online state
+templates.env.globals.update(presence_of=lambda conv: chats.presence_of(conv),    # the open chat: their online state
+                             partner_place=lambda conv: chats.partner_place(conv))     # and where they are from
 templates.env.globals.update(credentials_state=credentials_svc.stored)   # login details card (services/credentials.py)
 templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
