@@ -4,8 +4,6 @@
  "Deadline {date}": "Frist {date}",
  "No shipment for this chat yet": "Für diesen Chat gibt es noch keine Sendung",
  "The label is already saved.": "Das Etikett ist schon gespeichert.",
- "willhaben has not sent a label link yet": "willhaben hat noch keinen Etikett-Link geschickt",
- "The label could not be downloaded – open it on willhaben": "Das Etikett konnte nicht geladen werden – auf willhaben öffnen",
  "Label saved.": "Etikett gespeichert.",
  "Marked as shipped in this app": "In dieser App als verschickt markiert",
  "Marked as shipped.": "Als verschickt markiert.",
@@ -49,7 +47,6 @@
  "Accept this offer on willhaben now?": "Diesen Preisvorschlag jetzt auf willhaben annehmen?",
  "Decline offer": "Preisvorschlag ablehnen",
  "Decline this offer on willhaben now?": "Diesen Preisvorschlag jetzt auf willhaben ablehnen?",
- "Download label": "Etikett laden",
  "Mark shipped": "Als verschickt markieren",
  "Mark this parcel as shipped in this app?": "Dieses Paket in dieser App als verschickt markieren?",
  "Send offer": "Preisvorschlag senden",
@@ -112,5 +109,8 @@
  "Run only the PayLivery step on willhaben now, without sending the answer?": "Nur den PayLivery-Schritt jetzt auf willhaben ausführen, ohne die Antwort zu senden?",
  "Send + PayLivery": "Senden + PayLivery",
  "Only PayLivery: {step}": "Nur PayLivery: {step}",
- "{step} is running on willhaben…": "{step} läuft auf willhaben…"
+ "{step} is running on willhaben…": "{step} läuft auf willhaben…",
+ "Get label": "Etikett holen",
+ "willhaben showed no label PDF": "willhaben hat kein Etikett-PDF gezeigt",
+ "Label created and saved.": "Etikett erstellt und gespeichert."
 }

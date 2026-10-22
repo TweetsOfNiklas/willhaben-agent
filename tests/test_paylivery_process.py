@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from sqlmodel import select
 
+from app.config import get_settings
 from app.db import Conversation, Message, Shipment, get_setting, session, set_setting, utcnow
 from app.llm.base import LLMResult
 from app.services import paylivery, shipping
@@ -317,7 +318,7 @@ def test_chat_page_shows_the_card():
     _chat(cid="c2", state={"role": "seller", "stage": "paid", "amount": 120.0, "history": [], "applied": []})
     with TestClient(app) as c:
         card = c.get("/chats/c2").text.split('id="paylivery"')[1].split("</section>")[0]
-    assert 'hx-post="/chats/c2/paylivery/mark_shipped"' in card and "hx-confirm" not in card   # local only: no confirm
+    assert 'hx-post="/chats/c2/paylivery/mark_shipped"' in card and "hx-confirm" not in card   # no confirm: one click
 
 
 def test_settings_route_saves_switches():
@@ -677,13 +678,171 @@ async def test_label_and_mark_shipped_are_local(browser):
     assert browser.sess.opened == []                          # no browser for a local action
 
 
-async def test_download_label_without_link_says_so(browser):
+async def test_download_label_without_link_leaves_it_to_the_browser(browser):
     with session() as db:
         db.add(Conversation(id="c1", role="seller", paylivery={"role": "seller", "stage": "paid", "history": []}))
         db.add(Shipment(conversation_id="c1", status="awaiting"))
         db.commit()
-    with pytest.raises(paylivery.PayLiveryError):
-        await paylivery.download_label("c1")
+    assert await paylivery.download_label("c1") is None
+
+
+# ------------------------------------------------------------------ label: created in willhaben's dialog
+LABEL_LINK = "https://www.willhaben.at/iad/paketschein/x.pdf"
+PDF = b"%PDF-1.4 label"
+
+
+class FakeContext:
+    """Browser context events of the label action: responses, new pages, downloads."""
+
+    def __init__(self):
+        self.handlers: dict[str, list] = {}
+        self.pages: list = []
+
+    def on(self, event, fn):
+        self.handlers.setdefault(event, []).append(fn)
+
+    def remove_listener(self, event, fn):
+        self.handlers[event].remove(fn)
+
+    def emit(self, event, arg):
+        for fn in list(self.handlers.get(event, [])):
+            fn(arg)
+
+
+class FakeResponse:
+    def __init__(self, body, kind="application/pdf", url="https://www.willhaben.at/iad/paketschein/x"):
+        self.url, self.headers, self._body = url, {"content-type": kind}, body
+
+    async def body(self):
+        return self._body
+
+
+class _LinkReq:
+    """context.request.get of the plain link fetch: an HTML page (the create dialog) until `pdf` is set."""
+
+    def __init__(self):
+        self.pdf, self.urls = False, []
+
+    async def get(self, url, timeout=None):
+        self.urls.append(url)
+        body = PDF if self.pdf else b"<html>Etikett erstellen?</html>"
+        return SimpleNamespace(ok=True, status=200, headers={}, body=lambda: _value(body))
+
+
+async def _value(v):
+    return v
+
+
+@pytest.fixture
+def label_chat(browser):
+    _chat(state={"role": "seller", "stage": "label_ready", "history": [], "applied": [], "label_url": LABEL_LINK})
+    with session() as db:
+        db.add(Shipment(conversation_id="c1", status="awaiting"))
+        db.commit()
+    browser.sess.context = FakeContext()
+    browser.req = _LinkReq()
+    browser.sess.context.request = browser.req
+    return browser
+
+
+def _shipment() -> Shipment:
+    with session() as db:
+        return db.exec(select(Shipment).where(Shipment.conversation_id == "c1")).one()
+
+
+def test_label_dialog_buttons_are_this_actions_own():
+    assert paylivery.click_verdict("label", "Etikett erstellen") == "final"
+    assert paylivery.click_verdict("label", "Bestätigen") == "final"        # receipt's word, but the dialog's here
+    assert paylivery.click_verdict("label", "Herunterladen") == "final"
+    assert paylivery.click_verdict("label", "Angebot annehmen") == "refused"
+
+
+async def test_get_label_uses_the_link_when_it_gives_the_pdf(label_chat):
+    label_chat.req.pdf = True
+    msg = await paylivery.start_action("c1", "label")
+    assert "saved" in msg or "gespeichert" in msg
+    assert label_chat.sess.opened == []                       # no browser for a ready PDF
+    assert paylivery._busy == {}                              # and the chat is free again
+    s = _shipment()
+    assert s.status == "labelled" and s.label_path == f"shipment-{s.id}-paylivery.pdf"
+
+
+async def test_get_label_starts_the_browser_when_willhaben_asks_to_create_it(label_chat, monkeypatch):
+    started = []
+
+    async def fake_run(cid, action, amount=None, claimed=False):
+        started.append((cid, action, claimed))
+        paylivery._busy.pop(cid, None)
+        return "ok"
+
+    monkeypatch.setattr(paylivery, "run_action", fake_run)
+    msg = await paylivery.start_action("c1", "label")
+    assert paylivery._busy == {"c1": "label"}                 # the chat is taken until the browser action ends
+    await asyncio.gather(*paylivery._tasks)
+    assert started == [("c1", "label", True)] and label_chat.req.urls == [LABEL_LINK]
+    assert "Started" in msg or "Im Browser" in msg
+    assert paylivery.card(_conv("c1"))["actions"][0]["confirm"] == ""   # one click: no confirm dialog
+
+
+async def test_label_action_creates_it_and_catches_the_pdf(label_chat, monkeypatch):
+    label_chat.elements = [_btn(1, "Etikett erstellen"), _btn(2, "Abbrechen")]
+    label_chat.backend.replies = [_step(action_idx=1, status="continue", note="Dialog bestätigt")]
+
+    async def click(page, el):
+        label_chat.clicked.append(el["label"])
+        label_chat.sess.context.emit("response", FakeResponse(b"<html>", kind="text/html"))
+        label_chat.sess.context.emit("response", FakeResponse(PDF))      # the PDF tab after creating
+
+    monkeypatch.setattr(paylivery, "_click", click)
+    msg = await paylivery.run_action("c1", "label")
+    assert label_chat.sess.opened == [LABEL_LINK]             # starts on the label link, not the chat list
+    assert label_chat.clicked == ["Etikett erstellen"] and len(label_chat.backend.prompts) == 1
+    assert "gespeichert" in msg or "saved" in msg
+    s = _shipment()
+    assert s.status == "labelled"
+    assert (get_settings().data_dir / "labels" / s.label_path).read_bytes() == PDF
+    assert label_chat.sess.context.handlers == {"response": [], "page": []}   # listeners removed
+    st = _state()
+    assert st["stage"] == "label_ready" and st["history"][-1]["action"] == "label" and st["history"][-1]["ok"]
+
+
+async def test_label_action_catches_a_download_too(label_chat, monkeypatch, tmp_path):
+    f = tmp_path / "label.pdf"
+    f.write_bytes(PDF)
+    download = SimpleNamespace(path=lambda: _value(str(f)))
+    page = FakeContext()                                      # a page: it only needs on/remove_listener/emit
+    label_chat.sess.context.pages = [page]
+    label_chat.elements = [_btn(1, "Herunterladen")]
+    label_chat.backend.replies = [_step(action_idx=1, status="done")]
+
+    async def click(page_, el):
+        page.emit("download", download)
+
+    monkeypatch.setattr(paylivery, "_click", click)
+    await paylivery.run_action("c1", "label")
+    assert _shipment().status == "labelled" and page.handlers["download"] == []
+
+
+async def test_label_action_takes_the_link_once_created(label_chat, monkeypatch):
+    label_chat.elements = [_btn(1, "Etikett erstellen")]
+    label_chat.backend.replies = [_step(action_idx=1, status="done", note="erstellt")]
+
+    async def click(page, el):
+        label_chat.req.pdf = True                             # created: the link serves the PDF now
+
+    monkeypatch.setattr(paylivery, "_click", click)
+    await paylivery.run_action("c1", "label")
+    assert _shipment().status == "labelled"
+
+
+async def test_label_action_without_pdf_says_so(label_chat):
+    label_chat.elements = [_btn(1, "Etikett erstellen")]
+    label_chat.backend.replies = [_step(action_idx=1, status="done", note="erstellt")]
+    msg = await paylivery.run_action("c1", "label")
+    s = _shipment()
+    assert s.label_path is None and s.status == "awaiting"
+    assert "PDF" in msg
+    assert _state()["history"][-1]["ok"] is False
 
 
 async def test_action_refused_for_the_other_role(browser):
