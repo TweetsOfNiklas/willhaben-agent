@@ -4,7 +4,7 @@
 {% block content %}
 {# contributors: pass `contributors = [{login, html_url, avatar_url, contributions}]` from a cached GitHub API call (GET /repos/lumascet/willhaben-agent/contributors), bots filtered. #}
 <div class="mb-5 flex items-start gap-4">
-  <span class="grid size-12 shrink-0 place-items-center rounded-[14px] bg-primary text-[26px] font-extrabold text-primary-content">w</span>
+  <img src="/static/icons/icon.svg?v=2" alt="" class="size-12 shrink-0 rounded-[14px]">
   <div class="min-w-0"><h1>{{ _("Credits") }}</h1><p class="mt-1 text-muted">SecondHandler v{{ app_version }} — {{ _("an independent, self-hosted project by {author}. Not affiliated with willhaben.", author=app_author) }}</p></div>
 </div>
 <div class="grid items-start gap-5 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">

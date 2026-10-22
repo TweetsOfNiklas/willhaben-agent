@@ -73,6 +73,7 @@ def test_the_home_screen_app_gets_its_manifest_and_icons_before_any_login(pw):
     with TestClient(app) as c:
         m = c.get("/static/manifest.json")
         assert m.status_code == 200 and m.json()["display"] == "standalone" and m.json()["start_url"] == "/"
+        assert m.json()["name"] == m.json()["short_name"] == "SecondHandler"
         for icon in m.json()["icons"]:
             r = c.get(icon["src"])
             assert r.status_code == 200 and r.headers["content-type"] == icon["type"]
@@ -80,7 +81,8 @@ def test_the_home_screen_app_gets_its_manifest_and_icons_before_any_login(pw):
         page = c.get("/login").text
         c.post("/login", data={"username": "admin", "password": "geheim", "next": "/"})
         for html in (page, c.get("/").text):
-            assert '<link rel="manifest" href="/static/manifest.json">' in html
+            assert '<link rel="manifest" href="/static/manifest.json?v=2">' in html
+            assert 'name="apple-mobile-web-app-title" content="SecondHandler"' in html
             assert 'name="apple-mobile-web-app-capable" content="yes"' in html and "viewport-fit=cover" in html
             assert 'rel="apple-touch-icon"' in html
 
