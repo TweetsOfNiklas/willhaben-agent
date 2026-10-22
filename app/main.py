@@ -343,12 +343,37 @@ def _inbox_seen_at() -> datetime:
         return datetime(2000, 1, 1, tzinfo=timezone.utc)
 
 
+def _inbox_events(limit: int = 200) -> list[EventLog]:
+    """The inbox's events: newer than its last "Clear", not quiet, and not about a hit or a chat already seen in the
+    app (the hit opened or handled, the chat opened since) – those leave it by themselves. Newest first."""
+    seen = _inbox_seen_at()
+    with session() as db:
+        events = list(db.exec(select(EventLog).where(EventLog.ts > seen, col(EventLog.quiet).is_not(True))
+                              .order_by(col(EventLog.ts).desc()).limit(limit)))
+        refs = {e.ad_id for e in events if e.ad_id}
+        handled: set[str] = set()
+        if refs:
+            plain = {r.split(":", 1)[-1] for r in refs}
+            for platform, ad_id in db.exec(select(Hit.platform, Hit.ad_id).where(col(Hit.ad_id).in_(plain),
+                                                                                 Hit.state != "new")):
+                handled |= {ad_id, f"{platform or 'willhaben'}:{ad_id}"}
+        cids = {e.conversation_id for e in events if e.conversation_id}
+        opened = {c.id: c.app_seen_at for c in db.exec(select(Conversation).where(col(Conversation.id).in_(cids)))} if cids else {}
+
+    def done(e: EventLog) -> bool:
+        if e.ad_id and e.ad_id in handled and e.kind in ("hit", "price_drop", "saved"):
+            return True
+        at = opened.get(e.conversation_id or "")
+        ts = e.ts if e.ts.tzinfo else e.ts.replace(tzinfo=timezone.utc)
+        return bool(at) and (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) >= ts
+    return [e for e in events if not done(e)]
+
+
 def _nav_counts() -> dict[str, int]:
     """Badges in the sidebar: new hits, unread messages and chats that need you (chats.badge_counts), purchases waiting for your payment,
     and notifications since the inbox was last opened (those sent without a push left out)."""
     with session() as db:
-        return {"inbox": db.exec(select(func.count()).select_from(EventLog).where(
-                    EventLog.ts > _inbox_seen_at(), col(EventLog.quiet).is_not(True))).one(),
+        return {"inbox": len(_inbox_events()),
                 "hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
                 **chats.badge_counts(db),
                 "purchases": db.exec(select(func.count()).select_from(Purchase).where(Purchase.status == "pay_now")).one()}
@@ -998,11 +1023,12 @@ async def ad_fragment(request: Request, platform: platforms.Platform, ad_id: str
             h = db.exec(select(Hit).where(Hit.platform == platform.id, Hit.ad_id == ad_id)
                         .order_by(col(Hit.id).desc())).first()
         if h:
-            if h.state == "new":         # opened = seen
+            if h.state == "new":         # opened = seen: its push goes off the phone too
                 h.state = "seen"
                 db.add(h)
                 db.commit()
                 db.refresh(h)
+                search_agents_svc.pushes_seen([h])
     error = d = detail_error = None
     reduced = not platform.can("detail")
 
@@ -1082,6 +1108,8 @@ async def hit_state(request: Request, hit_id: int, state: str = Form(...)):
         db.add(h)
         db.commit()
         db.refresh(h)
+    if state != "new":                   # handled: its push goes off the phone
+        search_agents_svc.pushes_seen([h])
     if state == "saved":                # its photos, before the site drops them (sold, deleted)
         search_agents_svc.keep_image_later(hit_id, search_agents_svc.shown_photos(hit_id))
     if request.headers.get("hx-request"):
@@ -1226,10 +1254,12 @@ async def hits_mark_seen(request: Request):
     """New → Mark all as seen: the hits the page shows (agent, site, filters)."""
     view = _view_form(await request.form(), "new")
     with session() as db:
-        for h in view.hits(db, limit=100000):
+        seen = list(view.hits(db, limit=100000))
+        for h in seen:
             h.state = "seen"
             db.add(h)
         db.commit()
+    search_agents_svc.pushes_seen(seen)
     return back(view.url(state=""))
 
 
@@ -2942,10 +2972,8 @@ def _inbox_items(limit: int = 15) -> list[dict[str, Any]]:
     newer than the last clear."""
     seen = _inbox_seen_at()
     out = []
-    for e in recent_events(limit):
+    for e in _inbox_events(limit):       # newer than the last clear, and not already seen elsewhere in the app
         ts = e.ts if e.ts.tzinfo else e.ts.replace(tzinfo=timezone.utc)
-        if ts <= seen:
-            break                        # newest first: the rest was cleared
         out.append({"kind": "pay" if e.kind == "paylivery" else e.kind, "title": t(INBOX_KINDS.get(e.kind, "Notification")),
                     "text": e.message, "time": _ago(ts), "link": event_link(e), "unread": ts > seen})
     return out

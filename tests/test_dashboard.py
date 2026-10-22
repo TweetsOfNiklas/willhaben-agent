@@ -340,7 +340,7 @@ def test_model_selector(client):
     assert selected(page, "purchase") == selected(page, "shipping") == ["claude-fable-5-1"]
     assert selected(page, "chat") == ["claude-haiku-5-5"]
     home = client.get("/").text
-    assert 'href="/settings/claude" data-pop="claude" title="Claude tokens this month"' in home and 'id="claude-pop"' in home   # meter + popover
+    assert 'href="/settings/claude" data-pop="claude" title="Claude tokens in the last 7 days"' in home and 'id="claude-pop"' in home   # meter + popover
     assert client.post("/settings/model", data={"purpose": "ads", "model": "claude-fable-5-1"},
                        follow_redirects=False).status_code == 303
     assert get_backend("chat").model == "claude-haiku-5-5"

@@ -27,7 +27,7 @@ from app.llm.prompts import (
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
 from app.services import my_ads, paylivery_advice, selling, stock, style, system_prompts
-from app.services.notify import notify
+from app.services.notify import clear_push, notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
@@ -659,6 +659,9 @@ def badge_counts(db) -> dict[str, int]:
             "chats_action": len(ids & (o["waiting"] | o["open_drafts"]))}
 
 
+_clear_tasks: set[asyncio.Task] = set()
+
+
 def seen_in_app(conversation_id: str) -> None:
     """The owner looked at the chat in the app: what came so far is read here."""
     with session() as db:
@@ -673,6 +676,12 @@ def seen_in_app(conversation_id: str) -> None:
         conv.app_seen_at, conv.marked_unread = utcnow(), None
         db.add(conv)
         db.commit()
+    try:                                    # its "new message" push goes off the phone
+        task = asyncio.get_running_loop().create_task(clear_push(message_tag(conversation_id)))
+        _clear_tasks.add(task)
+        task.add_done_callback(_clear_tasks.discard)
+    except RuntimeError:                    # no loop (a sync caller in tests)
+        pass
 
 
 def live_state(conversation_id: str | None = None) -> dict[str, str]:

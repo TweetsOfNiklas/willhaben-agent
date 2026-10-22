@@ -809,7 +809,7 @@ async def _run_agent(agent_id: int) -> RunResult:
         for h in res.new:
             if h.id in pushed or h.id not in good:   # rejected hits: HA event only, no push
                 await notify("hit", _scam_prefix(h) + f"{label(h.platform)}: {h.price_display or ''}{_ship_suffix(h)}".strip(" :"),
-                             _hit_text(h), url=h.url, image=h.image_url, push=h.id in pushed,
+                             _hit_text(h), url=h.url, image=h.image_url, push=h.id in pushed, tag=hit_tag(h),
                              data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
                                    "price": h.price, "location": h.location, "shipping_price": h.shipping_price,
                                    "shipping": h.shipping, **_screen_data(h), **_scam_data(h), **_geizhals_data(h)})
@@ -823,7 +823,7 @@ async def _run_agent(agent_id: int) -> RunResult:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),
                          f"{h.heading}: {h.old_price:g} → {h.price:g} {_site(h.platform).currency}{_ship_suffix(h)}"
                          + _scam_line(h)
-                         + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url,
+                         + _geizhals_line(h) + _screen_line(h), url=h.url, image=h.image_url, tag=hit_tag(h),
                          push=passes(agent, h) and not _unjudged(agent, h, asked),
                          data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
                                "price": h.price, "old_price": h.old_price, **_screen_data(h), **_scam_data(h),
@@ -1268,6 +1268,38 @@ def site_status(detail: Any) -> str:
         return "gone"
     raw = (getattr(detail, "status", None) or "unknown").lower()
     return "active" if raw == "active" else STATUS_WORDS.get(raw, raw)
+
+
+def hit_tag(h: Hit) -> str:
+    """Tag of a hit's push (new hit, price drop): the same tag replaces it, and seeing the hit takes it off the phone."""
+    return f"wh-hit-{h.platform or 'willhaben'}-{h.ad_id}"
+
+
+def pushes_seen(hits: list[Hit]) -> None:
+    """The owner has seen these hits (opened, saved, ignored, marked seen): their pushes go off the phone (Home
+    Assistant) and their Telegram buttons go; only hits that were pushed (an inbox entry) are asked for."""
+    from app.db import EventLog
+    refs = {(h.platform or "willhaben", h.ad_id) for h in hits if h.ad_id}
+    if not refs:
+        return
+    keys = {ad for _p, ad in refs} | {f"{p}:{ad}" for p, ad in refs}
+    with session() as db:
+        pushed = set(db.exec(select(EventLog.ad_id).where(col(EventLog.ad_id).in_(keys),
+                                                          col(EventLog.quiet).is_not(True))).all())
+    tags = [f"wh-hit-{p}-{ad}" for p, ad in refs if ad in pushed or f"{p}:{ad}" in pushed][:50]
+    if not tags:
+        return
+    from app.services.notify import clear_push
+
+    async def run() -> None:
+        for tag in tags:
+            await clear_push(tag)
+    try:
+        task = asyncio.get_running_loop().create_task(run())
+    except RuntimeError:           # no loop (a sync caller in tests): nothing to clear
+        return
+    _image_tasks.add(task)
+    task.add_done_callback(_image_tasks.discard)
 
 
 _image_tasks: set[asyncio.Task] = set()

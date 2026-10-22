@@ -207,3 +207,33 @@ def test_the_other_persons_online_state_from_willhaben_and_vinted(monkeypatch):
     page = '"login":"x","last_loged_on_ts":"2026-10-22T21:23:00+02:00","last_loged_on":"heute","is_online":true,"country_iso_code":"DE"'
     m = vinted.parse_member(page)
     assert (m["country"], m["online"], m["last_seen"]) == ("DE", True, "2026-10-22T21:23:00+02:00")
+
+
+def test_seen_hits_and_chats_leave_the_inbox_and_the_phone(monkeypatch):
+    import asyncio
+
+    from app.db import Hit, log_event
+    from app.services import notify as notify_mod
+    from app.services import search_agents
+    cleared = []
+
+    async def clear(tag):
+        cleared.append(tag)
+    monkeypatch.setattr(notify_mod, "clear_push", clear)
+    monkeypatch.setattr(chats, "clear_push", clear)
+    with session() as db:
+        db.add(Hit(agent_id=1, ad_id="555", heading="Lampe", url="https://x/555", state="new"))
+        db.commit()
+    _chat("c1", ("in", -1))
+    log_event("hit", "Lampe: 20 €", None, ad_id="555")
+    log_event("message", "Nachricht", None, conversation_id="c1")
+    from app.main import _inbox_events, app
+    assert len(_inbox_events()) == 2
+    with TestClient(app) as c:
+        c.get("/hits/ad/555", params={"hit": 1})               # opened: seen
+        c.get("/chats/c1")
+        asyncio.run(asyncio.sleep(0))
+    assert _inbox_events() == []
+    with session() as db:
+        h = db.exec(select(Hit).where(Hit.ad_id == "555")).one()
+    assert search_agents.hit_tag(h) == "wh-hit-willhaben-555"
