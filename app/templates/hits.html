@@ -157,7 +157,21 @@
       {% if h.state == 'filtered' %}{% set why = held_back_reasons(agents.get(h.agent_id), h) %}{% if why %}<p class="m-0 text-[12.5px] text-warning" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</p>{% endif %}{% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
       {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
-      <div class="text-[12.5px] text-muted">{% if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden">{{ agents[h.agent_id].name }} · </span>{% endif %}{% if platform_ids %}<span class="sm:hidden">{{ platform_name(h.platform) }} · </span>{% endif %}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}{% set km = hit_km(h, home) %}{% if km is not none %} · <span data-km class="{{ 'text-warning' if agents.get(h.agent_id) and agents[h.agent_id].max_km and km > agents[h.agent_id].max_km and h.shipping != 'ship' and h.shipping_price is none else '' }}">{{ _("{n} km", n=km|round|int) }}</span>{% endif %} · <span data-found{% if view.sort in ('newest', 'oldest') %} class="font-medium text-base-content"{% endif %}>{{ _("found {ago}", ago=h.first_seen_at|ago) }}</span>{% if h.published_at %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% endif %}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}{% if h.is_private == false %} · {{ _("dealer") }}{% endif %}</div>
+      {# where (only the parts there are, so no stray separators) and when; the status line below #}
+      {% set km = hit_km(h, home) %}{% set far = agents.get(h.agent_id) and agents[h.agent_id].max_km and km is not none and km > agents[h.agent_id].max_km and h.shipping != 'ship' and h.shipping_price is none %}
+      {% set seen_place = h.location or h.postcode or km is not none or h.is_private == false %}
+      {% if (not agent_id and agents.get(h.agent_id)) or platform_ids %}<div class="text-[12.5px] text-muted sm:hidden" data-hit-origin>
+        {%- set sep = joiner(' · ') %}
+        {%- if not agent_id and agents.get(h.agent_id) %}{{ sep() }}{{ agents[h.agent_id].name }}{% endif %}
+        {%- if platform_ids %}{{ sep() }}{{ platform_name(h.platform) }}{% endif %}
+      </div>{% endif %}
+      {% if seen_place %}<div class="text-[12.5px] text-muted" data-hit-place>
+        {%- set sep2 = joiner(' · ') %}
+        {%- if h.location or h.postcode %}{{ sep2() }}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}{% endif %}
+        {%- if km is not none %}{{ sep2() }}<span data-km class="{{ 'text-warning' if far else '' }}">{{ _("{n} km", n=km|round|int) }}</span>{% endif %}
+        {%- if h.is_private == false %}{{ sep2() }}{{ _("dealer") }}{% endif %}
+      </div>{% endif %}
+      <div class="text-[12.5px] text-muted" data-hit-when><span data-found{% if view.sort in ('newest', 'oldest') %} class="font-medium text-base-content"{% endif %}>{{ _("found {ago}", ago=h.first_seen_at|ago) }}</span>{% if h.published_at %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% endif %}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}</div>
       {% with sync_error=none, can_sync=hit_can_sync(h) %}{% include "_hit_status.html" %}{% endwith %}
     </div>
     {# three equal columns, one line each (icon and label): a card is one row shorter than with stacked buttons #}

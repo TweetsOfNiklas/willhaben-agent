@@ -234,3 +234,34 @@ def test_cards_show_when_a_hit_was_found_the_order_of_newest():
     assert page.count("data-found") == 2 and "found 3 h ago" in page.replace(" ", " ") or "found" in page
     first = page[page.index("Vinted SSD"):page.index("Older find")]
     assert "published" not in first.split("data-found")[1][:200]            # no date: nothing shown for it
+
+
+def test_a_card_has_tidy_place_time_and_status_lines():
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from app.db import Hit, SearchAgent, session, utcnow
+    from app.main import app
+    now = utcnow()
+    with session() as db:
+        a = SearchAgent(name="SSD", source_url="https://www.willhaben.at/iad/x", webapi_url="/x")
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        db.add(Hit(agent_id=a.id, platform="vinted", ad_id="v1", heading="No place", url="https://x/1", state="new",
+                   first_seen_at=now - timedelta(hours=3), last_seen_at=now, site_status="active",
+                   status_checked_at=now - timedelta(hours=1)))
+        db.add(Hit(agent_id=a.id, platform="willhaben", ad_id="w1", heading="With place", url="https://x/2", state="new",
+                   location="Haag", postcode="3350", is_private=False, first_seen_at=now - timedelta(hours=5),
+                   last_seen_at=now, published_at=now - timedelta(hours=6)))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits?state=new").text
+    card = page[page.index("No place"):page.index("With place")]
+    assert "data-hit-place" not in card                                  # nothing to say: no line, no stray "·"
+    assert "data-hit-when" in card and "published" not in card.split("data-hit-when")[1][:300]
+    status = card[card.index("data-hit-status"):][:600]
+    assert "still online" in status and 'title="listed' in status and ">listed" not in status   # ages in the tooltip
+    other = page[page.index("With place"):]
+    assert "Haag (3350) · dealer" in other[other.index("data-hit-place"):][:200]
