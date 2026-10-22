@@ -106,7 +106,7 @@ async def test_irreversible_jobs_do_not_wait_for_the_hourly_budget(monkeypatch):
 # ---- 6. #22: "Undo" in the last moment: the job had started, the notice vanished as if it had been taken back
 def test_undo_says_when_it_came_too_late():
     base = (TEMPLATES / "base.html").read_text(encoding="utf-8")
-    cancel = re.search(r"async cancel\(id\) \{(.*?)\n    \},", base, re.S).group(1)
+    cancel = re.search(r"async cancel\(id, quiet\) \{(.*?)\n    \},", base, re.S).group(1)
     assert ".json()" in cancel and "ok" in cancel and "tooLate" in cancel      # the answer is read and told
     assert "grace_s * 1000 + 1500" not in base                               # no Undo after the period ended
 
