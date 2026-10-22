@@ -628,7 +628,10 @@ document.addEventListener('alpine:init', () => {
       if (document.hidden && !document.querySelector('[data-pending-key]') && !browserNotify.on()) return;   // else: keep asking
       const url = '/jobs' + (this.live && this.cursor !== null ? '?since=' + this.cursor : '');
       fetch(url, {headers: {accept: 'application/json'}})
-        .then(r => { if (r.status >= 502 && r.status <= 504) throw new Error('gateway'); return r.ok ? r.json() : null; })
+        // only the app's own JSON counts as back: while it restarts the proxy answers with plain text ("404 page
+        // not found", "Bad Gateway"), which once hid the bar too early
+        .then(r => { if (!(r.headers.get('content-type') || '').includes('json')) throw new Error('away');
+                     return r.ok ? r.json() : null; })
         .then(d => {          // a slip in applying the answer is not a lost connection
           this.back();
           try { if (d) this.apply(d); else this.later(this.IDLE); } catch (e) { console.error(e); this.later(this.IDLE); }
