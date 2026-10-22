@@ -265,3 +265,33 @@ def test_a_card_has_tidy_place_time_and_status_lines():
     assert "still online" in status and 'title="listed' in status and ">listed" not in status   # ages in the tooltip
     other = page[page.index("With place"):]
     assert "Haag (3350) · dealer" in other[other.index("data-hit-place"):][:200]
+
+
+def test_a_sold_hit_is_greyed_out_and_a_fresh_one_does_not_repeat_its_time():
+    from datetime import timedelta
+
+    from fastapi.testclient import TestClient
+
+    from app.db import Hit, SearchAgent, session, utcnow
+    from app.main import app
+    now = utcnow()
+    with session() as db:
+        a = SearchAgent(name="x", source_url="https://www.willhaben.at/iad/x", webapi_url="/x")
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+        db.add(Hit(agent_id=a.id, ad_id="1", heading="Sold one", url="https://x/1", state="saved", site_status="sold"))
+        db.add(Hit(agent_id=a.id, ad_id="2", heading="Fresh one", url="https://x/2", state="saved",
+                   first_seen_at=now, last_seen_at=now))
+        db.add(Hit(agent_id=a.id, ad_id="3", heading="Listed again", url="https://x/3", state="saved",
+                   first_seen_at=now - timedelta(days=2), last_seen_at=now))
+        db.commit()
+    with TestClient(app) as c:
+        page = c.get("/hits?state=saved").text
+
+    def card(name):
+        i = page.index(name)
+        return page[page.rindex("<article", 0, i):page.index("</article>", i)]
+    assert "data-unavailable" in card("Sold one") and "grayscale" in card("Sold one")
+    assert "data-unavailable" not in card("Fresh one")
+    assert ">listed" not in card("Fresh one") and ">listed" in card("Listed again")
