@@ -131,8 +131,6 @@
         <button class="btn btn-ghost btn-sm hover:bg-bad-soft hover:text-error max-sm:px-2" title="{{ _('Discard') }}" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ ui.icon('trash', 15) }}<span class="max-sm:sr-only">{{ _("Discard") }}</span></button>
         <span class="flex-1"></span>
         {% if step %}<button class="btn" formaction="/chats/{{ conv.id }}/paylivery/{{ step.action }}" formnovalidate hx-post="/chats/{{ conv.id }}/paylivery/{{ step.action }}" hx-confirm="{{ _('Run only the PayLivery step on willhaben now, without sending the answer?') }}" data-paylivery-only>{{ _("Only PayLivery: {step}", step=step.label) }}</button>{% endif %}
-        {# right away: no countdown to take it back (the normal Send waits a few seconds for that) #}
-        <button class="btn" name="now" value="1" hx-post="/drafts/{{ d.id }}/send" hx-vals='{"now": "1"}' data-send-now title="{{ _('Goes out right away, no countdown to take it back.') }}">{{ ui.icon('send', 15) }}{{ _("Send now") }}</button>
         <button class="btn btn-primary px-5" hx-post="/drafts/{{ d.id }}/send" title="{{ _('Goes out in a few seconds – until then you can take it back here.') }}">{{ ui.icon('send', 16) }}{{ _("Send + PayLivery") if step else _("Send") }}</button>
       </div>
     </form>
@@ -155,7 +153,9 @@
     {% else %}
     <form method="post" action="/chats/{{ conv.id }}/draft" class="flex flex-col gap-2 sm:flex-row sm:items-center" hx-disabled-elt="find button"
           hx-post="/chats/{{ conv.id }}/draft" hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML">
-      <input name="hint" placeholder="{{ _('Guidance for this answer (optional), e.g. counter-offer €180, pickup Saturday from 10 am') }}" class="input w-full min-w-0 bg-base-200 sm:w-auto sm:flex-1">
+      <input name="hint" placeholder="{{ _('Your own message to send, or guidance for Claude, e.g. counter-offer €180') }}" class="input w-full min-w-0 bg-base-200 sm:w-auto sm:flex-1">
+      {# the text as it is, right away – no Claude, no countdown #}
+      <button class="btn whitespace-nowrap" formaction="/chats/{{ conv.id }}/send-direct" hx-post="/chats/{{ conv.id }}/send-direct" data-send-direct>{{ ui.icon('send', 15) }}{{ _("Send directly") }}</button>
       <button class="btn btn-primary whitespace-nowrap">{{ ui.icon('sparkle', 16) }}{{ _("Prepare answer with Claude") }}</button>
     </form>
     <small class="text-[12.5px] text-muted">{{ _("Takes 10–60 seconds.") }}</small>

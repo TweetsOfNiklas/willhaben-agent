@@ -1635,6 +1635,23 @@ async def chat_draft(request: Request, conversation_id: str, hint: str = Form(""
     return back(f"/chats/{conversation_id}")
 
 
+@app.post("/chats/{conversation_id}/send-direct")
+async def chat_send_direct(conversation_id: str, hint: str = Form("")):
+    """My own text from the composer, sent as it is right away (no Claude draft, no countdown)."""
+    text = hint.strip()
+    with session() as db:
+        if db.get(Conversation, conversation_id) is None:
+            raise HTTPException(404)
+        if not text:
+            return back(f"/chats/{conversation_id}?msg={quote(t('Write the message first'), safe='')}")
+        d = Draft(conversation_id=conversation_id, text=text, model="manual")
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+    chats.enqueue_send(d.id, text, now=True)
+    return back(f"/chats/{conversation_id}#draft-{d.id}")
+
+
 @app.post("/drafts/{draft_id}/send")
 async def draft_send(draft_id: int, text: str = Form(...), paylivery_step: str = Form(""), pl_amount: str = Form(""),
                      now: str = Form("")):

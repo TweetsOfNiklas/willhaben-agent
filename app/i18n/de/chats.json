@@ -164,6 +164,7 @@
  "Nothing more to answer: no yellow dot, not counted as action needed": "Nichts mehr zu beantworten: kein gelber Punkt, zählt nicht als Aktion erforderlich",
  "Mark as finished": "Als erledigt markieren",
  "Marked finished": "Erledigt",
- "Send now": "Sofort senden",
- "Goes out right away, no countdown to take it back.": "Geht sofort raus, ohne Countdown zum Zurückholen."
+ "Your own message to send, or guidance for Claude, e.g. counter-offer €180": "Eigene Nachricht zum Senden oder Vorgabe für Claude, z. B. Gegenangebot 180 €",
+ "Send directly": "Direkt senden",
+ "Write the message first": "Schreib zuerst die Nachricht"
 }

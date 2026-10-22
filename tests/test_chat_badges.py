@@ -119,3 +119,18 @@ def test_a_finished_chat_needs_no_answer_until_they_write_again():
                        created_at=utcnow() + timedelta(minutes=1)))
         db.commit()
     assert _counts()["chats_action"] == 1                 # they wrote again: open again
+
+
+def test_my_own_text_goes_out_directly(monkeypatch):
+    """Instead of a Claude draft: the text I typed, sent as it is, right away."""
+    queued = []
+    monkeypatch.setattr(chats, "enqueue_send", lambda did, text, now=False: queued.append((did, text, now)) or True)
+    _chat("c1", ("in", -1))
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats/c1").text
+        assert "data-send-direct" in page and "data-send-now" not in page
+        c.post("/chats/c1/send-direct", data={"hint": "Passt, bis morgen"}, follow_redirects=False)
+    with session() as db:
+        d = db.exec(select(Draft).where(Draft.conversation_id == "c1")).one()
+    assert d.text == "Passt, bis morgen" and d.model == "manual" and queued == [(d.id, "Passt, bis morgen", True)]

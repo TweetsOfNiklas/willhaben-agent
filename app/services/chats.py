@@ -623,7 +623,8 @@ def _style_examples(limit: int = MAX_STYLE_EXAMPLES) -> list[str]:
     """The owner's own voice: messages they typed themselves on willhaben (outgoing, not sent from a Claude draft),
     newest first; only when there are too few, sent drafts rated 👍 in Telegram fill up. Never the partner's messages."""
     with session() as db:
-        sent = {style._norm(d) for d in db.exec(select(Draft.text).where(Draft.status == "sent")).all()}  # as compared below
+        sent = {style._norm(d) for d in db.exec(select(Draft.text).where(          # as compared below; typed by me
+            Draft.status == "sent", (col(Draft.model).is_(None)) | (Draft.model != "manual"))).all()}  # ("Send directly"): my voice
         rows = db.exec(select(Message).where(Message.direction == "out", Message.kind.is_(None))  # type: ignore[union-attr]
                        .order_by(Message.created_at.desc()).limit(200))
         out: list[str] = []
