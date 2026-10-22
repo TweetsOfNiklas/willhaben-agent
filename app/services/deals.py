@@ -34,7 +34,7 @@ from urllib.parse import quote_plus
 from sqlalchemy import String, cast, or_
 from sqlmodel import col, select
 
-from app.db import DealCheck, ProductSearch, session, utcnow
+from app.db import DealCheck, ProductSearch, get_setting, session, set_setting, utcnow
 from app.i18n import LANGS, lang, t
 from app.llm.base import LLMError, get_backend
 from app.platforms import vpn
@@ -1503,6 +1503,33 @@ def stored_geizhals(ad_id: str) -> dict[str, Any] | None:
     return gh if gh.get("by") == "claude" else None
 
 
+GH_NONE_SETTING = "geizhals_claude_none"   # {ad ref: {reason, at}}: Claude searched Geizhals and found nothing
+GH_NONE_KEEP = 2000
+
+
+def stored_geizhals_none(ref: str) -> dict[str, Any] | None:
+    """Claude looked for this ad's product on Geizhals before and found none: {reason, at} – no point asking again.
+    Kept apart from the 50 "recently checked" rows, which are pruned."""
+    import json
+    try:
+        return (json.loads(get_setting(GH_NONE_SETTING) or "{}") or {}).get(str(ref))
+    except ValueError:
+        return None
+
+
+def keep_geizhals_none(ref: str, reason: str) -> None:
+    import json
+    try:
+        kept = json.loads(get_setting(GH_NONE_SETTING) or "{}") or {}
+    except ValueError:
+        kept = {}
+    kept.pop(str(ref), None)
+    kept[str(ref)] = {"reason": reason, "at": utcnow().isoformat()}
+    while len(kept) > GH_NONE_KEEP:
+        kept.pop(next(iter(kept)))
+    set_setting(GH_NONE_SETTING, json.dumps(kept, ensure_ascii=False))
+
+
 def stored_claude(ad_id: str, price: float | None) -> dict[str, Any] | None:
     with session() as db:
         row = db.get(DealCheck, str(ad_id))
@@ -1537,6 +1564,8 @@ async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = F
         res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None, "own_query": own,
                "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,
+               "geizhals_none": None if gh else (stored_geizhals_none(ad.ref) or {}).get("reason"),
+               "geizhals_none_at": None if gh else (stored_geizhals_none(ad.ref) or {}).get("at"),
                "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None, ad.item_condition),
                "claude": stored_claude(ad.ref, ad.price), "checked_at": utcnow().isoformat()}
         if not comp.get("error"):
@@ -1546,8 +1575,11 @@ async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = F
         if "error" in found:
             return rerate({**res, "geizhals_error": found["error"]})   # not kept: the next click tries again
         gh = found.get("match")
+        if found.get("none"):           # asked once: the button does not come back for this ad
+            keep_geizhals_none(ad.ref, found["none"])
         stats = (res.get("comparables") or {}).get("stats")
         res = {**res, "geizhals": gh, "geizhals_none": found.get("none"),
+               "geizhals_none_at": utcnow().isoformat() if found.get("none") else None,
                "position": position(ad.price, stats, gh["price_from"] if gh else None, ad.item_condition)}
         _keep(res, ad.ref, query, category_url, own)
     if use_claude and not _claude_for(res.get("claude"), ad.price):

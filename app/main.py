@@ -198,7 +198,12 @@ def _local(dt: datetime | str | None, fmt: str = "%d.%m. %H:%M") -> str:
     return dt.astimezone(VIENNA).strftime(fmt)
 
 
-def _ago(dt: datetime | None) -> str:
+def _ago(dt: datetime | str | None) -> str:
+    if isinstance(dt, str):              # an ISO time kept in JSON (a stored analysis)
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            return "–"
     if not dt:
         return "–"
     if dt.tzinfo is None:

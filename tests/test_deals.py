@@ -1388,6 +1388,9 @@ async def test_claude_finds_nothing_or_fails(wh, gh, no_auto_gh, monkeypatch):
     assert res["geizhals"] is None and res["geizhals_none"] == "Nur Sets mit Akku gefunden."
     await deals.analyze(_ad(100), find_geizhals=True)          # Claude's "none" is kept with the analysis
     assert len(fake.calls) == 3
+    deals._results.clear()                                       # the cache gone (a restart, its TTL): still known
+    res = await deals.analyze(_ad(100), find_geizhals=True)
+    assert res["geizhals_none"] == "Nur Sets mit Akku gefunden." and res["geizhals_none_at"] and len(fake.calls) == 3
 
     fake.answers = [{"product": "", "queries": []}]
     res = await deals.analyze(_ad(100, ad_id="1000000005", heading="Alter Holzschrank Eiche"), find_geizhals=True)

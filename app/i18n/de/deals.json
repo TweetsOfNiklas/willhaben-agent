@@ -41,5 +41,6 @@
  "None of the Geizhals results is this product.": "Keines der Geizhals-Ergebnisse ist dieses Produkt.",
  "Claude found „{name}“ on Geizhals, but it has no current price there.": "Claude hat „{name}“ auf Geizhals gefunden, dort gibt es aber keinen aktuellen Preis.",
  "Comparable ads can't be fetched right now: the VPN is looking for a server for {site}.": "Vergleichsanzeigen gerade nicht abrufbar: das VPN sucht einen Server für {site}.",
- "{site}: no answer within {n} s – left out": "{site}: keine Antwort in {n} s – ausgelassen"
+ "{site}: no answer within {n} s – left out": "{site}: keine Antwort in {n} s – ausgelassen",
+ "Not on Geizhals – Claude already searched": "Nicht auf Geizhals – Claude hat schon gesucht"
 }
