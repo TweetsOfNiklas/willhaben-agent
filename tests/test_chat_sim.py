@@ -121,7 +121,7 @@ async def test_buying_answers_and_the_first_message_get_my_style(backend):
     await _done()
     opener, answer = backend.calls[-2]["prompt"], backend.calls[-1]["prompt"]
     assert "Lg Lukas am Ende" in opener and "Lg Lukas am Ende" in answer
-    assert "Martin" not in opener                              # no name to address him by
+    assert "Vorname des Verkäufers: Martin" in opener and "Muster" not in opener
 
 
 async def test_buyer_chat_opens_and_follows_the_purchase(backend):

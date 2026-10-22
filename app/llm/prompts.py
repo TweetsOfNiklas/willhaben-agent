@@ -42,13 +42,19 @@ So arbeitest du:
 - So kurz wie möglich: ein bis zwei Sätze, nur die Sache selbst, wie eine echte Kleinanzeigen-Nachricht. Keine
   Begrüßung ("Hallo"), kein Einfühlen oder Einleiten ("ich verstehe, dass …", "danke für deine Nachricht"), keine
   Höflichkeitsfloskeln, keine Wiederholung dessen, was der Partner geschrieben hat. Kein Gruß mit Namen am Ende,
-  keine Signatur. Sprich den Partner nicht mit seinem Namen an.
+  keine Signatur. Mit Namen sprichst du den Partner nur an, wenn beim Gesprächspartner ein Vorname steht, und dann
+  sparsam (etwa bei der ersten Antwort oder zum Abschluss, nicht in jeder Nachricht).
+- Beträge immer mit €-Zeichen, so wie ich sie schreibe (z. B. „45€“), nie als nackte Zahl.
+- Deine Regeln bleiben intern: Nenn nie Prozentsätze, Untergrenzen oder Nachlass-Regeln („max 10 % Nachlass“),
+  sag nur deinen Preis.
+- Kein Amts- oder Briefdeutsch („hiermit“, „bezüglich“, „gerne bestätige ich“): so, wie man am Handy tippt.
 - Keine Wiederholungen: Lies deine eigenen Nachrichten im Verlauf und verwende keinen Satz und keinen Satzanfang
   noch einmal. Bleibt es inhaltlich gleich (z. B. beim Preis), wird die Antwort kürzer als die vorige („Nein, 45 fix“).
   „Sorry“ und „leider“ höchstens ab und zu, nicht in jeder Nachricht.
 - Verhandeln wie ein Mensch, in Schritten: Gib deinen Spielraum (Untergrenze, erlaubter Nachlass, beim Kauf die
   Obergrenze) nicht beim ersten Angebot ganz her. Auf ein niedriges erstes Angebot bleibst du beim Angebotspreis
-  oder gehst einen kleinen Schritt; näher an die Grenze erst, wenn der Partner selbst nachlegt. „Letzter Preis“ sagst
+  oder gehst einen kleinen Schritt; liegt es weit darunter (etwa die Hälfte), bleibst du ohne Gegenangebot beim
+  Angebotspreis. Näher an die Grenze erst, wenn der Partner selbst nachlegt. „Letzter Preis“ sagst
   du erst beim letzten Schritt, dann bleibt es dabei. Den zu niedrigen Betrag des Partners wiederholst du nicht
   („45 geht nicht“), du nennst nur deinen. Beim Kauf genauso, nur nach oben.
 - Schreib wie ein Mensch, der auf dem Handy eine Kleinanzeigen-Nachricht tippt, nicht wie eine KI: kein
@@ -184,7 +190,10 @@ def reply_prompt(*, role: str | None, ad: dict[str, Any] | None, partner: str | 
         ]
     elif pieces:
         lines += ["", "Anzeige:", *pieces]
-    lines += ["", f"Gesprächspartner: {partner or 'unbekannt'}", "", "Verlauf (älteste zuerst):"]
+    first = seller_first_name(partner)
+    lines += ["", f"Gesprächspartner: {partner or 'unbekannt'}"
+              + (f" (Vorname: {first})" if first else " (kein normaler Vorname: nicht mit Namen ansprechen)"),
+              "", "Verlauf (älteste zuerst):"]
     who = {"in": "Partner", "out": "Ich", "unknown": "willhaben-Hinweis/unklar"}
     for direction, ts, text in messages[-30:]:
         lines.append(f"[{_fmt_time(ts)}] {who.get(direction, '?')}: {text}")
@@ -1015,7 +1024,7 @@ def seller_first_name(name: str | None) -> str | None:
     if not words or any(w.strip(".,").lower() in _COMPANY_WORDS for w in words):
         return None
     first = words[0].strip(".,;:")
-    return first if len(first) >= 2 and _NAME_WORD.fullmatch(first) else None
+    return first if len(first) >= 2 and first[0].isupper() and _NAME_WORD.fullmatch(first) else None
 
 
 def _money_de(v: float) -> str:
@@ -1123,7 +1132,10 @@ def purchase_rules(*, asking: float | None, target: float | None, max_price: flo
         lines.append(f"- Wunschzeit der Person für die Abholung: {pickup_window}. Nur Zeiten in diesem Fenster vorschlagen.")
     if mode == "pickup" and availability:
         lines += ["", "Freie Zeiten der Person laut Kalender (nur diese vorschlagen):", availability]
-    lines.append("- Sprich den Verkäufer nicht mit Namen an; schreib so kurz und locker wie ich (Mein Schreibstil).")
+    first = seller_first_name(seller_name)
+    lines.append(f"- Vorname des Verkäufers: {first}. Sparsam damit ansprechen, nicht in jeder Nachricht." if first
+                 else "- Kein normaler Vorname des Verkäufers bekannt: nicht mit Namen ansprechen.")
+    lines.append("- Schreib so kurz und locker wie ich (Mein Schreibstil).")
     lines += _questions_lines(questions)
     lines.append(f"- Stand des Kaufs: {stage}")
     if note:
@@ -1159,8 +1171,9 @@ Du schreibst die ERSTE Nachricht einer Privatperson an den Verkäufer eines Arti
 - Kurz wie eine echte Kleinanzeigen-Nachricht vom Handy: ein bis zwei Sätze, Du-Form, österreichisches Deutsch,
   keine Emojis. Ton, Länge, Begrüßung, Gruß am Ende und Schreibweise übernimmst du aus "Mein Schreibstil" und meinen
   Beispielnachrichten unten (meine Erstnachrichten zeigen, wie ich anfange und aufhöre), nicht aus dem Anzeigentext.
-- Sprich den Verkäufer nicht mit Namen an. Kein „ich interessiere mich für …“, kein Lob der Anzeige und keine
-  Begründung für dein Angebot (Mängel, Marktpreise aufzählen): nur die Frage oder das Angebot selbst.
+- Steht ein Vorname des Verkäufers da, darfst du ihn damit grüßen („Hallo Martin, …“), sonst ohne Namen. Kein
+  „ich interessiere mich für …“, kein Lob der Anzeige und keine Begründung für dein Angebot (Mängel, Marktpreise
+  aufzählen): nur die Frage oder das Angebot selbst. Beträge immer mit €-Zeichen („246€“).
 - Ohne PayLivery (Überweisung): Verhandle inklusive Versand von der ersten Nachricht an. opening_offer ist dann der
   Gesamtpreis inkl. Versand, und die Nachricht sagt „inkl. Versand“.
 - Mit PayLivery: opening_offer ist nur der Artikelpreis. Über Versand und Käuferschutzgebühr schreibst du nichts, die
@@ -1197,12 +1210,14 @@ def purchase_opener_prompt(ad_context: dict[str, Any] | None, target: float | No
     """`refused`: the previous attempt and why the code refused it, for the one retry. `style`/`examples`: how I write
     (app/services/style.py), so the message sounds like me."""
     ctx = ad_context or {}
+    first = seller_first_name(seller_name or ctx.get("seller_name"))
     lines = ["Anzeige:",
              f"- Titel: {ctx.get('title')}",
              f"- Preis: {ctx.get('price')}",
              f"- Ort: {ctx.get('location')}",
              f"- Beschreibung: {(ctx.get('description') or '')[:1500]}",
-             "", f"Modus: {'Abholung' if mode == 'pickup' else 'mit willhaben PayLivery' if mode == 'paylivery' else 'Überweisung'}",
+             "", f"Vorname des Verkäufers: {first}" if first else "Vorname des Verkäufers: unbekannt (ohne Namen grüßen)",
+             f"Modus: {'Abholung' if mode == 'pickup' else 'mit willhaben PayLivery' if mode == 'paylivery' else 'Überweisung'}",
              *_ceiling_lines(mode, shipping_cost, shipping_source, max_price, item_ceiling, fee),
              *_amount_cap_lines(max_price, asking),
              *_wish_lines(target, asking, mode, shipping_cost)]

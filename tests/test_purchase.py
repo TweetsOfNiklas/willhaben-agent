@@ -706,7 +706,7 @@ async def test_begin_stores_market_and_paylivery_shipping_of_the_ad(fx):
     assert purchase.item_ceiling(p) == 282.39 and purchase.shipping_of(p) == (4.9, "ad")
     prompt = fx.backend.calls[0]["prompt"]
     assert "Vergleichbare Anzeigen" not in prompt and "Median" not in prompt   # comparables are no argument
-    assert "4,90 €" in prompt and "Anna" not in prompt                       # no name to address the seller by
+    assert "4,90 €" in prompt and "Vorname des Verkäufers: Anna" in prompt
 
 
 async def test_begin_without_comparables_stores_no_market(fx):
@@ -854,12 +854,14 @@ def test_rules_block_states_ceiling_shipping_and_mode():
     assert "Versand: keiner (Abholung)" in pu and "inkl. Versand" not in pu
 
 
-def test_rules_block_no_name_and_no_market_argument():
+def test_rules_block_first_name_and_no_market_argument():
     conv = Conversation(id="c-x", role="buyer", partner_name="Anna Muster")
     p = _p(mode="paylivery", status="negotiating", max_price=300.0, asking_price=300.0,
            market={"min": 180.0, "p25": 200.0, "median": 220.0, "count": 9})   # no argument any more
     text = purchase.rules_block(p, conv)
-    assert "Anna" not in text and "nicht mit Namen" in text                 # the owner never uses names
+    assert "Vorname des Verkäufers: Anna." in text and "Muster" not in text and "Sparsam" in text
+    assert "nicht mit Namen" in purchase.rules_block(p, Conversation(id="c-y", role="buyer", partner_name="Autohaus Müller GmbH"))
+    assert "nicht mit Namen" in purchase.rules_block(p, Conversation(id="c-z", role="buyer", partner_name="rebinowskis"))
     assert "Vergleichbare Anzeigen" not in text and "180 €" not in text
 
 
@@ -872,13 +874,13 @@ def test_seller_first_name(name, first):
     assert seller_first_name(name) == first
 
 
-def test_opener_prompt_direct_with_market_and_no_name():
+def test_opener_prompt_direct_with_market_and_name():
     from app.llm.prompts import purchase_opener_prompt
     prompt = purchase_opener_prompt({"title": "MX Master", "price": "300 €"}, target=270.0, max_price=300.0, mode="direct",
                                     rules="", seller_name="Anna Muster", shipping_cost=6.0,
                                     shipping_source="estimate", item_ceiling=294.0,
                                     asking=300.0)
-    assert "Anna" not in prompt
+    assert "Vorname des Verkäufers: Anna" in prompt and "Muster" not in prompt
     assert "Wunschpreis inkl. Versand: 276 €" in prompt and "Versand: 6 € (Schätzung)" in prompt
     assert "Frag, ob der Artikel noch zu haben ist" not in purchase.PURCHASE_OPENER_SYSTEM
 
@@ -1161,3 +1163,12 @@ async def test_without_willhabens_fee_the_category_rule_applies(fx, monkeypatch)
     fx.ad = detail(shipping_price=7.9)
     pid = await open_order(fx, max_price=None)
     assert row(pid).fee["at_fee"] is None and row(pid).max_price == 321.4       # 300 + 7.90 + 4.5 % of 300
+
+
+def test_the_reply_prompt_names_a_first_name_only_when_there_is_one():
+    from app.llm.prompts import REPLY_SYSTEM, reply_prompt
+    def prompt(partner):
+        return reply_prompt(role="seller", ad=None, partner=partner, messages=[], rules="", examples=[], hint=None)
+    assert "(Vorname: Erika)" in prompt("Erika Mustermann")
+    assert "kein normaler Vorname" in prompt("marco_85") and "kein normaler Vorname" in prompt(None)
+    assert "€-Zeichen" in REPLY_SYSTEM and "Nachlass-Regeln" in REPLY_SYSTEM
