@@ -218,6 +218,8 @@ def apply_inbox(data: dict[str, Any], incoming: list[str] | None = None) -> list
                 photos = [p.get("url") for p in item.get("photos") or [] if isinstance(p, dict) and p.get("url")]
                 ctx = {**(row.ad_context or {}), "title": row.ad_title, "url": f"{ORIGIN}/items/{row.ad_id}",
                        "platform": "vinted"}
+                if partner.get("id"):                # their profile tells their country: the answers' language
+                    ctx["partner_id"] = str(partner["id"])
                 if photos and not ctx.get("images"):        # the inbox's photo: a sold item's page has none left
                     ctx["images"] = photos[:1]
                 row.ad_context = ctx

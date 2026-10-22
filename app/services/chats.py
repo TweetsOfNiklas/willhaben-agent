@@ -21,7 +21,7 @@ from app.i18n import t
 from app.llm.base import LLMError, get_backend
 from app.llm.prompts import (
     AUTO_REPLY_SCHEMA, MAX_OTHERS, MAX_STYLE_EXAMPLES, PURCHASE_SCHEMA, REPLY_SCHEMA, REPLY_SYSTEM,
-    auto_rules, platform_rule,
+    auto_rules, language_rule, platform_rule,
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
@@ -387,7 +387,9 @@ async def _vinted_ad_context(conv: Conversation) -> Conversation:
         row = db.get(Conversation, conv.id)
         if detail is not None:
             old = row.ad_context or {}
-            ctx = {**detail.as_context(), **{k: v for k, v in old.items() if k in ("order_id", "side_tried")},
+            ctx = {**detail.as_context(), **{k: v for k, v in old.items()
+                                             if k in ("order_id", "side_tried", "partner_id", "partner_country",
+                                                      "partner_country_tried")},
                    "platform": "vinted"}
             if not ctx.get("images") and old.get("images"):   # a sold item's page has no photos: the inbox's stays
                 ctx["images"] = old["images"]
@@ -397,6 +399,28 @@ async def _vinted_ad_context(conv: Conversation) -> Conversation:
         db.commit()
         db.refresh(row)
     return row
+
+
+async def _vinted_partner_country(conv: Conversation) -> str | None:
+    """The other person's country on Vinted (their public profile, read once and kept with the chat): which language
+    the answers are in. None when unknown or not loadable (then the conversation decides)."""
+    ctx = conv.ad_context or {}
+    if ctx.get("partner_country") or not ctx.get("partner_id") or ctx.get("partner_country_tried"):
+        return ctx.get("partner_country")
+    from app.platforms import PlatformError, vinted
+    try:
+        country = await vinted.get_client().member_country(ctx["partner_id"])
+    except (PlatformError, Exception) as e:  # noqa: BLE001 - the answer is written all the same
+        log.info("vinted member %s: country not loaded: %s", ctx["partner_id"], e)
+        return None
+    with session() as db:
+        row = db.get(Conversation, conv.id)
+        if row is not None:
+            row.ad_context = {**(row.ad_context or {}), "partner_country": country, "partner_country_tried": True}
+            db.add(row)
+            db.commit()
+            conv.ad_context = row.ad_context
+    return country
 
 
 async def _own_ad_context(conv: Conversation) -> Conversation:
@@ -715,6 +739,8 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         examples = style.examples()                       # the profile's characteristic messages, then the newest
         others = _others_said(conv.id, conv.ad_id) if conv.role == "seller" else []
     if line := platform_rule(platform):
+        rules = f"{rules}\n\n{line}"
+    if platform == "vinted" and (line := language_rule(await _vinted_partner_country(conv))):
         rules = f"{rules}\n\n{line}"
     pl, pl_asking, pl_floor = paylivery_advice.for_draft(conv, ad)
     if pl:                                        # an open PayLivery offer: the draft suggests the step on willhaben too

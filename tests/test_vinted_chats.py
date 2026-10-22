@@ -331,3 +331,38 @@ def test_old_unstable_rows_are_replaced():
           "data": {"event_type": "success", "entity": {"title": "Gekauft!", "subtitle": "x"}}}
     vinted_inbox.apply_conversation("01a1-uuid", {**CONV, "messages": [ev]})
     assert [m.ext_id.startswith("vinted-ev-") for m in chats.messages_of("01a1-uuid")] == [True]
+
+
+def test_a_members_country_comes_from_their_profile_page():
+    from app.platforms.vinted import parse_member_country
+    page = ('…"login":"x","country_id":2,"city":"","country_code":"DE",…'
+            '"country_title_local":"Deutschland","country_iso_code":"DE","country_title":"Deutschland"…')
+    assert parse_member_country(page) == "DE" and parse_member_country("no user") is None
+
+
+@pytest.mark.parametrize("country,says", [("AT", "auf Deutsch"), ("DE", "auf Deutsch"), ("IT", "auf Englisch"),
+                                          (None, None)])
+async def test_answers_on_vinted_are_in_german_or_english_by_the_partners_country(monkeypatch, country, says):
+    from app.platforms import vinted
+    vinted_inbox.apply_inbox(INBOX)
+    with session() as db:
+        assert db.get(Conversation, "01a1-uuid").ad_context["partner_id"] == "77"
+    asked = []
+
+    class Client:
+        async def member_country(self, user_id):
+            asked.append(user_id)
+            return country
+    monkeypatch.setattr(vinted, "get_client", lambda: Client())
+    with session() as db:
+        conv = db.get(Conversation, "01a1-uuid")
+    out = await chats.compose(conv, [("in", None, "Hi, still available?")], auto=True, ad=None, platform="vinted")
+    rules = out["prompt"].split("Meine Regeln:")[1]
+    if says:
+        assert "Sprache:" in rules and says in rules
+    else:
+        assert "Sprache:" not in rules
+    with session() as db:
+        conv = db.get(Conversation, "01a1-uuid")
+    await chats.compose(conv, [("in", None, "Hi")], auto=False, ad=None, platform="vinted")
+    assert asked == ["77"]                                    # read once, kept with the chat

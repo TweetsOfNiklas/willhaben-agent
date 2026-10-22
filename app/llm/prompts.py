@@ -471,6 +471,21 @@ PLATFORM_RULES = {
 }
 
 
+GERMAN_COUNTRIES = {"AT": "Österreich", "DE": "Deutschland"}
+
+
+def language_rule(country: str | None) -> str:
+    """Vinted reaches all of Europe: a rules line for the language by the other person's country (their profile);
+    "" when it is unknown (then the conversation decides, as everywhere)."""
+    if not country:
+        return ""
+    if country.upper() in GERMAN_COUNTRIES:
+        return f"Sprache: Der Gesprächspartner ist aus {GERMAN_COUNTRIES[country.upper()]}: schreib auf Deutsch."
+    return (f"Sprache: Der Gesprächspartner ist aus dem Ausland (Land {country.upper()}), nicht aus Österreich oder "
+            "Deutschland: schreib auf Englisch, kurz und in einfachen Worten. Schreibt er selbst auf Deutsch, antworte "
+            "auf Deutsch.")
+
+
 def platform_rule(platform: str | None) -> str:
     """A rules line for a chat on another site than willhaben (the prompts are written for willhaben); "" there."""
     return PLATFORM_RULES.get(platform or "", "")

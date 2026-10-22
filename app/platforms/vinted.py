@@ -119,6 +119,16 @@ def _item_status(plugins: dict[str, dict[str, Any]], text: str) -> str:
     return "reserved" if _RESERVED.search(text or "") else "active"
 
 
+# the profile page's own user: {"country_title_local": "Deutschland", "country_iso_code": "DE", …} (seen 2026-10-22,
+# fetched anonymously, so the only user on the page is the member)
+_COUNTRY = re.compile(r'"country_iso_code"\s*:\s*"([A-Z]{2})"|"country_code"\s*:\s*"([A-Z]{2})"')
+
+
+def parse_member_country(text: str) -> str | None:
+    m = _COUNTRY.search(text or "")
+    return (m.group(1) or m.group(2)) if m else None
+
+
 def parse_catalog(text: str, host: str = HOST) -> SearchPage:
     """The flight data of a catalog page -> SearchPage. PlatformError when the answer holds no result list."""
     i = (text or "").find(_ITEMS)
@@ -241,6 +251,13 @@ class VintedClient(HttpPlatformClient):
         if r.status_code != 200:
             raise PlatformError(t("Vinted search returned HTTP {status}", status=r.status_code))
         return parse_catalog(r.text, host)
+
+    async def member_country(self, user_id: str, host: str = HOST) -> str | None:
+        """A member's country (ISO code, "DE") from their public profile page; None when it says none."""
+        r = await self._get(f"https://{host}/member/{user_id}", headers=RSC_HEADERS, cache_s=86400, kind="detail")
+        if r.status_code != 200:
+            raise PlatformError(t("Vinted member {id}: HTTP {status}", id=user_id, status=r.status_code))
+        return parse_member_country(r.text)
 
     async def item(self, ad_id: str, host: str = HOST) -> AdDetail | None:
         r = await self._get(f"https://{host}/items/{ad_id}", headers=RSC_HEADERS, cache_s=300, kind="detail")
@@ -387,4 +404,4 @@ class VintedPlatform(Platform):
 
 
 __all__ = ["VintedClient", "VintedPlatform", "get_client", "set_client", "parse_catalog", "parse_item", "parse_listing",
-           "parse_age"]
+           "parse_age", "parse_member_country"]
