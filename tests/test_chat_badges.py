@@ -134,3 +134,18 @@ def test_my_own_text_goes_out_directly(monkeypatch):
     with session() as db:
         d = db.exec(select(Draft).where(Draft.conversation_id == "c1")).one()
     assert d.text == "Passt, bis morgen" and d.model == "manual" and queued == [(d.id, "Passt, bis morgen", True)]
+
+
+def test_mark_as_unread_until_opened_again_and_the_live_line_in_the_chat():
+    set_setting("chats_app_seen_since", (T0 - timedelta(hours=1)).isoformat())
+    _chat("c1", ("in", -9), ("out", -5))                      # answered: read
+    assert _counts()["chats"] == 0
+    from app.main import app
+    with TestClient(app) as c:
+        page = c.get("/chats/c1").text
+        assert "data-mark-unread" in page and 'data-chat-live="0"' in page and "willhaben offline" in page
+        r = c.post("/chats/c1/unread", follow_redirects=False)
+        assert r.headers["location"].startswith("/chats") and "/c1" not in r.headers["location"]
+        assert _counts()["chats"] == 1
+        c.get("/chats/c1")                                     # opened: read again
+    assert _counts()["chats"] == 0

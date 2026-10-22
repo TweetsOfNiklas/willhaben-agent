@@ -1293,6 +1293,13 @@ async def chat_finished(conversation_id: str, finished: str = Form("1")):
     return back(f"/chats/{conversation_id}")
 
 
+@app.post("/chats/{conversation_id}/unread")
+async def chat_unread(conversation_id: str):
+    """Mark as unread (here only): back to the list, where it counts as unread again."""
+    chats.mark_unread(conversation_id)
+    return back("/chats")
+
+
 @app.post("/chats/{conversation_id}/remove")
 async def chat_remove(conversation_id: str):
     chats.remove(conversation_id)

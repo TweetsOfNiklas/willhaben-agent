@@ -490,6 +490,16 @@ def closes_chat(text: str | None) -> bool:
     return hit and all(w in _CLOSING_FILLER for w in s.split())
 
 
+def mark_unread(conversation_id: str) -> None:
+    """Unread again here (the blue badge, at least 1) until I open the chat; the site is not told."""
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.marked_unread = True
+            db.add(conv)
+            db.commit()
+
+
 def set_finished(conversation_id: str, on: bool = True) -> None:
     """Mark as finished: no answer due (the yellow dot and the sidebar's count leave it out) until they write again."""
     with session() as db:
@@ -543,6 +553,8 @@ def overview(db) -> dict[str, Any]:
         if c.unread_count and not (c.app_seen_at and c.last_message_at
                                    and _aware(c.app_seen_at) >= _aware(c.last_message_at)):
             n = max(n, c.unread_count)
+        if c.marked_unread:                 # Mark as unread
+            n = max(n, 1)
         if n:
             unread[c.id] = n
     since = sync_window()[1]
@@ -575,9 +587,10 @@ def seen_in_app(conversation_id: str) -> None:
             return
         newest = db.exec(select(func.max(Message.created_at)).where(Message.conversation_id == conversation_id,
                                                                     Message.direction == "in")).one()
-        if conv.app_seen_at is not None and (newest is None or _aware(newest) <= _aware(conv.app_seen_at)):
+        if conv.app_seen_at is not None and not conv.marked_unread and (
+                newest is None or _aware(newest) <= _aware(conv.app_seen_at)):
             return                          # nothing new since: no write
-        conv.app_seen_at = utcnow()
+        conv.app_seen_at, conv.marked_unread = utcnow(), None
         db.add(conv)
         db.commit()
 
@@ -593,7 +606,7 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
     with session() as db:
         convs = db.exec(select(Conversation.id, Conversation.last_message_at, Conversation.unread_count,
                                Conversation.last_message_text, Conversation.hidden_at, Conversation.removed,
-                               Conversation.app_seen_at, Conversation.finished_at)).all()
+                               Conversation.app_seen_at, Conversation.finished_at, Conversation.marked_unread)).all()
         open_drafts = sorted(set(db.exec(select(Draft.conversation_id).where(Draft.status == "draft")).all()))
         out = {"list": fp([list(r) for r in convs], open_drafts, get_session().chat_live.get("state"))}
         conv = db.get(Conversation, conversation_id) if conversation_id else None

@@ -136,6 +136,7 @@ class Conversation(SQLModel, table=True):
     app_seen_at: datetime | None = None
     # marked finished by me ("Mark as finished"): no answer due any more; a newer message from them opens it again
     finished_at: datetime | None = None
+    marked_unread: bool | None = None   # "Mark as unread": counts as unread here until I open it again
 
 
 class Message(SQLModel, table=True):

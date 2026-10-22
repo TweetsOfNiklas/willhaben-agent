@@ -4,6 +4,9 @@
   <button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="{{ _('Actions') }}" aria-haspopup="menu" :aria-expanded="open" @click="open = !open">{{ ui.icon('dots', 16) }}</button>
   <div x-cloak x-show="open" role="menu"
        class="absolute top-full right-0 z-30 mt-1 flex min-w-60 flex-col gap-0.5 rounded-box border border-base-300 bg-base-100 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,.18)]">
+    {# unread again: the blue badge comes back, as if I had not opened it yet (only here) #}
+    <form method="post" action="/chats/{{ c.id }}/unread">
+      <button class="btn btn-ghost btn-sm w-full justify-start font-normal" data-mark-unread>{{ _("Mark as unread") }}</button></form>
     <form method="post" action="/chats/{{ c.id }}/hide">
       <input type="hidden" name="hidden" value="{{ '0' if c.hidden_at else '1' }}">
       <button class="btn btn-ghost btn-sm w-full justify-start font-normal">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form>
