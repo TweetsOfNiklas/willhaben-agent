@@ -134,3 +134,17 @@ def test_the_refreshing_parts_do_not_pass_their_settings_to_the_links_inside(cli
     assert polled and all('hx-disinherit="*"' in t for t in polled)
     hit = client.get(f"/tg/hits/{hit_id}").text
     assert "data-pricebar" in hit                       # the price bar from the Geizhals new price alone
+
+
+def test_a_hit_with_a_geizhals_product_but_no_price_opens(client):
+    """Claude found the product on Geizhals, but no offer: no new price to show, the page still opens."""
+    agent_id, _ = _data()
+    with session() as db:
+        h = Hit(agent_id=agent_id, ad_id="556", heading="Miniserver", url="https://www.willhaben.at/iad/object?adId=556",
+                state="filtered", price=289, geizhals={"name": "Miniserver", "url": "https://geizhals.at/a2", "by": "claude",
+                                                       "checked": True})
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    page = client.get(f"/tg/hits/{h.id}")
+    assert page.status_code == 200 and "data-geizhals-link" in page.text and "data-pricebar" not in page.text

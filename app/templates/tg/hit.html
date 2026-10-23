@@ -48,7 +48,7 @@
   <div class="sh">Geizhals</div>
   <div class="sec">
     <a class="cell" href="{{ h.geizhals.url }}" target="_blank" hx-boost="false" data-geizhals-link>
-      <span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="ttl trunc">{{ h.geizhals.name }}</span><span class="sub">{{ _("new from {price}", price=h.geizhals.price_from|eur) }}{% if h.geizhals.checked %} · {{ _("checked by Claude") }}{% endif %}</span></span>
+      <span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="ttl trunc">{{ h.geizhals.name }}</span><span class="sub">{%- set sep = joiner(' · ') %}{% if h.geizhals.price_from %}{{ sep() }}{{ _("new from {price}", price=h.geizhals.price_from|eur) }}{% endif %}{% if h.geizhals.checked %}{{ sep() }}{{ _("checked by Claude") }}{% endif %}</span></span>
         <span class="val" style="color: var(--link)">{{ ui.icon('external', 16, 2) }}</span></span></a>
   </div>
   {% endif %}
