@@ -1,0 +1,25 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Purchases") }}{% endblock %}
+{% block page %}
+<main data-back="/tg">
+{{ m.head(_("Purchases")) }}
+<div class="wrap">
+  {% if buys %}
+  <div class="sec" style="margin-top: 12px">
+    {% for p in buys %}
+    <a class="cell" href="{{ '/tg/chats/' ~ p.conversation_id if p.conversation_id else '#' }}" style="padding-top: 8px; align-items: flex-start" data-purchase="{{ p.id }}">
+      {% if p.image_url %}<img class="thumb" src="{{ p.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 8px">
+        <span class="trunc" style="font-size: 15px; font-weight: 500">{{ p.ad_title or p.ad_id }}</span>
+        <span style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center"><span class="pill">{{ purchase_status(p.status) }}</span>
+          {% if p.agreed_price %}<span class="sub">{{ _("agreed {price}", price=p.agreed_price|eur) }}</span>{% elif p.max_price %}<span class="sub">{{ _("at most {price}", price=p.max_price|eur) }}</span>{% endif %}</span>
+      </span>
+      {% if p.conversation_id %}{{ m.chev() }}{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("No purchase orders yet.") }}</p>{% endif %}
+</div>
+</main>
+{% endblock %}

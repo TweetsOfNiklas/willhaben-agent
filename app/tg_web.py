@@ -1,0 +1,309 @@
+"""The Telegram Mini App (/tg): the app rebuilt in Telegram's own look, for the bot's menu button and the buttons in
+its messages. Grouped lists with section headers, cells with an icon, a value and a chevron, Telegram's theme
+colours, its back button and its main button (templates/tg/). The same data as the dashboard: new and saved hits
+with their photos and the ad itself, the chats with their drafts and sending, my ads and purchase orders.
+
+Logged in like every page: inside Telegram by the signed launch data of the linked chat (auth.telegram_user via
+/login, no password). Kept out of main.py (one include there); `render` is imported from app.main at call time.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from fastapi import APIRouter, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlmodel import col, select
+
+from app import platforms
+from app.db import Conversation, Draft, Hit, MyAd, Purchase, SearchAgent, session
+from app.i18n import t
+from app.platforms import PlatformError
+
+log = logging.getLogger(__name__)
+router = APIRouter()
+_background: set[asyncio.Task] = set()
+LIST_LIMIT = 60
+
+
+def install(app: FastAPI) -> None:
+    app.include_router(router)
+
+
+def _render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
+    from app.main import render
+    from app.services import purchase
+    return render(request, f"tg/{name}", embed=True, myad_status=label_of, purchase_status=purchase.status_label, **ctx)
+
+
+def _back(path: str) -> RedirectResponse:
+    return RedirectResponse(path, status_code=303)
+
+
+def _later(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+# ------------------------------------------------------------------ home
+@router.get("/tg", response_class=HTMLResponse)
+async def tg_home(request: Request):
+    from app.main import _nav_counts
+    from app.services import chats
+    counts = _nav_counts()
+    with session() as db:
+        o = chats.overview(db)
+        saved = len(list(db.exec(select(Hit.id).where(Hit.state == "saved"))))
+        agents = list(db.exec(select(SearchAgent)))
+        myads = len(list(db.exec(select(MyAd.ad_id).where(MyAd.status == "active", col(MyAd.hidden).is_not(True)))))
+        buys = len(list(db.exec(select(Purchase.id).where(col(Purchase.status).not_in(("done", "cancelled", "failed"))))))
+    return _render(request, "home.html", counts=counts, saved=saved, agents=agents, myads=myads, buys=buys,
+                   chats_shown=len(o["shown"]))
+
+
+# ------------------------------------------------------------------ hits
+@router.get("/tg/hits", response_class=HTMLResponse)
+async def tg_hits(request: Request, state: str = "new"):
+    state = state if state in ("new", "saved", "seen") else "new"
+    with session() as db:
+        hits = list(db.exec(select(Hit).where(Hit.state == state)
+                            .order_by(col(Hit.first_seen_at).desc()).limit(LIST_LIMIT)))
+        agents = {a.id: a.name for a in db.exec(select(SearchAgent))}
+    return _render(request, "hits.html", hits=hits, state=state, agents=agents)
+
+
+async def _detail(h: Hit) -> Any:
+    """The ad itself from its site (photos, description), else what the hit knows; a sold ad's kept photos."""
+    from app.services import search_agents
+    p = platforms.get(h.platform or "willhaben")
+    d = None
+    if p.can("detail"):
+        try:
+            d = await p.detail(h.ad_id, url=h.url)
+        except (PlatformError, Exception) as e:  # noqa: BLE001 - the stored hit is shown instead
+            log.info("mini app: ad %s not loaded: %s", h.ad_id, e)
+        else:
+            search_agents.record_status(h.platform or "willhaben", h.ad_id, search_agents.site_status(d), d)
+    if d is None:
+        d = platforms.AdDetail.from_hit(h)
+    if not d.images:
+        kept = search_agents.kept_photos(h)
+        d.images = ([f"/hits/{h.id}/image"] + [f"/hits/{h.id}/image/{i}" for i in range(1, len(kept))] if kept
+                    else [h.image_url] if h.image_url else [])
+    return d
+
+
+@router.get("/tg/hits/{hit_id}", response_class=HTMLResponse)
+async def tg_hit(request: Request, hit_id: int):
+    from app.services import search_agents
+    with session() as db:
+        h = db.get(Hit, hit_id)
+        if h is None:
+            raise HTTPException(404)
+        if h.state == "new":             # opened = seen, as in the ad viewer; its push goes off the phone
+            h.state = "seen"
+            db.add(h)
+            db.commit()
+            db.refresh(h)
+            search_agents.pushes_seen([h])
+        agent = db.get(SearchAgent, h.agent_id)
+    d = await _detail(h)
+    with session() as db:
+        h = db.get(Hit, hit_id) or h
+    return _render(request, "hit.html", h=h, d=d, agent=agent, site=platforms.get(h.platform or "willhaben"))
+
+
+@router.post("/tg/hits/{hit_id}/state")
+async def tg_hit_state(hit_id: int, state: str = Form(...)):
+    from app.services import search_agents
+    if state not in ("new", "seen", "saved", "ignored"):
+        raise HTTPException(400)
+    with session() as db:
+        h = db.get(Hit, hit_id)
+        if h is None:
+            raise HTTPException(404)
+        h.state = state
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    if state != "new":
+        search_agents.pushes_seen([h])
+    if state == "saved":
+        search_agents.keep_image_later(hit_id, search_agents.shown_photos(hit_id))
+    return _back(f"/tg/hits/{hit_id}")
+
+
+@router.get("/tg/ad/{ref:path}")
+async def tg_ad(ref: str):
+    """A push or message button about an ad (its ref, "<platform>:<id>" for other sites): its newest hit."""
+    platform, _, ad_id = ref.rpartition(":")
+    with session() as db:
+        h = db.exec(select(Hit).where(Hit.ad_id == ad_id, Hit.platform == (platform or "willhaben"))
+                    .order_by(col(Hit.id).desc())).first()
+    return _back(f"/tg/hits/{h.id}" if h else "/tg/hits")
+
+
+# ------------------------------------------------------------------ chats
+@router.get("/tg/chats", response_class=HTMLResponse)
+async def tg_chats(request: Request, show: str = ""):
+    from app.services import chats
+    with session() as db:
+        o = chats.overview(db)
+    convs = o["shown"]
+    if show == "action":
+        convs = [c for c in convs if c.id in o["waiting"] or c.id in o["open_drafts"]]
+    elif show == "unread":
+        convs = [c for c in convs if o["unread"].get(c.id)]
+    return _render(request, "chats.html", convs=convs, o=o, show=show)
+
+
+@router.get("/tg/chats/{conversation_id}", response_class=HTMLResponse)
+async def tg_chat(request: Request, conversation_id: str):
+    from app.services import chats
+    with session() as db:
+        conv = db.get(Conversation, conversation_id)
+    if conv is None:
+        raise HTTPException(404)
+    chats.seen_in_app(conversation_id)
+    _later(chats.ask_presence(conv))
+    drafts = chats.drafts_of(conversation_id)
+    return _render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
+                   draft=next((d for d in drafts if d.status == "draft"), None),
+                   sending=next((d for d in drafts if d.status == "sending"), None),
+                   presence=chats.presence_of(conv), place=chats.partner_place(conv))
+
+
+@router.post("/tg/chats/{conversation_id}/send")
+async def tg_chat_send(conversation_id: str, text: str = Form(""), draft_id: str = Form("")):
+    """The composer's main button: the open draft as edited, or my own text when there is none – right away."""
+    from app.services import chats
+    text = text.strip()
+    if not text:
+        return _back(f"/tg/chats/{conversation_id}")
+    with session() as db:
+        if db.get(Conversation, conversation_id) is None:
+            raise HTTPException(404)
+        d = db.get(Draft, int(draft_id)) if draft_id.isdigit() else None
+        if d is None or d.conversation_id != conversation_id or d.status != "draft":
+            d = Draft(conversation_id=conversation_id, text=text, model="manual")
+            db.add(d)
+            db.commit()
+            db.refresh(d)
+    chats.enqueue_send(d.id, text, now=True)
+    return _back(f"/tg/chats/{conversation_id}")
+
+
+@router.post("/tg/chats/{conversation_id}/draft")
+async def tg_chat_draft(conversation_id: str, hint: str = Form("")):
+    from app.services import chats
+    chats.enqueue_draft(conversation_id, hint.strip() or None)
+    return _back(f"/tg/chats/{conversation_id}")
+
+
+@router.post("/tg/chats/{conversation_id}/revise")
+async def tg_chat_revise(conversation_id: str, draft_id: int = Form(...), instruction: str = Form("")):
+    """One of Claude's other decisions under the draft (a chip): the draft is rewritten in the background."""
+    from app.services import chats
+    chats.enqueue_revise(draft_id, instruction)
+    return _back(f"/tg/chats/{conversation_id}")
+
+
+@router.post("/tg/chats/{conversation_id}/discard")
+async def tg_chat_discard(conversation_id: str, draft_id: int = Form(...)):
+    with session() as db:
+        d = db.get(Draft, draft_id)
+        if d is not None and d.conversation_id == conversation_id and d.status == "draft":
+            d.status = "discarded"
+            db.add(d)
+            db.commit()
+    return _back(f"/tg/chats/{conversation_id}")
+
+
+@router.post("/tg/chats/{conversation_id}/finished")
+async def tg_chat_finished(conversation_id: str, finished: str = Form("1")):
+    from app.services import chats
+    chats.set_finished(conversation_id, finished == "1")
+    return _back(f"/tg/chats/{conversation_id}")
+
+
+# ------------------------------------------------------------------ my ads, purchases, agents
+@router.get("/tg/myads", response_class=HTMLResponse)
+async def tg_myads(request: Request):
+    with session() as db:
+        ads = list(db.exec(select(MyAd).where(col(MyAd.hidden).is_not(True))
+                           .order_by(col(MyAd.published_at).desc().nulls_last()).limit(LIST_LIMIT)))
+    order = {"active": 0, "reserved": 1, "expired": 2, "sold": 3}
+    ads.sort(key=lambda a: order.get(a.status, 9))
+    return _render(request, "myads.html", ads=ads)
+
+
+@router.get("/tg/purchases", response_class=HTMLResponse)
+async def tg_purchases(request: Request):
+    with session() as db:
+        buys = list(db.exec(select(Purchase).order_by(col(Purchase.id).desc()).limit(LIST_LIMIT)))
+    return _render(request, "purchases.html", buys=buys)
+
+
+@router.get("/tg/agents", response_class=HTMLResponse)
+async def tg_agents(request: Request):
+    with session() as db:
+        agents = list(db.exec(select(SearchAgent).order_by(col(SearchAgent.name))))
+        new = {}
+        for agent_id in db.exec(select(Hit.agent_id).where(Hit.state == "new")):
+            new[agent_id] = new.get(agent_id, 0) + 1
+    return _render(request, "agents.html", agents=agents, new=new)
+
+
+@router.post("/tg/agents/{agent_id}/toggle")
+async def tg_agent_toggle(agent_id: int):
+    with session() as db:
+        a = db.get(SearchAgent, agent_id)
+        if a is None:
+            raise HTTPException(404)
+        a.enabled = not a.enabled
+        db.add(a)
+        db.commit()
+    from app import scheduler
+    try:
+        scheduler.reschedule_agents()
+    except Exception as e:  # noqa: BLE001 - the switch is stored; the next start schedules it
+        log.info("reschedule after toggle failed: %s", e)
+    return _back("/tg/agents")
+
+
+def tg_link(url: str) -> str:
+    """The Mini App page for a link to an app page (a Telegram button opens that instead of the dashboard)."""
+    from urllib.parse import parse_qs, urlsplit
+
+    from app.config import get_settings
+    base = (get_settings().public_url or "").rstrip("/")
+    if not base or not url.startswith(base):
+        return url
+    parts = urlsplit(url[len(base):] or "/")
+    path, q = parts.path, parse_qs(parts.query)
+    if path.startswith("/chats/"):
+        return base + "/tg" + path
+    if path == "/hits" and q.get("view"):
+        return f"{base}/tg/ad/{q['view'][0]}"
+    if path == "/hits":
+        return base + "/tg/hits"
+    if path.startswith("/myads"):
+        return base + "/tg/myads"
+    if path.startswith("/purchases"):
+        return base + "/tg/purchases"
+    if path in ("", "/"):
+        return base + "/tg"
+    return url
+
+
+def menu_url() -> str | None:
+    """The Mini App's address for the bot's menu button: only an https public URL (Telegram opens nothing else)."""
+    from app.config import get_settings
+    base = (get_settings().public_url or "").rstrip("/")
+    return base + "/tg" if base.startswith("https://") else None
+
+
+def label_of(status: str) -> str:
+    return {"active": t("online"), "reserved": t("reserved"), "sold": t("sold"), "expired": t("expired")}.get(status, status)

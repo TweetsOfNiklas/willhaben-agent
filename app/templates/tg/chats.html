@@ -1,0 +1,35 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Chats") }}{% endblock %}
+{% block page %}
+<main data-back="/tg">
+{{ m.head(_("Chats")) }}
+<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}" hx-trigger="every 15s" hx-select="#tg-chats" hx-swap="outerHTML">
+  <nav class="seg" aria-label="{{ _('Chats') }}">
+    <a href="/tg/chats"{% if not show %} aria-current="page"{% endif %}>{{ _("All") }}</a>
+    <a href="/tg/chats?show=unread"{% if show == 'unread' %} aria-current="page"{% endif %}>{{ _("Unread") }}{% if o.unread %} · {{ o.unread|length }}{% endif %}</a>
+    <a href="/tg/chats?show=action"{% if show == 'action' %} aria-current="page"{% endif %}>{{ _("Open") }}</a>
+  </nav>
+  {% if convs %}
+  <div class="sec" style="margin-top: 12px">
+    {% for c in convs %}{% set n = o.unread.get(c.id) %}{% set img = o.thumbs.get(c.id) %}
+    <a class="cell" href="/tg/chats/{{ c.id }}" style="align-items: flex-start; padding-top: 9px" data-chat="{{ c.id }}">
+      {% if img %}<img class="thumb" src="{{ img }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px; border-radius: 12px" onerror="this.style.visibility='hidden'">
+      {% else %}<span class="thumb" style="width: 54px; height: 54px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--hint)">{{ (c.partner_name or '?')[:1]|upper }}</span>{% endif %}
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 1px; padding: 0 0 9px">
+        <span style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+          <span style="display: flex; align-items: center; gap: 6px; min-width: 0"><span class="trunc" style="font-size: 16px; font-weight: {{ '700' if n else '500' }}">{{ c.partner_name or _('unknown') }}</span>{{ m.site(c.platform) }}</span>
+          <span class="sub" style="flex-shrink: 0">{{ c.last_message_at|ago }}</span></span>
+        <span class="trunc" style="font-size: 13px; color: var(--link)">{{ c.ad_title or '' }}{% if c.role %} · {{ _("Selling") if c.role == 'seller' else _("Buying") }}{% endif %}</span>
+        <span style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+          <span class="trunc" style="font-size: 14px; color: {{ 'var(--text)' if n else 'var(--hint)' }}">{% if c.id in o.open_drafts %}<span style="color: var(--link)">{{ _("Draft") }}:</span> {% endif %}{{ c.last_message_text or '' }}</span>
+          <span style="display: flex; align-items: center; gap: 6px; flex-shrink: 0">{% if c.id in o.waiting %}<span class="dot" title="{{ _('Awaiting my reply') }}"></span>{% endif %}{% if n %}<span class="badge">{{ n }}</span>{% endif %}</span>
+        </span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("No chats here.") }}</p>{% endif %}
+</div>
+</main>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("My ads") }}{% endblock %}
+{% block page %}
+<main data-back="/tg">
+{{ m.head(_("My ads")) }}
+<div class="wrap">
+  {% if ads %}
+  <div class="sec" style="margin-top: 12px">
+    {% for a in ads %}
+    <a class="cell" href="{{ a.url or '#' }}" target="_blank" hx-boost="false" style="padding-top: 8px; align-items: flex-start" data-myad="{{ a.ad_id }}">
+      {% if a.image_url %}<img class="thumb" src="{{ a.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px{{ '; filter: grayscale(1); opacity: .6' if a.status in ('sold', 'expired') else '' }}" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 8px">
+        <span class="trunc" style="font-size: 15px; font-weight: 500">{{ a.heading or a.ad_id }}</span>
+        <span style="display: flex; gap: 6px; flex-wrap: wrap"><span class="pill">{{ myad_status(a.status) }}</span>{% if a.sale_status %}<span class="pill">{{ _("reserved") if a.sale_status == 'reserved' else _("sold") }}</span>{% endif %}{% if a.auto_reply %}<span class="pill">{{ _("automatic answers") }}</span>{% endif %}</span>
+        {% if a.end_date and a.status == 'active' %}<span class="sub">{{ _("runs until {date}", date=a.end_date|local('%d.%m.')) }}</span>{% endif %}
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("No ads.") }}</p>{% endif %}
+</div>
+</main>
+{% endblock %}

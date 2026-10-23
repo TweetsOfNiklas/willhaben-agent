@@ -1,0 +1,28 @@
+{# Building blocks of the Mini App's pages (tg/_base.html styles them). #}
+{% import "_ui.html" as ui %}
+
+{% macro head(title, back='/tg') -%}
+<div class="head"><a href="{{ back }}">{{ ui.icon('back', 16, 2.4) }}{{ _("Back") }}</a><span class="t trunc">{{ title }}</span><span class="sp"></span></div>
+{%- endmacro %}
+
+{% macro chev() -%}<span class="chev">{{ ui.icon('chevron-right', 16, 2.4) }}</span>{%- endmacro %}
+
+{% macro site(pid) -%}
+{%- set pid = pid or 'willhaben' %}<span class="site site-{{ pid }}" title="{{ platform_name(pid) }}" aria-label="{{ platform_name(pid) }}">{{ (platform_name(pid) or '?')[:1]|upper }}</span>
+{%- endmacro %}
+
+{# the Geizhals rating of a hit, as on the hit cards: the price zone by the new price and the share of it #}
+{% macro geizhals(h, pz) -%}
+{%- set gh_pct = geizhals_below_pct(h) %}
+{%- if gh_pct is not none %}{% set lvl = hit_level(h, pz) %}{% set share = share_pct(h.price, h.geizhals.price_from) if lvl else none %}
+<span class="pill{{ ' lvl-' ~ lvl if lvl else '' }}" data-geizhals>
+  {%- if lvl %}{{ deal_level_label(lvl) }} · {{ (_("{n} % of {price} new", n=share, price=h.geizhals.price_from|eur) if share else _("below 1 % of the new price"))|nb }}
+  {%- else %}{{ (_("new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)))|nb }}{% endif %}</span>
+{%- endif %}
+{%- endmacro %}
+
+{% macro switch(on, label) -%}
+<button type="submit" role="switch" aria-checked="{{ 'true' if on else 'false' }}" aria-label="{{ label }}"
+        style="width: 51px; height: 31px; border-radius: 16px; border: 0; padding: 2px; flex-shrink: 0; display: flex; align-items: center; justify-content: {{ 'flex-end' if on else 'flex-start' }}; background: {{ '#34C759' if on else 'rgba(120,120,128,.32)' }}">
+  <span style="width: 27px; height: 27px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.2)"></span></button>
+{%- endmacro %}

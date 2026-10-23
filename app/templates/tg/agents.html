@@ -1,0 +1,18 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Search agents") }}{% endblock %}
+{% block page %}
+<main data-back="/tg">
+{{ m.head(_("Search agents")) }}
+<div class="wrap">
+  <div class="sec" style="margin-top: 12px">
+    {% for a in agents %}
+    <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0">
+      <span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="ttl trunc">{{ a.name }}</span><span class="sub">{{ _("on") if a.enabled else _("paused") }}{% if new.get(a.id) %} · {{ _("{n} new", n=new[a.id]) }}{% endif %}</span></span>
+        {{ m.switch(a.enabled, a.name) }}</span>
+    </form>
+    {% else %}<p class="empty">{{ _("No search agents yet.") }}</p>{% endfor %}
+  </div>
+</div>
+</main>
+{% endblock %}

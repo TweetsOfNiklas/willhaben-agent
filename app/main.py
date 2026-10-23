@@ -4289,5 +4289,7 @@ from app import bugreport_routes  # noqa: E402  footer "Report a bug" (/bugrepor
 bugreport_routes.install(app)
 from app import stats_web  # noqa: E402  willhaben access statistics (/stats/willhaben, footer counter)
 stats_web.install(app, templates)
+from app import tg_web  # noqa: E402,I001  (the Telegram Mini App, /tg)
+tg_web.install(app)
 from app import timeline_web  # noqa: E402  timeline (/timeline), Settings → Timeline
 timeline_web.install(app, templates)

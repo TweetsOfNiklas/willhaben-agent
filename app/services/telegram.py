@@ -179,6 +179,22 @@ async def save_token(tok: str) -> str:
     return me.get("username") or ""
 
 
+async def menu_button() -> bool:
+    """The bot's menu button opens the Mini App (app/tg_web.py) for the linked chat; only with an https public URL,
+    which is all Telegram opens. False when there is none or Telegram refused."""
+    from app.tg_web import menu_url
+    url, cid = menu_url(), chat_id()
+    if not url or not cid or cid <= 0:
+        return False
+    try:
+        await api("setChatMenuButton", chat_id=cid,
+                  menu_button={"type": "web_app", "text": "SecondHandler", "web_app": {"url": url}})
+    except (TelegramError, httpx.HTTPError) as e:
+        log.info("telegram menu button not set: %s", e)
+        return False
+    return True
+
+
 def unlink() -> None:
     set_setting("telegram_chat_id", "")
     set_setting("telegram_chat_name", "")
@@ -193,6 +209,7 @@ async def link(cid: int) -> str | None:
     set_setting("telegram_chat_id", str(cid))
     set_setting("telegram_chat_name", found)
     _candidates.clear()
+    await menu_button()
     await _say("✅ " + t("Linked. Notifications from SecondHandler now arrive here.") + "\n\n" + _help())
     return found
 
@@ -248,7 +265,10 @@ def open_button(text: str, url: str) -> dict[str, Any]:
     link in a group chat (Mini App buttons work in private chats only) stay ordinary links."""
     base = get_settings().public_url.rstrip("/")
     mine = base.startswith("https://") and (url == base or url.startswith(base + "/"))
-    return {"text": text, "web_app": {"url": url}} if mine and (chat_id() or 0) > 0 else {"text": text, "url": url}
+    if mine and (chat_id() or 0) > 0:                 # in Telegram: the Mini App's page (app/tg_web.py)
+        from app.tg_web import tg_link
+        return {"text": text, "web_app": {"url": tg_link(url)}}
+    return {"text": text, "url": url}
 
 
 def _rows(buttons: list[dict[str, str]], per_row: int = 2) -> list[list[dict[str, str]]]:
@@ -890,6 +910,7 @@ async def listen_forever() -> None:
             continue
         if time.monotonic() - last_prune > 86400:
             _prune_actions()
+            await menu_button()          # the Mini App's button, kept current (a new public URL, a new bot)
             last_prune = time.monotonic()
         try:
             updates = await api("getUpdates", _timeout=65, offset=offset, timeout=50,

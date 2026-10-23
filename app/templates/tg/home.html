@@ -1,0 +1,45 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block page %}
+<main>
+<div class="wrap">
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 0 6px">
+    <img src="/static/icons/icon.svg" alt="" style="width: 64px; height: 64px; border-radius: 16px">
+    <span style="font-size: 20px; font-weight: 600">SecondHandler</span>
+    <span class="sub">{{ _("{n} new hits", n=counts.hits) }} · {{ _("{n} unread", n=counts.chats) }}</span>
+  </div>
+
+  <div class="sh">{{ _("Overview") }}</div>
+  <div class="sec">
+    <a class="cell" href="/tg/hits" data-cell="hits"><span class="ico" style="background: #F2994A">{{ ui.icon('target', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Hits") }}</span><span class="val">{% if counts.hits %}<span class="badge">{{ _("{n} new", n=counts.hits) }}</span>{% elif saved %}{{ _("{n} saved", n=saved) }}{% endif %}{{ m.chev() }}</span></span></a>
+    <a class="cell" href="/tg/chats" data-cell="chats"><span class="ico" style="background: #2F80ED">{{ ui.icon('chat', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Chats") }}</span><span class="val">{% if counts.chats_action %}<span class="dot" aria-hidden="true"></span>{% endif %}{{ _("{n} unread", n=counts.chats) }}{% if counts.chats_action %} · {{ _("{n} open", n=counts.chats_action) }}{% endif %}{{ m.chev() }}</span></span></a>
+    <a class="cell" href="/tg/myads"><span class="ico" style="background: #27AE60">{{ ui.icon('tag', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("My ads") }}</span><span class="val">{{ _("{n} online", n=myads) }}{{ m.chev() }}</span></span></a>
+    <a class="cell" href="/tg/purchases"><span class="ico" style="background: #D9548F">{{ ui.icon('cart', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Purchases") }}</span><span class="val">{% if buys %}{{ _("{n} running", n=buys) }}{% endif %}{{ m.chev() }}</span></span></a>
+  </div>
+
+  {% if agents %}
+  <div class="sh">{{ _("Search agents") }}</div>
+  <div class="sec">
+    {% for a in agents[:8] %}
+    <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0">
+      <span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="ttl trunc">{{ a.name }}</span><span class="sub">{{ _("on") if a.enabled else _("paused") }}</span></span>
+        {{ m.switch(a.enabled, a.name) }}</span>
+    </form>
+    {% endfor %}
+    {% if agents|length > 8 %}<a class="cell" href="/tg/agents"><span class="body"><span class="ttl">{{ _("All search agents") }}</span><span class="val">{{ agents|length }}{{ m.chev() }}</span></span></a>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="sh">{{ _("More") }}</div>
+  <div class="sec">
+    <a class="cell" href="/" target="_blank" hx-boost="false"><span class="body"><span class="ttl">{{ _("Open in the browser") }}</span><span class="val" style="color: var(--link)">{{ ui.icon('external', 16, 2) }}</span></span></a>
+  </div>
+  <div class="sub" style="padding: 8px 16px 0">{{ _("Version {v}", v=app_version) }}</div>
+</div>
+</main>
+{% endblock %}
+

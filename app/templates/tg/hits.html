@@ -1,0 +1,35 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Hits") }}{% endblock %}
+{% block page %}
+{% set pz = price_zone_config() %}
+<main data-back="/tg">
+{{ m.head(_("Hits")) }}
+<div class="wrap">
+  <nav class="seg" aria-label="{{ _('Hits') }}">
+    {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('seen', _("Seen"))] %}
+    <a href="/tg/hits?state={{ v }}"{% if state == v %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% if hits %}
+  <div class="sec" style="margin-top: 12px">
+    {% for h in hits %}
+    <a class="cell" href="/tg/hits/{{ h.id }}" style="align-items: flex-start; padding-top: 10px" data-hit="{{ h.id }}">
+      <span style="position: relative">
+        {% if h.image_path or h.image_url %}<img class="thumb" src="{{ '/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url }}" alt="" loading="lazy" width="64" height="64" style="width: 64px; height: 64px{{ '; filter: grayscale(1); opacity: .6' if h.site_status in ('sold', 'gone', 'expired') else '' }}" onerror="this.style.visibility='hidden'">
+        {% else %}<span class="thumb" style="width: 64px; height: 64px"></span>{% endif %}
+        <span style="position: absolute; left: 4px; bottom: 4px">{{ m.site(h.platform) }}</span>
+      </span>
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 10px">
+        <span style="display: flex; justify-content: space-between; gap: 8px"><span class="trunc" style="font-size: 15px; font-weight: 500">{{ h.heading }}</span><span class="sub" style="flex-shrink: 0">{{ h.first_seen_at|ago }}</span></span>
+        <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><span style="font-size: 16px; font-weight: 700">{{ h.price|eur if h.price is not none else (h.price_display or '–') }}</span>{{ m.geizhals(h, pz) }}
+          {%- if h.site_status in ('sold', 'reserved', 'gone', 'expired') %}<span class="pill">{{ {'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}[h.site_status] }}</span>{% endif %}</span>
+        <span class="sub trunc">{{ agents.get(h.agent_id, '') }}{% if h.location %} · {{ h.location }}{% endif %}{% if h.shipping_price %} · {{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("No hits here.") }}</p>{% endif %}
+</div>
+</main>
+{% endblock %}

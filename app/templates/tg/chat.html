@@ -1,0 +1,61 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ conv.partner_name or _('Chat') }}{% endblock %}
+{% block page %}
+{% set ad = conv.ad_context or {} %}
+<main data-back="/tg/chats" style="min-height: 100vh; display: flex; flex-direction: column; background: var(--chat-bg)"
+      {% if not conv.drafting and not sending %}data-main="{{ _('Send') }}" data-main-form="tg-send"{% endif %}>
+{{ m.head(conv.partner_name or _('Chat'), '/tg/chats') }}
+{# who and where: their online state and place, from their site #}
+<div style="background: var(--section); border-bottom: 1px solid var(--sep); padding: 8px 14px; display: flex; align-items: center; gap: 10px">
+  {% if ad.images %}<img class="thumb" src="{{ ad.images[0] }}" alt="" width="40" height="40" style="width: 40px; height: 40px; border-radius: 8px" onerror="this.style.visibility='hidden'">{% endif %}
+  <span style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+    <span style="display: flex; align-items: center; gap: 6px"><span class="trunc" style="font-size: 15px; font-weight: 600">{{ conv.partner_name or _('unknown') }}</span>{{ m.site(conv.platform) }}
+      {% if presence and presence.online %}<span style="font-size: 12px; color: var(--ok)">{{ _("online") }}</span>{% elif presence and presence.last_seen %}<span class="sub">{{ _("last online {ago}", ago=presence.last_seen|ago) }}</span>{% endif %}</span>
+    <span class="sub trunc">{{ conv.ad_title or '' }}{% if ad.price %} · {{ ad.price }}{% endif %}{% if conv.role %} · {{ _("Selling") if conv.role == 'seller' else _("Buying") }}{% endif %}{% if place %} · {{ place }}{% endif %}</span>
+  </span>
+</div>
+
+{# the messages, newest at the bottom; refreshed by themselves #}
+<div id="tg-thread" hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 8s" hx-select="#tg-thread" hx-swap="outerHTML"
+     style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 10px 10px 12px; max-width: 640px; width: 100%; margin: 0 auto">
+  {% for msg in messages[-60:] %}
+    {% if msg.kind or msg.direction == 'unknown' %}
+    <span style="align-self: center; max-width: 88%; text-align: center; background: rgba(0,0,0,.22); color: #FFFFFF; font-size: 13px; border-radius: 10px; padding: 3px 10px">{{ msg.text }}</span>
+    {% else %}{% set mine = msg.direction == 'out' %}
+    <div style="align-self: {{ 'flex-end' if mine else 'flex-start' }}; max-width: 80%; background: var({{ '--out' if mine else '--in' }}); border-radius: {{ '16px 16px 4px 16px' if mine else '16px 16px 16px 4px' }}; padding: 7px 11px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere">{{ msg.text }}<span style="display: block; text-align: right; font-size: 11px; color: {{ 'var(--out-meta)' if mine else 'var(--hint)' }}">{{ msg.created_at|local('%H:%M') }}{% if mine %} {{ '✓✓' if msg.read else '✓' }}{% endif %}</span></div>
+    {% endif %}
+  {% else %}<p class="empty">{{ _("No history stored.") }}</p>{% endfor %}
+  {% if sending %}
+  <div style="align-self: flex-end; max-width: 80%; background: var(--out); opacity: .6; border-radius: 16px 16px 4px 16px; padding: 7px 11px; font-size: 15px; white-space: pre-wrap">{{ sending.text }}<span style="display: block; text-align: right; font-size: 11px; color: var(--out-meta)">{{ _("Sending…") }}</span></div>
+  {% endif %}
+</div>
+
+{# the composer: Claude's draft to edit, or my own text; Telegram's main button sends #}
+<div id="tg-composer" style="background: var(--section); border-top: 1px solid var(--sep); padding: 10px 14px calc(12px + env(safe-area-inset-bottom))"
+     {% if conv.drafting %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML"{% endif %}>
+  <div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px">
+  {% if conv.drafting %}
+    <span style="display: flex; align-items: center; gap: 8px; color: var(--link); font-size: 14px">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude is writing an answer…") }}</span>
+  {% elif sending %}
+    <span class="sub">{{ _("Your answer is on its way.") }}</span>
+  {% else %}
+    {% if draft %}<span style="display: flex; align-items: center; justify-content: space-between"><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--link)">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude's draft") }}</span>{% if draft.intent %}<span class="sub">{{ intent_label(draft.intent) }}</span>{% endif %}</span>{% endif %}
+    <form method="post" action="/tg/chats/{{ conv.id }}/send" id="tg-send" style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+      {% if draft %}<input type="hidden" name="draft_id" value="{{ draft.id }}">{% endif %}
+      <label for="tg-text" style="position: absolute; width: 1px; height: 1px; overflow: hidden">{{ _("Answer") }}</label>
+      <textarea id="tg-text" name="text" rows="2" placeholder="{{ _('Message') }}" style="width: 100%; border: 1px solid var(--sep); border-radius: 12px; background: var(--chip); padding: 9px 12px; font-size: 15px; resize: none; field-sizing: content; max-height: 40vh">{{ draft.text if draft else '' }}</textarea>
+    </form>
+    <div style="display: flex; gap: 6px; overflow-x: auto">
+      {% if draft %}{% for a in draft.alternatives or [] %}
+      <form method="post" action="/tg/chats/{{ conv.id }}/revise" style="margin: 0"><input type="hidden" name="draft_id" value="{{ draft.id }}"><input type="hidden" name="instruction" value="{{ a.instruction }}"><button class="chip" title="{{ a.instruction }}">{{ a.label }}</button></form>
+      {% endfor %}{% endif %}
+      <form method="post" action="/tg/chats/{{ conv.id }}/draft" style="margin: 0"><button class="chip">{{ ui.icon('sparkle', 12, 2) }} {{ _("Redraft") if draft else _("Draft with Claude") }}</button></form>
+      {% if draft %}<form method="post" action="/tg/chats/{{ conv.id }}/discard" style="margin: 0"><input type="hidden" name="draft_id" value="{{ draft.id }}"><button class="chip danger">{{ _("Discard") }}</button></form>{% endif %}
+    </div>
+    <button class="mainbtn tg-hide" form="tg-send">{{ _("Send") }}</button>
+  {% endif %}
+  </div>
+</div>
+</main>
+{% endblock %}
