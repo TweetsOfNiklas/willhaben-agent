@@ -17,7 +17,7 @@
 </div>
 
 {# the messages, newest at the bottom; refreshed by themselves #}
-<div id="tg-thread" hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 8s" hx-select="#tg-thread" hx-swap="outerHTML"
+<div id="tg-thread" hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 8s" hx-select="#tg-thread" hx-swap="outerHTML" hx-disinherit="*"
      style="flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 10px 10px 12px; max-width: 640px; width: 100%; margin: 0 auto">
   {% for msg in messages[-60:] %}
     {% if msg.kind or msg.direction == 'unknown' %}
@@ -33,7 +33,7 @@
 
 {# the composer: Claude's draft to edit, or my own text; Telegram's main button sends #}
 <div id="tg-composer" style="background: var(--section); border-top: 1px solid var(--sep); padding: 10px 14px calc(12px + env(safe-area-inset-bottom))"
-     {% if conv.drafting %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML"{% endif %}>
+     {% if conv.drafting %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
   <div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px">
   {% if conv.drafting %}
     <span style="display: flex; align-items: center; gap: 8px; color: var(--link); font-size: 14px">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude is writing an answer…") }}</span>

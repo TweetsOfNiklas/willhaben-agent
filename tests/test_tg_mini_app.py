@@ -121,3 +121,16 @@ def test_the_mini_app_shows_what_the_site_shows(client, monkeypatch):
     client.post("/tg/chats/c1/finished", data={"finished": "1"})
     with session() as db:
         assert db.get(Conversation, "c1").finished_at is not None
+
+
+def test_the_refreshing_parts_do_not_pass_their_settings_to_the_links_inside(client, monkeypatch):
+    """A link inside the chat list (hx-select="#tg-chats") opened the chat with only that part of it, which the chat
+    page does not have: no messages, no composer, nothing refreshed."""
+    import re
+    _, hit_id = _data()
+    monkeypatch.setattr(chats, "presence", lambda *a, **k: None, raising=False)
+    pages = [client.get("/tg/chats").text, client.get("/tg/chats/c1").text]
+    polled = [t for page in pages for t in re.findall(r"<div[^>]*hx-trigger=\"every[^>]*>", page)]
+    assert polled and all('hx-disinherit="*"' in t for t in polled)
+    hit = client.get(f"/tg/hits/{hit_id}").text
+    assert "data-pricebar" in hit                       # the price bar from the Geizhals new price alone

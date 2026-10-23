@@ -4,7 +4,7 @@
 {% block page %}
 <main data-back="/tg">
 {{ m.head(_("Chats")) }}
-<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}&role={{ role }}" hx-trigger="every 15s" hx-select="#tg-chats" hx-swap="outerHTML">
+<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}&role={{ role }}" hx-trigger="every 15s" hx-select="#tg-chats" hx-swap="outerHTML" hx-disinherit="*">
   {# the chat list's filters: selling or buying, and all / unread / awaiting my reply #}
   <nav class="seg" aria-label="{{ _('Role') }}">
     {% for v, label in [('', _("All")), ('seller', _("Selling")), ('buyer', _("Buying"))] %}
