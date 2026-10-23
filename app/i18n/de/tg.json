@@ -35,5 +35,7 @@
  "Check the price again": "Preis erneut prüfen",
  "Check the price closely": "Preis genau prüfen",
  "Seller": "Verkäufer",
- "Held back": "Zurückgehalten"
+ "Held back": "Zurückgehalten",
+ "The price check failed: {error}": "Die Preisprüfung ist fehlgeschlagen: {error}",
+ "Checking the price… (up to half a minute)": "Prüfe den Preis … (bis zu einer halben Minute)"
 }

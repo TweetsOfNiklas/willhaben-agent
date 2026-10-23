@@ -148,3 +148,28 @@ def test_a_hit_with_a_geizhals_product_but_no_price_opens(client):
         db.refresh(h)
     page = client.get(f"/tg/hits/{h.id}")
     assert page.status_code == 200 and "data-geizhals-link" in page.text and "data-pricebar" not in page.text
+
+
+def test_the_price_check_runs_on_its_own_and_the_section_asks_until_it_is_done(client, monkeypatch):
+    """A check takes longer than a phone keeps a request open: the button starts it, the section shows it running and
+    asks again, then shows the rating."""
+    import asyncio
+
+    from app import deals_web, tg_web
+    _, hit_id = _data()
+    gate = asyncio.Event()
+
+    async def analysis(*a, **k):
+        await gate.wait()
+        return {"ad": {"ad_id": "555", "platform": "willhaben"}, "position": {"pos": 0.3, "level": "bargain"}}, None
+    monkeypatch.setattr(deals_web, "_analysis", analysis)
+    monkeypatch.setattr("app.services.deals.remember", lambda res: None)
+    stored = {}
+    monkeypatch.setattr("app.services.deals.cached", lambda *a, **k: stored.get("res"))
+    assert client.post(f"/tg/hits/{hit_id}/deal", follow_redirects=False).status_code == 303
+    part = client.get(f"/tg/hits/{hit_id}/deal").text
+    assert "data-checking" in part and 'hx-trigger="every 3s"' in part and 'hx-disinherit="*"' in part
+    stored["res"] = {"position": {"pos": 0.3, "level": "bargain"}}
+    tg_web._checks.pop(hit_id).cancel()
+    part = client.get(f"/tg/hits/{hit_id}/deal").text
+    assert "data-checking" not in part and "every 3s" not in part and "lvl-bargain" in part

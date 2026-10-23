@@ -31,18 +31,8 @@
       <button class="chip" data-sync>{{ ui.icon('refresh', 13, 2) }} {{ _("Sync") }}</button></form>
   </div>
 
-  {# the price check, as in the ad viewer: comparable ads, the Geizhals new price and Claude's verdict #}
   <div class="sh" id="deal">{{ _("Price check") }}</div>
-  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-deal>
-    {% if bar %}{{ m.pricebar(bar) }}{% endif %}
-    {% if deal %}{% set lvl = (deal.position or {}).get('level') %}
-      <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">{% if lvl %}<span class="pill lvl-{{ lvl }}">{{ deal_level_label(lvl) }}</span>{% endif %}
-        {% set st = (deal.comparables or {}).get('stats') or {} %}{% if st.median %}<span class="sub">{{ _("comparable ads: median {price} ({n})", price=st.median|eur, n=st.count) }}</span>{% endif %}</span>
-      <span style="font-size: 14px">{{ deal_explain(deal) }}</span>
-      {% set cl = deal.claude or {} %}{% if cl.deal %}<span style="font-size: 14px"><strong style="color: var(--link)">{{ _("Claude's assessment") }}</strong> · {{ deal_label(cl.deal) }}{% if cl.reason %}<br>{{ cl.reason }}{% endif %}</span>{% endif %}
-    {% else %}<span class="sub">{{ _("Compares the ad with similar ads and the Geizhals new price; Claude rates it.") }}</span>{% endif %}
-    <form method="post" action="/tg/hits/{{ h.id }}/deal" style="margin: 0"><button class="chip" style="width: 100%">{{ ui.icon('sparkle', 13, 2) }} {{ _("Check the price again") if deal else _("Check the price closely") }}</button></form>
-  </div>
+  {% include "tg/_deal.html" %}
 
   {% if h.geizhals and h.geizhals.url %}
   <div class="sh">Geizhals</div>

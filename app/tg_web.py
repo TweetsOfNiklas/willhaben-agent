@@ -105,11 +105,23 @@ async def tg_hit_deal(hit_id: int):
     h, fallback = deals_web._hit(hit_id)
     if h is None:
         raise HTTPException(404)
-    res, error = await deals_web._analysis(h.platform or "willhaben", h.ad_id, None, fallback, use_claude=True, hit=h)
-    if res is not None:
-        deals.remember(res)
-    elif error:
-        log.info("mini app price check of %s: %s", hit_id, error)
+
+    async def check() -> None:
+        try:
+            res, error = await deals_web._analysis(h.platform or "willhaben", h.ad_id, None, fallback,
+                                                   use_claude=True, hit=h)
+        except Exception as e:  # noqa: BLE001 - shown in the price section
+            log.warning("mini app price check of %s failed", hit_id, exc_info=True)
+            res, error = None, str(e) or type(e).__name__
+        if res is not None:
+            deals.remember(res)
+        if error:
+            _check_errors[hit_id] = error
+            log.info("mini app price check of %s: %s", hit_id, error)
+
+    if not (task := _checks.get(hit_id)) or task.done():
+        _check_errors.pop(hit_id, None)
+        _checks[hit_id] = asyncio.create_task(check())
     return _back(f"/tg/hits/{hit_id}#deal")
 
 
@@ -151,15 +163,36 @@ async def tg_hit(request: Request, hit_id: int):
     d = await _detail(h)
     with session() as db:
         h = db.get(Hit, hit_id) or h
-    from app.services import deals
-    p = platforms.get(h.platform or "willhaben")
-    res = deals.rerate(deals.cached(p.ref(h.ad_id)))
+    return _render(request, "hit.html", h=h, d=d, agent=agent, site=platforms.get(h.platform or "willhaben"),
+                   **_deal_ctx(h))
+
+
+# the price checks running (hit id → task) and the last one's error; a check takes up to half a minute, longer than a
+# phone keeps a request open, so it runs on its own and the page's price section asks again until it is done
+_checks: dict[int, asyncio.Task] = {}
+_check_errors: dict[int, str] = {}
+
+
+def _deal_ctx(h: Hit) -> dict[str, Any]:
+    """The price section: the stored analysis, the price bar (before a check from the Geizhals new price alone) and
+    whether a check is running."""
+    from app.services import deals, price_bar
+    res = deals.rerate(deals.cached(platforms.get(h.platform or "willhaben").ref(h.ad_id)))
     pos = (res or {}).get("position") or {}
     if pos.get("pos") is None and h.price and (h.geizhals or {}).get("price_from"):    # before a price check: the zones
         pos = deals.position(h.price, None, h.geizhals["price_from"], h.item_condition)
-    from app.services import price_bar
     bar = price_bar.layout(pos, f"{h.price:g} €" if h.price else "") if pos.get("pos") is not None else None
-    return _render(request, "hit.html", h=h, d=d, agent=agent, site=p, deal=res, bar=bar)
+    task = _checks.get(h.id)
+    return {"deal": res, "bar": bar, "checking": bool(task and not task.done()), "check_error": _check_errors.get(h.id)}
+
+
+@router.get("/tg/hits/{hit_id}/deal", response_class=HTMLResponse)
+async def tg_hit_deal_part(request: Request, hit_id: int):
+    with session() as db:
+        h = db.get(Hit, hit_id)
+    if h is None:
+        raise HTTPException(404)
+    return _render(request, "_deal.html", h=h, **_deal_ctx(h))
 
 
 @router.post("/tg/hits/{hit_id}/state")
