@@ -34,6 +34,7 @@
   {# the price check, as in the ad viewer: comparable ads, the Geizhals new price and Claude's verdict #}
   <div class="sh" id="deal">{{ _("Price check") }}</div>
   <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-deal>
+    {% if bar %}{{ m.pricebar(bar) }}{% endif %}
     {% if deal %}{% set lvl = (deal.position or {}).get('level') %}
       <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">{% if lvl %}<span class="pill lvl-{{ lvl }}">{{ deal_level_label(lvl) }}</span>{% endif %}
         {% set st = (deal.comparables or {}).get('stats') or {} %}{% if st.median %}<span class="sub">{{ _("comparable ads: median {price} ({n})", price=st.median|eur, n=st.count) }}</span>{% endif %}</span>

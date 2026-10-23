@@ -153,8 +153,13 @@ async def tg_hit(request: Request, hit_id: int):
         h = db.get(Hit, hit_id) or h
     from app.services import deals
     p = platforms.get(h.platform or "willhaben")
-    res = deals.rerate(deals.cached(p.ref(h.ad_id)) if hasattr(p, "ref") else deals.cached(h.ad_id))
-    return _render(request, "hit.html", h=h, d=d, agent=agent, site=p, deal=res)
+    res = deals.rerate(deals.cached(p.ref(h.ad_id)))
+    pos = (res or {}).get("position") or {}
+    if pos.get("pos") is None and h.price and (h.geizhals or {}).get("price_from"):    # before a price check: the zones
+        pos = deals.position(h.price, None, h.geizhals["price_from"], h.item_condition)
+    from app.services import price_bar
+    bar = price_bar.layout(pos, f"{h.price:g} €" if h.price else "") if pos.get("pos") is not None else None
+    return _render(request, "hit.html", h=h, d=d, agent=agent, site=p, deal=res, bar=bar)
 
 
 @router.post("/tg/hits/{hit_id}/state")

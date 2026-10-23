@@ -78,7 +78,9 @@
   // ---- the bridge: Telegram's Mini App protocol without its script
   const qs = new URLSearchParams(location.hash.slice(1));
   if (qs.get('tgWebAppData') || qs.get('tgWebAppPlatform')) try { sessionStorage.setItem('tg', '1'); } catch (_) {}
-  const inTg = !!(window.TelegramWebviewProxy || (window.parent && window.parent !== window) || (() => { try { return sessionStorage.getItem('tg') === '1'; } catch (_) { return false; } })());
+  // a Mini App only when Telegram launched it as one (its launch parameters, kept for the next pages): a link opened
+  // in Telegram's own browser has the bridge too, but no main button, and must keep the page's own buttons
+  const inTg = !!(window.TelegramWebviewProxy || window.parent !== window) && (() => { try { return sessionStorage.getItem('tg') === '1'; } catch (_) { return false; } })();
   const post = (type, data) => {
     const payload = JSON.stringify(data || {});
     try {
@@ -151,8 +153,11 @@
   document.addEventListener('click', (e) => {
     if (inTg && e.target.closest('button, .cell, .chip')) post('web_app_trigger_haptic_feedback', {type: 'selection_change'});
   });
-  document.addEventListener('htmx:afterSettle', setup);
+  // a chat opens at its newest message
+  const toEnd = () => { if (document.getElementById('tg-thread')) window.scrollTo(0, document.body.scrollHeight); };
+  document.addEventListener('htmx:afterSettle', (e) => { setup(); if (e.detail.target && e.detail.target.tagName === 'BODY') toEnd(); });
   setup();
+  toEnd();
 })();
 </script>
 </body>
