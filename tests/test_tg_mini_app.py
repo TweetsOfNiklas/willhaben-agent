@@ -88,3 +88,36 @@ def test_telegram_buttons_open_the_mini_app(monkeypatch):
     assert menu_url() == "https://sh.example.org/tg"
     monkeypatch.setattr(get_settings(), "public_url", "http://10.0.0.5:8000")
     assert menu_url() is None                                                    # Telegram opens https only
+
+
+
+def test_the_mini_app_shows_what_the_site_shows(client, monkeypatch):
+    """Close to the dashboard: the cards' Claude verdict, held-back reason and quick buttons, the viewer's price check
+    and sync, the chat page's notes, instruction, manual send and actions, the list's role filter."""
+    from app import platforms
+    _a, hit_id = _data()
+    with session() as db:
+        h = db.get(Hit, hit_id)
+        h.screen_relevant, h.screen_deal, h.screen_reason, h.buyer_fee = True, "good", "Gutes Angebot.", 2.45
+        db.add(h)
+        d = db.exec(__import__("sqlmodel").select(Draft)).one()
+        d.needs_info = ["Abholzeit fehlt"]
+        db.add(d)
+        db.commit()
+    hits = client.get("/tg/hits").text
+    assert "data-claude" in hits and 'data-quick="saved"' in hits and "2,45" in hits
+    assert ">Held back" in client.get("/tg/hits?state=filtered").text or "Held back" in client.get("/tg/hits").text
+    monkeypatch.setattr(platforms.get("willhaben"), "detail", lambda *a, **k: _none())
+    page = client.get(f"/tg/hits/{hit_id}").text
+    assert "data-deal" in page and "data-sync" in page and "Gutes Angebot." in page
+    client.post(f"/tg/hits/{hit_id}/quick", data={"state": "ignored", "tab": "new"})
+    with session() as db:
+        assert db.get(Hit, hit_id).state == "ignored"
+    chat = client.get("/tg/chats/c1").text
+    assert "data-notes" in chat and "Abholzeit fehlt" in chat and 'name="hint"' in chat and "data-chat-actions" in chat
+    assert "/tg/chats/c1/mark-sent" in chat
+    lst = client.get("/tg/chats?role=buyer").text
+    assert 'data-chat="c1"' not in lst and 'data-chat="c1"' in client.get("/tg/chats?role=seller").text
+    client.post("/tg/chats/c1/finished", data={"finished": "1"})
+    with session() as db:
+        assert db.get(Conversation, "c1").finished_at is not None

@@ -2,7 +2,7 @@
 {% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
 {% block title %}{{ h.heading }}{% endblock %}
 {% block page %}
-{% set pz = price_zone_config() %}
+{% set pz = price_zone_config() %}{% set home = home_point() %}{% set km = hit_km(h, home) %}
 {% set saved = h.state == 'saved' %}
 <main data-back="/tg/hits" data-main="{{ _('Remove from saved') if saved else _('Save') }}" data-main-form="tg-save">
 {{ m.head(_("Hit"), '/tg/hits') }}
@@ -15,13 +15,32 @@
 <div class="wrap">
   <div class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px">
     <span style="font-size: 18px; font-weight: 600; line-height: 1.25">{{ d.heading or h.heading }}</span>
-    <span style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap"><span style="font-size: 24px; font-weight: 700">{{ h.price|eur if h.price is not none else (d.price_display or '–') }}</span>
-      {% if h.shipping == 'pickup' %}<span class="sub">{{ _("pickup only") }}</span>{% elif h.shipping_price %}<span class="sub">{{ _("+ {price} shipping", price=h.shipping_price|eur) }}</span>{% endif %}</span>
+    <span style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap"><span style="font-size: 24px; font-weight: 700">{{ h.price_display or (h.price|eur if h.price is not none else (d.price_display or '–')) }}</span>
+      {% if h.old_price and h.price and h.old_price > h.price %}<span class="sub" style="text-decoration: line-through">{{ h.old_price|eur }}</span><span style="font-size: 12px; font-weight: 600; color: var(--ok)">{{ _("price drop") }}</span>{% endif %}</span>
+    {% if h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}
     <span style="display: flex; flex-wrap: wrap; gap: 6px">
-      {{ m.geizhals(h, pz) }}
+      {{ m.geizhals(h, pz) }}{{ m.claude(h) }}
       {% if h.item_condition_label %}<span class="pill">{{ h.item_condition_label }}</span>{% endif %}
       {% set st = h.site_status %}{% if st %}<span class="pill">{{ {'active': _('still online'), 'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}.get(st, st) }}</span>{% endif %}
     </span>
+    {% set scam_w = scam_for_viewer(d, h) %}{% set scam_w = scam_w|selectattr('severity', 'ne', 'info')|list if scam_w else [] %}{% if scam_w %}<span style="font-size: 13px; color: var(--destructive)">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
+    {% if h.state == 'filtered' %}{% set why = held_back_reasons(agent, h) %}{% if why %}<span style="font-size: 13px; color: #B07800">{{ _("Held back: {why}", why=why|join(' · ')) }}</span>{% endif %}{% endif %}
+    {# the status from the site and when it was checked; Sync asks the site now #}
+    <form method="post" action="/tg/hits/{{ h.id }}/sync" style="margin: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px">
+      <span class="sub">{% if h.status_checked_at %}{{ _("checked {ago}", ago=h.status_checked_at|ago) }}{% else %}{{ _("listed {ago}", ago=h.last_seen_at|ago) }}{% endif %}</span>
+      <button class="chip" data-sync>{{ ui.icon('refresh', 13, 2) }} {{ _("Sync") }}</button></form>
+  </div>
+
+  {# the price check, as in the ad viewer: comparable ads, the Geizhals new price and Claude's verdict #}
+  <div class="sh" id="deal">{{ _("Price check") }}</div>
+  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-deal>
+    {% if deal %}{% set lvl = (deal.position or {}).get('level') %}
+      <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">{% if lvl %}<span class="pill lvl-{{ lvl }}">{{ deal_level_label(lvl) }}</span>{% endif %}
+        {% set st = (deal.comparables or {}).get('stats') or {} %}{% if st.median %}<span class="sub">{{ _("comparable ads: median {price} ({n})", price=st.median|eur, n=st.count) }}</span>{% endif %}</span>
+      <span style="font-size: 14px">{{ deal_explain(deal) }}</span>
+      {% set cl = deal.claude or {} %}{% if cl.deal %}<span style="font-size: 14px"><strong style="color: var(--link)">{{ _("Claude's assessment") }}</strong> · {{ deal_label(cl.deal) }}{% if cl.reason %}<br>{{ cl.reason }}{% endif %}</span>{% endif %}
+    {% else %}<span class="sub">{{ _("Compares the ad with similar ads and the Geizhals new price; Claude rates it.") }}</span>{% endif %}
+    <form method="post" action="/tg/hits/{{ h.id }}/deal" style="margin: 0"><button class="chip" style="width: 100%">{{ ui.icon('sparkle', 13, 2) }} {{ _("Check the price again") if deal else _("Check the price closely") }}</button></form>
   </div>
 
   {% if h.geizhals and h.geizhals.url %}
@@ -42,7 +61,9 @@
   <div class="sec">
     <div class="cell"><span class="body"><span>{{ _("Platform") }}</span><span class="val">{{ site.name }}</span></span></div>
     {% if agent %}<div class="cell"><span class="body"><span>{{ _("Search agent") }}</span><span class="val trunc">{{ agent.name }}</span></span></div>{% endif %}
-    {% if d.location or h.location %}<div class="cell"><span class="body"><span>{{ _("Place") }}</span><span class="val">{{ d.location or h.location }}</span></span></div>{% endif %}
+    {% if d.location or h.location %}<div class="cell"><span class="body"><span>{{ _("Place") }}</span><span class="val trunc">{{ d.location or h.location }}{% if km is not none %} · {{ _("{n} km", n=km|round|int) }}{% endif %}</span></span></div>{% endif %}
+    {% if d.seller_name or h.is_private is not none %}<div class="cell"><span class="body"><span>{{ _("Seller") }}</span><span class="val trunc">{{ d.seller_name or '' }}{% if h.is_private == false %}{{ ' · ' if d.seller_name else '' }}{{ _("dealer") }}{% elif h.is_private %}{{ ' · ' if d.seller_name else '' }}{{ _("private") }}{% endif %}</span></span></div>{% endif %}
+    {% if d.category_path %}<div class="cell"><span class="body"><span>{{ _("Category") }}</span><span class="val trunc">{{ d.category_path|join(' › ') }}</span></span></div>{% endif %}
     {% if h.published_at %}<div class="cell"><span class="body"><span>{{ _("Published") }}</span><span class="val">{{ h.published_at|ago }}</span></span></div>{% endif %}
     <div class="cell"><span class="body"><span>{{ _("Found") }}</span><span class="val">{{ h.first_seen_at|ago }}</span></span></div>
     <a class="cell" href="{{ h.url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=site.name) }}</span><span class="val" style="color: var(--link)">{{ ui.icon('external', 16, 2) }}</span></span></a>
@@ -53,10 +74,13 @@
   <div class="sec" style="padding: 12px 14px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere">{{ d.description }}</div>
   {% endif %}
 
-  <form method="post" action="/tg/hits/{{ h.id }}/state" class="sec" style="margin-top: 20px">
-    <input type="hidden" name="state" value="{{ 'seen' if h.state == 'ignored' else 'ignored' }}">
-    <button class="cell" style="justify-content: center; color: {{ 'var(--link)' if h.state == 'ignored' else 'var(--destructive)' }}">{{ _("Show again") if h.state == 'ignored' else _("Ignore") }}</button>
-  </form>
+  <div class="sec" style="margin-top: 20px">
+    {% if h.state != 'seen' %}<form method="post" action="/tg/hits/{{ h.id }}/state" style="margin: 0"><input type="hidden" name="state" value="seen">
+      <button class="cell" style="justify-content: center; color: var(--link)">{{ ui.icon('check', 15, 2) }} {{ _("Seen") }}</button></form>{% endif %}
+    <form method="post" action="/tg/hits/{{ h.id }}/state" style="margin: 0; border-top: 1px solid var(--sep)">
+      <input type="hidden" name="state" value="{{ 'seen' if h.state == 'ignored' else 'ignored' }}">
+      <button class="cell" style="justify-content: center; color: {{ 'var(--link)' if h.state == 'ignored' else 'var(--destructive)' }}">{{ _("Show again") if h.state == 'ignored' else _("Ignore") }}</button></form>
+  </div>
 
   <form method="post" action="/tg/hits/{{ h.id }}/state" id="tg-save" style="margin-top: 16px">
     <input type="hidden" name="state" value="{{ 'seen' if saved else 'saved' }}">

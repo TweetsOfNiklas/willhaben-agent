@@ -26,3 +26,11 @@
         style="width: 51px; height: 31px; border-radius: 16px; border: 0; padding: 2px; flex-shrink: 0; display: flex; align-items: center; justify-content: {{ 'flex-end' if on else 'flex-start' }}; background: {{ '#34C759' if on else 'rgba(120,120,128,.32)' }}">
   <span style="width: 27px; height: 27px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.2)"></span></button>
 {%- endmacro %}
+
+{# Claude's screening verdict of a hit, in the price zones' colours (as on the hit cards) #}
+{% macro claude(h) -%}
+{%- if h.screen_relevant is not none %}{% set labels = screen_labels(h) %}
+{%- set lv = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'}.get(h.screen_deal) if h.screen_relevant else none %}
+<span class="pill{{ ' lvl-' ~ lv if lv else '' }}" style="{{ '' if h.screen_relevant else 'background: #FDE3E3; color: #9B1C1C' }}" data-claude title="{{ labels|join(' · ') }}">Claude · {{ labels|first }}</span>
+{%- endif %}
+{%- endmacro %}

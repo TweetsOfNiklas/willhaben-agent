@@ -64,14 +64,53 @@ async def tg_home(request: Request):
 
 
 # ------------------------------------------------------------------ hits
+TABS = {"new": ("new",), "saved": ("saved",), "filtered": ("filtered", "pending"), "seen": ("seen",)}
+
+
 @router.get("/tg/hits", response_class=HTMLResponse)
 async def tg_hits(request: Request, state: str = "new"):
-    state = state if state in ("new", "saved", "seen") else "new"
+    """The hits page's tabs (New, Saved, Held back, Seen) and its cards' content, newest first."""
+    state = state if state in TABS else "new"
     with session() as db:
-        hits = list(db.exec(select(Hit).where(Hit.state == state)
+        hits = list(db.exec(select(Hit).where(col(Hit.state).in_(TABS[state]))
                             .order_by(col(Hit.first_seen_at).desc()).limit(LIST_LIMIT)))
-        agents = {a.id: a.name for a in db.exec(select(SearchAgent))}
-    return _render(request, "hits.html", hits=hits, state=state, agents=agents)
+        agents = {a.id: a for a in db.exec(select(SearchAgent))}
+        counts = {k: len(list(db.exec(select(Hit.id).where(col(Hit.state).in_(v))))) for k, v in TABS.items()}
+    return _render(request, "hits.html", hits=hits, state=state, agents=agents, counts=counts)
+
+
+@router.post("/tg/hits/{hit_id}/quick")
+async def tg_hit_quick(hit_id: int, state: str = Form(...), tab: str = Form("new")):
+    """A card's Save / Seen / Ignore in the list: back to the same tab."""
+    await tg_hit_state(hit_id, state)
+    return _back(f"/tg/hits?state={tab if tab in TABS else 'new'}")
+
+
+@router.post("/tg/hits/{hit_id}/sync")
+async def tg_hit_sync(hit_id: int):
+    """Sync: the ad from its site now (still online, reserved, sold)."""
+    from app.services import search_agents
+    try:
+        await search_agents.check_hit(hit_id)
+    except PlatformError as e:
+        log.info("mini app sync of %s failed: %s", hit_id, e)
+    return _back(f"/tg/hits/{hit_id}")
+
+
+@router.post("/tg/hits/{hit_id}/deal")
+async def tg_hit_deal(hit_id: int):
+    """Check the price closely: comparable ads, the Geizhals new price and Claude's verdict (as the ad viewer)."""
+    from app import deals_web
+    from app.services import deals
+    h, fallback = deals_web._hit(hit_id)
+    if h is None:
+        raise HTTPException(404)
+    res, error = await deals_web._analysis(h.platform or "willhaben", h.ad_id, None, fallback, use_claude=True, hit=h)
+    if res is not None:
+        deals.remember(res)
+    elif error:
+        log.info("mini app price check of %s: %s", hit_id, error)
+    return _back(f"/tg/hits/{hit_id}#deal")
 
 
 async def _detail(h: Hit) -> Any:
@@ -112,7 +151,10 @@ async def tg_hit(request: Request, hit_id: int):
     d = await _detail(h)
     with session() as db:
         h = db.get(Hit, hit_id) or h
-    return _render(request, "hit.html", h=h, d=d, agent=agent, site=platforms.get(h.platform or "willhaben"))
+    from app.services import deals
+    p = platforms.get(h.platform or "willhaben")
+    res = deals.rerate(deals.cached(p.ref(h.ad_id)) if hasattr(p, "ref") else deals.cached(h.ad_id))
+    return _render(request, "hit.html", h=h, d=d, agent=agent, site=p, deal=res)
 
 
 @router.post("/tg/hits/{hit_id}/state")
@@ -147,16 +189,18 @@ async def tg_ad(ref: str):
 
 # ------------------------------------------------------------------ chats
 @router.get("/tg/chats", response_class=HTMLResponse)
-async def tg_chats(request: Request, show: str = ""):
+async def tg_chats(request: Request, show: str = "", role: str = ""):
     from app.services import chats
     with session() as db:
         o = chats.overview(db)
     convs = o["shown"]
+    if role in ("seller", "buyer"):
+        convs = [c for c in convs if c.role == role]
     if show == "action":
         convs = [c for c in convs if c.id in o["waiting"] or c.id in o["open_drafts"]]
     elif show == "unread":
         convs = [c for c in convs if o["unread"].get(c.id)]
-    return _render(request, "chats.html", convs=convs, o=o, show=show)
+    return _render(request, "chats.html", convs=convs, o=o, show=show, role=role)
 
 
 @router.get("/tg/chats/{conversation_id}", response_class=HTMLResponse)
@@ -169,10 +213,13 @@ async def tg_chat(request: Request, conversation_id: str):
     chats.seen_in_app(conversation_id)
     _later(chats.ask_presence(conv))
     drafts = chats.drafts_of(conversation_id)
+    with session() as db:
+        o = chats.overview(db)
     return _render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
                    draft=next((d for d in drafts if d.status == "draft"), None),
                    sending=next((d for d in drafts if d.status == "sending"), None),
-                   presence=chats.presence_of(conv), place=chats.partner_place(conv))
+                   presence=chats.presence_of(conv), place=chats.partner_place(conv),
+                   finished=conv.id in o["finished"], notes=_notes(conv, drafts))
 
 
 @router.post("/tg/chats/{conversation_id}/send")
@@ -225,6 +272,31 @@ async def tg_chat_discard(conversation_id: str, draft_id: int = Form(...)):
 async def tg_chat_finished(conversation_id: str, finished: str = Form("1")):
     from app.services import chats
     chats.set_finished(conversation_id, finished == "1")
+    return _back(f"/tg/chats/{conversation_id}")
+
+
+@router.post("/tg/chats/{conversation_id}/unread")
+async def tg_chat_unread(conversation_id: str):
+    from app.services import chats
+    chats.mark_unread(conversation_id)
+    return _back("/tg/chats")
+
+
+@router.post("/tg/chats/{conversation_id}/hide")
+async def tg_chat_hide(conversation_id: str, hidden: str = Form("1")):
+    from app.services import chats
+    chats.hide(conversation_id, hidden == "1")
+    return _back("/tg/chats" if hidden == "1" else f"/tg/chats/{conversation_id}")
+
+
+@router.post("/tg/chats/{conversation_id}/mark-sent")
+async def tg_chat_mark_sent(conversation_id: str, draft_id: int = Form(...), text: str = Form("")):
+    """Sent by hand elsewhere (willhaben's own app): stored as sent, nothing goes out from here."""
+    from app.services import chats
+    with session() as db:
+        d = db.get(Draft, draft_id)
+    if d is not None and d.conversation_id == conversation_id and d.status == "draft":
+        chats.mark_sent(draft_id, text.strip() or d.text)
     return _back(f"/tg/chats/{conversation_id}")
 
 
@@ -296,6 +368,17 @@ def tg_link(url: str) -> str:
     if path in ("", "/"):
         return base + "/tg"
     return url
+
+
+def _notes(conv: Conversation, drafts: list[Draft]) -> list[str]:
+    """What the open draft asks the owner to check before sending (Claude's needs_info and notes), as on the chat page."""
+    d = next((x for x in drafts if x.status == "draft"), None)
+    if d is None:
+        return []
+    out = [n[8:].strip() if n.startswith("Hinweis:") else n for n in (d.needs_info or []) if n]
+    if d.error:
+        out.insert(0, d.error)
+    return out
 
 
 def menu_url() -> str | None:

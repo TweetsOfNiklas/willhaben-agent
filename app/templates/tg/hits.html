@@ -2,31 +2,55 @@
 {% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
 {% block title %}{{ _("Hits") }}{% endblock %}
 {% block page %}
-{% set pz = price_zone_config() %}
+{% set pz = price_zone_config() %}{% set home = home_point() %}
 <main data-back="/tg">
 {{ m.head(_("Hits")) }}
 <div class="wrap">
-  <nav class="seg" aria-label="{{ _('Hits') }}">
-    {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('seen', _("Seen"))] %}
-    <a href="/tg/hits?state={{ v }}"{% if state == v %} aria-current="page"{% endif %}>{{ label }}</a>
+  {# the hits page's tabs; held back = filtered out by Claude's screening, the Geizhals rule or the distance #}
+  <nav class="seg" style="grid-template-columns: repeat(4, minmax(0, 1fr))" aria-label="{{ _('Hits') }}">
+    {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('filtered', _("Held back")), ('seen', _("Seen"))] %}
+    <a href="/tg/hits?state={{ v }}"{% if state == v %} aria-current="page"{% endif %} style="font-size: 13px">{{ label }}{% if counts[v] and v != 'seen' %} · {{ counts[v] }}{% endif %}</a>
     {% endfor %}
   </nav>
   {% if hits %}
-  <div class="sec" style="margin-top: 12px">
-    {% for h in hits %}
-    <a class="cell" href="/tg/hits/{{ h.id }}" style="align-items: flex-start; padding-top: 10px" data-hit="{{ h.id }}">
-      <span style="position: relative">
-        {% if h.image_path or h.image_url %}<img class="thumb" src="{{ '/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url }}" alt="" loading="lazy" width="64" height="64" style="width: 64px; height: 64px{{ '; filter: grayscale(1); opacity: .6' if h.site_status in ('sold', 'gone', 'expired') else '' }}" onerror="this.style.visibility='hidden'">
-        {% else %}<span class="thumb" style="width: 64px; height: 64px"></span>{% endif %}
-        <span style="position: absolute; left: 4px; bottom: 4px">{{ m.site(h.platform) }}</span>
-      </span>
-      <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 10px">
-        <span style="display: flex; justify-content: space-between; gap: 8px"><span class="trunc" style="font-size: 15px; font-weight: 500">{{ h.heading }}</span><span class="sub" style="flex-shrink: 0">{{ h.first_seen_at|ago }}</span></span>
-        <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><span style="font-size: 16px; font-weight: 700">{{ h.price|eur if h.price is not none else (h.price_display or '–') }}</span>{{ m.geizhals(h, pz) }}
-          {%- if h.site_status in ('sold', 'reserved', 'gone', 'expired') %}<span class="pill">{{ {'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}[h.site_status] }}</span>{% endif %}</span>
-        <span class="sub trunc">{{ agents.get(h.agent_id, '') }}{% if h.location %} · {{ h.location }}{% endif %}{% if h.shipping_price %} · {{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}</span>
-      </span>
-    </a>
+  <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px">
+    {% for h in hits %}{% set gone = h.site_status in ('sold', 'gone', 'expired') %}{% set agent = agents.get(h.agent_id) %}
+    <div class="sec" data-hit="{{ h.id }}" style="{{ 'opacity: .62' if gone else '' }}">
+      <a href="/tg/hits/{{ h.id }}" style="display: flex; gap: 12px; padding: 10px 12px; color: var(--text)">
+        <span style="position: relative; flex-shrink: 0; align-self: flex-start">
+          {% if h.image_path or h.image_url %}<img class="thumb" src="{{ '/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url }}" alt="" loading="lazy" width="88" height="88" style="width: 88px; height: 88px{{ '; filter: grayscale(1)' if gone else '' }}" onerror="this.style.visibility='hidden'">
+          {% else %}<span class="thumb" style="width: 88px; height: 88px"></span>{% endif %}
+          <span style="position: absolute; left: 5px; bottom: 5px">{{ m.site(h.platform) }}</span>
+        </span>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 15px; font-weight: 600; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{ h.heading }}</span>
+          <span style="display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap">
+            <span style="font-size: 16px; font-weight: 700">{{ h.price_display or (h.price|eur if h.price is not none else '–') }}</span>
+            {% if h.old_price and h.price and h.old_price > h.price %}<span class="sub" style="text-decoration: line-through">{{ h.old_price|eur }}</span><span style="font-size: 12px; font-weight: 600; color: var(--ok)">{{ _("price drop") }}</span>{% endif %}
+          </span>
+          {% if h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}
+          <span style="display: flex; flex-wrap: wrap; gap: 5px">
+            {{ m.geizhals(h, pz) }}{{ m.claude(h) }}
+            {% if h.item_condition_label %}<span class="pill">{{ h.item_condition_label }}</span>{% endif %}
+            {% if h.site_status in ('sold', 'reserved', 'gone', 'expired') %}<span class="pill">{{ {'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}[h.site_status] }}</span>{% endif %}
+          </span>
+          {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}<span style="font-size: 12.5px; color: var(--destructive)">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
+          {% if h.state == 'filtered' %}{% set why = held_back_reasons(agent, h) %}{% if why %}<span style="font-size: 12.5px; color: #B07800" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</span>{% endif %}{% endif %}
+          {% set km = hit_km(h, home) %}
+          <span class="sub trunc">{%- set sep = joiner(' · ') %}{% if agent %}{{ sep() }}{{ agent.name }}{% endif %}{% if h.location %}{{ sep() }}{{ h.location }}{% endif %}{% if km is not none %}{{ sep() }}{{ _("{n} km", n=km|round|int) }}{% endif %}{% if h.is_private == false %}{{ sep() }}{{ _("dealer") }}{% endif %}</span>
+          <span class="sub">{{ _("found {ago}", ago=h.first_seen_at|ago) }}{% if h.published_at %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% endif %}</span>
+        </span>
+      </a>
+      {# the card's three buttons, as on the hits page #}
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--sep)">
+        {% for s, label, icon in [('saved', _('Save'), 'star'), ('seen', _('Seen'), 'check'), ('ignored', _('Ignore'), 'eye-off')] %}{% set on = h.state == s %}
+        <form method="post" action="/tg/hits/{{ h.id }}/quick" style="margin: 0; {{ '' if loop.first else 'border-left: 1px solid var(--sep)' }}">
+          <input type="hidden" name="state" value="{{ 'new' if on else s }}"><input type="hidden" name="tab" value="{{ state }}">
+          <button style="width: 100%; height: 42px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13.5px; font-weight: {{ '600' if on else '500' }}; color: {{ 'var(--link)' if on else 'var(--text)' }}" data-quick="{{ s }}">{{ ui.icon(icon, 15, 2) }}{{ label }}</button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
     {% endfor %}
   </div>
   {% else %}<p class="empty">{{ _("No hits here.") }}</p>{% endif %}

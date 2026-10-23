@@ -21,5 +21,19 @@
  "No ads.": "Keine Anzeigen.",
  "agreed {price}": "vereinbart {price}",
  "at most {price}": "höchstens {price}",
- "No purchase orders yet.": "Noch keine Kaufaufträge."
+ "No purchase orders yet.": "Noch keine Kaufaufträge.",
+ "PayLivery step: {step}": "PayLivery-Schritt: {step}",
+ "open the chat in the browser to run it": "zum Ausführen den Chat im Browser öffnen",
+ "Sent it yourself elsewhere: stored as sent, nothing goes out": "Selbst woanders gesendet: wird als gesendet gespeichert, hier geht nichts raus",
+ "Instruction for Claude": "Anweisung an Claude",
+ "Instruction, e.g. counter-offer €180, pickup Saturday": "Anweisung, z. B. Gegenangebot 180 €, Abholung Samstag",
+ "Role": "Rolle",
+ "+ {price} buyer protection": "+ {price} Käuferschutz",
+ "Price check": "Preisprüfung",
+ "comparable ads: median {price} ({n})": "vergleichbare Anzeigen: Median {price} ({n})",
+ "Compares the ad with similar ads and the Geizhals new price; Claude rates it.": "Vergleicht die Anzeige mit ähnlichen Anzeigen und dem Geizhals-Neupreis; Claude bewertet sie.",
+ "Check the price again": "Preis erneut prüfen",
+ "Check the price closely": "Preis genau prüfen",
+ "Seller": "Verkäufer",
+ "Held back": "Zurückgehalten"
 }

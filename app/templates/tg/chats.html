@@ -4,11 +4,17 @@
 {% block page %}
 <main data-back="/tg">
 {{ m.head(_("Chats")) }}
-<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}" hx-trigger="every 15s" hx-select="#tg-chats" hx-swap="outerHTML">
-  <nav class="seg" aria-label="{{ _('Chats') }}">
-    <a href="/tg/chats"{% if not show %} aria-current="page"{% endif %}>{{ _("All") }}</a>
-    <a href="/tg/chats?show=unread"{% if show == 'unread' %} aria-current="page"{% endif %}>{{ _("Unread") }}{% if o.unread %} · {{ o.unread|length }}{% endif %}</a>
-    <a href="/tg/chats?show=action"{% if show == 'action' %} aria-current="page"{% endif %}>{{ _("Open") }}</a>
+<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}&role={{ role }}" hx-trigger="every 15s" hx-select="#tg-chats" hx-swap="outerHTML">
+  {# the chat list's filters: selling or buying, and all / unread / awaiting my reply #}
+  <nav class="seg" aria-label="{{ _('Role') }}">
+    {% for v, label in [('', _("All")), ('seller', _("Selling")), ('buyer', _("Buying"))] %}
+    <a href="/tg/chats?role={{ v }}&show={{ show }}"{% if role == v %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <nav class="seg" style="margin-top: 6px" aria-label="{{ _('Chats') }}">
+    <a href="/tg/chats?role={{ role }}"{% if not show %} aria-current="page"{% endif %}>{{ _("All") }}</a>
+    <a href="/tg/chats?show=unread&role={{ role }}"{% if show == 'unread' %} aria-current="page"{% endif %}>{{ _("Unread") }}{% if o.unread %} · {{ o.unread|length }}{% endif %}</a>
+    <a href="/tg/chats?show=action&role={{ role }}"{% if show == 'action' %} aria-current="page"{% endif %}>{{ _("Awaiting my reply") }}</a>
   </nav>
   {% if convs %}
   <div class="sec" style="margin-top: 12px">
