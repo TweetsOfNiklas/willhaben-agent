@@ -285,13 +285,20 @@ def test_a_sold_hit_is_greyed_out_and_a_fresh_one_does_not_repeat_its_time():
                    first_seen_at=now, last_seen_at=now))
         db.add(Hit(agent_id=a.id, ad_id="3", heading="Listed again", url="https://x/3", state="saved",
                    first_seen_at=now - timedelta(days=2), last_seen_at=now))
+        db.add(Hit(agent_id=a.id, ad_id="4", heading="Reserved one", url="https://x/4", state="saved",
+                   site_status="reserved"))
+        db.add(Hit(agent_id=a.id, ad_id="5", heading="Seen one", url="https://x/5", state="seen", site_status="active"))
         db.commit()
     with TestClient(app) as c:
         page = c.get("/hits?state=saved").text
+        seen = c.get("/hits?state=seen").text
 
     def card(name):
         i = page.index(name)
         return page[page.rindex("<article", 0, i):page.index("</article>", i)]
     assert "data-unavailable" in card("Sold one") and "grayscale" in card("Sold one")
     assert "data-unavailable" not in card("Fresh one")
+    assert "data-unavailable" in card("Reserved one") and "grayscale" in card("Reserved one")
+    i = seen.index("Seen one")                  # seen, but still on the site: not greyed out
+    assert "opacity" not in seen[seen.rindex("<article", 0, i):seen.index(">", seen.rindex("<article", 0, i))]
     assert ">listed" not in card("Fresh one") and ">listed" in card("Listed again")

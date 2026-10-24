@@ -14,7 +14,7 @@
   </nav>
   {% if hits %}
   <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px">
-    {% for h in hits %}{% set gone = h.site_status in ('sold', 'gone', 'expired') %}{% set agent = agents.get(h.agent_id) %}
+    {% for h in hits %}{% set gone = h.site_status in ('sold', 'reserved', 'gone', 'expired') %}{% set agent = agents.get(h.agent_id) %}
     <div class="sec" data-hit="{{ h.id }}" style="{{ 'opacity: .62' if gone else '' }}">
       <a href="/tg/hits/{{ h.id }}" style="display: flex; gap: 12px; padding: 10px 12px; color: var(--text)">
         <span style="position: relative; flex-shrink: 0; align-self: flex-start">

@@ -114,10 +114,11 @@
 {% set screen_levels = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'} %}{# Claude's verdict in the zones' colours #}
 {% for h in hits %}
   {% set tone = {'saved': 'star', 'seen': 'check', 'ignored': 'eye-off'} %}
-  {# sold, expired or deleted on the site: the card greyed out (picture in grey), its status pill says why #}
-  {% set gone = h.site_status in ('sold', 'gone', 'expired') %}
+  {# sold, reserved, expired or deleted on the site: the card greyed out (picture in grey), its status pill says why;
+     nothing else greys a card (seen or held back stays readable) #}
+  {% set gone = h.site_status in ('sold', 'reserved', 'gone', 'expired') %}
   {# phone: a horizontal card (small picture left, text right, actions below); wider: a tile #}
-  <article class="relative flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-75' if h.state in ('seen', 'ignored', 'filtered', 'pending') and not gone else '' }}{{ ' opacity-60' if gone else '' }}" id="hit-{{ h.id }}"{% if gone %} data-unavailable{% endif %}>
+  <article class="relative flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:content-start max-sm:gap-x-3 max-sm:p-2.5 {{ 'opacity-60' if gone else '' }}" id="hit-{{ h.id }}"{% if gone %} data-unavailable{% endif %}>
     <label class="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md bg-black/55 p-1.5" title="{{ _('Select') }}"><input type="checkbox" form="hits-bulk" name="ids" value="{{ h.id }}" class="checkbox checkbox-xs border-white/80" aria-label="{{ _('Select') }}"></label>
     <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="relative block{{ ' grayscale' if gone else '' }}">
       {{ ui.thumb('/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url, 'h-[72px] w-full sm:h-[150px]', 'rounded-md sm:rounded-none') }}
@@ -213,8 +214,6 @@
   });
   document.addEventListener('hit-state', e => {
     moved(e.detail.from, e.detail.state);
-    const card = document.getElementById('hit-' + e.detail.hit);
-    if (card && e.detail.state === 'seen') card.classList.add('opacity-75');
   });
 })();
 </script>
