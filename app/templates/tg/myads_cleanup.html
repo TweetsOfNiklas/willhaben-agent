@@ -1,0 +1,31 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Clean up old ads") }}{% endblock %}
+{# main.myads_cleanup_page: offline ads without photos, sold or given-away ads, old copies of republished ads #}
+{% block page %}
+<main data-back="/tg/myads"{% if cands %} data-main="{{ _('Delete selected on willhaben') }}" data-main-form="tg-cleanup"{% endif %}>
+{{ m.head(_("Clean up old ads"), '/tg/myads') }}
+<div class="wrap">
+  <p class="sub" style="margin: 12px 4px">{{ _("Offline ads without photos (willhaben cannot put them online again), sold or given-away ads and the old copy of republished ads. Active and reserved ads are never listed.") }}</p>
+  {% if cands %}
+  <form method="post" action="/myads/cleanup" id="tg-cleanup" style="margin: 0" hx-confirm="{{ _('Delete the selected ads on willhaben for good? This cannot be undone.') }}">
+    <div class="sec">
+      {% for c in cands %}
+      <label class="cell" style="align-items: flex-start; padding-top: 8px" data-cleanup="{{ c.ad_id }}">
+        {% if c.ad_id not in pending %}<input type="checkbox" name="ids" value="{{ c.ad_id }}" checked style="margin-top: 4px; width: 20px; height: 20px; flex-shrink: 0">{% else %}<span style="width: 20px">{{ ui.icon('clock', 14, 2) }}</span>{% endif %}
+        <span class="body" style="flex-direction: column; align-items: stretch; gap: 2px; padding: 0 0 8px">
+          <a href="{{ c.url }}" target="_blank" hx-boost="false" style="color: var(--text); font-weight: 500">{{ c.heading }}</a>
+          <span class="sub">{% if c.ad_id in pending %}{{ _("already queued") }}{% else %}{{ c.status }}{% endif %} · {{ c.reasons|join(" · ") }}</span>
+          {% if not c.deletable %}<span class="sub">{{ _("willhaben offers no deleting – only hidden here") }}</span>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+    <button class="mainbtn tg-hide" style="margin-top: 14px; background: var(--destructive)">{{ _("Delete selected on willhaben") }}</button>
+    <p class="sub" style="margin: 8px 4px">{{ _("Runs in the background, one willhaben request after another – you can leave the page. Progress in the sidebar.") }}</p>
+    <p class="sub" style="margin: 0 4px">{{ _("The app no longer answers buyers of a deleted ad automatically.") }}</p>
+  </form>
+  {% else %}<p class="empty">{{ _("Nothing to clean up.") }}</p>{% endif %}
+</div>
+</main>
+{% endblock %}

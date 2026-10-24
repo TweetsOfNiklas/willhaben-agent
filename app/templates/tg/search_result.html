@@ -71,7 +71,7 @@
       <a href="{{ r.url }}" target="_blank" hx-boost="false" style="flex-shrink: 0">{% if r.image_url %}<img class="thumb" src="{{ r.image_url }}" alt="" loading="lazy" width="80" height="80" style="width: 80px; height: 80px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 80px; height: 80px"></span>{% endif %}</a>
       <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
         <a href="{{ r.url }}" target="_blank" hx-boost="false" style="font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.25">{{ r.title }}</a>
-        <span style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center"><strong style="font-size: 16px">{{ r.price_display or (r.price|eur) }}</strong>
+        <span style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center"><strong style="font-size: 16px">{{ r.price_display or (r.price|eur) }}</strong><span class="sub" data-ship>{{ ui.ship_lazy(r) }}</span>
           {% if r.fit is not none %}<span class="pill {{ 'lvl-bargain' if r.fit >= 75 else 'lvl-fair' if r.fit >= 50 else '' }}">{{ _("Fit {n}", n=r.fit) }}</span>{% endif %}
           {% if p.pos is not none %}<span class="pill lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}
           {% if r.photo %}<span class="pill">{{ {"match": _("photo fits"), "unclear": _("photo unclear"), "mismatch": _("photo shows something else")}[r.photo] }}</span>{% endif %}

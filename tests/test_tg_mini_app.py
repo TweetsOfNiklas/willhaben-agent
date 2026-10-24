@@ -278,3 +278,26 @@ def test_saving_the_web_address_sets_the_menu_button(client, monkeypatch):
     monkeypatch.setattr(telegram, "chat_id", lambda: 42)
     button = telegram.open_button("Open", "https://sh.example.com/hits?view=555")
     assert button == {"text": "Open", "web_app": {"url": "https://sh.example.com/tg/ad/555"}}
+
+
+def test_chat_list_bulk_and_my_ads_clean_up(client, monkeypatch):
+    """The chat list syncs and marks or hides several chats at once (its filters stay); My ads cleans up old ads."""
+    from app.services import my_ads
+    from app.tg_bridge import target
+    _data()
+    lst = client.get("/tg/chats?role=seller").text
+    assert 'action="/chats/sync"' in lst and 'formaction="/chats/bulk/hide"' in lst and 'form="tg-chat-bulk"' in lst
+    r = client.post("/chats/bulk/hide", data={"ids": ["c1"]}, headers={"X-TG-Back": "/tg/chats?role=seller"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/tg/chats?role=seller")
+    with session() as db:
+        assert db.get(Conversation, "c1").hidden_at is not None
+    assert target("/chats", "/tg/chats?show=unread") == "/tg/chats?show=unread"
+
+    async def cands():
+        return [{"ad_id": "900", "heading": "Fritzbox 7530", "url": "https://x/900", "status": "expired",
+                 "reasons": ["no photos"], "deletable": True}]
+    monkeypatch.setattr(my_ads, "cleanup_candidates", cands)
+    page = client.get("/tg/myads/cleanup").text
+    assert 'data-cleanup="900"' in page and 'action="/myads/cleanup"' in page and "hx-confirm" in page
+    assert 'href="/tg/myads/cleanup"' in client.get("/tg/myads").text

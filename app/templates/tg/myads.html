@@ -16,6 +16,7 @@
   <div class="btnrow" style="margin: 8px 0 0">
     <form method="post" action="/myads/check" style="margin: 0"><button class="chip">{{ ui.icon('refresh', 13, 2) }} {{ _("Update from willhaben") }}</button></form>
     <a class="chip" style="display: inline-flex; align-items: center" href="/tg/new-ad">{{ ui.icon('plus', 13, 2) }} {{ _("New ad") }}</a>
+    <a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads/cleanup">{{ ui.icon('trash', 13, 2) }} {{ _("Clean up old ads") }}</a>
     {% if hidden_count %}<a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads?show={{ show }}{{ '' if show_hidden else '&hidden=1' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a>{% endif %}
   </div>
   {% if ads %}

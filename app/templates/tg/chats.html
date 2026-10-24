@@ -4,7 +4,7 @@
 {% block page %}
 <main data-back="/tg">
 {{ m.head(_("Chats")) }}
-<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}&role={{ role }}" hx-trigger="every 15s" hx-select="#tg-chats" hx-swap="outerHTML" hx-disinherit="*">
+<div class="wrap" id="tg-chats" hx-get="/tg/chats?show={{ show }}&role={{ role }}" hx-trigger="every 15s [!document.documentElement.classList.contains('selecting')]" hx-select="#tg-chats" hx-swap="outerHTML" hx-disinherit="*">
   {# the chat list's filters: selling or buying, and all / unread / awaiting my reply #}
   <nav class="seg" aria-label="{{ _('Role') }}">
     {% for v, label in [('', _("All")), ('seller', _("Selling")), ('buyer', _("Buying"))] %}
@@ -16,10 +16,20 @@
     <a href="/tg/chats?show=unread&role={{ role }}"{% if show == 'unread' %} aria-current="page"{% endif %}>{{ _("Unread") }}{% if o.unread %} · {{ o.unread|length }}{% endif %}</a>
     <a href="/tg/chats?show=action&role={{ role }}"{% if show == 'action' %} aria-current="page"{% endif %}>{{ _("Awaiting my reply") }}</a>
   </nav>
+  {# sync with the sites; several chats at once: read or hidden (the dashboard's bulk actions) #}
+  <div class="btnrow" style="margin-top: 8px">
+    <form method="post" action="/chats/sync" style="margin: 0"><button class="chip">{{ ui.icon('refresh', 13, 2) }} {{ _("Sync") }}</button></form>
+    {% if convs %}<button type="button" class="chip" data-select-toggle onclick="document.documentElement.classList.toggle('selecting')">{{ _("Select") }}</button>{% endif %}
+  </div>
+  <form method="post" id="tg-chat-bulk" class="sel-only btnrow" style="margin: 8px 0 0">
+    <button class="chip" formaction="/chats/bulk/read">{{ _("Mark as read") }}</button>
+    <button class="chip" formaction="/chats/bulk/hide">{{ _("Hide from this list only") }}</button>
+  </form>
   {% if convs %}
   <div class="sec" style="margin-top: 12px">
     {% for c in convs %}{% set n = o.unread.get(c.id) %}{% set img = o.thumbs.get(c.id) %}
     <a class="cell" href="/tg/chats/{{ c.id }}" style="align-items: flex-start; padding-top: 9px" data-chat="{{ c.id }}">
+      <input type="checkbox" name="ids" value="{{ c.id }}" form="tg-chat-bulk" class="sel-only" style="margin-top: 18px; width: 20px; height: 20px; flex-shrink: 0" aria-label="{{ _('Select') }}">
       {% if img %}<img class="thumb" src="{{ img }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px; border-radius: 12px" onerror="this.style.visibility='hidden'">
       {% else %}<span class="thumb" style="width: 54px; height: 54px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--hint)">{{ (c.partner_name or '?')[:1]|upper }}</span>{% endif %}
       <span class="body" style="flex-direction: column; align-items: stretch; gap: 1px; padding: 0 0 9px">
@@ -38,4 +48,20 @@
   {% else %}<p class="empty">{{ _("No chats here.") }}</p>{% endif %}
 </div>
 </main>
+<style>.sel-only { display: none !important; } html.selecting .sel-only { display: flex !important; }</style>
+<script>
+// selecting: a tap on a row ticks it instead of opening the chat (set up once: pages swap in without a reload)
+document.documentElement.classList.remove('selecting');
+if (!window.tgChatSelect) { window.tgChatSelect = true;
+document.addEventListener('click', (e) => {
+  const row = e.target.closest('a[data-chat]');
+  if (!row || !document.documentElement.classList.contains('selecting')) return;
+  e.preventDefault(); e.stopPropagation();
+  const box = row.querySelector('input[name=ids]');
+  if (box && e.target !== box) box.checked = !box.checked;
+}, true);
+document.addEventListener('htmx:beforeRequest', (e) => { if (e.detail.elt && e.detail.elt.id === 'tg-chat-bulk') document.documentElement.classList.remove('selecting'); });
+document.addEventListener('htmx:beforeSwap', (e) => { if (e.detail.target && e.detail.target.tagName === 'BODY') document.documentElement.classList.remove('selecting'); });
+}
+</script>
 {% endblock %}

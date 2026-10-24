@@ -394,6 +394,13 @@ async def tg_myads(request: Request, show: str = "active", hidden: bool = False)
                        show_inactive=show == "inactive", show_active=show == "active")
 
 
+@router.get("/tg/myads/cleanup", response_class=HTMLResponse)
+async def tg_myads_cleanup(request: Request):
+    """Old ads to delete on willhaben (no photos, sold, the old copy of a republished ad)."""
+    from app import main
+    return await _page(request, "myads_cleanup.html", main.myads_cleanup_page)
+
+
 @router.get("/tg/myads/{ad_id}", response_class=HTMLResponse)
 async def tg_myad(request: Request, ad_id: str):
     with session() as db:

@@ -55,7 +55,7 @@
       {% if a.image_url %}<img class="thumb" src="{{ a.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
       <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 8px">
         <span style="font-size: 15px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{ a.title }}</span>
-        <span style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><strong>{{ a.price_display or (a.price|eur) }}</strong>{% if a.level %}<span class="pill lvl-{{ a.level }}">{{ deal_level_label(a.level) }}</span>{% endif %}{% if site_counts|length > 1 %}{{ m.site(ap) }}{% endif %}</span>
+        <span style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><strong>{{ a.price_display or (a.price|eur) }}</strong><span class="sub" data-ship>{{ ui.ship_lazy(a) }}</span>{% if a.level %}<span class="pill lvl-{{ a.level }}">{{ deal_level_label(a.level) }}</span>{% endif %}{% if site_counts|length > 1 %}{{ m.site(ap) }}{% endif %}</span>
         {% if a.location %}<span class="sub trunc">{{ a.location }}</span>{% endif %}
       </span>{{ m.chev() }}
     </a>
