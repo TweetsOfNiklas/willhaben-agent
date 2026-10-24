@@ -68,11 +68,20 @@
   html.tg .mainbtn.tg-hide { display: none; }   /* Telegram's own main button does it */
   .empty { color: var(--hint); text-align: center; padding: 36px 12px; }
   .danger { color: var(--destructive); }
+  .toast { position: fixed; z-index: 50; top: 8px; left: 8px; right: 8px; max-width: 624px; margin: 0 auto; padding: 10px 14px;
+           border-radius: 12px; background: var(--text); color: var(--section); font-size: 14px; white-space: pre-wrap;
+           box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  .field { width: 100%; border: 1px solid var(--sep); border-radius: 10px; background: var(--chip); padding: 9px 12px; font-size: 15px; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+  .chip[disabled] { opacity: .5; }
   .chip { height: 34px; border: 1px solid var(--sep); background: var(--section); border-radius: 17px; padding: 0 13px; font-size: 13px; white-space: nowrap; }
 </style>
 </head>
 <body hx-boost="true">
 {% block page %}{% endblock %}
+{# the dashboard's answer to an action (app/tg_bridge.py): shown on top, gone after a while #}
+{% set flash = request.query_params.get('msg') %}{% if flash %}<div class="toast" role="status" data-toast onclick="this.remove()">{{ flash }}</div>{% endif %}
 <script>
 (function () {
   // ---- the bridge: Telegram's Mini App protocol without its script
@@ -153,6 +162,29 @@
   document.addEventListener('click', (e) => {
     if (inTg && e.target.closest('button, .cell, .chip')) post('web_app_trigger_haptic_feedback', {type: 'selection_change'});
   });
+  // an action posted to the dashboard's endpoint comes back to this page (app/tg_bridge.py)
+  document.addEventListener('htmx:configRequest', (e) => {
+    if (!e.detail.path.startsWith('/tg')) e.detail.headers['X-TG-Back'] = location.pathname + location.search.replace(/[?&]msg=[^&]*/, '');
+  });
+  // confirmations as Telegram's own popup (a browser dialog may be blocked inside Telegram)
+  document.addEventListener('htmx:confirm', (e) => {
+    if (!e.detail.question || !inTg) return;
+    e.preventDefault();
+    confirming = () => e.detail.issueRequest(true);      // one popup at a time
+    post('web_app_open_popup', {message: e.detail.question.slice(0, 256),
+                                buttons: [{id: 'ok', type: 'ok'}, {id: 'no', type: 'cancel'}]});
+  });
+  let confirming = null;
+  on('popup_closed', (d) => { const f = confirming; confirming = null; if (f && d && d.button_id === 'ok') f(); });
+  // the message from the last action: out of the address (a reload does not show it again), gone after a while
+  const toast = () => {
+    const el = document.querySelector('[data-toast]');
+    if (!el) return;
+    history.replaceState(history.state, '', location.pathname + location.search.replace(/([?&])msg=[^&]*&?/, '$1').replace(/[?&]$/, '') + location.hash);
+    setTimeout(() => el.remove(), 6000);
+  };
+  document.addEventListener('htmx:afterSettle', toast);
+  toast();
   // a chat opens at its newest message
   const toEnd = () => { if (document.getElementById('tg-thread')) window.scrollTo(0, document.body.scrollHeight); };
   document.addEventListener('htmx:afterSettle', (e) => { setup(); if (e.detail.target && e.detail.target.tagName === 'BODY') toEnd(); });

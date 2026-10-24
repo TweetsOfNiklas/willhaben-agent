@@ -1,0 +1,112 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Edit ad") }}{% endblock %}
+{# twin of myad_edit.html (app/tg_bridge.py TWINS): title, text and price, the Geizhals spec sheet, Claude's revision
+   with its questions, the photos – the dashboard's endpoints; Claude's proposal and the Geizhals search come back here #}
+{% block page %}
+<main data-back="/tg/myads/{{ a.ad_id }}" data-main="{{ _('Save on willhaben') }}" data-main-form="edit-form">
+{{ m.head(_("Edit ad"), '/tg/myads/' ~ a.ad_id) }}
+<div class="wrap">
+  <p class="sub" style="margin: 12px 4px 0">{{ a.heading or a.ad_id }} · {{ _("Status: {status}", status=a.status or '?') }}</p>
+  {% if a.pending_action %}<p style="font-size: 13px; color: #B07800; margin: 8px 4px">{{ _("This ad is being changed on willhaben in the background – wait until it is done before you save again.") }}</p>{% endif %}
+  {% if unsaved %}<p style="font-size: 13px; color: #B07800; margin: 8px 4px">{{ _("Your last changes were not saved on willhaben – they are filled in below. Save again when you are ready.") }}</p>{% endif %}
+  {% if ai_error %}<p style="font-size: 13px; color: var(--destructive); margin: 8px 4px">{{ ai_error }}</p>{% endif %}
+  {% if proposal %}
+  <div class="sec" style="margin-top: 10px; padding: 10px 14px; border-left: 4px solid var(--btn); display: flex; flex-direction: column; gap: 4px" data-proposal>
+    <strong>{{ _("Claude's proposal – not saved yet") }}</strong>
+    {% if proposal.note %}<span style="font-size: 14px">{{ proposal.note }}</span>{% endif %}
+    <span class="sub">{{ _("Check the text below, change it if you like, then save on willhaben – or discard it.") }}</span>
+    <a href="/tg/myads/{{ a.ad_id }}/edit" class="sub" style="color: var(--link)">{{ _("Discard proposal") }}</a>
+  </div>
+  {% endif %}
+
+  <form method="post" action="/myads/{{ a.ad_id }}/edit" id="edit-form" style="margin: 0">
+    <div class="sh">{{ _("Ad") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      <label class="sub">{{ _("Title") }}<input class="field" name="heading" value="{{ cur.heading }}" maxlength="80" required></label>
+      <label class="sub">{{ _("Description") }}<textarea class="field" name="description" rows="12" required>{{ cur.description }}</textarea></label>
+      <label class="sub">{{ _("Price (€)") }}<input class="field" name="price" id="price" inputmode="decimal" value="{{ ('%.2f'|format(cur.price)).rstrip('0').rstrip('.') if cur.price is not none else '' }}"></label>
+      {% if proposal and proposal.price_estimate %}<span class="sub">{{ _("Claude estimates {price}", price=proposal.price_estimate|eur) }} <button type="button" class="chip" onclick="document.getElementById('price').value = '{{ ('%.2f'|format(proposal.price_estimate)).rstrip('0').rstrip('.') }}'">{{ _("use") }}</button></span>{% endif %}
+      <button class="mainbtn tg-hide" {% if a.pending_action %}disabled{% endif %}>{{ _("Save on willhaben") }}</button>
+      <span class="sub">{{ _("Only title, description and price change; photos, category and everything else stay as they are. willhaben may check the changed ad again before it shows the new version – the status in My ads tells you.") }}</span>
+    </div>
+
+    {# the Geizhals spec sheet at the end of the text: search, put in, remove (only the form changes) #}
+    {% set g = gh if gh is defined else {} %}{% set sheet = geizhals_sheet(cur.description) %}
+    <div class="sh">{{ _("Geizhals spec sheet") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-geizhals>
+      {% if sheet %}<span class="sub">{{ _("in the text: {name}", name=sheet[2]) }} <button class="chip" name="gh_action" value="remove" formaction="/myads/{{ a.ad_id }}/edit/geizhals" formnovalidate>{{ _("Remove") }}</button></span>
+      {% else %}<span class="sub">{{ _("none in the text") }}</span>{% endif %}
+      <span style="display: flex; gap: 6px"><input class="field" name="gh_query" value="{{ g.get('query') or (sheet[2] if sheet else cur.heading) }}" placeholder="{{ _('Search for a product, e.g. Bosch GSR 18V-55') }}">
+        <button class="chip" name="gh_action" value="search" formaction="/myads/{{ a.ad_id }}/edit/geizhals" formnovalidate>{{ _("Search") }}</button></span>
+      {% if g.get('error') %}<span style="font-size: 13px; color: var(--destructive)">{{ g.error }}</span>{% endif %}
+      {% set found = ([g.match] if g.get('match') and g.get('candidates') is not none else []) + (g.get('candidates') or [])|rejectattr('url', 'equalto', (g.get('match') or {}).get('url'))|list %}
+      {% if g.get('candidates') is not none and g.get('query') and not found %}<span class="sub">{{ _("Nothing found for “{q}”.", q=g.query) }}</span>{% endif %}
+      {% if found %}
+      <select class="field" name="gh_url">{% for c in found %}<option value="{{ c.url }}">{{ c.name }}{% if c.get('price') or c.get('price_from') %} – {{ (c.get('price') or c.get('price_from'))|eur }}{% endif %}</option>{% endfor %}</select>
+      <button class="chip" name="gh_action" value="use" formaction="/myads/{{ a.ad_id }}/edit/geizhals" formnovalidate>{{ _("Put into the text") if not sheet else _("Replace in the text") }}</button>
+      {% if g.get('verified') is sameas false %}<span style="font-size: 13px; color: #B07800">{{ _("Variant not confirmed – check that this is the right model") }}</span>{% endif %}
+      {% elif g.get('match') and not g.get('error') %}<span class="sub">{{ _("Spec sheet of {name} is in the text – check it, then save on willhaben.", name=g.match.name) }}</span>{% endif %}
+    </div>
+
+    {% if proposal and proposal.questions %}
+    <div class="sh">{{ _("Claude's questions") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 10px" data-ad-questions>
+      <input type="hidden" name="questions" value="{{ proposal.questions|tojson|forceescape }}">
+      {% for q in proposal.questions %}{{ m.question(q) }}{% endfor %}
+      <button class="chip primary" formaction="/myads/{{ a.ad_id }}/edit/ai" formnovalidate>{{ _("Work the answers in") }}</button>
+    </div>
+    {% endif %}
+    <div class="sh">{{ _("Revise with Claude") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      <input class="field" name="instruction" value="{{ instruction or '' }}" placeholder="{{ _('e.g. shorter, more convincing title, mention that the battery is new') }}">
+      <button class="chip" formaction="/myads/{{ a.ad_id }}/edit/ai" formnovalidate data-revise>{{ ui.icon('sparkle', 13, 2) }} {{ _("Revise") }}</button>
+      <span class="sub">{{ _("Claude sees the text above, the ad's photos and your rules. Nothing is saved until you click “Save on willhaben”. Takes 10–60 seconds.") }}</span>
+    </div>
+  </form>
+
+  <div class="sh" id="photos">{{ _("Photos") }} · {{ _("the first photo is the cover") }}</div>
+  {% if cur.images_error %}<p style="font-size: 13px; color: var(--destructive)">{{ _("Could not load the photos from willhaben: {error}", error=cur.images_error) }}</p>
+  {% else %}
+  <form method="post" action="/myads/{{ a.ad_id }}/photos" enctype="multipart/form-data" class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-photos>
+    <div id="photo-grid" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+      {% for img in cur.images %}
+      <div class="photo-tile" style="position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--sep)">
+        <input type="hidden" name="order" value="{{ img.reference }}">
+        <img src="{{ img.thumb }}" alt="" loading="lazy" referrerpolicy="no-referrer" style="display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: rgba(118,118,128,.2)" onerror="this.style.visibility='hidden'">
+        <span style="display: grid; grid-template-columns: repeat(3, 1fr)">
+          <button type="button" class="chip" style="border-radius: 0; height: 30px; padding: 0" data-move="-1" aria-label="{{ _('Move left') }}">‹</button>
+          <button type="button" class="chip" style="border-radius: 0; height: 30px; padding: 0" data-cover aria-label="{{ _('Make cover photo') }}">★</button>
+          <button type="button" class="chip danger" style="border-radius: 0; height: 30px; padding: 0" data-remove aria-label="{{ _('Remove') }}">✕</button>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    <label class="sub">{{ _("Add photos") }}<input class="field" type="file" name="photos" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label>
+    <label style="display: flex; gap: 8px; align-items: center; font-size: 14px"><input type="checkbox" name="new_first" value="1">{{ _("Put new photos first (the first one becomes the cover)") }}</label>
+    <button class="chip primary" id="photo-save" {% if a.pending_action %}disabled{% endif %}>{{ _("Save photos on willhaben") }}</button>
+    <span class="sub">{{ _("Saves only the photos – unsaved text changes above are not included. At most {n} photos; removed photos are gone on willhaben.", n=15) }}</span>
+  </form>
+  <script>
+  (() => {
+    const grid = document.getElementById('photo-grid');
+    if (!grid) return;
+    grid.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      const tile = b.closest('.photo-tile');
+      if (b.dataset.move === '-1' && tile.previousElementSibling) grid.insertBefore(tile, tile.previousElementSibling);
+      else if (b.hasAttribute('data-cover')) grid.prepend(tile);
+      else if (b.hasAttribute('data-remove')) {
+        const off = !tile.classList.contains('removed');
+        tile.classList.toggle('removed', off);
+        tile.style.opacity = off ? '.3' : '';
+        tile.querySelector('input[name=order]').disabled = off;
+        if (off) grid.append(tile);
+      }
+    });
+  })();
+  </script>
+  {% endif %}
+</div>
+</main>
+{% endblock %}

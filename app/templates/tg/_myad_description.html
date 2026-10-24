@@ -1,0 +1,23 @@
+{# twin of _myad_description.html (app/tg_bridge.py TWINS): the own ad as buyers see it, loaded into the ad's page:
+   the price (changed right here), the photos, pickup and delivery, the text #}
+{% import "_ui.html" as ui %}
+{% if error %}<span style="font-size: 13px; color: var(--destructive)">{{ error }}</span>
+{% elif not d %}<span class="sub">{{ _("willhaben shows no text for this ad (offline or under review).") }}</span>
+{% else %}
+<div style="display: flex; flex-direction: column; gap: 10px" data-myad-view>
+  <form method="post" action="/myads/{{ a.ad_id }}/price" style="margin: 0; display: flex; gap: 6px; align-items: center" data-myad-price>
+    <span style="font-size: 20px; font-weight: 700">{{ d.price_display or (d.price|eur) }}</span>
+    <input class="field" style="width: 100px; height: 34px; padding: 0 10px" name="price" inputmode="decimal" value="{{ ('%.2f'|format(d.price)).rstrip('0').rstrip('.') if d.price is not none else '' }}" aria-label="{{ _('Price') }}">
+    <button class="chip">{{ _("Change price") }}</button>
+  </form>
+  {% if d.item_condition_label or d.category_path %}<span class="sub">{{ d.item_condition_label or '' }}{% if d.category_path %}{{ ' · ' if d.item_condition_label else '' }}{{ d.category_path|join(' › ') }}{% endif %}</span>{% endif %}
+  {% if d.images %}<div style="display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 6px; border-radius: 10px">
+    {% for img in d.images %}<img src="{{ img }}" alt="" loading="lazy" referrerpolicy="no-referrer" style="flex: 0 0 85%; height: 220px; object-fit: cover; border-radius: 10px; scroll-snap-align: center; background: rgba(118,118,128,.2)">{% endfor %}</div>
+  <span class="sub">{{ _("{n} photos · the first is the cover", n=d.images|length) }} · <a href="/tg/myads/{{ a.ad_id }}/edit#photos">{{ _("Change photos") }}</a></span>{% endif %}
+  <span style="font-size: 14px"><span class="sub">{{ _("Pickup") }}:</span> {{ d.location or d.place or _("no place given") }}</span>
+  <span style="font-size: 14px"><span class="sub">{{ _("Delivery") }}:</span>
+    {% if d.shipping_options %}{% for o in d.shipping_options %}PayLivery {{ o.name }}{% if o.point is not none %} · {{ _("pickup point {price}", price=o.point|eur) }}{% endif %}{% if o.home is not none %} · {{ _("to the door {price}", price=o.home|eur) }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}
+    {% elif d.paylivery_enabled %}PayLivery{% else %}{{ _("pickup only (no PayLivery)") }}{% endif %}</span>
+  {% if d.description %}<p style="margin: 0; white-space: pre-line; font-size: 14px; overflow-wrap: anywhere">{{ d.description }}</p>{% endif %}
+</div>
+{% endif %}

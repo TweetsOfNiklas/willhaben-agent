@@ -1,0 +1,66 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_panels.html" as pn with context %}
+{% block title %}{{ a.heading or a.ad_id }}{% endblock %}
+{# one own ad, as the open ad in My ads: willhaben's actions, the sale, auto-renew, pieces, automatic answers and the
+   ad as buyers see it (the dashboard's endpoints; the description is the dashboard's fragment in its twin) #}
+{% block page %}
+{% set here = '/tg/myads/' ~ a.ad_id %}
+<main data-back="/tg/myads">
+{{ m.head(_("Ad"), '/tg/myads') }}
+<div class="wrap"{% if a.pending_action %} hx-get="{{ here }}" hx-trigger="every 4s" hx-select=".wrap" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  <div class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; gap: 12px">
+    {% if a.image_url %}<img class="thumb" src="{{ a.image_url }}" alt="" width="72" height="72" style="width: 72px; height: 72px" onerror="this.style.visibility='hidden'">{% endif %}
+    <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+      <span style="font-size: 17px; font-weight: 600; line-height: 1.25">{{ a.heading or a.ad_id }}</span>
+      <span style="display: flex; gap: 6px; flex-wrap: wrap">{% if a.sale_status %}<span class="pill lvl-fair">{{ _("reserved") if a.sale_status == 'reserved' else _("sold") }}</span>{% else %}<span class="pill">{{ myad_status(a.status) }}</span>{% endif %}{% if a.hidden %}<span class="pill">{{ _("hidden") }}</span>{% endif %}</span>
+      <span class="sub">{{ _("checked {t}", t=a.last_checked_at|ago) }}{% if a.last_action %} · {{ a.last_action }}{% endif %}</span>
+      {% if a.last_error %}<span style="font-size: 13px; color: var(--destructive)">{{ a.last_error }}</span>{% endif %}
+      {% if a.pending_action %}<span class="sub" style="color: var(--link)" data-pending>{{ {'delete': _("Deleting…"), 'deactivate': _("Deactivating…"), 'activate': _("Activating…"), 'edit': _("Saving…"), 'photos': _("Saving the photos…"), 'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}.get(a.pending_action, _("In progress…")) }}</span>{% endif %}
+    </span>
+  </div>
+
+  {% if not a.pending_action %}
+  <div class="sec" style="margin-top: 12px">
+    <a class="cell" href="/tg/myads/{{ a.ad_id }}/edit"><span class="body"><span>{{ _("Edit") }}</span>{{ m.chev() }}</span></a>
+    {% if a.status == 'active' %}<form method="post" action="/myads/{{ a.ad_id }}/deactivate" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Deactivate") }}</span></span></button></form>
+    {% elif a.status not in ('sold', 'reserved') %}<form method="post" action="/myads/bulk/activate" style="margin: 0"><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="cell"><span class="body"><span>{{ _("Activate") }}</span></span></button></form>{% endif %}
+    <form method="post" action="/myads/bulk/{{ 'unhide' if a.hidden else 'hide' }}" style="margin: 0"><input type="hidden" name="ids" value="{{ a.ad_id }}"><button class="cell"><span class="body"><span>{{ _("Show again") if a.hidden else _("Hide from list") }}</span></span></button></form>
+    <a class="cell" href="{{ a.url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on willhaben") }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
+    <form method="post" action="/myads/{{ a.ad_id }}/delete" style="margin: 0" hx-confirm="{{ _('Deletes the ad on willhaben for good – it waits a few seconds in the queue, where you can still take it back.') }}"><button class="cell danger"><span class="body"><span>{{ _("Delete") }}</span></span></button></form>
+  </div>
+  {% endif %}
+
+  {% if not a.replaced_by %}
+  <div class="sh">{{ _("Sale") }}</div>
+  {{ pn.sale(sale_panel(a.ad_id, a.sale_conversation_id), here) }}
+  <a href="/tg/sold/{{ a.ad_id }}?kind={{ a.sale_status or 'sold' }}{% if a.sale_conversation_id %}&buyer={{ a.sale_conversation_id }}{% endif %}" class="sub" style="display: block; margin: 6px 4px 0; color: var(--link)">{{ _("Sale page: stock, the other buyers") }} ›</a>
+  {% endif %}
+
+  <div class="sh">{{ _("Settings") }}</div>
+  <div class="sec">
+    <form method="post" action="/myads/{{ a.ad_id }}/auto-renew" class="cell" style="margin: 0">
+      <input type="hidden" name="on" value="{{ '0' if a.auto_renew else '1' }}">
+      <span class="body"><span style="display: flex; flex-direction: column"><span>{{ _("Auto-renew") }}</span><span class="sub">{{ _("Expires") }} {{ a.end_date|local('%d.%m.%Y') }} · {{ a.end_date|ago }}</span></span>{{ m.switch(a.auto_renew, _("Auto-renew")) }}</span></form>
+  </div>
+  <form method="post" action="/myads/{{ a.ad_id }}/quantity" class="sec" style="margin-top: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px">
+    <label class="sub">{{ _("Number of pieces") }} · {{ stock_text(a) or _("One item") }}<input class="field" type="number" name="quantity" min="1" max="999" inputmode="numeric" value="{{ a.quantity if a.quantity is not none else '' }}" placeholder="{{ _('one item') }}"></label>
+    <button class="chip">{{ _("Save") }}</button>
+  </form>
+
+  <div class="sh">{{ _("Automatic answers") }}</div>
+  <form method="post" action="/myads/{{ a.ad_id }}/auto-reply" class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-auto-reply>
+    <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px"><span>{{ _("On — Claude answers simple questions") }}</span><input type="checkbox" name="on" {% if a.auto_reply %}checked{% endif %} style="width: 22px; height: 22px"></label>
+    <span class="sub">{{ _("Uncertain cases (price negotiation, open questions, suspected scam) end up as a draft, with a push via Home Assistant.") }}</span>
+    <label class="sub">{{ _("Instruction for this ad") }}<textarea class="field" name="instructions" rows="3" placeholder="{{ _('e.g. Fixed price €20. Power supply included, battery lasts about 4 h. Pickup in Vienna 15 in the evening, shipping €5 extra.') }}">{{ a.auto_reply_instructions or '' }}</textarea></label>
+    <label class="sub">{{ _("Minimum (€)") }}<input class="field" inputmode="decimal" name="min_price" value="{{ ('%.2f'|format(a.min_price)).rstrip('0').rstrip('.') if a.min_price is not none else '' }}" placeholder="{{ _('none') }}"></label>
+    <span class="sub">{{ _("Automatic answers never agree to less. Leave empty: price talks stay with you.") }}</span>
+    <button class="chip primary">{{ _("Save") }}</button>
+  </form>
+
+  <div class="sh">{{ _("As buyers see it") }}</div>
+  <div class="sec" style="padding: 10px 14px" hx-get="/myads/{{ a.ad_id }}/description" hx-trigger="load" hx-swap="innerHTML" hx-disinherit="*" data-description>
+    <span class="sub">{{ _("Loading the ad from willhaben …") }}</span>
+  </div>
+</div>
+</main>
+{% endblock %}

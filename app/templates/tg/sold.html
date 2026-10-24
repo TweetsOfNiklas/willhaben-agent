@@ -1,0 +1,71 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_panels.html" as pn with context %}
+{% block title %}{{ _("Sale") }}{% endblock %}
+{# the sale page (main.sold_page): sold or reserved here and on willhaben, the stock, the notices to the other buyers #}
+{% block page %}
+{% set is_sold = kind == 'sold' %}{% set pieces_left = is_sold and stock and stock.remaining > 0 %}
+{% set here = '/tg/sold/' ~ ad_id ~ '?kind=' ~ kind ~ ('&buyer=' ~ buyer.id if buyer else '') %}
+{% set hidden %}<input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}">{% endset %}
+<main data-back="{{ '/tg/chats/' ~ buyer.id ~ '/info' if buyer else '/tg/myads/' ~ ad_id }}">
+{{ m.head(_("Sale"), '/tg/myads/' ~ ad_id) }}
+<div class="wrap">
+  <p style="margin: 12px 4px 0; font-weight: 600">{{ title }}</p>
+  {# the buyer: who the sale is for, and who is left out of the notices #}
+  <form method="get" action="/tg/sold/{{ ad_id }}" style="margin: 10px 0 0" data-buyer>
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <select class="field" name="buyer" aria-label="{{ _('Buyer') }}" onchange="this.form.requestSubmit()">
+      <option value="">{{ _("Buyer: not from a chat") }}</option>
+      {% for c in convs %}<option value="{{ c.id }}" {% if buyer and buyer.id == c.id %}selected{% endif %}>{{ _("Buyer: {name}", name=c.partner_name or c.id) }}</option>{% endfor %}
+    </select>
+  </form>
+
+  <div class="sh">{{ _("Sold or reserved") }}</div>
+  {{ pn.sale(panel, here) }}
+  <p class="sub" style="margin: 6px 4px 0">{{ _("Nothing happens without your click. The willhaben step runs in the background; a sale waits a few seconds there, so you can take it back.") }}</p>
+
+  {% if stock %}
+  <div class="sh">{{ _("Stock") }} · {{ _("{left} of {total} pieces left", left=stock.remaining, total=stock.quantity) }}</div>
+  <div class="sec">
+    {% for s in sales %}
+    <div class="cell"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span class="trunc">{{ names.get(s.conversation_id) or _('unknown') if s.conversation_id else _("Buyer: not from a chat") }}</span>
+      <span class="sub">{{ _("{n} pcs", n=s.pieces) }}{% if s.price is not none %} · {{ s.price|eur }}{% endif %} · {{ s.created_at|ago }}</span></span>
+      <form method="post" action="/sold/{{ ad_id }}/sales/{{ s.id }}/undo" style="margin: 0" hx-confirm="{{ _('Undo this sale? Its pieces count as available again (willhaben is not changed).') }}">{{ hidden }}<button class="chip danger">{{ _("Undo") }}</button></form></span></div>
+    {% else %}<p class="sub" style="padding: 12px 14px; margin: 0">{{ _("No sales recorded yet.") }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="sh">{{ _("Tell the other buyers") }}</div>
+  {% set drafts = others|selectattr('draft')|list %}
+  {% if pieces_left %}<p class="sub" style="margin: 0 4px">{{ _("{left} pieces left – the ad stays online on willhaben; the others are told only with the last piece", left=stock.remaining) }}</p>
+  {% elif others %}
+  <form method="post" action="/sold/{{ ad_id }}/notices" class="sec" style="padding: 6px 14px 12px; display: flex; flex-direction: column; gap: 6px" data-notices
+        {% if others|selectattr('conv.drafting')|list %}hx-get="{{ here }}" hx-trigger="every 4s" hx-select="main" hx-target="main" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+    {{ hidden }}
+    {% if not buyer %}<span class="sub">{{ _("Pick the buyer above first, so they do not get this message too.") }}</span>{% endif %}
+    {% for o in others %}
+    <label style="display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--sep)">
+      <input type="checkbox" name="conv" value="{{ o.conv.id }}" style="margin-top: 3px" {% if buyer and not o.informed and not o.draft and not o.sending %}checked{% endif %}>
+      <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span>{{ o.conv.partner_name or _('unknown') }}
+        {% if o.conv.drafting %}<span class="sub" style="color: var(--link)"> · {{ _("Claude is writing…") }}</span>{% elif o.sending %}<span class="sub"> · {{ _("Sending…") }}</span>{% elif o.informed %}<span class="pill lvl-bargain">{{ _("informed") }}</span>{% elif o.draft %}<span class="pill">{{ _("draft") }}</span>{% endif %}</span>
+        <span class="sub trunc">{{ (o.last_in or '')[:120] }}</span></span>
+    </label>
+    {% endfor %}
+    <div class="btnrow"><button class="chip" name="mode" value="template">{{ _("Prepare short drafts") }}</button><button class="chip" name="mode" value="claude">{{ ui.icon('sparkle', 12, 2) }} {{ _("Prepare drafts with Claude") }}</button></div>
+    <span class="sub">{{ _("Only drafts – you check them below before anything is sent.") }}</span>
+  </form>
+  {% else %}<p class="sub" style="margin: 0 4px">{{ _("No other conversations about this ad.") }}</p>{% endif %}
+
+  {% if drafts and not pieces_left %}
+  <form method="post" action="/sold/{{ ad_id }}/notices/send" class="sec" style="margin-top: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px" data-notice-drafts>
+    {{ hidden }}
+    {% for o in drafts %}
+    <label style="display: flex; gap: 8px; align-items: center; font-weight: 600"><input type="checkbox" name="send" value="{{ o.draft.id }}" checked>{{ o.conv.partner_name or _('unknown') }}</label>
+    <textarea class="field" name="text_{{ o.draft.id }}" rows="3">{{ o.draft.text }}</textarea>
+    {% if o.draft.error %}<span style="font-size: 13px; color: var(--destructive)">{{ o.draft.error }}</span>{% endif %}
+    {% endfor %}
+    <div class="btnrow"><button class="chip primary" name="action" value="send">{{ _("Send selected") }}</button><button class="chip" name="action" value="discard">{{ _("Discard selected") }}</button></div>
+  </form>
+  {% endif %}
+</div>
+</main>
+{% endblock %}

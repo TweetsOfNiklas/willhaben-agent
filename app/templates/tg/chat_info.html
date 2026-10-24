@@ -1,0 +1,52 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_panels.html" as pn with context %}
+{% block title %}{{ conv.partner_name or _('Chat') }}{% endblock %}
+{# everything beside the thread on the chat page: the ad, this buyer (sell, reserve), the purchase order, PayLivery,
+   shipping, the calendar and the chat's actions – the dashboard's context (main.chat_page), its endpoints #}
+{% block page %}
+{% set ad = conv.ad_context or {} %}{% set selling = conv.role == 'seller' %}{% set here = '/tg/chats/' ~ conv.id ~ '/info' %}
+<main data-back="/tg/chats/{{ conv.id }}">
+{{ m.head(conv.partner_name or _('Chat'), '/tg/chats/' ~ conv.id) }}
+<div class="wrap">
+  {% if ad %}
+  <div class="sh">{{ _("Your ad") if selling else _("Someone else's ad") }}</div>
+  <div class="sec">
+    {% if ad.images %}<img src="{{ ad.images[0] }}" alt="" style="display: block; width: 100%; height: 180px; object-fit: cover; background: rgba(118,118,128,.2)" onerror="this.style.display='none'">{% endif %}
+    <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 4px">
+      <a href="{{ ad.url }}" target="_blank" hx-boost="false" style="font-weight: 600; color: var(--text)">{{ ad.title }} ↗</a>
+      {% set where = [ad.location, ad.status]|select|join(' · ') %}
+      <span>{% if ad.price %}<strong>{{ ad.price }}</strong>{% endif %}{% if where %} <span class="sub">{{ where }}</span>{% endif %}</span>
+      {% if ad.description %}<details><summary class="sub" style="color: var(--link)">{{ _("Description") }}</summary><p style="font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere">{{ ad.description }}</p></details>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if selling and conv.ad_id and sale_panel %}
+  <div class="sh">{{ _("This buyer") }}</div>
+  {% if sale and sale.quantity is not none and sale.kind != 'sold' %}<p class="sub" style="margin: 0 4px 6px">{{ _("{left} of {total} still available", left=sale.remaining, total=sale.quantity) }}</p>{% endif %}
+  {{ pn.sale(sale_panel, here) }}
+  {% endif %}
+
+  {% set pc = purchase_card(conv) %}
+  {% if pc %}<div class="sh">{{ _("Purchase order") }}</div>{{ pn.purchase(pc) }}{% endif %}
+
+  {% set pl = paylivery_card(conv) %}
+  {% if pl %}<div class="sh">PayLivery</div>{{ pn.paylivery(pl, conv, here) }}{% endif %}
+
+  {% if ship_on %}<div class="sh">{{ _("Shipping") }}</div>{{ pn.shipping(conv, here) }}{% endif %}
+
+  {% if gcal_on %}<div class="sh">{{ _("Calendar") }}</div>{{ pn.calendar(conv, meetup, gcal_duration) }}{% endif %}
+
+  <div class="sh">{{ _("Actions") }}</div>
+  <div class="sec">
+    <form method="post" action="/chats/{{ conv.id }}/refresh" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Reload") }}</span>{{ ui.icon('refresh', 15, 2) }}</span></button></form>
+    {% set done = conv.id in finished %}
+    <form method="post" action="/chats/{{ conv.id }}/finished" style="margin: 0"><input type="hidden" name="finished" value="{{ '0' if done else '1' }}"><button class="cell"><span class="body"><span>{{ _("Open again") if done else _("Mark as finished") }}</span>{{ ui.icon('check', 15, 2) }}</span></button></form>
+    <form method="post" action="/chats/{{ conv.id }}/unread" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Mark as unread") }}</span></span></button></form>
+    <form method="post" action="/chats/{{ conv.id }}/hide" style="margin: 0"><input type="hidden" name="hidden" value="{{ '0' if conv.hidden_at else '1' }}"><button class="cell"><span class="body"><span>{{ _("Show in list again") if conv.hidden_at else _("Hide from this list only") }}</span></span></button></form>
+    <a class="cell" href="{{ 'https://www.vinted.at/inbox/' ~ conv.id if conv.platform == 'vinted' else 'https://www.willhaben.at/iad/myprofile/chat/' ~ conv.id }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=platform_name(conv.platform or 'willhaben')) }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
+    <form method="post" action="/chats/{{ conv.id }}/remove" style="margin: 0" hx-confirm="{{ _('Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.') }}"><button class="cell danger"><span class="body"><span>{{ _("Remove from the app") }}</span></span></button></form>
+  </div>
+</div>
+</main>
+{% endblock %}

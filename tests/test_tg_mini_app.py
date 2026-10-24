@@ -114,8 +114,10 @@ def test_the_mini_app_shows_what_the_site_shows(client, monkeypatch):
     with session() as db:
         assert db.get(Hit, hit_id).state == "ignored"
     chat = client.get("/tg/chats/c1").text
-    assert "data-notes" in chat and "Abholzeit fehlt" in chat and 'name="hint"' in chat and "data-chat-actions" in chat
-    assert "/tg/chats/c1/mark-sent" in chat
+    assert "data-notes" in chat and "Abholzeit fehlt" in chat and 'name="hint"' in chat and "data-info" in chat
+    assert "/mark-sent" in chat and 'action="/drafts/' in chat                  # the dashboard's own endpoints
+    info = client.get("/tg/chats/c1/info").text
+    assert 'action="/chats/c1/remove"' in info and 'action="/chats/c1/finished"' in info
     lst = client.get("/tg/chats?role=buyer").text
     assert 'data-chat="c1"' not in lst and 'data-chat="c1"' in client.get("/tg/chats?role=seller").text
     client.post("/tg/chats/c1/finished", data={"finished": "1"})
@@ -173,3 +175,53 @@ def test_the_price_check_runs_on_its_own_and_the_section_asks_until_it_is_done(c
     tg_web._checks.pop(hit_id).cancel()
     part = client.get(f"/tg/hits/{hit_id}/deal").text
     assert "data-checking" not in part and "every 3s" not in part and "lvl-bargain" in part
+
+
+def test_an_action_posted_to_the_dashboard_comes_back_to_the_mini_app(client):
+    """The Mini App posts to the dashboard's own endpoints with X-TG-Back: the redirect goes to the /tg page (the
+    dashboard's message along), not to the dashboard; the dashboard's referer reads keep the open ad."""
+    _data()
+    r = client.post("/myads/900/auto-renew", data={"on": "1"}, headers={"X-TG-Back": "/tg/myads/900"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/tg/myads/900")
+    with session() as db:
+        assert db.get(MyAd, "900").auto_renew is True
+    r = client.post("/myads/900/quantity", data={"quantity": "x"}, headers={"X-TG-Back": "/tg/myads/900"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/tg/myads/900?msg=")             # the dashboard's message comes along
+    r = client.post("/chats/c1/finished", data={"finished": "1"}, headers={"X-TG-Back": "/tg/chats/c1/info"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/tg/chats/c1")
+    r = client.post("/chats/nope/send-direct", data={"hint": "x"}, headers={"X-TG-Back": "/tg/chats"},
+                    follow_redirects=False)                                    # an error: back with its text
+    assert r.status_code == 303 and r.headers["location"].startswith("/tg/chats?msg=")
+    plain = client.post("/myads/900/auto-renew", data={"on": "0"}, follow_redirects=False)
+    assert plain.headers["location"].startswith("/myads")                      # the dashboard itself: unchanged
+
+
+def test_my_ads_their_edit_page_and_the_sale_page(client, monkeypatch):
+    """The ad's page (sale, settings, automatic answers), the edit page with Claude's proposal coming back into the
+    Mini App's twin, the sale page."""
+    from app.services import my_ads
+    _data()
+    assert 'href="/tg/myads/900"' in client.get("/tg/myads").text
+    page = client.get("/tg/myads/900").text
+    assert 'action="/sold/900/sell"' in page and 'action="/myads/900/auto-reply"' in page and "data-description" in page
+
+    async def load(ad_id):
+        return {"heading": "Fritzbox 7530", "description": "Wie neu.", "price": 60.0, "images": []}
+
+    async def revise(ad_id, heading, description, price, instruction):
+        return {"heading": "FRITZ!Box 7530", "description": "Wie neu, mit Netzteil.", "note": "Kürzer.", "questions": []}
+    monkeypatch.setattr(my_ads, "load_for_edit", load)
+    monkeypatch.setattr(my_ads, "ai_revise", revise)
+    edit = client.get("/tg/myads/900/edit").text
+    assert 'id="edit-form"' in edit and 'formaction="/myads/900/edit/ai"' in edit and "tg-hide" in edit
+    r = client.post("/myads/900/edit/ai", data={"heading": "Fritzbox 7530", "description": "Wie neu.", "price": "60",
+                                                "instruction": "kürzer"}, headers={"X-TG-Back": "/tg/myads/900/edit"})
+    assert r.status_code == 200 and "data-proposal" in r.text and "FRITZ!Box 7530" in r.text and "tg-hide" in r.text
+    assert r.headers["hx-replace-url"] == "/tg/myads/900/edit"
+    dashboard = client.post("/myads/900/edit/ai", data={"heading": "x", "description": "y"}).text
+    assert "tg-hide" not in dashboard and 'id="edit-form"' in dashboard          # the dashboard keeps its own page
+    sale = client.get("/tg/sold/900").text
+    assert "data-buyer" in sale and 'action="/sold/900/sell"' in sale

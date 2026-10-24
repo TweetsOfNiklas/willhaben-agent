@@ -28,13 +28,30 @@ LIST_LIMIT = 60
 
 
 def install(app: FastAPI) -> None:
+    from app import tg_bridge
+    from app.main import templates
+    from app.services import purchase
     app.include_router(router)
+    tg_bridge.install(app, templates)   # the Mini App's forms post to the dashboard's endpoints (app/tg_bridge.py)
+    templates.env.globals.update(myad_status=label_of, purchase_status=purchase.status_label)
 
 
 def _render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
     from app.main import render
-    from app.services import purchase
-    return render(request, f"tg/{name}", embed=True, myad_status=label_of, purchase_status=purchase.status_label, **ctx)
+    return render(request, f"tg/{name}", embed=True, **ctx)
+
+
+_OWN = {"request", "embed", "myad_status", "purchase_status"}
+
+
+async def _page(request: Request, name: str, handler, *args: Any, **kw: Any):
+    """A /tg page from a dashboard page's context: the dashboard's handler runs (its data, its side effects such as
+    marking read) and `name` shows its context in the Mini App's look; a redirect (not found, login) passes as it is."""
+    resp = await handler(request, *args, **kw)
+    ctx = getattr(resp, "context", None)
+    if ctx is None:
+        return resp
+    return _render(request, name, **{k: v for k, v in ctx.items() if k not in _OWN})
 
 
 def _back(path: str) -> RedirectResponse:
@@ -243,7 +260,7 @@ async def tg_chats(request: Request, show: str = "", role: str = ""):
 
 @router.get("/tg/chats/{conversation_id}", response_class=HTMLResponse)
 async def tg_chat(request: Request, conversation_id: str):
-    from app.services import chats
+    from app.services import chats, selling
     with session() as db:
         conv = db.get(Conversation, conversation_id)
     if conv is None:
@@ -257,7 +274,17 @@ async def tg_chat(request: Request, conversation_id: str):
                    draft=next((d for d in drafts if d.status == "draft"), None),
                    sending=next((d for d in drafts if d.status == "sending"), None),
                    presence=chats.presence_of(conv), place=chats.partner_place(conv),
-                   finished=conv.id in o["finished"], notes=_notes(conv, drafts))
+                   finished=conv.id in o["finished"], notes=_notes(conv, drafts),
+                   contact_warn=selling.contact_hits(draft.text) if (draft := next(
+                       (d for d in drafts if d.status == "draft"), None)) else [])
+
+
+@router.get("/tg/chats/{conversation_id}/info", response_class=HTMLResponse)
+async def tg_chat_info(request: Request, conversation_id: str, sort: str | None = None):
+    """Everything beside the thread: the ad, this buyer, the purchase order, PayLivery, shipping, the calendar."""
+    from app import main
+    return await _page(request, "chat_info.html", main.chat_page, conversation_id, msg=None, sort=sort,
+                       show_hidden=False)
 
 
 @router.post("/tg/chats/{conversation_id}/send")
@@ -340,13 +367,32 @@ async def tg_chat_mark_sent(conversation_id: str, draft_id: int = Form(...), tex
 
 # ------------------------------------------------------------------ my ads, purchases, agents
 @router.get("/tg/myads", response_class=HTMLResponse)
-async def tg_myads(request: Request):
+async def tg_myads(request: Request, show: str = "active", hidden: bool = False):
+    """My ads as the dashboard lists them, one group at a time (active, deactivated, sold / reserved)."""
+    from app import main
+    return await _page(request, "myads.html", main.myads_page, msg=None, show_hidden=hidden, show_sold=show == "sold",
+                       show_inactive=show == "inactive", show_active=show == "active")
+
+
+@router.get("/tg/myads/{ad_id}", response_class=HTMLResponse)
+async def tg_myad(request: Request, ad_id: str):
     with session() as db:
-        ads = list(db.exec(select(MyAd).where(col(MyAd.hidden).is_not(True))
-                           .order_by(col(MyAd.published_at).desc().nulls_last()).limit(LIST_LIMIT)))
-    order = {"active": 0, "reserved": 1, "expired": 2, "sold": 3}
-    ads.sort(key=lambda a: order.get(a.status, 9))
-    return _render(request, "myads.html", ads=ads)
+        a = db.get(MyAd, ad_id)
+    if a is None:
+        raise HTTPException(404)
+    return _render(request, "myad.html", a=a)
+
+
+@router.get("/tg/myads/{ad_id}/edit", response_class=HTMLResponse)
+async def tg_myad_edit(request: Request, ad_id: str):
+    from app import main
+    return await _page(request, "myad_edit.html", main.myads_edit_page, ad_id, msg=None)
+
+
+@router.get("/tg/sold/{ad_id}", response_class=HTMLResponse)
+async def tg_sold(request: Request, ad_id: str, kind: str = "sold", buyer: str | None = None):
+    from app import main
+    return await _page(request, "sold.html", main.sold_page, ad_id, kind=kind, buyer=buyer or None, msg=None)
 
 
 @router.get("/tg/purchases", response_class=HTMLResponse)

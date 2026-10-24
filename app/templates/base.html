@@ -863,5 +863,23 @@ function splitResize(list, key) {
   });
 })();
 </script>
+{# opened from the Telegram Mini App (/tg, its launch flag in this tab): Telegram's back button goes back there #}
+<script>
+(function () {
+  let tg = false;
+  try { tg = sessionStorage.getItem('tg') === '1'; } catch (_) {}
+  if (!tg || !(window.TelegramWebviewProxy || window.parent !== window)) return;
+  const post = (type, data) => { try {
+    if (window.TelegramWebviewProxy) window.TelegramWebviewProxy.postEvent(type, JSON.stringify(data || {}));
+    else window.parent.postMessage(JSON.stringify({eventType: type, eventData: data || {}}), '*');
+  } catch (_) {} };
+  const back = (type) => { if (type === 'back_button_pressed') { if (history.length > 1) history.back(); else location.href = '/tg'; } };
+  window.Telegram = window.Telegram || {};
+  window.Telegram.WebView = Object.assign(window.Telegram.WebView || {}, {receiveEvent: back});
+  addEventListener('message', (e) => { try { const m = JSON.parse(e.data); if (m && m.eventType) back(m.eventType); } catch (_) {} });
+  post('web_app_setup_back_button', {is_visible: true});
+  post('web_app_setup_main_button', {is_visible: false});
+})();
+</script>
 </body>
 </html>

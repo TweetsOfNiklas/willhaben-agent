@@ -1,0 +1,227 @@
+{# The dashboard's panels in the Mini App's look: the same data (the dashboard's own helpers) and the same endpoints,
+   posted through app/tg_bridge.py, which brings the answer back to the page the form sits on. Imported with context. #}
+{% import "_ui.html" as ui %}
+
+{# one section with a header #}
+{% macro sh(text) %}<div class="sh">{{ text }}</div>{% endmacro %}
+
+{# ---- the sale panel of an own ad (_sale_actions.html): sell or reserve here and on willhaben in one tap.
+   p = sold.panel(ad_id, buyer_id), next = the /tg page to come back to #}
+{% macro sale(p, next) %}
+{% set a = p.ad %}{% set buyer = p.buyer %}{% set wh = p.wh %}{% set st = p.stock %}
+{% set kind = a.sale_status if a else none %}
+{% set mine = buyer is not none and a is not none and a.sale_conversation_id == buyer.id %}
+{% set who = buyer.partner_name if buyer and buyer.partner_name else none %}
+{% set sold_out = st and not st.remaining %}
+{% set hidden %}<input type="hidden" name="buyer" value="{{ buyer.id if buyer else '' }}"><input type="hidden" name="next" value="{{ next }}">{% endset %}
+<div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-sale{% if wh.pending %} hx-get="{{ next }}" hx-trigger="every 4s" hx-select="[data-sale]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  {% if kind or wh.pending or wh.status in ('sold', 'reserved') or wh.error %}
+  <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+    {% if kind %}<span class="pill {{ 'lvl-bargain' if mine or not buyer else 'lvl-fair' }}">{{ _("sold") if kind == 'sold' else _("reserved") }}</span>
+      {% if buyer %}<span class="sub">{{ _("to this buyer") if mine else _("to someone else") }}</span>{% endif %}{% endif %}
+    {% if wh.pending %}<span class="sub" style="color: var(--link)">{{ {'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}[wh.pending] }}</span>
+    {% elif wh.status in ('sold', 'reserved') %}<span class="pill">{{ _("willhaben: {status}", status=_("sold") if wh.status == 'sold' else _("reserved")) }}</span>
+    {% elif kind and wh.status != 'deleted' %}
+      <form method="post" action="/sold/{{ a.ad_id }}/willhaben" style="margin: 0">{{ hidden }}<input type="hidden" name="kind" value="{{ kind }}"><button class="chip" style="color: #B07800">{{ _("Mark on willhaben") }}</button></form>
+    {% endif %}
+  </span>
+  {% if wh.error and not wh.pending and not wh.reasons %}<span style="font-size: 13px; color: var(--destructive)">{{ wh.error }}</span>{% endif %}
+  {% endif %}
+  {% if wh.reasons and not wh.pending %}
+  <form method="post" action="/sold/{{ a.ad_id }}/willhaben" style="margin: 0; display: flex; flex-direction: column; gap: 6px">
+    {{ hidden }}<input type="hidden" name="kind" value="sold">
+    <span style="font-size: 13px; font-weight: 600; color: #B07800">{{ _("willhaben asks why the ad is sold. Pick a reason.") }}</span>
+    {% for r in wh.reasons %}<label style="display: flex; gap: 8px; align-items: center; font-size: 14px"><input type="radio" name="reason_id" value="{{ r.id }}" required>{{ r.label }}</label>{% endfor %}
+    <button class="chip primary">{{ _("Mark as sold on willhaben") }}</button>
+  </form>
+  {% endif %}
+  {% if not wh.pending %}
+  {% if sold_out %}<span class="sub">{{ _("All pieces are sold.") }}</span>
+  {% else %}
+    {% if kind != 'sold' %}
+    <form method="post" action="/sold/{{ a.ad_id }}/sell" style="margin: 0; display: flex; flex-direction: column; gap: 6px">
+      {{ hidden }}
+      {% if st %}<span style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px">
+        <label class="sub">{{ _("Pieces") }}<input class="field" type="number" name="pieces" value="1" min="1" max="{{ st.remaining }}" required></label>
+        <label class="sub">{{ _("Total price (€, optional)") }}<input class="field" inputmode="decimal" name="price" value="{{ ('%.2f'|format(p.agreed)).rstrip('0').rstrip('.') if p.agreed is not none else '' }}"></label></span>{% endif %}
+      <button class="chip primary" style="width: 100%" data-sell>{{ ui.icon('check', 14) }} {% if who %}{{ _("Sold to {name}", name=who) }}{% elif st %}{{ _("Record sale") }}{% else %}{{ _("Mark sold") }}{% endif %}</button>
+    </form>
+    {% endif %}
+    {% if kind == 'reserved' %}
+    <form method="post" action="/sold/{{ a.ad_id }}/unreserve" style="margin: 0">{{ hidden }}<button class="chip" style="width: 100%">{{ _("Remove reservation") }}</button></form>
+    {% elif kind != 'sold' %}
+    <form method="post" action="/sold/{{ a.ad_id }}/reserve" style="margin: 0">{{ hidden }}<button class="chip" style="width: 100%" data-reserve>{% if who %}{{ _("Reserve for {name}", name=who) }}{% else %}{{ _("Reserve") }}{% endif %}</button></form>
+    {% endif %}
+    {% if kind == 'sold' and not st %}
+    <form method="post" action="/sold/{{ a.ad_id }}/reset" style="margin: 0" hx-confirm="{{ _('Only here – willhaben cannot undo “sold”.') }}">{{ hidden }}<input type="hidden" name="kind" value="sold"><button class="chip danger" style="width: 100%">{{ _("Not sold after all") }}</button></form>
+    {% endif %}
+  {% endif %}
+  {% if kind and p.others %}
+  <a class="chip" style="display: flex; align-items: center; justify-content: center" href="/tg/sold/{{ a.ad_id }}?kind={{ kind }}{% if buyer %}&buyer={{ buyer.id }}{% endif %}">{{ _("Tell the other buyers ({n})", n=p.others) }}</a>
+  {% endif %}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# ---- a purchase order (_purchase.html) #}
+{% macro purchase(pc) %}
+{% set confirm_text = {"cancel": _("Cancel this purchase? The agent stops and writes no more."), "paid": _("Did you transfer the amount in your bank app? The seller is told in the chat."), "received": _("Did you receive the item?"), "collected": _("Did you collect the item and pay the cash?")} %}
+<div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-purchase>
+  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ pc.mode_label }}</span><span class="pill">{{ pc.status_label }}</span></span>
+  <span style="font-size: 15px">{{ pc.next }}</span>
+  {% if pc.pending %}<span class="sub" style="color: var(--link)">{{ _("Contacting the seller…") }}</span>{% endif %}
+  {% if pc.note %}<span class="sub">{{ pc.note }}</span>{% endif %}
+  {% if pc.pay_now %}
+  <div style="border-left: 3px solid #E2A400; background: rgba(226,164,0,.12); border-radius: 8px; padding: 8px 12px; font-size: 14px; display: flex; flex-direction: column; gap: 4px">
+    <strong style="color: #8A6200">{{ _("Pay now!") }}</strong>
+    {% if pc.mode == 'direct' and pc.payment %}
+    <span>{{ _("Recipient") }}: {{ pc.payment.holder or '–' }}</span><span>IBAN: <code>{{ pc.payment.iban_group }}</code></span>
+    <span>{{ _("Amount") }}: <strong>{{ pc.payment.amount|eur }}</strong>{% if pc.get('agreed_total') is not none %} · {{ _("Total incl. shipping") }} {{ pc.get('agreed_total')|eur }}{% endif %}</span>
+    <span>{{ _("Reference") }}: {{ pc.payment.reference or '–' }}</span>
+    <span class="sub">{{ _("Transfer it in your bank app, then press Paid. Nothing is paid automatically.") }}</span>
+    {% elif pc.mode == 'paylivery' %}<span>{{ _("Pay in the willhaben app, or on the chat page with the Buy now & pay button in the PayLivery card. The card fills in your saved card; you approve 3-D Secure on your phone, and the purchase then continues by itself. Nothing is paid automatically.") }}</span>{% endif %}
+  </div>
+  {% endif %}
+  {% if pc.status == 'meetup' and pc.pickup %}<span style="font-size: 14px"><strong>{{ _("Pickup") }}</strong> · {{ pc.pickup.start|replace('T', ' ') }}{% if pc.pickup.location %} · {{ pc.pickup.location }}{% endif %} · {{ _("{price} cash", price=(pc.agreed or pc.asking)|eur) }}</span>{% endif %}
+  <span class="sub">{{ _("Asking") }} {{ pc.asking|eur if pc.asking else '–' }} · {{ _("Your maximum") }} {{ pc.max_price|eur if pc.max_price else '–' }}{% if pc.agreed %} · <strong style="color: var(--ok)">{{ _("Agreed") }} {{ pc.agreed|eur }}</strong>{% endif %}</span>
+  {% if pc.actions %}
+  <div class="btnrow">
+    {% for a in pc.actions %}
+    <form method="post" action="/purchases/{{ pc.id }}/{{ a.name }}" style="margin: 0; display: flex; gap: 6px"{% if a.confirm %} hx-confirm="{{ confirm_text[a.name] }}"{% endif %}>
+      {% if a.input %}<input class="field" style="width: 100px; height: 34px; padding: 0 10px" type="number" name="value" min="1" step="0.01" value="{{ pc.max_price or '' }}" required placeholder="€">{% endif %}
+      <button class="chip{{ ' danger' if a.name == 'cancel' else '' if a.name in ('pause', 'resume', 'max_price') else ' primary' }}">{{ a.label }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if pc.get('questions') %}<details><summary class="sub">{{ _("Your questions") }}</summary>{% for q in pc.questions %}<p style="font-size: 14px; margin: 6px 0"><strong>{{ q.question }}</strong><br>{{ q.answer or _("(no answer yet)") }}</p>{% endfor %}</details>{% endif %}
+  {% if pc.log %}<details><summary class="sub">{{ _("History") }}</summary>{% for h in pc.log %}<p class="sub" style="margin: 4px 0">{{ (h.at or '')[:16]|replace('T', ' ') }} · {{ h.text }}</p>{% endfor %}</details>{% endif %}
+</div>
+{% endmacro %}
+
+{# ---- PayLivery (_paylivery.html) #}
+{% macro paylivery(pl, conv, back) %}
+<div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-paylivery{% if pl.busy %} hx-get="{{ back }}" hx-trigger="every 3s" hx-select="[data-paylivery]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span><span class="pill {{ 'lvl-bargain' if pl.stage in ('paid_out', 'received') else 'lvl-fair' if pl.actions else '' }}">{{ pl.stage_label }}</span></span>
+  {% if pl.busy %}<span class="sub" style="color: var(--link)">{{ _("working in the browser…") }} {{ pl.busy_label }}</span>{% endif %}
+  <span style="font-size: 14px">{{ pl.next }}</span>
+  {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<span class="sub">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</span>{% endif %}
+  <div class="btnrow">
+    {% for a in pl.actions %}
+    <form method="post" action="/chats/{{ conv.id }}/paylivery/{{ a.name }}" style="margin: 0; display: flex; gap: 6px; align-items: center"{% if a.confirm %} hx-confirm="{{ a.confirm }}"{% endif %}>
+      {% if a.input %}<input class="field" style="width: 90px; height: 34px; padding: 0 10px" type="number" name="amount" min="1" max="100000" step="0.01" value="{{ pl.offer or '' }}" required placeholder="€"{% if a.disabled %} disabled{% endif %}>{% endif %}
+      <button class="chip{{ ' primary' if a.name == 'buy' else '' }}"{% if a.disabled %} disabled{% endif %} data-pl="{{ a.name }}">{{ a.label }}{% if a.name == 'buy' and a.amount_text %} · {{ a.amount_text }}{% endif %}</button>
+      {% if a.disabled %}<span class="sub">{{ a.note }}</span>{% endif %}
+    </form>
+    {% endfor %}
+    {% if pl.label_saved and pl.shipment_id %}<a class="chip" style="display: inline-flex; align-items: center" href="/shipments/{{ pl.shipment_id }}/label.pdf" target="_blank" hx-boost="false">{{ _("Label") }}</a>{% endif %}
+    <a class="chip" style="display: inline-flex; align-items: center" href="{{ pl.open_url }}" target="_blank" hx-boost="false">{{ _("Open on willhaben") }} ↗</a>
+  </div>
+  {% if pl.history %}<details><summary class="sub">{{ _("History") }}</summary>{% for h in pl.history %}<p class="sub" style="margin: 4px 0">{{ h.at[:16]|replace('T', ' ') }} · {{ h.text }}</p>{% endfor %}</details>{% endif %}
+</div>
+{% endmacro %}
+
+{# ---- the calendar (chat page): the appointment found in the chat, into Google Calendar #}
+{% macro calendar(conv, meetup, duration) %}
+<div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-calendar>
+  {% if meetup and meetup.event_id %}
+    <span style="font-size: 14px"><strong>{{ _("In your calendar") }}</strong> · {{ meetup.start.replace('T', ' ') }}{% if meetup.location %} · {{ meetup.location }}{% endif %}</span>
+    <div class="btnrow">{% if meetup.event_link %}<a class="chip" style="display: inline-flex; align-items: center" href="{{ meetup.event_link }}" target="_blank" hx-boost="false">{{ _("Open") }} ↗</a>{% endif %}
+      <form method="post" action="/chats/{{ conv.id }}/calendar/forget" style="margin: 0"><button class="chip">{{ _("New appointment") }}</button></form></div>
+  {% elif meetup %}
+    <form method="post" action="/chats/{{ conv.id }}/calendar" style="margin: 0; display: flex; flex-direction: column; gap: 6px">
+      <label class="sub">{{ _("When") }}<input class="field" type="datetime-local" name="start" value="{{ meetup.start }}" required></label>
+      <span style="display: grid; grid-template-columns: 1fr 2fr; gap: 6px">
+        <label class="sub">{{ _("Minutes") }}<input class="field" type="number" name="minutes" value="{{ meetup.minutes or duration }}" min="5" max="480" step="5"></label>
+        <label class="sub">{{ _("Where") }}<input class="field" name="location" value="{{ meetup.location or '' }}"></label></span>
+      <input type="hidden" name="summary" value="{{ meetup.summary or '' }}">
+      <div class="btnrow"><button class="chip primary">{{ _("Add to calendar") }}</button>{% if conv.meetup %}<button class="chip" formaction="/chats/{{ conv.id }}/calendar/forget">{{ _("Not an appointment") }}</button>{% endif %}</div>
+    </form>
+  {% else %}
+    <form method="post" action="/chats/{{ conv.id }}/calendar/find" style="margin: 0"><button class="chip" style="width: 100%">{{ _("Find appointment in this chat") }}</button></form>
+    <span class="sub">{{ _("Claude reads the chat and fills in the calendar entry for you to check.") }}</span>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# ---- shipping (_shipping.html), with the chat page's shipping context #}
+{% macro shipping(conv, back) %}
+{% set st = {'draft': _('to prepare'), 'awaiting': _('paid – your go needed'), 'buying': _('buying label'), 'labelled': _('label created'), 'printed': _('printed'), 'sent': _('sent'), 'failed': _('failed'), 'discarded': _('discarded')} %}
+<div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-shipping{% if ship_detecting or shipment and shipment.status == 'buying' %} hx-get="{{ back }}" hx-trigger="every 4s" hx-select="[data-shipping]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  {% if shipment %}<span style="display: flex; justify-content: flex-end"><span class="pill">{{ st.get(shipment.status, shipment.status) }}</span></span>{% endif %}
+  {% if not ship_sender_ok %}<span style="font-size: 13px; color: #B07800">{{ _("Your sender address is missing:") }} <a href="/settings/shipping" hx-boost="false">{{ _("Settings → Shipping") }}</a></span>{% endif %}
+  {% if ship_detecting %}<span class="sub" style="color: var(--link)">{{ _("Claude is preparing the parcel from the chat…") }}</span>
+  {% elif not shipment %}
+    <form method="post" action="/chats/{{ conv.id }}/shipping/detect" style="margin: 0"><button class="chip" style="width: 100%">{{ _("Prepare parcel from this chat") }}</button></form>
+    <span class="sub">{{ _("Claude takes the buyer's address from the chat and estimates size and weight. When a buyer sends an address, this happens by itself.") }}</span>
+  {% else %}
+    {% set r = shipment.recipient or {} %}{% set p = shipment.parcel or {} %}
+    {% if shipment.note %}<span class="sub">{{ shipment.note }}</span>{% endif %}
+    <details{% if shipment.status == 'draft' and (not r.name or not p.weight_kg) %} open{% endif %}>
+      <summary style="font-size: 14px"><strong>{{ r.name or _('Address missing') }}</strong>{% if r.city %}, {{ r.zip }} {{ r.city }}{% endif %} · <span class="sub">{% if p.length_cm %}{{ p.length_cm }}×{{ p.width_cm }}×{{ p.height_cm }} cm, {{ p.weight_kg }} kg{% if p.source == 'claude' %} ({{ _("estimated") }}){% endif %}{% else %}{{ _("size missing") }}{% endif %}</span></summary>
+      <form method="post" action="/shipments/{{ shipment.id }}" style="margin: 8px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px">
+        {% for n, lbl, v in [('name', _("Name"), r.name), ('phone', _("Phone"), r.phone), ('street', _("Street"), r.street), ('house_no', _("No."), r.house_no), ('extra', _("Stair/door"), r.extra), ('zip', _("Postcode"), r.zip), ('city', _("City"), r.city), ('email', _("E-mail"), r.email)] %}
+        <input class="field" name="{{ n }}" value="{{ v or '' }}" placeholder="{{ lbl }}" aria-label="{{ lbl }}" autocomplete="off">{% endfor %}
+        {% for n, lbl, v, mn, mx, stp in [('length_cm', _("Length (cm)"), p.length_cm, 1, 300, 1), ('width_cm', _("Width (cm)"), p.width_cm, 1, 300, 1), ('height_cm', _("Height (cm)"), p.height_cm, 1, 300, 1), ('weight_kg', _("Weight (kg)"), p.weight_kg, 0.1, 40, 0.1)] %}
+        <input class="field" type="number" name="{{ n }}" value="{{ v or '' }}" placeholder="{{ lbl }}" aria-label="{{ lbl }}" min="{{ mn }}" max="{{ mx }}" step="{{ stp }}">{% endfor %}
+        <input type="hidden" name="contents" value="{{ p.contents or '' }}">
+        <button class="chip" style="grid-column: 1 / -1">{{ _("Save") }}</button>
+      </form>
+    </details>
+    {% if ship_option and ship_option.delivery == 'shop' and shipment.status not in ('sent', 'discarded') %}
+      <span style="font-size: 13px">{% if ship_shop %}{{ _("Parcel shop for the buyer:") }} <strong>{{ ship_shop.name }}</strong>, {{ ship_shop.address }}{% else %}<span style="color: #B07800">{{ _("No parcel shop found near the buyer – choose a door option, or pick the shop on the carrier's page.") }}</span>{% endif %}</span>
+      {% if ship_shops|length > 1 and shipment.status in ('draft', 'awaiting', 'failed') %}
+      <form method="post" action="/shipments/{{ shipment.id }}/shop" style="margin: 0; display: flex; gap: 6px">
+        <select class="field" name="shop" aria-label="{{ _('Parcel shop') }}">{% for s in ship_shops %}<option value='{{ {'name': s.name, 'address': s.address, 'id': s.id or ''}|tojson }}' {% if ship_shop and s.name == ship_shop.name and s.address == ship_shop.address %}selected{% endif %}>{{ s.name }}, {{ s.address }}{% if s.dist_m is not none %} · {{ fmt_dist(s.dist_m) }}{% endif %}</option>{% endfor %}</select>
+        <button class="chip">{{ _("Use") }}</button></form>
+      {% endif %}
+    {% endif %}
+    {% set via = {'manual': _('by hand'), 'paylivery': _('willhaben PayLivery'), 'email': _('e-mail'), 'bank': _('bank')} %}
+    <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px">
+      {% if shipment.paid_at %}<span style="color: var(--ok)">✓ {{ _("Paid") }}</span><span class="sub">{{ shipment.paid_at|ago }} ({{ via.get(shipment.paid_via, shipment.paid_via) }})</span>
+        {% if shipment.status in ('draft', 'awaiting') %}<form method="post" action="/shipments/{{ shipment.id }}/unpaid" style="margin: 0"><button class="chip">{{ _("undo") }}</button></form>{% endif %}
+      {% elif shipment.status in ('draft', 'awaiting') %}<form method="post" action="/shipments/{{ shipment.id }}/paid" style="margin: 0"><button class="chip">{{ _("Paid") }}</button></form><span class="sub">{% if shipment.agreed_price %}{{ _("agreed price:") }} {{ shipment.agreed_price|eur }} · {% endif %}{{ _("not paid yet") }}</span>{% endif %}
+    </span>
+    {% if shipment.payment_claimed_at and not shipment.paid_at %}<span class="sub">{{ _("The buyer writes that they have paid – check your account.") }}</span>{% endif %}
+    {% if ship_ask and shipment.status == 'awaiting' %}
+    <div style="border: 1px solid var(--btn); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px">
+      <strong style="font-size: 14px">{{ _("Paid – buy the label?") }}</strong>
+      <span class="sub">{% if ship_option %}{{ ship_option.label() }} · {{ ship_option.price|eur }} · {% endif %}{{ r.name }}, {{ r.zip }} {{ r.city }}</span>
+      {% if ship_blockers %}<span class="sub">{{ _("Not automatic because: {reasons}", reasons=ship_blockers|join(', ')) }}</span>{% endif %}
+      <div class="btnrow">
+        <form method="post" action="/shipments/{{ shipment.id }}/approve" style="margin: 0"><button class="chip primary"{% if not ship_sender_ok or not ship_option %} disabled{% endif %}>{{ ship_buy_title }}</button></form>
+        <form method="post" action="/shipments/{{ shipment.id }}/decline" style="margin: 0"><button class="chip">{{ _("Decline") }}</button></form>
+      </div>
+    </div>
+    {% endif %}
+    {% if shipment.approval == 'auto' and shipment.status == 'awaiting' and ship_grace_left is not none %}<span style="display: flex; gap: 6px; align-items: center; font-size: 14px">{{ _("Label will be bought in {n} min", n=ship_grace_left) }}<form method="post" action="/shipments/{{ shipment.id }}/cancel-auto" style="margin: 0"><button class="chip">{{ _("Cancel") }}</button></form></span>{% endif %}
+    {% if shipment.status == 'buying' %}<span style="font-size: 14px">{{ _("Buying the label on the carrier's website …") }}</span>{% elif shipment.status == 'failed' %}<span style="font-size: 14px; color: var(--destructive)">{{ shipment.error or _("The label could not be bought.") }}</span>{% endif %}
+    {% if shipment.status in ('buying', 'failed') %}<div class="btnrow"><form method="post" action="/shipments/{{ shipment.id }}/retry" style="margin: 0"><button class="chip primary">{{ _("Retry") }}</button></form>
+      {% if shipment.paid_price is not none and not shipment.label_path %}<form method="post" action="/shipments/{{ shipment.id }}/retry" style="margin: 0" hx-confirm="{{ _('Buy the label again? Only if the carrier did not charge the first purchase.') }}"><input type="hidden" name="rebuy" value="1"><button class="chip">{{ _("Not charged – buy again") }}</button></form>{% endif %}</div>{% endif %}
+    {% if ship_options %}
+    {% if ship_pref %}<span class="sub">{{ _("Preference: {pref}", pref=ship_pref) }}</span>{% endif %}
+    <span class="sub">{{ _("Sort:") }} <a href="{{ back }}?sort=price">{{ _("cheapest") }}</a> · <a href="{{ back }}?sort=near">{{ _("nearest drop-off") }}</a></span>
+    {% set cheapest = ship_options|map(attribute='price')|min %}
+    <div style="display: flex; flex-direction: column">
+      {% for o in ship_options %}
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border-top: 1px solid var(--sep); padding: 7px 0; font-size: 14px{{ '; font-weight: 600' if ship_option and o.key == ship_option.key else '' }}" data-opt>
+        <span style="min-width: 0">{{ o.label() }}{% if o.price == cheapest %} <span class="pill lvl-bargain">{{ _("cheapest") }}</span>{% endif %}<br><span class="sub" style="font-weight: 400">{% set pts = ship_near.get(o.carrier) or [] %}{% if pts %}{{ pts[0].name }}, {{ pts[0].address }} · {{ fmt_dist(pts[0].dist_m) }}{% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}</span></span>
+        <span style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px">{{ o.price|eur }}
+          {% if shipment.status == 'draft' and o.online %}<form method="post" action="/shipments/{{ shipment.id }}/label" style="margin: 0"><input type="hidden" name="key" value="{{ o.key }}"><button class="chip{{ ' primary' if loop.first else '' }}"{% if not ship_sender_ok or not r.name %} disabled{% endif %}>{{ _("Create label") }}</button></form>
+          {% elif shipment.status == 'awaiting' and o.online and o.key != shipment.option %}<form method="post" action="/shipments/{{ shipment.id }}/option" style="margin: 0"><input type="hidden" name="key" value="{{ o.key }}"><button class="chip">{{ _("Use") }}</button></form>
+          {% elif not o.online %}<span class="sub">{{ _("at the counter") }}</span>{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% elif p.length_cm %}<span style="font-size: 14px">{{ _("No enabled carrier takes a parcel this size or weight.") }}</span>{% endif %}
+    <div class="btnrow">
+      {% if shipment.label_path %}<a class="chip" style="display: inline-flex; align-items: center" href="/shipments/{{ shipment.id }}/label.pdf" target="_blank" hx-boost="false">{{ _("Label") }}</a>
+        <form method="post" action="/shipments/{{ shipment.id }}/print" style="margin: 0"><button class="chip" name="which" value="auto">{{ _("Print") }}</button></form>{% endif %}
+    </div>
+    {% if shipment.printed_at %}<span class="sub">{{ _("printed {at} (job {job})", at=shipment.printed_at|local, job=(shipment.print_job or '').rsplit('#', 1)[-1] or '–') }}</span>{% endif %}
+    {% if shipment.status != 'sent' %}<form method="post" action="/shipments/{{ shipment.id }}/status" style="margin: 0; display: flex; gap: 6px"><input type="hidden" name="status" value="sent"><input class="field" name="tracking" placeholder="{{ _('Tracking number (optional)') }}" value="{{ shipment.tracking or '' }}"><button class="chip">{{ _("Sent") }}</button></form>
+    {% elif shipment.tracking %}<span class="sub">{{ _("Tracking:") }} <code>{{ shipment.tracking }}</code></span>{% endif %}
+    <form method="post" action="/shipments/{{ shipment.id }}/status" style="margin: 0" hx-confirm="{{ _('Discard') }}?"><input type="hidden" name="status" value="discarded"><button class="chip danger">{{ _("Discard") }}</button></form>
+  {% endif %}
+</div>
+{% endmacro %}

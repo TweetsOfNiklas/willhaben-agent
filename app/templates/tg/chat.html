@@ -14,7 +14,12 @@
       {% if presence and presence.online %}<span style="font-size: 12px; color: var(--ok)">{{ _("online") }}</span>{% elif presence and presence.last_seen %}<span class="sub">{{ _("last online {ago}", ago=presence.last_seen|ago) }}</span>{% endif %}</span>
     <span class="sub trunc">{{ conv.ad_title or '' }}{% if ad.price %} · {{ ad.price }}{% endif %}{% if conv.role %} · {{ _("Selling") if conv.role == 'seller' else _("Buying") }}{% endif %}{% if place %} · {{ place }}{% endif %}</span>
   </span>
+  <a href="/tg/chats/{{ conv.id }}/info" class="chip" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0" data-info aria-label="{{ _('Details') }}">{{ ui.icon('dots', 16, 2) }}</a>
 </div>
+{# something to do outside the thread (PayLivery, the sale, shipping): one line to the details #}
+{% set pl = paylivery_card(conv) %}{% set pc = purchase_card(conv) %}
+{% if pl and (pl.actions or pl.busy) or pc and (pc.actions or pc.pay_now) %}<a href="/tg/chats/{{ conv.id }}/info" style="display: block; background: rgba(31,116,186,.12); color: var(--link); font-size: 13.5px; padding: 8px 14px; border-bottom: 1px solid var(--sep)" data-todo>
+  {% if pl and (pl.actions or pl.busy) %}<b>PayLivery:</b> {{ pl.stage_label }}{% if pl.actions %} – {{ pl.actions|map(attribute='label')|join(' / ') }}{% endif %}{% else %}<b>{{ _("Purchase order") }}:</b> {{ pc.status_label }}{% endif %} ›</a>{% endif %}
 
 {# the messages, newest at the bottom; refreshed by themselves #}
 <div id="tg-thread" hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 8s" hx-select="#tg-thread" hx-swap="outerHTML" hx-disinherit="*"
@@ -31,51 +36,57 @@
   {% endif %}
 </div>
 
-{# the composer: Claude's draft to edit, or my own text; Telegram's main button sends #}
+{# the composer: Claude's draft to edit, or my own text; Telegram's main button sends (the dashboard's endpoints) #}
 <div id="tg-composer" style="background: var(--section); border-top: 1px solid var(--sep); padding: 10px 14px calc(12px + env(safe-area-inset-bottom))"
      {% if conv.drafting %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
   <div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px">
   {% if conv.drafting %}
     <span style="display: flex; align-items: center; gap: 8px; color: var(--link); font-size: 14px">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude is writing an answer…") }}</span>
+    <span class="sub">{{ _("Takes 10–60 seconds – you can leave the chat.") }}</span>
   {% elif sending %}
     <span class="sub">{{ _("Your answer is on its way.") }}</span>
   {% else %}
-    {% if draft %}<span style="display: flex; align-items: center; justify-content: space-between"><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--link)">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude's draft") if draft.model and draft.model not in ('telegram', 'template', 'manual') else _("Draft") }}</span>{% if draft.intent %}<span class="sub">{{ intent_label(draft.intent) }}</span>{% endif %}</span>{% endif %}
+    {% if draft %}{% set scam = draft.intent == 'scam_suspect' %}
+    <span style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap"><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--link)">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude's draft") if draft.model and draft.model not in ('telegram', 'template', 'manual') else _("Draft") }}</span>
+      <span class="sub">{% set sep = joiner(' · ') %}{% if draft.intent %}{{ sep() }}{{ intent_label(draft.intent) }}{% endif %}{% if draft.suggested_price %}{{ sep() }}{{ _("Price {price}", price=draft.suggested_price|eur) }}{% endif %}{% if draft.auto %}{{ sep() }}{{ _("automatic") }}{% endif %}</span></span>
     {# what to check before sending (Claude's open points and notes), as on the chat page #}
-    {% if notes %}<div style="border: 1px solid #E8C25A; background: rgba(226,164,0,.12); border-radius: 12px; padding: 8px 12px; font-size: 13.5px" data-notes>
-      <strong style="color: #8A6200">{{ _("Check before sending") }}</strong>{% for n in notes %}<br>{{ n }}{% endfor %}</div>{% endif %}
-    {% set step = paylivery_step(draft, conv) if draft else none %}{% if step %}<div class="sub" data-paylivery>{{ ui.icon('card', 13, 2) }} {{ _("PayLivery step: {step}", step=step.label) }} – {{ _("open the chat in the browser to run it") }}</div>{% endif %}
-    <form method="post" action="/tg/chats/{{ conv.id }}/send" id="tg-send" style="margin: 0; display: flex; flex-direction: column; gap: 8px">
-      {% if draft %}<input type="hidden" name="draft_id" value="{{ draft.id }}">{% endif %}
+    {% if scam or notes or contact_warn %}<div style="border: 1px solid {{ '#E5484D' if scam else '#E8C25A' }}; background: {{ 'rgba(229,72,77,.1)' if scam else 'rgba(226,164,0,.12)' }}; border-radius: 12px; padding: 8px 12px; font-size: 13.5px" data-notes>
+      <strong style="color: {{ 'var(--destructive)' if scam else '#8A6200' }}">{{ _("Caution: possible scam attempt.") if scam else _("Check before sending") }}</strong>{% for n in notes %}<br>{{ n }}{% endfor %}
+      {% if contact_warn %}<br>{{ _("willhaben censors e-mail addresses and links – remove: {hits}", hits=contact_warn|join(', ')) }}{% endif %}</div>{% endif %}
+    {% if draft.meetup %}<span class="sub">{{ ui.icon('calendar', 13, 2) }} {{ _("This answer fixes an appointment: {when}", when=draft.meetup.start.replace('T', ' ')) }}{% if draft.meetup.location %} · {{ draft.meetup.location }}{% endif %}</span>{% endif %}
+    {% endif %}
+    <form method="post" action="{{ '/drafts/' ~ draft.id ~ '/send' if draft else '/chats/' ~ conv.id ~ '/send-direct' }}" id="tg-send" style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+      {% if draft %}<input type="hidden" name="now" value="1">{% endif %}
       <label for="tg-text" style="position: absolute; width: 1px; height: 1px; overflow: hidden">{{ _("Answer") }}</label>
-      <textarea id="tg-text" name="text" rows="2" placeholder="{{ _('Message') }}" style="width: 100%; border: 1px solid var(--sep); border-radius: 12px; background: var(--chip); padding: 9px 12px; font-size: 15px; resize: none; field-sizing: content; max-height: 40vh">{{ draft.text if draft else '' }}</textarea>
+      <textarea id="tg-text" name="{{ 'text' if draft else 'hint' }}" rows="2" placeholder="{{ _('Message') }}" style="width: 100%; border: 1px solid var(--sep); border-radius: 12px; background: var(--chip); padding: 9px 12px; font-size: 15px; resize: none; field-sizing: content; max-height: 40vh">{{ draft.text if draft else '' }}</textarea>
+      {% if draft and draft.error %}<span style="font-size: 13px; color: var(--destructive)">{{ draft.error }}</span>{% endif %}
+      {# Claude's PayLivery step for the open offer: runs on willhaben together with Send #}
+      {% set step = paylivery_step(draft, conv) if draft else none %}
+      {% if step and step.busy %}<span class="sub" style="color: var(--link)" data-paylivery-busy><b>PayLivery:</b> {{ _("{step} is running on willhaben…", step=step.busy) }}</span>
+      {% elif step %}<label style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13.5px; background: rgba(31,116,186,.1); border-radius: 10px; padding: 8px 12px" data-paylivery-step>
+        <input type="checkbox" name="paylivery_step" value="{{ step.action }}" checked><span><b>PayLivery:</b> {{ step.label }}{% if not step.input %} · {{ _("offer {amount}", amount=step.offer|eur) }}{% endif %}</span>
+        {% if step.input %}<input class="field" style="width: 90px; height: 32px; padding: 0 8px" type="number" name="pl_amount" min="1" max="100000" step="0.5" value="{{ step.amount }}" aria-label="{{ _('Counter offer amount in euros') }}"> <span class="sub">€ · {{ _("their offer {amount}", amount=step.offer|eur) }}</span>{% endif %}</label>
+      {% endif %}
     </form>
+    {% if draft %}
     <div style="display: flex; gap: 6px; overflow-x: auto">
-      {% if draft %}{% for a in draft.alternatives or [] %}
-      <form method="post" action="/tg/chats/{{ conv.id }}/revise" style="margin: 0"><input type="hidden" name="draft_id" value="{{ draft.id }}"><input type="hidden" name="instruction" value="{{ a.instruction }}"><button class="chip" title="{{ a.instruction }}">{{ a.label }}</button></form>
-      {% endfor %}{% endif %}
-      {% if draft %}<form method="post" action="/tg/chats/{{ conv.id }}/mark-sent" style="margin: 0"><input type="hidden" name="draft_id" value="{{ draft.id }}"><button class="chip" title="{{ _('Sent it yourself elsewhere: stored as sent, nothing goes out') }}">{{ ui.icon('check', 12, 2) }} {{ _("Sent manually") }}</button></form>
-      <form method="post" action="/tg/chats/{{ conv.id }}/discard" style="margin: 0"><input type="hidden" name="draft_id" value="{{ draft.id }}"><button class="chip danger">{{ _("Discard") }}</button></form>{% endif %}
+      {% for a in draft.alternatives or [] %}
+      <form method="post" action="/drafts/{{ draft.id }}/revise" style="margin: 0"><input type="hidden" name="instruction" value="{{ a.instruction }}"><button class="chip" title="{{ a.instruction }}">{{ a.label }}</button></form>
+      {% endfor %}
+      <form method="post" action="/drafts/{{ draft.id }}/mark-sent" style="margin: 0"><button class="chip" title="{{ _('Sent it yourself elsewhere: stored as sent, nothing goes out') }}">{{ ui.icon('check', 12, 2) }} {{ _("Sent manually") }}</button></form>
+      <form method="post" action="/drafts/{{ draft.id }}/discard" style="margin: 0"><button class="chip danger">{{ _("Discard") }}</button></form>
+      {% if step and not step.busy %}<form method="post" action="/chats/{{ conv.id }}/paylivery/{{ step.action }}" style="margin: 0" hx-confirm="{{ _('Run only the PayLivery step on willhaben now, without sending the answer?') }}"><button class="chip">{{ _("Only PayLivery: {step}", step=step.label) }}</button></form>{% endif %}
     </div>
+    {% endif %}
     {# a new draft from my own instruction (or the first one) #}
-    <form method="post" action="/tg/chats/{{ conv.id }}/draft" style="margin: 0; display: flex; gap: 6px">
+    <form method="post" action="/chats/{{ conv.id }}/draft" style="margin: 0; display: flex; gap: 6px">
       <label for="tg-hint" style="position: absolute; width: 1px; height: 1px; overflow: hidden">{{ _("Instruction for Claude") }}</label>
       <input id="tg-hint" name="hint" placeholder="{{ _('Instruction, e.g. counter-offer €180, pickup Saturday') }}" style="flex: 1; min-width: 0; height: 36px; border: 1px solid var(--sep); border-radius: 18px; background: var(--chip); padding: 0 12px; font-size: 14px">
       <button class="chip" style="height: 36px">{{ ui.icon('sparkle', 12, 2) }} {{ _("Redraft") if draft else _("Draft with Claude") }}</button>
     </form>
+    {% if conv.draft_error and not draft %}<span style="font-size: 13px; color: var(--destructive)">{{ conv.draft_error }}</span>{% endif %}
     <button class="mainbtn tg-hide" form="tg-send">{{ _("Send") }}</button>
   {% endif %}
-  {# the chat's actions (the menu on the chat page) #}
-  <details style="margin-top: 4px" data-chat-actions>
-    <summary class="sub" style="cursor: pointer; list-style: none; text-align: center; padding: 4px">{{ _("More") }} ▾</summary>
-    <div class="sec" style="margin-top: 8px; border: 1px solid var(--sep)">
-      <form method="post" action="/tg/chats/{{ conv.id }}/finished" style="margin: 0"><input type="hidden" name="finished" value="{{ '0' if finished else '1' }}"><button class="cell"><span class="body"><span>{{ _("Open again") if finished else _("Mark as finished") }}</span>{{ ui.icon('check', 15, 2) }}</span></button></form>
-      <form method="post" action="/tg/chats/{{ conv.id }}/unread" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Mark as unread") }}</span></span></button></form>
-      <form method="post" action="/tg/chats/{{ conv.id }}/hide" style="margin: 0"><input type="hidden" name="hidden" value="{{ '0' if conv.hidden_at else '1' }}"><button class="cell"><span class="body"><span>{{ _("Show in list again") if conv.hidden_at else _("Hide from this list only") }}</span></span></button></form>
-      <a class="cell" href="{{ 'https://www.vinted.at/inbox/' ~ conv.id if conv.platform == 'vinted' else 'https://www.willhaben.at/iad/myprofile/chat/' ~ conv.id }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=platform_name(conv.platform or 'willhaben')) }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
-      <a class="cell" href="/chats/{{ conv.id }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open in the browser") }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
-    </div>
-  </details>
   </div>
 </div>
 </main>

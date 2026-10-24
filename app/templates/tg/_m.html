@@ -51,3 +51,10 @@
   {% if b.lane %}<div style="position: relative; height: 16px; margin-top: {{ '14px' if b.band else '8px' }}; font-size: 11.5px; color: var(--hint)">{% for l in b.lane if not l.from_px or l.from_px <= 360 %}<span style="position: absolute; left: {{ l.x }}%; transform: translateX({{ {'c': '-50%', 'l': '0', 'r': '-100%'}[l.anchor] }}); white-space: nowrap">{{ l.text }}</span>{% endfor %}</div>{% endif %}
 </div>
 {%- endmacro %}
+
+{# one of Claude's questions (ui.question): options as chips, or an own answer #}
+{% macro question(q) -%}
+<fieldset style="margin: 0; border: 0; padding: 0; display: flex; flex-direction: column; gap: 6px"><legend style="font-weight: 600; font-size: 14px; margin-bottom: 4px">{{ q.text }}</legend>
+  <span class="btnrow">{% for o in q.options %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="radio" name="q_{{ q.id }}" value="{{ o }}">{{ o }}</label>{% endfor %}</span>
+  <input class="field" name="t_{{ q.id }}" maxlength="200" placeholder="{{ _('other answer') }}" aria-label="{{ q.text }} – {{ _('other answer') }}"></fieldset>
+{%- endmacro %}

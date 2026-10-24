@@ -1,20 +1,37 @@
 {% extends "tg/_base.html" %}
 {% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
 {% block title %}{{ _("My ads") }}{% endblock %}
+{# the dashboard's list (main.myads_page): active (and recently expired), deactivated, sold / reserved; update from
+   willhaben; a row opens the ad #}
 {% block page %}
+{% set show = 'sold' if show_sold else 'inactive' if show_inactive else 'active' %}
 <main data-back="/tg">
 {{ m.head(_("My ads")) }}
 <div class="wrap">
+  <nav class="seg" aria-label="{{ _('My ads') }}">
+    <a href="/tg/myads?show=active"{% if show == 'active' %} aria-current="page"{% endif %} style="font-size: 13px">{{ _("Active") }} · {{ active_count }}</a>
+    <a href="/tg/myads?show=inactive"{% if show == 'inactive' %} aria-current="page"{% endif %} style="font-size: 13px">{{ _("Deactivated") }} · {{ inactive_count }}</a>
+    <a href="/tg/myads?show=sold"{% if show == 'sold' %} aria-current="page"{% endif %} style="font-size: 13px">{{ _("Sold / reserved") }} · {{ sold_count }}</a>
+  </nav>
+  <div class="btnrow" style="margin: 8px 0 0">
+    <form method="post" action="/myads/check" style="margin: 0"><button class="chip">{{ ui.icon('refresh', 13, 2) }} {{ _("Update from willhaben") }}</button></form>
+    <a class="chip" style="display: inline-flex; align-items: center" href="/tg/new-ad">{{ ui.icon('plus', 13, 2) }} {{ _("New ad") }}</a>
+    {% if hidden_count %}<a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads?show={{ show }}{{ '' if show_hidden else '&hidden=1' }}">{{ _("Hide hidden ads") if show_hidden else _("Show {n} hidden ads", n=hidden_count) }}</a>{% endif %}
+  </div>
   {% if ads %}
   <div class="sec" style="margin-top: 12px">
-    {% for a in ads %}
-    <a class="cell" href="{{ a.url or '#' }}" target="_blank" hx-boost="false" style="padding-top: 8px; align-items: flex-start" data-myad="{{ a.ad_id }}">
-      {% if a.image_url %}<img class="thumb" src="{{ a.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px{{ '; filter: grayscale(1); opacity: .6' if a.status in ('sold', 'expired') else '' }}" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
+    {% for a in ads %}{% set st = stock_of(a) %}
+    <a class="cell" href="/tg/myads/{{ a.ad_id }}" style="padding-top: 8px; align-items: flex-start" data-myad="{{ a.ad_id }}">
+      {% if a.image_url %}<img class="thumb" src="{{ a.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px{{ '; filter: grayscale(1); opacity: .6' if a.status in ('sold', 'expired') or a.sale_status else '' }}" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
       <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 8px">
         <span class="trunc" style="font-size: 15px; font-weight: 500">{{ a.heading or a.ad_id }}</span>
-        <span style="display: flex; gap: 6px; flex-wrap: wrap"><span class="pill">{{ myad_status(a.status) }}</span>{% if a.sale_status %}<span class="pill">{{ _("reserved") if a.sale_status == 'reserved' else _("sold") }}</span>{% endif %}{% if a.auto_reply %}<span class="pill">{{ _("automatic answers") }}</span>{% endif %}</span>
-        {% if a.end_date and a.status == 'active' %}<span class="sub">{{ _("runs until {date}", date=a.end_date|local('%d.%m.')) }}</span>{% endif %}
-      </span>
+        <span style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
+          {% if a.pending_action %}<span class="pill" style="color: var(--link)">{{ _("In progress…") }}</span>
+          {% elif a.sale_status %}<span class="pill lvl-fair">{{ _("reserved") if a.sale_status == 'reserved' else _("sold") }}</span>
+          {% else %}<span class="pill">{{ myad_status(a.status) }}</span>{% endif %}
+          {% if a.auto_reply %}<span class="pill">{{ _("automatic answers") }}</span>{% endif %}{% if a.auto_renew %}<span class="pill">{{ _("Auto-renew") }}</span>{% endif %}{% if a.hidden %}<span class="pill">{{ _("hidden") }}</span>{% endif %}</span>
+        <span class="sub">{% if a.price_display is defined and a.price_display %}{{ a.price_display }} · {% endif %}{{ a.end_date|ago }}{% if st %} · {{ _("{left}/{total} pcs", left=st.remaining, total=st.quantity) }}{% endif %}</span>
+      </span>{{ m.chev() }}
     </a>
     {% endfor %}
   </div>
