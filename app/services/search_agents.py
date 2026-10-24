@@ -770,21 +770,22 @@ async def _run_agent(agent_id: int) -> RunResult:
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
-    # Claude checks the products before the rule and the screening use their prices (and, with room to spare, older
-    # unchecked hits of the agent: no Claude call when there are none)
-    if gh_check:
-        from app.services import geizhals_check
+    # held back anyway: no Claude call – unless Claude is to check the product the rule judged by (the screening's call
+    # does that too: geizhals_check.SCREEN_RULES)
+    from app.services import geizhals_check
 
-        await geizhals_check.check(agent, to_notify)
-    to_screen = [h for h in to_notify if geizhals_passes(agent, h) and distance_passes(agent, h)]   # held back anyway: no Claude call
+    to_screen = [h for h in to_notify if distance_passes(agent, h)
+                 and (geizhals_passes(agent, h) or gh_check and geizhals_check.unchecked(h.geizhals))]
     # first those held back before (filtered or pending, no verdict yet), which get into New only judged. A check
     # sends at most screening.MAX_PER_RUN; a hit beyond that stays unjudged (pending) and gets no push (10-14 they
     # were pushed unjudged: 30 off-topic Vinted ads in a day)
     to_screen.sort(key=lambda h: (bool(h.quiet), not (h.state in ("filtered", PENDING) and h.screen_relevant is None
                                                        and h.id not in fresh)))   # quiet ones last
     asked: set[int] = set()
-    if agent.screen and to_screen:      # Claude: right item? good deal? (a new price is a new deal)
+    if agent.screen and to_screen:      # Claude: right item? good deal? right Geizhals product?
         asked = await screening.screen_all(agent_id, to_screen)
+    if gh_check and not asked:          # no screening call: the products alone (the held back, older unchecked hits)
+        await geizhals_check.check(agent, to_notify)
     if _holds(agent) and to_notify:
         _file_screened(agent, res.new if notify_new else [], res.price_drops, asked)
     if res.quiet:

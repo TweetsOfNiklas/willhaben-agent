@@ -21,7 +21,7 @@ from app.services import ad_images, scam
 from app.services.ad_images import MAX_IMAGE_BYTES  # noqa: F401  (re-exported)
 from app.i18n import LANGS, background_lang, t
 from app.llm.base import LLMError, get_backend
-from app.llm.prompts import SCREEN_SCHEMA, screen_prompt, screen_system
+from app.llm.prompts import SCREEN_GH_SCHEMA, SCREEN_SCHEMA, screen_prompt, screen_system
 from app.services.ad_creator import price_stats
 from app.services import timeline
 
@@ -130,9 +130,16 @@ def _site_name(pid: str | None) -> str:
         return pid or "willhaben"
 
 
-def _system(sites: list[str]) -> str:
+def _system(sites: list[str], check_geizhals: bool = False) -> str:
     """The system prompt for the sites of this batch: one site with its country, several named together (a
-    multi-site agent's hits are not all from its main site)."""
+    multi-site agent's hits are not all from its main site); with `check_geizhals` also the Geizhals check's rules."""
+    from app.services import geizhals_check
+
+    base = _site_system(sites)
+    return base + geizhals_check.SCREEN_RULES if check_geizhals else base
+
+
+def _site_system(sites: list[str]) -> str:
     from app import platforms
 
     known = []
@@ -171,8 +178,12 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         agent = db.get(SearchAgent, agent_id)
     if agent is None or not agent.screen or not hits:
         return 0
+    from app.services import geizhals_check
+
     hits = hits[:MAX_PER_CALL]
     timeline.update_context(hit_ids=[h.id for h in hits])
+    # with "Check the Geizhals product" the same call checks the product the app found (one call instead of two)
+    check = [nr for nr, h in enumerate(hits, 1) if agent.geizhals_check and geizhals_check.unchecked(h.geizhals)]
     stats = _stats(agent_id, {h.id for h in hits})
     lang = LANGS.get(background_lang(), "Deutsch")
     sites = list(dict.fromkeys(h.platform or "willhaben" for h in hits))
@@ -187,6 +198,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                           "location": h.location, "private": h.is_private, "description": h.body,
                           "condition": condition.shown(h.item_condition, h.item_condition_label, h.platform) or None,
                           "new_price": _new_price(h),
+                          **({"check_geizhals": (h.geizhals or {}).get("name") or ""} if nr in check else {}),
                           "shipping": shipping_info.prompt_line(h.shipping_price, h.shipping)
                           if h.shipping_price is not None or h.shipping else None,
                           **({"site": _site_name(h.platform)} if len(sites) > 1 else {}),
@@ -196,8 +208,9 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         prompt = screen_prompt(agent_name=agent.name, brief=agent.screen_brief or "", hits=items, stats=stats,
                                language=lang)
         try:
-            system = _system(sites)
-            result = await get_backend("screen").complete(system=system, prompt=prompt, schema=SCREEN_SCHEMA,
+            system = _system(sites, bool(check))
+            result = await get_backend("screen").complete(system=system, prompt=prompt,
+                                                          schema=SCREEN_GH_SCHEMA if check else SCREEN_SCHEMA,
                                                           images=images)
         except LLMError as e:
             log.warning("screening failed for agent %s: %s", agent_id, e)
@@ -224,6 +237,11 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
             db.add(row)
             judged += 1
         db.commit()
+    if check:               # the product check's answers: right ones kept, wrong ones looked for
+        nrs = [nr for nr in check if nr in by_nr]
+        await geizhals_check.settle(agent, [hits[nr - 1] for nr in nrs],
+                                    {i: {"ok": by_nr[nr].get("geizhals_ok"), "product": by_nr[nr].get("product"),
+                                         "queries": by_nr[nr].get("queries")} for i, nr in enumerate(nrs, 1)})
     for h in hits:          # callers keep using their objects
         with session() as db:
             fresh = db.get(Hit, h.id)

@@ -189,7 +189,8 @@ def test_drawer_switch_saves_only_with_screening(agent):
 
 async def test_agent_run_checks_before_the_rule(monkeypatch):
     """A screening agent with the switch and the 30 % rule: the automatic product (the dear Pro 24, 740 €) would let a
-    350 € ad through as 53 % below; Claude's product (407 €) holds it back. Without the switch nothing is checked."""
+    350 € ad through as 53 % below; Claude's product (407 €) holds it back. The check is part of the screening's call
+    (one call, a second only to pick the product it looked for). Without the switch nothing is checked."""
     from app import platforms
     from app.services import search_agents
     from tests.fake_platform import FakePlatform, listing
@@ -206,17 +207,16 @@ async def test_agent_run_checks_before_the_rule(monkeypatch):
         async def notify(*a, **kw):
             return True
 
-        async def screen(agent_id, hits):
-            return 0
-
+        verdict = {"relevant": True, "deal": "good", "issues": [], "reason": "Passt."}
         monkeypatch.setattr(deals, "geizhals_match", match)
         monkeypatch.setattr(geizhals_check, "_candidates", candidates)
         monkeypatch.setattr(search_agents, "notify", notify)
-        monkeypatch.setattr(search_agents.screening, "screen", screen)
-        fake = Script({"results": [{"nr": 1, "ok": False, "product": "Ubiquiti UniFi Switch 24 PoE",
+        fake = Script({"results": [{"nr": 1, **verdict, "geizhals_ok": False, "product": "Ubiquiti UniFi Switch 24 PoE",
                                     "queries": ["USW-24-POE"]}]},
-                      {"results": [{"nr": 1, "pick": 1}]})
+                      {"results": [{"nr": 1, "pick": 1}]},
+                      {"results": [{"nr": 1, **verdict}]})
         monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: fake)
+        monkeypatch.setattr(search_agents.screening, "get_backend", lambda *a: fake)
         a = search_agents.create_agent("https://fake.example/s/unifi")
         fake_site.pages = [[]]
         await search_agents.run_agent(a.id)                                   # baseline
@@ -231,6 +231,8 @@ async def test_agent_run_checks_before_the_rule(monkeypatch):
             h = db.exec(select(Hit).where(Hit.agent_id == a.id)).one()
         assert h.geizhals["by"] == "claude" and h.geizhals["price_from"] == 406.87
         assert h.state == "filtered" and len(fake.calls) == 2              # 350 € is only 14 % below 407 €
+        assert "geizhals_ok" in fake.calls[0]["system"] and "prüfe das Produkt" in fake.calls[0]["prompt"]
+        assert h.screen_deal == "good"                                     # judged in the same call
 
         with session() as db:
             row = db.get(SearchAgent, a.id)
@@ -240,7 +242,7 @@ async def test_agent_run_checks_before_the_rule(monkeypatch):
         fake_site.pages = [[listing("1", "Ubiquiti UniFiSwitch 24 PoE USW-24-POE", 350.0),
                             listing("2", "Ubiquiti UniFiSwitch 24 PoE", 340.0)]]
         await search_agents.run_agent(a.id)
-        assert len(fake.calls) == 2                                          # switched off: no check
+        assert len(fake.calls) == 3 and "geizhals_ok" not in fake.calls[2]["system"]   # switched off: no check
     finally:
         platforms.reset()
 

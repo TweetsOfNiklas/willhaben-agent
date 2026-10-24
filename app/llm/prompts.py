@@ -1,6 +1,7 @@
 """Prompts and output schemas for chat replies, ad drafts, screening and the product search."""
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -636,13 +637,22 @@ SCREEN_SCHEMA: dict[str, Any] = {
 }
 
 
+# the screening with the Geizhals check (app/services/geizhals_check.py SCREEN_RULES): three answers more per hit
+SCREEN_GH_SCHEMA: dict[str, Any] = json.loads(json.dumps(SCREEN_SCHEMA))
+_gh_item = SCREEN_GH_SCHEMA["properties"]["results"]["items"]
+_gh_item["properties"].update({"geizhals_ok": {"type": "boolean"}, "product": {"type": "string"},
+                               "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 3}})
+_gh_item["required"] += ["geizhals_ok", "product", "queries"]
+
+
 def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], stats: dict[str, Any] | None,
                   language: str) -> str:
     """hits: [{nr, title, price, location, private, description, photo, site, condition, new_price}] where photo is a
     file name or None, site the hit's site name, only in a batch from several sites (each hit's country, distance and
     price level), condition the condition the site states and new_price {name, price, pct, level} the Geizhals
     product with its lowest price, the hit's price in % of it and the label of the person's zones (or None), shipping
-    the shipping line (app/platforms/shipping_info.prompt_line) when the site states anything."""
+    the shipping line (app/platforms/shipping_info.prompt_line) when the site states anything; check_geizhals (the
+    product's name, "" for none found) marks a product the app found by itself for Claude to check."""
     lines = [f"Suchagent: {agent_name}", "", "Was die Person genau sucht:", brief.strip() or "(keine Beschreibung – nach dem Namen des Suchagenten urteilen)"]
     if stats:
         lines += ["", f"Vergleichspreise bisheriger Treffer dieses Suchagenten ({stats['count']} Anzeigen): "
@@ -658,9 +668,13 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
             lines.append(f"    Zustand laut Anzeige: {h['condition']}")
         if h.get("shipping"):
             lines.append(f"    {h['shipping']}")
+        checking = " – automatisch gefunden, prüfe das Produkt" if "check_geizhals" in h else ""
         if (np := h.get("new_price")) is not None:
-            lines.append(f"    Neupreis laut Geizhals: ab {np['price']:g} € ({np['name']}); der Preis ist {np['pct']} % davon"
+            lines.append(f"    Neupreis laut Geizhals{checking}: ab {np['price']:g} € ({np['name']}); der Preis ist {np['pct']} % davon"
                          + (f", nach den Preiszonen der Person: {np['level']}" if np.get("level") else ""))
+        elif checking:
+            lines.append(f"    Geizhals-Produkt{checking}: "
+                         + (f"{h['check_geizhals']} (ohne Preis)" if h["check_geizhals"] else "keines gefunden"))
         if h.get("description"):
             lines.append(f"    {h['description'][:400]}")
         if h.get("scam_flags"):   # cheap heuristic hints, if available
