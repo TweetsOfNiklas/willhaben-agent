@@ -86,7 +86,7 @@
 
   {# meters (expanded rail; phone: the "More" menu) / ring gauges (collapsed rail): Claude tokens, willhaben requests and
      the other switched-on sites' requests (main._site_usage; collapsed: in the willhaben ring's tooltip and the popover) #}
-  {% set meters %}
+  {% set meters_html %}
     {% if cu %}
     <a href="/settings/claude" data-pop="claude" title="{{ _('Claude tokens in the last {n} days', n=cu.days) }}" @click="pop($event, 'claude')"
        class="grid grid-cols-[16px_1fr_auto] items-center gap-x-2 gap-y-1 text-xs whitespace-nowrap text-muted no-underline hover:text-base-content">
@@ -105,7 +105,7 @@
     </a>
     {% endfor %}
   {% endset %}
-  <div class="mx-1.5 mb-1.5 hidden shrink-0 flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-200 px-2.5 pt-2.5 pb-2 rail-x:flex">{{ meters }}</div>
+  <div class="mx-1.5 mb-1.5 hidden shrink-0 flex-col gap-2.5 rounded-[10px] border border-base-300 bg-base-200 px-2.5 pt-2.5 pb-2 rail-x:flex">{{ meters_html }}</div>
   {% if cu %}
   <a href="/settings/claude" @click="pop($event, 'claude')" class="relative grid h-10 shrink-0 place-items-center text-muted rail-x:hidden"
      title="{{ _('Claude usage in the last {n} days: {used} M of your {limit} M token limit (covered by the subscription)', n=cu.days, used='%.1f'|format(cu.used / 1e6), limit=(cu.limit / 1e6)|round|int) }}">
@@ -190,7 +190,7 @@
       {% endfor %}
     </ul>
     {# phone: the sidebar's meters (requests per site and hour, Claude tokens); a tap opens their popover #}
-    <div class="mb-1 flex flex-col gap-3 border-b border-base-300 px-2.5 pt-1.5 pb-3 md:hidden">{{ meters }}</div>
+    <div class="mb-1 flex flex-col gap-3 border-b border-base-300 px-2.5 pt-1.5 pb-3 md:hidden">{{ meters_html }}</div>
     <ul class="menu w-full gap-0.5 p-0">
       <li><a href="/settings/willhaben" role="menuitem">{{ ui.icon('tag', 16) }}<span class="flex-1">{{ _("willhaben account") }}</span><span class="size-1.5 rounded-full {{ {'ok': 'bg-success', 'bad': 'bg-error'}.get(wh_state, 'bg-off') }}"></span></a></li>
       {% for name, st in other_logins %}<li><a href="/settings/{{ name|lower }}" role="menuitem">{{ ui.icon('tag', 16) }}<span class="flex-1">{{ _("{site} account", site=name) }}</span><span class="size-1.5 rounded-full {{ 'bg-success' if st.logged_in else 'bg-off' if st.logged_in is none else 'bg-error' }}"></span></a></li>{% endfor %}

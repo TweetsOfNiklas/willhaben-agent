@@ -31,7 +31,7 @@ def test_meter_lists_the_other_sites():
     assert "Kleinanzeigen / h" in row and ">12<" in row and "/ 90" in row and "width:13%" in row
     assert "12 / 90 Kleinanzeigen requests in the last hour" in page
     assert 'data-site-usage="shpock"' in page and 'data-site-usage="vinted"' not in page
-    assert 'data-site-usage="willhaben"' not in page                    # willhaben keeps its own row
+    assert 'data-site-usage="willhaben"' in page                        # every site alike, willhaben too
     # the popover: the same block for every site, chips to switch, each with its own budget form
     assert "site = 'kleinanzeigen'" in page and "site = 'shpock'" in page and "site = 'vinted'" not in page
     assert 'href="/stats/requests?platform=kleinanzeigen"' in page and 'href="/stats/requests?platform=all"' in page
@@ -45,7 +45,8 @@ def test_no_other_site_no_extra_rows():
 
     with TestClient(app) as c:
         page = c.get("/myads").text
-    assert "data-site-usage" not in page and "site = '" not in page
+    assert 'data-site-usage="willhaben"' in page                        # willhaben's row, as every site's
+    assert 'data-site-usage="kleinanzeigen"' not in page and 'data-site-usage="vinted"' not in page
 
 
 def test_the_phone_menu_shows_the_meters():
