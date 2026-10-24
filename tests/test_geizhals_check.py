@@ -247,6 +247,55 @@ async def test_agent_run_checks_before_the_rule(monkeypatch):
         platforms.reset()
 
 
+async def test_the_screening_picks_from_the_lookups_results_in_one_call(monkeypatch):
+    """The lookup saw the right switch among its results: Claude picks it in the screening's call – one Claude call,
+    no Geizhals search of its own."""
+    from app import platforms
+    from app.services import search_agents
+    from tests.fake_platform import FakePlatform, listing
+
+    fake_site = FakePlatform()
+    platforms.set_platform("fake", fake_site)
+    try:
+        async def match(query, **kw):
+            return dict(AUTO_PRO_24)
+
+        async def candidates(queries):
+            raise AssertionError("no search of its own")
+
+        async def notify(*a, **kw):
+            return True
+
+        results = [{"name": AUTO_PRO_24["name"], "url": AUTO_PRO_24["url"], "price": 739.88},
+                   {"name": RIGHT_24.name, "url": RIGHT_24.url, "price": RIGHT_24.price}]
+        monkeypatch.setattr(deals, "geizhals_match", match)
+        monkeypatch.setattr(deals, "geizhals_candidates", lambda q: list(results))
+        monkeypatch.setattr(geizhals_check, "_candidates", candidates)
+        monkeypatch.setattr(search_agents, "notify", notify)
+        fake = Script({"results": [{"nr": 1, "relevant": True, "deal": "fair", "issues": [], "reason": "Marktüblich.",
+                                    "geizhals_ok": False, "geizhals_pick": 2, "product": "", "queries": []}]})
+        monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: fake)
+        monkeypatch.setattr(search_agents.screening, "get_backend", lambda *a: fake)
+        a = search_agents.create_agent("https://fake.example/s/unifi")
+        fake_site.pages = [[]]
+        await search_agents.run_agent(a.id)
+        with session() as db:
+            row = db.get(SearchAgent, a.id)
+            row.screen, row.geizhals_check, row.geizhals_pct = True, True, 30
+            db.add(row)
+            db.commit()
+        fake_site.pages = [[listing("1", "Ubiquiti UniFiSwitch 24 PoE USW-24-POE", 350.0)]]
+        await search_agents.run_agent(a.id)
+        with session() as db:
+            h = db.exec(select(Hit).where(Hit.agent_id == a.id)).one()
+        assert h.geizhals == {"name": RIGHT_24.name, "url": RIGHT_24.url, "price_from": 406.87, "by": "claude",
+                              "checked": True}
+        assert len(fake.calls) == 1 and h.state == "filtered" and h.screen_deal == "fair"
+        assert "2. Ubiquiti UniFiSwitch 24 Rackmount" in fake.calls[0]["prompt"] and "geizhals_pick" in fake.calls[0]["system"]
+    finally:
+        platforms.reset()
+
+
 async def test_a_product_geizhals_lists_without_a_price_is_a_final_answer(agent, monkeypatch):
     """The UniFi Dream Router, no longer sold: Claude picks its entry without a price; not asked again every check."""
     h = _hit(agent, 1, "Ubiquiti UniFi UDR Wifi 6 Router", {})

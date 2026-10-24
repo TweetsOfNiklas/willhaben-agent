@@ -64,7 +64,13 @@ SCREEN_RULES = """\
   automatisch gefunden); bei allen anderen geizhals_ok true, product "" und queries [].
 """ + RULES.replace("- ok:", "  geizhals_ok:").replace("\n- ", "\n  ").replace("wenn ok false", "wenn geizhals_ok false") \
     .replace("Bei ok true", "Bei geizhals_ok true") + """\
-  Ist geizhals_ok false, gilt dieser Neupreis nicht: bewerte deal ohne ihn.
+  geizhals_pick: ist geizhals_ok false und stehen beim Treffer „Geizhals-Ergebnisse zur Auswahl“, die Nummer des
+  Ergebnisses, das genau das Produkt der Anzeige ist – Modell und Variante müssen stimmen; lässt die Anzeige die
+  Variante offen, die günstigste passende; Farben zählen nicht; Zubehör, Ersatzteile, Sets, Mehrfachpacks und
+  Nachfolger passen nicht. 0, wenn keines passt, keine Liste dasteht oder geizhals_ok true ist. product und queries
+  nur, wenn geizhals_pick 0 ist (die App sucht dann selbst).
+  Ist geizhals_ok false, gilt der genannte Neupreis nicht: bewerte deal mit dem gewählten Ergebnis, sonst ohne
+  Neupreis.
 """
 
 CHECK_SCHEMA: dict[str, Any] = {
@@ -199,9 +205,10 @@ async def check(agent: SearchAgent, hits: list[Hit], with_backlog: bool = True) 
 
 
 async def settle(agent: SearchAgent, hits: list[Hit], verdicts: dict[int, dict[str, Any]]) -> int:
-    """Claude's check of `hits` ({nr: {ok, product, queries}}, nr counting from 1): keeps the right products, looks
-    for the wrong and missing ones (Geizhals searches, one more Claude call to pick) and stores the result on the
-    hits and the objects passed in. Returns how many got a final answer."""
+    """Claude's check of `hits` ({nr: {ok, product, queries}}, nr counting from 1; from the screening also pick and
+    candidates: the lookup's results Claude chose from): keeps the right products, takes the picked ones, looks for
+    the others (Geizhals searches, one more Claude call to pick: only when none of the lookup's results was it) and
+    stores the result on the hits and the objects passed in. Returns how many got a final answer."""
     backend = get_backend("screen")
     result: dict[int, dict[str, Any]] = {}      # what gets stored; "checked" only for a final answer
     to_search: list[tuple[int, Hit, str, list[str]]] = []
@@ -212,6 +219,12 @@ async def settle(agent: SearchAgent, hits: list[Hit], verdicts: dict[int, dict[s
         auto = {k: h.geizhals[k] for k in ("name", "url", "price_from") if h.geizhals.get(k) is not None}
         if v.get("ok") and auto.get("name"):
             result[nr] = {**auto, "checked": True}
+            continue
+        cands, pick = v.get("candidates") or [], v.get("pick")
+        if isinstance(pick, int) and 1 <= pick <= len(cands):    # picked from the lookup's results in the same call
+            c = cands[pick - 1]
+            result[nr] = {"name": c["name"], "url": c["url"], **({"price_from": c["price"]} if c.get("price") else {}),
+                          "by": "claude", "checked": True}
             continue
         product = (v.get("product") or "").strip()
         queries = list(dict.fromkeys(q.strip() for q in v.get("queries") or [] if q and q.strip()))

@@ -640,9 +640,10 @@ SCREEN_SCHEMA: dict[str, Any] = {
 # the screening with the Geizhals check (app/services/geizhals_check.py SCREEN_RULES): three answers more per hit
 SCREEN_GH_SCHEMA: dict[str, Any] = json.loads(json.dumps(SCREEN_SCHEMA))
 _gh_item = SCREEN_GH_SCHEMA["properties"]["results"]["items"]
-_gh_item["properties"].update({"geizhals_ok": {"type": "boolean"}, "product": {"type": "string"},
+_gh_item["properties"].update({"geizhals_ok": {"type": "boolean"}, "geizhals_pick": {"type": "integer"},
+                               "product": {"type": "string"},
                                "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 3}})
-_gh_item["required"] += ["geizhals_ok", "product", "queries"]
+_gh_item["required"] += ["geizhals_ok", "geizhals_pick", "product", "queries"]
 
 
 def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], stats: dict[str, Any] | None,
@@ -652,7 +653,8 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
     price level), condition the condition the site states and new_price {name, price, pct, level} the Geizhals
     product with its lowest price, the hit's price in % of it and the label of the person's zones (or None), shipping
     the shipping line (app/platforms/shipping_info.prompt_line) when the site states anything; check_geizhals (the
-    product's name, "" for none found) marks a product the app found by itself for Claude to check."""
+    product's name, "" for none found) marks a product the app found by itself for Claude to check, geizhals_results
+    ([{name, price}]) the lookup's results to pick from instead."""
     lines = [f"Suchagent: {agent_name}", "", "Was die Person genau sucht:", brief.strip() or "(keine Beschreibung – nach dem Namen des Suchagenten urteilen)"]
     if stats:
         lines += ["", f"Vergleichspreise bisheriger Treffer dieses Suchagenten ({stats['count']} Anzeigen): "
@@ -675,6 +677,11 @@ def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], st
         elif checking:
             lines.append(f"    Geizhals-Produkt{checking}: "
                          + (f"{h['check_geizhals']} (ohne Preis)" if h["check_geizhals"] else "keines gefunden"))
+        if h.get("geizhals_results"):
+            lines.append("    Geizhals-Ergebnisse zur Auswahl:")
+            for i, c in enumerate(h["geizhals_results"], 1):
+                price = f"ab {c['price']:g} €" if c.get("price") else "kein Preis"
+                lines.append(f"      {i}. {c['name']} · {price}")
         if h.get("description"):
             lines.append(f"    {h['description'][:400]}")
         if h.get("scam_flags"):   # cheap heuristic hints, if available

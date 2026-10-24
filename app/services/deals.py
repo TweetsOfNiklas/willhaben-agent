@@ -102,6 +102,8 @@ _comparables: dict[str, tuple[float, dict[str, Any]]] = {}
 _geizhals: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _results: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
 _geizhals_fail: dict[str, tuple[float, None]] = {}
+# the lookup's search results ({name, url, price}), for the screening's product check to pick from without a request
+_geizhals_cands: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 def clear_cache() -> None:
@@ -1415,6 +1417,8 @@ async def geizhals_match(query: str | None, raise_errors: bool = False) -> dict[
         if raise_errors:
             raise
         return None
+    _put(_geizhals_cands, key, [{k: c.get(k) for k in ("name", "url", "price")} for c in (found or {}).get("candidates") or []
+                                if c.get("name") and c.get("url")], GEIZHALS_TTL_S)
     m = (found or {}).get("match") or {}
     best = None                    # an unverified guess (Geizhals' first hit, maybe another variant) is no price
     if (found or {}).get("verified") and m.get("url") and m.get("price_from") and _matches(m.get("name") or "", query,
@@ -1422,6 +1426,13 @@ async def geizhals_match(query: str | None, raise_errors: bool = False) -> dict[
         best = {"name": m["name"], "url": m["url"], "price_from": m["price_from"]}
     _put(_geizhals, key, best, GEIZHALS_TTL_S)
     return best
+
+
+def geizhals_candidates(query: str | None) -> list[dict[str, Any]]:
+    """The Geizhals results the automatic lookup of `query` saw ({name, url, price}, cached as long as its answer; []
+    when it did not run in this process): what Claude picks from when the lookup's product is the wrong one."""
+    hit = _cached(_geizhals_cands, (query or "").lower(), GEIZHALS_TTL_S) if query else None
+    return list(hit[1]) if hit else []
 
 
 def _ad_summary(ad: AdDetail) -> dict[str, Any]:

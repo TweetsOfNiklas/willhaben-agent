@@ -28,6 +28,7 @@ from app.services import timeline
 log = logging.getLogger(__name__)
 
 MAX_PER_CALL = 10
+GH_PICK_MAX = 8                    # Geizhals results per hit Claude may pick from in the screening's call
 MAX_PER_RUN = 3 * MAX_PER_CALL     # hits one agent check sends to Claude at most, in calls of MAX_PER_CALL
 DEAL_RANK = {"great": 3, "good": 2, "fair": 1, "unknown": 1, "overpriced": 0}
 # agent threshold -> lowest deal that still notifies ("unknown" passes "fair" but not "good")
@@ -167,6 +168,14 @@ def _new_price(h: Hit) -> dict[str, Any] | None:
             "level": deals.LEVEL_DE.get(lvl or "")}
 
 
+def _gh_candidates(h: Hit) -> list[dict[str, Any]]:
+    """The Geizhals results of the hit's automatic lookup, for Claude to pick from (no request; the product found
+    first)."""
+    from app.services import deals
+
+    return deals.geizhals_candidates(deals.geizhals_query(h.heading))[:GH_PICK_MAX]
+
+
 async def _download(url: str | None, folder: Path, name: str, platform: str | None = None) -> Path | None:
     return await ad_images.download(url, folder, name, transport=_transport, platform=platform)   # _transport: tests
 
@@ -184,6 +193,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
     timeline.update_context(hit_ids=[h.id for h in hits])
     # with "Check the Geizhals product" the same call checks the product the app found (one call instead of two)
     check = [nr for nr, h in enumerate(hits, 1) if agent.geizhals_check and geizhals_check.unchecked(h.geizhals)]
+    cands: dict[int, list[dict[str, Any]]] = {}     # the results Claude may pick from, per hit to check
     stats = _stats(agent_id, {h.id for h in hits})
     lang = LANGS.get(background_lang(), "Deutsch")
     sites = list(dict.fromkeys(h.platform or "willhaben" for h in hits))
@@ -198,7 +208,8 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                           "location": h.location, "private": h.is_private, "description": h.body,
                           "condition": condition.shown(h.item_condition, h.item_condition_label, h.platform) or None,
                           "new_price": _new_price(h),
-                          **({"check_geizhals": (h.geizhals or {}).get("name") or ""} if nr in check else {}),
+                          **({"check_geizhals": (h.geizhals or {}).get("name") or "",
+                              "geizhals_results": cands.setdefault(nr, _gh_candidates(h))} if nr in check else {}),
                           "shipping": shipping_info.prompt_line(h.shipping_price, h.shipping)
                           if h.shipping_price is not None or h.shipping else None,
                           **({"site": _site_name(h.platform)} if len(sites) > 1 else {}),
@@ -241,7 +252,8 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         nrs = [nr for nr in check if nr in by_nr]
         await geizhals_check.settle(agent, [hits[nr - 1] for nr in nrs],
                                     {i: {"ok": by_nr[nr].get("geizhals_ok"), "product": by_nr[nr].get("product"),
-                                         "queries": by_nr[nr].get("queries")} for i, nr in enumerate(nrs, 1)})
+                                         "queries": by_nr[nr].get("queries"), "pick": by_nr[nr].get("geizhals_pick"),
+                                         "candidates": cands.get(nr) or []} for i, nr in enumerate(nrs, 1)})
     for h in hits:          # callers keep using their objects
         with session() as db:
             fresh = db.get(Hit, h.id)
