@@ -22,8 +22,10 @@
     {% if convs %}<button type="button" class="chip" data-select-toggle onclick="document.documentElement.classList.toggle('selecting')">{{ _("Select") }}</button>{% endif %}
   </div>
   <form method="post" id="tg-chat-bulk" class="sel-only btnrow" style="margin: 8px 0 0">
-    <button class="chip" formaction="/chats/bulk/read">{{ _("Mark as read") }}</button>
-    <button class="chip" formaction="/chats/bulk/hide">{{ _("Hide from this list only") }}</button>
+    {# only removing asks first (Telegram's popup: the form's hx-confirm, set by the button pressed) #}
+    <button class="chip" formaction="/chats/bulk/read" onclick="this.form.removeAttribute('hx-confirm')">{{ _("Mark as read") }}</button>
+    <button class="chip" formaction="/chats/bulk/hide" onclick="this.form.removeAttribute('hx-confirm')">{{ _("Hide from this list only") }}</button>
+    <button class="chip danger" formaction="/chats/bulk/remove" data-bulk-remove onclick="this.form.setAttribute('hx-confirm', this.dataset.q)" data-q="{{ _('Remove the ticked chats from the app? Their messages and drafts are deleted here; on willhaben the chats stay. A chat comes back if they write again.') }}">{{ ui.icon('trash', 13, 2) }} {{ _("Remove from the app") }}</button>
   </form>
   {% if convs %}
   <div class="sec" style="margin-top: 12px">

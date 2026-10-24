@@ -14,7 +14,7 @@
       {% if presence and presence.online %}<span style="font-size: 12px; color: var(--ok)">{{ _("online") }}</span>{% elif presence and presence.last_seen %}<span class="sub">{{ _("last online {ago}", ago=presence.last_seen|ago) }}</span>{% endif %}</span>
     <span class="sub trunc">{{ conv.ad_title or '' }}{% if ad.price %} · {{ ad.price }}{% endif %}{% if conv.role %} · {{ _("Selling") if conv.role == 'seller' else _("Buying") }}{% endif %}{% if place %} · {{ place }}{% endif %}</span>
   </span>
-  <a href="/tg/chats/{{ conv.id }}/info" class="chip" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0" data-info aria-label="{{ _('Details') }}">{{ ui.icon('dots', 16, 2) }}</a>
+  <a href="/tg/chats/{{ conv.id }}/info" class="chip" style="display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0" data-info>{{ _("Details") }}</a>
 </div>
 {# something to do outside the thread (PayLivery, the sale, shipping): one line to the details #}
 {% set pl = paylivery_card(conv) %}{% set pc = purchase_card(conv) %}

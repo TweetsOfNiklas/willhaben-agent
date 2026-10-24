@@ -7,5 +7,7 @@
  "Dashboard": "Dashboard",
  "These pages open as in the browser; Telegram's back button brings you back.": "Diese Seiten öffnen sich wie im Browser; Telegrams Zurück-Taste bringt dich zurück.",
  "Mark as read": "Als gelesen markieren",
- "Filter & sort": "Filter & Sortierung"
+ "Filter & sort": "Filter & Sortierung",
+ "{n} chats removed from the app": "{n} Chats aus der App entfernt",
+ "Remove the ticked chats from the app? Their messages and drafts are deleted here; on willhaben the chats stay. A chat comes back if they write again.": "Die angehakten Chats aus der App entfernen? Ihre Nachrichten und Entwürfe werden hier gelöscht; auf willhaben bleiben die Chats. Ein Chat kommt zurück, wenn die Person wieder schreibt."
 }

@@ -2,6 +2,7 @@
 and the ad, the chats with sending, my ads, purchases and the search agents' switches."""
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import select
 
 from app.db import Conversation, Draft, Hit, Message, MyAd, SearchAgent, session, utcnow
 from app.services import chats
@@ -301,3 +302,14 @@ def test_chat_list_bulk_and_my_ads_clean_up(client, monkeypatch):
     page = client.get("/tg/myads/cleanup").text
     assert 'data-cleanup="900"' in page and 'action="/myads/cleanup"' in page and "hx-confirm" in page
     assert 'href="/tg/myads/cleanup"' in client.get("/tg/myads").text
+
+
+def test_chats_are_removed_from_the_list_several_at_once(client):
+    """Selected chats can be removed from the app (messages and drafts gone here; willhaben keeps them)."""
+    _data()
+    assert 'formaction="/chats/bulk/remove"' in client.get("/tg/chats").text
+    r = client.post("/chats/bulk/remove", data={"ids": ["c1"]}, headers={"X-TG-Back": "/tg/chats"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/tg/chats?msg=")
+    with session() as db:
+        assert db.get(Conversation, "c1").removed and not db.exec(select(Message).where(Message.conversation_id == "c1")).all()

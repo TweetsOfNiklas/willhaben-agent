@@ -1303,13 +1303,16 @@ async def chats_live_state(c: str | None = None):
 
 @app.post("/chats/bulk/{action}")
 async def chats_bulk(request: Request, action: str):
-    """Selected chats: mark read (read receipts on willhaben, best effort) or hide here."""
-    if action not in ("read", "hide"):
+    """Selected chats: mark read (read receipts on willhaben, best effort), hide or remove here (willhaben keeps
+    them; a removed chat comes back when they write again)."""
+    if action not in ("read", "hide", "remove"):
         raise HTTPException(404)
     ids = [str(i) for i in (await request.form()).getlist("ids")]
     for cid in ids:
         if action == "hide":
             chats.hide(cid)
+        elif action == "remove":
+            chats.remove(cid)
         else:
             chats.seen_in_app(cid)
             if get_session().logged_in:
@@ -1320,7 +1323,8 @@ async def chats_bulk(request: Request, action: str):
                     conv.unread_count = 0
                     db.add(conv)
                     db.commit()
-    msg = t("{n} chats hidden", n=len(ids)) if action == "hide" else t("{n} chats marked read", n=len(ids))
+    msg = {"hide": t("{n} chats hidden", n=len(ids)), "remove": t("{n} chats removed from the app", n=len(ids))}.get(
+        action) or t("{n} chats marked read", n=len(ids))
     return back(f"/chats?msg={quote(msg, safe='')}")
 
 

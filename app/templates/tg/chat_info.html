@@ -8,6 +8,17 @@
 <main data-back="/tg/chats/{{ conv.id }}">
 {{ m.head(conv.partner_name or _('Chat'), '/tg/chats/' ~ conv.id) }}
 <div class="wrap">
+  <div class="sh">{{ _("Actions") }}</div>
+  <div class="sec">
+    <form method="post" action="/chats/{{ conv.id }}/refresh" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Reload") }}</span>{{ ui.icon('refresh', 15, 2) }}</span></button></form>
+    {% set done = conv.id in finished %}
+    <form method="post" action="/chats/{{ conv.id }}/finished" style="margin: 0"><input type="hidden" name="finished" value="{{ '0' if done else '1' }}"><button class="cell"><span class="body"><span>{{ _("Open again") if done else _("Mark as finished") }}</span>{{ ui.icon('check', 15, 2) }}</span></button></form>
+    <form method="post" action="/chats/{{ conv.id }}/unread" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Mark as unread") }}</span></span></button></form>
+    <form method="post" action="/chats/{{ conv.id }}/hide" style="margin: 0"><input type="hidden" name="hidden" value="{{ '0' if conv.hidden_at else '1' }}"><button class="cell"><span class="body"><span>{{ _("Show in list again") if conv.hidden_at else _("Hide from this list only") }}</span></span></button></form>
+    <a class="cell" href="{{ 'https://www.vinted.at/inbox/' ~ conv.id if conv.platform == 'vinted' else 'https://www.willhaben.at/iad/myprofile/chat/' ~ conv.id }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=platform_name(conv.platform or 'willhaben')) }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
+    <form method="post" action="/chats/{{ conv.id }}/remove" style="margin: 0" hx-confirm="{{ _('Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.') }}"><button class="cell danger"><span class="body"><span>{{ _("Remove from the app") }}</span></span></button></form>
+  </div>
+
   {% if ad %}
   <div class="sh">{{ _("Your ad") if selling else _("Someone else's ad") }}</div>
   <div class="sec">
@@ -37,16 +48,6 @@
 
   {% if gcal_on %}<div class="sh">{{ _("Calendar") }}</div>{{ pn.calendar(conv, meetup, gcal_duration) }}{% endif %}
 
-  <div class="sh">{{ _("Actions") }}</div>
-  <div class="sec">
-    <form method="post" action="/chats/{{ conv.id }}/refresh" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Reload") }}</span>{{ ui.icon('refresh', 15, 2) }}</span></button></form>
-    {% set done = conv.id in finished %}
-    <form method="post" action="/chats/{{ conv.id }}/finished" style="margin: 0"><input type="hidden" name="finished" value="{{ '0' if done else '1' }}"><button class="cell"><span class="body"><span>{{ _("Open again") if done else _("Mark as finished") }}</span>{{ ui.icon('check', 15, 2) }}</span></button></form>
-    <form method="post" action="/chats/{{ conv.id }}/unread" style="margin: 0"><button class="cell"><span class="body"><span>{{ _("Mark as unread") }}</span></span></button></form>
-    <form method="post" action="/chats/{{ conv.id }}/hide" style="margin: 0"><input type="hidden" name="hidden" value="{{ '0' if conv.hidden_at else '1' }}"><button class="cell"><span class="body"><span>{{ _("Show in list again") if conv.hidden_at else _("Hide from this list only") }}</span></span></button></form>
-    <a class="cell" href="{{ 'https://www.vinted.at/inbox/' ~ conv.id if conv.platform == 'vinted' else 'https://www.willhaben.at/iad/myprofile/chat/' ~ conv.id }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=platform_name(conv.platform or 'willhaben')) }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
-    <form method="post" action="/chats/{{ conv.id }}/remove" style="margin: 0" hx-confirm="{{ _('Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.') }}"><button class="cell danger"><span class="body"><span>{{ _("Remove from the app") }}</span></span></button></form>
-  </div>
 </div>
 </main>
 {% endblock %}
