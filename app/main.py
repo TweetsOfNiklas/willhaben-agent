@@ -3416,6 +3416,10 @@ async def settings_web(public_url: str = Form("")):
         return back(f"/settings/web?msg={quote(t('Enter the address with http:// or https://, e.g. https://willhaben.example.com'), safe='')}")
     set_setting(SETTING_PUBLIC_URL, url)
     apply_public_url()
+    if telegram.active():          # an https address: the bot's menu button and its buttons open the Mini App now
+        task = asyncio.create_task(telegram.menu_button())
+        _background.add(task)
+        task.add_done_callback(_background.discard)
     msg = t("Web address saved") if url else t("Web address reset to PUBLIC_URL from .env")
     return back(f"/settings/web?msg={quote(msg, safe='')}")
 

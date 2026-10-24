@@ -257,3 +257,24 @@ def test_where_the_bridge_goes_after_an_action():
     assert target("/chats", "/tg/chats/c1/info", path="/chats/c1/remove") == "/tg/chats"
     assert target("/chats/c1?msg=ok", "/tg/chats/c1/info", path="/purchases/3/paid") == "/tg/chats/c1/info?msg=ok"
     assert target("", "/tg/new-ad/5", path="/new-ad/batch/1/drafts") == "/tg/new-ad/5"
+
+
+def test_saving_the_web_address_sets_the_menu_button(client, monkeypatch):
+    """An https web address saved in the settings makes the bot's menu button open the Mini App at once (its
+    notification buttons follow the address by themselves)."""
+    import asyncio
+
+    from app.services import telegram
+    called = []
+
+    async def menu():
+        called.append(True)
+        return True
+    monkeypatch.setattr(telegram, "active", lambda: True)
+    monkeypatch.setattr(telegram, "menu_button", menu)
+    client.post("/settings/web", data={"public_url": "https://sh.example.com"}, follow_redirects=False)
+    asyncio.run(asyncio.sleep(0))
+    assert called
+    monkeypatch.setattr(telegram, "chat_id", lambda: 42)
+    button = telegram.open_button("Open", "https://sh.example.com/hits?view=555")
+    assert button == {"text": "Open", "web_app": {"url": "https://sh.example.com/tg/ad/555"}}
