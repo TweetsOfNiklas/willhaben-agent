@@ -28,7 +28,7 @@
   <div class="sh">{{ _("Ad") }}</div>
   {% if d.refining %}<p class="sub" style="color: var(--link); margin: 0 4px 8px" data-refining>{{ ui.icon('sparkle', 13, 2) }} {{ _("Claude is writing the draft…") if writing else _("Claude is revising the text…") }}{% if writing %} {{ _("Takes up to 2 minutes.") }}{% endif %}</p>{% endif %}
   <form method="post" action="/new-ad/{{ d.id }}" id="draft-form" class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
-    {% if published %}<span class="sub">{{ _("Published – the text is now edited on willhaben, this is the version that was sent.") }}</span>{% endif %}
+    {% if published %}<span class="sub">{{ _("Published – the text is now edited on willhaben, this is the version that was sent.") }}{% if d.wh_ad_id %} <a href="/tg/myads/{{ d.wh_ad_id }}/edit">{{ _("Edit on willhaben") }} ›</a>{% endif %}</span>{% endif %}
     <label class="sub">{{ _("Title") }} · {{ (d.title or '')|length }} / 60<input class="field" name="title" id="title" value="{{ d.title or '' }}" maxlength="80" required{% if published or d.refining %} readonly{% endif %}></label>
     <label class="sub">{{ _("Description") }}<textarea class="field" name="description" id="desc" rows="11" required{% if published or d.refining %} readonly{% endif %}>{{ d.description or '' }}</textarea></label>
     <span style="display: grid; grid-template-columns: 2fr 1fr; gap: 6px">
@@ -41,6 +41,7 @@
     {% if not published and not d.refining %}<button class="mainbtn tg-hide">{{ _("Save") }}</button>{% endif %}
   </form>
 
+  {% if published %}<p class="sub" style="margin: 10px 4px 0">{{ _("The ad is on willhaben – revise it there (Claude helps in the editor under My ads).") }}</p>{% endif %}
   {% if not published %}
   <div class="sh">{{ _("Improve the listing") }}</div>
   <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 10px">
@@ -67,7 +68,7 @@
   <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-geizhals>
     {% if gh.match %}
       <a href="{{ gh.match.url }}" target="_blank" hx-boost="false" style="font-weight: 600">{{ gh.match.name }} ↗</a>
-      <span class="sub">{% if gh.match.price_from %}{{ _("New from") }} <strong style="color: var(--text)">{{ gh.match.price_from|eur }}</strong>{% else %}{{ _("No current new price – the product is no longer sold.") }}{% endif %}{% if gh.verified is sameas false %} · <span style="color: #B07800">{{ _("Variant not confirmed – check that this is the right model") }}</span>{% endif %}</span>
+      <span class="sub">{% if gh.match.price_from %}{{ _("New from") }} <strong style="color: var(--text)">{{ gh.match.price_from|eur }}</strong>{% else %}{{ _("No current new price – the product is no longer sold.") }}{% endif %}{% if gh.verified is sameas false %} · <span style="color: #B07800">{{ _("Variant not confirmed – check that this is the right model") }}</span>{% else %} · {{ _("matched automatically") }}{% endif %}</span>
       {% if gh.match.specs %}<details><summary class="sub">{{ _("Spec sheet ({n})", n=gh.match.specs|length) }}</summary>{% for k, v in gh.match.specs %}<p style="margin: 4px 0; font-size: 13px"><span class="sub">{{ k }}:</span> {{ v }}</p>{% endfor %}</details>
         {% if not d.refining and not published %}<form method="post" action="/new-ad/{{ d.id }}/reconcile" style="margin: 0"><button class="chip" style="width: 100%">{{ _("Check text against the spec sheet") }}</button></form>
         <span class="sub">{{ _("Claude fixes contradictions and removes “(bitte prüfen)” where the spec sheet confirms it.") }}</span>{% endif %}
@@ -89,7 +90,7 @@
     {% elif published %}
       <span style="color: var(--ok); font-size: 14px">✓ <strong>{{ _("Published on willhaben") }}</strong></span>
       <span class="sub">{{ _("New ads are checked by willhaben first and can take a few minutes to show up.") }}</span>
-      {% if d.wh_ad_id %}<div class="btnrow"><a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads/{{ d.wh_ad_id }}">{{ _("My ad") }}</a><a class="chip" style="display: inline-flex; align-items: center" href="/tg/sold/{{ d.wh_ad_id }}?kind=sold">{{ _("Mark sold…") }}</a>
+      {% if d.wh_ad_id %}<div class="btnrow"><a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/myads/{{ d.wh_ad_id }}/edit">{{ _("Edit on willhaben") }}</a><a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads/{{ d.wh_ad_id }}">{{ _("My ad") }}</a><a class="chip" style="display: inline-flex; align-items: center" href="/tg/sold/{{ d.wh_ad_id }}?kind=sold">{{ _("Mark sold…") }}</a>
         <a class="chip" style="display: inline-flex; align-items: center" href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" hx-boost="false">{{ _("View on willhaben") }} ↗</a></div>{% endif %}
     {% else %}
       <form method="post" action="/new-ad/{{ d.id }}/willhaben/prepare" style="margin: 0; display: flex; gap: 6px" hx-include="#title, #desc, #price, #quantity" data-prepare>

@@ -6,12 +6,12 @@
 <main data-back="/tg">
 {{ m.head(_("Hits")) }}
 <div class="wrap">
-  {% set keep = ('&agent_id=' ~ agent_id if agent_id else '') ~ ('&platform=' ~ platform if platform else '') %}
-  {% set view %}<input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform or '' }}">{% endset %}
+  {% set keep = ('&agent_id=' ~ agent_id if agent_id else '') ~ ('&platform=' ~ platform if platform else '') ~ ('&sort=' ~ sort if sort and sort != 'newest' else '') ~ ('&ship=' ~ ship if ship else '') ~ ('&level=' ~ level if level else '') %}
+  {% set view %}<input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform or '' }}"><input type="hidden" name="sort" value="{{ sort if sort != 'newest' else '' }}"><input type="hidden" name="ship" value="{{ ship }}"><input type="hidden" name="level" value="{{ level }}">{% endset %}
   {# the hits page's tabs; held back = filtered out by Claude's screening, the Geizhals rule or the distance #}
-  <nav class="seg" style="grid-template-columns: repeat(4, minmax(0, 1fr))" aria-label="{{ _('Hits') }}">
-    {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('filtered', _("Held back")), ('seen', _("Seen"))] %}
-    <a href="/tg/hits?state={{ v }}{{ keep }}"{% if state == v %} aria-current="page"{% endif %} style="font-size: 13px">{{ label }}{% if counts[v] and v != 'seen' %} · {{ counts[v] }}{% endif %}</a>
+  <nav class="seg" style="grid-template-columns: repeat(5, minmax(0, 1fr))" aria-label="{{ _('Hits') }}">
+    {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('filtered', _("Held back")), ('seen', _("Seen")), ('ignored', _("Ignored"))] %}
+    <a href="/tg/hits?state={{ v }}{{ keep }}"{% if state == v %} aria-current="page"{% endif %} style="font-size: 12px; padding: 0 2px; text-align: center; line-height: 1.1">{{ label }}{% if counts[v] and v not in ('seen', 'ignored') %} · {{ counts[v] }}{% endif %}</a>
     {% endfor %}
   </nav>
   {# which agent and which site, as the dashboard's filters #}
@@ -23,6 +23,32 @@
     {% if sites|length > 1 %}<select class="field" name="platform" aria-label="{{ _('Site') }}" onchange="this.form.requestSubmit()" style="width: 38%; padding: 7px 10px; font-size: 14px">
       <option value="">{{ _("All sites") }}</option>
       {% for p in sites %}<option value="{{ p }}"{% if platform == p %} selected{% endif %}>{{ platform_name(p) }}</option>{% endfor %}</select>{% endif %}
+  </form>
+  {# the dashboard's sort and its shipping and price filters #}
+  <form method="get" action="/tg/hits" style="margin: 6px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px" data-hit-sort>
+    <input type="hidden" name="state" value="{{ state }}"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform or '' }}">
+    {% set fs = 'padding: 7px 8px; font-size: 13px; min-width: 0' %}
+    <select class="field" name="sort" aria-label="{{ _('Sort') }}" onchange="this.form.requestSubmit()" style="{{ fs }}">
+      {% for v, label in [('newest', _('Newest hits first')), ('oldest', _('Oldest hits first')), ('published', _('Recently published first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home else []) %}<option value="{{ v }}"{% if v == sort %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select class="field" name="ship" aria-label="{{ _('Shipping') }}" onchange="this.form.requestSubmit()" style="{{ fs }}">
+      {% for v, label in [('', _('Shipping or pickup')), ('ship', _('Shipping possible')), ('protected', _('Shipping with buyer protection')), ('pickup', _('Pickup only'))] %}<option value="{{ v }}"{% if v == ship %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select class="field" name="level" aria-label="{{ _('Price label') }}" onchange="this.form.requestSubmit()" style="{{ fs }}">
+      {% for v, label in [('', _('Any price')), ('bargain', _('Bargains only')), ('cheap', _('Cheap or better')), ('fair', _('Fair or better'))] %}<option value="{{ v }}"{% if v == level %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  </form>
+  {% if state == 'saved' %}
+  <form method="post" action="/hits/watch-saved" class="sec" style="margin: 8px 0 0; padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px" data-watch-saved>
+    {{ view }}<input type="hidden" name="state" value="saved">{% if not watch_saved %}<input type="hidden" name="on" value="1">{% endif %}
+    <span style="font-size: 14px">{{ _("Check saved ads once a day and notify on a price drop or when one is sold, reserved or gone") }}</span>{{ m.switch(watch_saved, _("Check saved ads")) }}
+  </form>
+  {% endif %}
+  {# the retention: cleared hits are shown nowhere, their ads never come back as new; saved ones are kept #}
+  <form method="post" action="/hits/keep-days" style="margin: 6px 4px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap" data-keep-days>
+    {{ view }}<input type="hidden" name="state" value="{{ state }}">
+    <span class="sub">{{ _("Clear hits automatically") }}</span>
+    <select class="field" name="days" onchange="this.form.requestSubmit()" style="width: auto; padding: 5px 8px; font-size: 13px">
+      {% for d in ([7, 14, 30, 90] + ([keep_days] if keep_days not in (0, 7, 14, 30, 90) else []))|sort %}<option value="{{ d }}"{% if d == keep_days %} selected{% endif %}>{{ _("after {n} days", n=d) }}</option>{% endfor %}
+      <option value="0"{% if keep_days == 0 %} selected{% endif %}>{{ _("never") }}</option></select>
+    <span class="sub">{{ _("· saved ones are kept") }}</span>
   </form>
   {% if hits %}
   {# the tab's own action, and the selection: several hits saved, seen or ignored at once #}
@@ -78,6 +104,8 @@
     </div>
     {% endfor %}
   </div>
+  {% if more %}<a class="chip" style="display: flex; align-items: center; justify-content: center; margin-top: 12px" href="/tg/hits?state={{ state }}{{ keep }}&offset={{ offset + hits|length }}" data-more>{{ _("Load more") }}</a>{% endif %}
+  {% if offset %}<a class="sub" style="display: block; text-align: center; margin-top: 8px; color: var(--link)" href="/tg/hits?state={{ state }}{{ keep }}">{{ _("Back to the start") }}</a>{% endif %}
   {% else %}<p class="empty">{{ _("No hits here.") }}</p>{% endif %}
 </div>
 </main>

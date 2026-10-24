@@ -1,0 +1,9 @@
+{# twin of _wh_fee.html (registered in app/tg_deals.py): willhaben's exact PayLivery fee in the hit page's price
+   breakdown (cells of its grid) – the fee and the total with it, or why it is not known #}
+{% if fee is not none %}
+<span class="sub">{{ _("Buyer protection fee") }}</span><span style="text-align: right">{{ fee|eur }}</span>
+{% if price %}<span style="font-weight: 600">{{ _("Total with fee from") }}</span><span style="text-align: right; font-weight: 600">{{ (price + sp + fee)|eur }}</span>{% endif %}
+<span class="sub" style="grid-column: 1 / -1">{{ _("as willhaben shows it in the PayLivery window") }}</span>
+{% else %}
+<span class="sub" style="grid-column: 1 / -1">{{ _("plus willhaben's buyer protection fee when paying with PayLivery") }}{% if error %} ({{ _("not loaded") }}){% endif %}</span>
+{% endif %}

@@ -1,5 +1,5 @@
 {% extends "tg/_base.html" %}
-{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_panels.html" as pn with context %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_buy_card.html" as bc %}
 {% block title %}{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}{% endblock %}
 {# one purchase order (purchase.card_for): the card with its buttons (app/tg_purchases.py runs the dashboard's handler
    and comes back here), the chat, the ad, the questions and the whole history; refreshes itself while it waits #}
@@ -11,16 +11,17 @@
     {% if row.image_url %}<img class="thumb" src="{{ row.image_url }}" alt="" width="72" height="72" style="width: 72px; height: 72px" onerror="this.style.visibility='hidden'">{% endif %}
     <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
       <span style="font-size: 17px; font-weight: 600; line-height: 1.25">{{ row.ad_title or _("Ad {id}", id=row.ad_id) }}</span>
-      <span class="sub">{{ _("Started") }} {{ row.created_at|local }} · {{ _("Updated") }} {{ row.updated_at|local }}{% if row.query %} · „{{ row.query }}“{% endif %}</span>
+      <span class="sub">{{ pcard.mode_label }} · {{ _("Started") }} {{ row.created_at|local }} · {{ _("Updated") }} {{ row.updated_at|local }}{% if row.query %} · „{{ row.query }}“{% endif %}</span>
     </span>
   </div>
   <div class="sec" style="margin-top: 12px">
     {% if row.conversation_id %}<a class="cell" href="/tg/chats/{{ row.conversation_id }}" data-chat-link><span class="body"><span>{{ _("Open chat") }}</span>{{ m.chev() }}</span></a>{% endif %}
+    {% if row.search_id %}<a class="cell" href="/tg/search/{{ row.search_id }}" data-search-link><span class="body"><span>{{ _("Product search") }}</span>{{ m.chev() }}</span></a>{% endif %}
     {% if row.ad_url %}<a class="cell" href="{{ row.ad_url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on willhaben") }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>{% endif %}
   </div>
   <div class="sh">{{ _("Purchase order") }}</div>
-  {# the card of the chat page; its buttons run through this Mini App's order routes (they come back here) #}
-  {{ pn.purchase(pcard)|replace('action="/purchases/'|safe, 'action="/tg/purchases/'|safe) }}
+  {# the whole card; its buttons run through this Mini App's order routes (they come back here) #}
+  {{ bc.card(pcard, '/tg/purchases/' ~ row.id) }}
 </div>
 </main>
 {% endblock %}

@@ -54,9 +54,19 @@
   {% if ps.warning %}<p style="font-size: 13px; color: #B07800; margin: 10px 4px">{{ ps.warning }}</p>{% endif %}
   {% if ps.note %}<p style="font-size: 14px; margin: 10px 4px">{{ ps.note }}</p>{% endif %}
   <div class="sh">{{ _("Best offers") }} · {{ (ps.results or [])|length }}</div>
-  {% if ps.results %}{% set home = home_point() %}
-  <div style="display: flex; flex-direction: column; gap: 10px" data-ps-results>
-    {% for r in ps.results %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set rp = r.get('platform') or 'willhaben' %}
+  <p class="sub" style="margin: 0 4px 8px">{{ _("{n} searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=ps_claude_calls + (1 if st.photos else 0) + ((ps.progress or {}).more or 0) * (2 if st.photos else 1)) }}{% if (st.platforms or [])|length > 1 %} · {% for pid in st.platforms %}{{ platform_name(pid) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
+  {% if results|length > 1 %}
+  {# the order of the offers: Claude's, by price, by distance from home (kept for the next search) #}
+  <nav class="seg" aria-label="{{ _('Sort the offers') }}" data-ps-order>
+    {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('distance', _('Distance'))] %}
+    {% if key == 'distance' and not home %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}">{{ label }}</a>
+    {% else %}<a href="/tg/search/{{ ps.id }}?order={{ key }}"{% if order == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}
+    {% endfor %}
+  </nav>
+  {% endif %}
+  {% if results %}
+  <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px" data-ps-results>
+    {% for r in results %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set rp = r.get('platform') or 'willhaben' %}
     <div class="sec" style="padding: 10px 12px; display: flex; gap: 12px" data-offer="{{ ad_ref(rp, r.ad_id) }}">
       <a href="{{ r.url }}" target="_blank" hx-boost="false" style="flex-shrink: 0">{% if r.image_url %}<img class="thumb" src="{{ r.image_url }}" alt="" loading="lazy" width="80" height="80" style="width: 80px; height: 80px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 80px; height: 80px"></span>{% endif %}</a>
       <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
@@ -66,11 +76,16 @@
           {% if p.pos is not none %}<span class="pill lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}
           {% if r.photo %}<span class="pill">{{ {"match": _("photo fits"), "unclear": _("photo unclear"), "mismatch": _("photo shows something else")}[r.photo] }}</span>{% endif %}
           {% if (st.platforms or [])|length > 1 %}{{ m.site(rp) }}{% endif %}</span>
+        {% if r.condition == 'worn' %}<span class="pill lvl-fair" style="align-self: flex-start">{{ _("worn") }}</span>{% elif r.condition == 'damaged' %}<span class="pill lvl-very_expensive" style="align-self: flex-start">{{ _("damaged") }}</span>{% endif %}
         {% if r.reason %}<span class="sub">{{ r.reason }}</span>{% endif %}{% if r.photo_note %}<span class="sub">{{ r.photo_note }}</span>{% endif %}
+        {% if p.pos is not none %}{{ m.pricebar(deal_bar(p, r.price_display or (r.price|eur))) }}{% endif %}
+        {% if r.median and r.price %}{% set diff = ((r.price - r.median) * 100 / r.median)|round|int %}<span class="sub">{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %} ({{ _("{n} comparable ads", n=r.comparables) }}){% if r.query %} · „{{ r.query }}“{% endif %}</span>{% endif %}
+        {% set rf = ps_red_flags(r.get('red_flags')) %}{% if rf %}<span style="display: flex; flex-wrap: wrap; gap: 4px">{% for f in rf %}<span class="pill">{{ f }}</span>{% endfor %}</span>{% endif %}
         {% set where = [r.location, _("{km} km away", km=('%.1f'|format(km)).replace('.', ',') if km < 10 else km|round|int) if km is not none else none, _("dealer") if r.is_private == false else none]|select|list %}
         {% if where %}<span class="sub">{{ where|join(' · ') }}</span>{% endif %}
         {% set scam_w = scam_warnings(r.scam_flags) %}{% if scam_w %}<span style="font-size: 12.5px; color: var(--destructive)">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
         <span class="btnrow">
+          <a class="chip" style="display: inline-flex; align-items: center" href="{{ r.url }}" target="_blank" hx-boost="false">{{ _("Open") }} ↗</a>
           <a class="chip" style="display: inline-flex; align-items: center" href="/tg/check/{{ rp }}/{{ r.ad_id }}?q={{ (r.query or '')|urlencode }}">{{ _("Check price") }}</a>
           {% if rp == 'willhaben' and purchase_enabled() %}<a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/purchases/new/{{ r.ad_id }}?search={{ ps.id }}&amp;q={{ (r.query or '')|urlencode }}" data-buy>{{ _("Buy") }}</a>{% endif %}
         </span>
@@ -87,11 +102,28 @@
   {% elif ps.results %}<p class="sub" style="margin: 10px 4px">{{ _("No more offers in this search.") }}</p>{% endif %}
   {% endif %}
 
+  {# the generated searches: each term once (price range, why, category, what it found); its run on each site as a
+     link to that site's search with its result, the price bands of a site run and the errors (_product_search.html) #}
+  {% macro count(n) -%}{{ '{:,}'.format(n).replace(',', '.') }}{%- endmacro %}
+  {% macro run_text(s) -%}{{ s.error or (_("skipped") if s.skipped else (_("{n} ads, {k} new candidates", n=count(s.found), k=s.kept) if s.found is number else '')) }}{%- endmacro %}
   {% if plan.queries %}{% set terms = ps_by_term(ps.queries or ps_planned(plan, ps.settings)) %}
-  <details style="margin-top: 14px"><summary class="sub" style="color: var(--link)">{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
+  {% set n_sites = terms[0].sites|length if terms else 0 %}
+  <details style="margin-top: 14px" data-ps-queries><summary class="sub" style="color: var(--link)">{{ _("Generated searches ({n})", n=plan.queries|length) }}{% if n_sites > 1 %} · {{ _("each on {n} sites", n=n_sites) }}{% endif %}</summary>
     <div class="sec" style="margin-top: 8px">
-      {% for term in terms %}<div class="cell"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span>{{ term.keyword }}</span>{% if term.why %}<span class="sub">{{ term.why }}</span>{% endif %}</span>
-        <span class="val">{% if term.found %}{{ _("{n} ads", n=term.found) }}{% elif term.found is number %}{{ _("nothing found") }}{% elif term.error %}{{ _("error") }}{% endif %}</span></span></div>{% endfor %}
+      {% for term in terms %}
+      <div style="padding: 9px 14px; border-bottom: 1px solid var(--sep); display: flex; flex-direction: column; gap: 4px" data-term>
+        <span style="display: flex; justify-content: space-between; gap: 10px; align-items: baseline">
+          <span style="font-weight: 600; min-width: 0; overflow-wrap: anywhere">{{ term.keyword }}{% if term.price_from or term.price_to %} <span class="sub" style="font-weight: 400">{{ term.price_from|eur if term.price_from else '' }}–{{ term.price_to|eur if term.price_to else '' }}</span>{% endif %}</span>
+          <span class="sub" style="flex-shrink: 0; text-align: right">{% if term.found %}{{ _("{n} ads", n=count(term.found)) }} · <span style="{{ 'color: var(--link); font-weight: 600' if term.kept else '' }}">{{ _("{n} new", n=term.kept) }}</span>{% elif term.found is number %}{{ _("nothing found") }}{% elif term.error %}<span class="danger">{{ _("error") }}</span>{% elif term.skipped %}{{ _("skipped") }}{% endif %}</span></span>
+        {% if term.why or term.category_hint %}<span class="sub">{{ term.why }}{% if term.category_hint %} · {{ term.category_hint }}{% endif %}</span>{% endif %}
+        <span class="btnrow">{% for s in term.sites %}{% set url = plan_query_url(s, ps.settings) %}
+          <a class="chip" style="display: inline-flex; align-items: center; gap: 4px; height: 28px; font-size: 12px{{ '; color: var(--destructive)' if s.error else ('; opacity: .55' if s.skipped else '') }}"{% if url %} href="{{ url }}" target="_blank" hx-boost="false"{% endif %} title="{{ run_text(s) }}" data-run="{{ s.platform }}">{{ platform_name(s.platform) }}{% if s.found is number %} <span class="sub">{{ count(s.found) }}</span>{% if s.kept %} <b style="color: var(--link)">+{{ s.kept }}</b>{% endif %}{% elif s.skipped %} <span class="sub">{{ _("skipped") }}</span>{% elif s.error %} ⚠{% elif url %} ↗{% endif %}</a>{% endfor %}</span>
+        {% for s in term.sites if s.error %}<span style="font-size: 12.5px; color: var(--destructive)">{{ platform_name(s.platform) }}: {{ s.error }}</span>{% endfor %}
+        {% for s in term.sites if s.bands or s.details or s.gone %}
+        <span class="sub" data-bands>{% if n_sites > 1 %}{{ platform_name(s.platform) }}: {% endif %}{% if s.bands %}{{ _("price bands") }} {% for b in s.bands %}<a href="{{ b.url }}" target="_blank" hx-boost="false" style="{{ 'color: var(--destructive)' if b.error else '' }}">{{ b.price_from|eur ~ ' – ' ~ b.price_to|eur if b.price_from else _("up to {price}", price=b.price_to|eur) }}{% if b.skipped %} ({{ _("skipped") }}){% elif b.found is number %} ({{ count(b.found) }}{% if b.kept %}, +{{ b.kept }}{% endif %}){% endif %}</a>{{ ' · ' if not loop.last }}{% endfor %}{% endif %}{% if s.details %} · {{ _("{n} descriptions loaded", n=s.details) }}{% endif %}{% if s.gone %} · {{ _("{n} no longer available", n=s.gone) }}{% endif %}</span>
+        {% endfor %}
+      </div>
+      {% endfor %}
     </div>
   </details>
   {% endif %}

@@ -55,26 +55,29 @@
       {% if not home_address() %}<span style="font-size: 13px; color: #B07800">{{ _("No address set yet") }}</span>{% endif %}
     </div>
 
-    {# the searches: each term once (it runs on every ticked site), the searches without a term, terms to add, the sites #}
-    <div class="sh">{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }} · {{ _("1 search per check") if srch.per_check == 1 else _("{n} searches per check", n=srch.per_check) }}</div>
-    <div class="sec" data-searches>
+    {# the searches: each term once (it runs on every ticked site), the searches without a term, terms added before
+       Save, the sites. Save sends plain form fields (drop_term, drop_query, add_*, sites); the script below only shows
+       what Save will do, as the dashboard's drawer: the count per check, rows added before Save (a term already there
+       flashes instead), the guard for the last search, the sites' warnings. #}
+    <div class="sh">{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }} · <span data-per-check>{{ _("1 search per check") if srch.per_check == 1 else _("{n} searches per check", n=srch.per_check) }}</span></div>
+    <div class="sec" data-searches data-js="{{ srch.js|tojson|forceescape }}">
       {% for f in srch.filters %}
-      <label class="cell"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc">{{ f.label }}</span><span class="sub">{{ _("only {site}", site=platform_name(f.platform)) }}{% if f.price_from or f.price_to %} · {{ f.price_from|eur if f.price_from else '' }}–{{ f.price_to|eur if f.price_to else '' }}{% endif %}</span></span>
-        <span class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Remove") }}<input type="checkbox" name="drop_query" value="{{ f.index }}"{% if last %} disabled{% endif %}></span></span></label>
+      <label class="cell" data-row="{{ f.k }}"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc">{{ f.label }}</span><span class="sub">{{ _("only {site}", site=platform_name(f.platform)) }}{% if f.price_from or f.price_to %} · {{ f.price_from|eur if f.price_from else '' }}–{{ f.price_to|eur if f.price_to else '' }}{% endif %}</span></span>
+        <span class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Remove") }}<input type="checkbox" name="drop_query" value="{{ f.index }}" data-k="{{ f.k }}"{% if last %} disabled{% endif %}></span></span></label>
       {% endfor %}
       {% for term in srch.terms %}
-      <label class="cell"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc">{{ term.keyword }}</span>
-        <span class="sub">{% if term.price_from or term.price_to %}{{ term.price_from|eur if term.price_from else '' }}–{{ term.price_to|eur if term.price_to else '' }}{% endif %}{% if term.missing %} {{ _("not on {sites} yet – Save adds it", sites=term.missing_names|join(', ')) }}{% endif %}</span></span>
-        <span class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Remove from every site") if choices|length > 1 else _("Remove") }}<input type="checkbox" name="drop_term" value="{{ term.key }}"{% if last %} disabled{% endif %}></span></span></label>
+      <label class="cell" data-row="{{ term.k }}" style="transition: background .3s"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc">{{ term.keyword }}</span>
+        <span class="sub">{% if term.price_from or term.price_to %}{{ term.price_from|eur if term.price_from else '' }}–{{ term.price_to|eur if term.price_to else '' }}{% endif %}{% if term.missing %} <span style="color: #B07800" data-missing="{{ term.k }}">{{ _("not on {sites} yet – Save adds it", sites=term.missing_names|join(', ')) }}</span>{% endif %}</span></span>
+        <span class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Remove from every site") if choices|length > 1 else _("Remove") }}<input type="checkbox" name="drop_term" value="{{ term.key }}" data-k="{{ term.k }}"{% if last %} disabled{% endif %}></span></span></label>
       {% endfor %}
-      {# terms to add: each row sends keyword, from and to, so the three lists line up; an empty term adds nothing #}
-      {% for i in range(2) %}
-      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px; gap: 6px; padding: 8px 14px; border-top: 1px solid var(--sep)">
-        <input class="field" name="add_keyword" autocomplete="off" placeholder="{{ _('Add a search term') }}" aria-label="{{ _('Add a search term') }}">
-        <input class="field" name="add_price_from" inputmode="numeric" placeholder="{{ _('from') }} €" aria-label="{{ _('from') }} €">
-        <input class="field" name="add_price_to" inputmode="numeric" placeholder="{{ _('to') }} €" aria-label="{{ _('to') }} €">
+      <div data-adds></div>
+      {# one more term: Enter or + lists it above (several before Save); typed but not added, Save still sends it #}
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 64px 64px 40px; gap: 6px; padding: 8px 14px; border-top: 1px solid var(--sep)" data-add-row>
+        <input class="field" name="add_keyword" autocomplete="off" placeholder="{{ _('Add a search term') }}" aria-label="{{ _('Add a search term') }}" data-kw>
+        <input class="field" name="add_price_from" inputmode="numeric" placeholder="{{ _('from') }} €" aria-label="{{ _('from') }} €" data-pf>
+        <input class="field" name="add_price_to" inputmode="numeric" placeholder="{{ _('to') }} €" aria-label="{{ _('to') }} €" data-pt>
+        <button type="button" class="chip" style="padding: 0" data-add aria-label="{{ _('Add a search term') }}">{{ ui.icon('plus', 15, 2) }}</button>
       </div>
-      {% endfor %}
     </div>
     {% if choices|length > 1 %}
     <input type="hidden" name="sites_shown" value="1">
@@ -82,8 +85,100 @@
       <span class="sub" style="align-self: center">{{ _("Sites:") }}</span>
       {% for pc in choices %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="checkbox" name="sites" value="{{ pc.id }}" {% if pc.id in srch.js.sites %}checked{% endif %}>{{ pc.name }}</label>{% endfor %}
     </div>
+    <p style="margin: 6px 4px 0; font-size: 13px; color: var(--destructive)" data-warn="nosite" hidden>{{ _("Choose at least one site.") }}</p>
+    <p style="margin: 6px 4px 0; font-size: 13px; color: #B07800" data-warn="needsterm" hidden>{{ _("The other sites need a search term: type one above.") }}</p>
+    {% for pc in choices if pc.id not in srch.js.fill %}<p style="margin: 6px 4px 0; font-size: 13px; color: #B07800" data-warn-off="{{ pc.id }}" hidden>{{ _("{name} is switched off in Settings → Platforms", name=pc.name) }}</p>{% endfor %}
     <p class="sub" style="margin: 6px 4px 0">{{ _("Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.") }}</p>
     {% endif %}
+    <p style="margin: 6px 4px 0; font-size: 13px; color: var(--destructive)" data-warn="last" hidden>{{ _("Keep at least one search, or delete the agent.") }}</p>
+    <script>
+    (() => {
+      const box = document.querySelector('[data-searches]');
+      if (!box) return;
+      const o = JSON.parse(box.dataset.js), form = box.closest('form');
+      const T = {one: {{ _("1 search per check")|tojson }}, n: {{ _("{n} searches per check")|tojson }},
+                 from: {{ _("from {price}")|tojson }}, upto: {{ _("up to {price}")|tojson }}, remove: {{ _("Remove")|tojson }}};
+      const kw = box.querySelector('[data-kw]'), pf = box.querySelector('[data-pf]'), pt = box.querySelector('[data-pt]');
+      const adds = box.querySelector('[data-adds]');
+      let seq = 0;
+      // a price as the server reads it (main.py _num_or_none): "1500", "1.500,50", "1500.50"; null when none
+      const num = (v) => {
+        v = String(v ?? '').replace(/[€\s]/g, '');
+        if (v.includes(',') && v.includes('.')) v = v.lastIndexOf(',') > v.lastIndexOf('.') ? v.replace(/\./g, '').replace(',', '.') : v.replace(/,/g, '');
+        else v = v.replace(/,/g, '.');
+        const n = v === '' ? NaN : Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const eur = (n) => '€ ' + n.toLocaleString('de-DE', {minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2});
+      const range = (f, t) => f && t ? eur(f) + ' – ' + eur(t) : f ? T.from.replace('{price}', eur(f)) : t ? T.upto.replace('{price}', eur(t)) : '';
+      const dropped = (k) => { const c = box.querySelector(`input[data-k="${k}"]`); return !!(c && c.checked); };
+      const sites = () => [...form.querySelectorAll('input[name=sites]')].length
+        ? [...form.querySelectorAll('input[name=sites]:checked')].map(c => c.value) : [...o.sites];
+      const pending = () => [...adds.querySelectorAll('[data-pending]')].map(r => JSON.parse(r.dataset.pending));
+      const typed = () => [kw.value.trim().replace(/\s+/g, ' '), num(pf.value), num(pt.value)];
+      const same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+      const known = (t) => ({saved: Object.keys(o.terms).find(k => same(o.terms[k].t, t)),
+                             pend: [...adds.querySelectorAll('[data-pending]')].find(r => same(JSON.parse(r.dataset.pending), t))});
+      const kept = () => Object.keys(o.terms).filter(k => !dropped(k));
+      // saved terms that stay, rows added before Save and the term still typed (Save sends it too)
+      const terms = () => { const t = typed(), k = known(t); return kept().length + pending().length + (t[0] && !(k.saved && !dropped(k.saved)) && !k.pend ? 1 : 0); };
+      const filtersOn = (s) => Object.keys(o.filters).filter(k => o.filters[k] === s && !dropped(k)).length;
+      const perSite = (s) => (o.fill.includes(s) ? terms() : kept().filter(k => o.terms[k].sites.includes(s)).length) + filtersOn(s);
+      const left = () => { const on = sites(); return (on.length ? terms() : 0) + on.reduce((n, s) => n + filtersOn(s), 0); };
+      const flash = (row) => { if (!row) return; row.style.background = 'rgba(31,116,186,.18)'; setTimeout(() => { row.style.background = ''; }, 1200); };
+      const show = (sel, on) => form.querySelectorAll(sel).forEach(el => { el.hidden = !on; });
+      const update = () => {
+        const on = sites(), n = on.reduce((sum, s) => sum + perSite(s), 0);
+        document.querySelector('[data-per-check]').textContent = n === 1 ? T.one : T.n.replace('{n}', n);
+        const l = left();
+        box.querySelectorAll('input[data-k]').forEach(c => { if (!c.checked) c.disabled = l <= 1; });
+        box.querySelectorAll('[data-pending] button').forEach(b => { b.disabled = l <= 1; });
+        const chip = (s) => !o.fixed.includes(s);
+        show('[data-warn="nosite"]', !on.some(chip) && o.sites.some(chip));
+        show('[data-warn="needsterm"]', on.length && l && on.some(s => o.fill.includes(s) && !perSite(s)));
+        show('[data-warn="last"]', on.length && !l);
+        form.querySelectorAll('[data-warn-off]').forEach(p => { p.hidden = !(on.includes(p.dataset.warnOff) && !perSite(p.dataset.warnOff)); });
+        box.querySelectorAll('[data-missing]').forEach(m => { const k = m.dataset.missing; m.hidden = dropped(k) || !o.terms[k].missing.some(s => on.includes(s)); });
+      };
+      const add = () => {
+        const t = typed();
+        if (!t[0]) { kw.focus(); return; }
+        const {saved, pend} = known(t);
+        if (saved) {                        // there already: kept after all, the row flashes
+          const c = box.querySelector(`input[data-k="${saved}"]`); if (c) c.checked = false;
+          flash(box.querySelector(`[data-row="${saved}"]`));
+        } else if (pend) flash(pend);
+        else {
+          const row = document.createElement('div');
+          row.className = 'cell'; row.style.transition = 'background .3s'; row.dataset.pending = JSON.stringify(t);
+          row.innerHTML = `<span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc"></span><span class="sub"></span></span>
+            <span class="pill" style="color: var(--link)">{{ _("new") }}</span><button type="button" class="chip danger" style="padding: 0 10px"></button></span>
+            <input type="hidden" name="add_keyword"><input type="hidden" name="add_price_from"><input type="hidden" name="add_price_to">`;
+          row.querySelector('.trunc').textContent = t[0];
+          row.querySelector('.sub').textContent = range(t[1], t[2]);
+          const [hk, hf, ht] = row.querySelectorAll('input[type=hidden]');
+          hk.value = t[0]; hf.value = t[1] ?? ''; ht.value = t[2] ?? '';
+          const rm = row.querySelector('button'); rm.textContent = '✕'; rm.setAttribute('aria-label', T.remove + ': ' + t[0]);
+          rm.addEventListener('click', () => { row.remove(); update(); });
+          adds.append(row);
+          flash(row);
+        }
+        kw.value = pf.value = pt.value = '';
+        kw.focus();
+        update();
+      };
+      box.querySelector('[data-add]').addEventListener('click', add);
+      // Enter in the add fields lists the term instead of saving (nothing typed: Enter saves as usual)
+      [kw, pf, pt].forEach(i => i.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        if (kw.value.trim()) { e.preventDefault(); add(); }
+        else if (pf.value.trim() || pt.value.trim()) { e.preventDefault(); kw.focus(); }
+      }));
+      form.addEventListener('input', update);
+      form.addEventListener('change', update);
+      update();
+    })();
+    </script>
 
     <div class="sh">Claude</div>
     {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a), gh_check=a.geizhals_check %}{% include "tg/_agent_screen.html" %}{% endwith %}

@@ -1,5 +1,5 @@
 {% extends "tg/_base.html" %}
-{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_panels.html" as pn with context %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}{% import "tg/_panels.html" as pn with context %}{% import "tg/_buy_card.html" as bc with context %}
 {% block title %}{{ conv.partner_name or _('Chat') }}{% endblock %}
 {# everything beside the thread on the chat page: the ad, this buyer (sell, reserve), the purchase order, PayLivery,
    shipping, the calendar and the chat's actions – the dashboard's context (main.chat_page), its endpoints #}
@@ -28,7 +28,7 @@
   {% endif %}
 
   {% set pc = purchase_card(conv) %}
-  {% if pc %}<div class="sh">{{ _("Purchase order") }}</div>{{ pn.purchase(pc) }}{% endif %}
+  {% if pc %}<div class="sh">{{ _("Purchase order") }}</div>{{ bc.card(pc, '/purchases/' ~ pc.id) }}{% endif %}
 
   {% set pl = paylivery_card(conv) %}
   {% if pl %}<div class="sh">PayLivery</div>{{ pn.paylivery(pl, conv, here) }}{% endif %}

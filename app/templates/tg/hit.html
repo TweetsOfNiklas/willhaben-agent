@@ -7,17 +7,42 @@
 <main data-back="/tg/hits" data-main="{{ _('Remove from saved') if saved else _('Save') }}" data-main-form="tg-save">
 {{ m.head(_("Hit"), '/tg/hits') }}
 {# the photos: swipe sideways #}
-<div style="display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: rgba(118,118,128,.2); height: 300px" data-photos>
+<div style="position: relative">
+<div style="display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: rgba(118,118,128,.2); height: 300px" data-photos
+     onscroll="const n = this.nextElementSibling; if (n) n.firstChild.textContent = Math.round(this.scrollLeft / this.clientWidth) + 1">
   {% for img in d.images[:12] %}
-  <img src="{{ img }}" alt="" loading="{{ 'eager' if loop.first else 'lazy' }}" style="flex: 0 0 100%; width: 100%; height: 300px; object-fit: contain; scroll-snap-align: center" onerror="this.style.visibility='hidden'">
+  <a href="{{ img }}" target="_blank" hx-boost="false" style="flex: 0 0 100%; scroll-snap-align: center"><img src="{{ img }}" alt="" loading="{{ 'eager' if loop.first else 'lazy' }}" style="width: 100%; height: 300px; object-fit: contain; display: block" onerror="this.style.visibility='hidden'"></a>
   {% else %}<span style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--hint)">{{ _("No photos") }}</span>{% endfor %}
+</div>
+{% if d.images|length > 1 %}<span style="position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); color: #FFFFFF; font-size: 12px; border-radius: 10px; padding: 2px 9px" data-photo-count><span>1</span> / {{ [d.images|length, 12]|min }}</span>{% endif %}
 </div>
 <div class="wrap">
   <div class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px">
     <span style="font-size: 18px; font-weight: 600; line-height: 1.25">{{ d.heading or h.heading }}</span>
     <span style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap"><span style="font-size: 24px; font-weight: 700">{{ h.price_display or (h.price|eur if h.price is not none else (d.price_display or '–')) }}</span>
       {% if h.old_price and h.price and h.old_price > h.price %}<span class="sub" style="text-decoration: line-through">{{ h.old_price|eur }}</span><span style="font-size: 12px; font-weight: 600; color: var(--ok)">{{ _("price drop") }}</span>{% endif %}</span>
-    {% if h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}
+    {# what the buyer pays (the ad viewer's breakdown): item, shipping (PayLivery: pickup point and door), the buyer
+       fee as the site states it, the total; willhaben's exact PayLivery fee loads into it (/wh-fee, its twin) #}
+    {% set sp = d.shipping_price if d.shipping_price is not none else h.shipping_price %}
+    {% if d.price and sp is not none %}
+    {% set opts = d.shipping_options if d.shipping_options is defined and d.shipping_options else [] %}
+    {% set known_fee = d.buyer_fee if d.buyer_fee is defined and d.buyer_fee is not none else h.buyer_fee %}
+    {% set pl_on = d.paylivery_enabled is defined and (d.paylivery_enabled or opts) %}
+    {% set bf = buyer_fee_line(d.platform, d.price, d.category_path if d.category_path is defined else none, known_fee, pl_on) %}
+    <div style="display: grid; grid-template-columns: 1fr auto; gap: 2px 14px; font-size: 13.5px; max-width: 380px" data-price-breakdown>
+      <span class="sub">{{ _("Item") }}</span><span style="text-align: right">{{ d.price|eur }}</span>
+      {% for o in opts %}
+        {% if o.point is not none %}<span class="sub">{{ _("Shipping {carrier} to a pickup point", carrier=o.name) }}</span><span style="text-align: right">{{ o.point|eur }}</span>{% endif %}
+        {% if o.home is not none %}<span class="sub">{{ _("Shipping {carrier} to the door", carrier=o.name) }}</span><span style="text-align: right">{{ o.home|eur }}</span>{% endif %}
+      {% else %}<span class="sub">{{ _("Shipping") }}</span><span style="text-align: right">{{ _("free") if sp <= 0 else sp|eur }}</span>{% endfor %}
+      {% if bf %}<span class="sub">{{ _("Buyer protection fee") }}</span><span style="text-align: right">{{ bf.amount|eur }}</span>{% endif %}
+      <span style="border-top: 1px solid var(--sep); font-weight: 600">{{ _("Total from") if (opts|map(attribute='home')|reject('none')|list + opts|map(attribute='point')|reject('none')|list)|length > 1 else _("Total") }}</span><span style="border-top: 1px solid var(--sep); font-weight: 600; text-align: right">{{ (d.price + sp + (bf.amount if bf else 0))|eur }}</span>
+      {% if not bf and pl_on and (d.platform or 'willhaben') == 'willhaben' %}
+      {% set cheapest = (opts|map(attribute='point')|reject('none')|list + opts|map(attribute='home')|reject('none')|list + [sp])|min %}
+      <span style="display: contents" hx-get="/wh-fee/{{ d.ad_id }}?price={{ d.price }}&amp;sp={{ cheapest }}" hx-trigger="load" hx-swap="outerHTML" hx-disinherit="*"><span class="sub" style="grid-column: 1 / -1">{{ _("Loading the buyer protection fee from willhaben …") }}</span></span>
+      {% endif %}
+    </div>
+    {% elif h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}
     <span style="display: flex; flex-wrap: wrap; gap: 6px">
       {{ m.geizhals(h, pz) }}{{ m.claude(h) }}
       {% if h.item_condition_label %}<span class="pill">{{ h.item_condition_label }}</span>{% endif %}
@@ -43,9 +68,12 @@
   </div>
   {% endif %}
 
-  {% if h.screen_reason %}
-  <div class="sh">Claude</div>
-  <div class="sec" style="padding: 12px 14px; font-size: 15px">{{ h.screen_reason }}</div>
+  {% if h.screen_relevant is not none or h.screen_reason %}
+  <div class="sh">{{ _("Claude's assessment") }}{% if h.screen_at %} · {{ h.screen_at|ago }}{% endif %}</div>
+  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-screen>
+    {% if h.screen_relevant is not none %}<span style="display: flex; flex-wrap: wrap; gap: 5px">{% for lbl in screen_labels(h) %}<span class="pill {{ 'lvl-bargain' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('lvl-very_expensive' if lbl == screen_issue_labels()['scam_suspect'] else '') }}">{{ lbl }}</span>{% endfor %}</span>{% endif %}
+    {% if h.screen_reason %}<span style="font-size: 15px; white-space: pre-wrap">{{ h.screen_reason }}</span>{% endif %}
+  </div>
   {% endif %}
 
   <div class="sh">{{ _("Details") }}</div>
@@ -55,7 +83,8 @@
     {% if d.location or h.location %}<div class="cell"><span class="body"><span>{{ _("Place") }}</span><span class="val trunc">{{ d.location or h.location }}{% if km is not none %} · {{ _("{n} km", n=km|round|int) }}{% endif %}</span></span></div>{% endif %}
     {% if d.seller_name or h.is_private is not none %}<div class="cell"><span class="body"><span>{{ _("Seller") }}</span><span class="val trunc">{{ d.seller_name or '' }}{% if h.is_private == false %}{{ ' · ' if d.seller_name else '' }}{{ _("dealer") }}{% elif h.is_private %}{{ ' · ' if d.seller_name else '' }}{{ _("private") }}{% endif %}</span></span></div>{% endif %}
     {% if d.category_path %}<div class="cell"><span class="body"><span>{{ _("Category") }}</span><span class="val trunc">{{ d.category_path|join(' › ') }}</span></span></div>{% endif %}
-    {% if h.published_at %}<div class="cell"><span class="body"><span>{{ _("Published") }}</span><span class="val">{{ h.published_at|ago }}</span></span></div>{% endif %}
+    {% set pub = d.published_at if d.published_at is defined and d.published_at else h.published_at %}
+    {% if pub %}<div class="cell"><span class="body"><span>{{ _("Published") }}</span><span class="val">{{ pub|ago }}{% if d.first_published_at is defined and d.first_published_at and d.first_published_at < pub %} · {{ _("first {date}", date=d.first_published_at|local('%d.%m.%Y')) }}{% endif %}</span></span></div>{% endif %}
     <div class="cell"><span class="body"><span>{{ _("Found") }}</span><span class="val">{{ h.first_seen_at|ago }}</span></span></div>
     <a class="cell" href="{{ h.url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=site.name) }}</span><span class="val" style="color: var(--link)">{{ ui.icon('external', 16, 2) }}</span></span></a>
   </div>

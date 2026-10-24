@@ -17,7 +17,7 @@
   <form method="post" action="/new-ad" enctype="multipart/form-data" id="new-ad-form" class="sec" style="margin-top: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px" data-new-ad>
     <label class="sub">{{ _("Notes about the item") }}<textarea class="field" name="notes" rows="5" placeholder="{{ _('KTM mountain bike, frame M, 2019, new brake pads, small scratch on the top tube, pickup Vienna 15') }}"></textarea></label>
     <label class="sub">{{ _("Photos") }} · {{ _("up to {n}", n=8) }}<input class="field" type="file" name="photos" accept="image/*" multiple data-max="8"></label>
-    <div class="tg-previews" style="display: flex; flex-wrap: wrap; gap: 6px"></div>
+    <div class="tg-previews" style="display: flex; flex-wrap: wrap; gap: 8px"></div><span class="sub" data-photo-note aria-live="polite"></span>
     <button class="mainbtn tg-hide">{{ _("Create listing with Claude") }}</button>
     <span class="sub">{{ _("Takes up to 2 minutes.") }}</span>
   </form>
@@ -25,7 +25,7 @@
   <form method="post" action="/new-ad/batch" enctype="multipart/form-data" id="new-ad-form" class="sec" style="margin-top: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px" data-new-batch>
     <label class="sub">{{ _("All photos, in any order") }} · {{ _("up to {n}", n=max_batch) }}<input class="field" type="file" name="photos" accept="image/*" multiple required data-max="{{ max_batch }}"></label>
     <span class="sub">{{ _("Claude sorts them into one draft per item") }}</span>
-    <div class="tg-previews" style="display: flex; flex-wrap: wrap; gap: 6px"></div>
+    <div class="tg-previews" style="display: flex; flex-wrap: wrap; gap: 8px"></div><span class="sub" data-photo-note aria-live="polite"></span>
     <label class="sub">{{ _("Details for all items") }} ({{ _("optional") }})<textarea class="field" name="notes" rows="2" placeholder="{{ _('everything from the storage room, pickup Vienna 15, no shipping') }}"></textarea></label>
     <button class="mainbtn tg-hide">{{ _("Upload photos and let Claude sort them") }}</button>
     <span class="sub">{{ _("Then you correct the groups and get a draft per item.") }}</span>
@@ -49,17 +49,33 @@
   </div>
 </div>
 <script>
-(() => {   // the chosen photos as small previews; more than allowed: the first ones are kept
+(() => {   // the chosen photos as previews: choosing again adds more, ✕ takes one out; more than allowed are left out
   const input = document.querySelector('#new-ad-form input[type=file]');
-  const box = document.querySelector('#new-ad-form .tg-previews');
+  const box = document.querySelector('#new-ad-form .tg-previews'), note = document.querySelector('#new-ad-form [data-photo-note]');
   if (!input || !box) return;
+  const T = {{ {"remove": _("Remove {name}"), "selected": _("· {n} selected"), "tooMany": _("At most {max} photos – the rest were left out.")}|tojson }};
+  const max = Number(input.dataset.max || 0);
+  let files = [];
+  const show = (cut) => {
+    const dt = new DataTransfer(); files.forEach((f) => dt.items.add(f)); input.files = dt.files;
+    box.replaceChildren(...files.map((f, i) => {
+      const tile = document.createElement('span');
+      tile.style.cssText = 'position: relative; display: block';
+      tile.append(Object.assign(document.createElement('img'), {src: URL.createObjectURL(f), alt: '', style: 'width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: block'}));
+      const x = Object.assign(document.createElement('button'), {type: 'button', textContent: '✕', ariaLabel: T.remove.replace('{name}', f.name),
+        style: 'position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #FFF; font-size: 11px'});
+      x.addEventListener('click', () => { files.splice(i, 1); show(false); });
+      tile.append(x);
+      return tile;
+    }));
+    if (note) note.textContent = (files.length ? T.selected.replace('{n}', files.length) : '') + (cut ? ' – ' + T.tooMany.replace('{max}', max) : '');
+  };
   input.addEventListener('change', () => {
-    const max = Number(input.dataset.max || 0);
-    if (max && input.files.length > max) {
-      const dt = new DataTransfer(); [...input.files].slice(0, max).forEach(f => dt.items.add(f)); input.files = dt.files;
-    }
-    box.replaceChildren(...[...input.files].map(f => Object.assign(document.createElement('img'),
-      {src: URL.createObjectURL(f), alt: '', style: 'width: 64px; height: 64px; object-fit: cover; border-radius: 8px'})));
+    const known = new Set(files.map((f) => f.name + f.size));
+    files = files.concat([...input.files].filter((f) => !known.has(f.name + f.size)));
+    const cut = max && files.length > max;
+    if (cut) files = files.slice(0, max);
+    show(cut);
   });
 })();
 </script>

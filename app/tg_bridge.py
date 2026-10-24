@@ -61,8 +61,8 @@ def tg_path(url: str) -> str | None:
     if path == "/hits":                     # the view stays (tab, agent, site)
         if one.get("view"):
             return f"/tg/ad/{one['view']}"
-        keep = {k: one[k] for k in ("state", "agent_id", "platform") if one.get(k)}
-        if keep.get("state") not in (None, "new", "saved", "filtered", "seen"):
+        keep = {k: one[k] for k in ("state", "agent_id", "platform", "sort", "ship", "level") if one.get(k)}
+        if keep.get("state") not in (None, "new", "saved", "filtered", "seen", "ignored"):
             keep.pop("state")
         return "/tg/hits" + (f"?{urlencode(keep)}" if keep else "")
     if m := re.fullmatch(r"/myads/([^/]+)/edit", path):
@@ -120,6 +120,8 @@ def target(location: str, back: str, msg: str = "", path: str = "") -> str:
             from app.purchase_routes import _notice_text
             msg = _notice_text(q["pn"][0]) or ""
     page = (tg_path(location) if location else None) or back
+    if back.split("?")[0] == page.split("?")[0] + "/info":     # a chat's details stay open after their actions
+        page = back
     if page == "/tg/agents" and re.fullmatch(r"/tg/agents/\d+", back.split("?")[0]) and not path.endswith("/delete"):
         page = back
     if not msg:

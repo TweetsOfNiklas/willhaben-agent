@@ -80,3 +80,22 @@ def test_the_builder_previews_and_creates(client, fake):
     assert r.status_code == 303 and r.headers["location"] == "/tg/agents"
     with session() as db:
         assert db.exec(SearchAgent.__table__.select().where(SearchAgent.name == "Kinderrad")).first() is not None
+
+
+def test_the_cards_show_the_latest_hits_and_the_searches_preview_their_count(client):
+    """As on the dashboard: each agent's latest hits as pictures (opening the hit in the Mini App); the searches
+    editor carries the data its script counts with (searches per check, terms added before Save, the last-search
+    guard)."""
+    a = create_agent(URL)
+    with session() as db:
+        for i in range(5):
+            db.add(Hit(agent_id=a.id, ad_id=str(i), heading=f"Rad {i}", url=f"u{i}", state="new",
+                       image_url=f"https://img.example/{i}.jpg"))
+        db.commit()
+    page = client.get("/tg/agents").text
+    strip = page[page.index(f'data-thumbs="{a.id}"'):]
+    strip = strip[:strip.index("</span>")]
+    assert strip.count('href="/tg/hits/') == 4 and "https://img.example/" in strip
+    agent = client.get(f"/tg/agents/{a.id}").text
+    assert "data-per-check" in agent and 'data-js="' in agent and "data-add-row" in agent and "data-k=" in agent
+    assert 'data-warn="last"' in agent and "&#34;fill&#34;" in agent

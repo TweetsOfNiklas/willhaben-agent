@@ -1,0 +1,58 @@
+{# A purchase order's card on its Mini App page: the whole of the dashboard's _purchase.html (status, what comes next,
+   pay now, pickup, the buttons, asking / maximum / agreed with the sum of item, shipping and fee, the comparables,
+   the questions, the history). `pc` = purchase.card_for(row); the buttons post to `action` (/tg/purchases/<id>/…,
+   app/tg_purchases.py, which comes back here). #}
+{% macro card(pc, action) %}
+{% set confirm_text = {"cancel": _("Cancel this purchase? The agent stops and writes no more."), "paid": _("Did you transfer the amount in your bank app? The seller is told in the chat."), "received": _("Did you receive the item?"), "collected": _("Did you collect the item and pay the cash?")} %}
+<div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-purchase-card>
+  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ pc.mode_label }}</span><span class="pill{{ ' lvl-bargain' if pc.status in ('agreed', 'meetup', 'paid', 'shipped') else ' lvl-expensive' if pc.status == 'failed' else '' }}">{{ pc.status_label }}</span></span>
+  <span style="font-size: 15px">{{ pc.next }}</span>
+  {% if pc.pending %}<span class="sub" style="color: var(--link)">{{ _("Contacting the seller…") }}</span>{% endif %}
+  {% if pc.note %}<span class="sub">{{ pc.note }}</span>{% endif %}
+  {% if pc.pay_now %}
+  <div style="border-left: 3px solid #E2A400; background: rgba(226,164,0,.12); border-radius: 8px; padding: 8px 12px; font-size: 14px; display: flex; flex-direction: column; gap: 4px" data-pay-now>
+    <strong style="color: #8A6200">{{ _("Pay now!") }}</strong>
+    {% if pc.mode == 'direct' and pc.payment %}
+    <span>{{ _("Recipient") }}: {{ pc.payment.holder or '–' }}</span>
+    <span>IBAN: <code style="user-select: all">{{ pc.payment.iban_group }}</code></span>
+    <span>{{ _("Amount") }}: <strong>{{ pc.payment.amount|eur }}</strong></span>
+    {% if pc.get('agreed_total') is not none %}<span>{{ _("Total incl. shipping") }}: {{ pc.get('agreed_total')|eur }}</span>{% endif %}
+    <span>{{ _("Reference") }}: {{ pc.payment.reference or '–' }}</span>
+    <span class="sub">{{ _("Transfer it in your bank app, then press Paid. Nothing is paid automatically.") }}</span>
+    {% elif pc.mode == 'paylivery' %}<span>{{ _("Pay in the willhaben app, or on the chat page with the Buy now & pay button in the PayLivery card. The card fills in your saved card; you approve 3-D Secure on your phone, and the purchase then continues by itself. Nothing is paid automatically.") }}</span>
+      {% if pc.wh_url %}<a class="chip" style="display: inline-flex; align-items: center; align-self: flex-start" href="{{ pc.wh_url }}" target="_blank" hx-boost="false">{{ _("Open chat on willhaben") }} ↗</a>{% endif %}{% endif %}
+  </div>
+  {% endif %}
+  {% if pc.status == 'meetup' and pc.pickup %}<span style="font-size: 14px; border-left: 3px solid var(--ok); padding-left: 10px"><strong>{{ _("Pickup") }}</strong> · {{ pc.pickup.start|replace('T', ' ') }}{% if pc.pickup.minutes %} · {{ _("{n} min", n=pc.pickup.minutes) }}{% endif %}{% if pc.pickup.location %} · {{ pc.pickup.location }}{% endif %} · {{ _("{price} cash", price=(pc.agreed or pc.asking)|eur) }}</span>{% endif %}
+  {% if pc.actions %}
+  <div class="btnrow">
+    {% for a in pc.actions %}
+    <form method="post" action="{{ action }}/{{ a.name }}" style="margin: 0; display: flex; gap: 6px"{% if a.confirm %} hx-confirm="{{ confirm_text[a.name] }}"{% endif %}>
+      {% if a.input %}<input class="field" style="width: 100px; height: 34px; padding: 0 10px" type="number" name="value" min="1" step="0.01" value="{{ pc.max_price or '' }}" required placeholder="€" aria-label="{{ _('Maximum price in euros') }}">{% endif %}
+      <button class="chip{{ ' danger' if a.name == 'cancel' else '' if a.name in ('pause', 'resume', 'max_price') else ' primary' }}" data-action="{{ a.name }}">{{ a.label }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+<div class="sec" style="margin-top: 10px">
+  <div class="cell"><span class="body"><span>{{ _("Asking") }}</span><span class="val">{{ pc.asking|eur if pc.asking else '–' }}</span></span></div>
+  <div class="cell"><span class="body"><span style="display: flex; flex-direction: column"><span>{{ _("Your maximum") }}</span>
+    <span class="sub">{{ _("incl. shipping & fee") }}{% if pc.get('pct_below') is not none %} · −{{ pc.get('pct_below') }} %{% endif %}{% if pc.wish_price %} · {{ _("Wish price {price}", price=pc.wish_price|eur) }}{% elif pc.target %} · {{ _("First offer {price}", price=pc.target|eur) }}{% endif %}</span></span>
+    <span class="val">{{ pc.max_price|eur if pc.max_price else '–' }}</span></span></div>
+  <div class="cell" data-agreed><span class="body"><span style="display: flex; flex-direction: column"><span>{{ _("Agreed") }}</span>
+    {% set item = pc.agreed or pc.asking %}{% set ship = pc.get('shipping_cost') %}{% if item is not none and ship is not none and pc.mode != 'pickup' %}{% set fee = pc.get('fee') or 0 %}{% set total = pc.get('total') if pc.get('total') is not none else (pc.get('agreed_total') if pc.get('agreed_total') is not none else item + ship + fee) %}
+    <span class="sub" data-sum>{{ item|eur }} + {{ ship|eur }}{% if fee %} + {{ fee|eur }}{% endif %} = <strong style="color: var(--text)">{{ total|eur }}</strong></span>{% endif %}</span>
+    <span class="val"{% if pc.agreed %} style="color: var(--ok); font-weight: 600"{% endif %}>{{ pc.agreed|eur if pc.agreed else '—' }}</span></span></div>
+</div>
+{% set mk = pc.get('market') %}
+{% if mk or pc.median %}<p class="sub" style="margin: 6px 4px 0" data-market>{% if mk %}{{ _("Comparable ads ({n})", n=mk.get('count') or 0) }}: {% if mk.get('min') is not none %}{{ _("cheapest {price}", price=mk.get('min')|eur) }}{% endif %}{% if mk.get('p25') is not none %} · {{ _("lower quartile {price}", price=mk.get('p25')|eur) }}{% endif %}{% if mk.get('median') is not none %} · {{ _("median {price}", price=mk.get('median')|eur) }}{% endif %}{% else %}{{ _("Comparable median {price}", price=pc.median|eur) }}{% endif %}</p>{% endif %}
+{% if pc.get('questions') %}
+<div class="sh">{{ _("Your questions") }}</div>
+<div class="sec">{% for q in pc.questions %}<div class="cell"><span class="body" style="flex-direction: column; align-items: stretch; gap: 2px"><strong style="font-size: 14px">{{ q.question }}</strong><span class="{{ '' if q.answer else 'sub' }}" style="font-size: 14px">{{ q.answer or _("(no answer yet)") }}</span></span></div>{% endfor %}</div>
+{% endif %}
+{% if pc.log %}
+<div class="sh">{{ _("History") }}</div>
+<div class="sec">{% for h in pc.log %}<div class="cell"><span class="body" style="flex-direction: column; align-items: stretch; gap: 2px"><span class="sub">{{ (h.at or '')[:16]|replace('T', ' ') }}</span><span style="font-size: 14px">{{ h.text }}</span></span></div>{% endfor %}</div>
+{% endif %}
+{% endmacro %}

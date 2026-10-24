@@ -151,3 +151,86 @@ def test_the_price_check_of_any_ad_and_claudes_verdict_in_the_background(client,
     assert 'hx-trigger="every 3s"' in part and 'hx-disinherit="*"' in part and "data-ask-claude" not in part
     tg_deals._running.pop(("willhaben", "123456789", "claude")).cancel()
     assert "data-ask-claude" in client.get("/tg/check/willhaben/123456789/result").text
+
+
+def test_the_hits_view_sorts_filters_pages_and_its_settings(client):
+    """The dashboard's sort, shipping and price filters, the Ignored tab, more hits page by page, and on Saved the
+    daily check of saved ads; the retention goes through the dashboard's endpoint and keeps the view."""
+    from app.services import search_agents
+    a, _ = _agents()
+    page = client.get(f"/tg/hits?agent_id={a}&sort=price_desc").text
+    assert page.index("Ad 2 of") < page.index("Ad 1 of")                        # dearest first
+    assert 'name="sort"' in page and 'name="ship"' in page and 'name="level"' in page and "state=ignored" in page
+    assert 'value="price_desc"' in page and 'action="/hits/keep-days"' in page and "data-watch-saved" not in page
+    saved = client.get("/tg/hits?state=saved").text
+    assert 'action="/hits/watch-saved"' in saved
+    r = client.post("/hits/keep-days", data={"days": "14", "state": "new", "agent_id": str(a)},
+                    headers={"X-TG-Back": f"/tg/hits?agent_id={a}"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/tg/hits") and search_agents.keep_days() == 14
+    from app import tg_web
+    monkey = tg_web.LIST_LIMIT
+    try:
+        tg_web.LIST_LIMIT = 1
+        first = client.get("/tg/hits").text
+        assert "data-more" in first and "offset=1" in first
+        assert "Back to the start" in client.get("/tg/hits?offset=1").text
+    finally:
+        tg_web.LIST_LIMIT = monkey
+
+
+def test_a_hit_shows_what_the_buyer_pays_and_claudes_labels(client, monkeypatch):
+    """The ad viewer's price breakdown (item, shipping options, total), willhaben's fee loading into it as the
+    Mini App's twin, and Claude's assessment with its labels."""
+    from app import platforms
+    from app.platforms import AdDetail
+    _agents()
+    with session() as db:
+        h = db.exec(select(Hit).where(Hit.ad_id == "1")).one()
+        h.screen_relevant, h.screen_deal, h.screen_reason = True, "good", "Gutes Angebot."
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    d = AdDetail.from_hit(h)
+    d.price, d.shipping_price = 51.0, 4.5
+    d.shipping_options = [{"name": "Post", "point": 4.5, "home": 6.0}]
+    d.paylivery_enabled = True
+
+    async def detail(*a, **k):
+        return d
+    monkeypatch.setattr(platforms.get("willhaben"), "detail", detail)
+    page = client.get(f"/tg/hits/{h.id}").text
+    assert "data-price-breakdown" in page and "Post" in page and 'hx-get="/wh-fee/1?' in page
+    assert "data-screen" in page and "Gutes Angebot." in page
+
+    async def fee(*a, **k):
+        return {"fee": 2.49}
+    from app.willhaben import paylivery_fee
+    monkeypatch.setattr(paylivery_fee, "fetch", fee)
+    part = client.get("/wh-fee/1?price=51&sp=4.5", headers={"X-TG-Back": f"/tg/hits/{h.id}"}).text
+    assert "2,49" in part and 'class="sub"' in part                              # the twin, not the dashboard's cells
+
+
+def test_a_product_search_sorts_its_offers_and_shows_each_sites_runs(client):
+    """The offers by price (the order kept for the next search) and the generated searches with their run on each
+    site, linked, with the found count, price bands and an error."""
+    with session() as db:
+        ps = ProductSearch(description="Echo Show 8", status="done", settings={"depth": "normal",
+                                                                             "platforms": ["willhaben", "vinted"]},
+                           plan={"queries": [{"keyword": "Echo Show 8", "why": "das Modell"}]},
+                           queries=[{"keyword": "Echo Show 8", "platform": "willhaben", "found": 1234, "kept": 3,
+                                     "why": "das Modell"},
+                                    {"keyword": "Echo Show 8", "platform": "vinted", "error": "blocked"}],
+                           results=[{"ad_id": "1", "platform": "willhaben", "title": "Teuer", "price": 90.0,
+                                     "url": "https://x/1", "fit": 90},
+                                    {"ad_id": "2", "platform": "willhaben", "title": "Billig", "price": 40.0,
+                                     "url": "https://x/2", "fit": 70}],
+                           requests=2, candidates=5, started_at=utcnow())
+        db.add(ps)
+        db.commit()
+        db.refresh(ps)
+    fit = client.get(f"/tg/search/{ps.id}").text
+    assert fit.index("Teuer") < fit.index("Billig") and "data-ps-order" in fit
+    by_price = client.get(f"/tg/search/{ps.id}?order=price").text
+    assert by_price.index("Billig") < by_price.index("Teuer")
+    assert client.get(f"/tg/search/{ps.id}").text.index("Billig") < client.get(f"/tg/search/{ps.id}").text.index("Teuer")
+    assert 'data-run="willhaben"' in fit and "1.234" in fit and "+3" in fit and "blocked" in fit

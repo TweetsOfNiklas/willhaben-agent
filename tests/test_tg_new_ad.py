@@ -81,8 +81,51 @@ def test_a_batch_its_groups_and_its_drafts(client):
     assert f'action="/new-ad/batch/{b.id}"' in sort and 'name="img_0"' in sort and 'name="img_2"' in sort   # 2: unused
     assert 'name="product_g1"' in sort and 'value="create"' in sort
     review = client.get(f"/tg/new-ad/batch/{b.id}").text                  # drafts there: the review step first
-    assert f'action="/new-ad/batch/{b.id}/drafts"' in review and f'href="/tg/new-ad/{d.id}"' in review
+    assert f'action="/tg/new-ad/batch/{b.id}/drafts"' in review and f'href="/tg/new-ad/{d.id}"' in review
     r = client.post(f"/new-ad/batch/{b.id}", data={"product_g1": "Akkuschrauber", "include_g1": "1", "img_0": "g1",
                                                    "img_1": "g1", "action": "save"},
                     headers={"X-TG-Back": f"/tg/new-ad/batch/{b.id}"}, follow_redirects=False)
     assert r.headers["location"].startswith(f"/tg/new-ad/batch/{b.id}?msg=")
+
+
+def test_the_batch_review_edits_inline_and_brings_the_tables_message_back(client):
+    """The drafts as editable cards (title, price, pieces, handover; ⧉ on the values); the table's save and its
+    actions answer the dashboard's fragment, so the Mini App's route brings its message back to the batch page."""
+    with session() as db:
+        b = AdBatch(image_paths=["/x/1.jpg"], status="review", groups=[])
+        db.add(b)
+        db.commit()
+        db.refresh(b)
+    d = _draft(batch_id=b.id, status="draft")
+    with session() as db:
+        row = db.get(AdBatch, b.id)
+        row.groups = [{"id": "g1", "photos": [0], "product": "Bohrschrauber", "include": True, "comment": "",
+                       "draft_id": d.id}]
+        db.add(row)
+        db.commit()
+    review = client.get(f"/tg/new-ad/batch/{b.id}?step=review").text
+    assert f'name="{d.id}.title"' in review and f'name="{d.id}.price"' in review and f'name="{d.id}.quantity"' in review
+    assert f'name="{d.id}.handover"' in review and "data-copy" in review and f'value="refine:{d.id}"' in review
+    r = client.post(f"/tg/new-ad/batch/{b.id}/drafts", data={f"{d.id}.title": "Bosch Akkuschrauber",
+                                                             f"{d.id}.description": "Wie neu.", f"{d.id}.price": "70",
+                                                             "sel": str(d.id), "all": str(d.id)},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith(f"/tg/new-ad/batch/{b.id}?step=review&msg=")
+    with session() as db:
+        assert db.get(AdDraft, d.id).title == "Bosch Akkuschrauber" and db.get(AdDraft, d.id).price_suggestion == 70
+    r = client.post(f"/tg/new-ad/batch/{b.id}/drafts", data={"act": "discard", "all": str(d.id)},   # nothing ticked
+                    follow_redirects=False)
+    assert f"unticked={d.id}" in r.headers["location"] and "msg=" in r.headers["location"]
+    with session() as db:
+        assert db.get(AdDraft, d.id).status == "draft"
+
+
+def test_the_sort_step_drags_photos_and_has_a_new_item(client):
+    with session() as db:
+        b = AdBatch(image_paths=["/x/1.jpg", "/x/2.jpg"], status="review",
+                    groups=[{"id": "g1", "photos": [0, 1], "product": "Lampe", "include": True, "comment": ""}])
+        db.add(b)
+        db.commit()
+        db.refresh(b)
+    sort = client.get(f"/tg/new-ad/batch/{b.id}?step=sort").text
+    assert 'data-gid="new"' in sort and "data-handle" in sort and "data-include-all" in sort and "pointerdown" in sort

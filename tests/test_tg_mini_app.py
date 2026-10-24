@@ -255,4 +255,5 @@ def test_where_the_bridge_goes_after_an_action():
     assert target("/hits?state=filtered&agent_id=3&msg=ok", "/tg/hits", path="/hits/clear-filtered") \
         == "/tg/hits?state=filtered&agent_id=3&msg=ok"
     assert target("/chats", "/tg/chats/c1/info", path="/chats/c1/remove") == "/tg/chats"
+    assert target("/chats/c1?msg=ok", "/tg/chats/c1/info", path="/purchases/3/paid") == "/tg/chats/c1/info?msg=ok"
     assert target("", "/tg/new-ad/5", path="/new-ad/batch/1/drafts") == "/tg/new-ad/5"

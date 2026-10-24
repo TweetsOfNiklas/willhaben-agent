@@ -84,25 +84,33 @@ async def tg_home(request: Request):
 
 
 # ------------------------------------------------------------------ hits
-TABS = {"new": ("new",), "saved": ("saved",), "filtered": ("filtered", "pending"), "seen": ("seen",)}
+TABS = {"new": ("new",), "saved": ("saved",), "filtered": ("filtered", "pending"), "seen": ("seen",),
+        "ignored": ("ignored",)}
 
 
 @router.get("/tg/hits", response_class=HTMLResponse)
-async def tg_hits(request: Request, state: str = "new", agent_id: str = "", platform: str = ""):
-    """The hits page's tabs (New, Saved, Held back, Seen) and its cards' content, as the dashboard's view shows them
-    (main.HitView: the agent and site filters, far pickup-only ads left out); the dashboard's parameter names, so its
-    bulk actions come back to the same view."""
+async def tg_hits(request: Request, state: str = "new", agent_id: str = "", platform: str = "", sort: str = "",
+                  ship: str = "", level: str = "", offset: int = 0):
+    """The hits page's tabs (New, Saved, Held back, Seen, Ignored) and its cards' content, as the dashboard's view
+    shows them (main.HitView: the agent and site filters, the sort, shipping and price filters, far pickup-only ads
+    left out); the dashboard's parameter names, so its bulk actions come back to the same view. `offset`: the next
+    page of the list."""
     from app.main import HitView
+    from app.services import search_agents
     state = state if state in TABS else "new"
-    view = HitView.of(",".join(TABS[state]), agent_id, platform)
+    view = HitView.of(",".join(TABS[state]), agent_id, platform, sort, ship, level)
+    offset = max(offset, 0)
     with session() as db:
-        hits = view.hits(db, limit=LIST_LIMIT)
+        hits = view.hits(db, limit=LIST_LIMIT + 1, offset=offset)
         agents = {a.id: a for a in db.exec(select(SearchAgent).order_by(col(SearchAgent.name)))}
-        counts = {k: len(list(db.exec(HitView.of(",".join(v), agent_id, platform).where(select(Hit.id)))))
-                  for k, v in TABS.items()}
+        counts = {k: len(list(db.exec(HitView.of(",".join(v), agent_id, platform, sort, ship, level)
+                                      .where(select(Hit.id))))) for k, v in TABS.items()}
         sites = sorted({p for p in db.exec(select(Hit.platform).distinct()) if p})
-    return _render(request, "hits.html", hits=hits, state=state, agents=agents, counts=counts, sites=sites,
-                   agent_id=view.agent_id, platform=view.platform)
+    more = len(hits) > LIST_LIMIT
+    return _render(request, "hits.html", hits=hits[:LIST_LIMIT], state=state, agents=agents, counts=counts,
+                   sites=sites, agent_id=view.agent_id, platform=view.platform, sort=view.sort, ship=view.ship,
+                   level=view.level, offset=offset, more=more, watch_saved=search_agents.watch_saved_on(),
+                   keep_days=search_agents.keep_days())
 
 
 @router.post("/tg/hits/{hit_id}/quick")
@@ -111,7 +119,7 @@ async def tg_hit_quick(request: Request, hit_id: int, state: str = Form(...), ta
     from urllib.parse import urlencode
     await tg_hit_state(hit_id, state)
     form = await request.form()
-    keep = {k: str(form.get(k)) for k in ("agent_id", "platform") if form.get(k)}
+    keep = {k: str(form.get(k)) for k in ("agent_id", "platform", "sort", "ship", "level") if form.get(k)}
     return _back(f"/tg/hits?{urlencode({'state': tab if tab in TABS else 'new', **keep})}")
 
 

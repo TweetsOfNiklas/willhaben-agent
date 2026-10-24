@@ -16,7 +16,7 @@
   {% if agents %}
   <div class="sec" style="margin-top: 12px">
     {% for a in agents %}{% set busy = ('agent:' ~ a.id) in checking %}
-    <div class="cell" style="align-items: flex-start; padding-top: 8px" data-agent="{{ a.id }}">
+    <div class="cell" style="align-items: flex-start; padding-top: 8px; flex-wrap: wrap" data-agent="{{ a.id }}">
       <span class="body" style="padding: 0 0 8px; align-items: flex-start">
         <a href="/tg/agents/{{ a.id }}" style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; color: var(--text)">
           <span style="display: flex; align-items: center; gap: 6px; min-width: 0"><span class="ttl trunc" style="font-weight: 500">{{ a.name }}</span>
@@ -32,6 +32,10 @@
           {% if not busy %}<form method="post" action="/agents/{{ a.id }}/run" style="margin: 0"><button class="chip" data-run>{{ _("Check now") }}</button></form>{% endif %}
         </span>
       </span>
+      {% set pics = thumbs.get(a.id, [])|selectattr('image_url')|list if thumbs is defined else [] %}
+      {% if pics %}<span style="flex: 1 1 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0 0 10px" data-thumbs="{{ a.id }}">
+        {% for h in thumbs.get(a.id, [])[:4] %}<a href="/tg/hits/{{ h.id }}" title="{{ h.heading }}" style="display: block; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden; background: rgba(118,118,128,.2)">{% if h.image_url or h.image_path %}<img src="{{ '/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url }}" alt="" loading="lazy" style="width: 100%; height: 100%; object-fit: cover; display: block" onerror="this.style.visibility='hidden'">{% endif %}</a>{% endfor %}
+      </span>{% endif %}
     </div>
     {% endfor %}
   </div>

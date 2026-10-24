@@ -18,6 +18,7 @@ def test_the_list_by_status_and_one_order_with_its_chat(client):  # noqa: F811
     page = client.get(f"/tg/purchases/{pid}").text
     assert 'href="/tg/chats/c1"' in page and "Gegenangebot" in page
     assert f'action="/tg/purchases/{pid}/cancel"' in page and 'action="/purchases/' not in page   # stays in the Mini App
+    assert "data-purchase-card" in page and "data-agreed" in page                 # the whole card, as the dashboard's
     assert client.get("/tg/purchases/999999").status_code == 404
 
 
@@ -45,8 +46,11 @@ def test_the_buy_dialog_and_start(client, monkeypatch):  # noqa: F811
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))
     page = client.get("/tg/purchases/new/2000000001?search=3&q=geschirr").text
     assert 'id="tg-buy"' in page and 'name="mode" value="paylivery"' in page and 'name="wish_price"' in page
-    assert 'name="max_default" value="1"' in page and "data-fair" in page and "data-pricebar" in page
+    assert 'name="max_default" value="1"' in page and "data-fair" in page and "data-gauge" in page
     assert 'data-main-form="tg-buy"' in page
+    # live as on the dashboard: the pill, the ring to drag, the summary, the maths (tg/_buy_script.html)
+    assert 'class="bd-drag"' in page and 'class="bd-pin"' in page and "bd-summary" in page and "bd-live" in page
+    assert "window.wbBuy" in page and "wbBuy.submit(this, event)" in page and 'data-ship=' in page
     assert 'id="tg-buy"' in client.get("/tg/purchases/new/willhaben:2000000001").text     # a ref works too
     assert "willhaben ads only" in client.get("/tg/purchases/new/vinted:55").text
     calls = {}

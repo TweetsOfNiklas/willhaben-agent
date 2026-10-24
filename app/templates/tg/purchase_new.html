@@ -2,9 +2,27 @@
 {% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
 {% block title %}{{ _("Buy") }}{% endblock %}
 {# the buy dialog (_buy_dialog.html, purchase_routes._dialog) in the Mini App: how to buy, wish price and maximum (the
-   price check's rating, the comparables' chips), questions for the seller, Start (Telegram's main button). The sums
-   stay the server's: an untouched maximum is sent as "default" (asking price + shipping + fee of the chosen way), an
-   untouched wish price empty (the suggestion for that way) – no price maths in the browser. #}
+   price check's rating, the comparables' chips), questions for the seller, Start (Telegram's main button). Live as on
+   the dashboard (tg/_buy_script.html, the port of _buy_script.html): the maximum's pill rates it as it is typed, the
+   ring on the bar sets it by dragging (finger or mouse), the summary adds shipping and buyer protection of the chosen
+   way. The server's sums stay the fallback: an untouched maximum goes as "default", an untouched wish price empty. #}
+{# the price bar to drag: the zones, the needle at the asking price, the new-price marker named under it and the ring
+   (.bd-pin) at the maximum, placed by the script; touch-action none, so a finger drags instead of scrolling #}
+{% macro gauge(fair) %}
+{%- set col = {'bargain': '#2F9E44', 'cheap': '#66A80F', 'fair': '#B38600', 'expensive': '#F76707', 'very_expensive': '#E5484D'} %}
+{%- set b = fair.bar %}
+<div style="margin: 4px 11px 0">
+  <div class="{{ 'bd-drag' if fair.js else '' }}" style="position: relative; padding: 12px 0; {{ 'touch-action: none; user-select: none; -webkit-user-select: none; cursor: ew-resize' if fair.js else '' }}" data-gauge>
+    <div style="position: relative; height: 10px; border-radius: 5px; overflow: hidden">{% for sg in b.segments %}<span style="position: absolute; top: 0; bottom: 0; left: {{ sg.from }}%; width: {{ (sg.to - sg.from)|round(2) }}%; background: {{ col.get(sg.level, '#999') }}; opacity: {{ '1' if sg.level == b.level else '.35' }}; {{ '' if loop.first else 'border-left: 2px solid var(--section)' }}"></span>{% endfor %}</div>
+    {% if b.new_at is not none %}<span style="position: absolute; top: 6px; height: 22px; width: 2px; left: {{ b.new_at }}%; transform: translateX(-50%); background: var(--hint)"></span>{% endif %}
+    <span style="position: absolute; top: 5px; height: 24px; width: 4px; border-radius: 2px; left: {{ (fair.pos * 100)|round(1) }}%; transform: translateX(-50%); background: var(--text); box-shadow: 0 0 0 2px var(--section)" title="{{ _('Asking price') }}"></span>
+    {% if fair.js %}<span class="bd-pin" style="position: absolute; top: 6px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; border: 3px solid var(--text); background: var(--section); box-shadow: 0 1px 3px rgba(0,0,0,.3)" hidden></span>{% endif %}
+  </div>
+  {% if b.new_at is not none and fair.new_price %}<div style="position: relative; height: 16px; font-size: 11.5px; color: var(--hint)"><span style="position: absolute; white-space: nowrap; font-weight: 600; left: {{ b.new_at }}%; transform: translateX({{ '-100%' if b.new_at > 80 else '0' if b.new_at < 20 else '-50%' }})">{{ _("New") }} {{ fair.new_price|eur }}</span></div>{% endif %}
+  {% if fair.js and fair.min is not none %}<div style="display: flex; justify-content: space-between; font-size: 11.5px; color: var(--hint)"><span>{{ fair.min|eur }}</span><span>{{ fair.max|eur }}</span></div>{% endif %}
+  {% if fair.js %}<p class="sub" style="margin: 4px 0 0">{{ _("Drag the ring to set your maximum.") }}</p>{% endif %}
+</div>
+{% endmacro %}
 {% block page %}
 <main data-back="/tg/purchases"{% if on and d and not gone %} data-main="{{ _('Start purchase') }}" data-main-form="tg-buy"{% endif %}>
 {{ m.head(_("Buy"), '/tg/purchases') }}
@@ -29,8 +47,9 @@
   </div>
   {% if d.description %}<details style="margin: 8px 4px 0"><summary class="sub" style="color: var(--link)">{{ _("Description") }}</summary><p style="font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere">{{ d.description[:1500] }}</p></details>{% endif %}
 
-  <form method="post" action="/tg/purchases/new/{{ ad_id }}" id="tg-buy" style="margin: 0" data-buy
-        onsubmit="if (!this.dataset.wishTouched) this.elements.wish_price.value = ''">
+  <form method="post" action="/tg/purchases/new/{{ ad_id }}" id="tg-buy" class="bd-form" style="margin: 0" data-buy
+        data-ask="{{ ask }}" data-ship='{{ ship|tojson }}' data-fee='{{ fee|tojson }}' data-discount="{{ '%g'|format(discount) }}"{% if fair and fair.js %} data-fair='{{ fair.js|tojson }}'{% endif %}
+        onkeydown="wbBuy.enter(event)" onsubmit="return wbBuy.submit(this, event)">
     {% for k, v in [('title', d.heading or ''), ('url', d.url or ''), ('image_url', d.images[0] if d.images else ''), ('price', d.price if d.price is not none else ''), ('search_id', search_id or ''), ('query', query), ('max_default', '1')] %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     <div class="sh">{{ _("How to buy") }}</div>
     <div class="sec">
@@ -39,31 +58,35 @@
         ('direct', _("Bank transfer"), _("Shipping about {amount}", amount=ship.direct|eur) if direct_ok else _("Needs your own address (Settings → Shipping)"), direct_ok, pre == 'direct'),
         ('pickup', _("Pickup"), _("cash, no shipping"), true, pre == 'pickup')] %}
       <label class="cell" style="{{ '' if enabled else 'opacity: .5' }}" data-mode="{{ val }}">
-        <input type="radio" name="mode" value="{{ val }}" required {% if not enabled %}disabled{% endif %} {% if pre_ok %}checked{% endif %} style="width: 20px; height: 20px; flex-shrink: 0">
+        <input type="radio" name="mode" value="{{ val }}" required {% if not enabled %}disabled{% endif %} {% if pre_ok %}checked{% endif %} data-label="{{ label }}" data-ship-text="{{ fact if enabled else '' }}" onchange="wbBuy.mode(this.form)" style="width: 20px; height: 20px; flex-shrink: 0">
         <span class="body"><span style="display: flex; flex-direction: column"><span>{{ label }}</span><span class="sub">{{ fact }}</span></span></span>
       </label>
       {% endfor %}
     </div>
     {% if d.maps_url %}<p class="sub" style="margin: 6px 4px 0">{{ _("Pickup place") }}: <a href="{{ d.maps_url }}" target="_blank" hx-boost="false">{{ d.place }} ↗</a> ({{ _("Google Maps; the exact address comes from the seller") }})</p>{% endif %}
-    <div class="sec" style="margin-top: 10px; padding: 10px 14px">
-      <label class="sub">{{ _("Preferred time") }}<input class="field" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}"></label>
+    <div class="sec bd-step" data-step="1" style="margin-top: 10px; padding: 10px 14px">
+      <label class="sub">{{ _("Preferred time") }}<input class="field" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}" oninput="wbBuy.refresh(this.form)"></label>
     </div>
 
-    <div class="sh">{{ _("Price") }}</div>
+    <div class="sh bd-step" data-step="2">{{ _("Price") }}</div>
     <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 10px">
       <label class="sub">{{ _("Wish price incl. shipping & fee") }} ({{ _("the agent offers this first") }})
-        <input class="field" type="number" name="wish_price" min="1" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(wish_prefill) if wish_prefill else '' }}" oninput="this.form.dataset.wishTouched = '1'"></label>
+        <input class="field" type="number" name="wish_price" min="1" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(wish_prefill) if wish_prefill else '' }}" oninput="wbBuy.wishInput(this.form)"></label>
+      <span class="bd-wish-over" style="font-size: 13px; color: var(--destructive)" hidden>{{ _("The wish price is above your maximum.") }}</span>
       <label class="sub">{{ _("Maximum incl. shipping & fee") }}{% if not ask %} ({{ _("optional") }}){% endif %}
-        <input class="field" type="number" name="max_price" min="1" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(prefill) if prefill else '' }}" oninput="this.form.elements.max_default.value = ''" data-max></label>
+        <span style="display: flex; align-items: center; gap: 8px">
+          <input class="field" type="number" name="max_price" min="1" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(prefill) if prefill else '' }}" oninput="wbBuy.input(this.form)" onblur="wbBuy.blur(this.form)" data-max style="flex: 1">
+          {% if fair and fair.js %}<span class="bd-live" data-tpl="{{ _('{n} % · {level}') }}" style="flex-shrink: 0; border-radius: 12px; padding: 3px 10px; font-size: 12.5px; font-weight: 600; color: #FFFFFF" hidden></span>{% endif %}
+        </span></label>
       {% if fair %}
       {% set parts = [] %}
       {% if fair.basis == 'geizhals' %}{% set _x = parts.append(_("{n} % of the new price", n=fair.pct) if fair.pct else _("below 1 % of the new price")) %}
       {% elif fair.diff is not none %}{% set _x = parts.append(_("{n} % below the median", n=-fair.diff) if fair.diff < 0 else (_("{n} % above the median", n=fair.diff) if fair.diff > 0 else _("exactly the median"))) %}{% endif %}
       {% if fair.count %}{% set _x = parts.append(_("{n} comparable ads", n=fair.count)) %}{% endif %}
       <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center" data-fair><span class="pill lvl-{{ fair.level }}">{{ deal_level_label(fair.level) }}</span><span class="sub">{{ parts|join(' · ') }}</span></span>
-      {% if fair.bar %}{{ m.pricebar(fair.bar) }}{% endif %}
-      {% if fair.chips %}<span class="btnrow">{% for c in fair.chips %}{% set tpl = _('Cheapest · {x}') if c.key == 'min' else _('Cheap · {x}') if c.key == 'cheap' else _('Market price · {x}') %}{% set total = (c.v + (ship[pre] if pre else 0) + (fee_of(c.v) if pre == 'paylivery' else 0))|round(2) %}
-        <button type="button" class="chip" data-v="{{ '%.2f'|format(total) }}" onclick="const f = this.form; f.elements.max_price.value = this.dataset.v; f.elements.max_default.value = ''">{{ tpl.replace('{x}', total|eur) }}</button>{% endfor %}</span>{% endif %}
+      {% if fair.bar %}{{ gauge(fair) }}{% endif %}
+      {% if fair.chips %}<span class="btnrow bd-sugg">{% for c in fair.chips %}{% set tpl = _('Cheapest · {x}') if c.key == 'min' else _('Cheap · {x}') if c.key == 'cheap' else _('Market price · {x}') %}{% set total = (c.v + (ship[pre] if pre else 0) + (fee_of(c.v) if pre == 'paylivery' else 0))|round(2) %}
+        <button type="button" class="chip" data-v="{{ '%.2f'|format(c.v) }}" data-tpl="{{ tpl }}" onclick="wbBuy.pick(this.form, +this.dataset.v)">{{ tpl.replace('{x}', total|eur) }}</button>{% endfor %}</span>{% endif %}
       {% endif %}
     </div>
 
@@ -72,10 +95,23 @@
       <label class="sub">{{ _("Questions for the seller") }} ({{ _("optional, one per line") }})
         <textarea class="field" name="questions" rows="3" maxlength="1500" placeholder="{{ _('e.g. Is the original box included?') }}"></textarea></label>
       <span class="sub">{{ _("The agent asks them in the chat; when the seller agrees to the sale you get the answers with the notification.") }}</span>
+    </div>
+    {# the live summary of what Start does (JavaScript only; "Change" leads back up) #}
+    <div class="sec bd-summary" style="margin-top: 10px" data-empty="–" data-noprice="{{ _('no price in the ad') }}" data-fee-tpl="{{ _('Buyer protection {amount}') }}" hidden>
+      {% for key, label, step in [('mode', _("How to buy"), 1), ('time', _("Preferred time"), 1), ('wish', _("Wish price"), 2), ('max', _("Maximum"), 2)] %}
+      <div class="cell"{% if key == 'time' %} data-s="timerow" hidden{% endif %}><span class="body"><span style="min-width: 0; display: flex; flex-direction: column">
+        <span class="sub">{{ label }}</span>
+        <span style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px"><strong data-s="{{ key }}"></strong>{% if key == 'mode' %}<span class="sub" data-s="ship"></span>{% elif key == 'max' and fair and fair.js %}<span class="bd-live" data-tpl="{{ _('{n} % · {level}') }}" style="border-radius: 12px; padding: 2px 9px; font-size: 12px; font-weight: 600; color: #FFFFFF" hidden></span>{% endif %}</span></span>
+        <button type="button" class="chip" onclick="wbBuy.go(this.form || document.getElementById('tg-buy'), {{ step }})">{{ _("Change") }}</button></span></div>
+      {% endfor %}
+    </div>
+    <div class="sec" style="margin-top: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
       <span class="sub">{{ _("Nothing is paid automatically. The agent offers your wish price and goes up to your maximum at most. With PayLivery you confirm the payment on your phone.") }}</span>
-      <button class="mainbtn tg-hide" data-start>{{ _("Start purchase") }}</button>
+      <span class="bd-error" style="font-size: 13px; color: var(--destructive)" hidden>{{ _("Choose how to buy, and check the prices.") }}</span>
+      <button class="mainbtn tg-hide bd-start" data-start>{{ _("Start purchase") }}</button>
     </div>
   </form>
+  {% include "tg/_buy_script.html" %}
   {% endif %}
 </div>
 </main>

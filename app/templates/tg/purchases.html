@@ -6,6 +6,7 @@
 <main data-back="/tg">
 {{ m.head(_("Purchases")) }}
 <div class="wrap">
+  <p class="sub" style="margin: 12px 4px 0">{{ _("The agent contacts the seller and negotiates within your maximum price. Nothing is paid automatically.") }}</p>
   <nav class="seg" aria-label="{{ _('Purchases') }}">
     {% for v, label in [('open', _("Ongoing")), ('done', _("Finished")), ('all', _("All"))] %}
     <a href="/tg/purchases?show={{ v }}"{% if show == v %} aria-current="page"{% endif %}>{{ label }}</a>
@@ -26,7 +27,7 @@
     </a>
     {% endfor %}
   </div>
-  {% else %}<p class="empty">{{ _("No purchase orders yet. Start one with Buy in the product search.") }}</p>{% endif %}
+  {% else %}<p class="empty">{{ _("No purchase orders yet. Start one with Buy in the product search.") }}<br><a class="chip primary" style="display: inline-flex; align-items: center; margin-top: 10px" href="/tg/search">{{ ui.icon('search', 13, 2) }} {{ _("Product search") }}</a></p>{% endif %}
 </div>
 </main>
 {% endblock %}

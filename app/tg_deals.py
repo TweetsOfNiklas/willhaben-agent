@@ -11,10 +11,14 @@ from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app import tg_bridge
 from app.tg_web import _back, _page, _render
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+# willhaben's exact PayLivery fee, loaded into the hit page's price breakdown
+tg_bridge.TWINS.update({"_wh_fee.html": "tg/_wh_fee.html"})
+ORDERS = ("fit", "price", "distance")
 
 
 def _search_notice(code: str | None) -> str | None:
@@ -48,14 +52,39 @@ async def tg_search(request: Request, q: str = "", search: int | None = None, ms
                        sites=sites)
 
 
+def _ordered(results: list[dict[str, Any]], order: str, home: Any) -> list[dict[str, Any]]:
+    """The offers in Claude's order, by price or by distance from home (as the dashboard sorts them in the browser):
+    offers without a price or a place last, in Claude's order."""
+    from app.services import geo
+    if order == "price":
+        key = lambda ir: (ir[1].get("price") is None, ir[1].get("price") or 0, ir[0])  # noqa: E731
+    elif order == "distance" and home:
+        def key(ir):
+            km = geo.distance_km(ir[1], home)
+            return (km is None, km or 0, ir[0])
+    else:
+        return list(results)
+    return [r for _, r in sorted(enumerate(results), key=key)]
+
+
 @router.get("/tg/search/{search_id}", response_class=HTMLResponse)
-async def tg_search_result(request: Request, search_id: int):
-    """One product search: its progress while it runs (the page asks again), Claude's questions, the offers."""
+async def tg_search_result(request: Request, search_id: int, order: str = ""):
+    """One product search: its progress while it runs (the page asks again), Claude's questions, the offers in the
+    order chosen (kept for the next search, as the dashboard keeps it in the browser)."""
     from app import deals_web
-    from app.services import product_search
-    if product_search.get(search_id) is None:
+    from app.db import get_setting, set_setting
+    from app.services import geo, product_search
+    ps = product_search.get(search_id)
+    if ps is None:
         raise HTTPException(404)
-    return _render(request, "search_result.html", **deals_web._search_ctx(search_id))
+    home = geo.home_cached()
+    if order in ORDERS:
+        set_setting("tg_ps_order", order)
+    order = get_setting("tg_ps_order") or "fit"
+    if order == "distance" and not home:
+        order = "fit"
+    return _render(request, "search_result.html", **deals_web._search_ctx(search_id), order=order,
+                   results=_ordered(ps.results or [], order, home), home=home)
 
 
 # ------------------------------------------------------------------ price check of one ad

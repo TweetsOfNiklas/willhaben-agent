@@ -1,13 +1,16 @@
 {% extends "tg/_base.html" %}
 {% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
 {% block title %}{{ _("Batch #{id}", id=b.id) }}{% endblock %}
-{# a batch of ads (main.ad_batch_page): Claude's groups of photos to correct (a photo is moved with its select), then
-   the drafts written from them – ticked ones published, revised or discarded together, each one opens as a draft #}
+{# a batch of ads (main.ad_batch_page): Claude's groups of photos to correct (a photo is dragged by its handle, or moved
+   with its select), then the drafts written from them as editable cards – title, price, pieces, category with its
+   fields, handover; ⧉ applies a value to all ticked drafts; the ticked ones are published, revised or discarded
+   together (POST /tg/new-ad/batch/<id>/drafts: the dashboard's table, its message back here) #}
 {% block page %}
 {% set open_groups = b.groups|rejectattr('draft_id')|list %}
 {% set step = request.query_params.get('step', 'review' if drafts else 'sort') %}
-<main data-back="/tg/new-ad"{% if step == 'sort' and not busy and b.status != 'sorting' %} data-main="{{ _('Create drafts for all ticked items') }}" data-main-form="batch-form"{% endif %}
-      {% if busy %}hx-get="/tg/new-ad/batch/{{ b.id }}?step={{ step }}" hx-trigger="every 4s" hx-select="main" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+{% set working = drafts|selectattr('publishing')|list or drafts|selectattr('refining')|list or drafts|selectattr('id', 'in', preparing)|list %}
+<main data-back="/tg/new-ad"{% if step == 'sort' and not busy and b.status != 'sorting' %} data-main="{{ _('Create drafts for all ticked items') }}" data-main-form="batch-form"{% elif step == 'review' and drafts %} data-main="{{ _('Save') }}" data-main-form="bt"{% endif %}
+      {% if busy or (step == 'review' and working) %}hx-get="/tg/new-ad/batch/{{ b.id }}?step={{ step }}{% if unticked %}&unticked={{ unticked|join(',') }}{% endif %}" hx-trigger="every 4s [!document.querySelector('[data-dirty]')]" hx-select="main" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
 {{ m.head(_("Batch #{id}", id=b.id), '/tg/new-ad') }}
 <div class="wrap">
   <p class="sub" style="margin: 12px 4px 0">{{ _("{n} photos", n=b.image_paths|length) }} · {{ _("{n} items", n=b.groups|length) }}{% if b.notes %} · {{ _("For all items:") }} {{ b.notes }}{% endif %}</p>
@@ -27,41 +30,115 @@
   </select>
   {% endmacro %}
   {% macro tile(idx, current, cover=false) %}
-  <div style="display: flex; flex-direction: column; gap: 4px; width: calc(33% - 4px)">
-    <a href="/ad-batches/{{ b.id }}/image/{{ idx }}" target="_blank" hx-boost="false" style="position: relative; display: block">
-      <img src="/ad-batches/{{ b.id }}/image/{{ idx }}" alt="{{ _('Photo {n}', n=idx + 1) }}" loading="lazy" style="display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: rgba(118,118,128,.2){{ '; outline: 2px solid var(--btn)' if cover else '' }}">
-      <span style="position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,.5); color: #FFF; font-size: 11px; border-radius: 4px; padding: 0 4px">{{ idx + 1 }}{% if cover %} · {{ _("cover") }}{% endif %}</span></a>
+  <div class="tile-photo" style="display: flex; flex-direction: column; gap: 4px; width: calc(33% - 4px)" data-idx="{{ idx }}">
+    <span style="position: relative; display: block">
+      <a href="/ad-batches/{{ b.id }}/image/{{ idx }}" target="_blank" hx-boost="false" style="display: block">
+        <img src="/ad-batches/{{ b.id }}/image/{{ idx }}" alt="{{ _('Photo {n}', n=idx + 1) }}" loading="lazy" draggable="false" style="display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: rgba(118,118,128,.2){{ '; outline: 2px solid var(--btn)' if cover else '' }}"></a>
+      {% if not busy %}<span data-handle role="button" aria-label="{{ _('Drag photos here (or choose “+ new item” below the photo)') }}" style="position: absolute; left: 4px; top: 4px; width: 30px; height: 30px; border-radius: 8px; background: rgba(0,0,0,.55); color: #FFF; display: flex; align-items: center; justify-content: center; font-size: 16px; touch-action: none; cursor: grab">⠿</span>{% endif %}
+      <span style="position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,.5); color: #FFF; font-size: 11px; border-radius: 4px; padding: 0 4px">{{ idx + 1 }}{% if cover %} · {{ _("cover") }}{% endif %}</span></span>
     {{ target_select(idx, current) }}
   </div>
   {% endmacro %}
+  {% set zone = 'display: flex; flex-wrap: wrap; gap: 6px; min-height: 64px; border: 1px dashed var(--sep); border-radius: 10px; padding: 4px' %}
 
   {% if step == 'review' and drafts %}
-  {# the drafts: ticked ones act together (the dashboard's batch table, act = publish / prepare / refine / discard) #}
-  <form method="post" action="/new-ad/batch/{{ b.id }}/drafts" id="bt" style="margin: 0" data-batch-drafts>
-    <div class="sec" style="margin-top: 12px">
-      {% for d in drafts %}{% set on = (d.id in selected) if selected is not none else (d.status == 'draft' and not d.publishing) %}
-      <div class="cell" style="align-items: center" data-draft="{{ d.id }}">
-        <input type="checkbox" name="sel" value="{{ d.id }}" {% if on %}checked{% endif %} {% if d.publishing or d.status == 'published' %}disabled{% endif %} aria-label="{{ _('Tick ad #{id}', id=d.id) }}" style="width: 20px; height: 20px; flex-shrink: 0">
-        {% if d.image_paths %}<img class="thumb" src="/ad-drafts/{{ d.id }}/image/0" alt="" loading="lazy" width="44" height="44" style="width: 44px; height: 44px">{% endif %}
-        <a href="/tg/new-ad/{{ d.id }}" class="body" style="color: var(--text)"><span style="display: flex; flex-direction: column; min-width: 0">
-          <span class="trunc">{{ d.title or _('Untitled') }}</span>
-          <span class="sub">{{ d.price_suggestion|eur if d.price_suggestion is not none else '–' }}{% if d.quantity %} · {{ d.quantity }} {{ _("Pcs.") }}{% endif %}{% if d.questions %} · <span style="color: #B07800">{{ _("Claude has questions") }}</span>{% endif %}</span>
-          {% if d.error %}<span style="font-size: 12px; color: var(--destructive)">{{ d.error }}</span>{% endif %}</span>
-          <span class="val">{% if d.publishing %}<span class="pill" style="color: var(--link)">{{ _("Publishing on willhaben…") }}</span>{% elif d.refining %}<span class="pill" style="color: var(--link)">{{ _("Claude is revising the text…") }}</span>{% else %}<span class="pill{{ ' lvl-bargain' if d.status == 'published' else '' }}">{{ {'draft': _('draft'), 'error': _('error'), 'published': _('published'), 'discarded': _('discarded')}.get(d.status, d.status) }}</span>{% endif %}{{ m.chev() }}</span></a>
+  {# ---- the drafts: one editable card each; the ticked ones act together ---- #}
+  {% set hos = {'pickup': _("Self pickup"), 'shipping': _("Shipping"), 'both': _("Pickup or shipping")} %}
+  {% set n_pub = drafts|selectattr('status', 'equalto', 'published')|list|length %}{% set n_disc = drafts|selectattr('status', 'equalto', 'discarded')|list|length %}
+  {% macro copy_btn() %}<button type="button" class="chip" data-copy style="height: 30px; padding: 0 9px; flex-shrink: 0" title="{{ _('Apply to all ticked ads') }}" aria-label="{{ _('Apply to all ticked ads') }}">⧉</button>{% endmacro %}
+  <form method="post" action="/tg/new-ad/batch/{{ b.id }}/drafts" id="bt" style="margin: 0" data-batch-drafts>
+    <div class="sec" style="margin-top: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px">
+      <span style="display: flex; align-items: center; gap: 8px"><span style="flex: 1; height: 6px; background: var(--sep); border-radius: 3px; overflow: hidden"><span style="display: block; height: 100%; background: var(--ok); width: {{ ((n_pub + n_disc) * 100 / (drafts|length or 1))|round|int }}%"></span></span>
+        <span class="sub"><strong>{{ n_pub }}</strong> {{ _("of {total} published", total=drafts|length) }}{% if n_disc %}, {{ _("{n} discarded", n=n_disc) }}{% endif %}</span></span>
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 14px"><input type="checkbox" data-selall style="width: 20px; height: 20px"><span data-selcount data-text="{{ _('{n} of {total} ticked') }}"></span></label>
+      <span class="sub" data-bt-status>{{ _("Changes save on their own · ⧉ applies a value to all ticked ads") }}</span>
+    </div>
+    {% for d in drafts %}
+    {% set checked = (d.id in selected) if selected is not none else (d.status == 'draft' and not d.publishing) %}
+    {% set plan = d.wh_plan or {} %}{% set opts = plan.options or [] %}
+    {% set sel_idx = plan.selected if plan.selected is defined and plan.selected is not none and plan.selected < opts|length else 0 %}
+    {% set ed = d.status == 'draft' and not d.publishing and not d.refining %}{% set prep = d.id in preparing %}
+    {% set sh = plan.shipping or {} %}{% set ho = sh.handover or sell_handover_default() %}
+    {% set st = d.price_stats or {} %}{% set match = (d.geizhals or {}).get('match') or {} %}
+    <div class="sec" style="margin-top: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px{{ '; opacity: .65' if d.status == 'discarded' else '' }}" data-draft="{{ d.id }}">
+      <span style="display: flex; align-items: center; gap: 10px">
+        {% if not (d.publishing or d.status == 'published') %}<input type="hidden" name="all" value="{{ d.id }}">{% endif %}
+        <input type="checkbox" name="sel" value="{{ d.id }}" {% if checked %}checked{% endif %} {% if d.publishing or d.status == 'published' %}disabled{% endif %} aria-label="{{ _('Tick ad #{id}', id=d.id) }}" style="width: 20px; height: 20px; flex-shrink: 0">
+        {% if d.image_paths %}<img class="thumb" src="/ad-drafts/{{ d.id }}/image/0" alt="" loading="lazy" width="44" height="44" style="width: 44px; height: 44px" onerror="this.style.visibility='hidden'">{% endif %}
+        <a href="/tg/new-ad/{{ d.id }}" class="sub" style="flex: 1; color: var(--link)">#{{ d.id }}{% if d.category_hint %} · {{ d.category_hint }}{% endif %}{% if d.questions %} · <span style="color: #B07800">{{ _("Claude has questions") }}</span>{% endif %}</a>
+        {% if d.publishing %}<span class="pill" style="color: var(--link)">{{ _("Publishing…") }}</span>
+        {% elif d.refining %}<span class="pill" style="color: var(--link)">{{ _("Claude writes…") }}</span>
+        {% elif d.status == 'published' %}<span class="pill lvl-bargain">{{ _("published") }}</span>
+        {% elif d.status == 'discarded' %}<span class="pill">{{ _("discarded") }}</span>
+        {% elif d.status == 'error' %}<span class="pill" style="color: var(--destructive)">{{ _("Error") }}</span>
+        {% elif opts %}<span class="pill" style="color: var(--link)">{{ _("ready") }}</span>
+        {% else %}<span class="pill">{{ _("draft") }}</span>{% endif %}
+      </span>
+      {% if ed %}
+      <input class="field" name="{{ d.id }}.title" value="{{ d.title or '' }}" maxlength="80" aria-label="{{ _('Title') }}" style="font-weight: 600" data-save>
+      <span style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px">
+        <span data-prop="price" style="display: flex; gap: 4px; align-items: center"><input class="field" name="{{ d.id }}.price" data-key="price" inputmode="decimal" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}" aria-label="{{ _('Price (€)') }}" placeholder="€" data-save>{{ copy_btn() }}</span>
+        <span data-prop="quantity" style="display: flex; gap: 4px; align-items: center"><input class="field" type="number" name="{{ d.id }}.quantity" data-key="quantity" min="1" max="999" inputmode="numeric" placeholder="1 {{ _('Pcs.') }}" value="{{ d.quantity or '' }}" aria-label="{{ _('Pcs.') }}" data-save>{{ copy_btn() }}</span>
+      </span>
+      {% if st.count %}<span class="sub">{{ _("Comparison ({n}): median {median}, middle {p25}–{p75}", n=st.count, median=st.median|eur, p25=st.p25|eur, p75=st.p75|eur) }}{% if st.llm_estimate %} · {{ _("Claude estimates {price}", price=st.llm_estimate|eur) }}{% endif %}</span>{% endif %}
+      {% if prep %}<span class="sub" style="color: var(--link)">{{ _("Asking willhaben…") }}</span>
+      {% else %}
+      <span data-prop="cat" style="display: flex; gap: 4px; align-items: center">
+        <select class="field" name="{{ d.id }}.cat" data-key="cat" aria-label="{{ _('Category') }}" data-save>
+          {% for o in opts %}<option value="{{ o.path[-1].code }}" title="{{ o.label }}" {% if loop.index0 == sel_idx %}selected{% endif %}>{{ o.path[-2:]|map(attribute='label')|join(' › ') }}</option>{% endfor %}
+          {% if not opts %}<option value="" selected>{{ _("– no category yet –") if plan.options is not defined else _("– no suggestion –") }}</option>{% endif %}
+        </select>{{ copy_btn() }}</span>
+      {% for o in opts %}{% set code = o.path[-1].code %}
+      <div data-catblock="{{ code }}" style="display: flex; flex-direction: column; gap: 4px" {% if loop.index0 != sel_idx %}hidden{% endif %}>
+        {% for f in o.fields %}<span data-prop="f:{{ f.code }}" style="display: flex; gap: 4px; align-items: center"><select class="field" style="font-size: 13px" name="{{ d.id }}.f:{{ code }}:{{ f.code }}" data-key="f:{{ f.code }}" aria-label="{{ f.label }}" data-save><option value="" {% if f.selected not in f['values']|map('first') %}selected{% endif %}>{{ f.label }}: –</option>{% for vc, vl in f['values'] %}<option value="{{ vc }}" {% if vc == f.selected %}selected{% endif %}>{{ f.label }}: {{ vl }}</option>{% endfor %}</select>{{ copy_btn() }}</span>{% endfor %}
       </div>
       {% endfor %}
+      {% if plan.options is not defined %}<button class="chip" name="act" value="prepare:{{ d.id }}">{{ _("Ask willhaben") }}</button>
+      {% elif not opts %}<span style="font-size: 13px; color: #B07800">{{ _("No category found for this draft – search for one below, e.g. by the product type.") }} <a href="/tg/new-ad/{{ d.id }}#willhaben">{{ _("Choose another category") }} ›</a></span>{% endif %}
+      {% endif %}
+      <div data-prop="handover" data-ho="{{ ho }}" style="display: flex; flex-direction: column; gap: 6px">
+        <span style="display: flex; gap: 4px; align-items: center"><select class="field" name="{{ d.id }}.handover" data-key="handover" aria-label="{{ _('Handover') }}" data-save data-ho-select>{% for v, lbl in hos.items() %}<option value="{{ v }}" {% if ho == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>{{ copy_btn() }}</span>
+        <span data-ship style="display: {{ 'none' if ho == 'pickup' else 'flex' }}; flex-wrap: wrap; gap: 6px; align-items: center">
+          <label style="display: flex; gap: 6px; align-items: center; font-size: 14px"><input type="checkbox" name="{{ d.id }}.paylivery" data-key="paylivery" value="1" {% if sh.paylivery %}checked{% endif %} data-save>{{ _("with PayLivery (buyer protection)") }}</label>
+          <select class="field" style="width: auto" name="{{ d.id }}.parcel_size" data-key="parcel_size" aria-label="{{ _('Parcel size') }}" data-save>{% for s in parcel_sizes %}<option value="{{ s }}" {% if s == (sh.size or 'S') %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+          <select class="field" style="width: auto" name="{{ d.id }}.parcel_carrier" data-key="parcel_carrier" aria-label="{{ _('Carrier') }}" data-save><option value="" {% if sh.carrier not in parcel_carriers %}selected{% endif %}>{{ _("cheapest") }}</option>{% for c in parcel_carriers %}<option value="{{ c }}" {% if c == sh.carrier %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+        </span>
+      </div>
+      <details><summary class="sub" style="color: var(--link)">{{ _("Description") }} · {{ _("Revise with Claude") }}</summary>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px">
+          <textarea class="field" name="{{ d.id }}.description" rows="6" aria-label="{{ _('Description') }}" data-save>{{ d.description or '' }}</textarea>
+          <span style="display: flex; gap: 6px"><input class="field" name="{{ d.id }}.instruction" placeholder="{{ _('Revise with Claude, e.g. “shorter”, “mention the new battery from 2024”') }}"><button class="chip" name="act" value="refine:{{ d.id }}" style="flex-shrink: 0">{{ ui.icon('sparkle', 12, 2) }} {{ _("Revise") }}</button></span>
+          {% if match.name %}<span class="sub">Geizhals: <a href="{{ match.url }}" target="_blank" hx-boost="false">{{ match.name[:50] }}</a>{% if match.price_from %}, {{ _("new from {price}", price=match.price_from|eur) }}{% endif %}</span>{% endif %}
+          {% if st.note %}<span style="font-size: 13px"><strong>Claude:</strong> {{ st.note }}</span>{% endif %}
+          {% if d.attributes %}<span class="sub">{% for a in d.attributes %}{{ a.name }}: {{ a.value }}{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}
+        </div>
+      </details>
+      {% else %}
+      <span style="font-weight: 600">{% if d.status == 'published' and d.wh_ad_id %}<a href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" hx-boost="false" style="color: var(--text)">{{ d.title }} ↗</a>{% else %}{{ d.title or _('Untitled') }}{% endif %}</span>
+      <span class="sub">{{ d.price_suggestion|eur if d.price_suggestion is not none else '–' }} · {{ d.quantity or 1 }} {{ _("Pcs.") }}{% if opts %} · {{ opts[sel_idx].label }}{% endif %} · {{ hos.get(ho, ho) }}</span>
+      {% endif %}
+      {% if d.error %}<span style="font-size: 13px; color: var(--destructive)">{{ d.error }}</span>{% endif %}
+      <div class="btnrow">
+        <a class="chip" style="display: inline-flex; align-items: center" href="/tg/new-ad/{{ d.id }}">{{ _("Details, Geizhals, undo") }} ›</a>
+        {% if d.image_paths %}<a class="chip" style="display: inline-flex; align-items: center" href="/ad-drafts/{{ d.id }}/photos.zip" hx-boost="false">{{ _("Photos (.zip)") }}</a>{% endif %}
+        {% if d.status == 'error' and not d.refining %}<button class="chip" name="act" value="retry:{{ d.id }}">{{ _("Try again") }}</button>{% endif %}
+        {% if d.status == 'published' and d.wh_ad_id %}<a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads/{{ d.wh_ad_id }}">{{ _("My ad") }}</a><a class="chip" style="display: inline-flex; align-items: center" href="/tg/sold/{{ d.wh_ad_id }}?kind=sold">{{ _("Mark sold…") }}</a>{% endif %}
+        {% if d.status == 'discarded' %}<button class="chip" name="act" value="restore:{{ d.id }}">{{ _("Restore") }}</button>
+        {% elif d.status in ('draft', 'error') and not d.publishing %}<button class="chip danger" name="act" value="discard:{{ d.id }}">{{ _("Discard") }}</button>{% endif %}
+      </div>
     </div>
-    <div class="sec" style="margin-top: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+    {% endfor %}
+    <div class="sec" style="margin-top: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
       <button class="chip primary" name="act" value="publish" hx-confirm="{{ _('Publish all ticked ads on willhaben now? They go live immediately (free private ads), one after another.') }}">{{ ui.icon('upload', 13, 2) }} {{ _("Publish ticked") }}</button>
-      <button class="chip" name="act" value="prepare">{{ _("Check categories") }}</button>
-      <span style="display: flex; gap: 6px"><input class="field" name="instruction" placeholder="{{ _('Revise all ticked with Claude, e.g. “mention pickup in Vienna 15”') }}"><button class="chip" name="act" value="refine">{{ ui.icon('sparkle', 12, 2) }} {{ _("Revise") }}</button></span>
+      <button class="chip" name="act" value="prepare" title="{{ _('Ask willhaben for categories and required fields again (read-only)') }}">{{ _("Check categories") }}</button>
+      <span style="display: flex; gap: 6px"><input class="field" name="instruction" placeholder="{{ _('Revise all ticked with Claude, e.g. “mention pickup in Vienna 15”') }}"><button class="chip" name="act" value="refine" style="flex-shrink: 0">{{ ui.icon('sparkle', 12, 2) }} {{ _("Revise") }}</button></span>
       <button class="chip danger" name="act" value="discard" hx-confirm="{{ _('Discard all ticked ads? They can be restored.') }}">{{ _("Discard ticked") }}</button>
-      <span class="sub">{{ _("Category, handover and required fields are set per ad: open it.") }}</span>
+      <button class="mainbtn tg-hide" name="act" value="save">{{ _("Save") }}</button>
     </div>
   </form>
   {% elif b.status != 'sorting' %}
-  {# Claude's groups: what each item is, a comment for Claude, pieces, whether it gets a draft; each photo's select
-     moves it to another item, a new one, or out #}
+  {# ---- Claude's groups: what each item is, a comment for Claude, pieces, whether it gets a draft; a photo is
+     dragged by its handle into another item, a new one or out, or moved with its select ---- #}
   <form method="post" action="/new-ad/batch/{{ b.id }}" id="batch-form" style="margin: 0" data-batch-groups>
     {% for g in open_groups %}
     <div class="sec" style="margin-top: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px{{ '' if g.include else '; opacity: .7' }}" data-group="{{ g.id }}">
@@ -70,20 +147,26 @@
       <input class="field" name="comment_{{ g.id }}" value="{{ g.comment }}" {% if busy %}disabled{% endif %} placeholder="{{ _('Comment for Claude, e.g. bought in 2021, battery still lasts 3 h, receipt available, €80 or best offer') }}">
       <span style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
         <label class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Pcs.") }}<input class="field" style="width: 70px" type="number" name="quantity_{{ g.id }}" value="{{ g.quantity or '' }}" min="1" max="999" inputmode="numeric" placeholder="1" {% if busy %}disabled{% endif %}></label>
-        <label style="display: flex; align-items: center; gap: 6px; font-size: 14px"><input type="checkbox" name="include_{{ g.id }}" value="1" {% if g.include %}checked{% endif %} {% if busy %}disabled{% endif %}>{{ _("Create draft") }}</label>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 14px"><input type="checkbox" name="include_{{ g.id }}" value="1" data-include {% if g.include %}checked{% endif %} {% if busy %}disabled{% endif %}>{{ _("Create draft") }}</label>
         {% if g.confidence %}<span class="pill">{{ {'hoch': _('high'), 'mittel': _('medium'), 'niedrig': _('low')}.get(g.confidence, g.confidence) }}</span>{% endif %}</span>
       {% if g.question %}<span style="font-size: 13px"><strong style="color: #B07800">{{ _("Question:") }}</strong> {{ g.question }}</span>{% endif %}
       {% if g.observations or g.error %}<span class="sub">{{ g.observations }}{% if g.error %} <span style="color: var(--destructive)">{{ _("Last attempt:") }} {{ g.error }}</span>{% endif %}</span>{% endif %}
-      <div style="display: flex; flex-wrap: wrap; gap: 6px">{% for i in g.photos %}{{ tile(i, g.id, loop.first) }}{% endfor %}</div>
+      <div class="tiles" data-gid="{{ g.id }}" style="{{ zone }}">{% for i in g.photos %}{{ tile(i, g.id, loop.first) }}{% endfor %}</div>
       {% if g.photos|length > max_images %}<span class="sub">{{ _("Only the first {n} photos go into the draft; the first one is the cover photo.", n=max_images) }}</span>{% endif %}
     </div>
     {% endfor %}
-    {% if unassigned %}
+    <div class="sh">{{ _("New item") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 6px">
+      <span class="sub">{{ _("Drag photos here (or choose “+ new item” below the photo)") }}</span>
+      <div class="tiles" data-gid="new" style="{{ zone }}"></div>
+    </div>
     <div class="sh">{{ _("Not used") }} · {{ unassigned|length }}</div>
-    <div class="sec" style="padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 6px">{% for i in unassigned %}{{ tile(i, '') }}{% endfor %}</div>
-    {% endif %}
+    <div class="sec" style="padding: 10px 14px">
+      <div class="tiles" data-gid="" style="{{ zone }}">{% for i in unassigned %}{{ tile(i, '') }}{% endfor %}</div>
+    </div>
     {% if not busy %}
     <div class="sec" style="margin-top: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 14px"><input type="checkbox" data-include-all {% if open_groups|selectattr('include')|list|length == open_groups|length %}checked{% endif %}>{{ _("Create draft") }} · {{ _("Tick all") }}</label>
       <button class="chip" name="action" value="save">{{ _("Save") }}</button>
       <span style="display: flex; gap: 6px"><input class="field" name="hint" placeholder="{{ _('Hint for re-sorting, e.g. “photos 7–9 are one set”') }}"><button class="chip" name="action" value="resort" style="flex-shrink: 0">{{ _("Sort again") }}</button></span>
       <input type="hidden" name="action" value="create" disabled data-main-action>
@@ -98,10 +181,134 @@
   {% endif %}
 </div>
 <script>
-(() => {   // Telegram's main button submits without a clicked button: it means "create drafts"
+(() => {
+  // Telegram's main button submits without a clicked button: on the groups it means "create drafts"
   const f = document.getElementById('batch-form'), h = f && f.querySelector('[data-main-action]');
-  if (!f || !h) return;
-  document.addEventListener('submit', (e) => { if (e.target === f) h.disabled = !!e.submitter; }, true);   // before htmx reads the form
+  if (f && h) document.addEventListener('submit', (e) => { if (e.target === f) h.disabled = !!e.submitter; }, true);   // before htmx reads the form
+  if (f) {
+    f.addEventListener('change', (e) => {
+      if (e.target.matches('[data-include-all]')) f.querySelectorAll('[data-include]').forEach((c) => { c.checked = e.target.checked; });
+      if (e.target.matches('.tile-photo select')) {          // the select moves its photo too
+        const z = f.querySelector(`.tiles[data-gid="${e.target.value}"]`);
+        if (z) z.append(e.target.closest('.tile-photo'));
+      }
+    });
+    // ---- a photo dragged by its handle (finger or mouse): into another item, before another photo, a new item, out
+    let drag = null;
+    const zoneAt = (x, y) => { const el = document.elementFromPoint(x, y); return el && el.closest('#batch-form .tiles[data-gid]'); };
+    const mark = (z) => { f.querySelectorAll('.tiles').forEach((t) => { t.style.borderColor = t === z ? 'var(--btn)' : ''; t.style.background = t === z ? 'rgba(31,116,186,.08)' : ''; }); };
+    f.addEventListener('pointerdown', (e) => {
+      const handle = e.target.closest('[data-handle]');
+      if (!handle) return;
+      e.preventDefault();
+      const t = handle.closest('.tile-photo'), r = t.getBoundingClientRect();
+      const ghost = t.cloneNode(true);
+      ghost.style.cssText += `;position: fixed; left: ${r.left}px; top: ${r.top}px; width: ${r.width}px; opacity: .85; pointer-events: none; z-index: 60; transform: scale(1.05)`;
+      document.body.append(ghost);
+      t.style.opacity = '.3';
+      drag = {t, ghost, dx: e.clientX - r.left, dy: e.clientY - r.top, zone: null};
+      handle.setPointerCapture(e.pointerId);
+    });
+    f.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      drag.ghost.style.left = (e.clientX - drag.dx) + 'px';
+      drag.ghost.style.top = (e.clientY - drag.dy) + 'px';
+      drag.zone = zoneAt(e.clientX, e.clientY);
+      mark(drag.zone);
+      if (e.clientY < 70) scrollBy(0, -12); else if (e.clientY > innerHeight - 70) scrollBy(0, 12);   // long lists
+    });
+    const drop = (e) => {
+      if (!drag) return;
+      const {t, ghost, zone} = drag;
+      drag = null;
+      ghost.remove(); t.style.opacity = ''; mark(null);
+      if (!zone || e.type === 'pointercancel') return;
+      const el = document.elementFromPoint(e.clientX, e.clientY), before = el && el.closest('.tile-photo');
+      if (before && before !== t && before.parentNode === zone) zone.insertBefore(t, before); else zone.append(t);
+      t.querySelector('select').value = zone.dataset.gid;
+    };
+    f.addEventListener('pointerup', drop);
+    f.addEventListener('pointercancel', drop);
+  }
+
+  // ---- the drafts: ticks, unsaved edits (the page waits with refreshing), ⧉ applies a value to all ticked
+  const bt = document.getElementById('bt');
+  if (!bt) return;
+  const T = {{ {'copied': _('Applied to {n} ads'), 'skipped': _('{n} skipped (no such field in their category)'), 'none': _('Tick the ads that should get the value first'), 'saving': _('Saving…'), 'saved': _('Saved'), 'failed': _('Connection failed')}|tojson }};
+  // changes save on their own, as in the dashboard's table: a moment after the last one, in the background
+  let timer = null, note = '';
+  const save = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      status((note ? note + ' · ' : '') + T.saving);
+      const fd = new FormData(bt); fd.set('act', 'save');
+      try {
+        const r = await fetch(bt.action, {method: 'POST', body: fd});
+        if (!r.ok) throw new Error(r.status);
+        bt.querySelectorAll('[data-dirty]').forEach((c) => { delete c.dataset.dirty; });
+        status((note ? note + ' · ' : '') + T.saved + ' ✓');
+      } catch (_) { status(T.failed, true); }
+      note = '';
+    }, 800);
+  };
+  const status = (text, warn) => { const s = bt.querySelector('[data-bt-status]'); if (s) { s.textContent = text; s.style.color = warn ? '#B07800' : ''; } };
+  const boxes = () => [...bt.querySelectorAll('input[name="sel"]:not(:disabled)')];
+  const count = () => {
+    const all = boxes(), on = all.filter((b) => b.checked).length, c = bt.querySelector('[data-selcount]'), a = bt.querySelector('[data-selall]');
+    if (c) c.textContent = c.dataset.text.replace('{n}', on).replace('{total}', all.length);
+    if (a) { a.checked = all.length > 0 && on === all.length; a.indeterminate = on > 0 && on < all.length; }
+  };
+  const blocks = (card) => {
+    const sel = card.querySelector('[data-key="cat"]');
+    if (sel) card.querySelectorAll('[data-catblock]').forEach((b) => { b.hidden = b.dataset.catblock !== sel.value; });
+    const ho = card.querySelector('[data-ho-select]'), ship = card.querySelector('[data-ship]');
+    if (ho && ship) ship.style.display = ho.value === 'pickup' ? 'none' : 'flex';
+  };
+  bt.addEventListener('input', (e) => { const c = e.target.closest('[data-draft]'); if (c && e.target.matches('[data-save]')) c.dataset.dirty = '1'; });
+  bt.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.matches('[data-selall]')) { boxes().forEach((b) => { b.checked = t.checked; }); count(); return; }
+    if (t.matches('input[name="sel"]')) { count(); return; }
+    const card = t.closest('[data-draft]');
+    if (card && t.matches('[data-save]')) { card.dataset.dirty = '1'; blocks(card); save(); }
+  });
+  bt.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-copy]');
+    if (!b) return;
+    const src = b.closest('[data-draft]'), prop = b.closest('[data-prop]').dataset.prop;
+    const targets = [...bt.querySelectorAll('[data-draft]')].filter((c) => c !== src && c.querySelector('input[name="sel"]:checked'));
+    if (!targets.length) { status(T.none, true); return; }
+    // the category takes its required fields along; a field goes to the field of the same name in the draft's category
+    const block = src.querySelector(`[data-catblock="${(src.querySelector('[data-key=cat]') || {}).value}"]`);
+    const props = prop === 'cat' ? ['cat', ...[...(block ? block.querySelectorAll('[data-prop]') : [])].map((p) => p.dataset.prop)] : [prop];
+    let done = 0, skipped = 0;
+    targets.forEach((card) => {
+      let ok = false;
+      props.forEach((p) => {
+        src.querySelectorAll(`[data-prop="${p}"] [data-key]`).forEach((s) => {
+          if (s.closest('[data-catblock]') && s.closest('[data-catblock]').hidden) return;
+          const scope = p.startsWith('f:') ? card.querySelector(`[data-catblock="${(card.querySelector('[data-key=cat]') || {}).value}"]`) : card;
+          const el = scope && scope.querySelector(`[data-key="${s.dataset.key}"]`);
+          if (!el || el.disabled) return;
+          if (el.type === 'checkbox') el.checked = s.checked;
+          else {
+            if (el.tagName === 'SELECT' && ![...el.options].some((o) => o.value === s.value)) {
+              if (el.dataset.key !== 'cat' || !s.value) return;      // a category the draft lacks: added (saved as hand-picked)
+              el.add(new Option(s.selectedOptions[0] ? s.selectedOptions[0].text : s.value, s.value));
+            }
+            el.value = s.value;
+          }
+          ok = true;
+          blocks(card);
+        });
+      });
+      if (ok) { done++; card.dataset.dirty = '1'; } else skipped++;
+    });
+    note = T.copied.replace('{n}', done) + (skipped ? ' · ' + T.skipped.replace('{n}', skipped) : '');
+    status(note, skipped > 0);
+    if (done) save(); else note = '';
+  });
+  count();
 })();
 </script>
 </main>
