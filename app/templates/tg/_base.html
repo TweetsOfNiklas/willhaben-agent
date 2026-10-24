@@ -11,6 +11,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">{# the sites' photos (willhaben) are refused with a foreign referrer #}
 <title>{% block title %}SecondHandler{% endblock %}</title>
 <script src="/static/vendor/htmx-2.0.11.min.js"></script>
 <style>
@@ -87,9 +88,9 @@
   // ---- the bridge: Telegram's Mini App protocol without its script
   const qs = new URLSearchParams(location.hash.slice(1));
   if (qs.get('tgWebAppData') || qs.get('tgWebAppPlatform')) try { sessionStorage.setItem('tg', '1'); } catch (_) {}
-  // a Mini App only when Telegram launched it as one (its launch parameters, kept for the next pages): a link opened
-  // in Telegram's own browser has the bridge too, but no main button, and must keep the page's own buttons
-  const inTg = !!(window.TelegramWebviewProxy || window.parent !== window) && (() => { try { return sessionStorage.getItem('tg') === '1'; } catch (_) { return false; } })();
+  // a Mini App only when Telegram launched it as one (its launch parameters, kept for the next pages, also through
+  // the login): a link opened in Telegram's own browser has none and keeps the page's own buttons
+  const inTg = (() => { try { return sessionStorage.getItem('tg') === '1'; } catch (_) { return false; } })();
   const post = (type, data) => {
     const payload = JSON.stringify(data || {});
     try {

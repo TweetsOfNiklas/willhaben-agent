@@ -9,25 +9,34 @@
   {% set keep = ('&agent_id=' ~ agent_id if agent_id else '') ~ ('&platform=' ~ platform if platform else '') ~ ('&sort=' ~ sort if sort and sort != 'newest' else '') ~ ('&ship=' ~ ship if ship else '') ~ ('&level=' ~ level if level else '') %}
   {% set view %}<input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform or '' }}"><input type="hidden" name="sort" value="{{ sort if sort != 'newest' else '' }}"><input type="hidden" name="ship" value="{{ ship }}"><input type="hidden" name="level" value="{{ level }}">{% endset %}
   {# the hits page's tabs; held back = filtered out by Claude's screening, the Geizhals rule or the distance #}
-  <nav class="seg" style="grid-template-columns: repeat(5, minmax(0, 1fr))" aria-label="{{ _('Hits') }}">
+  <nav class="seg" style="display: flex; overflow-x: auto; scrollbar-width: none" aria-label="{{ _('Hits') }}">
     {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('filtered', _("Held back")), ('seen', _("Seen")), ('ignored', _("Ignored"))] %}
-    <a href="/tg/hits?state={{ v }}{{ keep }}"{% if state == v %} aria-current="page"{% endif %} style="font-size: 12px; padding: 0 2px; text-align: center; line-height: 1.1">{{ label }}{% if counts[v] and v not in ('seen', 'ignored') %} · {{ counts[v] }}{% endif %}</a>
+    <a href="/tg/hits?state={{ v }}{{ keep }}"{% if state == v %} aria-current="page"{% endif %} style="flex: 0 0 auto; font-size: 13.5px; padding: 0 12px; white-space: nowrap">{{ label }}{% if counts[v] and v not in ('seen', 'ignored') %} · {{ counts[v] }}{% endif %}</a>
     {% endfor %}
   </nav>
+  {# filters, sort and the auto-clear folded away: the summary says what is active #}
+  {% set on = [agents[agent_id].name if agent_id and agent_id in agents else none, platform_name(platform) if platform else none,
+                 {'oldest': _('Oldest hits first'), 'published': _('Recently published first'), 'price': _('Price ascending'), 'price_desc': _('Price descending')}.get(sort) if sort and sort != 'newest' else none,
+                 {'ship': _('Shipping possible'), 'protected': _('Shipping with buyer protection'), 'pickup': _('Pickup only')}.get(ship) if ship else none,
+                 {'bargain': _('Bargains only'), 'cheap': _('Cheap or better'), 'fair': _('Fair or better')}.get(level) if level else none]|select|list %}
+  <details class="sec" style="margin-top: 8px" data-filters{% if on %} data-active{% endif %}>
+    <summary style="list-style: none; cursor: pointer; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px">
+      <span style="display: flex; align-items: center; gap: 6px; min-width: 0">{{ ui.icon('filter', 15, 2) }}<span class="trunc">{{ on|join(' · ') if on else _("Filter & sort") }}</span></span>{{ ui.icon('chevron-down', 15, 2) }}</summary>
+    <div style="padding: 0 14px 12px">
   {# which agent and which site, as the dashboard's filters #}
-  <form method="get" action="/tg/hits" style="margin: 8px 0 0; display: flex; gap: 6px" data-hit-filters>
+  <form method="get" action="/tg/hits" style="margin: 0; display: grid; gap: 6px" data-hit-filters>
     <input type="hidden" name="state" value="{{ state }}">
-    <select class="field" name="agent_id" aria-label="{{ _('Search agent') }}" onchange="this.form.requestSubmit()" style="flex: 1; min-width: 0; padding: 7px 10px; font-size: 14px">
+    <select class="field" name="agent_id" aria-label="{{ _('Search agent') }}" onchange="this.form.requestSubmit()" style="padding: 8px 10px; font-size: 15px">
       <option value="">{{ _("All agents") }}</option>
       {% for a in agents.values() %}<option value="{{ a.id }}"{% if agent_id == a.id %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
-    {% if sites|length > 1 %}<select class="field" name="platform" aria-label="{{ _('Site') }}" onchange="this.form.requestSubmit()" style="width: 38%; padding: 7px 10px; font-size: 14px">
+    {% if sites|length > 1 %}<select class="field" name="platform" aria-label="{{ _('Site') }}" onchange="this.form.requestSubmit()" style="padding: 8px 10px; font-size: 15px">
       <option value="">{{ _("All sites") }}</option>
       {% for p in sites %}<option value="{{ p }}"{% if platform == p %} selected{% endif %}>{{ platform_name(p) }}</option>{% endfor %}</select>{% endif %}
   </form>
   {# the dashboard's sort and its shipping and price filters #}
-  <form method="get" action="/tg/hits" style="margin: 6px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px" data-hit-sort>
+  <form method="get" action="/tg/hits" style="margin: 6px 0 0; display: grid; gap: 6px" data-hit-sort>
     <input type="hidden" name="state" value="{{ state }}"><input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform or '' }}">
-    {% set fs = 'padding: 7px 8px; font-size: 13px; min-width: 0' %}
+    {% set fs = 'padding: 8px 10px; font-size: 15px' %}
     <select class="field" name="sort" aria-label="{{ _('Sort') }}" onchange="this.form.requestSubmit()" style="{{ fs }}">
       {% for v, label in [('newest', _('Newest hits first')), ('oldest', _('Oldest hits first')), ('published', _('Recently published first')), ('price', _('Price ascending')), ('price_desc', _('Price descending')), ('total', _('Price incl. shipping ascending'))] + ([('distance', _('Nearest first'))] if home else []) %}<option value="{{ v }}"{% if v == sort %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
     <select class="field" name="ship" aria-label="{{ _('Shipping') }}" onchange="this.form.requestSubmit()" style="{{ fs }}">
@@ -35,14 +44,8 @@
     <select class="field" name="level" aria-label="{{ _('Price label') }}" onchange="this.form.requestSubmit()" style="{{ fs }}">
       {% for v, label in [('', _('Any price')), ('bargain', _('Bargains only')), ('cheap', _('Cheap or better')), ('fair', _('Fair or better'))] %}<option value="{{ v }}"{% if v == level %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
   </form>
-  {% if state == 'saved' %}
-  <form method="post" action="/hits/watch-saved" class="sec" style="margin: 8px 0 0; padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px" data-watch-saved>
-    {{ view }}<input type="hidden" name="state" value="saved">{% if not watch_saved %}<input type="hidden" name="on" value="1">{% endif %}
-    <span style="font-size: 14px">{{ _("Check saved ads once a day and notify on a price drop or when one is sold, reserved or gone") }}</span>{{ m.switch(watch_saved, _("Check saved ads")) }}
-  </form>
-  {% endif %}
   {# the retention: cleared hits are shown nowhere, their ads never come back as new; saved ones are kept #}
-  <form method="post" action="/hits/keep-days" style="margin: 6px 4px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap" data-keep-days>
+  <form method="post" action="/hits/keep-days" style="margin: 10px 0 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap" data-keep-days>
     {{ view }}<input type="hidden" name="state" value="{{ state }}">
     <span class="sub">{{ _("Clear hits automatically") }}</span>
     <select class="field" name="days" onchange="this.form.requestSubmit()" style="width: auto; padding: 5px 8px; font-size: 13px">
@@ -50,6 +53,14 @@
       <option value="0"{% if keep_days == 0 %} selected{% endif %}>{{ _("never") }}</option></select>
     <span class="sub">{{ _("· saved ones are kept") }}</span>
   </form>
+    </div>
+  </details>
+  {% if state == 'saved' %}
+  <form method="post" action="/hits/watch-saved" class="sec" style="margin: 8px 0 0; padding: 8px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px" data-watch-saved>
+    {{ view }}<input type="hidden" name="state" value="saved">{% if not watch_saved %}<input type="hidden" name="on" value="1">{% endif %}
+    <span style="font-size: 14px">{{ _("Check saved ads once a day and notify on a price drop or when one is sold, reserved or gone") }}</span>{{ m.switch(watch_saved, _("Check saved ads")) }}
+  </form>
+  {% endif %}
   {% if hits %}
   {# the tab's own action, and the selection: several hits saved, seen or ignored at once #}
   <div class="btnrow" style="margin-top: 8px">
@@ -70,7 +81,7 @@
       <a href="/tg/hits/{{ h.id }}" style="display: flex; gap: 12px; padding: 10px 12px; color: var(--text)">
         <span style="position: relative; flex-shrink: 0; align-self: flex-start">
           {% if h.image_path or h.image_url %}<img class="thumb" src="{{ '/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url }}" alt="" loading="lazy" width="88" height="88" style="width: 88px; height: 88px{{ '; filter: grayscale(1)' if gone else '' }}" onerror="this.style.visibility='hidden'">
-          {% else %}<span class="thumb" style="width: 88px; height: 88px"></span>{% endif %}
+          {% else %}<span class="thumb" style="width: 88px; height: 88px; display: flex; align-items: center; justify-content: center; color: var(--hint)" aria-label="{{ _('No photos') }}">{{ ui.icon('image', 26, 1.5) }}</span>{% endif %}
           <span style="position: absolute; left: 5px; bottom: 5px">{{ m.site(h.platform) }}</span>
         </span>
         <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">

@@ -51,7 +51,7 @@
       box.hidden = false;
       fetch('/login/telegram', {method: 'POST', body: new URLSearchParams({init_data: tg, next: {{ next|tojson }}})})
         .then(r => r.ok ? r.json() : null).catch(() => null)
-        .then(d => { if (d && d.ok) location.replace(d.next); else { box.hidden = true; history.replaceState(null, '', location.pathname + location.search); } });
+        .then(d => { if (d && d.ok) location.replace(d.next + location.hash); else { box.hidden = true; history.replaceState(null, '', location.pathname + location.search); } });
     }
   </script>
 </body>
