@@ -60,6 +60,13 @@
     <a class="cell" href="{{ h.url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Open on {site}", site=site.name) }}</span><span class="val" style="color: var(--link)">{{ ui.icon('external', 16, 2) }}</span></span></a>
   </div>
 
+  {# buying it (a purchase order: Claude writes and negotiates) and the full price check (another search term, a
+     category) #}
+  <div class="sec" style="margin-top: 20px">
+    {% if purchase_enabled() and (h.platform or 'willhaben') == 'willhaben' %}<a class="cell" href="/tg/purchases/new/{{ h.ad_id }}" data-buy><span class="body"><span style="color: var(--link); font-weight: 600">{{ ui.icon('cart', 15, 2) }} {{ _("Buy") }}…</span>{{ m.chev() }}</span></a>{% endif %}
+    <a class="cell" href="/tg/check/{{ h.platform or 'willhaben' }}/{{ h.ad_id }}?hit={{ h.id }}" data-check-link><span class="body"><span>{{ _("Price check") }} · {{ _("Compare again") }}</span>{{ m.chev() }}</span></a>
+  </div>
+
   {% if d.description %}
   <div class="sh">{{ _("Description") }}</div>
   <div class="sec" style="padding: 12px 14px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere">{{ d.description }}</div>

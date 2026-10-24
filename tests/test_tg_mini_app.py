@@ -225,3 +225,34 @@ def test_my_ads_their_edit_page_and_the_sale_page(client, monkeypatch):
     assert "tg-hide" not in dashboard and 'id="edit-form"' in dashboard          # the dashboard keeps its own page
     sale = client.get("/tg/sold/900").text
     assert "data-buyer" in sale and 'action="/sold/900/sell"' in sale
+
+
+def test_inbox_jobs_and_the_dashboard_pages(client):
+    """Notifications open their /tg page, background jobs can be taken back, the admin pages are the dashboard's."""
+    from app.db import EventLog
+    _data()
+    with session() as db:
+        db.add(EventLog(kind="message", message="Neue Nachricht", conversation_id="c1"))
+        db.commit()
+    home = client.get("/tg").text
+    assert 'data-cell="inbox"' in home and 'data-cell="search"' in home and 'data-cell="new-ad"' in home
+    inbox = client.get("/tg/inbox").text
+    assert 'data-inbox="message"' in inbox and 'action="/inbox/read-all"' in inbox
+    assert "Nothing running." in client.get("/tg/jobs").text
+    more = client.get("/tg/more").text
+    assert 'data-admin="/settings"' in more and 'hx-boost="false"' in more
+    r = client.post("/inbox/read-all", headers={"X-TG-Back": "/tg/inbox"}, follow_redirects=False)
+    assert r.headers["location"] == "/tg/inbox"
+
+
+def test_where_the_bridge_goes_after_an_action():
+    """The dashboard's redirect becomes its /tg page with the message; an agent's page stays open after its own
+    actions (not after deleting it, not after creating one); the hits view keeps its tab and filters."""
+    from app.tg_bridge import target
+    assert target("/agents?error=Bad%20link", "/tg/agents/new", path="/agents") == "/tg/agents?msg=Bad%20link"
+    assert target("/agents", "/tg/agents/7", path="/agents/7/edit") == "/tg/agents/7"
+    assert target("/agents", "/tg/agents/7", path="/agents/7/delete") == "/tg/agents"
+    assert target("/hits?state=filtered&agent_id=3&msg=ok", "/tg/hits", path="/hits/clear-filtered") \
+        == "/tg/hits?state=filtered&agent_id=3&msg=ok"
+    assert target("/chats", "/tg/chats/c1/info", path="/chats/c1/remove") == "/tg/chats"
+    assert target("", "/tg/new-ad/5", path="/new-ad/batch/1/drafts") == "/tg/new-ad/5"

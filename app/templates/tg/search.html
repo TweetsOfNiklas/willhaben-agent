@@ -1,0 +1,89 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Product search") }}{% endblock %}
+{# the dashboard's search page (deals_web.deals_page): Claude's product search, or the direct search (an ad link
+   checks its price, a text lists the ads of the ticked sites); the recent searches and price checks #}
+{% block page %}
+{% set pf = ps_prefill if ps_prefill else none %}{% set pst = pf.settings if pf else {} %}
+{% set mode = request.query_params.get('mode') or ('direct' if q or results is not none or error else 'ai') %}
+<main data-back="/tg">
+{{ m.head(_("Product search")) }}
+<div class="wrap">
+  <nav class="seg" style="grid-template-columns: repeat(2, minmax(0, 1fr))" aria-label="{{ _('Product search') }}">
+    <a href="/tg/search?mode=ai"{% if mode == 'ai' %} aria-current="page"{% endif %}>{{ _("AI search") }}</a>
+    <a href="/tg/search?mode=direct"{% if mode == 'direct' %} aria-current="page"{% endif %}>{{ _("Direct search") }}</a>
+  </nav>
+
+  {% if mode == 'ai' %}
+  {# Claude plans the searches, the app runs them anonymously, Claude picks the best offers #}
+  <form method="post" action="/deals/search" class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px" data-ps-form>
+    {% if pf %}<span class="sub">{{ _("Text and options taken from search #{id}. Change what you like, then start the search.", id=pf.id) }}</span>{% endif %}
+    <textarea class="field" name="description" rows="4" maxlength="2000" required placeholder="{{ _('Describe what you need: item, size, budget, condition, where you can pick it up – e.g. a quiet dishwasher, 60 cm wide, up to € 300, pickup around Vienna, no dealers') }}">{{ pf.description if pf else '' }}</textarea>
+    {% for name, label, on in [('unusual', _("Unusual names"), pst.unusual), ('categories', _("Other categories"), pst.categories), ('photos', _("Check photos"), not pf or pst.photos), ('ask', _("Ask short questions"), not pf or pst.ask)] %}
+    <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px"><span>{{ label }}</span><input type="checkbox" name="{{ name }}" value="1"{% if on %} checked{% endif %} style="width: 22px; height: 22px"></label>{% endfor %}
+    <label class="sub">{{ _("Depth") }}<select class="field" name="depth">
+      <option value="normal"{% if pst.depth == 'normal' %} selected{% endif %}>{{ _("Normal (≈{n} searches)", n=ps_depths.normal) }}</option>
+      <option value="thorough"{% if pst.depth == 'thorough' %} selected{% endif %}>{{ _("Thorough (≈{n})", n=ps_depths.thorough) }}</option>
+      <option value="deep"{% if pst.depth == 'deep' %} selected{% endif %}>{{ _("Deep (≈{n})", n=ps_depths.deep) }}</option></select></label>
+    {% set pc_cond = pst.get('condition') or 'any' %}
+    <span style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 15px"><input type="hidden" name="cond_shown" value="1"><span class="sub">{{ _("Condition") }}</span>
+      <label><input type="checkbox" name="cond_new" value="1"{% if pc_cond in ('any', 'new') %} checked{% endif %}> {{ _("New") }}</label>
+      <label><input type="checkbox" name="cond_used" value="1"{% if pc_cond in ('any', 'used') %} checked{% endif %}> {{ _("Used") }}</label></span>
+    {% if ps_sites|length > 1 %}<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 15px"><span class="sub">{{ _("Sites") }}</span>{% for pc in ps_sites %}<label><input type="checkbox" name="sites" value="{{ pc.id }}"{% if not pf or pc.id in (pst.platforms or []) %} checked{% endif %}> {{ pc.name }}</label>{% endfor %}</span>{% endif %}
+    <label class="sub">{{ _("Order") }}<select class="field" name="sort"><option value="relevance">{{ _("Relevance") }}</option><option value="newest"{% if pst.sort == 'newest' %} selected{% endif %}>{{ _("Newest first") }}</option></select></label>
+    {% if ps_sites_off %}<span class="sub">{{ _("{sites} can also be searched once you switch them on in the settings.", sites=ps_sites_off|map(attribute='name')|join(', ')) }}</span>{% endif %}
+    <button class="mainbtn" data-ps-submit{% if ps_running %} disabled{% endif %}>{{ _("Search") }}</button>
+    {% if ps_running %}<a href="/tg/search/{{ ps_running.id }}" class="sub" style="color: var(--link)">{{ _("A product search is still running – wait for it to finish.") }} ›</a>{% endif %}
+  </form>
+
+  {% else %}
+  <form method="get" action="/tg/search" role="search" class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-direct-form>
+    <input type="hidden" name="mode" value="direct">
+    <label class="sub" for="tg-q">{{ _("Ad link, willhaben ad id or search text") }}</label>
+    <span style="display: flex; gap: 6px"><input class="field" type="search" id="tg-q" name="q" value="{{ q }}" required placeholder="{{ _('e.g. a link to an ad, or: Raspberry Pi 5') }}"><button class="chip primary">{{ _("Check") }}</button></span>
+    {% if direct_sites|length > 1 %}<span style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px">{% for pc in direct_sites %}<label><input type="checkbox" name="sites" value="{{ pc.id }}"{% if pc.id in direct_chosen %} checked{% endif %}> {{ pc.name }}</label>{% endfor %}</span>{% endif %}
+    <span class="sub">{{ _("A link to an ad (from any switched-on site) checks its price against comparable willhaben ads; a text lists the matching ads of the ticked sites with their price position. No Claude call until you ask for it.") }}</span>
+  </form>
+  {% if error %}<p style="font-size: 14px; color: var(--destructive); margin: 10px 4px">{{ error }}</p>{% endif %}
+  {% if results is not none %}
+  {% for line in site_errors or [] %}<p style="font-size: 13px; color: #B07800; margin: 8px 4px">{{ line }}</p>{% endfor %}
+  <div class="sh">{{ _("{n} ads found for „{q}“", n=results|length, q=q) }}</div>
+  {% if spread %}<p class="sub" style="margin: -2px 4px 8px">{{ _("median {median}, middle half {p25}–{p75}", median=spread.median|eur, p25=spread.p25|eur, p75=spread.p75|eur) }}</p>{% endif %}
+  <div class="sec" data-direct-results>
+    {% for a in results %}{% set ap = a.platform or 'willhaben' %}
+    <a class="cell" href="/tg/check/{{ ap }}/{{ a.ad_id }}?q={{ quote(q) }}" style="align-items: flex-start; padding-top: 8px" data-result="{{ ad_ref(ap, a.ad_id) }}">
+      {% if a.image_url %}<img class="thumb" src="{{ a.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 8px">
+        <span style="font-size: 15px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{ a.title }}</span>
+        <span style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><strong>{{ a.price_display or (a.price|eur) }}</strong>{% if a.level %}<span class="pill lvl-{{ a.level }}">{{ deal_level_label(a.level) }}</span>{% endif %}{% if site_counts|length > 1 %}{{ m.site(ap) }}{% endif %}</span>
+        {% if a.location %}<span class="sub trunc">{{ a.location }}</span>{% endif %}
+      </span>{{ m.chev() }}
+    </a>
+    {% else %}<p class="empty">{{ _("No ads found.") }}</p>{% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if ps_recent %}
+  <div class="sh">{{ _("Recent searches") }}</div>
+  <div class="sec" data-ps-recent>
+    {% for s in ps_recent %}{% set running = ps_is_running(s) %}
+    <a class="cell" href="/tg/search/{{ s.id }}"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span class="trunc">{{ s.description }}</span>
+      <span class="sub">{% if running %}{{ _("running") }}{% elif s.status == 'asking' %}{{ _("waiting for your answers") }}{% elif s.status == 'done' %}{{ _("{n} offers", n=(s.results or [])|length) }}{% else %}{{ _("failed") }}{% endif %} · {{ (s.started_at or s.created_at)|ago }}</span></span>{{ m.chev() }}</span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if recent %}
+  <div class="sh">{{ _("Recently checked") }}</div>
+  <div class="sec" data-recent-checks>
+    {% set pz = price_zone_config() %}
+    {% for r in recent %}{% set pos = ((deal_rerate(r.result, pz) or {}).get('position') or {}) %}{% set rid = (r.ad_id|string).split(':')|last %}
+    <a class="cell" href="/tg/check/{{ r.platform or 'willhaben' }}/{{ rid }}"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span class="trunc">{{ r.title or r.ad_id }}</span>
+      <span class="sub">{{ r.price_display or (r.price|eur) }} · {{ r.checked_at|ago }}</span></span>
+      <span class="val">{% if pos.get('level') %}<span class="pill lvl-{{ pos.level }}">{{ deal_level_label(pos.level) }}</span>{% endif %}{{ m.chev() }}</span></span></a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+</main>
+{% endblock %}

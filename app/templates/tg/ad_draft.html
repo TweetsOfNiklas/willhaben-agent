@@ -1,0 +1,197 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Ad draft #{id}", id=d.id) }}{% endblock %}
+{# one ad draft (main.ad_draft_page): the text Claude wrote (saved with Telegram's main button), its questions and
+   revisions, Geizhals, then willhaben's category, the handover and publishing – the dashboard's endpoints #}
+{% block page %}
+{% set plan = d.wh_plan or {} %}{% set published = d.status == 'published' %}
+{% set writing = d.status == 'error' or not d.title %}{% set st = d.price_stats or {} %}
+{% set back = '/tg/new-ad/batch/' ~ d.batch_id if d.batch_id else '/tg/new-ad' %}
+<main data-back="{{ back }}"{% if not published and not d.refining %} data-main="{{ _('Save') }}" data-main-form="draft-form"{% endif %}
+      {% if d.refining or d.publishing %}hx-get="/tg/new-ad/{{ d.id }}" hx-trigger="every 4s" hx-select="main" hx-target="this" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+{{ m.head(_("Ad draft #{id}", id=d.id), back) }}
+<div class="wrap">
+  <div style="margin: 12px 4px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+    <span class="pill{{ ' lvl-bargain' if published else '' }}">{{ _("published") if published else _("draft") }}</span>
+    <span class="sub">{{ _("Written by Claude from your notes and {n} photos", n=d.image_paths|length) }} · {{ d.created_at|local }}</span>
+  </div>
+  {% if d.error %}<p style="font-size: 13px; color: var(--destructive); margin: 8px 4px" data-draft-error>{{ d.error }}</p>{% endif %}
+  {% if d.status == 'error' and not d.refining %}<form method="post" action="/new-ad/{{ d.id }}/retry" style="margin: 8px 0 0"><button class="chip primary" style="width: 100%">{{ _("Try again") }}</button></form>{% endif %}
+
+  {% if d.image_paths %}
+  <div style="display: flex; overflow-x: auto; scroll-snap-type: x mandatory; gap: 6px; margin-top: 12px; border-radius: 12px" data-photos>
+    {% for p in d.image_paths %}<img src="/ad-drafts/{{ d.id }}/image/{{ loop.index0 }}" alt="" loading="lazy" style="flex: 0 0 80%; height: 220px; object-fit: cover; border-radius: 12px; scroll-snap-align: center; background: rgba(118,118,128,.2)">{% endfor %}
+  </div>
+  <a class="sub" href="/ad-drafts/{{ d.id }}/photos.zip" hx-boost="false" style="display: block; margin: 6px 4px 0; color: var(--link)">{{ _("Photos (.zip)") }}</a>
+  {% endif %}
+
+  <div class="sh">{{ _("Ad") }}</div>
+  {% if d.refining %}<p class="sub" style="color: var(--link); margin: 0 4px 8px" data-refining>{{ ui.icon('sparkle', 13, 2) }} {{ _("Claude is writing the draft…") if writing else _("Claude is revising the text…") }}{% if writing %} {{ _("Takes up to 2 minutes.") }}{% endif %}</p>{% endif %}
+  <form method="post" action="/new-ad/{{ d.id }}" id="draft-form" class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+    {% if published %}<span class="sub">{{ _("Published – the text is now edited on willhaben, this is the version that was sent.") }}</span>{% endif %}
+    <label class="sub">{{ _("Title") }} · {{ (d.title or '')|length }} / 60<input class="field" name="title" id="title" value="{{ d.title or '' }}" maxlength="80" required{% if published or d.refining %} readonly{% endif %}></label>
+    <label class="sub">{{ _("Description") }}<textarea class="field" name="description" id="desc" rows="11" required{% if published or d.refining %} readonly{% endif %}>{{ d.description or '' }}</textarea></label>
+    <span style="display: grid; grid-template-columns: 2fr 1fr; gap: 6px">
+      <label class="sub">{{ _("Price (€)") }}<input class="field" name="price" id="price" inputmode="decimal" value="{{ '%g'|format(d.price_suggestion) if d.price_suggestion is not none else '' }}"{% if published %} readonly{% endif %}></label>
+      <label class="sub">{{ _("Pcs.") }}<input class="field" type="number" name="quantity" id="quantity" min="1" max="999" inputmode="numeric" placeholder="1" value="{{ d.quantity or '' }}"{% if published %} readonly{% endif %}></label></span>
+    {% if st.count %}<span class="sub">{{ _("{n} ads for “{q}”", n=st.count, q=d.search_keywords) }} · {{ _("Median") }} {{ st.median|eur }} · {{ _("middle 50 %") }} {{ st.p25|eur }} – {{ st.p75|eur }}{% if st.llm_estimate %} · {{ _("Claude estimates {price}.", price=st.llm_estimate|eur) }}{% endif %}</span>{% endif %}
+    {% if spec_block and not published %}<span class="sub">{{ _("Add the Geizhals spec sheet to the description") }}: {{ _("in the text: {name}", name=gh.match.name) if spec_block in (d.description or '') else _("none in the text") }}
+      <button type="button" class="chip" onclick="(() => { const t = document.getElementById('desc'), b = document.getElementById('spec-block').content.textContent; t.value = t.value.includes(b) ? t.value.replace(b, '').replace(/\s+$/, '') : t.value.replace(/\s+$/, '') + '\n\n' + b; })()">{{ _("Remove") if spec_block in (d.description or '') else _("Put into the text") }}</button></span>
+      <template id="spec-block">{{ spec_block }}</template>{% endif %}
+    {% if not published and not d.refining %}<button class="mainbtn tg-hide">{{ _("Save") }}</button>{% endif %}
+  </form>
+
+  {% if not published %}
+  <div class="sh">{{ _("Improve the listing") }}</div>
+  <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 10px">
+    {% if d.questions and not d.refining %}
+    <form method="post" action="/new-ad/{{ d.id }}/answers" style="margin: 0; display: flex; flex-direction: column; gap: 10px" data-ad-questions>
+      <strong style="font-size: 14px">{{ _("Claude has one short question") if d.questions|length == 1 else _("Claude has {n} short questions", n=d.questions|length) }}</strong>
+      {% for q in d.questions %}{{ m.question(q) }}{% endfor %}
+      <div class="btnrow"><button class="chip primary">{{ _("Work the answers in") }}</button><button class="chip" name="skip" value="1">{{ _("Skip questions") }}</button></div>
+      <span class="sub">{{ _("Claude adds the answers to title and description (one revision, can be undone).") }}</span>
+    </form>
+    {% endif %}
+    {% if not d.refining %}
+    <form method="post" action="/new-ad/{{ d.id }}/refine" style="margin: 0; display: flex; gap: 6px" data-refine>
+      <input class="field" name="instruction" required placeholder="{{ _('e.g. shorter and more factual · mention that the battery was new in 2024 · frame size in the title') }}">
+      <button class="chip">{{ ui.icon('sparkle', 12, 2) }} {{ _("Revise with Claude") }}</button></form>
+    <span class="sub">{{ _("Save unsaved changes above first – Claude works with the saved version.") }}</span>
+    {% endif %}
+    {% if d.revisions %}<form method="post" action="/new-ad/{{ d.id }}/undo" style="margin: 0"><button class="chip" style="height: auto; padding: 6px 12px; white-space: normal; text-align: left">↶ {{ _("Undo: “{what}”", what=d.revisions[-1].instruction[:60]) }}</button></form>{% endif %}
+  </div>
+  {% endif %}
+
+  {# Geizhals: the product Claude matched, other results, an own search #}
+  <div class="sh" id="geizhals">Geizhals</div>
+  <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-geizhals>
+    {% if gh.match %}
+      <a href="{{ gh.match.url }}" target="_blank" hx-boost="false" style="font-weight: 600">{{ gh.match.name }} ↗</a>
+      <span class="sub">{% if gh.match.price_from %}{{ _("New from") }} <strong style="color: var(--text)">{{ gh.match.price_from|eur }}</strong>{% else %}{{ _("No current new price – the product is no longer sold.") }}{% endif %}{% if gh.verified is sameas false %} · <span style="color: #B07800">{{ _("Variant not confirmed – check that this is the right model") }}</span>{% endif %}</span>
+      {% if gh.match.specs %}<details><summary class="sub">{{ _("Spec sheet ({n})", n=gh.match.specs|length) }}</summary>{% for k, v in gh.match.specs %}<p style="margin: 4px 0; font-size: 13px"><span class="sub">{{ k }}:</span> {{ v }}</p>{% endfor %}</details>
+        {% if not d.refining and not published %}<form method="post" action="/new-ad/{{ d.id }}/reconcile" style="margin: 0"><button class="chip" style="width: 100%">{{ _("Check text against the spec sheet") }}</button></form>
+        <span class="sub">{{ _("Claude fixes contradictions and removes “(bitte prüfen)” where the spec sheet confirms it.") }}</span>{% endif %}
+      {% else %}<span class="sub">{{ _("No spec sheet on the product page.") }}</span>{% endif %}
+    {% elif gh.error %}<span style="font-size: 13px; color: var(--destructive)">{{ gh.error }}</span>
+    {% elif gh.query %}<span class="sub">{{ _("Nothing found for “{q}”.", q=gh.query) }}</span>
+    {% else %}<span class="sub">{{ _("No clear brand-name product recognized.") }}</span>{% endif %}
+    {% set others = (gh.candidates or [])|rejectattr('url', 'equalto', (gh.match or {}).get('url'))|list %}
+    {% if others %}<form method="post" action="/new-ad/{{ d.id }}/geizhals" style="margin: 0; display: flex; gap: 6px"><select class="field" name="url">{% for c in others %}<option value="{{ c.url }}">{{ c.name }}{% if c.price %} – {{ c.price|eur }}{% endif %}</option>{% endfor %}</select><button class="chip">{{ _("Use") }}</button></form>{% endif %}
+    <form method="post" action="/new-ad/{{ d.id }}/geizhals" style="margin: 0; display: flex; gap: 6px"><input class="field" name="query" value="{{ gh.query or d.product_query or '' }}" placeholder="{{ _('Search for a product, e.g. Bosch GSR 18V-55') }}"><button class="chip">{{ _("Search") }}</button></form>
+  </div>
+
+  {# willhaben: the categories and fields from its insertion form, the handover, publishing (a background job) #}
+  <div class="sh" id="willhaben">{{ _("Publish on willhaben") }}{% if plan.location %} · {{ plan.location }}{% endif %}</div>
+  <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 10px" data-willhaben>
+    {% if d.publishing %}
+      <span style="color: var(--link); font-size: 14px" data-publishing>{{ _("Publishing on willhaben…") }}</span>
+      <span class="sub">{{ _("Runs in the background – you can leave this page. Progress in the sidebar.") }}</span>
+    {% elif published %}
+      <span style="color: var(--ok); font-size: 14px">✓ <strong>{{ _("Published on willhaben") }}</strong></span>
+      <span class="sub">{{ _("New ads are checked by willhaben first and can take a few minutes to show up.") }}</span>
+      {% if d.wh_ad_id %}<div class="btnrow"><a class="chip" style="display: inline-flex; align-items: center" href="/tg/myads/{{ d.wh_ad_id }}">{{ _("My ad") }}</a><a class="chip" style="display: inline-flex; align-items: center" href="/tg/sold/{{ d.wh_ad_id }}?kind=sold">{{ _("Mark sold…") }}</a>
+        <a class="chip" style="display: inline-flex; align-items: center" href="https://www.willhaben.at/iad/object?adId={{ d.wh_ad_id }}" target="_blank" hx-boost="false">{{ _("View on willhaben") }} ↗</a></div>{% endif %}
+    {% else %}
+      <form method="post" action="/new-ad/{{ d.id }}/willhaben/prepare" style="margin: 0; display: flex; gap: 6px" hx-include="#title, #desc, #price, #quantity" data-prepare>
+        {% if plan.options is defined %}<input class="field" name="category_query" value="{{ plan.query or '' }}" placeholder="{{ _('Category search term, e.g. speaker') }}">{% endif %}
+        <button class="chip{{ '' if plan.options else ' primary' }}" style="flex-shrink: 0">{{ _("Prepare for willhaben") if not plan.options else _("Check categories again") }}</button></form>
+      {% if plan.options is defined and not plan.options %}<span class="sub">{{ _("willhaben suggests no category for this title.") }}</span>{% endif %}
+      {% if plan.options is defined %}
+      <form method="post" action="/new-ad/{{ d.id }}/willhaben/publish" id="wh-publish" style="margin: 0; display: flex; flex-direction: column; gap: 10px" hx-include="#title, #desc, #price, #quantity"
+            hx-confirm="{{ _('Goes live on willhaben as a free private ad – it waits a few seconds in the queue, where you can take it back.') }}">
+        <span class="sub" style="font-weight: 600">{{ _("Category") }}</span>
+        {% set sel = plan.selected if plan.selected is defined and plan.selected is not none and plan.selected < (plan.options or [])|length else 0 %}
+        {% for o in plan.options or [] %}{% set oi = loop.index0 %}
+        <div style="border: 1px solid var(--sep); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px">
+          <label style="display: flex; gap: 8px; align-items: center; font-size: 14px"><input type="radio" name="option" value="{{ oi }}" {% if oi == sel %}checked{% endif %} onchange="this.form.querySelectorAll('.cat-fields').forEach((f, i) => f.hidden = i !== {{ oi }})">{{ o.label }}{% if o.manual %} <span class="sub">{{ _("chosen by hand") }}</span>{% endif %}</label>
+          <span class="cat-fields" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px" {% if oi != sel %}hidden{% endif %}>
+            {% for f in o.fields %}<label class="sub">{{ f.label }}<select class="field" name="o{{ oi }}_{{ f.code }}"><option value="">–</option>{% for code, label in f['values'] %}<option value="{{ code }}" {% if code == f.selected %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>{% endfor %}
+          </span>
+        </div>
+        {% endfor %}
+        <details{% if not plan.options %} open{% endif %} data-catpick><summary class="sub" style="color: var(--link)">{{ _("Choose another category") }}</summary>
+          <input class="field" type="search" data-catq autocomplete="off" placeholder="{{ _('Search willhaben categories, e.g. speaker') }}" style="margin-top: 6px">
+          <span class="sub" data-catmsg data-empty="{{ _('No category found.') }}" data-fail="{{ _('Search failed: {error}') }}"></span>
+          <div data-catres style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px"></div>
+        </details>
+        {% if plan.options %}
+        <span class="sub" style="font-weight: 600">{{ _("Handover") }}</span>
+        {% set sh = plan.shipping or {} %}{% set ho = sh.handover or sell_handover_default() %}
+        <span class="btnrow" data-handover>
+          {% for v, lbl in [('pickup', _("Self pickup")), ('shipping', _("Shipping")), ('both', _("Self pickup or shipping"))] %}
+          <label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="radio" name="handover" value="{{ v }}" {% if ho == v %}checked{% endif %}>{{ lbl }}</label>{% endfor %}
+        </span>
+        {% set offers = paylivery_offers() %}{% set kg = (d.parcel or {}).weight_kg if d.parcel else none %}
+        {% set pick = paylivery_pick(offers, kg, sh.get('size'), sh.get('carrier')) %}
+        <div class="wh-ship" style="display: flex; flex-direction: column; gap: 6px"{% if ho == 'pickup' %} hidden{% endif %}>
+          <label style="display: flex; gap: 8px; align-items: center; font-size: 14px"><input type="checkbox" name="paylivery" value="1" {% if sh.paylivery %}checked{% endif %}>{{ _("with PayLivery (buyer protection)") }}</label>
+          <span class="sub">{{ _("Carrier and parcel size – the buyer pays this shipping price") }}{% if kg %} · {{ _("parcel about {kg} kg", kg='%g'|format(kg)) }}{% endif %}</span>
+          {% for o in offers %}
+          <label style="display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--sep); border-radius: 10px; padding: 6px 10px; font-size: 14px">
+            <input type="radio" name="parcel_option" value="{{ o.size }}|{{ o.carrier }}" {% if pick and o.size == pick.size and o.carrier == pick.carrier %}checked{% endif %} style="margin-top: 3px">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span><strong>{{ o.carrier }} {{ o.size }}</strong> · {{ o.price|eur }}</span><span class="sub">{{ o.limits }}{% if o.get('liability') %} · {{ o.liability }}{% endif %}</span>
+              {% if kg and o.get('max_kg') and kg > o.max_kg %}<span style="font-size: 12px; color: #B07800">{{ _("too heavy: {kg} kg > {max} kg", kg='%g'|format(kg), max='%g'|format(o.max_kg)) }}</span>{% endif %}</span>
+          </label>
+          {% endfor %}
+          <span class="sub">{{ _("Without PayLivery the buyer pays you directly and you send the parcel yourself.") }}</span>
+        </div>
+        <button class="chip primary" style="height: 44px; font-size: 15px" data-publish>{{ _("Publish on willhaben now") }}</button>
+        <span class="sub">{{ _("Takes about half a minute: photos are uploaded, then the free ad is activated. Nothing that costs money is ever booked.") }}</span>
+        {% endif %}
+      </form>
+      {# a category picked by hand: the dashboard's category endpoint, then the draft comes back with it as an option #}
+      <form method="post" action="/new-ad/{{ d.id }}/willhaben/category" id="cat-pick" style="display: none"><input type="hidden" name="code"></form>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="sh">{{ _("Claude's read") }}</div>
+  <div class="sec">
+    <div class="cell"><span class="body"><span>{{ _("Category") }}</span><span class="val trunc">{{ d.category_hint or '–' }}</span></span></div>
+    <div class="cell"><span class="body"><span>{{ _("Condition") }}</span><span class="val trunc">{{ d.condition or '–' }}</span></span></div>
+    {% for a in d.attributes or [] %}<div class="cell"><span class="body"><span>{{ a.name }}</span><span class="val trunc">{{ a.value }}</span></span></div>{% endfor %}
+  </div>
+  {% if st.note %}<p class="sub" style="margin: 6px 4px 0"><strong>{% if d.revisions %}{{ _("Note from Claude on the last revision:") }}{% else %}{{ _("Note from Claude:") }}{% endif %}</strong> {{ st.note }}</p>{% endif %}
+
+  {% if d.comparables %}
+  <div class="sh">{{ _("Comparable ads") }}</div>
+  <div class="sec">
+    {% for c in d.comparables %}<a class="cell" href="{{ c.url }}" target="_blank" hx-boost="false"><span class="body"><span class="trunc" style="font-size: 14px">{{ c.title }}</span><span class="val">{{ c.price_display or (c.price|eur) }}</span></span></a>{% endfor %}
+  </div>
+  {% endif %}
+  <details style="margin-top: 12px"><summary class="sub">{{ _("Input") }}</summary><p style="font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere">{{ d.input_text }}</p></details>
+</div>
+<script>
+(() => {
+  // the handover: shipping's choices only when the item is not picked up only
+  const pub = document.getElementById('wh-publish');
+  if (pub) pub.addEventListener('change', (e) => {
+    if (e.target.name === 'handover') { const s = pub.querySelector('.wh-ship'); if (s) s.hidden = e.target.value === 'pickup'; }
+  });
+  // "Choose another category": willhaben's categories by a search term, a tap picks one
+  const box = document.querySelector('[data-catpick]'), pick = document.getElementById('cat-pick');
+  if (!box || !pick) return;
+  const q = box.querySelector('[data-catq]'), res = box.querySelector('[data-catres]'), msg = box.querySelector('[data-catmsg]');
+  let timer;
+  const search = async () => {
+    res.replaceChildren(); msg.textContent = '';
+    if (q.value.trim().length < 2) return;
+    try {
+      const r = await fetch('/api/willhaben/categories?q=' + encodeURIComponent(q.value.trim()));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.status);
+      if (!data.results.length) msg.textContent = msg.dataset.empty;
+      for (const c of data.results) {
+        const b = Object.assign(document.createElement('button'), {type: 'button', className: 'chip', textContent: c.path});
+        b.style.cssText = 'height: auto; padding: 6px 12px; text-align: left; white-space: normal';
+        b.addEventListener('click', () => { pick.querySelector('[name=code]').value = c.code; pick.requestSubmit(); });
+        res.appendChild(b);
+      }
+    } catch (err) { msg.textContent = msg.dataset.fail.replace('{error}', err.message); }
+  };
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 350); });
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timer); search(); } });
+})();
+</script>
+</main>
+{% endblock %}

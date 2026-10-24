@@ -1,0 +1,19 @@
+{# Claude screening fields in the Mini App's look (_screen_fields.html): screen, brief, minimum, hide, thresholds;
+   gh_check only when defined (edit). Field names as the dashboard's: screen_on, screen_brief, screen_min,
+   screen_hide, gh_check. #}
+<div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-screening>
+  <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px"><strong>{{ _("Claude screening") }}</strong><input type="checkbox" name="screen_on" {% if screen %}checked{% endif %} style="width: 22px; height: 22px"></label>
+  <span class="sub">{{ _("Claude checks every new hit before you are notified. Other hits go to Hits → Filtered out and still fire the Home Assistant event, just without a push.") }}</span>
+  <label class="sub">{{ _("What exactly are you looking for?") }}<textarea class="field" name="screen_brief" rows="3" placeholder="{{ _('e.g. road bike, frame size 56–58, Shimano 105 or better, no e-bikes, no parts') }}">{{ brief or '' }}</textarea></label>
+  <span class="sub">{{ _("Limits you write here (a maximum price, a must-have feature, the generation) are kept: a hit that misses one is never pushed.") }}</span>
+  <label class="sub">{{ _("Notify for") }}<select class="field" name="screen_min">{% for v, lbl in thresholds.items() %}<option value="{{ v }}" {% if (minimum or 'match') == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></label>
+  <span class="sub">{{ _("Don't notify when the hit is …") }}</span>
+  {% set names = screen_issue_labels() %}{% set chosen = hide if hide is not none else screen_default_hide %}
+  <span class="btnrow">{% for key in screen_hideable %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="checkbox" name="screen_hide" value="{{ key }}" {% if key in chosen %}checked{% endif %}>{{ names[key] }}</label>{% endfor %}</span>
+  <span class="sub">{{ _("“Too expensive” and “price unclear” are covered by “Notify for”. “Too far away” needs an area in the description above; “dealer” comes from the site itself (the seller is marked as commercial).") }}</span>
+  {% if gh_check is defined %}
+  <label style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; border-top: 1px solid var(--sep); padding-top: 8px">
+    <span style="display: flex; flex-direction: column"><span>{{ _("Check the Geizhals product") }}</span><span class="sub">{{ _("Claude checks the product found on Geizhals for every new hit (model and variant) and looks for the right one when it is wrong or missing – for the new price in the push and the “below the Geizhals price” rule. Two more Claude calls per check with new hits.") }}</span></span>
+    <input type="checkbox" name="gh_check" {% if gh_check %}checked{% endif %} style="width: 22px; height: 22px; flex-shrink: 0"></label>
+  {% endif %}
+</div>

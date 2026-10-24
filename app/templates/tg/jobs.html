@@ -1,0 +1,31 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Background jobs") }}{% endblock %}
+{% block page %}
+<main data-back="/tg">
+{{ m.head(_("Background jobs")) }}
+<div class="wrap" hx-get="/tg/jobs" hx-trigger="every 3s" hx-select=".wrap" hx-swap="outerHTML" hx-disinherit="*">
+  <div class="sh">{{ _("Running and queued") }}</div>
+  {% if active %}
+  <div class="sec">
+    {% for j in active %}
+    <div class="cell" data-job="{{ j.id }}"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column">
+      <span class="trunc">{{ j.label }}</span>
+      <span class="sub">{% if j.status == 'running' %}<span style="color: var(--link)">{{ j.step or _("running") }}</span>{% if j.total %} · {{ j.done }}/{{ j.total }}{% endif %}{% else %}{{ _("queued") }}{% if j.grace_s %} · {{ _("Goes out in {n} s", n=j.grace_s|int) }}{% endif %}{% endif %}</span></span>
+      {% if j.cancellable %}<form method="post" action="/jobs/{{ j.id }}/cancel" style="margin: 0"><button class="chip danger">{{ _("Take back") }}</button></form>{% endif %}</span></div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("Nothing running.") }}</p>{% endif %}
+  {% if recent %}
+  <div class="sh">{{ _("Done") }}</div>
+  <div class="sec">
+    {% for j in recent %}
+    <div class="cell"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column">
+      <span class="trunc">{{ j.label }}</span>
+      <span class="sub">{{ j.result or j.status }}{% if j.problems %} · <span class="danger">{{ j.problems|join(', ') if j.problems is iterable and j.problems is not string else j.problems }}</span>{% endif %}</span></span></span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+</main>
+{% endblock %}

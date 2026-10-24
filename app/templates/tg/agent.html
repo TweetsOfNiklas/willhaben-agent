@@ -1,0 +1,98 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ a.name }}{% endblock %}
+{# one search agent with everything the dashboard's settings drawer offers (agents.html): name, interval, push, price
+   drops, the Geizhals rule, the distance, its searches and sites, Claude's screening – saved by the dashboard's
+   /agents/<id>/edit; check now, pause, delete #}
+{% block page %}
+{% set srch = agent_search_items(a) %}{% set choices = srch.choices %}
+{% set last = srch.terms|length + srch.filters|length == 1 %}
+<main data-back="/tg/agents" data-main="{{ _('Save') }}" data-main-form="agent-form">
+{{ m.head(_("Search agent"), '/tg/agents') }}
+<div class="wrap"{% if busy %} hx-get="/tg/agents/{{ a.id }}" hx-trigger="every 4s" hx-select="#agent-state" hx-target="#agent-state" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  <div id="agent-state" class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px">
+    <span style="display: flex; align-items: center; gap: 6px"><span style="font-size: 17px; font-weight: 600">{{ a.name }}</span>{% if not a.enabled %}<span class="pill">{{ _("paused") }}</span>{% endif %}</span>
+    <span class="sub">{{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}</span>
+    {% set names = [] %}{% for pid in agent_sites(a) %}{% set _x = names.append(platform_name(pid)) %}{% endfor %}
+    {% if a.last_rows_found is not none %}<span class="sub">{{ _("{n} matching ads on {platform}", n='{:,}'.format(a.last_rows_found).replace(',', '.'), platform=names|join(', ')) }}</span>{% endif %}
+    {% if a.last_error %}<span style="font-size: 13px; color: var(--destructive)">{{ a.last_error }}</span>{% endif %}
+    {% if busy %}<span class="sub" style="color: var(--link)" data-checking>{{ _("Checking…") }}</span>{% endif %}
+  </div>
+
+  <div class="sec" style="margin-top: 12px">
+    <a class="cell" href="/tg/hits"><span class="body"><span>{{ _("Hits") }}{% if new %} <span class="badge">{{ new }}</span>{% endif %}</span>{{ m.chev() }}</span></a>
+    {% if not busy %}<form method="post" action="/agents/{{ a.id }}/run" style="margin: 0"><button class="cell" data-run><span class="body"><span>{{ _("Check now") }}</span>{{ ui.icon('refresh', 15, 2) }}</span></button></form>{% endif %}
+    <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0"><input type="hidden" name="back" value="/tg/agents/{{ a.id }}">
+      <span class="body"><span>{{ _("Running") }}</span>{{ m.switch(a.enabled, _("Running")) }}</span></form>
+    <a class="cell" href="{{ a.source_url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Search on {platform}", platform=platform_name(a.platform)) }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>
+  </div>
+
+  <form method="post" action="/agents/{{ a.id }}/edit" id="agent-form" style="margin: 0">
+    <div class="sh">{{ _("Settings") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      <label class="sub">{{ _("Name") }}<input class="field" name="name" value="{{ a.name }}"></label>
+      <label class="sub">{{ _("Check every (minutes)") }}<input class="field" type="number" name="interval_min" value="{{ a.interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span style="display: flex; flex-direction: column"><span>{{ _("Notify") }}</span><span class="sub">{{ _("Push to phone / Telegram for new hits") }}</span></span><input type="checkbox" name="notify_on" {% if a.notify %}checked{% endif %} style="width: 22px; height: 22px; flex-shrink: 0"></label>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span style="display: flex; flex-direction: column"><span>{{ _("Report price drops") }}</span><span class="sub">{{ _("Also when an already seen ad gets cheaper") }}</span></span><input type="checkbox" name="drops_on" {% if a.notify_price_drops %}checked{% endif %} style="width: 22px; height: 22px; flex-shrink: 0"></label>
+    </div>
+
+    {# the Geizhals rule: a price zone or cheaper, or an own percentage below the new price #}
+    <div class="sh">{{ _("Below the Geizhals price") }}</div>
+    {% set lvl0 = a.geizhals_level or ('pct' if a.geizhals_pct else 'cheap') %}
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-gh-rule>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span>{{ _("Below the Geizhals price") }}</span><input type="checkbox" name="gh_on" {% if a.geizhals_pct or a.geizhals_level %}checked{% endif %} style="width: 22px; height: 22px"></label>
+      <span class="sub">{{ _("Only show and push ads in this price range, measured against the lowest new price on Geizhals. Dearer ones go to “Filtered” without a push. For ads Geizhals does not know, Claude's price verdict counts (with the screening on); without one they are pushed as usual.") }}</span>
+      <select class="field" name="gh_level" aria-label="{{ _('Price range') }}">{% for v, lbl in geizhals_levels() %}<option value="{{ v }}"{% if v == lvl0 %} selected{% endif %}>{{ lbl }}</option>{% endfor %}<option value="pct"{% if lvl0 == 'pct' %} selected{% endif %}>{{ _("Own percentage") }}</option></select>
+      <label class="sub">{{ _("% below the Geizhals new price") }} ({{ _("Own percentage") }})<input class="field" type="number" name="gh_pct" min="1" max="95" step="1" value="{{ a.geizhals_pct or 30 }}"></label>
+    </div>
+
+    {# distance: pickup-only ads farther from home go to "Filtered"; ads that ship always pass #}
+    <div class="sh">{{ _("Pickup only nearby") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-distance>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span>{{ _("Pickup only nearby") }}</span><input type="checkbox" name="km_on" {% if a.max_km %}checked{% endif %} style="width: 22px; height: 22px"></label>
+      <span class="sub">{{ _("Ads that can only be picked up are shown and pushed only within this distance from your address (Settings → Shipping & pickup). Ads that ship always pass, so do ads without a known place.") }}</span>
+      <label class="sub">{{ _("km from home") }}<input class="field" type="number" name="max_km" min="1" max="2000" step="1" value="{{ a.max_km or 30 }}"></label>
+      {% if not home_address() %}<span style="font-size: 13px; color: #B07800">{{ _("No address set yet") }}</span>{% endif %}
+    </div>
+
+    {# the searches: each term once (it runs on every ticked site), the searches without a term, terms to add, the sites #}
+    <div class="sh">{{ _("Searches from product search #{id}", id=a.search_id) if a.search_id else _("Searches") }} · {{ _("1 search per check") if srch.per_check == 1 else _("{n} searches per check", n=srch.per_check) }}</div>
+    <div class="sec" data-searches>
+      {% for f in srch.filters %}
+      <label class="cell"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc">{{ f.label }}</span><span class="sub">{{ _("only {site}", site=platform_name(f.platform)) }}{% if f.price_from or f.price_to %} · {{ f.price_from|eur if f.price_from else '' }}–{{ f.price_to|eur if f.price_to else '' }}{% endif %}</span></span>
+        <span class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Remove") }}<input type="checkbox" name="drop_query" value="{{ f.index }}"{% if last %} disabled{% endif %}></span></span></label>
+      {% endfor %}
+      {% for term in srch.terms %}
+      <label class="cell"><span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="trunc">{{ term.keyword }}</span>
+        <span class="sub">{% if term.price_from or term.price_to %}{{ term.price_from|eur if term.price_from else '' }}–{{ term.price_to|eur if term.price_to else '' }}{% endif %}{% if term.missing %} {{ _("not on {sites} yet – Save adds it", sites=term.missing_names|join(', ')) }}{% endif %}</span></span>
+        <span class="sub" style="display: flex; align-items: center; gap: 6px">{{ _("Remove from every site") if choices|length > 1 else _("Remove") }}<input type="checkbox" name="drop_term" value="{{ term.key }}"{% if last %} disabled{% endif %}></span></span></label>
+      {% endfor %}
+      {# terms to add: each row sends keyword, from and to, so the three lists line up; an empty term adds nothing #}
+      {% for i in range(2) %}
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px; gap: 6px; padding: 8px 14px; border-top: 1px solid var(--sep)">
+        <input class="field" name="add_keyword" autocomplete="off" placeholder="{{ _('Add a search term') }}" aria-label="{{ _('Add a search term') }}">
+        <input class="field" name="add_price_from" inputmode="numeric" placeholder="{{ _('from') }} €" aria-label="{{ _('from') }} €">
+        <input class="field" name="add_price_to" inputmode="numeric" placeholder="{{ _('to') }} €" aria-label="{{ _('to') }} €">
+      </div>
+      {% endfor %}
+    </div>
+    {% if choices|length > 1 %}
+    <input type="hidden" name="sites_shown" value="1">
+    <div class="btnrow" style="margin-top: 8px" data-sites>
+      <span class="sub" style="align-self: center">{{ _("Sites:") }}</span>
+      {% for pc in choices %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="checkbox" name="sites" value="{{ pc.id }}" {% if pc.id in srch.js.sites %}checked{% endif %}>{{ pc.name }}</label>{% endfor %}
+    </div>
+    <p class="sub" style="margin: 6px 4px 0">{{ _("Every search term runs on every ticked site. New searches start quietly: what they find on their first check counts as seen.") }}</p>
+    {% endif %}
+
+    <div class="sh">Claude</div>
+    {% with screen=a.screen, brief=a.screen_brief, minimum=a.screen_min, hide=screen_hide_set(a), gh_check=a.geizhals_check %}{% include "tg/_agent_screen.html" %}{% endwith %}
+    <button class="mainbtn tg-hide" style="margin-top: 16px">{{ _("Save") }}</button>
+  </form>
+
+  <form method="post" action="/agents/{{ a.id }}/delete" class="sec" style="margin-top: 20px" hx-confirm="{{ _('Delete search agent and its hits?') }}">
+    <button class="cell danger" style="justify-content: center" data-delete>{{ _("Delete agent") }}</button>
+  </form>
+</div>
+</main>
+{% endblock %}

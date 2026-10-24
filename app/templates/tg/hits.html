@@ -6,16 +6,41 @@
 <main data-back="/tg">
 {{ m.head(_("Hits")) }}
 <div class="wrap">
+  {% set keep = ('&agent_id=' ~ agent_id if agent_id else '') ~ ('&platform=' ~ platform if platform else '') %}
+  {% set view %}<input type="hidden" name="agent_id" value="{{ agent_id or '' }}"><input type="hidden" name="platform" value="{{ platform or '' }}">{% endset %}
   {# the hits page's tabs; held back = filtered out by Claude's screening, the Geizhals rule or the distance #}
   <nav class="seg" style="grid-template-columns: repeat(4, minmax(0, 1fr))" aria-label="{{ _('Hits') }}">
     {% for v, label in [('new', _("New")), ('saved', _("Saved")), ('filtered', _("Held back")), ('seen', _("Seen"))] %}
-    <a href="/tg/hits?state={{ v }}"{% if state == v %} aria-current="page"{% endif %} style="font-size: 13px">{{ label }}{% if counts[v] and v != 'seen' %} · {{ counts[v] }}{% endif %}</a>
+    <a href="/tg/hits?state={{ v }}{{ keep }}"{% if state == v %} aria-current="page"{% endif %} style="font-size: 13px">{{ label }}{% if counts[v] and v != 'seen' %} · {{ counts[v] }}{% endif %}</a>
     {% endfor %}
   </nav>
+  {# which agent and which site, as the dashboard's filters #}
+  <form method="get" action="/tg/hits" style="margin: 8px 0 0; display: flex; gap: 6px" data-hit-filters>
+    <input type="hidden" name="state" value="{{ state }}">
+    <select class="field" name="agent_id" aria-label="{{ _('Search agent') }}" onchange="this.form.requestSubmit()" style="flex: 1; min-width: 0; padding: 7px 10px; font-size: 14px">
+      <option value="">{{ _("All agents") }}</option>
+      {% for a in agents.values() %}<option value="{{ a.id }}"{% if agent_id == a.id %} selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+    {% if sites|length > 1 %}<select class="field" name="platform" aria-label="{{ _('Site') }}" onchange="this.form.requestSubmit()" style="width: 38%; padding: 7px 10px; font-size: 14px">
+      <option value="">{{ _("All sites") }}</option>
+      {% for p in sites %}<option value="{{ p }}"{% if platform == p %} selected{% endif %}>{{ platform_name(p) }}</option>{% endfor %}</select>{% endif %}
+  </form>
   {% if hits %}
-  <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px">
+  {# the tab's own action, and the selection: several hits saved, seen or ignored at once #}
+  <div class="btnrow" style="margin-top: 8px">
+    {% if state == 'new' %}<form method="post" action="/hits/mark-seen" style="margin: 0">{{ view }}<button class="chip" data-mark-seen>{{ ui.icon('check', 13, 2) }} {{ _("Mark all as seen") }}</button></form>{% endif %}
+    {% if state == 'filtered' %}<form method="post" action="/hits/clear-filtered" style="margin: 0" hx-confirm="{{ _('Clear these {n} filtered hits?', n=counts.filtered) if not agent_id else _('Clear the filtered hits of this agent?') }}">{{ view }}<button class="chip danger" data-clear-filtered>{{ ui.icon('trash', 13, 2) }} {{ _("Clear") }}</button></form>{% endif %}
+    <button type="button" class="chip" data-select-toggle onclick="document.getElementById('tg-hitlist').toggleAttribute('data-select')">{{ _("Select") }}</button>
+  </div>
+  <form method="post" action="/hits/bulk" id="tg-bulk" style="margin: 0">{{ view }}<input type="hidden" name="state" value="{{ state }}"></form>
+  <style>#tg-hitlist .pick, #tg-hitlist .bulkbar { display: none; } #tg-hitlist[data-select] .pick { display: flex; } #tg-hitlist[data-select] .bulkbar { display: flex; }</style>
+  <div id="tg-hitlist" style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px">
+    <div class="bulkbar sec" style="position: sticky; top: 8px; z-index: 4; padding: 8px 10px; gap: 6px; flex-wrap: wrap; align-items: center" data-bulk>
+      {% for a, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}<button class="chip{{ ' danger' if a == 'ignored' else '' }}" form="tg-bulk" name="action" value="{{ a }}">{{ label }}</button>{% endfor %}
+      <span class="sub">{{ _("for the ticked hits") }}</span>
+    </div>
     {% for h in hits %}{% set gone = h.site_status in ('sold', 'reserved', 'gone', 'expired') %}{% set agent = agents.get(h.agent_id) %}
-    <div class="sec" data-hit="{{ h.id }}" style="{{ 'opacity: .62' if gone else '' }}">
+    <div class="sec" data-hit="{{ h.id }}" style="position: relative{{ '; opacity: .62' if gone else '' }}">
+      <label class="pick" style="position: absolute; z-index: 2; top: 6px; right: 6px; width: 34px; height: 34px; align-items: center; justify-content: center; background: var(--section); border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.2)"><input type="checkbox" name="ids" value="{{ h.id }}" form="tg-bulk" aria-label="{{ _('Select') }}" style="width: 20px; height: 20px"></label>
       <a href="/tg/hits/{{ h.id }}" style="display: flex; gap: 12px; padding: 10px 12px; color: var(--text)">
         <span style="position: relative; flex-shrink: 0; align-self: flex-start">
           {% if h.image_path or h.image_url %}<img class="thumb" src="{{ '/hits/' ~ h.id ~ '/image' if h.image_path else h.image_url }}" alt="" loading="lazy" width="88" height="88" style="width: 88px; height: 88px{{ '; filter: grayscale(1)' if gone else '' }}" onerror="this.style.visibility='hidden'">
@@ -45,7 +70,7 @@
       <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--sep)">
         {% for s, label, icon in [('saved', _('Save'), 'star'), ('seen', _('Seen'), 'check'), ('ignored', _('Ignore'), 'eye-off')] %}{% set on = h.state == s %}
         <form method="post" action="/tg/hits/{{ h.id }}/quick" style="margin: 0; {{ '' if loop.first else 'border-left: 1px solid var(--sep)' }}">
-          <input type="hidden" name="state" value="{{ 'new' if on else s }}"><input type="hidden" name="tab" value="{{ state }}">
+          <input type="hidden" name="state" value="{{ 'new' if on else s }}"><input type="hidden" name="tab" value="{{ state }}">{{ view }}
           <button style="width: 100%; height: 42px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13.5px; font-weight: {{ '600' if on else '500' }}; color: {{ 'var(--link)' if on else 'var(--text)' }}" data-quick="{{ s }}">{{ ui.icon(icon, 15, 2) }}{{ label }}</button>
         </form>
         {% endfor %}

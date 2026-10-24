@@ -1,0 +1,92 @@
+{# the price check of one ad in the Mini App (_deal_result.html + _deal.html + _deal_claude.html): the ad, its price
+   position on the bar, the comparable ads, the Geizhals new price, Claude's verdict; Claude's steps run on their own
+   (app/tg_deals.py) and this section asks again while one runs #}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% set busy = running.claude or running.geizhals %}
+<div data-check{% if busy %} hx-get="{{ self_url }}" hx-trigger="every 3s" hx-select="[data-check]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+{% if res %}{% set ad = res.ad %}{% set p = res.position or {} %}{% set c = res.comparables or {} %}{% set st = c.stats or {} %}{% set gh = res.geizhals %}{% set fl = c.filtered or {} %}
+{% set hidden %}<input type="hidden" name="q" value="{{ res.asked_query or '' }}"><input type="hidden" name="hit" value="{{ hit }}"><input type="hidden" name="cat" value="{{ res.category_url or '' }}"><input type="hidden" name="own" value="{{ '1' if res.own_query else '' }}">{% endset %}
+  <div class="sec" style="margin-top: 12px">
+    {% if ad.image %}<img src="{{ ad.image }}" alt="" style="display: block; width: 100%; height: 220px; object-fit: contain; background: rgba(118,118,128,.2)" onerror="this.style.display='none'">{% endif %}
+    <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 6px">
+      <span style="font-size: 17px; font-weight: 600; line-height: 1.25">{{ ad.title }}</span>
+      <span style="font-size: 22px; font-weight: 700">{{ ad.price_display or (ad.price|eur) }}</span>
+      {% set rc = condition_text(ad.get('item_condition'), ad.get('item_condition_label'), ad.get('platform')) %}
+      <span class="sub">{{ ad.location or '' }}{% if ad.category %} · {{ ad.category }}{% endif %}{% if ad.is_private == false %} · {{ _("dealer") }}{% elif ad.is_private %} · {{ _("private") }}{% endif %}{% if rc %} · {{ rc }}{% endif %}</span>
+      <div class="btnrow">
+        <a class="chip" style="display: inline-flex; align-items: center" href="{{ ad.url }}" target="_blank" hx-boost="false">{{ _("Open on {platform}", platform=platform_name(ad.get('platform'))) }} ↗</a>
+        {% if purchase_enabled() and (ad.get('platform') or 'willhaben') == 'willhaben' %}<a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/purchases/new/{{ ad.ad_id }}" data-buy>{{ _("Buy") }}…</a>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="sh">{{ _("Price") }}</div>
+  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-deal>
+    {% set head = [] %}
+    {% if p.basis == 'geizhals' %}{% set _x = head.append(_("{n} % of the new price", n=p.pct) if p.pct else _("below 1 % of the new price")) %}
+    {% elif st.median and ad.price and p.reason != 'defect' %}{% set diff = ((ad.price - st.median) * 100 / st.median)|round|int %}{% set _x = head.append(_("{n} % below the median", n=-diff) if diff < 0 else (_("{n} % above the median", n=diff) if diff > 0 else _("exactly the median"))) %}{% endif %}
+    {% if c.count %}{% set _x = head.append(_("{n} comparable ads", n=c.count)) %}{% endif %}
+    <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">{% if p.pos is not none %}<span class="pill lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}{% if head %}<span class="sub">{{ head|join(' · ') }}</span>{% endif %}</span>
+    {% if p.pos is not none %}{{ m.pricebar(deal_bar(p, ad.price|eur)) }}{% endif %}
+    {% if p.suspicious %}<span style="font-size: 13px; font-weight: 600; color: var(--destructive)">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</span>{% endif %}
+    {% if p.mismatch %}<span style="font-size: 13px; color: #B07800">{{ _("Comparable ads cost {n} % of the new price on average – is the Geizhals product the right one?", n=p.mismatch) }}</span>{% endif %}
+    {% if p.new_price_ignored %}<span style="font-size: 13px; color: #B07800">{{ _("Geizhals new price not used: the comparable ads cost {n} % of it on average – probably another product.", n=p.new_price_ignored) }}</span>{% endif %}
+    {% if c.error_kind == 'vpn' %}<span class="sub">{{ _("Comparable ads can't be fetched right now: the VPN is looking for a server for {site}.", site=platform_name(c.error_site)) }}</span>
+    {% else %}<span style="font-size: 14px">{{ deal_explain(res) }}</span>{% endif %}
+    <span class="sub">{% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
+      {% if fl.model %} {{ _("{n} other products, models or variants left out.", n=fl.model) }}{% endif %}{% if fl.kind %} {{ _("{n} accessories or parts left out.", n=fl.kind) }}{% endif %}{% if fl.condition %} {{ _("{n} ads in another condition left out.", n=fl.condition) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}</span>
+  </div>
+
+  <div class="sh">Geizhals</div>
+  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 6px" data-geizhals>
+    {% if gh %}<a href="{{ gh.url }}" target="_blank" hx-boost="false" style="font-size: 14px">{{ gh.name }} ↗</a>
+      <span class="sub">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }}{% if ad.price and gh.price_from %} · {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}{% endif %}{% if gh.by == 'claude' %} · {{ _("found by Claude") }}{% endif %}</span>
+    {% elif res.geizhals_none %}<strong style="font-size: 14px">{{ _("Not on Geizhals – Claude already searched") }}</strong><span class="sub">{{ res.geizhals_none }}{% if res.geizhals_none_at %} · {{ res.geizhals_none_at|ago }}{% endif %}</span>
+    {% elif running.geizhals %}<span style="font-size: 14px; color: var(--link)">{{ _("Claude searches Geizhals …") }}</span>
+    {% else %}<span class="sub">{{ _("No matching product found on Geizhals.") }}</span>
+      {% if run_errors.geizhals %}<span style="font-size: 13px; color: var(--destructive)">{{ _("Claude failed: {error}", error=run_errors.geizhals) }}</span>{% endif %}
+      <form method="post" action="/tg/check/{{ platform }}/{{ ad_id }}/geizhals" style="margin: 0">{{ hidden }}<button class="chip" style="width: 100%">{{ ui.icon('sparkle', 13, 2) }} {{ _("Let Claude search Geizhals") }}</button></form>
+    {% endif %}
+  </div>
+
+  <div class="sh">Claude</div>
+  {% set cl = res.get('claude') or {} %}
+  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 6px" data-claude>
+    {% if cl.deal %}<span style="display: flex; gap: 6px; align-items: center"><strong style="color: var(--link)">{{ _("Claude's assessment") }}</strong><span class="pill {{ 'lvl-bargain' if cl.deal in ('great', 'good') else '' }}">{{ deal_label(cl.deal) }}</span></span>
+      {% if cl.reason %}<span style="font-size: 14px; white-space: pre-wrap">{{ cl.reason }}</span>{% endif %}
+    {% elif running.claude %}<span style="font-size: 14px; color: var(--link)">{{ ui.icon('sparkle', 13, 2) }} {{ _("Claude rates the price …") }}</span>
+    {% else %}
+      {% if run_errors.claude %}<span style="font-size: 13px; color: var(--destructive)">{{ _("Claude failed: {error}", error=run_errors.claude) }}</span>{% endif %}
+      <form method="post" action="/tg/check/{{ platform }}/{{ ad_id }}/claude" style="margin: 0">{{ hidden }}<button class="chip primary" style="width: 100%" data-ask-claude>{{ ui.icon('sparkle', 13, 2) }} {{ _("Ask Claude") }}</button></form>
+    {% endif %}
+  </div>
+
+  {% if c.closest %}
+  <div class="sh">{{ _("Comparable ads ({n})", n=c.closest|length) }}</div>
+  <div class="sec" data-comparables>
+    {% set ns = namespace(done=ad.price is none or ad.price <= 0) %}
+    {% for a in c.closest %}{% set apid = a.get('platform') or 'willhaben' %}
+    {% if not ns.done and a.price > ad.price %}{% set ns.done = true %}<div class="cell" style="background: rgba(31,116,186,.08)"><span class="body"><strong>→ {{ _("this ad") }}</strong><span class="val" style="color: var(--text); font-weight: 600">{{ ad.price|eur }}</span></span></div>{% endif %}
+    <a class="cell" href="{{ a.url }}" target="_blank" hx-boost="false"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span class="trunc">{{ a.title }}</span><span class="sub">{{ platform_name(apid) }}{% if a.get('location') %} · {{ a.location }}{% endif %}</span></span><span class="val" style="color: var(--text)">{{ a.price|eur }}</span></span></a>
+    {% endfor %}
+    {% if not ns.done %}<div class="cell" style="background: rgba(31,116,186,.08)"><span class="body"><strong>→ {{ _("this ad") }}</strong><span class="val" style="color: var(--text); font-weight: 600">{{ ad.price|eur }}</span></span></div>{% endif %}
+  </div>
+  {% endif %}
+
+  {# another search term, another category: the check again (GET, the analysis is cached per term) #}
+  <div class="sh">{{ _("Compare again") }}</div>
+  <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+    <form method="get" action="/tg/check/{{ platform }}/{{ ad_id }}" style="margin: 0; display: flex; gap: 6px" data-compare>
+      <input class="field" name="q" value="{{ res.query }}" aria-label="{{ _('Compare with another search term') }}"><input type="hidden" name="was" value="{{ '' if res.own_query else res.query }}">{% if hit %}<input type="hidden" name="hit" value="{{ hit }}">{% endif %}
+      <button class="chip">{{ _("Compare again") }}</button></form>
+    {% if choices %}<form method="get" action="/tg/check/{{ platform }}/{{ ad_id }}" style="margin: 0" data-category>
+      {% if res.asked_query %}<input type="hidden" name="q" value="{{ res.asked_query }}">{% endif %}{% if res.own_query %}<input type="hidden" name="own" value="1">{% endif %}{% if hit %}<input type="hidden" name="hit" value="{{ hit }}">{% endif %}
+      <label class="sub">{{ _("Category for the comparison") }}<select class="field" name="cat" onchange="this.form.requestSubmit()">
+        <option value="" {% if not res.category_url %}selected{% endif %}>{{ _("Automatic (all categories)") }}</option>
+        {% if res.category_url %}<option value="{{ res.category_url }}" selected>{{ choices.selected|map(attribute='label')|join(' › ') or _("chosen category") }}</option>{% endif %}
+        {% for v in choices['values'] %}<option value="{{ v.url }}">{{ ((choices.selected|map(attribute='label')|join(' › ')) ~ ' › ') if choices.selected else '' }}{{ v.label }}{% if v.hits is not none %} ({{ v.hits }}){% endif %}</option>{% endfor %}</select></label>
+      {% if choices.error %}<span class="sub">{{ choices.error }}</span>{% endif %}</form>{% endif %}
+  </div>
+{% elif error %}<p style="font-size: 14px; color: var(--destructive); margin: 12px 4px">{{ error }}</p>
+{% endif %}
+</div>

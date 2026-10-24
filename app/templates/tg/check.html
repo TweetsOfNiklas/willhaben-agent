@@ -1,0 +1,15 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Price check") }}{% endblock %}
+{# the price check of one ad (deals_web.deals_ad_platform): the page answers at once, the analysis loads into it #}
+{% block page %}
+<main data-back="/tg/search">
+{{ m.head(_("Price check"), '/tg/search') }}
+<div class="wrap">
+  <div class="sec" style="margin-top: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px" hx-get="{{ result_url }}" hx-trigger="load" hx-swap="outerHTML" hx-disinherit="*" data-check-loading>
+    <strong style="font-size: 15px">{{ _("Checking the price …") }}</strong>
+    <span class="sub">{{ _("Comparable ads are loaded from willhaben; this takes a few seconds the first time, then it is cached for an hour.") }}</span>
+  </div>
+</div>
+</main>
+{% endblock %}

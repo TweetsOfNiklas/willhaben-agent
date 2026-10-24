@@ -1,0 +1,106 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("New search agent") }}{% endblock %}
+{# the dashboard's builder (agent_new.html, main.agents_new): the sites, a pasted search link or a search term with a
+   price range, willhaben's own filters, what the search finds now, then the agent (POST /agents) #}
+{% block page %}
+{% set wh = platform.can('filters') %}
+{% set sites_qs %}{% for sid in chosen %}&sites={{ sid }}{% endfor %}{% endset %}
+<main data-back="/tg/agents"{% if f or preview.url %} data-main="{{ _('Create search agent') }}" data-main-form="agent-create"{% endif %}>
+{{ m.head(_("New search agent"), '/tg/agents') }}
+<div class="wrap">
+  <p class="sub" style="margin: 12px 4px 0">{{ _("Paste a search link from the site, or type what you are looking for — the agent then checks it at human-like intervals.") }}</p>
+  {% if builder_error %}<p style="font-size: 13px; color: var(--destructive); margin: 8px 4px 0" data-error>{{ builder_error }}</p>{% endif %}
+
+  {# the sites: the first ticked one (or a pasted link's) is the main search, the others search the same term #}
+  <form method="get" action="/tg/agents/new" class="btnrow" style="margin-top: 10px" data-sites>
+    {% for pc in platform_choices %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="checkbox" name="sites" value="{{ pc.id }}"{% if pc.id in chosen %} checked{% endif %}{% if not pc.can('keyword_search') and pc.id != platform.id %} disabled{% endif %} onchange="if (!this.checked && this.value === {{ platform.id|tojson|forceescape }}) { const u = this.form.querySelector('input[name=url]'); if (u) u.remove(); } this.form.requestSubmit()">{{ pc.name }}</label>{% endfor %}
+    {% if preview.keyword %}<input type="hidden" name="keyword" value="{{ preview.keyword }}">{% endif %}
+    {% if preview.price_from is not none %}<input type="hidden" name="price_from" value="{{ preview.price_from|int }}">{% endif %}
+    {% if preview.price_to is not none %}<input type="hidden" name="price_to" value="{{ preview.price_to|int }}">{% endif %}
+    {% if url %}<input type="hidden" name="url" value="{{ url }}">{% endif %}
+  </form>
+  {% if platform_off %}<p class="sub" style="margin: 6px 4px 0">{{ _("{sites} can also be watched once you switch them on in the settings.", sites=platform_off|map(attribute='name')|join(', ')) }}</p>{% endif %}
+
+  <form method="get" action="/tg/agents/new" style="margin: 10px 0 0; display: flex; gap: 6px">
+    {% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
+    <input class="field" type="url" name="url" placeholder="{{ _('Paste a search link from {sites}', sites=platform_choices|map(attribute='name')|join(', ')) }}">
+    <button class="chip">{{ _("Use link") }}</button>
+  </form>
+  <form method="get" action="/tg/agents/new" style="margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 6px" data-keyword>
+    {% if wh %}<input type="hidden" name="url" value="{{ url }}">{% else %}<input type="hidden" name="platform" value="{{ platform.id }}">{% endif %}
+    {% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
+    <input class="field" type="search" name="keyword" value="{{ (f.keyword if f else (preview.keyword or url_param(url, 'keyword'))) or '' }}" placeholder="{{ _('What are you looking for? e.g. carbon road bike') }}" style="flex: 1 1 100%">
+    {% if not wh %}<input class="field" name="price_from" inputmode="numeric" value="{{ preview.price_from|int if preview.price_from is not none else '' }}" placeholder="{{ _('from') }} €" style="flex: 1">
+    <input class="field" name="price_to" inputmode="numeric" value="{{ preview.price_to|int if preview.price_to is not none else '' }}" placeholder="{{ _('to') }} €" style="flex: 1">{% endif %}
+    <button class="chip primary">{{ _("Search") }}</button>
+  </form>
+
+  {% if f or preview.url %}
+  {# willhaben's filters: chips and ranges, each a link to the search with that value applied #}
+  {% if f %}
+  <details style="margin-top: 12px" data-filters{% if f.selected %} open{% endif %}>
+    <summary class="sub" style="cursor: pointer; padding: 4px">{{ _("Filters") }}{% if f.selected %} · {{ f.selected|length }}{% endif %}</summary>
+    <div class="sec" style="margin-top: 6px">
+    {% for label, filters in f.groups %}{% for flt in filters %}
+      <details style="border-bottom: 1px solid var(--sep); padding: 8px 14px"{% if flt.selected %} open{% endif %}>
+        <summary style="font-size: 14px; font-weight: 600; cursor: pointer">{{ flt.label }}{% if flt.selected %} <span class="badge">{{ flt.selected|length }}</span>{% endif %}</summary>
+        {% if flt.kind == 'RANGE' %}
+        <form method="get" action="/tg/agents/new" style="margin: 6px 0 0; display: flex; gap: 6px"><input type="hidden" name="url" value="{{ url }}">{% for sid in chosen %}<input type="hidden" name="sites" value="{{ sid }}">{% endfor %}
+          {% for p in flt.range_params %}<input class="field" name="r_{{ p }}" inputmode="numeric" value="{{ url_param(f.url, p) or '' }}" placeholder="{{ _('from') if p.endswith('FROM') else _('to') }}">{% endfor %}
+          <button class="chip">{{ _("OK") }}</button></form>
+        {% else %}
+        <div class="btnrow" style="margin-top: 6px">
+          {% for v in flt.selected %}<a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/agents/new?url={{ v.url|urlencode }}{{ sites_qs }}">{{ v.label }} ✕</a>{% endfor %}
+          {% if not flt.selected or flt.multi or flt.kind == 'HIERARCHICAL' %}{% for v in flt.values %}<a class="chip" style="display: inline-flex; align-items: center" href="/tg/agents/new?url={{ v.url|urlencode }}{{ sites_qs }}">{{ v.label }}{% if v.hits is not none %} <span class="sub">&nbsp;{{ '{:,}'.format(v.hits).replace(',', '.') }}</span>{% endif %}</a>{% endfor %}{% endif %}
+        </div>
+        {% endif %}
+      </details>
+    {% endfor %}{% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  <div class="sh">{{ '{:,}'.format(preview.rows_found).replace(',', '.') }} {{ _("ads") }} {{ _("currently match") }}</div>
+  {% if f and f.selected %}<div class="btnrow">{% for flt, v in f.selected %}<a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/agents/new?url={{ v.url|urlencode }}{{ sites_qs }}">{{ v.label }} ✕</a>{% endfor %}</div>{% endif %}
+  {% if preview.sites|length > 1 %}
+  <div class="sec" style="margin-top: 8px">{% for row in preview.sites %}<div class="cell"><span class="body"><span>{{ row.p.name }}</span><span class="val">{% if row.error %}<span style="color: var(--destructive)">{{ row.error }}</span>{% else %}{{ _("{n} ads", n='{:,}'.format(row.rows_found).replace(',', '.')) }}{% endif %}</span></span></div>{% endfor %}</div>
+  {% elif chosen|length > 1 %}<p style="font-size: 13px; color: #B07800; margin: 6px 4px 0">{{ _("The other sites need a search term: type one above.") }}</p>{% endif %}
+  <a class="sub" style="display: block; margin: 6px 4px 0; color: var(--link)" href="{{ preview.url }}" target="_blank" hx-boost="false">{{ _("View this search on {platform}", platform=platform.name) }} ↗</a>
+
+  <form method="post" action="/agents" id="agent-create" style="margin: 0" data-create>
+    <input type="hidden" name="url" value="{{ preview.url }}">
+    <input type="hidden" name="platform" value="{{ platform.id }}">
+    {% if preview.sites|length > 1 %}{% for row in preview.sites %}<input type="hidden" name="sites" value="{{ row.p.id }}">{% endfor %}
+    <input type="hidden" name="keyword" value="{{ preview.keyword }}">
+    {% if preview.price_from is not none %}<input type="hidden" name="price_from" value="{{ preview.price_from|int }}">{% endif %}
+    {% if preview.price_to is not none %}<input type="hidden" name="price_to" value="{{ preview.price_to|int }}">{% endif %}{% endif %}
+    <div class="sh">{{ _("Search agent") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      <label class="sub">{{ _("Name") }}<input class="field" name="name" value="{{ preview.name }}"></label>
+      <label class="sub">{{ _("Check every (minutes)") }}<input class="field" type="number" name="interval_min" value="{{ settings.default_agent_interval_s // 60 }}" min="{{ settings.min_agent_interval_s // 60 }}"></label>
+    </div>
+    <div style="margin-top: 10px">{% with screen=False, brief='', minimum='match', hide=None %}{% include "tg/_agent_screen.html" %}{% endwith %}</div>
+    <button class="mainbtn tg-hide" style="margin-top: 16px" {% if f and not f.keyword and not f.selected %}disabled{% endif %}>{{ _("Create search agent") }}</button>
+    <p class="sub" style="margin: 6px 4px 0">{{ _("Only ads added after creating the agent are reported, plus price drops.") }}</p>
+  </form>
+
+  <div class="sh">{{ _("Latest hits") }}</div>
+  <div class="sec">
+    {% for ad in preview.ads %}
+    <a class="cell" href="{{ ad.url }}" target="_blank" hx-boost="false" style="padding-top: 8px; align-items: flex-start">
+      {% if ad.image_url %}<img class="thumb" src="{{ ad.image_url }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 2px; padding: 0 0 8px">
+        <span class="trunc" style="font-size: 15px">{{ ad.heading }}</span>
+        <span style="font-weight: 600">{{ ad.price_display or '–' }}</span>
+        <span class="sub">{% if preview.sites|length > 1 %}{{ platform_name(ad.platform) }} · {% endif %}{{ ad.location or '' }} · {{ ad.published_at|ago }}</span>
+      </span>
+    </a>
+    {% else %}<p class="empty">{{ _("No hits – loosen the filters.") }}</p>{% endfor %}
+  </div>
+  {% elif not builder_error %}
+  <p class="empty">{{ _("Type a search term or paste a link to see what the agent would find.") }}</p>
+  {% endif %}
+</div>
+</main>
+{% endblock %}

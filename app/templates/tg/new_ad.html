@@ -1,0 +1,67 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("New ad") }}{% endblock %}
+{# the start of ad creation (main.new_ad_page): one item from notes and photos, or the photos of several items that
+   Claude sorts; the recent drafts and batches #}
+{% block page %}
+{% set mode = request.query_params.get('mode', 'single') %}
+<main data-back="/tg/myads" data-main="{{ _('Create listing with Claude') if mode == 'single' else _('Upload photos and let Claude sort them') }}" data-main-form="new-ad-form">
+{{ m.head(_("New ad"), '/tg/myads') }}
+<div class="wrap">
+  <p class="sub" style="margin: 12px 4px 0">{{ _("Drop in notes and photos. Claude writes title, description and category; the price suggestion comes from comparable ads.") }}</p>
+  <nav class="seg" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+    <a href="/tg/new-ad"{% if mode == 'single' %} aria-current="page"{% endif %}>{{ _("One item") }}</a>
+    <a href="/tg/new-ad?mode=batch"{% if mode == 'batch' %} aria-current="page"{% endif %}>{{ _("Several items at once") }}</a>
+  </nav>
+  {% if mode == 'single' %}
+  <form method="post" action="/new-ad" enctype="multipart/form-data" id="new-ad-form" class="sec" style="margin-top: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px" data-new-ad>
+    <label class="sub">{{ _("Notes about the item") }}<textarea class="field" name="notes" rows="5" placeholder="{{ _('KTM mountain bike, frame M, 2019, new brake pads, small scratch on the top tube, pickup Vienna 15') }}"></textarea></label>
+    <label class="sub">{{ _("Photos") }} · {{ _("up to {n}", n=8) }}<input class="field" type="file" name="photos" accept="image/*" multiple data-max="8"></label>
+    <div class="tg-previews" style="display: flex; flex-wrap: wrap; gap: 6px"></div>
+    <button class="mainbtn tg-hide">{{ _("Create listing with Claude") }}</button>
+    <span class="sub">{{ _("Takes up to 2 minutes.") }}</span>
+  </form>
+  {% else %}
+  <form method="post" action="/new-ad/batch" enctype="multipart/form-data" id="new-ad-form" class="sec" style="margin-top: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px" data-new-batch>
+    <label class="sub">{{ _("All photos, in any order") }} · {{ _("up to {n}", n=max_batch) }}<input class="field" type="file" name="photos" accept="image/*" multiple required data-max="{{ max_batch }}"></label>
+    <span class="sub">{{ _("Claude sorts them into one draft per item") }}</span>
+    <div class="tg-previews" style="display: flex; flex-wrap: wrap; gap: 6px"></div>
+    <label class="sub">{{ _("Details for all items") }} ({{ _("optional") }})<textarea class="field" name="notes" rows="2" placeholder="{{ _('everything from the storage room, pickup Vienna 15, no shipping') }}"></textarea></label>
+    <button class="mainbtn tg-hide">{{ _("Upload photos and let Claude sort them") }}</button>
+    <span class="sub">{{ _("Then you correct the groups and get a draft per item.") }}</span>
+  </form>
+  {% endif %}
+
+  {% set st = {'draft': _('draft'), 'error': _('error'), 'published': _('published'), 'discarded': _('discarded')} %}
+  <div class="sh">{{ _("Recent drafts") }}</div>
+  <div class="sec">
+    {% for b in batches %}
+    <a class="cell" href="/tg/new-ad/batch/{{ b.id }}" data-batch="{{ b.id }}"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0">
+      <span class="trunc">{{ _("Batch #{id}", id=b.id) }} · {{ _("{n} photos", n=b.image_paths|length) }} · {{ _("{n} items", n=b.groups|length) }}</span><span class="sub">{{ b.created_at|local }}</span></span>
+      <span class="val"><span class="pill">{{ {'sorting': _('sorting'), 'review': _('ready for review'), 'creating': _('drafts being written'), 'error': _('error')}.get(b.status, b.status) }}</span>{{ m.chev() }}</span></span></a>
+    {% endfor %}
+    {% for d in drafts %}
+    <a class="cell" href="/tg/new-ad/{{ d.id }}" data-draft="{{ d.id }}">
+      {% if d.image_paths %}<img class="thumb" src="/ad-drafts/{{ d.id }}/image/0" alt="" loading="lazy" width="40" height="40" style="width: 40px; height: 40px" onerror="this.style.visibility='hidden'">{% endif %}
+      <span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span class="trunc">{{ d.title or (d.input_text[:60] ~ '…') }}</span><span class="sub">{{ d.created_at|local }}</span></span>
+      <span class="val"><span class="pill{{ ' lvl-bargain' if d.status == 'published' else '' }}">{{ st.get(d.status, d.status) }}</span>{{ m.chev() }}</span></span></a>
+    {% else %}{% if not batches %}<p class="empty">{{ _("None.") }}</p>{% endif %}{% endfor %}
+  </div>
+</div>
+<script>
+(() => {   // the chosen photos as small previews; more than allowed: the first ones are kept
+  const input = document.querySelector('#new-ad-form input[type=file]');
+  const box = document.querySelector('#new-ad-form .tg-previews');
+  if (!input || !box) return;
+  input.addEventListener('change', () => {
+    const max = Number(input.dataset.max || 0);
+    if (max && input.files.length > max) {
+      const dt = new DataTransfer(); [...input.files].slice(0, max).forEach(f => dt.items.add(f)); input.files = dt.files;
+    }
+    box.replaceChildren(...[...input.files].map(f => Object.assign(document.createElement('img'),
+      {src: URL.createObjectURL(f), alt: '', style: 'width: 64px; height: 64px; object-fit: cover; border-radius: 8px'})));
+  });
+})();
+</script>
+</main>
+{% endblock %}

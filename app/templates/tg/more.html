@@ -1,0 +1,19 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("More") }}{% endblock %}
+{# the dashboard's admin pages, opened as they are (Telegram's back button returns here) #}
+{% block page %}
+<main data-back="/tg">
+{{ m.head(_("More")) }}
+<div class="wrap">
+  <div class="sh">{{ _("Dashboard") }}</div>
+  <div class="sec">
+    {% for path, label, icon in admin %}
+    <a class="cell" href="{{ path }}" hx-boost="false" data-admin="{{ path }}"><span class="ico" style="background: #8E8E93">{{ ui.icon(icon, 16, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _(label) }}</span>{{ m.chev() }}</span></a>
+    {% endfor %}
+  </div>
+  <p class="sub" style="margin: 8px 16px">{{ _("These pages open as in the browser; Telegram's back button brings you back.") }}</p>
+</div>
+</main>
+{% endblock %}

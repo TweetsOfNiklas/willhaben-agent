@@ -1,0 +1,82 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Buy") }}{% endblock %}
+{# the buy dialog (_buy_dialog.html, purchase_routes._dialog) in the Mini App: how to buy, wish price and maximum (the
+   price check's rating, the comparables' chips), questions for the seller, Start (Telegram's main button). The sums
+   stay the server's: an untouched maximum is sent as "default" (asking price + shipping + fee of the chosen way), an
+   untouched wish price empty (the suggestion for that way) – no price maths in the browser. #}
+{% block page %}
+<main data-back="/tg/purchases"{% if on and d and not gone %} data-main="{{ _('Start purchase') }}" data-main-form="tg-buy"{% endif %}>
+{{ m.head(_("Buy"), '/tg/purchases') }}
+<div class="wrap">
+  {% set note = purchase_notice() %}{% if note %}<p style="margin: 12px 4px 0; font-size: 14px; color: var(--destructive)" role="alert">{{ note }}</p>{% endif %}
+  {% if other_site is defined and other_site %}<p class="empty">{{ _("Purchase orders work for willhaben ads only.") }}</p>
+  {% elif not on %}<p class="empty">{{ _("Purchase orders are switched off. Turn them on in Settings.") }}<br><a href="/settings/purchase" hx-boost="false">{{ _("Turn on purchases in Settings") }}</a></p>
+  {% elif wh_error %}<p class="empty" style="color: var(--destructive)">{{ _("willhaben error: {error}", error=wh_error) }}</p>
+  {% elif gone or not d %}<p class="empty">{{ _("This ad is no longer online (sold, expired or deleted).") }}</p>
+  {% else %}
+  {% set ask = d.price or 0 %}{% set seller = ((d.seller_name or '').split() or [''])[0] %}
+  {% set pl_fact = _("Shipping {amount}", amount=ship.paylivery|eur) if d.shipping_price is not none else _("Shipping about {amount}", amount=ship.paylivery|eur) %}
+  {% set fee_pct = ("%g"|format(fee.pct))|replace('.', ',') %}
+  <div class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; gap: 12px" data-buy-ad>
+    {% if d.images %}<img class="thumb" src="{{ d.images[0] }}" alt="" width="80" height="80" style="width: 80px; height: 80px" onerror="this.style.visibility='hidden'">{% endif %}
+    <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+      <span style="font-weight: 600; line-height: 1.25">{{ d.heading }}</span>
+      <span style="font-size: 20px; font-weight: 700">{{ d.price_display or (d.price|eur) }}</span>
+      <span style="display: flex; gap: 6px; flex-wrap: wrap">{% if d.paylivery_enabled %}<span class="pill lvl-bargain">PayLivery</span>{% endif %}{% if d.buy_now %}<span class="pill">{{ _("Buy now") }}</span>{% endif %}{% if d.is_private == false %}<span class="pill">{{ _("dealer") }}</span>{% elif d.is_private %}<span class="pill">{{ _("private") }}</span>{% endif %}{% if d.item_condition_label %}<span class="pill">{{ d.item_condition_label }}</span>{% endif %}</span>
+      <span class="sub">{{ d.location or '' }}{% if seller %} · {{ seller }}{% endif %} · <a href="{{ d.url }}" target="_blank" hx-boost="false">willhaben ↗</a></span>
+    </span>
+  </div>
+  {% if d.description %}<details style="margin: 8px 4px 0"><summary class="sub" style="color: var(--link)">{{ _("Description") }}</summary><p style="font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere">{{ d.description[:1500] }}</p></details>{% endif %}
+
+  <form method="post" action="/tg/purchases/new/{{ ad_id }}" id="tg-buy" style="margin: 0" data-buy
+        onsubmit="if (!this.dataset.wishTouched) this.elements.wish_price.value = ''">
+    {% for k, v in [('title', d.heading or ''), ('url', d.url or ''), ('image_url', d.images[0] if d.images else ''), ('price', d.price if d.price is not none else ''), ('search_id', search_id or ''), ('query', query), ('max_default', '1')] %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <div class="sh">{{ _("How to buy") }}</div>
+    <div class="sec">
+      {% for val, label, fact, enabled, pre_ok in [
+        ('paylivery', _("With PayLivery"), (pl_fact ~ ' · ' ~ _("Buyer protection from {pct} %", pct=fee_pct)) if d.paylivery_enabled else _("Not available"), d.paylivery_enabled, pre == 'paylivery'),
+        ('direct', _("Bank transfer"), _("Shipping about {amount}", amount=ship.direct|eur) if direct_ok else _("Needs your own address (Settings → Shipping)"), direct_ok, pre == 'direct'),
+        ('pickup', _("Pickup"), _("cash, no shipping"), true, pre == 'pickup')] %}
+      <label class="cell" style="{{ '' if enabled else 'opacity: .5' }}" data-mode="{{ val }}">
+        <input type="radio" name="mode" value="{{ val }}" required {% if not enabled %}disabled{% endif %} {% if pre_ok %}checked{% endif %} style="width: 20px; height: 20px; flex-shrink: 0">
+        <span class="body"><span style="display: flex; flex-direction: column"><span>{{ label }}</span><span class="sub">{{ fact }}</span></span></span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if d.maps_url %}<p class="sub" style="margin: 6px 4px 0">{{ _("Pickup place") }}: <a href="{{ d.maps_url }}" target="_blank" hx-boost="false">{{ d.place }} ↗</a> ({{ _("Google Maps; the exact address comes from the seller") }})</p>{% endif %}
+    <div class="sec" style="margin-top: 10px; padding: 10px 14px">
+      <label class="sub">{{ _("Preferred time") }}<input class="field" name="pickup_window" maxlength="200" placeholder="{{ _('e.g. Saturday morning') }}"></label>
+    </div>
+
+    <div class="sh">{{ _("Price") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 10px">
+      <label class="sub">{{ _("Wish price incl. shipping & fee") }} ({{ _("the agent offers this first") }})
+        <input class="field" type="number" name="wish_price" min="1" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(wish_prefill) if wish_prefill else '' }}" oninput="this.form.dataset.wishTouched = '1'"></label>
+      <label class="sub">{{ _("Maximum incl. shipping & fee") }}{% if not ask %} ({{ _("optional") }}){% endif %}
+        <input class="field" type="number" name="max_price" min="1" step="0.01" inputmode="decimal" value="{{ '%.2f'|format(prefill) if prefill else '' }}" oninput="this.form.elements.max_default.value = ''" data-max></label>
+      {% if fair %}
+      {% set parts = [] %}
+      {% if fair.basis == 'geizhals' %}{% set _x = parts.append(_("{n} % of the new price", n=fair.pct) if fair.pct else _("below 1 % of the new price")) %}
+      {% elif fair.diff is not none %}{% set _x = parts.append(_("{n} % below the median", n=-fair.diff) if fair.diff < 0 else (_("{n} % above the median", n=fair.diff) if fair.diff > 0 else _("exactly the median"))) %}{% endif %}
+      {% if fair.count %}{% set _x = parts.append(_("{n} comparable ads", n=fair.count)) %}{% endif %}
+      <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center" data-fair><span class="pill lvl-{{ fair.level }}">{{ deal_level_label(fair.level) }}</span><span class="sub">{{ parts|join(' · ') }}</span></span>
+      {% if fair.bar %}{{ m.pricebar(fair.bar) }}{% endif %}
+      {% if fair.chips %}<span class="btnrow">{% for c in fair.chips %}{% set tpl = _('Cheapest · {x}') if c.key == 'min' else _('Cheap · {x}') if c.key == 'cheap' else _('Market price · {x}') %}{% set total = (c.v + (ship[pre] if pre else 0) + (fee_of(c.v) if pre == 'paylivery' else 0))|round(2) %}
+        <button type="button" class="chip" data-v="{{ '%.2f'|format(total) }}" onclick="const f = this.form; f.elements.max_price.value = this.dataset.v; f.elements.max_default.value = ''">{{ tpl.replace('{x}', total|eur) }}</button>{% endfor %}</span>{% endif %}
+      {% endif %}
+    </div>
+
+    <div class="sh">{{ _("Start") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      <label class="sub">{{ _("Questions for the seller") }} ({{ _("optional, one per line") }})
+        <textarea class="field" name="questions" rows="3" maxlength="1500" placeholder="{{ _('e.g. Is the original box included?') }}"></textarea></label>
+      <span class="sub">{{ _("The agent asks them in the chat; when the seller agrees to the sale you get the answers with the notification.") }}</span>
+      <span class="sub">{{ _("Nothing is paid automatically. The agent offers your wish price and goes up to your maximum at most. With PayLivery you confirm the payment on your phone.") }}</span>
+      <button class="mainbtn tg-hide" data-start>{{ _("Start purchase") }}</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+</main>
+{% endblock %}

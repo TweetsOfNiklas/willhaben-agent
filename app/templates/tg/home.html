@@ -19,13 +19,27 @@
       <span class="body"><span class="ttl">{{ _("My ads") }}</span><span class="val">{{ _("{n} online", n=myads) }}{{ m.chev() }}</span></span></a>
     <a class="cell" href="/tg/purchases"><span class="ico" style="background: #D9548F">{{ ui.icon('cart', 18, 2) }}</span>
       <span class="body"><span class="ttl">{{ _("Purchases") }}</span><span class="val">{% if buys %}{{ _("{n} running", n=buys) }}{% endif %}{{ m.chev() }}</span></span></a>
+    <a class="cell" href="/tg/inbox" data-cell="inbox"><span class="ico" style="background: #E5484D">{{ ui.icon('bell', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Inbox") }}</span><span class="val">{% if counts.inbox %}<span class="badge">{{ counts.inbox }}</span>{% endif %}{{ m.chev() }}</span></span></a>
+  </div>
+
+  <div class="sh">{{ _("Tools") }}</div>
+  <div class="sec">
+    <a class="cell" href="/tg/search" data-cell="search"><span class="ico" style="background: #5856D6">{{ ui.icon('search', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Price check & search") }}</span>{{ m.chev() }}</span></a>
+    <a class="cell" href="/tg/new-ad" data-cell="new-ad"><span class="ico" style="background: #34C759">{{ ui.icon('plus', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("New ad") }}</span>{{ m.chev() }}</span></a>
+    <a class="cell" href="/tg/agents" data-cell="agents"><span class="ico" style="background: #FF9500">{{ ui.icon('detective', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Search agents") }}</span><span class="val">{{ agents|length }}{{ m.chev() }}</span></span></a>
+    <a class="cell" href="/tg/jobs" data-cell="jobs"><span class="ico" style="background: #8E8E93">{{ ui.icon('clock', 18, 2) }}</span>
+      <span class="body"><span class="ttl">{{ _("Background jobs") }}</span>{{ m.chev() }}</span></a>
   </div>
 
   {% if agents %}
   <div class="sh">{{ _("Search agents") }}</div>
   <div class="sec">
     {% for a in agents[:8] %}
-    <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0">
+    <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0"><input type="hidden" name="back" value="/tg">
       <span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="ttl trunc">{{ a.name }}</span><span class="sub">{{ _("on") if a.enabled else _("paused") }}</span></span>
         {{ m.switch(a.enabled, a.name) }}</span>
     </form>
@@ -36,6 +50,7 @@
 
   <div class="sh">{{ _("More") }}</div>
   <div class="sec">
+    <a class="cell" href="/tg/more" data-cell="more"><span class="body"><span class="ttl">{{ _("Settings, statistics and more") }}</span>{{ m.chev() }}</span></a>
     <a class="cell" href="/" target="_blank" hx-boost="false"><span class="body"><span class="ttl">{{ _("Open in the browser") }}</span><span class="val" style="color: var(--link)">{{ ui.icon('external', 16, 2) }}</span></span></a>
   </div>
   <div class="sub" style="padding: 8px 16px 0">{{ _("Version {v}", v=app_version) }}</div>

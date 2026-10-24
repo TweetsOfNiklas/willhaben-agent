@@ -31,7 +31,10 @@ def install(app: FastAPI) -> None:
     from app import tg_bridge
     from app.main import templates
     from app.services import purchase
+    from app import tg_agents, tg_deals, tg_more, tg_new_ad, tg_purchases
     app.include_router(router)
+    for area in (tg_new_ad, tg_deals, tg_purchases, tg_agents, tg_more):    # each area of the Mini App in its own module
+        app.include_router(area.router)
     tg_bridge.install(app, templates)   # the Mini App's forms post to the dashboard's endpoints (app/tg_bridge.py)
     templates.env.globals.update(myad_status=label_of, purchase_status=purchase.status_label)
 
@@ -85,22 +88,31 @@ TABS = {"new": ("new",), "saved": ("saved",), "filtered": ("filtered", "pending"
 
 
 @router.get("/tg/hits", response_class=HTMLResponse)
-async def tg_hits(request: Request, state: str = "new"):
-    """The hits page's tabs (New, Saved, Held back, Seen) and its cards' content, newest first."""
+async def tg_hits(request: Request, state: str = "new", agent_id: str = "", platform: str = ""):
+    """The hits page's tabs (New, Saved, Held back, Seen) and its cards' content, as the dashboard's view shows them
+    (main.HitView: the agent and site filters, far pickup-only ads left out); the dashboard's parameter names, so its
+    bulk actions come back to the same view."""
+    from app.main import HitView
     state = state if state in TABS else "new"
+    view = HitView.of(",".join(TABS[state]), agent_id, platform)
     with session() as db:
-        hits = list(db.exec(select(Hit).where(col(Hit.state).in_(TABS[state]))
-                            .order_by(col(Hit.first_seen_at).desc()).limit(LIST_LIMIT)))
-        agents = {a.id: a for a in db.exec(select(SearchAgent))}
-        counts = {k: len(list(db.exec(select(Hit.id).where(col(Hit.state).in_(v))))) for k, v in TABS.items()}
-    return _render(request, "hits.html", hits=hits, state=state, agents=agents, counts=counts)
+        hits = view.hits(db, limit=LIST_LIMIT)
+        agents = {a.id: a for a in db.exec(select(SearchAgent).order_by(col(SearchAgent.name)))}
+        counts = {k: len(list(db.exec(HitView.of(",".join(v), agent_id, platform).where(select(Hit.id)))))
+                  for k, v in TABS.items()}
+        sites = sorted({p for p in db.exec(select(Hit.platform).distinct()) if p})
+    return _render(request, "hits.html", hits=hits, state=state, agents=agents, counts=counts, sites=sites,
+                   agent_id=view.agent_id, platform=view.platform)
 
 
 @router.post("/tg/hits/{hit_id}/quick")
-async def tg_hit_quick(hit_id: int, state: str = Form(...), tab: str = Form("new")):
-    """A card's Save / Seen / Ignore in the list: back to the same tab."""
+async def tg_hit_quick(request: Request, hit_id: int, state: str = Form(...), tab: str = Form("new")):
+    """A card's Save / Seen / Ignore in the list: back to the same tab (and filters)."""
+    from urllib.parse import urlencode
     await tg_hit_state(hit_id, state)
-    return _back(f"/tg/hits?state={tab if tab in TABS else 'new'}")
+    form = await request.form()
+    keep = {k: str(form.get(k)) for k in ("agent_id", "platform") if form.get(k)}
+    return _back(f"/tg/hits?{urlencode({'state': tab if tab in TABS else 'new', **keep})}")
 
 
 @router.post("/tg/hits/{hit_id}/sync")
@@ -393,40 +405,6 @@ async def tg_myad_edit(request: Request, ad_id: str):
 async def tg_sold(request: Request, ad_id: str, kind: str = "sold", buyer: str | None = None):
     from app import main
     return await _page(request, "sold.html", main.sold_page, ad_id, kind=kind, buyer=buyer or None, msg=None)
-
-
-@router.get("/tg/purchases", response_class=HTMLResponse)
-async def tg_purchases(request: Request):
-    with session() as db:
-        buys = list(db.exec(select(Purchase).order_by(col(Purchase.id).desc()).limit(LIST_LIMIT)))
-    return _render(request, "purchases.html", buys=buys)
-
-
-@router.get("/tg/agents", response_class=HTMLResponse)
-async def tg_agents(request: Request):
-    with session() as db:
-        agents = list(db.exec(select(SearchAgent).order_by(col(SearchAgent.name))))
-        new = {}
-        for agent_id in db.exec(select(Hit.agent_id).where(Hit.state == "new")):
-            new[agent_id] = new.get(agent_id, 0) + 1
-    return _render(request, "agents.html", agents=agents, new=new)
-
-
-@router.post("/tg/agents/{agent_id}/toggle")
-async def tg_agent_toggle(agent_id: int):
-    with session() as db:
-        a = db.get(SearchAgent, agent_id)
-        if a is None:
-            raise HTTPException(404)
-        a.enabled = not a.enabled
-        db.add(a)
-        db.commit()
-    from app import scheduler
-    try:
-        scheduler.reschedule_agents()
-    except Exception as e:  # noqa: BLE001 - the switch is stored; the next start schedules it
-        log.info("reschedule after toggle failed: %s", e)
-    return _back("/tg/agents")
 
 
 def tg_link(url: str) -> str:

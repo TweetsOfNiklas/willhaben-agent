@@ -1,0 +1,116 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Search #{id}", id=ps.id) }}{% endblock %}
+{# one Claude product search (_product_search.html, deals_web._search_ctx): its progress while it runs (the section
+   asks again every few seconds), Claude's questions, the offers, more offers, a search agent from it #}
+{% block page %}
+{% set live = ps_is_running(ps) %}{% set plan = ps.plan or {} %}{% set st = ps.settings or {} %}
+<main data-back="/tg/search">
+{{ m.head(_("Search #{id}", id=ps.id), '/tg/search') }}
+<div class="wrap" data-ps="{{ ps.id }}"{% if live %} hx-get="/tg/search/{{ ps.id }}" hx-trigger="every 2s" hx-select="[data-ps]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  <div class="sec" style="margin-top: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px">
+    <span style="font-size: 15px; font-style: italic">„{{ ps.description }}“</span>
+    <span class="sub">{{ (ps.started_at or ps.created_at)|ago }} · {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}{% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}</span>
+    {% if live and ps.status != 'more' %}{% set pr = ps.progress or {} %}
+    <span style="color: var(--link); font-size: 14px" data-ps-progress>
+      {%- if ps.status == 'planning' %}{{ _("Claude") }}: {{ _("plans the searches") }}
+      {%- elif ps.status == 'searching' %}{{ _("Loading ads") }}: {{ _("{done} of {total} searches", done=pr.done or 0, total=pr.total or 0) }}
+      {%- elif ps.status == 'ranking' %}{{ _("Claude") }}: {{ _("ranks {n} offers", n=ps.candidates or 0) }}
+      {%- else %}{{ _("Claude") }}: {{ _("checks the photos of the best ones") }}{% endif %} …</span>
+    {% for site, at in ps_waiting_for(ps.id).items() %}<span class="sub">{{ _("{site}: hourly request limit reached – the search goes on by itself at {time}.", site=site, time=at.strftime("%H:%M")) }}</span>{% endfor %}
+    <span class="sub">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</span>
+    {% elif ps.status == 'error' %}<span style="font-size: 14px; color: var(--destructive)">{{ ps.error or _("The search failed.") }}</span>
+    {% elif ps.status in ('planning', 'searching', 'ranking', 'photos') %}<span style="font-size: 14px; color: #B07800">{{ _("This search was interrupted.") }}</span>{% endif %}
+    {% if not live and ps.status != 'asking' %}<div class="btnrow">
+      <a class="chip" style="display: inline-flex; align-items: center" href="/tg/search?mode=ai&from={{ ps.id }}">{{ ui.icon('edit', 13, 2) }} {{ _("New search") }}</a>
+      <form method="post" action="/deals/search/{{ ps.id }}/rerun" style="margin: 0"><button class="chip">{{ ui.icon('refresh', 13, 2) }} {{ _("Run again") }}</button></form></div>{% endif %}
+  </div>
+
+  {% if ps.status == 'asking' %}{% set qs = plan.questions or [] %}
+  <div class="sh">{% if qs|length == 1 %}{{ _("Claude has one short question") }}{% else %}{{ _("Claude has {n} short questions", n=qs|length) }}{% endif %}</div>
+  <form method="post" action="/deals/search/{{ ps.id }}/answers" class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 12px" data-ps-ask>
+    {% for q in qs %}
+    <fieldset style="margin: 0; border: 0; padding: 0; display: flex; flex-direction: column; gap: 6px"><legend style="font-weight: 600; font-size: 14px; margin-bottom: 4px">{{ q.text }}</legend>
+      <span class="btnrow">{% for o in q.options %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="radio" name="a_{{ q.id }}" value="{{ o }}">{{ o }}</label>{% endfor %}</span>
+      <input class="field" name="o_{{ q.id }}" maxlength="200" placeholder="{{ _('other answer') }}" aria-label="{{ q.text }} – {{ _('other answer') }}"></fieldset>
+    {% endfor %}
+    <div class="btnrow"><button class="chip primary">{{ _("Answer and rank") }}</button><button class="chip" name="skip" value="1">{{ _("Skip questions") }}</button></div>
+    <span class="sub">{{ _("The {k} searches are already done; answering costs no extra Claude call.", k=ps.requests or 0) }}</span>
+  </form>
+  {% endif %}
+
+  {% set pairs = ps_answer_pairs(plan, ps.answers) %}
+  {% if plan.summary or pairs %}
+  <div class="sh">{{ _("Claude's understanding") }}</div>
+  <div class="sec" style="padding: 10px 14px; font-size: 14px; display: flex; flex-direction: column; gap: 4px">
+    {% if plan.summary %}<span>{{ plan.summary }}</span>{% endif %}
+    {% if plan.max_price %}<span class="sub">{{ _("Budget: up to {price}", price=plan.max_price|eur) }}</span>{% endif %}
+    {% for part in [plan.must_have, plan.nice_to_have, plan.exclude] if part %}<span class="sub">{{ part|join(" · ") }}</span>{% endfor %}
+    {% if pairs %}<span class="sub"><strong>{{ _("Your answers") }}:</strong> {% for q, a in pairs %}{{ q }} <strong>{{ a }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if ps.status in ('done', 'more') %}
+  {% if ps.warning %}<p style="font-size: 13px; color: #B07800; margin: 10px 4px">{{ ps.warning }}</p>{% endif %}
+  {% if ps.note %}<p style="font-size: 14px; margin: 10px 4px">{{ ps.note }}</p>{% endif %}
+  <div class="sh">{{ _("Best offers") }} · {{ (ps.results or [])|length }}</div>
+  {% if ps.results %}{% set home = home_point() %}
+  <div style="display: flex; flex-direction: column; gap: 10px" data-ps-results>
+    {% for r in ps.results %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set rp = r.get('platform') or 'willhaben' %}
+    <div class="sec" style="padding: 10px 12px; display: flex; gap: 12px" data-offer="{{ ad_ref(rp, r.ad_id) }}">
+      <a href="{{ r.url }}" target="_blank" hx-boost="false" style="flex-shrink: 0">{% if r.image_url %}<img class="thumb" src="{{ r.image_url }}" alt="" loading="lazy" width="80" height="80" style="width: 80px; height: 80px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 80px; height: 80px"></span>{% endif %}</a>
+      <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+        <a href="{{ r.url }}" target="_blank" hx-boost="false" style="font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.25">{{ r.title }}</a>
+        <span style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center"><strong style="font-size: 16px">{{ r.price_display or (r.price|eur) }}</strong>
+          {% if r.fit is not none %}<span class="pill {{ 'lvl-bargain' if r.fit >= 75 else 'lvl-fair' if r.fit >= 50 else '' }}">{{ _("Fit {n}", n=r.fit) }}</span>{% endif %}
+          {% if p.pos is not none %}<span class="pill lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}
+          {% if r.photo %}<span class="pill">{{ {"match": _("photo fits"), "unclear": _("photo unclear"), "mismatch": _("photo shows something else")}[r.photo] }}</span>{% endif %}
+          {% if (st.platforms or [])|length > 1 %}{{ m.site(rp) }}{% endif %}</span>
+        {% if r.reason %}<span class="sub">{{ r.reason }}</span>{% endif %}{% if r.photo_note %}<span class="sub">{{ r.photo_note }}</span>{% endif %}
+        {% set where = [r.location, _("{km} km away", km=('%.1f'|format(km)).replace('.', ',') if km < 10 else km|round|int) if km is not none else none, _("dealer") if r.is_private == false else none]|select|list %}
+        {% if where %}<span class="sub">{{ where|join(' · ') }}</span>{% endif %}
+        {% set scam_w = scam_warnings(r.scam_flags) %}{% if scam_w %}<span style="font-size: 12.5px; color: var(--destructive)">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
+        <span class="btnrow">
+          <a class="chip" style="display: inline-flex; align-items: center" href="/tg/check/{{ rp }}/{{ r.ad_id }}?q={{ (r.query or '')|urlencode }}">{{ _("Check price") }}</a>
+          {% if rp == 'willhaben' and purchase_enabled() %}<a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/purchases/new/{{ r.ad_id }}?search={{ ps.id }}&amp;q={{ (r.query or '')|urlencode }}" data-buy>{{ _("Buy") }}</a>{% endif %}
+        </span>
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
+  {% set left = (ps.pool or [])|length %}{% set more_warning = (ps.progress or {}).more_warning %}
+  {% if more_warning and ps.status == 'done' %}<p style="font-size: 13px; color: #B07800; margin: 10px 4px">{{ more_warning }}</p>{% endif %}
+  {% if ps.status == 'more' %}<p class="sub" style="margin: 10px 4px; color: var(--link)">{{ _("Claude") }}: {{ _("ranks {n} offers", n=[left, 40]|min) }} …</p>
+  {% elif left %}<form method="post" action="/deals/search/{{ ps.id }}/more" style="margin: 12px 0 0" data-ps-more><button class="chip" style="width: 100%">{{ _("Load more offers") }}</button>
+    <p class="sub" style="margin: 6px 4px 0">{{ _("{n} more offers found; Claude ranks the next {k} and adds the best below.", n=left, k=[left, 40]|min) }}</p></form>
+  {% elif ps.results %}<p class="sub" style="margin: 10px 4px">{{ _("No more offers in this search.") }}</p>{% endif %}
+  {% endif %}
+
+  {% if plan.queries %}{% set terms = ps_by_term(ps.queries or ps_planned(plan, ps.settings)) %}
+  <details style="margin-top: 14px"><summary class="sub" style="color: var(--link)">{{ _("Generated searches ({n})", n=plan.queries|length) }}</summary>
+    <div class="sec" style="margin-top: 8px">
+      {% for term in terms %}<div class="cell"><span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span>{{ term.keyword }}</span>{% if term.why %}<span class="sub">{{ term.why }}</span>{% endif %}</span>
+        <span class="val">{% if term.found %}{{ _("{n} ads", n=term.found) }}{% elif term.found is number %}{{ _("nothing found") }}{% elif term.error %}{{ _("error") }}{% endif %}</span></span></div>{% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if ps.status in ('done', 'more') and plan.queries %}
+    {% for a in ps_agents %}<a href="/tg/agents" class="sub" style="display: block; margin: 10px 4px 0; color: var(--link)">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% endfor %}
+    {% if ps_agent_sites and not live %}
+    <div class="sh">{{ _("Create a search agent from this search") }}</div>
+    <form method="post" action="/deals/search/{{ ps.id }}/agent" class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-ps-agent>
+      <label class="sub">{{ _("Name") }}<input class="field" name="name" value="{{ ps_agent_name }}" maxlength="120"></label>
+      <label class="sub">{{ _("Check every (minutes)") }}<input class="field" type="number" name="interval_min" value="{{ ps_agent_interval_min }}" min="1"></label>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px"><span>{{ _("Let Claude screen new hits") }}</span><input type="checkbox" name="screen_on" checked style="width: 22px; height: 22px"></label>
+      {% if ps_agent_sites|length > 1 %}<span style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px">{% for pc in ps_agent_sites %}<label><input type="checkbox" name="sites" value="{{ pc.id }}" checked> {{ pc.name }}</label>{% endfor %}</span>
+      {% else %}{% for pc in ps_agent_sites %}<input type="hidden" name="sites" value="{{ pc.id }}">{% endfor %}{% endif %}
+      <button class="chip primary">{{ _("Create search agent") }}</button>
+      <span class="sub">{{ _("The agent keeps running these {n} searches; new ads are filtered by budget and exclusions in code and, if enabled, checked by Claude before they notify you. Planning costs no further Claude call.", n=ps_agent_n) }}</span>
+    </form>
+    {% endif %}
+  {% endif %}
+</div>
+</main>
+{% endblock %}

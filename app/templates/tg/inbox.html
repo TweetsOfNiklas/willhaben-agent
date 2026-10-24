@@ -1,0 +1,30 @@
+{% extends "tg/_base.html" %}
+{% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
+{% block title %}{{ _("Inbox") }}{% endblock %}
+{% block page %}
+{% set kinds = {'hit': ('target', '#F2994A'), 'price_drop': ('target', '#27AE60'), 'saved': ('star', '#27AE60'), 'message': ('chat', '#2F80ED'),
+                'auto_reply_pending': ('bot', '#27AE60'), 'auto_reply': ('bot', '#27AE60'), 'pay': ('cart', '#E2A400'),
+                'ad_expiring': ('tag', '#E2A400'), 'ad_expired': ('tag', '#E5484D'), 'health': ('bell', '#E5484D')} %}
+<main data-back="/tg">
+{{ m.head(_("Inbox")) }}
+<div class="wrap" hx-get="/tg/inbox" hx-trigger="every 30s" hx-select=".wrap" hx-swap="outerHTML" hx-disinherit="*">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin: 12px 4px 0">
+    <span class="sub">{{ _("{n} unread", n=unread) if unread else _("all read") }}</span>
+    {% if items %}<form method="post" action="/inbox/read-all" style="margin: 0"><button class="chip">{{ _("Clear") }}</button></form>{% endif %}
+  </div>
+  {% if items %}
+  <div class="sec" style="margin-top: 8px">
+    {% for n in items %}{% set k = kinds.get(n.kind, ('bell', '#8E8E93')) %}
+    <a class="cell" href="{{ n.href }}"{% if n.external %} target="_blank" hx-boost="false"{% endif %} style="align-items: flex-start; padding-top: 8px" data-inbox="{{ n.kind }}">
+      <span class="ico" style="background: {{ k[1] }}">{{ ui.icon(k[0], 16, 2) }}</span>
+      <span class="body" style="flex-direction: column; align-items: stretch; gap: 2px; padding: 0 0 8px">
+        <span style="display: flex; justify-content: space-between; gap: 8px"><span style="font-weight: {{ '600' if n.unread else '500' }}">{{ n.title }}</span><span class="sub" style="flex-shrink: 0">{{ n.time }}</span></span>
+        <span class="sub" style="white-space: pre-line">{{ n.text }}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="empty">{{ _("Nothing new. Hits, drafts, expiring ads and connection problems show up here.") }}</p>{% endif %}
+</div>
+</main>
+{% endblock %}

@@ -58,8 +58,13 @@ def tg_path(url: str) -> str | None:
         return f"/tg/chats/{m.group(1)}"
     if path == "/chats":
         return "/tg/chats"
-    if path == "/hits":
-        return f"/tg/ad/{one['view']}" if one.get("view") else "/tg/hits"
+    if path == "/hits":                     # the view stays (tab, agent, site)
+        if one.get("view"):
+            return f"/tg/ad/{one['view']}"
+        keep = {k: one[k] for k in ("state", "agent_id", "platform") if one.get(k)}
+        if keep.get("state") not in (None, "new", "saved", "filtered", "seen"):
+            keep.pop("state")
+        return "/tg/hits" + (f"?{urlencode(keep)}" if keep else "")
     if m := re.fullmatch(r"/myads/([^/]+)/edit", path):
         return f"/tg/myads/{m.group(1)}"
     if path == "/myads":
@@ -103,13 +108,20 @@ def web_url(tg: str) -> str:
     return tg
 
 
-def target(location: str, back: str, msg: str = "") -> str:
-    """Where the Mini App goes after an action that answered with `location` (or nothing): its /tg page or `back`,
-    with the message."""
+def target(location: str, back: str, msg: str = "", path: str = "") -> str:
+    """Where the Mini App goes after an action (POSTed to `path`) that answered with `location` (or nothing): its /tg
+    page or `back`, with the message. An agent's page stays open after its own actions (the dashboard goes back to
+    its list), except after deleting it."""
     parts = urlsplit(location) if location else None
-    if parts and not msg:
-        msg = (parse_qs(parts.query).get("msg") or [""])[0]
+    if parts and not msg:       # the dashboard's message; agents report a refusal as ?error=
+        q = parse_qs(parts.query)
+        msg = (q.get("msg") or q.get("error") or [""])[0]
+        if not msg and q.get("pn"):         # a purchase order's notice, kept on the server under a token
+            from app.purchase_routes import _notice_text
+            msg = _notice_text(q["pn"][0]) or ""
     page = (tg_path(location) if location else None) or back
+    if page == "/tg/agents" and re.fullmatch(r"/tg/agents/\d+", back.split("?")[0]) and not path.endswith("/delete"):
+        page = back
     if not msg:
         return page
     base, _, anchor = page.partition("#")
@@ -168,7 +180,7 @@ class TgBridge:
         elif status >= 400:
             to = target("", back, _error_text(state["body"], status))
         else:
-            to = target(location if 300 <= status < 400 else "", back)
+            to = target(location if 300 <= status < 400 else "", back, path=scope["path"])
         await send({"type": "http.response.start", "status": 303,
                     "headers": [(b"location", to.encode("latin-1", "replace")), (b"content-length", b"0")]})
         await send({"type": "http.response.body", "body": b""})

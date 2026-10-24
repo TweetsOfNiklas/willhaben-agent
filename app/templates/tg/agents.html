@@ -1,18 +1,61 @@
 {% extends "tg/_base.html" %}
 {% import "_ui.html" as ui %}{% import "tg/_m.html" as m %}
 {% block title %}{{ _("Search agents") }}{% endblock %}
+{# the dashboard's agents page (main.agents_page): each agent with its switch, new hits, last and next check, "check
+   now"; several at once (/agents/bulk); a new one. While a check runs the list refreshes itself. #}
 {% block page %}
 <main data-back="/tg">
 {{ m.head(_("Search agents")) }}
-<div class="wrap">
-  <div class="sec" style="margin-top: 12px">
-    {% for a in agents %}
-    <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0">
-      <span class="body"><span style="min-width: 0; display: flex; flex-direction: column"><span class="ttl trunc">{{ a.name }}</span><span class="sub">{{ _("on") if a.enabled else _("paused") }}{% if new.get(a.id) %} · {{ _("{n} new", n=new[a.id]) }}{% endif %}</span></span>
-        {{ m.switch(a.enabled, a.name) }}</span>
-    </form>
-    {% else %}<p class="empty">{{ _("No search agents yet.") }}</p>{% endfor %}
+<div class="wrap" id="tg-agents"{% if checking %} hx-get="/tg/agents" hx-trigger="every 4s" hx-select="#tg-agents" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+  {% if error %}<p style="font-size: 13px; color: var(--destructive); margin: 12px 4px 0" data-error>{{ error }}</p>{% endif %}
+  {% if quiet and quiet.active and agents %}<p style="font-size: 13px; color: #B07800; margin: 12px 4px 0">{{ _("Quiet hours until {time}:", time=quiet.end.strftime('%H:%M')) }}
+    {{ _("search agents are paused.") if quiet_cfg.mode == 'pause' else _("search agents only check every {n} min.", n=quiet_cfg.interval_min) }}</p>{% endif %}
+  <div class="btnrow" style="margin-top: 12px">
+    <a class="chip primary" style="display: inline-flex; align-items: center" href="/tg/agents/new" data-new>{{ ui.icon('plus', 13, 2) }} {{ _("New search agent") }}</a>
   </div>
+  {% if agents %}
+  <div class="sec" style="margin-top: 12px">
+    {% for a in agents %}{% set busy = ('agent:' ~ a.id) in checking %}
+    <div class="cell" style="align-items: flex-start; padding-top: 8px" data-agent="{{ a.id }}">
+      <span class="body" style="padding: 0 0 8px; align-items: flex-start">
+        <a href="/tg/agents/{{ a.id }}" style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; color: var(--text)">
+          <span style="display: flex; align-items: center; gap: 6px; min-width: 0"><span class="ttl trunc" style="font-weight: 500">{{ a.name }}</span>
+            {% if platforms_multi() %}{% for pid in agent_sites(a) %}{{ m.site(pid) }}{% endfor %}{% endif %}
+            {% if counts.get(a.id) %}<span class="badge">{{ counts.get(a.id) }}</span>{% endif %}</span>
+          <span class="sub">{{ _("every {n} min", n=a.interval_s // 60) }} · {{ _("last run {ago}", ago=a.last_run_at|ago) }}{% if a.enabled and next_run(a.id) %} · {{ _("next check {time}", time=next_run(a.id)|local('%H:%M')) }}{% endif %}</span>
+          {% if a.screen %}<span class="sub" style="color: var(--link)">{{ _("Claude screens hits: {rule}", rule=thresholds.get(a.screen_min or 'match', '')) }}</span>{% endif %}
+          {% if a.last_error %}<span style="font-size: 13px; color: var(--destructive)">{{ a.last_error }}</span>{% endif %}
+          {% if busy %}<span class="sub" style="color: var(--link)" data-checking>{{ _("Checking…") }}</span>{% endif %}
+        </a>
+        <span style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px">
+          <form method="post" action="/tg/agents/{{ a.id }}/toggle" style="margin: 0"><input type="hidden" name="back" value="/tg/agents">{{ m.switch(a.enabled, a.name) }}</form>
+          {% if not busy %}<form method="post" action="/agents/{{ a.id }}/run" style="margin: 0"><button class="chip" data-run>{{ _("Check now") }}</button></form>{% endif %}
+        </span>
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# several at once: each field left at "unchanged" stays as it is #}
+  <details style="margin-top: 16px" data-bulk>
+    <summary class="sub" style="cursor: pointer; padding: 4px">{{ _("Change several at once") }}</summary>
+    {% set keep = _("unchanged") %}
+    <form method="post" action="/agents/bulk" class="sec" style="margin-top: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px">
+      {% for a in agents %}<label style="display: flex; gap: 8px; align-items: center; font-size: 14px"><input type="checkbox" name="ids" value="{{ a.id }}">{{ a.name }}</label>{% endfor %}
+      <span style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px">
+        {% for name, label, on, off in [('enabled', _("Running"), _("Resume"), _("Pause")), ('notify', _("Push"), _("on"), _("off")), ('drops', _("Report price drops"), _("on"), _("off")), ('screen', _("Claude screening"), _("on"), _("off"))] %}
+        <label class="sub">{{ label }}<select class="field" name="{{ name }}"><option value="">{{ keep }}</option><option value="1">{{ on }}</option><option value="0">{{ off }}</option></select></label>
+        {% endfor %}
+        <label class="sub">{{ _("Check every (min)") }}<input class="field" name="interval_min" type="number" min="1" step="1" placeholder="{{ keep }}"></label>
+        <label class="sub">{{ _("Pickup only nearby") }}<select class="field" name="km_mode"><option value="">{{ keep }}</option><option value="set">{{ _("within …") }}</option><option value="off">{{ _("any distance") }}</option></select></label>
+        <label class="sub">{{ _("km from home") }}<input class="field" name="max_km" type="number" min="1" max="2000" step="1" placeholder="30"></label>
+      </span>
+      <button class="chip primary">{{ _("Apply to the selected agents") }}</button>
+    </form>
+  </details>
+  {% else %}
+  <p class="empty">{{ _("No search agents yet") }}<br><span class="sub">{{ _("Type what you are looking for or paste a search link – the agent reports new ads and price drops faster than the sites' own e-mail alerts.") }}</span></p>
+  {% endif %}
 </div>
 </main>
 {% endblock %}
