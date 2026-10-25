@@ -252,6 +252,8 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
               "noplan": t("This search has no planned willhaben searches yet.")}.get(msg or "")
     return {"ps": shown, "ps_running": run, "ps_recent": product_search.recent(), "ps_msg": notice, "ps_oob": oob,
             "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
+            "ps_per_site": product_search.PER_SITE, "ps_batch": product_search.MAX_CANDIDATES,
+            "ps_max_ranked": product_search.MAX_RANKED,
             "ps_is_running": product_search.is_running, "ps_waiting_for": product_search.waiting_for,
             "ps_answer_pairs": product_search.answer_pairs,
             "ps_planned": product_search.planned, "ps_by_term": product_search.by_term, **_agent_ctx(shown)}
@@ -289,13 +291,16 @@ async def search_alias():
 async def product_search_start(description: str = Form(""), depth: str = Form("normal"), unusual: str = Form(""),
                                categories: str = Form(""), sort: str = Form("relevance"), photos: str = Form(""),
                                ask: str = Form(""), sites: list[str] = Form([]), cond_new: str = Form(""),
-                               cond_used: str = Form(""), cond_shown: str = Form("")):
+                               cond_used: str = Form(""), cond_shown: str = Form(""), per_site: str = Form(""),
+                               over_budget: str = Form("")):
     if not description.strip():
         return RedirectResponse("/deals?msg=empty", status_code=303)
     # an older form without the boxes searches both
     condition = product_search.condition_wanted(bool(cond_new), bool(cond_used)) if cond_shown else "any"
     settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask),
-                                            sites=sites, condition=condition)
+                                            sites=sites, condition=condition,
+                                            per_site=int(per_site) if per_site.isdigit() else None,
+                                            over_budget=product_search.OVER_BUDGET_CHOICES.get(over_budget))
     try:
         sid = product_search.start(description, settings)
     except product_search.Busy:

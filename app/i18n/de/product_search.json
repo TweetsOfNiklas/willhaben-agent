@@ -89,5 +89,19 @@
  "{n} no longer available": "{n} nicht mehr verfügbar",
  "Loading the descriptions of the shortlisted Facebook offers: {done} of {total} …": "Lade die Beschreibungen der engeren Facebook-Auswahl: {done} von {total} …",
  "(incl. {n} Facebook price bands)": "(inkl. {n} Facebook-Preisbereiche)",
- "{site}: hourly request limit reached – the search goes on by itself at {time}.": "{site}: stündliches Anfragelimit erreicht – die Suche geht um {time} von selbst weiter."
+ "{site}: hourly request limit reached – the search goes on by itself at {time}.": "{site}: stündliches Anfragelimit erreicht – die Suche geht um {time} von selbst weiter.",
+ "Above the budget": "Über dem Budget",
+ "Ads per site": "Anzeigen je Seite",
+ "Ads priced above this multiple of your budget are left out before Claude sees them": "Anzeigen über diesem Vielfachen deines Budgets werden weggelassen, bevor Claude sie sieht",
+ "Claude could not rank the offers; showing the cheapest ones instead.": "Claude konnte die Angebote nicht bewerten; stattdessen die günstigsten.",
+ "Claude could not rank {n} offers ({error}).": "Claude konnte {n} Angebote nicht bewerten ({error}).",
+ "Claude: the plan and one call per {n} offers ranked.": "Claude: der Plan und ein Aufruf je {n} bewertete Angebote.",
+ "Claude: the plan, one call per {n} offers ranked, the photo check.": "Claude: der Plan, ein Aufruf je {n} bewertete Angebote, die Fotoprüfung.",
+ "Each search on each site, page after page up to this number; every page is one request of that site": "Jede Suche auf jeder Seite, Seite um Seite bis zu dieser Zahl; jede Ergebnisseite ist eine Anfrage dieser Seite",
+ "batch {i} of {n}": "Paket {i} von {n}",
+ "searches per site, each one request per result page ({used} of {budget} willhaben requests used in the last hour)": "Suchen je Seite, jede eine Anfrage pro Ergebnisseite ({used} von {budget} willhaben-Anfragen in der letzten Stunde verbraucht)",
+ "up to 1.5 ×": "bis 1,5 ×",
+ "up to 2 ×": "bis 2 ×",
+ "{n} more offers Claude found not fitting": "{n} weitere Angebote, die laut Claude nicht passen",
+ "no limit": "keine Grenze"
 }

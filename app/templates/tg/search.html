@@ -31,6 +31,10 @@
       <label><input type="checkbox" name="cond_used" value="1"{% if pc_cond in ('any', 'used') %} checked{% endif %}> {{ _("Used") }}</label></span>
     {% if ps_sites|length > 1 %}<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 15px"><span class="sub">{{ _("Sites") }}</span>{% for pc in ps_sites %}<label><input type="checkbox" name="sites" value="{{ pc.id }}"{% if not pf or pc.id in (pst.platforms or []) %} checked{% endif %}> {{ pc.name }}</label>{% endfor %}</span>{% endif %}
     <label class="sub">{{ _("Order") }}<select class="field" name="sort"><option value="relevance">{{ _("Relevance") }}</option><option value="newest"{% if pst.sort == 'newest' %} selected{% endif %}>{{ _("Newest first") }}</option></select></label>
+    <label class="sub">{{ _("Ads per site") }}<select class="field" name="per_site" data-ps-per-site>{% for n in ps_per_site %}<option value="{{ n }}"{% if (pst.per_site or 100) == n %} selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+    {% set ob = {1.5: '1.5', 2.0: '2', 0.0: 'none'}.get(pst.over_budget if pst.over_budget is not none else 1.5, '1.5') %}
+    <label class="sub">{{ _("Above the budget") }}<select class="field" name="over_budget" data-ps-over-budget>{% for v, label in [('1.5', _('up to 1.5 ×')), ('2', _('up to 2 ×')), ('none', _('no limit'))] %}<option value="{{ v }}"{% if ob == v %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <span class="sub">{{ _("Each search on each site, page after page up to this number; every page is one request of that site") }}</span>
     {% if ps_sites_off %}<span class="sub">{{ _("{sites} can also be searched once you switch them on in the settings.", sites=ps_sites_off|map(attribute='name')|join(', ')) }}</span>{% endif %}
     <button class="mainbtn" data-ps-submit{% if ps_running %} disabled{% endif %}>{{ _("Search") }}</button>
     {% if ps_running %}<a href="/tg/search/{{ ps_running.id }}" class="sub" style="color: var(--link)">{{ _("A product search is still running – wait for it to finish.") }} ›</a>{% endif %}

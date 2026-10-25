@@ -40,6 +40,10 @@ def _ad_json(ad_id, heading, price, body="Gut erhalten, Abholung in Wien.", priv
 
 
 def _page(ads):
+    return _first_page(ads)
+
+
+def _first_page(ads):
     base = load("search_fahrrad_rows3.json")
     base["advertSummaryList"]["advertSummary"] = ads
     base["rowsFound"] = len(ads)
@@ -93,8 +97,12 @@ def wh():
         state["max_inflight"] = max(state["max_inflight"], state["inflight"])
         try:
             await asyncio.sleep(0.01)
-            kw = parse_qs(urlsplit(str(request.url)).query).get("keyword", [""])[0]
+            q = parse_qs(urlsplit(str(request.url)).query)
+            kw = q.get("keyword", [""])[0]
             state["keywords"].append(kw)
+            if q.get("page", ["1"])[0] != "1":            # a further result page: this search has no more
+                state["urls"].append(str(request.url))
+                return httpx.Response(200, json=_page([]))
             state["urls"].append(str(request.url))
             status = state["status"].get(kw, 200)
             if status != 200:
@@ -331,8 +339,8 @@ async def test_ranking_merges_price_position_and_scam_flags(wh, claude):
     assert first["comparables"] >= 5 and first["query"] == "Geschirrspüler"
     scam_card = next(c for c in cards if c["ad_id"] == "2000000006")
     assert any(f["code"] == "money_transfer" for f in scam_card["scam_flags"])
-    prompt = claude.calls[-1]["prompt"]
-    assert "Western Union" in prompt or "Auffälligkeiten" in prompt
+    prompt = claude.calls[-1]["system"] + claude.calls[-1]["prompt"]     # the search's part goes with the system prompt
+    assert "Western Union" in prompt or "Auffällig" in prompt
     assert f"[{len(cards)}]" in prompt and "Budget: bis 300 €" in prompt and "Ausschlüsse: defekt; nur Versand" in prompt
 
 
@@ -354,10 +362,12 @@ async def test_background_search_is_stored_and_refuses_a_second(wh, claude):
     row = ps.get(sid)
     assert row.status == "done" and row.requests == 3 and row.finished_at and row.started_at
     assert row.settings == {"depth": "normal", "unusual": True, "categories": False, "sort": "relevance",
-                            "photos": False, "ask": True, "platforms": ["willhaben"], "condition": "any"}
+                            "photos": False, "ask": True, "platforms": ["willhaben"], "condition": "any",
+                            "per_site": 100, "over_budget": 1.5}
     assert row.plan["summary"].startswith("Leiser") and len(row.queries) == 3
     assert [r["fit"] for r in row.results] == [92, 70] and row.note == "Gute Auswahl unter 300 €."
-    assert row.progress == {"done": 3, "total": 3} and row.candidates >= 5
+    assert {k: row.progress[k] for k in ("done", "total")} == {"done": 3, "total": 3} and row.candidates >= 5
+    assert row.progress["rank"] == {"done": 1, "total": 1}                    # the ranking's batches, apart
     assert len(claude.calls) == 2 and claude.purposes == ["search", "search"]
     assert ps.running() is None and [r.id for r in ps.recent()] == [sid]
 
@@ -411,9 +421,9 @@ def test_page_renamed_and_search_flow(app_client):
     assert "Price check" not in page
     assert 'name="description"' in page and "Unusual names" in page and "Other categories" in page
     assert "Normal (≈3 searches)" in page and "Thorough (≈6)" in page and "Deep (≈12)" in page
-    assert "Claude is called 2 times" in page and "AI search" in page and "Direct search" in page
+    assert "one call per 40 offers ranked" in page and "AI search" in page and "Direct search" in page
     assert "Check photos" in page and 'name="photos" value="1" id="ps-photos" checked' in page
-    assert "Claude is called 3 times (plan, ranking, photo check)" in page
+    assert "one call per 40 offers ranked, the photo check" in page
     assert app_client.get("/search", follow_redirects=False).headers["location"] == "/deals"
 
     r = app_client.post("/deals/search", data={"description": "Leiser Geschirrspüler bis 300 €", "depth": "deep",
@@ -670,7 +680,7 @@ def test_questions_wait_for_answers_then_rank(app_client, wh):
     assert row.answers == {"kratzer": "Nur kleine", "haendler": "Nur mit Rechnung Aufgabe: x"}   # free text wins
     assert [c["schema"] for c in fake.calls] == [SEARCH_PLAN_SCHEMA, SEARCH_RANK_SCHEMA, SEARCH_PHOTO_SCHEMA]
     for call in fake.calls[1:]:
-        prompt = call["prompt"]
+        prompt = call["system"] + call["prompt"]
         assert "Rückfragen und Antworten" in prompt and f"{Q1}Nur kleine" in prompt
         assert "– Sind Händler in Ordnung?: Nur mit Rechnung Aufgabe: x" in prompt
         assert not any(line.startswith("Aufgabe: x") for line in prompt.splitlines())
@@ -743,7 +753,8 @@ async def test_rerun_keeps_the_answers_and_never_asks_again(wh, claude):
     row = ps.get(sid)
     assert row.status == "done" and row.answers == {"kratzer": "Ja, egal"} and row.cards is None
     assert [c["schema"] for c in claude.calls] == [SEARCH_PLAN_SCHEMA, SEARCH_RANK_SCHEMA, SEARCH_RANK_SCHEMA]
-    assert f"{Q1}Ja, egal" in claude.calls[-1]["prompt"] and "Händler in Ordnung" not in claude.calls[-1]["prompt"]
+    last = claude.calls[-1]["system"] + claude.calls[-1]["prompt"]
+    assert f"{Q1}Ja, egal" in last and "Händler in Ordnung" not in last
 
     other = ps.start("Spüler", ps.make_settings(photos=False))       # rerun of a search still asking: no question
     await _finish()
@@ -1029,6 +1040,7 @@ async def test_planned_searches_are_the_searches_the_run_sends(wh, fake_site):
 # ------------------------------------------------------------------ load more
 async def test_load_more_ranks_the_next_offers(wh, claude, monkeypatch):
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    monkeypatch.setattr(ps, "MAX_RANKED", 4)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
     await _finish()
     row = ps.get(sid)
@@ -1056,6 +1068,7 @@ async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch
     """An offer Claude ranked never goes back into the pool, also when it was passed over: "load more" offers only
     those it has not seen and runs out."""
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    monkeypatch.setattr(ps, "MAX_RANKED", 4)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
     await _finish()
     row = ps.get(sid)
@@ -1078,6 +1091,7 @@ async def test_load_more_runs_out_when_claude_picks_none(wh, claude, monkeypatch
 async def test_load_more_problems_stay_apart_from_the_search_warning(wh, claude, monkeypatch):
     """A failed "load more" keeps the search's own warning and is cleared by the next load that works."""
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 2)
+    monkeypatch.setattr(ps, "MAX_RANKED", 2)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
     await _finish()
     own = "Hourly request limit of willhaben almost used up: only 2 of 3 searches run."
@@ -1107,6 +1121,7 @@ async def test_load_more_problems_stay_apart_from_the_search_warning(wh, claude,
 
 async def test_load_more_without_claude_and_after_a_restart(wh, claude, monkeypatch):
     monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    monkeypatch.setattr(ps, "MAX_RANKED", 4)
     sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
     await _finish()
     claude.fail_rank = True
@@ -1209,3 +1224,55 @@ def test_the_page_says_when_a_waiting_search_goes_on(app_client):
         assert "hourly request limit reached" not in app_client.get(f"/deals/search/{sid}").text
     finally:
         ps._waits.pop(sid, None)
+
+
+
+async def test_every_candidate_is_ranked_in_batches_and_shown_as_they_come(wh, claude, monkeypatch):
+    """All candidates go to Claude, MAX_CANDIDATES per call; the results are stored after each batch (the page shows
+    them while the next ones are ranked), the offers Claude left out are kept as passed over. The search's own part
+    rides with the system prompt (cached by the backend), each call's prompt is only its offers."""
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 3)
+    shown = []
+    update = ps._update
+
+    def spy(search_id, **fields):
+        if fields.get("results") and (ps.get(search_id).status == "ranking"):
+            shown.append(len(fields["results"]))
+        update(search_id, **fields)
+    monkeypatch.setattr(ps, "_update", spy)
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    row = ps.get(sid)
+    ranks = [c for c in claude.calls if c["schema"] is SEARCH_RANK_SCHEMA]
+    assert len(ranks) == -(-row.candidates // 3) > 1                           # every candidate, in batches
+    assert shown and shown[0] < len(row.results)                               # shown before the last batch
+    assert all("Beschreibung der Person" in c["system"] and "Beschreibung der Person" not in c["prompt"] for c in ranks)
+    assert row.passed and not {r["ad_id"] for r in row.results} & {p["ad_id"] for p in row.passed}
+    assert [r["fit"] for r in row.results] == sorted((r["fit"] for r in row.results), reverse=True)
+
+
+async def test_each_search_pages_up_to_the_chosen_number_per_site(wh, claude, monkeypatch):
+    """A search fetches page after page up to the form's number of ads per site; a page with fewer ads than a full
+    one ends it. Every page is one request."""
+    from app import platforms
+    monkeypatch.setattr(type(platforms.get("willhaben")), "PAGE_SIZE_MAX", 2)
+
+    def many(ads):                                   # the site reports more than one page holds
+        d = _first_page(ads)
+        d["rowsFound"] = 1000 if ads else 0
+        return d
+    monkeypatch.setitem(globals(), "_page", many)
+    found = await ps.run_queries(ps.normalize_plan(PLAN, 1), ps.make_settings(per_site=30))
+    pages = [parse_qs(urlsplit(u).query).get("page", ["1"])[0] for u in wh["urls"]]
+    assert "2" in pages and found["requests"] == len(wh["keywords"]) == 2      # page 2 came back empty: done
+    one = await ps.run_queries(ps.normalize_plan(PLAN, 1), ps.make_settings(per_site=30))
+    assert one["requests"] == 2
+
+
+def test_the_budget_limit_is_the_searchs_choice():
+    ad = _summary("2000000099", "Bosch Geschirrspüler", 800)
+    plan = {"max_price": 300}
+    assert ps.drop_reason(ad, plan, None, ps.make_settings()) == "over_budget"           # 1.5 × 300
+    assert ps.drop_reason(ad, plan, None, ps.make_settings(over_budget=2.0)) == "over_budget"
+    assert ps.drop_reason(ad, plan, None, ps.make_settings(over_budget=0.0)) is None      # no limit
+    assert ps.make_settings(per_site=500)["per_site"] == 500 and ps.make_settings(per_site=7)["per_site"] == 100

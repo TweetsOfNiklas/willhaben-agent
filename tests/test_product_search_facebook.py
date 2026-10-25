@@ -163,7 +163,7 @@ async def test_search_with_bands_and_descriptions_end_to_end(site, wh, claude): 
     row = ps.get(sid)
     assert row.status == "done" and row.error is None
     assert row.requests == 3 + 7                        # searches: willhaben, Facebook with 4 bands
-    assert row.progress == {"done": 8, "total": 8, "step": "details"}
+    assert {k: v for k, v in row.progress.items() if k not in ("rank", "calls")} == {"done": 8, "total": 8, "step": "details"}
     rank_prompt = next(c["prompt"] for c in claude.calls if c["schema"] is SEARCH_RANK_SCHEMA)
     assert "1,70m x 2,20m" in rank_prompt
     fb_rows = [q for q in row.queries if q["platform"] == "facebook"]

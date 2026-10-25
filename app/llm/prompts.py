@@ -811,15 +811,15 @@ SEARCH_RANK_SYSTEM = """\
 Du wählst für eine Privatperson aus Kleinanzeigen (willhaben.at und gegebenenfalls weitere Portale wie kleinanzeigen.de)
 die besten Angebote für ihren Bedarf aus.
 
-- Bewerte nur die Anzeigen aus der Liste (nr wie angegeben) und gib die besten zurück, höchstens so viele wie
-  verlangt, die beste zuerst. Anzeigen, die nicht passen (anderes Produkt, nur Zubehör, Suche-/Tauschanzeige,
-  verletzt ein Muss- oder Ausschlusskriterium), lässt du weg.
+- Bewerte nur die Anzeigen aus der Liste (nr wie angegeben) und gib ALLE passenden zurück, die beste zuerst
+  (die Liste ist ein Teil aller Treffer; die App sortiert über alle Teile). Anzeigen, die nicht passen (anderes
+  Produkt, nur Zubehör, Suche-/Tauschanzeige, verletzt ein Muss- oder Ausschlusskriterium), lässt du weg.
 - fit: 0 bis 100, wie gut die Anzeige zum Bedarf passt, Preis-Leistung eingerechnet (Budget, üblicher
   Gebrauchtpreis, Zustand, Ort). 90+ = genau das Gesuchte zu gutem Preis.
-- reason: 1 bis 2 Sätze auf Deutsch (max. 300 Zeichen): warum diese Anzeige und was sie zum guten Angebot macht.
+- reason: ein knapper Satz auf Deutsch (max. 160 Zeichen): was die Anzeige gut oder schwächer macht.
 - red_flags: kurze deutsche Stichworte zu Bedenken (z. B. "Foto passt nicht zur Beschreibung", "nur Versand",
   "Zustand unklar", "Händler"), sonst leer. Fehlende Versandkosten sind kein Bedenken: die App lädt sie selbst.
-- note: ein kurzer deutscher Satz zum Gesamtbild (z. B. "Unter 300 € gibt es kaum gute Angebote") oder "".
+- note: ein kurzer deutscher Satz zum Gesamtbild dieses Teils (z. B. "Unter 300 € gibt es kaum gute Angebote") oder "".
 - Die Preis-Einordnung (billig … teuer) vergleicht jede Anzeige mit den anderen Ergebnissen derselben Suche; sie
   ist ein Hinweis, kein Urteil. Nutze auch dein Wissen über Neu- und Gebrauchtpreise.
 - Stehen Rückfragen und Antworten dabei, sind das die Vorlieben der Person (z. B. ob Gebrauchsspuren für einen
@@ -852,11 +852,11 @@ SEARCH_RANK_SCHEMA: dict[str, Any] = {
 }
 
 
-def search_rank_prompt(*, description: str, plan: dict[str, Any], candidates: list[dict[str, Any]],
-                       top_n: int, answers: list[tuple[str, str]] | None = None) -> str:
-    """candidates: [{nr, title, price, location, private, text, level, scam}] (level/scam may be empty);
-    answers: (question, answer) pairs from the plan's questions, already on one line each."""
-    lines = ["Beschreibung der Person:", description.strip(), ""]
+def search_rank_context(*, description: str, plan: dict[str, Any], answers: list[tuple[str, str]] | None = None) -> str:
+    """What stays the same for every batch of one search (the person's description, the plan's criteria, the
+    answers): goes behind the system prompt, which the backend caches, so the batches after the first pay little
+    for it. answers: (question, answer) pairs from the plan's questions, already on one line each."""
+    lines = ["", "Beschreibung der Person:", description.strip(), ""]
     if plan.get("summary"):
         lines.append(f"Bedarf: {plan['summary']}")
     if plan.get("max_price"):
@@ -865,19 +865,33 @@ def search_rank_prompt(*, description: str, plan: dict[str, Any], candidates: li
         if plan.get(key):
             lines.append(f"{label}: {'; '.join(plan[key])}")
     lines += _answers_block(answers)
-    lines += ["", f"Anzeigen ({len(candidates)}):"]
+    return "\n".join(lines)
+
+
+def search_rank_list(candidates: list[dict[str, Any]]) -> str:
+    """One batch of offers, as short as it stays clear: candidates [{nr, title, price, location, private, text,
+    level, scam}] (level/scam may be empty)."""
+    lines = [f"Anzeigen ({len(candidates)}):"]
     for c in candidates:
-        who = "privat" if c.get("private") else "Händler" if c.get("private") is False else "Anbieter unbekannt"
-        line = f"[{c['nr']}] {c['title']} · Preis: {c.get('price') or 'keiner'} · {c.get('location') or '?'} · {who}"
+        who = "privat" if c.get("private") else "Händler" if c.get("private") is False else "?"
+        line = f"[{c['nr']}] {c['title']} · {c.get('price') or 'kein Preis'} · {c.get('location') or '?'} · {who}"
         if c.get("level"):
-            line += f" · Einordnung: {c['level']}"
+            line += f" · {c['level']}"
         lines.append(line)
         if c.get("text"):
             lines.append(f"    Text: \"{c['text']}\"")
         if c.get("scam"):
-            lines.append(f"    Auffälligkeiten (automatisch erkannt): {', '.join(c['scam'])}")
-    lines += ["", f"Aufgabe: Gib die besten {top_n} passenden Anzeigen zurück (nr wie oben), die beste zuerst."]
+            lines.append(f"    Auffällig: {', '.join(c['scam'])}")
+    lines += ["", "Aufgabe: Gib alle passenden Anzeigen zurück (nr wie oben), die beste zuerst."]
     return "\n".join(lines)
+
+
+def search_rank_prompt(*, description: str, plan: dict[str, Any], candidates: list[dict[str, Any]],
+                       top_n: int = 0, answers: list[tuple[str, str]] | None = None) -> str:
+    """Context and list in one text (tests, the simulator's view of a prompt); the search itself sends the context
+    with the system prompt (search_rank_context) and only the list as the prompt."""
+    return search_rank_context(description=description, plan=plan, answers=answers).lstrip() + "\n\n" + \
+        search_rank_list(candidates)
 
 
 SEARCH_PHOTO_SYSTEM = """\
