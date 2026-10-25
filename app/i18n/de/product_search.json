@@ -103,5 +103,8 @@
  "up to 1.5 ×": "bis 1,5 ×",
  "up to 2 ×": "bis 2 ×",
  "{n} more offers Claude found not fitting": "{n} weitere Angebote, die laut Claude nicht passen",
- "no limit": "keine Grenze"
+ "no limit": "keine Grenze",
+ "Usually under a minute, a large search several minutes – the best offers show up as they are ranked. You can leave this page; the result stays here.": "Meist unter einer Minute, eine große Suche einige Minuten – die besten Angebote erscheinen, sobald sie bewertet sind. Du kannst die Seite verlassen; das Ergebnis bleibt hier.",
+ "Hourly request limit of {platform} reached: further result pages were left out.": "Stündliches Anfragelimit von {platform} erreicht: weitere Ergebnisseiten wurden ausgelassen.",
+ "{platform} paused the search ({error}): no further result pages there, the offers found so far are ranked.": "{platform} hat die Suche pausiert ({error}): keine weiteren Ergebnisseiten dort, die bisher gefundenen Angebote werden bewertet."
 }

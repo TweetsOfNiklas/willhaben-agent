@@ -57,7 +57,7 @@
                _("plan done, waits for the ads") if ps.status == 'searching'
                else steps[at][1] ~ ' · ' ~ (_("batch {i} of {n}", i=pr.rank.done, n=pr.rank.total) if ps.status == 'ranking' and pr.rank else _("step {i} of {n}", i=at + 1, n=steps|length))) }}
       {% for site, at in ps_waiting_for(ps.id).items() %}{{ ui.msg(_("{site}: hourly request limit reached – the search goes on by itself at {time}.", site=site, time=at.strftime("%H:%M")), 'info') }}{% endfor %}
-      <div class="text-[12.5px] text-muted">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</div>
+      <div class="text-[12.5px] text-muted">{{ _("Usually under a minute, a large search several minutes – the best offers show up as they are ranked. You can leave this page; the result stays here.") }}</div>
     </div>
     {% elif ps.status == 'asking' %}{% set qs = plan.questions or [] %}
     <form method="post" action="/deals/search/{{ ps.id }}/answers" id="ps-ask-{{ ps.id }}" class="flex flex-col gap-3 rounded-field border-l-[3px] border-primary bg-brand-soft px-3.5 py-3">
@@ -107,11 +107,12 @@
         <div class="mt-2 flex flex-col">{% for r in ps.passed %}<div class="flex min-w-0 items-center gap-2.5 border-t border-base-300 py-1.5">{{ ui.thumb(r.image_url, 'h-9 w-12', 'rounded-md') }}<a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ ad_ref(r.get('platform'), r.ad_id) }}" class="min-w-0 flex-1 truncate text-base-content no-underline hover:underline">{{ r.title }}</a><span class="shrink-0 tabular-nums">{{ r.price_display or (r.price|eur if r.price is not none else '') }}</span>{% if (st.platforms or [])|length > 1 %}{{ ui.pill(platform_name(r.get('platform') or 'willhaben'), '', false) }}{% endif %}</div>{% endfor %}</div>
       </details>{% endif %}
       {# more offers: the search found more than Claude ranked; the next ones are ranked on request and added below #}
-      {% set left = (ps.pool or [])|length %}{% set more_warning = (ps.progress or {}).more_warning %}
+      {# the footer only once the search is done: while it ranks, the pool and "no more" mean nothing yet #}
+      {% set left = (ps.pool or [])|length if ps.status in ('done', 'more') else 0 %}{% set more_warning = (ps.progress or {}).more_warning %}
       {% if more_warning and ps.status == 'done' %}{{ ui.msg(more_warning, 'warn') }}{% endif %}
       {% if ps.status == 'more' %}<div id="ps-more" class="flex flex-col gap-2.5" data-ps-progress>{{ stage(_("Loading ads"), 100, false, _("{n} more offers from this search, no new requests", n=[left, ps_max_ranked]|min)) }}{{ stage(_("Claude"), 50, true, _("ranks {n} offers", n=[left, ps_max_ranked]|min) ~ ((' · ' ~ _("batch {i} of {n}", i=(ps.progress or {}).rank.done, n=(ps.progress or {}).rank.total)) if (ps.progress or {}).rank else '')) }}</div>
-      {% elif left %}<form id="ps-more" method="post" action="/deals/search/{{ ps.id }}/more" x-data="{ busy: false }" @submit="busy = true" class="flex flex-wrap items-center gap-2.5"><button class="btn btn-sm" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Load more offers") }}</button><small class="text-[12.5px] text-muted">{{ _("{n} more offers found; Claude ranks the next {k} and adds the best below.", n=left, k=[left, 40]|min) }}</small></form>
-      {% elif ps.results %}<p id="ps-more" class="text-[12.5px] text-muted">{{ _("No more offers in this search.") }}</p>{% endif %}
+      {% elif left %}<form id="ps-more" method="post" action="/deals/search/{{ ps.id }}/more" x-data="{ busy: false }" @submit="busy = true" class="flex flex-wrap items-center gap-2.5"><button class="btn btn-sm" :disabled="busy"><span x-show="busy" x-cloak class="loading loading-spinner loading-xs"></span>{{ _("Load more offers") }}</button><small class="text-[12.5px] text-muted">{{ _("{n} more offers found; Claude ranks the next {k} and adds the best below.", n=left, k=[left, ps_max_ranked]|min) }}</small></form>
+      {% elif ps.results and ps.status == 'done' %}<p id="ps-more" class="text-[12.5px] text-muted">{{ _("No more offers in this search.") }}</p>{% endif %}
       </div>
     {% endif %}
     {# each term once: price range, why and category, the total on the right; on several sites a second row below with

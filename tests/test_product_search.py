@@ -1276,3 +1276,54 @@ def test_the_budget_limit_is_the_searchs_choice():
     assert ps.drop_reason(ad, plan, None, ps.make_settings(over_budget=2.0)) == "over_budget"
     assert ps.drop_reason(ad, plan, None, ps.make_settings(over_budget=0.0)) is None      # no limit
     assert ps.make_settings(per_site=500)["per_site"] == 500 and ps.make_settings(per_site=7)["per_site"] == 100
+
+
+async def test_paging_asks_full_pages_first_pages_first_and_keeps_what_it_has(wh, claude, monkeypatch):
+    """Review fixes: every further page asks the full page size (sites count the start from rows × page); every
+    search gets its first page before any search a second one; a failing later page keeps what the earlier ones
+    found, and a site without an exact total pages on until it gets an empty page."""
+    from app import platforms
+    wl = type(platforms.get("willhaben"))
+    monkeypatch.setattr(wl, "PAGE_SIZE_MAX", 2)
+    monkeypatch.setattr(wl, "TOTAL_KNOWN", False)                  # like Preisjäger: rows_found is no total
+
+    def many(ads):
+        d = _first_page(ads)
+        d["rowsFound"] = len(ads)
+        return d
+    monkeypatch.setitem(globals(), "_page", many)
+    found = await ps.run_queries(ps.normalize_plan(PLAN, 3), ps.make_settings(per_site=30))
+    qs = [parse_qs(urlsplit(u).query) for u in wh["urls"]]
+    pages = [q.get("page", ["1"])[0] for q in qs]
+    assert pages[:3] == ["1", "1", "1"] and "2" in pages                # first pages of all three, then deeper
+    assert all(q.get("rows", ["2"])[0] == "2" for q in qs)              # always the full page size
+    assert found["requests"] == len(wh["urls"])
+
+    calls = {"n": 0}
+    search = wl.search
+
+    async def failing(self, spec, *, rows=None, cache_s=0, page=1):
+        if page > 1:
+            calls["n"] += 1
+            raise ps.PlatformError("HTTP 500")
+        return await search(self, spec, rows=rows, cache_s=cache_s, page=page)
+    monkeypatch.setattr(wl, "search", failing)
+    found = await ps.run_queries(ps.normalize_plan(PLAN, 1), ps.make_settings(per_site=30))
+    entry = found["per_query"][0]
+    assert calls["n"] == 1 and entry["error"] is None and entry["kept"] == len(found["pools"][0]) > 0
+
+
+async def test_load_more_counts_its_calls_and_passed_offers_can_be_checked(wh, claude, monkeypatch):
+    from app.services import deals
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 2)
+    monkeypatch.setattr(ps, "MAX_RANKED", 2)
+    claude.rank = {"results": [{"nr": 1, "fit": 80, "reason": "Passt.", "red_flags": []}], "note": ""}   # one of two fits
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    first = ps.get(sid).progress["calls"]
+    assert ps.load_more(sid)
+    await _finish()
+    row = ps.get(sid)
+    assert row.progress["calls"] == first + 1                       # load more's call counted, not overwritten
+    p = row.passed[0]                                               # passed over: its price check finds it
+    assert deals.shown_result(p.get("platform") or "willhaben", str(p["ad_id"]))["ad_id"] == p["ad_id"]

@@ -18,7 +18,7 @@
       {%- elif ps.status == 'ranking' %}{{ _("Claude") }}: {{ _("ranks {n} offers", n=ps.candidates or 0) }}{% if pr.rank %} · {{ _("batch {i} of {n}", i=pr.rank.done, n=pr.rank.total) }}{% endif %}
       {%- else %}{{ _("Claude") }}: {{ _("checks the photos of the best ones") }}{% endif %} …</span>
     {% for site, at in ps_waiting_for(ps.id).items() %}<span class="sub">{{ _("{site}: hourly request limit reached – the search goes on by itself at {time}.", site=site, time=at.strftime("%H:%M")) }}</span>{% endfor %}
-    <span class="sub">{{ _("Usually 20–60 seconds. You can leave this page; the result stays here.") }}</span>
+    <span class="sub">{{ _("Usually under a minute, a large search several minutes – the best offers show up as they are ranked. You can leave this page; the result stays here.") }}</span>
     {% elif ps.status == 'error' %}<span style="font-size: 14px; color: var(--destructive)">{{ ps.error or _("The search failed.") }}</span>
     {% elif ps.status in ('planning', 'searching', 'ranking', 'photos') %}<span style="font-size: 14px; color: #B07800">{{ _("This search was interrupted.") }}</span>{% endif %}
     {% if not live and ps.status != 'asking' %}<div class="btnrow">
@@ -102,12 +102,12 @@
       {% if r.image_url %}<img class="thumb" src="{{ r.image_url }}" alt="" loading="lazy" width="44" height="44" style="width: 44px; height: 44px" onerror="this.style.visibility='hidden'">{% endif %}
       <span class="trunc" style="flex: 1; font-size: 14px">{{ r.title }}</span><span class="sub" style="flex-shrink: 0">{{ r.price_display or (r.price|eur if r.price is not none else '') }}</span></a>{% endfor %}
   </details>{% endif %}
-  {% set left = (ps.pool or [])|length %}{% set more_warning = (ps.progress or {}).more_warning %}
+  {% set left = (ps.pool or [])|length if ps.status in ('done', 'more') else 0 %}{% set more_warning = (ps.progress or {}).more_warning %}
   {% if more_warning and ps.status == 'done' %}<p style="font-size: 13px; color: #B07800; margin: 10px 4px">{{ more_warning }}</p>{% endif %}
   {% if ps.status == 'more' %}<p class="sub" style="margin: 10px 4px; color: var(--link)">{{ _("Claude") }}: {{ _("ranks {n} offers", n=[left, ps_max_ranked]|min) }} …</p>
   {% elif left %}<form method="post" action="/deals/search/{{ ps.id }}/more" style="margin: 12px 0 0" data-ps-more><button class="chip" style="width: 100%">{{ _("Load more offers") }}</button>
     <p class="sub" style="margin: 6px 4px 0">{{ _("{n} more offers found; Claude ranks the next {k} and adds the best below.", n=left, k=[left, ps_max_ranked]|min) }}</p></form>
-  {% elif ps.results %}<p class="sub" style="margin: 10px 4px">{{ _("No more offers in this search.") }}</p>{% endif %}
+  {% elif ps.results and ps.status == 'done' %}<p class="sub" style="margin: 10px 4px">{{ _("No more offers in this search.") }}</p>{% endif %}
   {% endif %}
 
   {# the generated searches: each term once (price range, why, category, what it found); its run on each site as a

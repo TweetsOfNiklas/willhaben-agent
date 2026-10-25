@@ -1385,11 +1385,11 @@ def shown_result(platform: str, ad_id: str) -> dict[str, Any] | None:
     if (r := _shown.get((platform, ad_id))) is not None:
         return r
     mentions = or_(*(cast(c, String).contains(ad_id, autoescape=True)
-                     for c in (ProductSearch.results, ProductSearch.cards)))
+                     for c in (ProductSearch.results, ProductSearch.cards, ProductSearch.passed)))
     with session() as db:
         for ps in db.exec(select(ProductSearch).where(mentions).order_by(col(ProductSearch.started_at).desc(),
                                                                           col(ProductSearch.id).desc())):
-            for r in (ps.results or []) + (ps.cards or []):
+            for r in (ps.results or []) + (ps.cards or []) + (ps.passed or []):
                 if str(r.get("ad_id")) == ad_id and (r.get("platform") or "willhaben") == platform:
                     return r
     return None

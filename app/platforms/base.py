@@ -121,6 +121,7 @@ class Platform(ABC):
     # whether search(page=k) can ask for the k-th result page; a site that cannot page answers page 1 only
     PAGE_SIZE_MAX: int = 30
     CAN_PAGE: bool = False
+    TOTAL_KNOWN: bool = False      # rows_found is the search's real total (not just what this page kept after a filter)
 
     @abstractmethod
     async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,

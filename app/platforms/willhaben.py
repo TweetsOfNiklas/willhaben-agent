@@ -45,6 +45,7 @@ class WillhabenPlatform(Platform):
     capabilities = frozenset({"search_url", "keyword_search", "filters", "detail", "images"})
     PAGE_SIZE_MAX = MAX_ROWS
     CAN_PAGE = True
+    TOTAL_KNOWN = True             # rowsFound: the whole search's count (10/2026: 47 found, pages of 30 + 17)
 
     @property
     def limiter(self):
