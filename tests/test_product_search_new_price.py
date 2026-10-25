@@ -105,3 +105,27 @@ def test_an_interrupted_price_step_keeps_the_offers():
     ps.recover()
     row = ps.get(sid)
     assert row.status == "done" and row.error is None
+
+
+async def test_an_older_search_looks_its_new_prices_up_when_opened(lookups):
+    """A search stored before the step (no "geizhals" on its offers): opening it looks them up in the background."""
+    from tests.test_product_search import _finish
+    results = [_r("1", "Bosch SMS46 Geschirrspüler", 300.0, 90), _r("2", "Bosch SMS46", 100.0, 80)]
+    sid = _row(results, status="done")
+    assert ps.fill_new_prices(sid) is True and ps.get(sid).status == "prices" and ps.running().id == sid
+    assert ps.fill_new_prices(sid) is False                                   # already on it
+    await _finish()
+    row = ps.get(sid)
+    assert row.status == "done" and [ps.discount(r) for r in row.results] == [25, 75] and ps.running() is None
+    assert ps.fill_new_prices(sid) is False and lookups == ["Bosch SMS46"]   # all asked: nothing more
+
+
+def test_nothing_priced_means_no_discount_order(lookups):
+    from app.main import app
+    sid = _row([_r("1", "Billig", 50.0, 90, geizhals={}), _r("2", "Teuer", 90.0, 70, geizhals={})], status="done")
+    with TestClient(app) as c:
+        web = c.get(f"/deals/search/{sid}").text
+        assert "priced: false" in web and "Geizhals knows the new price of none" in web
+        tg = c.get(f"/tg/search/{sid}?order=discount").text
+        assert 'aria-disabled="true"' in tg and tg.index("Billig") < tg.index("Teuer")
+        c.get(f"/tg/search/{sid}?order=fit")

@@ -61,7 +61,8 @@
   {# the order of the offers: Claude's, by price, by distance from home (kept for the next search) #}
   <nav class="seg" aria-label="{{ _('Sort the offers') }}" data-ps-order>
     {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('discount', _('Discount')), ('distance', _('Distance'))] %}
-    {% if key == 'distance' and not home %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}">{{ label }}</a>
+    {% if key == 'discount' and not priced %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Geizhals knows the new price of none of these offers (yet) – they are looked up after the ranking, for products with a model name.') }}">{{ label }}</a>
+    {% elif key == 'distance' and not home %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}">{{ label }}</a>
     {% else %}<a href="/tg/search/{{ ps.id }}?order={{ key }}"{% if order == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}
     {% endfor %}
   </nav>

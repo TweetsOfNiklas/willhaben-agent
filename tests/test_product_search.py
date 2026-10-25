@@ -1140,7 +1140,8 @@ def test_load_more_on_the_page(app_client, monkeypatch):
     asked = []
     monkeypatch.setattr(ps, "load_more", lambda sid: asked.append(sid) or True)   # the route only starts it
     rows = [{"ad_id": str(n), "platform": "willhaben", "title": f"Spüler {n}", "price": 100.0 + n,
-             "price_display": f"{100 + n} €", "url": f"https://x/{n}", "fit": 80 - n, "position": {"pos": None}}
+             "price_display": f"{100 + n} €", "url": f"https://x/{n}", "fit": 80 - n, "position": {"pos": None},
+             "geizhals": {}}
             for n in range(3)]
     with dbmod.session() as db:
         row = dbmod.ProductSearch(description="Spüler", status="done", results=rows[:1], pool=rows[1:],

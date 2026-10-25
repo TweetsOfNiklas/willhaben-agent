@@ -700,14 +700,11 @@ def discount(r: dict[str, Any]) -> int | None:
     return round((1 - price / new) * 100)
 
 
-async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None:
-    """The Geizhals product of every offer not asked yet, as the price check finds it (Claude's pick from an
-    earlier check of the ad, else the lookup of the title's product name, cached 6 h), in place and stored after
-    each lookup so the list can sort by discount while it runs. An offer without a product name gets {} (asked,
-    none); when Geizhals fails the rest stay not asked."""
-    from app.services import geizhals
-
-    groups: dict[str, tuple[str, list[dict[str, Any]]]] = {}       # one lookup per name, whatever its case
+def _lookups(results: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """The Geizhals lookups the offers not asked yet need, one per product name (whatever its case), best offers
+    first, at most MAX_NEW_PRICES. What needs no request is filled in place: Claude's pick from an earlier price
+    check of the ad, {} for a title without a product name (asked, none)."""
+    groups: dict[str, tuple[str, list[dict[str, Any]]]] = {}
     for r in results:
         if "geizhals" in r:
             continue
@@ -719,7 +716,16 @@ async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None
             groups.setdefault(q.lower(), (q, []))[1].append(r)
         else:
             r["geizhals"] = {}
-    todo = list(groups.values())[:MAX_NEW_PRICES]
+    return list(groups.values())[:MAX_NEW_PRICES]
+
+
+async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None:
+    """The Geizhals product of every offer not asked yet, as the price check finds it (_lookups; the lookup is
+    cached 6 h), in place and stored after each lookup so the list can sort by discount while it runs. When
+    Geizhals fails the rest stay not asked."""
+    from app.services import geizhals
+
+    todo = _lookups(results)
     row = get(search_id)
     progress = dict((row.progress if row else None) or {})
     for i, (q, rows) in enumerate(todo):
@@ -732,6 +738,39 @@ async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None
             r["geizhals"] = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}
     progress.pop("prices", None)
     _update(search_id, results=results, progress=progress)
+
+
+def fill_new_prices(search_id: int) -> bool:
+    """A finished search whose offers were not looked up on Geizhals yet (stored before the step existed, or Geizhals
+    failed then): look them up in the background now, so its list can sort by discount. False when nothing is to do
+    or another search runs (what needs no request is filled in at once)."""
+    row = get(search_id)
+    if row is None or row.status != "done" or not any("geizhals" not in r for r in row.results or []) or running():
+        return False
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    results = list(row.results or [])
+    if not _lookups(results):                       # nothing that needs a request: stored at once
+        _update(search_id, results=results)
+        return False
+    _update(search_id, status="prices")
+    _active.add(search_id)
+    _spawn(_new_prices(search_id), search_id)
+    return True
+
+
+async def _new_prices(search_id: int) -> None:
+    try:
+        row = get(search_id)
+        if row is not None:
+            await geizhals_prices(search_id, list(row.results or []))
+    except Exception:  # noqa: BLE001 - the offers stay as they were
+        log.exception("new prices of product search %s failed", search_id)
+    finally:
+        _update(search_id, status="done")
+        _active.discard(search_id)
 
 
 # ------------------------------------------------------------------ ranking

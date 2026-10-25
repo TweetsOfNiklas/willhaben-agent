@@ -110,5 +110,6 @@
  "{n} % below the new price ({price}, Geizhals)": "{n} % unter dem Neupreis ({price}, Geizhals)",
  "{n} % above the new price ({price}, Geizhals)": "{n} % über dem Neupreis ({price}, Geizhals)",
  "new prices of the offers: {done} of {total} products": "Neupreise der Angebote: {done} von {total} Produkten",
- "Discount": "Rabatt"
+ "Discount": "Rabatt",
+ "Geizhals knows the new price of none of these offers (yet) – they are looked up after the ranking, for products with a model name.": "Geizhals kennt (noch) von keinem dieser Angebote den Neupreis – er wird nach der Bewertung nachgeschlagen, für Produkte mit Modellbezeichnung."
 }

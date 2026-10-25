@@ -245,6 +245,8 @@ def _page(platform: str, ad_id: str) -> str:
 def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = False) -> dict[str, Any]:
     """Template context of the product search part of the page. `msg` is a short code from our own redirects;
     unknown values show nothing (no attacker-chosen banner text via a crafted link)."""
+    if search:
+        product_search.fill_new_prices(search)      # an older search: its offers' new prices, for the discount order
     run = product_search.running()
     shown = product_search.get(search) if search else run
     notice = {"busy": t("A product search is still running – wait for it to finish."),
