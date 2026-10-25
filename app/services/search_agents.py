@@ -1278,7 +1278,7 @@ def hit_tag(h: Hit) -> str:
 
 def pushes_seen(hits: list[Hit]) -> None:
     """The owner has seen these hits (opened, saved, ignored, marked seen): their pushes go off the phone (Home
-    Assistant) and their Telegram buttons go; only hits that were pushed (an inbox entry) are asked for."""
+    Assistant); Telegram's messages keep their buttons. Only hits that were pushed (an inbox entry) are asked for."""
     from app.db import EventLog
     refs = {(h.platform or "willhaben", h.ad_id) for h in hits if h.ad_id}
     if not refs:
@@ -1293,8 +1293,8 @@ def pushes_seen(hits: list[Hit]) -> None:
     from app.services.notify import clear_push
 
     async def run() -> None:
-        for tag in tags:
-            await clear_push(tag)
+        for tag in tags:                  # Telegram's message keeps its buttons (keep, ignore, open)
+            await clear_push(tag, telegram_buttons=False)
     try:
         task = asyncio.get_running_loop().create_task(run())
     except RuntimeError:           # no loop (a sync caller in tests): nothing to clear

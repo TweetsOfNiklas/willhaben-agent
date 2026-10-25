@@ -72,7 +72,9 @@
   <style>#tg-hitlist .pick, #tg-hitlist .bulkbar { display: none; } #tg-hitlist[data-select] .pick { display: flex; } #tg-hitlist[data-select] .bulkbar { display: flex; }</style>
   <div id="tg-hitlist" style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px">
     <div class="bulkbar sec" style="position: sticky; top: 8px; z-index: 4; padding: 8px 10px; gap: 6px; flex-wrap: wrap; align-items: center" data-bulk>
-      {% for a, label in [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}<button class="chip{{ ' danger' if a == 'ignored' else '' }}" form="tg-bulk" name="action" value="{{ a }}">{{ label }}</button>{% endfor %}
+      {# type="submit" spelled out: htmx only takes the pressed button (the action) of a button outside its form then #}
+      {% set acts = [('seen', _('Remove from saved')), ('ignored', _('Ignore'))] if state == 'saved' else [('saved', _('Save')), ('seen', _('Seen')), ('ignored', _('Ignore'))] %}
+      {% for a, label in acts %}<button type="submit" class="chip{{ ' danger' if a == 'ignored' else '' }}" form="tg-bulk" name="action" value="{{ a }}" data-bulk-action="{{ a }}">{{ label }}</button>{% endfor %}
       <span class="sub">{{ _("for the ticked hits") }}</span>
     </div>
     {% for h in hits %}{% set gone = h.site_status in ('sold', 'reserved', 'gone', 'expired') %}{% set agent = agents.get(h.agent_id) %}

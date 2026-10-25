@@ -85,7 +85,7 @@
       <button class="chip" style="height: 36px">{{ ui.icon('sparkle', 12, 2) }} {{ _("Redraft") if draft else _("Draft with Claude") }}</button>
     </form>
     {% if conv.draft_error and not draft %}<span style="font-size: 13px; color: var(--destructive)">{{ conv.draft_error }}</span>{% endif %}
-    <button class="mainbtn tg-hide" form="tg-send">{{ _("Send") }}</button>
+    <button type="submit" class="mainbtn tg-hide" form="tg-send">{{ _("Send") }}</button>
   {% endif %}
   </div>
 </div>

@@ -141,12 +141,15 @@ async def notify(kind: str, title: str, message: str, *, url: str | None = None,
         return False
 
 
-async def clear_push(tag: str) -> None:
-    """Remove a push from the phone (HA companion app: message "clear_notification" with the tag)."""
+async def clear_push(tag: str, telegram_buttons: bool = True) -> None:
+    """Remove a push from the phone (HA companion app: message "clear_notification" with the tag); in Telegram the
+    message stays and its buttons go, unless `telegram_buttons` is False (a hit seen: keep, ignore and open still
+    make sense there)."""
     from app.services import telegram
     from app.services.ha_auth import ha_token, ha_url, notify_service
 
-    await telegram.clear(tag)      # Telegram keeps the message, only its buttons go
+    if telegram_buttons:
+        await telegram.clear(tag)
 
     base, token, service = ha_url(), ha_token(), notify_service()
     if not (base and token and service):

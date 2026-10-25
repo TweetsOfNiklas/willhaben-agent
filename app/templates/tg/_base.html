@@ -76,15 +76,31 @@
   .btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip.primary { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
   .chip[disabled] { opacity: .5; }
+  /* loading: a running bar on top, the tapped link or button dimmed, after a moment a "Loading…" pill */
+  .tg-bar { position: fixed; z-index: 60; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; opacity: 0; transition: opacity .15s; pointer-events: none; }
+  .tg-bar::before { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--btn); animation: tg-run 1s ease-in-out infinite; }
+  @keyframes tg-run { from { left: -35%; } to { left: 100%; } }
+  html.loading .tg-bar { opacity: 1; }
+  .tg-wait { position: fixed; z-index: 60; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: none; align-items: center; gap: 8px;
+             padding: 8px 14px; border-radius: 18px; background: var(--text); color: var(--section); font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.25); pointer-events: none; }
+  html.loading-long .tg-wait { display: flex; }
+  .tg-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: tg-turn .7s linear infinite; }
+  @keyframes tg-turn { to { transform: rotate(360deg); } }
+  a.htmx-request, button.htmx-request, form.htmx-request button, .cell.htmx-request { opacity: .5; }
   .chip { height: 34px; border: 1px solid var(--sep); background: var(--section); border-radius: 17px; padding: 0 13px; font-size: 13px; white-space: nowrap; }
 </style>
 </head>
 <body hx-boost="true">
+<div class="tg-bar" aria-hidden="true"></div><div class="tg-wait" role="status"><span class="tg-spin"></span>{{ _("Loading…") }}</div>
 {% block page %}{% endblock %}
 {# the dashboard's answer to an action (app/tg_bridge.py): shown on top, gone after a while #}
 {% set flash = request.query_params.get('msg') %}{% if flash %}<div class="toast" role="status" data-toast onclick="this.remove()">{{ flash }}</div>{% endif %}
 <script>
 (function () {
+  // once per launch: pages swap in without a reload (hx-boost) and this script comes along with each of them; its
+  // per-page part runs on htmx:afterSettle
+  if (window.tgBridgeReady) return;
+  window.tgBridgeReady = true;
   // ---- the bridge: Telegram's Mini App protocol without its script
   const qs = new URLSearchParams(location.hash.slice(1));
   if (qs.get('tgWebAppData') || qs.get('tgWebAppPlatform')) try { sessionStorage.setItem('tg', '1'); } catch (_) {}
@@ -186,6 +202,24 @@
   };
   document.addEventListener('htmx:afterSettle', toast);
   toast();
+  // ---- loading: what the owner started (a tap, a form) shows the bar at once and "Loading…" after a moment; the
+  // pages' own refreshes (every …, load, revealed) stay quiet
+  let busy = 0, slow = null;
+  const own = (e) => !/every|load|revealed/.test((e.detail.elt && e.detail.elt.getAttribute && e.detail.elt.getAttribute('hx-trigger')) || '');
+  const loading = (on) => {
+    const html = document.documentElement;
+    clearTimeout(slow);
+    html.classList.toggle('loading', on);
+    if (on) slow = setTimeout(() => html.classList.add('loading-long'), 600); else html.classList.remove('loading-long');
+  };
+  document.addEventListener('htmx:beforeRequest', (e) => { if (own(e)) { busy++; loading(true); } });
+  document.addEventListener('htmx:afterRequest', (e) => { if (own(e)) { busy = Math.max(0, busy - 1); if (!busy) loading(false); } });
+  // a link that leaves the Mini App's pages (the dashboard's admin pages) loads the whole page
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href]');
+    if (a && a.getAttribute('hx-boost') === 'false' && !a.target && !e.defaultPrevented) loading(true);
+  });
+  addEventListener('pageshow', () => { busy = 0; loading(false); });
   // a chat opens at its newest message
   const toEnd = () => { if (document.getElementById('tg-thread')) window.scrollTo(0, document.body.scrollHeight); };
   document.addEventListener('htmx:afterSettle', (e) => { setup(); if (e.detail.target && e.detail.target.tagName === 'BODY') toEnd(); });

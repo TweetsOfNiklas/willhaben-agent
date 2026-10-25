@@ -215,10 +215,12 @@ def test_seen_hits_and_chats_leave_the_inbox_and_the_phone(monkeypatch):
     from app.db import Hit, log_event
     from app.services import notify as notify_mod
     from app.services import search_agents
-    cleared = []
+    cleared, kept_buttons = [], []
 
-    async def clear(tag):
+    async def clear(tag, telegram_buttons=True):
         cleared.append(tag)
+        if not telegram_buttons:
+            kept_buttons.append(tag)
     monkeypatch.setattr(notify_mod, "clear_push", clear)
     monkeypatch.setattr(chats, "clear_push", clear)
     with session() as db:
@@ -237,6 +239,7 @@ def test_seen_hits_and_chats_leave_the_inbox_and_the_phone(monkeypatch):
     with session() as db:
         h = db.exec(select(Hit).where(Hit.ad_id == "555")).one()
     assert search_agents.hit_tag(h) == "wh-hit-willhaben-555"
+    assert "wh-hit-willhaben-555" in kept_buttons            # Telegram's message keeps keep / ignore / open
 
 
 def test_the_yellow_count_and_awaiting_my_reply_list_the_same_chats():
