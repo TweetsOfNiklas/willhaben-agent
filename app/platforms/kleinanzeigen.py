@@ -347,6 +347,8 @@ class KleinanzeigenPlatform(Platform):
     image_hosts = ("kleinanzeigen.de", "ebayimg.com")
     locale = "de-DE"
     capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
+    PAGE_SIZE_MAX = MAX_ROWS
+    CAN_PAGE = True
     access = "http"
     min_interval_s = 180                      # the API caches searches for about two minutes anyway
 
@@ -449,8 +451,10 @@ class KleinanzeigenPlatform(Platform):
                 "sortType": SORTS.get(spec.sort, "DATE_DESCENDING"), "adType": "OFFERED",
                 "page": 0, "size": min(rows, MAX_ROWS), "pictureRequired": "false"}
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
         params = await self._params(spec, rows or get_settings().search_rows)
+        params["page"] = max(page, 1) - 1          # the API's pages count from 0
         page = await self.client.search_ads(params, cache_s=cache_s)
         page.title = spec.keyword
         return page

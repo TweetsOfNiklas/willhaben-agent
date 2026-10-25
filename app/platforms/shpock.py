@@ -206,9 +206,13 @@ class ShpockClient(HttpPlatformClient):
     def classify(self, url: str) -> str:
         return classify(url)
 
-    async def search_items(self, filters: dict[str, Any], limit: int, *, cache_s: float = 0) -> SearchPage:
+    async def search_items(self, filters: dict[str, Any], limit: int, *, cache_s: float = 0,
+                           offset: int = 0) -> SearchPage:
+        """One page of the item search; `offset` > 0: the ads after the first `offset` (the answer states its offset,
+        limit and total)."""
+        pagination: dict[str, int] = {"limit": limit, **({"offset": offset} if offset > 0 else {})}
         variables = {"serializedFilters": json.dumps(filters, separators=(",", ":"), ensure_ascii=False),
-                     "pagination": {"limit": limit}, "trackingSource": "Search"}
+                     "pagination": pagination, "trackingSource": "Search"}
         r = await self._get(GRAPHQL, params={"operationName": "ItemSearch", "query": SEARCH_QUERY,
                                              "variables": json.dumps(variables, separators=(",", ":"), ensure_ascii=False)},
                             headers=GRAPHQL_HEADERS, cache_s=cache_s, kind="search", valid=_real_answer)
@@ -267,6 +271,8 @@ class ShpockPlatform(Platform):
     image_hosts = ("secondhandapp.at",)
     locale = "de-AT"
     capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
+    PAGE_SIZE_MAX = MAX_ROWS
+    CAN_PAGE = True
     access = "http"
 
     @property
@@ -319,14 +325,16 @@ class ShpockPlatform(Platform):
             f["price"] = {k: v for k, v in (("from", spec.price_from), ("to", spec.price_to)) if v is not None}
         return f
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
         from app.config import get_settings
 
         limit = min(rows or get_settings().search_rows, MAX_ROWS)
-        page = await self.client.search_items(self.filters_of(spec), limit, cache_s=cache_s)
-        page.ads = page.ads[:limit]
-        page.title = spec.keyword
-        return page
+        result = await self.client.search_items(self.filters_of(spec), limit, cache_s=cache_s,
+                                                offset=(max(page, 1) - 1) * limit)
+        result.ads = result.ads[:limit]
+        result.title = spec.keyword
+        return result
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:
         return await self.client.item(ad_id)

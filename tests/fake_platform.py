@@ -52,7 +52,7 @@ class FakePlatform(Platform):
         return SearchSpec(platform=self.id, url=f"https://fake.example/s/{keyword}", keyword=keyword,
                           price_from=price_from, price_to=price_to, sort=sort)
 
-    async def search(self, spec: SearchSpec, *, rows=None, cache_s=0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows=None, cache_s=0, page: int = 1) -> SearchPage:
         self.searched.append(spec)
         if not self.pages:
             return SearchPage(rows_found=0, ads=[])

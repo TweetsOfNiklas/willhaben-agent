@@ -191,6 +191,8 @@ class PreisjaegerPlatform(Platform):
     image_hosts = ("static.preisjaeger.at",)
     locale = "de-AT"
     capabilities = frozenset({"search_url", "keyword_search", "images"})
+    PAGE_SIZE_MAX = 30          # one result page of the deal list
+    CAN_PAGE = True
     access = "http"
     min_interval_s = 300                      # deals come in slowly; the community needs minutes to post them
 
@@ -246,14 +248,17 @@ class PreisjaegerPlatform(Platform):
         spec.url = self._url(spec)
         return spec
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
         from app.config import get_settings
 
-        page = await self.client.search_page(self._params(spec, spec.sort), spec.price_from, spec.price_to,
-                                             cache_s=cache_s)
-        page.ads = page.ads[:rows or get_settings().search_rows]
-        page.title = spec.keyword
-        return page
+        params = self._params(spec, spec.sort)
+        if page > 1:                                # the deal list's own paging
+            params["page"] = str(page)
+        result = await self.client.search_page(params, spec.price_from, spec.price_to, cache_s=cache_s)
+        result.ads = result.ads[:rows or get_settings().search_rows]
+        result.title = spec.keyword
+        return result
 
     def ad_url(self, ad_id: str) -> str:
         return f"{WEB}/share-deal/{ad_id}"

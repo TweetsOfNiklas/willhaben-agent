@@ -324,6 +324,8 @@ class VintedPlatform(Platform):
     image_hosts = ("vinted.net",)
     locale = "de-AT"
     capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
+    PAGE_SIZE_MAX = 96          # the catalog's page (its per_page default on the web)
+    CAN_PAGE = True
     access = "http"
     min_interval_s = 300                      # every search loads the catalog page's data (about 3 MB unpacked)
 
@@ -391,16 +393,20 @@ class VintedPlatform(Platform):
         spec.url = self._url(spec)
         return spec
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
         from app.config import get_settings
 
         host = spec.extra.get("host") or HOST
-        page = await self.client.catalog(self._url(spec, spec.sort), host, cache_s=cache_s)
+        url = self._url(spec, spec.sort)
+        if page > 1:                                # the catalog's own paging
+            url += f"&page={page}"
+        result = await self.client.catalog(url, host, cache_s=cache_s)
         if spec.keyword:     # Vinted also finds ads that name none of the words (make-up for "Unifi"): left out
-            page.ads = [ad for ad in page.ads if mentions(f"{ad.heading} {ad.body or ''}", spec.keyword)]
-        page.ads = page.ads[:rows or get_settings().search_rows]
-        page.title = spec.keyword
-        return page
+            result.ads = [ad for ad in result.ads if mentions(f"{ad.heading} {ad.body or ''}", spec.keyword)]
+        result.ads = result.ads[:rows or get_settings().search_rows]
+        result.title = spec.keyword
+        return result
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:
         host = (urlsplit(url).hostname or HOST) if url and self.matches(url) else HOST

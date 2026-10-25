@@ -117,9 +117,16 @@ class Platform(ABC):
     def keyword_search(self, keyword: str, price_from: float | None = None, price_to: float | None = None, *,
                        category: str | None = None, sort: str = "newest") -> SearchSpec: ...
 
+    # paging (the product search fetches page after page up to its maximum): the most ads one request returns, and
+    # whether search(page=k) can ask for the k-th result page; a site that cannot page answers page 1 only
+    PAGE_SIZE_MAX: int = 30
+    CAN_PAGE: bool = False
+
     @abstractmethod
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
-        """Run the search. Raises PlatformError (Blocked when the site throttles)."""
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
+        """Run the search, one result page (`page` 1-based; at most PAGE_SIZE_MAX ads, `rows` caps it). Raises
+        PlatformError (Blocked when the site throttles)."""
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:
         """One ad in full; None when it is gone. Only when can("detail")."""

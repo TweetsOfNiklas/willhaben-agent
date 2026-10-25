@@ -581,6 +581,8 @@ class EbayPlatform(Platform):
     image_hosts = ("ebayimg.com", "ebaystatic.com")
     locale = "de-AT"
     capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
+    PAGE_SIZE_MAX = int(PAGE_SIZE)
+    CAN_PAGE = True
     access = "http"
     min_interval_s = 300                      # every search is a whole result page (about 1.5 MB)
     vpn_test_requests = 1 + WARMUP_RETRIES    # a new visitor per exit: its warm-up 403s are asked again there
@@ -650,13 +652,17 @@ class EbayPlatform(Platform):
         spec.url = self._url(spec)
         return spec
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
         from app.config import get_settings
 
-        page = await self.client.search_page({**self._params(spec), "_ipg": PAGE_SIZE, **ship_to()}, cache_s=cache_s)
-        page.ads = page.ads[:rows or get_settings().search_rows]
-        page.title = spec.keyword
-        return page
+        params = {**self._params(spec), "_ipg": PAGE_SIZE, **ship_to()}
+        if page > 1:                                # the result list's own paging
+            params["_pgn"] = str(page)
+        result = await self.client.search_page(params, cache_s=cache_s)
+        result.ads = result.ads[:rows or get_settings().search_rows]
+        result.title = spec.keyword
+        return result
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:
         return await self.client.item(ad_id)

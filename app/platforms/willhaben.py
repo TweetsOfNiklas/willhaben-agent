@@ -26,6 +26,13 @@ SORTS = {"newest": 1, "relevance": 7, "price_asc": 3, "price_desc": 4}
 
 MAX_ROWS = 200      # willhaben's largest result page (10/2026: rows=1000 still gives 200); about 1.2 MB of JSON
 
+def _with_param(url: str, name: str, value: str) -> str:
+    """`url` with `name`=`value` (replaced when it is there, else added)."""
+    if url_param(url, name) is not None:
+        return re.sub(rf"([?&]){name}=[^&]*", rf"\g<1>{name}={value}", url)
+    return url + ("&" if "?" in url else "?") + f"{name}={value}"
+
+
 class WillhabenPlatform(Platform):
     id = "willhaben"
     name = "willhaben"
@@ -36,6 +43,8 @@ class WillhabenPlatform(Platform):
     image_hosts = ("willhaben.at",)
     locale = "de-AT"
     capabilities = frozenset({"search_url", "keyword_search", "filters", "detail", "images"})
+    PAGE_SIZE_MAX = MAX_ROWS
+    CAN_PAGE = True
 
     @property
     def limiter(self):
@@ -76,16 +85,18 @@ class WillhabenPlatform(Platform):
         rows = int(raw) if raw and raw.isdigit() else get_settings().search_rows
         return rows if rows < MAX_ROWS else None
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
         """One result page. Without `rows` (the search agents) the largest page willhaben gives, MAX_ROWS: one request
-        covers everything new since the last check, also after quiet hours or on a busy search."""
+        covers everything new since the last check, also after quiet hours or on a busy search. `page` > 1: the next
+        pages of the same search (the webapi's page=<n>, as the site's own result list pages)."""
         from app.willhaben.public import get_public
 
-        rows = rows or MAX_ROWS
+        rows = min(rows or MAX_ROWS, MAX_ROWS)
         api = spec.api or to_webapi_url(spec.url, rows=rows)
-        if url_param(api, "rows") != str(rows):
-            api = re.sub(r"([?&])rows=\d+", rf"\g<1>rows={rows}", api) if url_param(api, "rows") \
-                else api + ("&" if "?" in api else "?") + f"rows={rows}"
+        api = _with_param(api, "rows", str(rows))
+        if page > 1 or url_param(api, "page"):
+            api = _with_param(api, "page", str(max(page, 1)))
         return await get_public().search(api, cache_s=cache_s)
 
     async def detail(self, ad_id: str, *, url: str | None = None) -> AdDetail | None:

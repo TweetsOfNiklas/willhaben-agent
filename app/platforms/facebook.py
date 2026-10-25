@@ -405,6 +405,8 @@ class FacebookPlatform(Platform):
     image_hosts = ("fbcdn.net",)
     locale = "de-AT"
     capabilities = frozenset({"search_url", "keyword_search", "detail", "images"})
+    PAGE_SIZE_MAX = 24          # what one search page shows without a login; no further pages
+    CAN_PAGE = False
     access = "http"
     min_interval_s = 600                 # one whole page per check, and Facebook does not like automated visitors
 
@@ -464,7 +466,10 @@ class FacebookPlatform(Platform):
         spec.url = self._url(spec)
         return spec
 
-    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0) -> SearchPage:
+    async def search(self, spec: SearchSpec, *, rows: int | None = None, cache_s: float = 0,
+                     page: int = 1) -> SearchPage:
+        if page > 1:                                # no further pages: nothing more to fetch
+            return SearchPage(ads=[], rows_found=0)
         if not spec.location:
             raise PlatformError(t("Facebook Marketplace needs a location: set it in Settings → Facebook Marketplace"))
         page = await self.client.search_page(self._url(spec))
