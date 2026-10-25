@@ -290,6 +290,10 @@ Tippfehlern und Umgangssprache, wo es passt) und genau eine Schwierigkeit testen
   accessory_only, wrong_variant, misses_requirement, defective, search_or_swap, incomplete, bundle_only, too_far,
   scam_suspect, too_expensive, price_unclear): das Urteil, das eine sorgfältige Prüfung nach der Beschreibung der
   Person fällen sollte. why: ein kurzer Satz, warum.
+- Das erwartete Urteil folgt denselben Regeln wie die Prüfung: verfehlt eine Anzeige eine ausdrückliche Vorgabe der
+  Beschreibung (eine Preisgrenze wie "nur unter 50 €", eine Generation, eine Pflicht-Eigenschaft), ist sie nicht
+  relevant (expected_relevant false) mit misses_requirement – auch wenn das Produkt sonst passt; bei kind overpriced
+  und bundle_only also meist nicht relevant. Zeigt das beschriebene Foto ein anderes Produkt, gehört wrong_product dazu.
 - Keine echten Namen, Telefonnummern, Adressen oder Links. Orte nur als Bezirk oder Stadt.
 """
 
@@ -372,7 +376,7 @@ async def _tests(agent_id: int, settings: dict[str, Any], n: int) -> list[dict[s
         exp_hit = _copy(h)
         exp_hit.screen_relevant, exp_hit.screen_deal = expected["relevant"], expected["deal"]
         exp_hit.screen_issues = expected["issues"]
-        expected["push"] = screening.passes(sim_agent, exp_hit)
+        expected["push"] = search_agents.passes(sim_agent, exp_hit)    # the same rules as the actual verdict
         actual = {**_verdict(h), "push": search_agents.passes(sim_agent, h)}
         no = auto_buy.why_not(sim_agent, h) if actual["push"] else t("no hit")
         actual.update(buy=bool(sim_agent.auto_buy) and no is None, buy_total=auto_buy.estimate(h), buy_why=no)
