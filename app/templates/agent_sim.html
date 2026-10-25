@@ -34,6 +34,12 @@
         <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Pickup only within (km)") }}</span>
           <input type="number" name="max_km" min="1" max="1000" value="{{ settings.max_km or '' }}" placeholder="{{ _('the setting for all agents') }}" class="input w-full bg-base-200"></label>
       </div>
+      {# auto-buy (app/services/auto_buy.py): which hits it would buy – simulated only, nothing is bought #}
+      <div class="grid grid-cols-1 items-end gap-3 sm:grid-cols-2" data-sim-auto-buy>
+        <label class="flex items-center gap-2 text-[13.5px]"><input type="checkbox" name="auto_buy" {% if settings.auto_buy %}checked{% endif %} class="checkbox checkbox-primary checkbox-sm">{{ _("Buy automatically") }}</label>
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Maximum for auto-buy in euros") }} · {{ _("incl. shipping and buyer protection") }}</span>
+          <input type="text" inputmode="decimal" name="auto_buy_max" value="{{ ('%.2f'|format(settings.auto_buy_max)).rstrip('0').rstrip('.') if settings.auto_buy_max else '' }}" placeholder="€" class="input w-full bg-base-200"></label>
+      </div>
       <div class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Do not notify when the hit is …") }}</span>
         <div class="flex flex-wrap gap-1.5">{% for i in hideable %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 px-3 py-1 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary">
           <input type="checkbox" name="screen_hide" value="{{ i }}" class="sr-only" {% if i in (settings.screen_hide or []) %}checked{% endif %}>{{ issue_labels[i] }}</label>{% endfor %}</div></div>
@@ -91,10 +97,12 @@
     {% elif sim.kind == 'replay' %}
       {% set sm = sim.summary or {} %}
       <div class="flex flex-wrap gap-2 text-[13px]" data-summary>
-        {{ ui.pill(_("{n} would push", n=sm.push), 'ok', dot=false) }}{{ ui.pill(_("{n} held back", n=sm.held), '', dot=false) }}
-        {{ ui.pill(_("{n} pushed before", n=sm.real_push), '', dot=false) }}
-        {% if sm.now_push %}{{ ui.pill(_("{n} would push now", n=sm.now_push), 'brand', dot=false) }}{% endif %}
+        {{ ui.pill(_("{n} would be hits", n=sm.push), 'ok', dot=false) }}{{ ui.pill(_("{n} held back", n=sm.held), '', dot=false) }}
+        {% if sm.buy %}{{ ui.pill(_("{n} would be bought", n=sm.buy), 'warn', dot=false) }}{% endif %}
+        {{ ui.pill(_("{n} were hits", n=sm.real_push), '', dot=false) }}
+        {% if sm.now_push %}{{ ui.pill(_("{n} would be hits now", n=sm.now_push), 'brand', dot=false) }}{% endif %}
         {% if sm.now_held %}{{ ui.pill(_("{n} would be held back now", n=sm.now_held), 'warn', dot=false) }}{% endif %}
+        <span class="basis-full text-[12px] text-muted">{{ _("Hit: shown under New with a notification. Held back: only under Held back, no notification.") }}</span>
         <a class="link link-primary ml-auto text-[12.5px] no-underline" href="/agent-sim?id={{ sim.id }}{{ '' if only_changes else '&changes=1' }}">{{ _("Show all") if only_changes else _("Only changes") }}</a>
       </div>
       <div class="flex flex-col">
@@ -104,9 +112,10 @@
           <div class="flex min-w-0 flex-col gap-1">
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-2"><a href="{{ r.url }}" target="_blank" rel="noopener" class="truncate font-semibold text-base-content no-underline hover:underline">{{ r.title }}</a><span class="tabular-nums text-[13px]">{{ r.price_display or (r.price|eur if r.price else '') }}</span></div>
             <div class="grid grid-cols-1 gap-1 text-[12.5px] sm:grid-cols-2">
-              <div><span class="text-muted">{{ _("Really:") }}</span> {{ ui.pill(_("pushed") if r.real.pushed else (_("passed") if r.real.push else _("held back")), 'ok' if r.real.push else '', dot=false) }}
+              <div><span class="text-muted">{{ _("Really:") }}</span> {{ ui.pill(_("hit, notified") if r.real.pushed else (_("hit") if r.real.push else _("held back")), 'ok' if r.real.push else '', dot=false) }}
                 {% if r.real.relevant is not none %}<span class="text-muted">{{ deal_label(r.real.deal) if r.real.relevant else _("wrong item") }}</span>{% endif %}</div>
-              <div><span class="text-muted">{{ _("Simulated:") }}</span> {{ ui.pill(_("would push") if r.sim.push else _("held back"), 'ok' if r.sim.push else 'warn' if r.changed else '', dot=false) }}
+              <div><span class="text-muted">{{ _("Simulated:") }}</span> {{ ui.pill(_("would be a hit") if r.sim.push else _("held back"), 'ok' if r.sim.push else 'warn' if r.changed else '', dot=false) }}
+                {% if r.sim.buy %}{{ ui.pill(_("would buy · {price}", price=r.sim.buy_total|eur), 'warn', dot=false) }}{% elif settings.auto_buy and r.sim.push and r.sim.buy_why %}<span class="text-muted">· {{ _("not bought: {why}", why=r.sim.buy_why) }}</span>{% endif %}
                 {% if r.sim.relevant is not none %}<span class="text-muted">{{ deal_label(r.sim.deal) if r.sim.relevant else _("wrong item") }}{% for i in r.sim.issues if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}</span>{% endif %}
                 {% if r.sim.reasons and not r.sim.push %}<span class="text-muted"> · {{ r.sim.reasons|join(', ') }}</span>{% endif %}</div>
             </div>
@@ -131,9 +140,9 @@
           </div>
           <details class="text-[13px]"><summary class="cursor-pointer text-muted">{{ _("Ad text") }}</summary><p class="mt-1 whitespace-pre-wrap">{{ r.description }}</p></details>
           <div class="grid grid-cols-1 gap-1 text-[12.5px] sm:grid-cols-2">
-            <div><span class="text-muted">{{ _("Expected:") }}</span> {{ _("would push") if r.expected.push else _("held back") }} · {{ deal_label(r.expected.deal) if r.expected.relevant else _("wrong item") }}{% for i in r.expected.issues if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}
+            <div><span class="text-muted">{{ _("Expected:") }}</span> {{ _("would be a hit") if r.expected.push else _("held back") }} · {{ deal_label(r.expected.deal) if r.expected.relevant else _("wrong item") }}{% for i in r.expected.issues if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}
               {% if r.why %}<span class="block text-muted">{{ r.why }}</span>{% endif %}</div>
-            <div><span class="text-muted">{{ _("Screening:") }}</span> {{ _("would push") if r.actual.push else _("held back") }} · {{ deal_label(r.actual.deal) if r.actual.relevant else _("wrong item") }}{% for i in r.actual.issues or [] if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}
+            <div><span class="text-muted">{{ _("Screening:") }}</span> {{ _("would be a hit") if r.actual.push else _("held back") }}{% if r.actual.buy %} · <strong class="text-warning">{{ _("would buy · {price}", price=r.actual.buy_total|eur) }}</strong>{% elif settings.auto_buy and r.actual.push and r.actual.buy_why %} · {{ _("not bought: {why}", why=r.actual.buy_why) }}{% endif %} · {{ deal_label(r.actual.deal) if r.actual.relevant else _("wrong item") }}{% for i in r.actual.issues or [] if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}
               {% if r.actual.reason %}<span class="block text-muted">{{ r.actual.reason }}</span>{% endif %}</div>
           </div>
           <form method="post" action="/agent-sim/{{ sim.id }}/rate/{{ loop.index0 }}" class="flex flex-wrap items-center gap-1.5" data-rate>
@@ -177,7 +186,7 @@
     <a href="/agent-sim?id={{ r.id }}" class="flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if sim and sim.id == r.id else '' }}" data-run-link>
       <span class="font-semibold">{{ agent_names.get(r.agent_id, '?') }}</span>
       <span class="text-muted">{{ _("Replay") if r.kind == 'replay' else _("Test ads") }} · {{ r.created_at|local }}</span>
-      <span class="ml-auto text-muted">{% if r.status == 'running' %}{{ _("running") }}{% elif r.status == 'error' %}{{ _("failed") }}{% elif r.kind == 'replay' %}{{ _("{n} would push", n=sm.push) }} · {{ _("{n} changed", n=(sm.now_push or 0) + (sm.now_held or 0)) }}{% else %}{{ _("{ok} of {n} as expected", ok=sm.ok, n=sm.n) }}{% endif %}</span>
+      <span class="ml-auto text-muted">{% if r.status == 'running' %}{{ _("running") }}{% elif r.status == 'error' %}{{ _("failed") }}{% elif r.kind == 'replay' %}{{ _("{n} would be hits", n=sm.push) }} · {{ _("{n} changed", n=(sm.now_push or 0) + (sm.now_held or 0)) }}{% else %}{{ _("{ok} of {n} as expected", ok=sm.ok, n=sm.n) }}{% endif %}</span>
     </a>
     {% endfor %}
   </section>

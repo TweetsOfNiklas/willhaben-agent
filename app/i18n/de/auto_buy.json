@@ -25,5 +25,13 @@
  "at most": "höchstens",
  "Maximum for auto-buy in euros": "Maximum für den automatischen Kauf in Euro",
  "incl. shipping and buyer protection": "inkl. Versand und Käuferschutz",
- "buys automatically up to {price}": "kauft automatisch bis {price}"
+ "buys automatically up to {price}": "kauft automatisch bis {price}",
+ "auto-buy is off": "automatischer Kauf aus",
+ "only willhaben so far": "bisher nur willhaben",
+ "no price": "kein Preis",
+ "{total} is above the maximum {max}": "{total} liegt über dem Maximum {max}",
+ "not the item": "nicht der gesuchte Artikel",
+ "defective": "defekt",
+ "no longer for sale": "nicht mehr zu haben",
+ "no hit": "kein Treffer"
 }

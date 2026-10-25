@@ -29,16 +29,44 @@ def enabled(agent: SearchAgent) -> bool:
     return bool(agent.auto_buy and agent.auto_buy_max and agent.auto_buy_max > 0)
 
 
+def estimate(h: Hit) -> float | None:
+    """What the hit would cost with PayLivery (item, its shipping or the estimate, the buyer protection fee) – the same
+    sums as a purchase order's (purchase.costs_of); None without a price."""
+    from app.services import purchase
+    if not h.price or h.price <= 0:
+        return None
+    row = Purchase(ad_id=h.ad_id, mode="paylivery", shipping_cost=h.shipping_price,
+                   shipping_source="ad" if h.shipping_price is not None else None)
+    return purchase.costs_of(row, float(h.price))["total"]
+
+
+def why_not(agent: SearchAgent, h: Hit) -> str | None:
+    """Why this hit would not be bought (no request; the rules that push it are the caller's), None = it would."""
+    if not enabled(agent):
+        return t("auto-buy is off")
+    if (h.platform or "willhaben") not in PLATFORMS:
+        return t("only willhaben so far")
+    total = estimate(h)
+    if total is None:
+        return t("no price")
+    if total > agent.auto_buy_max + 0.005:
+        return t("{total} is above the maximum {max}", total=_eur(total), max=_eur(agent.auto_buy_max))
+    if h.screen_relevant is False:
+        return t("not the item")
+    issues = set(h.screen_issues or [])
+    if "scam_suspect" in issues:
+        return t("suspected scam")
+    if "defective" in issues:
+        return t("defective")
+    if h.site_status in ("sold", "reserved", "gone", "expired"):
+        return t("no longer for sale")
+    return None
+
+
 def candidate(agent: SearchAgent, h: Hit) -> bool:
-    """Worth a look (no request): the agent buys, a site it can buy on, a price within the maximum, not a scam
-    suspect, not judged the wrong item."""
-    if not enabled(agent) or (h.platform or "willhaben") not in PLATFORMS or not h.price or h.price <= 0:
-        return False
-    if h.price > agent.auto_buy_max:
-        return False
-    if h.screen_relevant is False or "scam_suspect" in (h.screen_issues or []) or "defective" in (h.screen_issues or []):
-        return False
-    return h.site_status not in ("sold", "reserved", "gone", "expired")
+    """Worth a look (no request): the agent buys, a site it can buy on, the estimated total within the maximum, not a
+    scam suspect, not defective, not judged the wrong item. Buy-now is only known from the ad page (buy())."""
+    return why_not(agent, h) is None
 
 
 async def consider(agent: SearchAgent, hits: list[Hit]) -> list[int]:

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
-from app.db import EventLog, Hit, SearchAgent, session
+from app.db import EventLog, Hit, Purchase, SearchAgent, session
 from app.llm.base import LLMResult
 from app.services import agent_sim, screening
 
@@ -92,6 +92,20 @@ async def test_replay_rules_without_claude(agent):
     settings = {**agent_sim.settings_of(agent), "screen": False, "geizhals_pct": 50}
     out = {r["ad_id"]: r for r in await agent_sim._replay(agent.id, settings, 30, "all")}
     assert not out["1"]["sim"]["push"] and out["1"]["sim"]["reasons"] and out["2"]["sim"]["push"]
+
+
+async def test_replay_says_which_hits_auto_buy_would_buy(agent):
+    """With auto-buy in the simulated settings each hit that would be a hit says whether it would be bought (the
+    estimated total incl. shipping and buyer protection within the maximum) or why not; nothing is bought."""
+    _hit(agent, 1, "Echo Show 8", "new", price=30.0, shipping_price=3.49)
+    _hit(agent, 2, "Echo Show 8", "new", price=80.0, shipping_price=3.49)
+    settings = {**agent_sim.settings_of(agent), "screen": False, "auto_buy": True, "auto_buy_max": 50.0}
+    out = {r["ad_id"]: r for r in await agent_sim._replay(agent.id, settings, 30, "all")}
+    assert out["1"]["sim"]["buy"] and 30 < out["1"]["sim"]["buy_total"] <= 50
+    assert not out["2"]["sim"]["buy"] and "50" in out["2"]["sim"]["buy_why"]
+    assert agent_sim._replay_summary(list(out.values()))["buy"] == 1
+    with session() as db:
+        assert not db.exec(select(Purchase)).all()                              # simulated: nothing bought
 
 
 async def test_invented_ads_are_judged_and_compared(agent, monkeypatch):

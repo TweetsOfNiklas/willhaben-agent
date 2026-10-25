@@ -23,14 +23,14 @@ from sqlmodel import Field, SQLModel, col, select
 from app.db import EventLog, Hit, SearchAgent, session, utcnow
 from app.i18n import LANGS, background_lang, t
 from app.llm.base import LLMError, get_backend
-from app.services import screening
+from app.services import auto_buy, screening
 
 log = logging.getLogger(__name__)
 
 SCOPES = (30, 50, 100)              # how many recent hits a replay judges
 TEST_COUNTS = (5, 10, 15)           # how many ads Claude invents
 SETTING_KEYS = ("screen", "screen_brief", "screen_min", "screen_hide", "geizhals_pct", "geizhals_level",
-                "geizhals_check", "max_km")
+                "geizhals_check", "max_km", "auto_buy", "auto_buy_max")
 # what an invented ad is meant to test (the expected verdict follows from it)
 TEST_KINDS = ("bargain", "fair_price", "overpriced", "wrong_product", "accessory_only", "wrong_variant", "defective",
               "search_or_swap", "scam_suspect", "misses_requirement", "bundle_only")
@@ -60,7 +60,8 @@ def settings_of(agent: SearchAgent) -> dict[str, Any]:
     return {"screen": bool(agent.screen), "screen_brief": agent.screen_brief or "", "screen_min": agent.screen_min or "match",
             "screen_hide": sorted(screening.hide_set(agent)) if hide is not None else sorted(screening.DEFAULT_HIDE),
             "geizhals_pct": agent.geizhals_pct, "geizhals_level": agent.geizhals_level,
-            "geizhals_check": bool(agent.geizhals_check), "max_km": agent.max_km}
+            "geizhals_check": bool(agent.geizhals_check), "max_km": agent.max_km,
+            "auto_buy": bool(agent.auto_buy), "auto_buy_max": agent.auto_buy_max}
 
 
 def parse_settings(form: Any) -> dict[str, Any]:
@@ -68,6 +69,12 @@ def parse_settings(form: Any) -> dict[str, Any]:
     def num(key: str) -> int | None:
         raw = str(form.get(key) or "").strip()
         return int(raw) if raw.isdigit() and int(raw) > 0 else None
+    def money(key: str) -> float | None:
+        raw = str(form.get(key) or "").strip().replace("€", "").replace(",", ".")
+        try:
+            return round(float(raw), 2) if raw and float(raw) > 0 else None
+        except ValueError:
+            return None
     rule = str(form.get("gh_rule") or "")
     return {"screen": bool(form.get("screen")), "screen_brief": str(form.get("screen_brief") or "").strip(),
             "screen_min": str(form.get("screen_min") or "match") if str(form.get("screen_min") or "") in screening.MIN_RANK
@@ -75,7 +82,8 @@ def parse_settings(form: Any) -> dict[str, Any]:
             "screen_hide": sorted(h for h in form.getlist("screen_hide") if h in screening.HIDEABLE),
             "geizhals_pct": num("geizhals_pct") if rule == "pct" else None,
             "geizhals_level": rule if rule and rule != "pct" else None,
-            "geizhals_check": bool(form.get("geizhals_check")), "max_km": num("max_km")}
+            "geizhals_check": bool(form.get("geizhals_check")), "max_km": num("max_km"),
+            "auto_buy": bool(form.get("auto_buy")), "auto_buy_max": money("auto_buy_max")}
 
 
 def as_agent(agent: SearchAgent, settings: dict[str, Any]) -> SearchAgent:
@@ -243,11 +251,14 @@ async def _replay(agent_id: int, settings: dict[str, Any], n: int, only: str) ->
         real_push = h.state not in ("filtered", search_agents.PENDING)
         sim_push = search_agents.passes(sim_agent, c)
         gh_real, gh_sim = (h.geizhals or {}).get("price_from"), (c.geizhals or {}).get("price_from")
+        buy_no = auto_buy.why_not(sim_agent, c) if sim_push else t("no hit")
         out.append({"hit_id": h.id, "ad_id": h.ad_id, "platform": h.platform or "willhaben", "title": h.heading,
                     "price": h.price, "price_display": h.price_display, "image": h.image_url, "url": h.url,
                     "state": h.state, "real": {"push": real_push, "pushed": was(h), **_verdict(h), "geizhals": gh_real},
                     "sim": {"push": sim_push, "reasons": search_agents.held_back_reasons(sim_agent, c), **_verdict(c),
-                            "geizhals": gh_sim, "product": notes.get(i)},
+                            "geizhals": gh_sim, "product": notes.get(i),
+                            "buy": sim_agent.auto_buy and buy_no is None, "buy_total": auto_buy.estimate(c),
+                            "buy_why": buy_no},
                     "changed": real_push != sim_push})
     return out
 
@@ -257,7 +268,8 @@ def _replay_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
             "held": sum(1 for r in results if not r["sim"]["push"]),
             "real_push": sum(1 for r in results if r["real"]["push"]),
             "now_push": sum(1 for r in results if r["changed"] and r["sim"]["push"]),
-            "now_held": sum(1 for r in results if r["changed"] and not r["sim"]["push"])}
+            "now_held": sum(1 for r in results if r["changed"] and not r["sim"]["push"]),
+            "buy": sum(1 for r in results if r["sim"].get("buy"))}
 
 
 # ------------------------------------------------------------------ invented ads
@@ -362,6 +374,8 @@ async def _tests(agent_id: int, settings: dict[str, Any], n: int) -> list[dict[s
         exp_hit.screen_issues = expected["issues"]
         expected["push"] = screening.passes(sim_agent, exp_hit)
         actual = {**_verdict(h), "push": search_agents.passes(sim_agent, h)}
+        no = auto_buy.why_not(sim_agent, h) if actual["push"] else t("no hit")
+        actual.update(buy=bool(sim_agent.auto_buy) and no is None, buy_total=auto_buy.estimate(h), buy_why=no)
         results.append({"kind": a.get("kind"), "title": h.heading, "price": h.price, "description": h.body,
                         "condition": h.item_condition_label, "location": h.location, "private": h.is_private,
                         "shipping": bool(a.get("shipping")), "why": a.get("why"), "expected": expected, "actual": actual,
