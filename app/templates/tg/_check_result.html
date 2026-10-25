@@ -28,7 +28,7 @@
     {% if c.count %}{% set _x = head.append(_("{n} comparable ads", n=c.count)) %}{% endif %}
     <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">{% if p.pos is not none %}<span class="pill lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}{% if head %}<span class="sub">{{ head|join(' · ') }}</span>{% endif %}</span>
     {% if p.pos is not none %}{% set b = deal_bar(p, ad.price|eur) %}{{ m.pricebar(b) }}
-    {% if b.basis == 'geizhals' %}<span class="sub" data-legend>{% if gh %}▏{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }}{% endif %}{% if b.band %}{{ ' · ' if gh }}⊔ {{ _("usual among comparable ads:") }} {{ b.band.text }}{% if b.band.out %} · {{ _("outside the scale") }}{% elif b.band.off %} · {{ _("reaches past the scale") }}{% endif %}{% endif %}</span>{% endif %}
+    {% if b.basis == 'geizhals' %}<span class="sub" data-legend>{% if gh %}▏{{ gh.name }}: {{ _("new from {price} on Geizhals", price=gh.price_from|eur) }}{% endif %}{% if b.band %}{{ ' · ' if gh }}⊔ {{ _("usual among comparable ads:") }} {{ b.band.text }}{% if b.band.out %} · {{ _("outside the scale") }}{% elif b.band.off %} · {{ _("reaches past the scale") }}{% endif %}{% endif %}</span>{% endif %}
     {% endif %}
     {% if p.suspicious %}<span style="font-size: 13px; font-weight: 600; color: var(--destructive)">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</span>{% endif %}
     {% if p.mismatch %}<span style="font-size: 13px; color: #B07800">{{ _("Comparable ads cost {n} % of the new price on average – is the Geizhals product the right one?", n=p.mismatch) }}</span>{% endif %}

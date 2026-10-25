@@ -93,7 +93,7 @@ def test_offers_show_and_sort_by_distance():
         set_setting("ship_sender_geo", json.dumps({"addr": dropoff.address_line(HOME), "lat": 48.19, "lon": 16.33}))
         frag = c.get(f"/deals/search/{row.id}").text
     assert "499 km away" in frag and "3,2 km away" in frag and 'disabled title="Enter' not in frag
-    assert 'data-i="0" data-price="100.0" data-km="498.76' in frag and 'data-i="2" data-price="" data-km=""' in frag
+    assert 'data-i="0" data-price="100.0" data-off="" data-km="498.76' in frag and 'data-i="2" data-price="" data-off="" data-km=""' in frag
 
 
 def _search_with_offers():
@@ -124,7 +124,7 @@ def test_saving_the_address_locates_it(nominatim):
         assert c.post("/settings/shipping", data=HOME, follow_redirects=False).status_code == 303
         _wait(lambda: geo.home_cached() is not None)
         frag = c.get(f"/deals/search/{sid}").text
-    assert geo.home_cached() == (48.19, 16.33) and "km away" in frag and "disabled title=" not in frag
+    assert geo.home_cached() == (48.19, 16.33) and "km away" in frag and 'disabled title="Enter' not in frag
     assert len(nominatim) == 1
 
 
@@ -272,3 +272,25 @@ async def test_an_agent_checks_the_ad_page_before_holding_a_far_hit_back(nominat
     with session() as db:
         states = {h.ad_id: h.state for h in db.exec(select(Hit))}
     assert states == {"1": "new", "2": "filtered"} and set(fake.detail_calls) == {"1", "2"}
+
+
+def test_the_counters_follow_the_radius_and_saved_hits_stay():
+    """A far pickup-only hit the list hides is not counted either; a saved one is the person's own choice and stays
+    (listed and counted); filtered out and "All" show every hit."""
+    from app.db import Hit, SearchAgent, session
+    from app.main import HitView, app
+
+    _home()
+    set_setting("pickup_max_km", "100")
+    with session() as db:
+        a = SearchAgent(name="Rad", source_url="x", webapi_url="x")
+        db.add(a)
+        db.commit()
+        for ad_id, state, lat in (("1", "new", 47.48), ("2", "new", 48.2), ("3", "saved", 47.48), ("4", "filtered", 47.48)):
+            db.add(Hit(agent_id=a.id, ad_id=ad_id, heading=f"Ad {ad_id}", url=f"u{ad_id}", lat=lat, lon=9.73 if lat < 48
+                       else 16.4, shipping="pickup", state=state))
+        db.commit()
+        assert HitView.of("saved").counts(db) == {"new": 1, "saved": 1, "filtered": 1, "all": 4}
+        assert HitView.of("new").counts(db) == HitView.of("all").counts(db)
+    with TestClient(app) as c:
+        assert ">Ad 3<" in c.get("/hits?state=saved").text and ">Ad 1<" not in c.get("/hits").text

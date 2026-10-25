@@ -234,3 +234,22 @@ def test_a_product_search_sorts_its_offers_and_shows_each_sites_runs(client):
     assert by_price.index("Billig") < by_price.index("Teuer")
     assert client.get(f"/tg/search/{ps.id}").text.index("Billig") < client.get(f"/tg/search/{ps.id}").text.index("Teuer")
     assert 'data-run="willhaben"' in fit and "1.234" in fit and "+3" in fit and "blocked" in fit
+
+
+def test_a_cleared_hit_says_its_reason_was_removed(client, monkeypatch):
+    """A hit cleared before the reason was kept: its verdict shows, with a note instead of an empty text."""
+    from app import platforms
+    from app.platforms import AdDetail
+    _agents()
+    with session() as db:
+        h = db.exec(select(Hit).where(Hit.ad_id == "1")).one()
+        h.screen_relevant, h.screen_deal, h.screen_reason, h.state = True, "good", None, "cleared"
+        db.add(h)
+        db.commit()
+        db.refresh(h)
+    d = AdDetail.from_hit(h)
+
+    async def detail(*a, **k):
+        return d
+    monkeypatch.setattr(platforms.get("willhaben"), "detail", detail)
+    assert "data-no-reason" in client.get(f"/tg/hits/{h.id}").text

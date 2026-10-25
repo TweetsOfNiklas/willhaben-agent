@@ -500,7 +500,7 @@ def test_viewer_has_lazy_price_section(app_client):
     assert "deal-zones" in frag and "10 comparable ads" in frag and "fair" in frag
     assert "For used items enough comparable ads decide" in frag and "this ad is 71 % of new" in frag   # 10 ads
     assert 'href="https://geizhals.at/bosch-professional-gsr-18v-55-solo-06019h5202-a2221732.html" target="_blank" rel="noopener"' in frag
-    assert "New from €\xa0139 on Geizhals" in frag and "Ask Claude" in frag        # the amount never breaks
+    assert "new from €\xa0139 on Geizhals" in frag and "Ask Claude" in frag        # the amount never breaks
     assert "Comparable ads" in frag and "closest by price" in frag   # list in the viewer too
     assert "this ad" in frag
     assert app_client.fake.calls == []
@@ -596,7 +596,7 @@ def test_deals_page_german(app_client):
     page = app_client.get("/deals").text
     assert "Produktsuche" in page and "Claude wird nur auf Klick gefragt" in page
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
-    assert "Neu ab € 139 auf Geizhals" in _plain(frag) and "vergleichbare Anzeigen" in frag
+    assert "neu ab € 139 auf Geizhals" in _plain(frag) and "vergleichbare Anzeigen" in frag
 
 
 # ------------------------------------------------------------------ review fixes
@@ -1449,7 +1449,7 @@ def test_viewer_offers_claude_and_updates_the_hit(app_client, no_auto_gh, monkey
     assert fake.calls == []
 
     section = app_client.post(f"/deals/ad/willhaben/{AD_ID}/geizhals", data={"hit": str(h.id), "compact": "1"}).text
-    assert section.lstrip().startswith("<section") and "New from € 139 on Geizhals" in _plain(section)
+    assert section.lstrip().startswith("<section") and "new from € 139 on Geizhals" in _plain(section)
     assert "found by Claude" in section and "Let Claude search Geizhals" not in section
     from app.services import jobs
     shown = jobs.snapshot()["recent"][0]                         # shown in the jobs indicator while Claude searched
@@ -1583,7 +1583,7 @@ def test_price_section_by_zones_in_german():
     html = _render_deal(_res(139, USER_CASE, 202.30))
     small = re.search(r'<small class="text-muted">([^<]*)</small>', html).group(1)
     assert small == "68 % vom Neupreis · 4 vergleichbare Anzeigen"              # never a leading " · "
-    assert "Neu ab €\xa0202,30 auf Geizhals" in html
+    assert "neu ab €\xa0202,30 auf Geizhals" in html and "data-gh-name" in html
     assert 'üblich bei Vergleichsanzeigen: <span class="whitespace-nowrap">€ 131–€ 155</span>' in html
     # amounts, shares and ranges never break across lines
     assert "Bei Gebrauchtem gilt als „fair“: 50–\u206079\xa0% vom Neupreis (€\xa0101,15 bis unter €\xa0161,84)." in html

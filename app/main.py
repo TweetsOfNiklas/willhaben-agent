@@ -380,7 +380,7 @@ def _nav_counts() -> dict[str, int]:
     and notifications since the inbox was last opened (those sent without a push left out)."""
     with session() as db:
         return {"inbox": len(_inbox_events()),
-                "hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
+                "hits": HitView.of("new").count(db),        # as the list shows them: far pickup-only ads left out
                 **chats.badge_counts(db),
                 "purchases": db.exec(select(func.count()).select_from(Purchase).where(Purchase.status == "pay_now")).one()}
 
@@ -936,6 +936,51 @@ class HitView:
             q = q.where(col(Hit.state).in_(self.states))         # every state but cleared, or some of them
         return q
 
+    def _radius(self) -> float | None:
+        return geo.pickup_radius() if "filtered" not in self.states and self.state != "all" else None
+
+    def _python_filters(self) -> bool:
+        return bool(self.level or self._radius())
+
+    def _filtered(self, rows: list[Hit]) -> list[Hit]:
+        """The filters SQL cannot do: far pickup-only ads (Settings → Shipping & pickup; a saved hit stays, it is
+        the person's own choice) and the price label."""
+        if radius := self._radius():
+            home = geo.home_cached()
+            rows = [h for h in rows if h.state == "saved" or not geo.too_far(h, radius, home)]
+        return self._of_level(rows)
+
+    def _of_level(self, rows: list[Hit]) -> list[Hit]:
+        if not self.level:
+            return rows
+        zones, top = price_zones.config(), _LEVEL_RANK[self.level]
+        return [h for h in rows if _LEVEL_RANK.get(hit_label(h, zones) or "", 9) <= top]
+
+    def count(self, db) -> int:
+        """How many hits this view lists (all its pages)."""
+        if not self._python_filters():
+            return db.exec(self.where(select(func.count()).select_from(Hit))).one()
+        return len(self._filtered(list(db.exec(self.where(select(Hit))))))
+
+    def counts(self, db) -> dict[str, int]:
+        """Hits per state as each tab lists them with this view's filters (cleared ones left out), and "all": the
+        tabs' counters. The pickup radius hides far ads in the tabs but not under filtered out and all (_radius)."""
+        radius = geo.pickup_radius()
+        if not self.level and not radius:
+            q = self.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
+            out = dict(db.exec(q).all())
+            out.pop(search_agents_svc.CLEARED, None)
+            out["all"] = sum(out.values())
+            return out
+        rows = self._of_level(list(db.exec(self.where(select(Hit), state=False)
+                                           .where(Hit.state != search_agents_svc.CLEARED))))
+        home = geo.home_cached() if radius else None
+        out = {"all": len(rows)}
+        for h in rows:
+            if not radius or h.state in ("filtered", "saved") or not geo.too_far(h, radius, home):
+                out[h.state] = out.get(h.state, 0) + 1
+        return out
+
     def hits(self, db, limit: int = 200, offset: int = 0) -> list[Hit]:
         """The page's hits in its order; `offset`: the next batch when the list is scrolled down."""
         q = self.where(select(Hit))
@@ -951,16 +996,9 @@ class HitView:
             q = q.order_by(col(Hit.published_at).desc().nulls_last(), col(Hit.id).desc())
         else:                             # newest hits first
             q = q.order_by(col(Hit.first_seen_at).desc(), col(Hit.id).desc())
-        radius = geo.pickup_radius() if "filtered" not in self.states and self.state != "all" else None
-        if not self.level and self.sort != "distance" and not radius:
+        if not self._python_filters() and self.sort != "distance":
             return list(db.exec(q.offset(offset).limit(limit)))
-        rows = list(db.exec(q.limit(max((offset + limit) * 10, 2000))))
-        if radius:                        # Settings → Shipping & pickup: far pickup-only ads are not shown
-            home = geo.home_cached()
-            rows = [h for h in rows if not geo.too_far(h, radius, home)]
-        if self.level:
-            zones, top = price_zones.config(), _LEVEL_RANK[self.level]
-            rows = [h for h in rows if _LEVEL_RANK.get(hit_label(h, zones) or "", 9) <= top]
+        rows = self._filtered(list(db.exec(q.limit(max((offset + limit) * 10, 2000)))))
         if self.sort == "distance":       # in Python: the distance comes from coordinates or a cached postcode
             home = geo.home_cached()
             dist = {h.id: geo.hit_km(h, home) if home else None for h in rows}
@@ -999,10 +1037,7 @@ async def hits_page(request: Request, state: str = "new", sort: str = "", ship: 
             view.platforms = ()
         offset = max(offset, 0)
         hits = view.hits(db, HIT_PAGE, offset)
-        counts_q = view.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
-        state_counts = dict(db.exec(counts_q).all())
-        state_counts.pop(search_agents_svc.CLEARED, None)
-    state_counts["all"] = sum(state_counts.values())
+        state_counts = view.counts(db)
     return render(request, "hits.html", hits=hits, agents=agents, agent_id=view.agent_id, state=view.state,
                   state_counts=state_counts, platform=view.platform, platform_ids=used if len(used) > 1 else [],
                   filter_platform_ids=filter_ids if len(filter_ids) > 1 or view.platforms else [], view=view,

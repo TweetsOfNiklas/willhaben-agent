@@ -44,7 +44,7 @@ def test_clear_and_retention():
     assert sa.clear_hits(("saved",)) == 0 and _states()["6"] == "saved"         # never saved ones
     with session() as db:
         h = db.exec(select(Hit).where(Hit.ad_id == "1")).one()
-        assert h.body is None and h.screen_reason is None
+        assert h.body is None and h.screen_reason == "why"            # the verdict's reason stays with it
     assert sa.clear_hits(agent_id=b) == 0 and sa.clear_hits(agent_id=a) == 1 and _states()["2"] == "cleared"
     assert sa.prune_cleared() == 0                    # still listed by the searches: the rows stay
     _hit(a, "5", "cleared", unseen=sa.GONE_DAYS + 1)

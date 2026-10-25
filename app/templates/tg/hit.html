@@ -72,7 +72,7 @@
   <div class="sh">{{ _("Claude's assessment") }}{% if h.screen_at %} · {{ h.screen_at|ago }}{% endif %}</div>
   <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-screen>
     {% if h.screen_relevant is not none %}<span style="display: flex; flex-wrap: wrap; gap: 5px">{% for lbl in screen_labels(h) %}<span class="pill {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else '') }}">{{ lbl }}</span>{% endfor %}</span>{% endif %}
-    {% if h.screen_reason %}<span style="font-size: 15px; white-space: pre-wrap">{{ h.screen_reason }}</span>{% endif %}
+    {% if h.screen_reason %}<span style="font-size: 15px; white-space: pre-wrap">{{ h.screen_reason }}</span>{% elif h.state == 'cleared' %}<span class="sub" data-no-reason>{{ _("Claude's reasoning was removed when this hit was cleared.") }}</span>{% endif %}
   </div>
   {% endif %}
 

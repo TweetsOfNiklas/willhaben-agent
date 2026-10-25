@@ -1200,7 +1200,9 @@ def clear_hits(states: Iterable[str] = ("filtered",), agent_id: int | None = Non
                older_than_days: int | None = None, platform: str | None = None,
                ids: Iterable[int] | None = None) -> int:
     """Hits in `states` (of one agent or site, first seen more than `older_than_days` ago, or just those `ids`) become
-    cleared: shown nowhere, their texts dropped. The row stays so a search that still lists the ad does not find it new (and screen it again)."""
+    cleared: shown nowhere, their description dropped (Claude's short reason stays with its verdict: the ad viewer
+    shows both when the ad comes up again). The row stays so a search that still lists the ad does not find it new
+    (and screen it again)."""
     states = [x for x in states if x in EXPIRING]       # never saved ones
     with session() as db:
         q = select(Hit).where(col(Hit.state).in_(states))
@@ -1214,7 +1216,7 @@ def clear_hits(states: Iterable[str] = ("filtered",), agent_id: int | None = Non
             q = q.where(Hit.first_seen_at < utcnow() - timedelta(days=older_than_days))
         n = 0
         for h in db.exec(q):
-            h.state, h.body, h.screen_reason = CLEARED, None, None
+            h.state, h.body = CLEARED, None
             db.add(h)
             n += 1
         db.commit()

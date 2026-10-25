@@ -103,8 +103,7 @@ async def tg_hits(request: Request, state: str = "new", agent_id: str = "", plat
     with session() as db:
         hits = view.hits(db, limit=LIST_LIMIT + 1, offset=offset)
         agents = {a.id: a for a in db.exec(select(SearchAgent).order_by(col(SearchAgent.name)))}
-        counts = {k: len(list(db.exec(HitView.of(",".join(v), agent_id, platform, sort, ship, level)
-                                      .where(select(Hit.id))))) for k, v in TABS.items()}
+        counts = {k: HitView.of(",".join(v), agent_id, platform, sort, ship, level).count(db) for k, v in TABS.items()}
         sites = sorted({p for p in db.exec(select(Hit.platform).distinct()) if p})
     more = len(hits) > LIST_LIMIT
     return _render(request, "hits.html", hits=hits[:LIST_LIMIT], state=state, agents=agents, counts=counts,
