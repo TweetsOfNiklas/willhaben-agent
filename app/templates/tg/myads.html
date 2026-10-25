@@ -28,8 +28,8 @@
         <span class="trunc" style="font-size: 15px; font-weight: 500">{{ a.heading or a.ad_id }}</span>
         <span style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
           {% if a.pending_action %}<span class="pill" style="color: var(--link)">{{ _("In progress…") }}</span>
-          {% elif a.sale_status %}<span class="pill lvl-fair">{{ _("reserved") if a.sale_status == 'reserved' else _("sold") }}</span>
-          {% else %}<span class="pill">{{ myad_status(a.status) }}</span>{% endif %}
+          {% elif a.sale_status %}<span class="pill warn">{{ _("reserved") if a.sale_status == 'reserved' else _("sold") }}</span>
+          {% else %}<span class="pill {{ {'active': 'ok', 'expired': 'bad', 'sold': 'warn', 'reserved': 'warn'}.get(a.status, '') }}">{{ myad_status(a.status) }}</span>{% endif %}
           {% if a.auto_reply %}<span class="pill">{{ _("automatic answers") }}</span>{% endif %}{% if a.auto_renew %}<span class="pill">{{ _("Auto-renew") }}</span>{% endif %}{% if a.hidden %}<span class="pill">{{ _("hidden") }}</span>{% endif %}</span>
         <span class="sub">{% if a.price_display is defined and a.price_display %}{{ a.price_display }} · {% endif %}{{ a.end_date|ago }}{% if st %} · {{ _("{left}/{total} pcs", left=st.remaining, total=st.quantity) }}{% endif %}</span>
       </span>{{ m.chev() }}

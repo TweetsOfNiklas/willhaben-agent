@@ -5,7 +5,7 @@
 {% macro card(pc, action) %}
 {% set confirm_text = {"cancel": _("Cancel this purchase? The agent stops and writes no more."), "paid": _("Did you transfer the amount in your bank app? The seller is told in the chat."), "received": _("Did you receive the item?"), "collected": _("Did you collect the item and pay the cash?")} %}
 <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-purchase-card>
-  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ pc.mode_label }}</span><span class="pill{{ ' lvl-bargain' if pc.status in ('agreed', 'meetup', 'paid', 'shipped') else ' lvl-expensive' if pc.status == 'failed' else '' }}">{{ pc.status_label }}</span></span>
+  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ pc.mode_label }}</span><span class="pill {{ {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad'}.get(pc.status, 'brand') }}">{{ pc.status_label }}</span></span>
   <span style="font-size: 15px">{{ pc.next }}</span>
   {% if pc.pending %}<span class="sub" style="color: var(--link)">{{ _("Contacting the seller…") }}</span>{% endif %}
   {% if pc.note %}<span class="sub">{{ pc.note }}</span>{% endif %}

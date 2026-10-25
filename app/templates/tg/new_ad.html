@@ -44,7 +44,7 @@
     <a class="cell" href="/tg/new-ad/{{ d.id }}" data-draft="{{ d.id }}">
       {% if d.image_paths %}<img class="thumb" src="/ad-drafts/{{ d.id }}/image/0" alt="" loading="lazy" width="40" height="40" style="width: 40px; height: 40px" onerror="this.style.visibility='hidden'">{% endif %}
       <span class="body"><span style="display: flex; flex-direction: column; min-width: 0"><span class="trunc">{{ d.title or (d.input_text[:60] ~ '…') }}</span><span class="sub">{{ d.created_at|local }}</span></span>
-      <span class="val"><span class="pill{{ ' lvl-bargain' if d.status == 'published' else '' }}">{{ st.get(d.status, d.status) }}</span>{{ m.chev() }}</span></span></a>
+      <span class="val"><span class="pill{{ ' ok' if d.status == 'published' else '' }}">{{ st.get(d.status, d.status) }}</span>{{ m.chev() }}</span></span></a>
     {% else %}{% if not batches %}<p class="empty">{{ _("None.") }}</p>{% endif %}{% endfor %}
   </div>
 </div>

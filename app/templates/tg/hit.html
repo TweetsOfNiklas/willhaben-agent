@@ -45,11 +45,11 @@
     {% elif h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}
     <span style="display: flex; flex-wrap: wrap; gap: 6px">
       {{ m.geizhals(h, pz) }}{{ m.claude(h) }}
-      {% if h.item_condition_label %}<span class="pill">{{ h.item_condition_label }}</span>{% endif %}
-      {% set st = h.site_status %}{% if st %}<span class="pill">{{ {'active': _('still online'), 'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}.get(st, st) }}</span>{% endif %}
+      {% if h.item_condition_label %}<span class="pill {{ condition_tone(h.item_condition) }}">{{ h.item_condition_label }}</span>{% endif %}
+      {% set st = h.site_status %}{% if st %}<span class="pill {{ 'ok' if st == 'active' else 'warn' if st == 'reserved' else 'bad' }}">{{ {'active': _('still online'), 'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}.get(st, st) }}</span>{% endif %}
     </span>
-    {% set scam_w = scam_for_viewer(d, h) %}{% set scam_w = scam_w|selectattr('severity', 'ne', 'info')|list if scam_w else [] %}{% if scam_w %}<span style="font-size: 13px; color: var(--destructive)">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
-    {% if h.state == 'filtered' %}{% set why = held_back_reasons(agent, h) %}{% if why %}<span style="font-size: 13px; color: #B07800">{{ _("Held back: {why}", why=why|join(' · ')) }}</span>{% endif %}{% endif %}
+    {% set scam_w = scam_for_viewer(d, h) %}{% set scam_w = scam_w|selectattr('severity', 'ne', 'info')|list if scam_w else [] %}{% if scam_w %}<span class="pill bad" style="align-self: flex-start; white-space: normal">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
+    {% if h.state == 'filtered' %}{% set why = held_back_reasons(agent, h) %}{% if why %}<span class="t-warn" style="font-size: 13px">{{ _("Held back: {why}", why=why|join(' · ')) }}</span>{% endif %}{% endif %}
     {# the status from the site and when it was checked; Sync asks the site now #}
     <form method="post" action="/tg/hits/{{ h.id }}/sync" style="margin: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px">
       <span class="sub">{% if h.status_checked_at %}{{ _("checked {ago}", ago=h.status_checked_at|ago) }}{% else %}{{ _("listed {ago}", ago=h.last_seen_at|ago) }}{% endif %}</span>
@@ -71,7 +71,7 @@
   {% if h.screen_relevant is not none or h.screen_reason %}
   <div class="sh">{{ _("Claude's assessment") }}{% if h.screen_at %} · {{ h.screen_at|ago }}{% endif %}</div>
   <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-screen>
-    {% if h.screen_relevant is not none %}<span style="display: flex; flex-wrap: wrap; gap: 5px">{% for lbl in screen_labels(h) %}<span class="pill {{ 'lvl-bargain' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('lvl-very_expensive' if lbl == screen_issue_labels()['scam_suspect'] else '') }}">{{ lbl }}</span>{% endfor %}</span>{% endif %}
+    {% if h.screen_relevant is not none %}<span style="display: flex; flex-wrap: wrap; gap: 5px">{% for lbl in screen_labels(h) %}<span class="pill {{ 'ok' if loop.first and h.screen_relevant and h.screen_deal in ('great', 'good') else ('bad' if lbl == screen_issue_labels()['scam_suspect'] else '') }}">{{ lbl }}</span>{% endfor %}</span>{% endif %}
     {% if h.screen_reason %}<span style="font-size: 15px; white-space: pre-wrap">{{ h.screen_reason }}</span>{% endif %}
   </div>
   {% endif %}

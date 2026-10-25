@@ -15,9 +15,9 @@
 {% macro geizhals(h, pz) -%}
 {%- set gh_pct = geizhals_below_pct(h) %}
 {%- if gh_pct is not none %}{% set lvl = hit_level(h, pz) %}{% set share = share_pct(h.price, h.geizhals.price_from) if lvl else none %}
-<span class="pill{{ ' lvl-' ~ lvl if lvl else '' }}" data-geizhals>
-  {%- if lvl %}{{ deal_level_label(lvl) }} · {{ (_("{n} % of {price} new", n=share, price=h.geizhals.price_from|eur) if share else _("below 1 % of the new price"))|nb }}
-  {%- else %}{{ (_("new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)))|nb }}{% endif %}</span>
+<span style="display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px" data-geizhals>
+  {%- if lvl %}<span class="pill lvl-{{ lvl }}">{{ deal_level_label(lvl) }}</span><span class="sub">{{ (_("{n} % of {price} new", n=share, price=h.geizhals.price_from|eur) if share else _("below 1 % of the new price"))|nb }}</span>
+  {%- else %}<span class="sub">Geizhals · {{ (_("new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)))|nb }}</span>{% endif %}</span>
 {%- endif %}
 {%- endmacro %}
 
@@ -31,7 +31,7 @@
 {% macro claude(h) -%}
 {%- if h.screen_relevant is not none %}{% set labels = screen_labels(h) %}
 {%- set lv = {'great': 'bargain', 'good': 'cheap', 'fair': 'fair', 'overpriced': 'expensive'}.get(h.screen_deal) if h.screen_relevant else none %}
-<span class="pill{{ ' lvl-' ~ lv if lv else '' }}" style="{{ '' if h.screen_relevant else 'background: #FDE3E3; color: #9B1C1C' }}" data-claude title="{{ labels|join(' · ') }}">Claude · {{ labels|first }}</span>
+<span style="display: inline-flex; align-items: center; gap: 5px" data-claude title="{{ labels|join(' · ') }}"><span class="sub">Claude</span><span class="pill {{ 'lvl-' ~ lv if lv else ('' if h.screen_relevant else 'bad') }}">{{ labels|first }}</span></span>
 {%- endif %}
 {%- endmacro %}
 

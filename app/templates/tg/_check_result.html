@@ -69,7 +69,7 @@
   <div class="sh">Claude</div>
   {% set cl = res.get('claude') or {} %}
   <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 6px" data-claude>
-    {% if cl.deal %}<span style="display: flex; gap: 6px; align-items: center"><strong style="color: var(--link)">{{ _("Claude's assessment") }}</strong><span class="pill {{ 'lvl-bargain' if cl.deal in ('great', 'good') else '' }}">{{ deal_label(cl.deal) }}</span></span>
+    {% if cl.deal %}<span style="display: flex; gap: 6px; align-items: center"><strong style="color: var(--link)">{{ _("Claude's assessment") }}</strong><span class="pill {{ 'ok' if cl.deal in ('great', 'good') else '' }}">{{ deal_label(cl.deal) }}</span></span>
       {% if cl.reason %}<span style="font-size: 14px; white-space: pre-wrap">{{ cl.reason }}</span>{% endif %}
     {% elif running.claude %}<span style="font-size: 14px; color: var(--link)">{{ ui.icon('sparkle', 13, 2) }} {{ _("Claude rates the price …") }}</span>
     {% else %}

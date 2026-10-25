@@ -72,11 +72,11 @@
       <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
         <a href="{{ r.url }}" target="_blank" hx-boost="false" style="font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.25">{{ r.title }}</a>
         <span style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center"><strong style="font-size: 16px">{{ r.price_display or (r.price|eur) }}</strong><span class="sub" data-ship>{{ ui.ship_lazy(r) }}</span>
-          {% if r.fit is not none %}<span class="pill {{ 'lvl-bargain' if r.fit >= 75 else 'lvl-fair' if r.fit >= 50 else '' }}">{{ _("Fit {n}", n=r.fit) }}</span>{% endif %}
+          {% if r.fit is not none %}<span class="pill {{ 'ok' if r.fit >= 75 else 'warn' if r.fit >= 50 else '' }}">{{ _("Fit {n}", n=r.fit) }}</span>{% endif %}
           {% if p.pos is not none %}<span class="pill lvl-{{ p.level }}">{{ deal_level_label(p.level) }}</span>{% endif %}
           {% if r.photo %}<span class="pill">{{ {"match": _("photo fits"), "unclear": _("photo unclear"), "mismatch": _("photo shows something else")}[r.photo] }}</span>{% endif %}
           {% if (st.platforms or [])|length > 1 %}{{ m.site(rp) }}{% endif %}</span>
-        {% if r.condition == 'worn' %}<span class="pill lvl-fair" style="align-self: flex-start">{{ _("worn") }}</span>{% elif r.condition == 'damaged' %}<span class="pill lvl-very_expensive" style="align-self: flex-start">{{ _("damaged") }}</span>{% endif %}
+        {% if r.condition == 'worn' %}<span class="pill warn" style="align-self: flex-start">{{ _("worn") }}</span>{% elif r.condition == 'damaged' %}<span class="pill bad" style="align-self: flex-start">{{ _("damaged") }}</span>{% endif %}
         {% if r.reason %}<span class="sub">{{ r.reason }}</span>{% endif %}{% if r.photo_note %}<span class="sub">{{ r.photo_note }}</span>{% endif %}
         {% if p.pos is not none %}{{ m.pricebar(deal_bar(p, r.price_display or (r.price|eur))) }}{% endif %}
         {% if r.median and r.price %}{% set diff = ((r.price - r.median) * 100 / r.median)|round|int %}<span class="sub">{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %} ({{ _("{n} comparable ads", n=r.comparables) }}){% if r.query %} · „{{ r.query }}“{% endif %}</span>{% endif %}

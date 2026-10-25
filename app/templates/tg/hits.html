@@ -95,11 +95,11 @@
           {% if h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}
           <span style="display: flex; flex-wrap: wrap; gap: 5px">
             {{ m.geizhals(h, pz) }}{{ m.claude(h) }}
-            {% if h.item_condition_label %}<span class="pill">{{ h.item_condition_label }}</span>{% endif %}
-            {% if h.site_status in ('sold', 'reserved', 'gone', 'expired') %}<span class="pill">{{ {'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}[h.site_status] }}</span>{% endif %}
+            {% if h.item_condition_label %}<span class="pill {{ condition_tone(h.item_condition) }}">{{ h.item_condition_label }}</span>{% endif %}
+            {% if h.site_status in ('sold', 'reserved', 'gone', 'expired') %}<span class="pill {{ 'warn' if h.site_status == 'reserved' else 'bad' }}">{{ {'sold': _('sold'), 'reserved': _('reserved'), 'gone': _('no longer online'), 'expired': _('expired')}[h.site_status] }}</span>{% endif %}
           </span>
-          {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}<span style="font-size: 12.5px; color: var(--destructive)">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
-          {% if h.state == 'filtered' %}{% set why = held_back_reasons(agent, h) %}{% if why %}<span style="font-size: 12.5px; color: #B07800" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</span>{% endif %}{% endif %}
+          {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}<span class="pill bad" style="align-self: flex-start; white-space: normal">{{ scam_w|map(attribute='label')|join(' · ') }}</span>{% endif %}
+          {% if h.state == 'filtered' %}{% set why = held_back_reasons(agent, h) %}{% if why %}<span class="t-warn" style="font-size: 12.5px" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</span>{% endif %}{% endif %}
           {% set km = hit_km(h, home) %}
           <span class="sub trunc">{%- set sep = joiner(' · ') %}{% if agent %}{{ sep() }}{{ agent.name }}{% endif %}{% if h.location %}{{ sep() }}{{ h.location }}{% endif %}{% if km is not none %}{{ sep() }}{{ _("{n} km", n=km|round|int) }}{% endif %}{% if h.is_private == false %}{{ sep() }}{{ _("dealer") }}{% endif %}</span>
           <span class="sub">{{ _("found {ago}", ago=h.first_seen_at|ago) }}{% if h.published_at %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% endif %}</span>

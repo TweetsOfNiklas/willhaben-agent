@@ -20,7 +20,7 @@
       {% if r.image %}<img class="thumb" src="{{ r.image }}" alt="" loading="lazy" width="54" height="54" style="width: 54px; height: 54px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 54px; height: 54px"></span>{% endif %}
       <span class="body" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 0 0 8px">
         <span class="trunc" style="font-size: 15px; font-weight: 500">{{ r.title }}</span>
-        <span style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center"><span class="pill{{ ' lvl-bargain' if r.tone == 'ok' else '' }}">{{ r.status }}</span>
+        <span style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center"><span class="pill {{ {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad', 'new': 'brand', 'contacting': 'brand', 'negotiating': 'brand'}.get(r.tone, r.tone) or '' }}">{{ r.status }}</span>
           <span class="sub">{{ r.mode }}{% if r.agreed %} · {{ _("agreed {price}", price=r.agreed|eur) }}{% elif r.max %} · {{ _("at most {price}", price=r.max|eur) }}{% endif %}</span></span>
         {% if r.query %}<span class="sub trunc">„{{ r.query }}“</span>{% endif %}
       </span>{{ m.chev() }}

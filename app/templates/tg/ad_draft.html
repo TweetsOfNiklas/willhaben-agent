@@ -12,7 +12,7 @@
 {{ m.head(_("Ad draft #{id}", id=d.id), back) }}
 <div class="wrap">
   <div style="margin: 12px 4px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
-    <span class="pill{{ ' lvl-bargain' if published else '' }}">{{ _("published") if published else _("draft") }}</span>
+    <span class="pill{{ ' ok' if published else '' }}">{{ _("published") if published else _("draft") }}</span>
     <span class="sub">{{ _("Written by Claude from your notes and {n} photos", n=d.image_paths|length) }} · {{ d.created_at|local }}</span>
   </div>
   {% if d.error %}<p style="font-size: 13px; color: var(--destructive); margin: 8px 4px" data-draft-error>{{ d.error }}</p>{% endif %}

@@ -68,7 +68,7 @@
         <a href="/tg/new-ad/{{ d.id }}" class="sub" style="flex: 1; color: var(--link)">#{{ d.id }}{% if d.category_hint %} · {{ d.category_hint }}{% endif %}{% if d.questions %} · <span style="color: #B07800">{{ _("Claude has questions") }}</span>{% endif %}</a>
         {% if d.publishing %}<span class="pill" style="color: var(--link)">{{ _("Publishing…") }}</span>
         {% elif d.refining %}<span class="pill" style="color: var(--link)">{{ _("Claude writes…") }}</span>
-        {% elif d.status == 'published' %}<span class="pill lvl-bargain">{{ _("published") }}</span>
+        {% elif d.status == 'published' %}<span class="pill ok">{{ _("published") }}</span>
         {% elif d.status == 'discarded' %}<span class="pill">{{ _("discarded") }}</span>
         {% elif d.status == 'error' %}<span class="pill" style="color: var(--destructive)">{{ _("Error") }}</span>
         {% elif opts %}<span class="pill" style="color: var(--link)">{{ _("ready") }}</span>

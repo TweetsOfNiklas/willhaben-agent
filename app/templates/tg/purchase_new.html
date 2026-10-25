@@ -41,7 +41,7 @@
     <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
       <span style="font-weight: 600; line-height: 1.25">{{ d.heading }}</span>
       <span style="font-size: 20px; font-weight: 700">{{ d.price_display or (d.price|eur) }}</span>
-      <span style="display: flex; gap: 6px; flex-wrap: wrap">{% if d.paylivery_enabled %}<span class="pill lvl-bargain">PayLivery</span>{% endif %}{% if d.buy_now %}<span class="pill">{{ _("Buy now") }}</span>{% endif %}{% if d.is_private == false %}<span class="pill">{{ _("dealer") }}</span>{% elif d.is_private %}<span class="pill">{{ _("private") }}</span>{% endif %}{% if d.item_condition_label %}<span class="pill">{{ d.item_condition_label }}</span>{% endif %}</span>
+      <span style="display: flex; gap: 6px; flex-wrap: wrap">{% if d.paylivery_enabled %}<span class="pill ok">PayLivery</span>{% endif %}{% if d.buy_now %}<span class="pill">{{ _("Buy now") }}</span>{% endif %}{% if d.is_private == false %}<span class="pill">{{ _("dealer") }}</span>{% elif d.is_private %}<span class="pill">{{ _("private") }}</span>{% endif %}{% if d.item_condition_label %}<span class="pill {{ condition_tone(d.item_condition) }}">{{ d.item_condition_label }}</span>{% endif %}</span>
       <span class="sub">{{ d.location or '' }}{% if seller %} · {{ seller }}{% endif %} · <a href="{{ d.url }}" target="_blank" hx-boost="false">willhaben ↗</a></span>
     </span>
   </div>

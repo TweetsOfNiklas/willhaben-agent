@@ -17,7 +17,7 @@
 <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-sale{% if wh.pending %} hx-get="{{ next }}" hx-trigger="every 4s" hx-select="[data-sale]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
   {% if kind or wh.pending or wh.status in ('sold', 'reserved') or wh.error %}
   <span style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
-    {% if kind %}<span class="pill {{ 'lvl-bargain' if mine or not buyer else 'lvl-fair' }}">{{ _("sold") if kind == 'sold' else _("reserved") }}</span>
+    {% if kind %}<span class="pill {{ 'ok' if mine or not buyer else 'warn' }}">{{ _("sold") if kind == 'sold' else _("reserved") }}</span>
       {% if buyer %}<span class="sub">{{ _("to this buyer") if mine else _("to someone else") }}</span>{% endif %}{% endif %}
     {% if wh.pending %}<span class="sub" style="color: var(--link)">{{ {'sold': _("Marking as sold…"), 'reserved': _("Marking as reserved…"), 'unreserve': _("Removing the reservation…")}[wh.pending] }}</span>
     {% elif wh.status in ('sold', 'reserved') %}<span class="pill">{{ _("willhaben: {status}", status=_("sold") if wh.status == 'sold' else _("reserved")) }}</span>
@@ -67,7 +67,7 @@
 {% macro purchase(pc) %}
 {% set confirm_text = {"cancel": _("Cancel this purchase? The agent stops and writes no more."), "paid": _("Did you transfer the amount in your bank app? The seller is told in the chat."), "received": _("Did you receive the item?"), "collected": _("Did you collect the item and pay the cash?")} %}
 <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-purchase>
-  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ pc.mode_label }}</span><span class="pill">{{ pc.status_label }}</span></span>
+  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ pc.mode_label }}</span><span class="pill {{ {'agreed': 'ok', 'meetup': 'ok', 'paid': 'ok', 'shipped': 'ok', 'done': '', 'cancelled': '', 'failed': 'bad'}.get(pc.status, 'brand') }}">{{ pc.status_label }}</span></span>
   <span style="font-size: 15px">{{ pc.next }}</span>
   {% if pc.pending %}<span class="sub" style="color: var(--link)">{{ _("Contacting the seller…") }}</span>{% endif %}
   {% if pc.note %}<span class="sub">{{ pc.note }}</span>{% endif %}
@@ -102,7 +102,7 @@
 {# ---- PayLivery (_paylivery.html) #}
 {% macro paylivery(pl, conv, back) %}
 <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-paylivery{% if pl.busy %} hx-get="{{ back }}" hx-trigger="every 3s" hx-select="[data-paylivery]" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
-  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span><span class="pill {{ 'lvl-bargain' if pl.stage in ('paid_out', 'received') else 'lvl-fair' if pl.actions else '' }}">{{ pl.stage_label }}</span></span>
+  <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><span class="sub">{{ _("I am selling") if pl.role == 'seller' else _("I am buying") }}</span><span class="pill {{ 'ok' if pl.stage in ('paid_out', 'received') else 'warn' if pl.actions else '' }}">{{ pl.stage_label }}</span></span>
   {% if pl.busy %}<span class="sub" style="color: var(--link)">{{ _("working in the browser…") }} {{ pl.busy_label }}</span>{% endif %}
   <span style="font-size: 14px">{{ pl.next }}</span>
   {% if pl.amount or pl.offer or pl.deadline or pl.tracking %}<span class="sub">{% if pl.amount %}{{ _("Price {amount}", amount=pl.amount|eur) }}{% endif %}{% if pl.offer %} · {{ _("Offer {amount}", amount=pl.offer|eur) }}{% endif %}{% if pl.deadline %} · {{ _("Deadline {date}", date=pl.deadline) }}{% endif %}{% if pl.tracking %} · {{ _("Tracking {number}", number=pl.tracking) }}{% endif %}</span>{% endif %}
@@ -205,7 +205,7 @@
     <div style="display: flex; flex-direction: column">
       {% for o in ship_options %}
       <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; border-top: 1px solid var(--sep); padding: 7px 0; font-size: 14px{{ '; font-weight: 600' if ship_option and o.key == ship_option.key else '' }}" data-opt>
-        <span style="min-width: 0">{{ o.label() }}{% if o.price == cheapest %} <span class="pill lvl-bargain">{{ _("cheapest") }}</span>{% endif %}<br><span class="sub" style="font-weight: 400">{% set pts = ship_near.get(o.carrier) or [] %}{% if pts %}{{ pts[0].name }}, {{ pts[0].address }} · {{ fmt_dist(pts[0].dist_m) }}{% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}</span></span>
+        <span style="min-width: 0">{{ o.label() }}{% if o.price == cheapest %} <span class="pill ok">{{ _("cheapest") }}</span>{% endif %}<br><span class="sub" style="font-weight: 400">{% set pts = ship_near.get(o.carrier) or [] %}{% if pts %}{{ pts[0].name }}, {{ pts[0].address }} · {{ fmt_dist(pts[0].dist_m) }}{% else %}{{ ship_carriers[o.carrier].dropoff }}{% endif %}</span></span>
         <span style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px">{{ o.price|eur }}
           {% if shipment.status == 'draft' and o.online %}<form method="post" action="/shipments/{{ shipment.id }}/label" style="margin: 0"><input type="hidden" name="key" value="{{ o.key }}"><button class="chip{{ ' primary' if loop.first else '' }}"{% if not ship_sender_ok or not r.name %} disabled{% endif %}>{{ _("Create label") }}</button></form>
           {% elif shipment.status == 'awaiting' and o.online and o.key != shipment.option %}<form method="post" action="/shipments/{{ shipment.id }}/option" style="margin: 0"><input type="hidden" name="key" value="{{ o.key }}"><button class="chip">{{ _("Use") }}</button></form>
