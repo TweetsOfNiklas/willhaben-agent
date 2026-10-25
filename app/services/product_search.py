@@ -83,7 +83,7 @@ OVER_BUDGET = 1.5            # default: ads above 1.5 × the budget are not wort
 TEXT_CHARS = 160             # ad text per candidate in the ranking prompt (the token cost of every batch)
 MAX_DESCRIPTION = 2000
 RECENT = 10
-RUNNING = ("planning", "searching", "ranking", "photos", "more")   # "asking" waits for the person, no task runs
+RUNNING = ("planning", "searching", "ranking", "photos", "prices", "more")   # "asking" waits for the person, no task runs
 CLAUDE_CALLS = 2             # plan + ranking; the templates add one when settings["photos"] is on
 MAX_PHOTOS = TOP_N           # photos sent in the photo check
 PHOTO_RAISE = 10             # the photo check may raise the text fit by at most this much
@@ -684,6 +684,56 @@ def card(qi: int, ad: Listing, plan: dict[str, Any], prices: list[float]) -> dic
             "scam_flags": scam.flags(item, scam.median_context(comp), home_country=scam.home_country_of(ad.platform))}
 
 
+# ------------------------------------------------------------------ new prices (Geizhals)
+MAX_NEW_PRICES = 30           # Geizhals lookups per search (one per product name, 3 s apart): the best offers first
+
+
+def new_price(r: dict[str, Any]) -> float | None:
+    return (r.get("geizhals") or {}).get("price_from")
+
+
+def discount(r: dict[str, Any]) -> int | None:
+    """How far below the Geizhals new price the offer is, in % (negative: above it); None without both prices."""
+    price, new = r.get("price"), new_price(r)
+    if not price or not new or price <= 0 or new <= 0:
+        return None
+    return round((1 - price / new) * 100)
+
+
+async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None:
+    """The Geizhals product of every offer not asked yet, as the price check finds it (Claude's pick from an
+    earlier check of the ad, else the lookup of the title's product name, cached 6 h), in place and stored after
+    each lookup so the list can sort by discount while it runs. An offer without a product name gets {} (asked,
+    none); when Geizhals fails the rest stay not asked."""
+    from app.services import geizhals
+
+    groups: dict[str, tuple[str, list[dict[str, Any]]]] = {}       # one lookup per name, whatever its case
+    for r in results:
+        if "geizhals" in r:
+            continue
+        if gh := deals.stored_geizhals(str(r.get("ref") or r.get("ad_id"))):
+            r["geizhals"] = {k: gh.get(k) for k in ("name", "url", "price_from", "by")}
+            continue
+        q = deals.geizhals_query(r.get("title"))
+        if q:
+            groups.setdefault(q.lower(), (q, []))[1].append(r)
+        else:
+            r["geizhals"] = {}
+    todo = list(groups.values())[:MAX_NEW_PRICES]
+    row = get(search_id)
+    progress = dict((row.progress if row else None) or {})
+    for i, (q, rows) in enumerate(todo):
+        _update(search_id, results=results, progress={**progress, "prices": {"done": i, "total": len(todo)}})
+        try:
+            gh = await deals.geizhals_match(q, raise_errors=True)
+        except geizhals.GeizhalsError:
+            break
+        for r in rows:
+            r["geizhals"] = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}
+    progress.pop("prices", None)
+    _update(search_id, results=results, progress=progress)
+
+
 # ------------------------------------------------------------------ ranking
 def _rank_line(nr: int, c: dict[str, Any]) -> dict[str, Any]:
     return {"nr": nr, "title": _one_line(c["title"])[:120],
@@ -989,7 +1039,7 @@ def recover() -> None:
     """After a restart no search task is running any more (a search in "asking" has none: it stays)."""
     with session() as db:
         for row in db.exec(select(ProductSearch).where(col(ProductSearch.status).in_(RUNNING))):
-            if row.status == "more":             # loading more: the offers shown before stay
+            if row.status in ("more", "prices"):  # loading more or new prices: the offers shown before stay
                 row.status = "done"
             else:
                 row.status, row.error, row.finished_at = "error", t("Interrupted by a restart."), utcnow()
@@ -1099,6 +1149,9 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                 if msg:
                     warning = f"{warning} {msg}" if warning else msg
             results = _by_fit(best + rest)
+        if results:
+            _update(search_id, status="prices", results=results)
+            await geizhals_prices(search_id, results)
     await geo.locate(results)           # coordinates from postcodes, home geocoded once: the list can sort by distance
     _update(search_id, status="done", results=results, passed=passed or None, note=note or None, warning=warning,
             finished_at=utcnow(), cards=None, pool=_pool(reserve or [], unseen, results + passed))
@@ -1152,6 +1205,7 @@ async def _more(search_id: int) -> None:
         if unseen and len(unseen) == len(batch):        # Claude ranked none of them: the cheapest instead
             results = results + unranked(batch)
             warning = t("Claude could not rank the offers; showing the cheapest ones instead.")
+        await geizhals_prices(search_id, results)
         await geo.locate(results)
         _update(search_id, status="done", results=results, passed=passed or None, pool=_pool(rest, unseen, results + passed),
                 candidates=(row.candidates or 0) + len(batch),

@@ -332,9 +332,10 @@ from app.services import geo as _geo  # noqa: E402
 
 templates.env.globals.update(home_point=_geo.home_cached, home_address=_geo.home_address,   # distance from home to ads
                              result_km=_geo.distance_km, hit_km=_geo.hit_km)
+from app.services.product_search import discount as _ps_discount  # noqa: E402
 from app.services.product_search import red_flags as _red_flags  # noqa: E402
 
-templates.env.globals.update(ps_red_flags=_red_flags)   # older stored results: without "shipping costs unclear"
+templates.env.globals.update(ps_red_flags=_red_flags, ps_discount=_ps_discount)   # older stored results: without "shipping costs unclear"
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled,
                              vpn_health=vpn.health)
@@ -2110,7 +2111,8 @@ async def myads_delete(request: Request, ad_id: str):
 
 LIVE_EVENTS = 5      # notices one poll brings at most (a page that slept long gets the newest ones)
 PS_STEPS = {"planning": "Claude plans the searches", "searching": "Searching the sites",
-            "ranking": "Claude ranks the offers", "photos": "Claude checks the photos"}
+            "ranking": "Claude ranks the offers", "photos": "Claude checks the photos",
+            "prices": "Looking up new prices on Geizhals"}
 
 
 def _product_search_jobs() -> dict[str, list[dict[str, Any]]]:

@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 # willhaben's exact PayLivery fee, loaded into the hit page's price breakdown
 tg_bridge.TWINS.update({"_wh_fee.html": "tg/_wh_fee.html"})
-ORDERS = ("fit", "price", "distance")
+ORDERS = ("fit", "price", "discount", "distance")
 
 
 def _search_notice(code: str | None) -> str | None:
@@ -53,11 +53,15 @@ async def tg_search(request: Request, q: str = "", search: int | None = None, ms
 
 
 def _ordered(results: list[dict[str, Any]], order: str, home: Any) -> list[dict[str, Any]]:
-    """The offers in Claude's order, by price or by distance from home (as the dashboard sorts them in the browser):
-    offers without a price or a place last, in Claude's order."""
-    from app.services import geo
+    """The offers in Claude's order, by price, by discount on the Geizhals new price or by distance from home (as the
+    dashboard sorts them in the browser): offers without a price, a new price or a place last, in Claude's order."""
+    from app.services import geo, product_search
     if order == "price":
         key = lambda ir: (ir[1].get("price") is None, ir[1].get("price") or 0, ir[0])  # noqa: E731
+    elif order == "discount":
+        def key(ir):
+            off = product_search.discount(ir[1])
+            return (off is None, -(off or 0), ir[0])
     elif order == "distance" and home:
         def key(ir):
             km = geo.distance_km(ir[1], home)

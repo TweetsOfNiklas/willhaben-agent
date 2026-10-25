@@ -16,11 +16,12 @@
       {%- if ps.status == 'planning' %}{{ _("Claude") }}: {{ _("plans the searches") }}
       {%- elif ps.status == 'searching' %}{{ _("Loading ads") }}: {{ _("{done} of {total} searches", done=pr.done or 0, total=pr.total or 0) }}
       {%- elif ps.status == 'ranking' %}{{ _("Claude") }}: {{ _("ranks {n} offers", n=ps.candidates or 0) }}{% if pr.rank %} · {{ _("batch {i} of {n}", i=pr.rank.done, n=pr.rank.total) }}{% endif %}
+      {%- elif ps.status == 'prices' %}Geizhals: {{ _("new prices of the offers: {done} of {total} products", done=pr.prices.done if pr.prices else 0, total=pr.prices.total if pr.prices else 0) }}
       {%- else %}{{ _("Claude") }}: {{ _("checks the photos of the best ones") }}{% endif %} …</span>
     {% for site, at in ps_waiting_for(ps.id).items() %}<span class="sub">{{ _("{site}: hourly request limit reached – the search goes on by itself at {time}.", site=site, time=at.strftime("%H:%M")) }}</span>{% endfor %}
     <span class="sub">{{ _("Usually under a minute, a large search several minutes – the best offers show up as they are ranked. You can leave this page; the result stays here.") }}</span>
     {% elif ps.status == 'error' %}<span style="font-size: 14px; color: var(--destructive)">{{ ps.error or _("The search failed.") }}</span>
-    {% elif ps.status in ('planning', 'searching', 'ranking', 'photos') %}<span style="font-size: 14px; color: #B07800">{{ _("This search was interrupted.") }}</span>{% endif %}
+    {% elif ps.status in ('planning', 'searching', 'ranking', 'photos', 'prices') %}<span style="font-size: 14px; color: #B07800">{{ _("This search was interrupted.") }}</span>{% endif %}
     {% if not live and ps.status != 'asking' %}<div class="btnrow">
       <a class="chip" style="display: inline-flex; align-items: center" href="/tg/search?mode=ai&from={{ ps.id }}">{{ ui.icon('edit', 13, 2) }} {{ _("New search") }}</a>
       <form method="post" action="/deals/search/{{ ps.id }}/rerun" style="margin: 0"><button class="chip">{{ ui.icon('refresh', 13, 2) }} {{ _("Run again") }}</button></form></div>{% endif %}
@@ -59,7 +60,7 @@
   {% if results|length > 1 %}
   {# the order of the offers: Claude's, by price, by distance from home (kept for the next search) #}
   <nav class="seg" aria-label="{{ _('Sort the offers') }}" data-ps-order>
-    {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('distance', _('Distance'))] %}
+    {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('discount', _('Discount')), ('distance', _('Distance'))] %}
     {% if key == 'distance' and not home %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}">{{ label }}</a>
     {% else %}<a href="/tg/search/{{ ps.id }}?order={{ key }}"{% if order == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}
     {% endfor %}
@@ -80,6 +81,7 @@
         {% if r.condition == 'worn' %}<span class="pill warn" style="align-self: flex-start">{{ _("worn") }}</span>{% elif r.condition == 'damaged' %}<span class="pill bad" style="align-self: flex-start">{{ _("damaged") }}</span>{% endif %}
         {% if r.reason %}<span class="sub">{{ r.reason }}</span>{% endif %}{% if r.photo_note %}<span class="sub">{{ r.photo_note }}</span>{% endif %}
         {% if p.pos is not none %}{{ m.pricebar(deal_bar(p, r.price_display or (r.price|eur))) }}{% endif %}
+        {% set off = ps_discount(r) %}{% if off is not none %}<a class="sub" href="{{ r.geizhals.url }}" target="_blank" hx-boost="false" data-new-price>{{ _("{n} % below the new price ({price}, Geizhals)", n=off, price=r.geizhals.price_from|eur) if off >= 0 else _("{n} % above the new price ({price}, Geizhals)", n=-off, price=r.geizhals.price_from|eur) }}</a>{% endif %}
         {% if r.median and r.price %}{% set diff = ((r.price - r.median) * 100 / r.median)|round|int %}<span class="sub">{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %} ({{ _("{n} comparable ads", n=r.comparables) }}){% if r.query %} · „{{ r.query }}“{% endif %}</span>{% endif %}
         {% set rf = ps_red_flags(r.get('red_flags')) %}{% if rf %}<span style="display: flex; flex-wrap: wrap; gap: 4px">{% for f in rf %}<span class="pill">{{ f }}</span>{% endfor %}</span>{% endif %}
         {% set where = [r.location, _("{km} km away", km=('%.1f'|format(km)).replace('.', ',') if km < 10 else km|round|int) if km is not none else none, _("dealer") if r.is_private == false else none]|select|list %}

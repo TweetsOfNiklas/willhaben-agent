@@ -427,10 +427,11 @@ def rerate(res: dict[str, Any] | None, zones: dict[str, Any] | None = None) -> d
 
 
 def card_position(r: dict[str, Any]) -> dict[str, Any]:
-    """The position of a product-search card, computed now from its stats (lists know no new price: comparables
-    only); a card stored before the cards kept their stats keeps its position with the current label bounds."""
+    """The position of a product-search card, computed now from its stats and the Geizhals new price looked up after
+    the ranking (none yet: comparables only); a card stored before the cards kept their stats keeps its position
+    with the current label bounds."""
     if r.get("stats"):
-        return position(r.get("price"), r["stats"], None, r.get("item_condition"))
+        return position(r.get("price"), r["stats"], (r.get("geizhals") or {}).get("price_from"), r.get("item_condition"))
     p = r.get("position") or {}
     if p.get("pos") is not None:
         return {**p, "level": level_at(p["pos"])}
