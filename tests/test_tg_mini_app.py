@@ -304,8 +304,15 @@ def test_chat_list_bulk_and_my_ads_clean_up(client, monkeypatch):
     assert 'href="/tg/myads/cleanup"' in client.get("/tg/myads").text
 
 
-def test_chats_are_removed_from_the_list_several_at_once(client):
-    """Selected chats can be removed from the app (messages and drafts gone here; willhaben keeps them)."""
+def test_chats_are_removed_from_the_list_several_at_once(client, monkeypatch):
+    """Selected chats are deleted at once, on willhaben and here."""
+    from app.services import chats
+    deleted = []
+
+    class Account:
+        async def delete_conversations(self, ids):
+            deleted.append(list(ids))
+    monkeypatch.setattr(chats, "_account", lambda: Account())
     _data()
     assert 'formaction="/chats/bulk/remove"' in client.get("/tg/chats").text
     r = client.post("/chats/bulk/remove", data={"ids": ["c1"]}, headers={"X-TG-Back": "/tg/chats"},
@@ -313,3 +320,4 @@ def test_chats_are_removed_from_the_list_several_at_once(client):
     assert r.headers["location"].startswith("/tg/chats?msg=")
     with session() as db:
         assert db.get(Conversation, "c1").removed and not db.exec(select(Message).where(Message.conversation_id == "c1")).all()
+    assert deleted == [["c1"]]

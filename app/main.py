@@ -1303,8 +1303,8 @@ async def chats_live_state(c: str | None = None):
 
 @app.post("/chats/bulk/{action}")
 async def chats_bulk(request: Request, action: str):
-    """Selected chats: mark read (read receipts on willhaben, best effort), hide or remove here (willhaben keeps
-    them; a removed chat comes back when they write again)."""
+    """Selected chats: mark read (read receipts on willhaben, best effort), hide here, or delete (on willhaben and
+    here, _delete_chats)."""
     if action not in ("read", "hide", "remove"):
         raise HTTPException(404)
     ids = [str(i) for i in (await request.form()).getlist("ids")]
@@ -1312,7 +1312,7 @@ async def chats_bulk(request: Request, action: str):
         if action == "hide":
             chats.hide(cid)
         elif action == "remove":
-            chats.remove(cid)
+            continue                     # all at once below: one willhaben request
         else:
             chats.seen_in_app(cid)
             if get_session().logged_in:
@@ -1323,8 +1323,10 @@ async def chats_bulk(request: Request, action: str):
                     conv.unread_count = 0
                     db.add(conv)
                     db.commit()
-    msg = {"hide": t("{n} chats hidden", n=len(ids)), "remove": t("{n} chats removed from the app", n=len(ids))}.get(
-        action) or t("{n} chats marked read", n=len(ids))
+    if action == "remove":
+        msg, _ok = await _delete_chats(ids) if ids else ("", True)
+        return back(f"/chats?msg={quote(msg, safe='')}")
+    msg = t("{n} chats hidden", n=len(ids)) if action == "hide" else t("{n} chats marked read", n=len(ids))
     return back(f"/chats?msg={quote(msg, safe='')}")
 
 
@@ -1348,10 +1350,30 @@ async def chat_unread(conversation_id: str):
     return back("/chats")
 
 
+async def _delete_chats(ids: list[str]) -> tuple[str, bool]:
+    """Delete chats on willhaben and here (chats.delete); Vinted's delete is not known: those are only removed here,
+    and the message says so. (message, ok); not ok when willhaben refused or could not be reached: nothing changed."""
+    try:
+        deleted, kept = await chats.delete(ids)
+    except Exception as e:  # noqa: BLE001 - not logged in, browser away, willhaben refused: shown, nothing removed
+        log.warning("deleting chats failed: %s", e)
+        return t("The chat could not be deleted on willhaben: {error}", error=e), False
+    for cid in kept:
+        chats.remove(cid)
+    parts = []
+    if deleted:
+        parts.append(t("Chat deleted on willhaben and here") if len(deleted) == 1
+                     else t("{n} chats deleted on willhaben and here", n=len(deleted)))
+    if kept:
+        parts.append(t("Vinted chats can only be removed here so far ({n}) – on Vinted they stay", n=len(kept)))
+    return " · ".join(parts), True
+
+
 @app.post("/chats/{conversation_id}/remove")
 async def chat_remove(conversation_id: str):
-    chats.remove(conversation_id)
-    return back(f"/chats?msg={quote(t('Chat removed here (still on willhaben); it comes back when they write again'), safe='')}")
+    """Delete the chat on its site (willhaben) and here."""
+    msg, ok = await _delete_chats([conversation_id])
+    return back(f"/chats{'' if ok else '/' + quote(conversation_id, safe='')}?msg={quote(msg, safe='')}")
 
 
 @app.post("/chats/sync")

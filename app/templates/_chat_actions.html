@@ -11,7 +11,7 @@
       <input type="hidden" name="hidden" value="{{ '0' if c.hidden_at else '1' }}">
       <button class="btn btn-ghost btn-sm w-full justify-start font-normal">{{ _("Show in list again") if c.hidden_at else _("Hide from this list only") }}</button></form>
     <form method="post" action="/chats/{{ c.id }}/remove"
-          onsubmit='return confirm({{ (_("Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.") ~ "\n\n" ~ (c.partner_name or _("unknown")) ~ " · " ~ (c.ad_title or ""))|tojson }})'>
-      <button class="btn btn-ghost btn-sm w-full justify-start text-error hover:bg-bad-soft">{{ _("Remove from the app") }}</button></form>
+          onsubmit='return confirm({{ (_("Delete this chat? It is deleted on willhaben for good, with all messages – this cannot be undone. A Vinted chat is only removed here.") ~ "\n\n" ~ (c.partner_name or _("unknown")) ~ " · " ~ (c.ad_title or ""))|tojson }})'>
+      <button class="btn btn-ghost btn-sm w-full justify-start text-error hover:bg-bad-soft">{{ _("Delete chat") }}</button></form>
   </div>
 </div>

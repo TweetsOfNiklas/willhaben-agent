@@ -1,5 +1,7 @@
 from datetime import timedelta
+from urllib.parse import unquote
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
@@ -71,8 +73,23 @@ async def test_hidden_chat_comes_back_on_a_new_message(monkeypatch):
         assert db.get(Conversation, "c1").hidden_at is None
 
 
-def test_chat_list_hides_and_removes():
+class FakeAccount:
+    """willhaben's chat delete (recorded): the ids asked for, or a refusal."""
+    def __init__(self, fail=False):
+        self.deleted, self.fail = [], fail
+
+    async def delete_conversations(self, ids):
+        if self.fail:
+            from app.willhaben.account import SendFailed
+            raise SendFailed("HTTP 403")
+        self.deleted.append(list(ids))
+
+
+def test_chat_list_hides_and_removes(monkeypatch):
     from app.main import app
+    from app.services import chats
+    fake = FakeAccount()
+    monkeypatch.setattr(chats, "_account", lambda: fake)
 
     with session() as db:
         db.add(Conversation(id="a", partner_name="Sichtbar", last_message_at=utcnow()))
@@ -90,6 +107,7 @@ def test_chat_list_hides_and_removes():
         page = c.get("/chats").text
         assert "Versteckt" in page and "Sichtbar" not in page
         c.post("/chats/b/remove")
+        assert fake.deleted == [["b"]]                          # deleted on willhaben first, then here
         assert "Versteckt" not in c.get("/chats?show_hidden=1").text
         assert {x["id"] for x in c.get("/api/chats").json()} == {"a"}
 
@@ -124,3 +142,47 @@ def test_chat_list_filters_unread_awaiting_reply_and_drafts():
         assert shown("/chats?show=draft") == {"Entwurf-Person"}
         assert shown("/chats?show=reply&role=buyer") == set()
         assert 'href="/chats?role=seller&amp;show=reply"' in c.get("/chats?show=reply").text
+
+
+def test_deleting_chats_on_willhaben(monkeypatch):
+    """One request for several chats; a refusal removes nothing here; a Vinted chat is only removed here."""
+    from app.main import app
+    from app.services import chats
+    with session() as db:
+        for cid in ("x", "y", "z"):
+            db.add(Conversation(id=cid, partner_name=cid, last_message_at=utcnow()))
+        db.add(Conversation(id="v1", platform="vinted", partner_name="v", last_message_at=utcnow()))
+        db.commit()
+    fake = FakeAccount(fail=True)
+    monkeypatch.setattr(chats, "_account", lambda: fake)
+    with TestClient(app) as c:
+        r = c.post("/chats/x/remove", follow_redirects=False)
+        assert "/chats/x?msg=" in r.headers["location"]          # refused: back to the chat, it stays
+        with session() as db:
+            assert not db.get(Conversation, "x").removed
+        fake.fail = False
+        r = c.post("/chats/bulk/remove", data={"ids": ["y", "z", "v1"]}, follow_redirects=False)
+        assert fake.deleted == [["y", "z"]]                      # one willhaben request for both
+        assert "Vinted" in unquote(r.headers["location"])
+    with session() as db:
+        assert db.get(Conversation, "y").removed and db.get(Conversation, "z").removed and db.get(Conversation, "v1").removed
+
+
+async def test_the_account_sends_willhabens_delete():
+    """DELETE chat-api/v1/conversations with {"ids": [...]}, as the chat web app does; anything but 2xx raises."""
+    from app.willhaben.account import AccountClient, SendFailed
+    from app.willhaben.session import ApiResponse
+    calls = []
+
+    class S:
+        status = 204
+
+        async def api(self, method, path, body=None):
+            calls.append((method, path, body))
+            return ApiResponse(self.status, "", path)
+    s = S()
+    await AccountClient(s).delete_conversations(["a", "b"])
+    assert calls == [("DELETE", "/webapi/chat-api/v1/conversations", {"ids": ["a", "b"]})]
+    s.status = 403
+    with pytest.raises(SendFailed):
+        await AccountClient(s).delete_conversations(["a"])

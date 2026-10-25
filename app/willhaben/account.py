@@ -348,6 +348,13 @@ class AccountClient:
         await self.s.ws_send(CHAT_WS, frames)
         return len(unread)
 
+    async def delete_conversations(self, ids: list[str]) -> None:
+        """Delete conversations on willhaben for good, as the chat web app's "delete" does (recorded 2026-10-25):
+        DELETE chat-api/v1/conversations with {"ids": [...]}, answered 204. Several at once."""
+        r = await self.s.api("DELETE", f"{CHAT}/conversations", {"ids": list(ids)})
+        if r.status not in (200, 204):
+            raise SendFailed(t("willhaben did not delete the chat (HTTP {status})", status=r.status))
+
     async def ping_chat(self) -> dict[str, Any]:
         """Health check of the chat WebSocket (the web app's own ping); sends no message."""
         return await self.s.ws_request(CHAT_WS, {"req_type": "ping"}, None, req_type="ping", timeout_ms=10000)

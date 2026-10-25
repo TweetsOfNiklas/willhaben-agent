@@ -121,10 +121,7 @@
  "Sync the latest conversations": "Die neuesten Unterhaltungen synchronisieren",
  "Show hidden chats ({n})": "Ausgeblendete Chats zeigen ({n})",
  "hidden": "ausgeblendet",
- "Remove from the app": "Aus der App entfernen",
- "Remove this chat from the app? Its messages and drafts are deleted here; on willhaben the chat stays. It comes back if they write again.": "Diesen Chat aus der App entfernen? Nachrichten und Entwürfe werden hier gelöscht, auf willhaben bleibt der Chat. Schreibt die Person wieder, taucht er wieder auf.",
  "Chat hidden here (still on willhaben); it comes back when they write again": "Chat hier ausgeblendet (auf willhaben noch da); schreibt die Person wieder, taucht er wieder auf",
- "Chat removed here (still on willhaben); it comes back when they write again": "Chat hier entfernt (auf willhaben noch da); schreibt die Person wieder, taucht er wieder auf",
  "drafted automatically": "automatisch entworfen",
  "Claude revises the answer to {name}": "Claude überarbeitet die Antwort an {name}",
  "Availability": "Verfügbarkeit",
@@ -171,5 +168,13 @@
  "last online {ago}": "zuletzt online {ago}",
  "online": "online",
  "From their profile": "Laut ihrem Profil",
- "No chats match these filters.": "Keine Chats zu diesen Filtern."
+ "No chats match these filters.": "Keine Chats zu diesen Filtern.",
+ "Delete chat": "Chat löschen",
+ "Delete this chat? It is deleted on willhaben for good, with all messages – this cannot be undone. A Vinted chat is only removed here.": "Diesen Chat löschen? Er wird auf willhaben endgültig gelöscht, mit allen Nachrichten – das lässt sich nicht rückgängig machen. Ein Vinted-Chat wird nur hier entfernt.",
+ "Also on willhaben, for good": "Auch auf willhaben, endgültig",
+ "The chat could not be deleted on willhaben: {error}": "Der Chat konnte auf willhaben nicht gelöscht werden: {error}",
+ "Chat deleted on willhaben and here": "Chat auf willhaben und hier gelöscht",
+ "{n} chats deleted on willhaben and here": "{n} Chats auf willhaben und hier gelöscht",
+ "Vinted chats can only be removed here so far ({n}) – on Vinted they stay": "Vinted-Chats lassen sich bisher nur hier entfernen ({n}) – auf Vinted bleiben sie",
+ "willhaben did not delete the chat (HTTP {status})": "willhaben hat den Chat nicht gelöscht (HTTP {status})"
 }

@@ -1725,6 +1725,22 @@ def hide(conversation_id: str, on: bool = True) -> None:
             db.commit()
 
 
+async def delete(ids: list[str]) -> tuple[list[str], list[str]]:
+    """Delete chats on their site and then here (remove). willhaben deletes them for good (one request for all);
+    a chat of a site without a known delete (Vinted) is not touched there and comes back as `kept` – it is not
+    removed here either, so nothing looks deleted that is not. Returns (deleted, kept). Raises when willhaben
+    refuses: then nothing is removed."""
+    from app.platforms import vinted_inbox
+    wh = [i for i in ids if not vinted_inbox.is_vinted(i)]
+    kept = [i for i in ids if vinted_inbox.is_vinted(i)]
+    if wh:
+        await _account().delete_conversations(wh)
+        log.info("deleted %d chat(s) on willhaben", len(wh))
+    for cid in wh:
+        remove(cid)
+    return wh, kept
+
+
 def remove(conversation_id: str) -> None:
     """Delete a chat's messages and drafts here (not on willhaben) and skip it in future syncs, until the
     other person writes again. Shipments and purchases stay: they are records of labels and money."""
