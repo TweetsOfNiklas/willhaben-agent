@@ -23,7 +23,7 @@ from sqlmodel import col, select
 from app.config import get_settings
 from app.db import Hit, ProductSearch, SearchAgent, get_setting, session, set_setting, utcnow
 from app.i18n import t
-from app.services import product_search, scam, screening
+from app.services import auto_buy, product_search, scam, screening
 from app import platforms
 from app.platforms import Blocked, Listing, PlatformError, SearchSpec, ad_ref
 from app.platforms import vpn
@@ -814,11 +814,15 @@ async def _run_agent(agent_id: int) -> RunResult:
                              data={"agent": name, "platform": h.platform, "ad_id": h.ad_id, "ref": ad_ref(h.platform, h.ad_id),
                                    "price": h.price, "location": h.location, "shipping_price": h.shipping_price,
                                    "shipping": h.shipping, **_screen_data(h), **_scam_data(h), **_geizhals_data(h)})
+        if auto_buy.enabled(agent):       # the passing hits: bought after a countdown (Telegram can cancel it)
+            await auto_buy.consider(agent, [h for h in res.new if h.id in good])
         if len(good) > MAX_PUSH_PER_RUN:
             sites = list(dict.fromkeys(h.platform for h in res.new))
             await notify("hit", label(sites[0]) if len(sites) == 1 else name,
                          t("+{n} more new hits", n=len(good) - MAX_PUSH_PER_RUN),
                          data={"agent": name, "platform": sites[0] if len(sites) == 1 else None, "count": len(good)})
+    if notify_drops and res.price_drops and auto_buy.enabled(agent):   # a price drop into the maximum buys too
+        await auto_buy.consider(agent, [h for h in res.price_drops if passes(agent, h) and not _unjudged(agent, h, asked)])
     if notify_drops:
         for h in res.price_drops[:MAX_PUSH_PER_RUN]:
             await notify("price_drop", _scam_prefix(h) + t("{name}: price dropped", name=label(h.platform)),

@@ -1194,7 +1194,7 @@ async def _tell_seller_paid(pid: int) -> None:
 # ------------------------------------------------------------------ hooks: PayLivery (not registered here)
 async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, Any]) -> None:
     """PayLivery stage of a buyer chat changed (registered by app/main.py)."""
-    row = for_conversation(conv.id)
+    row = for_conversation(conv.id) or _take_over_auto_buy(conv)
     if row is None:
         return
     if state.get("corrected_from"):              # a recheck lowered the stage
@@ -1235,6 +1235,20 @@ async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, An
     elif stage in ("cancelled", "problem"):
         if row.status in OPEN and row.status != "paused":
             await pause(row.id, t("PayLivery: {stage}", stage=stage), push=True)
+
+
+def _take_over_auto_buy(conv: Conversation) -> Purchase | None:
+    """willhaben's real chat of an ad bought by auto-buy (its order sat on a placeholder chat, auto_buy.py) takes the
+    order over: shipping, delivery and receipt follow there."""
+    from app.services.auto_buy import BUY_CHAT_PREFIX
+    if not conv.ad_id or (conv.id or "").startswith(BUY_CHAT_PREFIX):
+        return None
+    with session() as db:
+        row = db.exec(select(Purchase).where(Purchase.ad_id == conv.ad_id, col(Purchase.status).in_(OPEN),
+                                             col(Purchase.conversation_id).startswith(BUY_CHAT_PREFIX))).first()
+    if row is None:
+        return None
+    return _change(row.id, lambda r: setattr(r, "conversation_id", conv.id))
 
 
 def _paylivery_corrected(row: Purchase, stage: str) -> Purchase:

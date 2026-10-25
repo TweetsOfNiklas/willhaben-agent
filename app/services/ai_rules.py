@@ -80,6 +80,8 @@ BUILT_IN = (
     ("app.llm.prompts", "SIM_REVIEW_SYSTEM", _("Simulator: reviewing a prompt"), "sim"),
     ("app.llm.prompts", "SIM_ROUND_REVIEW_SYSTEM", _("Simulator: reviewing a round"), "sim"),
     ("app.services.chat_sim", "FILL_SYSTEM", _("Simulator: filling the owner's gaps"), "sim"),
+    ("app.services.agent_sim", "ADS_SYSTEM", _("Agent simulator: inventing test ads"), "sim"),
+    ("app.services.agent_sim", "BRIEF_SYSTEM", _("Agent simulator: improving the brief"), "sim"),
 )
 
 

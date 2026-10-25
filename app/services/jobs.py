@@ -134,7 +134,7 @@ def grace_s() -> float:
 
 def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *, lane: str = "ads", total: int = 0,
            current: str | None = None, reuse_queued: bool = False, keys: list[str] | None = None,
-           on_cancel: Callable[[], None] | None = None, grace: bool = False, quiet: bool = False,
+           on_cancel: Callable[[], None] | None = None, grace: bool | float = False, quiet: bool = False,
            link: str | None = None) -> Job:
     """Queue `run(job)` in `lane`; it returns the result line shown in the header. Needs a running event loop.
     `link`: the page with the result (the finished-job notice opens it; no notice on that page itself).
@@ -142,7 +142,7 @@ def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *
     `keys`: the marker keys ("ad:123", "draft:5") of everything the job will touch, so the elements waiting for it
     can offer a cancel button while it is queued. `on_cancel` clears those markers when it is cancelled (cancel());
     a job with markers but no on_cancel cannot be cancelled. `grace`: irreversible work waits grace_s() seconds
-    in the queue first (the window to take the click back). `quiet`: no notice when it is done – the page that
+    in the queue first (the window to take the click back); a number: that many seconds (auto-buy's countdown). `quiet`: no notice when it is done – the page that
     started it shows the result itself (a failure still gets one)."""
     if lane not in LANES:
         raise ValueError(lane)
@@ -151,13 +151,19 @@ def submit(kind: str, label: str, run: Callable[[Job], Awaitable[str | None]], *
             if j.kind == kind and j.status == "queued":
                 return j
     keys = list(keys or ([current] if current else []))
-    wait = grace_s() if grace else 0
+    wait = grace_s() if grace is True else float(grace or 0)
     job = Job(next(_ids), kind, label, lane=lane, total=total, current=current, keys=keys, on_cancel=on_cancel,
               cancellable=on_cancel is not None or not keys, quiet=quiet, link=link,
-              runs_at=utcnow() + timedelta(seconds=wait) if wait else None, irreversible=grace)
+              runs_at=utcnow() + timedelta(seconds=wait) if wait else None, irreversible=bool(grace))
     _active.append(job)
     job.task = asyncio.create_task(_run(job, run))
     return job
+
+
+def cancel_key(key: str) -> bool:
+    """Take back the queued job working on `key` ("purchase:12"); False when there is none (it runs already)."""
+    job = next((j for j in _active if j.current == key and j.status == "queued"), None)
+    return cancel(job.id) if job is not None else False
 
 
 def cancel(job_id: int) -> bool:

@@ -55,6 +55,15 @@
       {% if not home_address() %}<span style="font-size: 13px; color: #B07800">{{ _("No address set yet") }}</span>{% endif %}
     </div>
 
+    {# auto-buy: a passing hit within the maximum is bought with PayLivery after a countdown (app/services/auto_buy.py) #}
+    <div class="sh">{{ _("Buy automatically") }}</div>
+    <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-auto-buy>
+      <input type="hidden" name="auto_buy_shown" value="1">
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span>{{ _("Buy automatically") }}</span><input type="checkbox" name="auto_buy_on" {% if a.auto_buy %}checked{% endif %} style="width: 22px; height: 22px"></label>
+      <span class="sub">{{ _("A hit that passes this agent and costs at most the maximum (item, shipping and buyer protection) is bought with willhaben PayLivery's “buy now” – after a 2-minute countdown that Telegram's Cancel button stops. You approve 3-D Secure in your bank app. Vinted: not yet.") }}</span>
+      <label class="sub">{{ _("Maximum for auto-buy in euros") }} · {{ _("incl. shipping and buyer protection") }}<input class="field" inputmode="decimal" name="auto_buy_max" value="{{ ('%.2f'|format(a.auto_buy_max)).rstrip('0').rstrip('.') if a.auto_buy_max else '' }}" placeholder="€"></label>
+    </div>
+
     {# the searches: each term once (it runs on every ticked site), the searches without a term, terms added before
        Save, the sites. Save sends plain form fields (drop_term, drop_query, add_*, sites); the script below only shows
        what Save will do, as the dashboard's drawer: the count per check, rows added before Save (a term already there

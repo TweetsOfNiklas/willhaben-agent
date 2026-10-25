@@ -13,7 +13,7 @@ router = APIRouter()
 
 # the dashboard's own pages, opened as they are: (path, label, icon)
 ADMIN = (("/settings", "Settings", "settings"), ("/stats/willhaben", "Statistics", "database"),
-         ("/timeline", "Timeline", "clock"), ("/simulator", "Chat simulator", "bot"),
+         ("/timeline", "Timeline", "clock"), ("/simulator", "Chat simulator", "bot"), ("/agent-sim", "Search agent simulator", "detective"),
          ("/session", "Browser", "monitor"), ("/credits", "Credits", "star"), ("/bugreport", "Report a bug", "bug"))
 
 

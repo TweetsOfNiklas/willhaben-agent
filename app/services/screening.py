@@ -180,21 +180,13 @@ async def _download(url: str | None, folder: Path, name: str, platform: str | No
     return await ad_images.download(url, folder, name, transport=_transport, platform=platform)   # _transport: tests
 
 
-@timeline.scoped(agent_id="agent_id")
-async def screen(agent_id: int, hits: list[Hit]) -> int:
-    """Ask Claude about up to MAX_PER_CALL hits and store the verdicts on them. Returns how many were judged."""
-    with session() as db:
-        agent = db.get(SearchAgent, agent_id)
-    if agent is None or not agent.screen or not hits:
-        return 0
-    from app.services import geizhals_check
-
-    hits = hits[:MAX_PER_CALL]
-    timeline.update_context(hit_ids=[h.id for h in hits])
-    # with "Check the Geizhals product" the same call checks the product the app found (one call instead of two)
-    check = [nr for nr, h in enumerate(hits, 1) if agent.geizhals_check and geizhals_check.unchecked(h.geizhals)]
+async def ask(agent: SearchAgent, hits: list[Hit], check: list[int],
+              stats: dict[str, Any] | None) -> tuple[dict[int, dict[str, Any]], dict[int, list[dict[str, Any]]]]:
+    """Claude's verdicts on `hits` (the agent's brief, the photos, the comparables `stats`); `check`: the numbers
+    (from 1) whose Geizhals product Claude checks in the same call. ({nr: answer}, {nr: the lookup's results Claude
+    picked from}). Stores nothing (the screening and the agent simulator, app/services/agent_sim.py, both use it);
+    raises LLMError."""
     cands: dict[int, list[dict[str, Any]]] = {}     # the results Claude may pick from, per hit to check
-    stats = _stats(agent_id, {h.id for h in hits})
     lang = LANGS.get(background_lang(), "Deutsch")
     sites = list(dict.fromkeys(h.platform or "willhaben" for h in hits))
     with tempfile.TemporaryDirectory(prefix="wh-screen-") as tmp:
@@ -218,15 +210,45 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
                           "photo": f"foto{len(images)}{img.suffix}" if img else None})
         prompt = screen_prompt(agent_name=agent.name, brief=agent.screen_brief or "", hits=items, stats=stats,
                                language=lang)
-        try:
-            system = _system(sites, bool(check))
-            result = await get_backend("screen").complete(system=system, prompt=prompt,
-                                                          schema=SCREEN_GH_SCHEMA if check else SCREEN_SCHEMA,
-                                                          images=images)
-        except LLMError as e:
-            log.warning("screening failed for agent %s: %s", agent_id, e)
-            return 0
-    by_nr = {r.get("nr"): r for r in result.data.get("results") or [] if isinstance(r, dict)}
+        result = await get_backend("screen").complete(system=_system(sites, bool(check)), prompt=prompt,
+                                                      schema=SCREEN_GH_SCHEMA if check else SCREEN_SCHEMA,
+                                                      images=images)
+    return {r.get("nr"): r for r in result.data.get("results") or [] if isinstance(r, dict)}, cands
+
+
+def verdict_fields(r: dict[str, Any], hit: Hit) -> dict[str, Any]:
+    """One answer of `ask` as the hit's screen_* fields (the app's own issues added: dealer, the scam check)."""
+    out: dict[str, Any] = {"screen_relevant": bool(r.get("relevant")),
+                           "screen_deal": r.get("deal") if r.get("deal") in DEAL_RANK else "unknown",
+                           "screen_reason": (r.get("reason") or "").strip()[:1500] or None}   # full text for the viewer
+    if isinstance(r.get("issues"), list):
+        issues = [i for i in r["issues"] if i in ISSUES and i != "dealer"]
+        if hit.is_private is False:          # willhaben says so; Claude does not have to guess
+            issues.append("dealer")
+        if scam.level(hit.scam_flags) == "high":   # the rule-based scam check counts like Claude's verdict
+            issues.append("scam_suspect")
+        out["screen_issues"] = list(dict.fromkeys(issues))
+    return out
+
+
+@timeline.scoped(agent_id="agent_id")
+async def screen(agent_id: int, hits: list[Hit]) -> int:
+    """Ask Claude about up to MAX_PER_CALL hits and store the verdicts on them. Returns how many were judged."""
+    with session() as db:
+        agent = db.get(SearchAgent, agent_id)
+    if agent is None or not agent.screen or not hits:
+        return 0
+    from app.services import geizhals_check
+
+    hits = hits[:MAX_PER_CALL]
+    timeline.update_context(hit_ids=[h.id for h in hits])
+    # with "Check the Geizhals product" the same call checks the product the app found (one call instead of two)
+    check = [nr for nr, h in enumerate(hits, 1) if agent.geizhals_check and geizhals_check.unchecked(h.geizhals)]
+    try:
+        by_nr, cands = await ask(agent, hits, check, _stats(agent_id, {h.id for h in hits}))
+    except LLMError as e:
+        log.warning("screening failed for agent %s: %s", agent_id, e)
+        return 0
     judged = 0
     with session() as db:
         for nr, h in enumerate(hits, 1):
@@ -234,16 +256,8 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
             if r is None:
                 continue
             row = db.get(Hit, h.id)
-            row.screen_relevant = bool(r.get("relevant"))
-            row.screen_deal = r.get("deal") if r.get("deal") in DEAL_RANK else "unknown"
-            row.screen_reason = (r.get("reason") or "").strip()[:1500] or None   # full text for the ad viewer
-            if isinstance(r.get("issues"), list):
-                issues = [i for i in r["issues"] if i in ISSUES and i != "dealer"]
-                if row.is_private is False:      # willhaben says so; Claude does not have to guess
-                    issues.append("dealer")
-                if scam.level(row.scam_flags) == "high":   # the rule-based scam check counts like Claude's verdict
-                    issues.append("scam_suspect")
-                row.screen_issues = list(dict.fromkeys(issues))
+            for k, v in verdict_fields(r, row).items():
+                setattr(row, k, v)
             row.screen_at = utcnow()
             db.add(row)
             judged += 1

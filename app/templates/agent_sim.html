@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+{# Search agent simulator (app/services/agent_sim.py, routes app/agent_sim_routes.py): an agent's judging settings
+   edited as a copy, its recent hits judged again or test ads Claude invents; nothing is stored on the hits, nothing
+   pushed. A running run (sim.status "running") asks for this page again every 3 s and swaps itself in. #}
+{% block content %}
+{% set scope = (sim.scope if sim else none) or {} %}
+<div class="mx-auto flex w-full max-w-[1000px] min-w-0 flex-col gap-5 px-4 py-5 md:px-7 md:py-[22px]">
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    {{ ui.head(_("Search agent simulator"), _("How would an agent judge with other settings? Replay its recent hits, or let Claude invent tricky test ads – nothing is stored on the hits, nothing is pushed.")) }}
+    <a href="/simulator" class="btn btn-sm">{{ ui.icon('bot', 14) }}{{ _("Chat simulator") }}</a>
+  </div>
+
+  {% if not agents %}
+  {{ ui.msg(_("No search agent yet."), 'info') }}
+  {% else %}
+  {# ---- the agent and a copy of its judging settings ---- #}
+  <form method="post" action="/agent-sim/run" class="flex flex-col gap-4 rounded-box border border-base-300 bg-base-100 px-5 py-4" data-sim-settings>
+    <div class="flex flex-wrap items-end gap-3">
+      <label class="flex min-w-[220px] flex-1 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Search agent") }}</span>
+        <select name="agent_id" class="select w-full bg-base-200" onchange="location.href='/agent-sim?agent=' + this.value">
+          {% for a in agents %}<option value="{{ a.id }}" {% if agent and a.id == agent.id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
+      {% if terms %}<span class="pb-2.5 text-[12.5px] text-muted">{{ _("Searches: {terms}", terms=terms|join(', ')) }}</span>{% endif %}
+    </div>
+    {% if sim %}<p class="-mt-2 text-[12.5px] text-muted">{{ _("The settings of the run below – change them and run again.") }}</p>{% endif %}
+
+    <fieldset class="flex flex-col gap-3">
+      <label class="flex items-center gap-2 text-[14px] font-semibold"><input type="checkbox" name="screen" class="toggle toggle-primary toggle-sm" {% if settings.screen %}checked{% endif %}>{{ _("Claude screening") }}</label>
+      <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("What exactly are you looking for?") }}</span>
+        <textarea name="screen_brief" rows="3" class="textarea w-full bg-base-200" placeholder="{{ _('e.g. only gen 2 or newer, below €50, no defective devices') }}">{{ settings.screen_brief or '' }}</textarea></label>
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Notify about") }}</span>
+          <select name="screen_min" class="select w-full bg-base-200">{% for k, label in thresholds.items() %}<option value="{{ k }}" {% if settings.screen_min == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Pickup only within (km)") }}</span>
+          <input type="number" name="max_km" min="1" max="1000" value="{{ settings.max_km or '' }}" placeholder="{{ _('the setting for all agents') }}" class="input w-full bg-base-200"></label>
+      </div>
+      <div class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Do not notify when the hit is …") }}</span>
+        <div class="flex flex-wrap gap-1.5">{% for i in hideable %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 px-3 py-1 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary">
+          <input type="checkbox" name="screen_hide" value="{{ i }}" class="sr-only" {% if i in (settings.screen_hide or []) %}checked{% endif %}>{{ issue_labels[i] }}</label>{% endfor %}</div></div>
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Geizhals rule") }}</span>
+          <select name="gh_rule" class="select w-full bg-base-200">
+            <option value="" {% if not settings.geizhals_pct and not settings.geizhals_level %}selected{% endif %}>{{ _("off") }}</option>
+            {% for k, label in levels %}<option value="{{ k }}" {% if settings.geizhals_level == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            <option value="pct" {% if settings.geizhals_pct %}selected{% endif %}>{{ _("own percentage below the new price") }}</option></select></label>
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("% below") }}</span>
+          <input type="number" name="geizhals_pct" min="1" max="95" value="{{ settings.geizhals_pct or '' }}" class="input w-full bg-base-200"></label>
+      </div>
+      <label class="flex items-center gap-2 text-[13px]"><input type="checkbox" name="geizhals_check" class="checkbox checkbox-primary checkbox-sm" {% if settings.geizhals_check %}checked{% endif %}>{{ _("Claude checks the Geizhals product (in the simulation it only picks from the results the app found)") }}</label>
+    </fieldset>
+
+    <div class="flex flex-col gap-3 border-t border-base-300 pt-4 md:flex-row md:items-end md:justify-between">
+      <div class="flex flex-wrap items-end gap-2">
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Recent hits") }}</span>
+          <select name="n" class="select select-sm bg-base-200">{% for n in scopes %}<option value="{{ n }}" {% if scope.get('n') == n or (not scope and n == 50) %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Which") }}</span>
+          <select name="only" class="select select-sm bg-base-200">{% for k, label in [('all', _("all")), ('pushed', _("only pushed")), ('held', _("only held back"))] %}<option value="{{ k }}" {% if scope.get('only') == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <button class="btn btn-primary btn-sm" name="kind" value="replay" data-run-replay>{{ ui.icon('refresh', 14) }}{{ _("Replay hits") }}</button>
+      </div>
+      <div class="flex flex-wrap items-end gap-2">
+        <label class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Test ads") }}</span>
+          <select name="tests_n" class="select select-sm bg-base-200">{% for n in test_counts %}<option value="{{ n }}" {% if n == 10 %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></label>
+        <button class="btn btn-sm" name="kind" value="tests" data-run-tests>{{ ui.icon('sparkle', 14) }}{{ _("Let Claude invent test ads") }}</button>
+      </div>
+    </div>
+    <p class="text-xs text-muted">{{ _("Runs in the background with the screening's Claude model – about one call per 10 hits; the page fills in by itself.") }}</p>
+  </form>
+  {% endif %}
+
+  {# ---- the open run ---- #}
+  {% if sim %}
+  <section id="sim-run" class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4"
+           {% if sim.status == 'running' %}hx-get="/agent-sim?id={{ sim.id }}" hx-trigger="every 3s" hx-select="#sim-run" hx-swap="outerHTML"{% endif %} data-sim-run="{{ sim.status }}">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <h2 class="text-base font-semibold">{{ _("Replay") if sim.kind == 'replay' else _("Test ads") }} · {{ agent_names.get(sim.agent_id, '?') }}</h2>
+        <span class="text-[12.5px] text-muted">{{ sim.created_at|local }}</span>
+        {% if changed %}{{ ui.pill(_("{n} settings changed", n=changed|length), 'warn', dot=false) }}{% endif %}
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        {% if sim.status == 'done' and changed %}<form method="post" action="/agent-sim/{{ sim.id }}/apply" onsubmit='return confirm({{ _("Take these settings over for the agent?")|tojson }})'><button class="btn btn-primary btn-sm" data-apply>{{ _("Apply these settings to the agent") }}</button></form>{% endif %}
+        {% if sim.status != 'running' %}<form method="post" action="/agent-sim/{{ sim.id }}/again"><button class="btn btn-sm">{{ ui.icon('refresh', 13) }}{{ _("Run again") }}</button></form>{% endif %}
+        <form method="post" action="/agent-sim/{{ sim.id }}/delete"><button class="btn btn-ghost btn-sm text-error">{{ _("Delete") }}</button></form>
+      </div>
+    </div>
+
+    {% if sim.status == 'running' %}
+    <div class="flex items-center gap-2 text-[14px] text-primary"><span class="loading loading-spinner loading-sm"></span>{{ _("Claude is judging …") }}</div>
+    {% elif sim.status == 'error' %}
+    {{ ui.msg(sim.error or _("Failed"), 'error') }}
+    {% elif sim.kind == 'replay' %}
+      {% set sm = sim.summary or {} %}
+      <div class="flex flex-wrap gap-2 text-[13px]" data-summary>
+        {{ ui.pill(_("{n} would push", n=sm.push), 'ok', dot=false) }}{{ ui.pill(_("{n} held back", n=sm.held), '', dot=false) }}
+        {{ ui.pill(_("{n} pushed before", n=sm.real_push), '', dot=false) }}
+        {% if sm.now_push %}{{ ui.pill(_("{n} would push now", n=sm.now_push), 'brand', dot=false) }}{% endif %}
+        {% if sm.now_held %}{{ ui.pill(_("{n} would be held back now", n=sm.now_held), 'warn', dot=false) }}{% endif %}
+        <a class="link link-primary ml-auto text-[12.5px] no-underline" href="/agent-sim?id={{ sim.id }}{{ '' if only_changes else '&changes=1' }}">{{ _("Show all") if only_changes else _("Only changes") }}</a>
+      </div>
+      <div class="flex flex-col">
+        {% for r in sim.results or [] %}{% if not only_changes or r.changed %}
+        <div id="r{{ loop.index0 }}" class="grid grid-cols-[52px_minmax(0,1fr)] gap-3 border-t border-base-300 py-2.5 {{ 'bg-warn-soft -mx-5 px-5' if r.changed else '' }}" data-row data-changed="{{ 1 if r.changed else 0 }}">
+          {{ ui.thumb(r.image) }}
+          <div class="flex min-w-0 flex-col gap-1">
+            <div class="flex min-w-0 flex-wrap items-baseline gap-x-2"><a href="{{ r.url }}" target="_blank" rel="noopener" class="truncate font-semibold text-base-content no-underline hover:underline">{{ r.title }}</a><span class="tabular-nums text-[13px]">{{ r.price_display or (r.price|eur if r.price else '') }}</span></div>
+            <div class="grid grid-cols-1 gap-1 text-[12.5px] sm:grid-cols-2">
+              <div><span class="text-muted">{{ _("Really:") }}</span> {{ ui.pill(_("pushed") if r.real.pushed else (_("passed") if r.real.push else _("held back")), 'ok' if r.real.push else '', dot=false) }}
+                {% if r.real.relevant is not none %}<span class="text-muted">{{ deal_label(r.real.deal) if r.real.relevant else _("wrong item") }}</span>{% endif %}</div>
+              <div><span class="text-muted">{{ _("Simulated:") }}</span> {{ ui.pill(_("would push") if r.sim.push else _("held back"), 'ok' if r.sim.push else 'warn' if r.changed else '', dot=false) }}
+                {% if r.sim.relevant is not none %}<span class="text-muted">{{ deal_label(r.sim.deal) if r.sim.relevant else _("wrong item") }}{% for i in r.sim.issues if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}</span>{% endif %}
+                {% if r.sim.reasons and not r.sim.push %}<span class="text-muted"> · {{ r.sim.reasons|join(', ') }}</span>{% endif %}</div>
+            </div>
+            {% if r.sim.reason %}<p class="text-[12.5px] text-muted">{{ r.sim.reason }}</p>{% endif %}
+            {% if r.sim.product %}<p class="text-[12px] text-muted">Geizhals: {{ {'kept': _("product kept"), 'picked': _("product picked: {name}", name=r.sim.product.name), 'search': _("Claude would search for {name}", name=r.sim.product.name or '?')}[r.sim.product.product] }}</p>{% endif %}
+          </div>
+        </div>
+        {% endif %}{% endfor %}
+      </div>
+    {% else %}
+      {% set sm = sim.summary or {} %}
+      <div class="flex flex-wrap items-center gap-2 text-[13px]" data-summary>
+        {{ ui.pill(_("{n} judged as expected", n=sm.ok), 'ok', dot=false) }}{% if sm.wrong %}{{ ui.pill(_("{n} judged differently", n=sm.wrong), 'bad', dot=false) }}{% endif %}
+      </div>
+      <div class="flex flex-col">
+        {% for r in sim.results or [] %}{% set rated = (sim.ratings or {}).get(loop.index0|string) or {} %}
+        <div id="r{{ loop.index0 }}" class="flex flex-col gap-1.5 border-t border-base-300 py-3" data-test="{{ 'ok' if r.ok else 'wrong' }}">
+          <div class="flex flex-wrap items-center gap-2">
+            {{ ui.pill(_("as expected") if r.ok else _("different"), 'ok' if r.ok else 'bad', dot=false) }}
+            <span class="font-semibold">{{ r.title }}</span><span class="tabular-nums text-[13px]">{{ r.price|eur if r.price else '' }}</span>
+            <span class="text-[12px] text-muted">{{ kind_labels.get(r.kind, r.kind) }}{% if r.condition %} · {{ r.condition }}{% endif %}{% if r.location %} · {{ r.location }}{% endif %}</span>
+          </div>
+          <details class="text-[13px]"><summary class="cursor-pointer text-muted">{{ _("Ad text") }}</summary><p class="mt-1 whitespace-pre-wrap">{{ r.description }}</p></details>
+          <div class="grid grid-cols-1 gap-1 text-[12.5px] sm:grid-cols-2">
+            <div><span class="text-muted">{{ _("Expected:") }}</span> {{ _("would push") if r.expected.push else _("held back") }} · {{ deal_label(r.expected.deal) if r.expected.relevant else _("wrong item") }}{% for i in r.expected.issues if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}
+              {% if r.why %}<span class="block text-muted">{{ r.why }}</span>{% endif %}</div>
+            <div><span class="text-muted">{{ _("Screening:") }}</span> {{ _("would push") if r.actual.push else _("held back") }} · {{ deal_label(r.actual.deal) if r.actual.relevant else _("wrong item") }}{% for i in r.actual.issues or [] if i in issue_labels %} · {{ issue_labels[i] }}{% endfor %}
+              {% if r.actual.reason %}<span class="block text-muted">{{ r.actual.reason }}</span>{% endif %}</div>
+          </div>
+          <form method="post" action="/agent-sim/{{ sim.id }}/rate/{{ loop.index0 }}" class="flex flex-wrap items-center gap-1.5" data-rate>
+            <button name="up" value="1" class="btn btn-xs {{ 'btn-success' if rated.up == true else '' }}" title="{{ _('The screening judged right') }}">👍</button>
+            <button name="up" value="0" class="btn btn-xs {{ 'btn-error' if rated.up == false else '' }}" title="{{ _('The screening judged wrong') }}">👎</button>
+            <input name="note" value="{{ rated.note or '' }}" placeholder="{{ _('Note for Claude (optional)') }}" class="input input-xs min-w-0 flex-1 bg-base-200">
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# ---- a better brief from the mismatches and ratings ---- #}
+    {% if sim.status == 'done' and sim.settings and sim.settings.screen %}
+    <div id="proposal" class="flex flex-col gap-2 border-t border-base-300 pt-3">
+      {% set p = sim.proposal %}
+      {% if p and p.status == 'open' %}
+        <div class="text-[13px]"><strong>{{ _("Claude's proposal for the brief") }}</strong>{% if p.summary %} · {{ p.summary }}{% endif %}</div>
+        {% if brief_diff %}<pre class="max-h-60 overflow-auto rounded-[10px] bg-base-200 px-3 py-2 text-[12.5px] whitespace-pre-wrap" data-diff>{% for kind, line in brief_diff if kind != '@' %}<span class="{{ 'text-success' if kind == '+' else 'text-error' if kind == '-' else 'text-muted' }}">{{ kind }} {{ line }}</span>
+{% endfor %}</pre>{% else %}<p class="text-[13px] text-muted">{{ _("No change proposed – the brief fits the tests.") }}</p>{% endif %}
+        <div class="flex flex-wrap gap-1.5">
+          {% if brief_diff %}<form method="post" action="/agent-sim/{{ sim.id }}/proposal/apply"><button class="btn btn-primary btn-sm" data-apply-brief>{{ _("Use this brief for the agent") }}</button></form>{% endif %}
+          <form method="post" action="/agent-sim/{{ sim.id }}/proposal/discard"><button class="btn btn-ghost btn-sm">{{ _("Discard") }}</button></form>
+        </div>
+      {% else %}
+        {% if p %}<p class="text-[12.5px] text-muted">{{ _("Proposal applied") if p.status == 'applied' else _("Proposal discarded") }}</p>{% endif %}
+        <form method="post" action="/agent-sim/{{ sim.id }}/propose" onsubmit="this.querySelector('button').setAttribute('aria-busy', 'true')">
+          <button class="btn btn-sm" data-propose>{{ ui.icon('sparkle', 13) }}{{ _("Propose a better brief") }}</button>
+          <span class="ml-2 text-[12px] text-muted">{{ _("From the differences and your ratings – takes 10–30 seconds.") }}</span></form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {# ---- earlier runs ---- #}
+  {% if runs %}
+  <section class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+    <h2 class="mb-1 text-base font-semibold">{{ _("Earlier runs") }}</h2>
+    {% for r in runs %}{% set sm = r.summary or {} %}
+    <a href="/agent-sim?id={{ r.id }}" class="flex flex-wrap items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-base-content no-underline hover:bg-hover {{ 'bg-brand-soft' if sim and sim.id == r.id else '' }}" data-run-link>
+      <span class="font-semibold">{{ agent_names.get(r.agent_id, '?') }}</span>
+      <span class="text-muted">{{ _("Replay") if r.kind == 'replay' else _("Test ads") }} · {{ r.created_at|local }}</span>
+      <span class="ml-auto text-muted">{% if r.status == 'running' %}{{ _("running") }}{% elif r.status == 'error' %}{{ _("failed") }}{% elif r.kind == 'replay' %}{{ _("{n} would push", n=sm.push) }} · {{ _("{n} changed", n=(sm.now_push or 0) + (sm.now_held or 0)) }}{% else %}{{ _("{ok} of {n} as expected", ok=sm.ok, n=sm.n) }}{% endif %}</span>
+    </a>
+    {% endfor %}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

@@ -760,7 +760,8 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
                       sites: list[str] = Form([]), sites_shown: str = Form(""), add_keyword: list[str] = Form([]),
                       add_price_from: list[str] = Form([]), add_price_to: list[str] = Form([]),
                       gh_on: str | None = Form(None), gh_pct: str = Form(""), gh_level: str = Form("pct"),
-                      gh_check: str | None = Form(None), km_on: str | None = Form(None), max_km: str = Form("")):
+                      gh_check: str | None = Form(None), km_on: str | None = Form(None), max_km: str = Form(""),
+                      auto_buy_shown: str = Form(""), auto_buy_on: str | None = Form(None), auto_buy_max: str = Form("")):
     from app.services import search_agents
 
     # the drawer's searches: terms to add (each added row and the add row send keyword, from and to, so the three
@@ -785,6 +786,11 @@ async def agents_edit(agent_id: int, name: str = Form(...), interval_min: int = 
         a.geizhals_pct = min(max(int(pct if pct is not None else 30), 1), 95) if gh_on and not level else None
         km = _num_or_none(max_km)      # pickup only within this distance from home
         a.max_km = min(max(int(km if km is not None else 30), 1), 2000) if km_on else None
+        if auto_buy_shown:             # a form with the auto-buy fields (another form leaves them as they are)
+            most = _num_or_none(auto_buy_max)
+            if auto_buy_on and not (most and most > 0):
+                return back(f"/agents?error={quote(t('Auto-buy needs a maximum price'), safe='')}")
+            a.auto_buy, a.auto_buy_max = bool(auto_buy_on), round(float(most), 2) if most else None
         db.add(a)
         db.commit()
         db.refresh(a)
@@ -4323,3 +4329,5 @@ from app import tg_web  # noqa: E402,I001  (the Telegram Mini App, /tg)
 tg_web.install(app)
 from app import timeline_web  # noqa: E402  timeline (/timeline), Settings → Timeline
 timeline_web.install(app, templates)
+from app import agent_sim_routes  # noqa: E402  search agent simulator (/agent-sim)
+agent_sim_routes.install(app, templates)

@@ -16,6 +16,7 @@ Buttons carry a short random token (`t:<token>`, table TelegramAction) instead o
   A_ON / A_OFF                              automatic answers for one own ad
   H_SAVE / H_IGNORE                         search hit: keep / ignore
   P_BUY                                     search hit: start a purchase order (when purchases are on in Settings)
+  AB_STOP                                   auto-buy's countdown: cancel the purchase before it runs
 Buttons that need text ("Direkte Antwort", "Mit Claude überarbeiten", 👎 note) send a ForceReply prompt that
 quotes the notification; the user's reply to it is the text. Replying to a notification directly (swipe) works
 without any button: the text goes to that chat (and sends the held-back draft when the notification shows one).
@@ -305,6 +306,8 @@ def keyboard(kind: str, data: dict[str, Any], actions: list[dict[str, Any]], url
         buttons += [_button("👍", "F_UP", ref), _button("👎 " + t("Bad answer"), "F_DOWN", ref)]
         if ad_id:
             buttons.append(_button("⏸ " + t("Auto answers off for this ad"), "A_OFF", ad_id))
+    elif kind == "purchase" and data.get("auto_buy") and data.get("purchase_id"):   # the countdown: stop it
+        buttons.append(_button("⏹ " + t("Cancel the purchase"), "AB_STOP", str(data["purchase_id"])))
     elif kind in ("hit", "price_drop") and ad_id:
         buttons += [_button("⭐ " + t("Keep"), "H_SAVE", ref), _button("🚫 " + t("Ignore"), "H_IGNORE", ref)]
         if get_setting("purchase_enabled") == "1" and ":" not in str(ref):   # purchase orders: willhaben only
@@ -660,6 +663,12 @@ async def _on_callback(cq: dict[str, Any]) -> None:
         await _swap_button(msg, raw, new)
     elif verb == "P_BUY":
         await _start_purchase(cq_id, msg, raw, ref)
+    elif verb == "AB_STOP":                      # auto-buy's countdown: taken back before anything is bought
+        from app.services import jobs
+        stopped = jobs.cancel_key(f"purchase:{ref}")
+        await _answer(cq_id, ("⏹ " + t("Purchase cancelled")) if stopped else t("Too late – the purchase is running already."))
+        if stopped:
+            await _drop_buttons(msg)
     elif verb in ("H_SAVE", "H_IGNORE"):
         n = _set_hit_state(ref, "saved" if verb == "H_SAVE" else "ignored")
         await _answer(cq_id, ("⭐ " + t("Kept")) if verb == "H_SAVE" else ("🚫 " + t("Ignored")) if n else t("Hit not found."))
