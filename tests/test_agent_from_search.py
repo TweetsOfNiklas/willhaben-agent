@@ -335,3 +335,17 @@ def test_one_agent_for_every_site_of_a_search(app_client):
         assert b.source_url == first["source_url"] and b.webapi_url == (first["webapi_url"] or first["source_url"])
     finally:
         platforms.reset()
+
+
+def test_the_searchs_geizhals_rule_goes_along():
+    from app.db import ProductSearch, session
+    from app.services import product_search as ps
+    for rule, want in (({"gh_level": "cheap"}, ("cheap", None)), ({"gh_pct": 40}, (None, 40)), ({}, (None, None))):
+        sid = _search_row()
+        with session() as db:
+            row = db.get(ProductSearch, sid)
+            row.settings = {**ps.make_settings(sites=["willhaben"]), **rule}
+            db.add(row)
+            db.commit()
+        a = create_agent_from_search(sid, screen=False)
+        assert (a.geizhals_level, a.geizhals_pct) == want

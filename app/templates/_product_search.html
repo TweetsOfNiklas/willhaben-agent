@@ -37,7 +37,7 @@
 {%- endmacro %}
 {% set live = ps_is_running(ps) %}{% set plan = ps.plan or {} %}{% set st = ps.settings or {} %}
 <section class="overflow-hidden rounded-box border border-base-300 bg-base-100" id="ps-box" data-search="{{ ps.id }}"{% if live %} hx-get="/deals/search/{{ ps.id }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
-  <header class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-base-300 px-4 py-3 font-semibold"><span>{{ _("Search #{id}", id=ps.id) }} <span class="text-[12.5px] font-normal text-muted">· {{ (ps.started_at or ps.created_at)|ago }} · {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}{% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}{% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}</span></span>
+  <header class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-base-300 px-4 py-3 font-semibold"><span>{{ _("Search #{id}", id=ps.id) }} <span class="text-[12.5px] font-normal text-muted">· {{ (ps.started_at or ps.created_at)|ago }} · {{ {"normal": _("Normal"), "thorough": _("Thorough"), "deep": _("Deep")}.get(st.depth, _("Normal")) }}{% if st.unusual %} · {{ _("unusual names") }}{% endif %}{% if st.categories %} · {{ _("other categories") }}{% endif %}{% if st.sort == 'newest' %} · {{ _("newest first") }}{% endif %}{% if st.photos %} · {{ _("photo check") }}{% endif %}{% if st.gh_level %} · {{ _("Geizhals: {level} or cheaper", level=deal_level_label(st.gh_level)) }}{% elif st.gh_pct %} · {{ _("{pct} % below Geizhals", pct=st.gh_pct) }}{% endif %}</span></span>
     {% if not live and ps.status != 'asking' %}<a href="/deals?from={{ ps.id }}#ps-form" class="btn btn-xs ml-auto" title="{{ _('Copies the text and the options into the search form; you check them and start the search.') }}">{{ ui.icon('edit', 13) }}{{ _("New search") }}</a>{% endif %}</header>
   <div class="flex flex-col gap-3 px-4 py-3.5">
     <p class="italic text-muted">„{{ ps.description }}“</p>
@@ -75,9 +75,11 @@
     {# the offers as they come: shown after each ranked batch, while the next ones are still being ranked #}
     {% if ps.status in ('done', 'more') or ps.status in ('ranking', 'photos', 'prices') and ps.results %}
       {% if ps.warning %}{{ ui.msg(ps.warning, 'warn') }}{% endif %}{% if ps.note %}<p class="text-[13px]">{{ ps.note }}</p>{% endif %}
+      {# the search's Geizhals rule (as a search agent's): offers dearer than it fold away below #}
+      {% set gh = namespace(shown=[], out=[]) %}{% for r in ps.results or [] %}{% if ps_gh_passes(r, st) %}{% set gh.shown = gh.shown + [r] %}{% else %}{% set gh.out = gh.out + [r] %}{% endif %}{% endfor %}
       {# the offers in Claude's order, by price or by distance from home: reordered in the browser, the choice remembered #}
       {% set home = home_point() %}
-      <div x-data="{ order: 'fit', home: {{ 'true' if home else 'false' }}, priced: {{ 'true' if ps.results and ps.results|selectattr('geizhals')|list else 'false' }},
+      <div x-data="{ order: 'fit', home: {{ 'true' if home else 'false' }}, priced: {{ 'true' if gh.shown|selectattr('geizhals')|list else 'false' }},
              init() { try { this.order = localStorage.getItem('ps-order') || 'fit' } catch (e) {}
                       if (this.order === 'distance' && !this.home || this.order === 'discount' && !this.priced) this.order = 'fit'; this.$nextTick(() => this.apply()) },
              sort(o) { this.order = o; try { localStorage.setItem('ps-order', o) } catch (e) {} this.apply() },
@@ -87,11 +89,11 @@
                        [...list.children].sort((a, b) => v(a) - v(b) || a.dataset.i - b.dataset.i).forEach((el) => list.appendChild(el)) } }"
            class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2"><h3>{{ _("Best offers") }} <span class="text-[13px] font-normal text-muted">· {{ _("{n} searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=1 + ((ps.progress or {}).calls or [((ps.candidates or 0) + ps_batch - 1) // ps_batch, 1]|max + ((ps.progress or {}).more or 0)) + (1 if st.photos else 0)) }}{% if (st.platforms or [])|length > 1 %} · {% for pid in st.platforms %}{{ platform_name(pid) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</span></h3>
-        {% set priced = ps.results and ps.results|selectattr('geizhals')|list|length > 0 %}{% if ps.results and ps.results|length > 1 %}<div role="group" aria-label="{{ _('Sort the offers') }}" class="inline-flex gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px] text-[12.5px]">
+        {% set priced = gh.shown|selectattr('geizhals')|list|length > 0 %}{% if gh.shown|length > 1 %}<div role="group" aria-label="{{ _('Sort the offers') }}" class="inline-flex gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px] text-[12.5px]">
           {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('discount', _('Discount')), ('distance', _('Distance'))] %}<button type="button" @click="sort('{{ key }}')" :aria-pressed="order === '{{ key }}'" :class="order === '{{ key }}' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" class="rounded-md px-2.5 py-0.5 disabled:opacity-50"{% if key == 'discount' and not priced %} disabled title="{{ _('Geizhals knows the new price of none of these offers (yet) – they are looked up after the ranking, for products with a model name.') }}"{% elif key == 'distance' and not home %} disabled title="{{ _('Your address under Settings → Shipping & pickup could not be located (yet), so the offers cannot be sorted by distance.') if home_address() else _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}"{% endif %}>{{ label }}</button>{% endfor %}
         </div>{% endif %}</div>
-      {% if ps.results %}<div x-ref="list" class="flex flex-col gap-2.5">
-      {% for r in ps.results %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set off = ps_discount(r) %}
+      {% if gh.shown %}<div x-ref="list" class="flex flex-col gap-2.5">
+      {% for r in gh.shown %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set off = ps_discount(r) %}
       <article data-i="{{ loop.index0 }}" data-price="{{ r.price if r.price is not none else '' }}" data-off="{{ -off if off is not none else '' }}" data-km="{{ km|round(2) if km is not none else '' }}" class="grid grid-cols-[84px_minmax(0,1fr)] items-start gap-3 rounded-box border border-base-300 bg-base-100 px-3.5 py-3 sm:grid-cols-[120px_minmax(0,1fr)] sm:gap-3.5 md:grid-cols-[120px_minmax(0,1fr)_auto]">
         <a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ ad_ref(r.get('platform'), r.ad_id) }}" class="block">{{ ui.thumb(r.image_url, 'h-[63px] w-[84px] sm:h-[90px] sm:w-[120px]', 'rounded-lg') }}</a>
         <div class="flex min-w-0 flex-col gap-1.5">
@@ -103,7 +105,11 @@
         </div>
         <div class="col-start-2 flex flex-col items-start gap-1.5 md:col-start-auto md:items-end md:text-right"><div class="text-[17px] font-semibold tabular-nums">{{ r.price_display or (r.price|eur) }}</div>{{ ui.ship_lazy(r) }}<div class="flex flex-wrap gap-1.5 md:justify-end"><a class="btn btn-xs" href="{{ r.url }}" data-ad="{{ ad_ref(r.get('platform'), r.ad_id) }}">{{ _("Open") }}</a>{% set rp = r.get('platform') or 'willhaben' %}<a class="btn btn-xs" href="{{ '/deals/ad/' ~ r.ad_id if rp == 'willhaben' else '/deals/ad/' ~ rp ~ '/' ~ r.ad_id }}?q={{ (r.query or '')|urlencode }}">{{ _("Check price") }}</a>{% if rp != 'willhaben' %}{% elif purchase_enabled() %}<a class="btn btn-primary btn-xs" data-buy="{{ r.ad_id }}" href="/purchases/new/{{ r.ad_id }}?search={{ ps.id }}&amp;q={{ (r.query or '')|urlencode }}">{{ _("Buy") }}</a>{% else %}<a class="btn btn-xs" href="/settings/purchase" title="{{ _('Turn on purchases in Settings') }}">{{ _("Buy") }}</a>{% endif %}</div></div>
       </article>{% endfor %}</div>
-      {% elif ps.status in ('done', 'more') %}<p class="text-muted">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
+      {% elif ps.status in ('done', 'more') and not gh.out %}<p class="text-muted">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
+      {% if gh.out %}<details class="rounded-box border border-base-300 bg-base-100 px-3.5 py-2.5 text-[13px]" data-ps-gh-out>
+        <summary class="cursor-pointer text-muted">{{ _("{n} fitting offers above your Geizhals limit", n=gh.out|length) }}</summary>
+        <div class="mt-2 flex flex-col">{% for r in gh.out %}{% set off = ps_discount(r) %}<div class="flex min-w-0 items-center gap-2.5 border-t border-base-300 py-1.5">{{ ui.thumb(r.image_url, 'h-9 w-12', 'rounded-md') }}<a href="{{ r.url }}" target="_blank" rel="noopener" data-ad="{{ ad_ref(r.get('platform'), r.ad_id) }}" class="min-w-0 flex-1 truncate text-base-content no-underline hover:underline">{{ r.title }}</a>{% if off is not none %}<span class="shrink-0 text-[12px] text-muted">{{ (_("{n} % below new", n=off) if off >= 0 else _("{n} % above new", n=-off))|nb }}</span>{% endif %}<span class="shrink-0 tabular-nums">{{ r.price_display or (r.price|eur if r.price is not none else '') }}</span></div>{% endfor %}</div>
+      </details>{% endif %}
       {# the offers Claude ranked and found unfitting: folded, for a look of one's own #}
       {% if ps.passed %}<details class="rounded-box border border-base-300 bg-base-100 px-3.5 py-2.5 text-[13px]" data-ps-passed>
         <summary class="cursor-pointer text-muted">{{ _("{n} more offers Claude found not fitting", n=ps.passed|length) }}</summary>

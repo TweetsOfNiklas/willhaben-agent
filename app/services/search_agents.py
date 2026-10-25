@@ -432,6 +432,9 @@ def create_agent_from_search(search_id: int, name: str | None = None, interval_s
                         interval_s=interval, queries=queries, plan=agent_plan(row.plan), search_id=row.id)
     if screen:
         agent.screen, agent.screen_brief, agent.screen_min = True, screen_brief(row) or None, "match"
+    st = row.settings or {}              # the search's Geizhals rule goes along
+    agent.geizhals_level = st.get("gh_level") if st.get("gh_level") in LEVELS else None
+    agent.geizhals_pct = None if agent.geizhals_level else st.get("gh_pct")
     with session() as db:
         db.add(agent)
         db.commit()

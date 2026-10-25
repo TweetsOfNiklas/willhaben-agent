@@ -37,6 +37,7 @@ import asyncio
 import logging
 import re
 import tempfile
+from types import SimpleNamespace
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
@@ -134,18 +135,27 @@ def condition_wanted(new: bool, used: bool) -> str:
 def make_settings(depth: str | None = "normal", unusual: bool = False, categories: bool = False,
                   sort: str | None = "relevance", photos: bool = True, ask: bool = True,
                   sites: list[str] | None = None, condition: str = "any", per_site: int | None = None,
-                  over_budget: float | None = None) -> dict[str, Any]:
+                  over_budget: float | None = None, gh_level: str | None = None,
+                  gh_pct: int | None = None) -> dict[str, Any]:
     """The search's options; `sites` = platform ids to search on (default: search_platforms()); `condition`: any,
     new or used (the person said it in the form: Claude does not ask, offers stating the other one are left out);
     `per_site`: ads per search and site (PER_SITE, paged); `over_budget`: factor of the budget above which ads are
-    left out (OVER_BUDGET_CHOICES; 0 = no limit)."""
+    left out (OVER_BUDGET_CHOICES; 0 = no limit); `gh_level` / `gh_pct`: the search agents' Geizhals rule (a price zone
+    or cheaper, or at least this many % below the new price; stored only when set, the level wins)."""
+    from app.services.search_agents import LEVELS
     usable = {p.id for p in platforms.all() if p.can("keyword_search")}
+    if gh_level in LEVELS:
+        rule: dict[str, Any] = {"gh_level": gh_level}
+    elif gh_pct:
+        rule = {"gh_pct": min(max(int(gh_pct), 1), 95)}
+    else:
+        rule = {}
     chosen = [s for s in dict.fromkeys(sites or []) if s in usable] or [p.id for p in search_platforms()]
     return {"depth": depth if depth in DEPTHS else "normal", "unusual": bool(unusual), "categories": bool(categories),
             "sort": sort if sort in SORTS else "relevance", "photos": bool(photos), "ask": bool(ask),
             "platforms": chosen, "condition": condition if condition in CONDITIONS_WANTED else "any",
             "per_site": per_site if per_site in PER_SITE else PER_SITE_DEFAULT,
-            "over_budget": over_budget if over_budget in OVER_BUDGET_CHOICES.values() else OVER_BUDGET}
+            "over_budget": over_budget if over_budget in OVER_BUDGET_CHOICES.values() else OVER_BUDGET, **rule}
 
 
 def condition_note(settings: dict[str, Any] | None) -> tuple[str, str] | None:
@@ -717,6 +727,26 @@ def _lookups(results: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, An
         else:
             r["geizhals"] = {}
     return list(groups.values())[:MAX_NEW_PRICES]
+
+
+def geizhals_rule(settings: dict[str, Any] | None) -> SimpleNamespace | None:
+    """The search's Geizhals rule as a search agent holds it (geizhals_level / geizhals_pct), None without one."""
+    st = settings or {}
+    if not (st.get("gh_level") or st.get("gh_pct")):
+        return None
+    return SimpleNamespace(geizhals_level=st.get("gh_level"), geizhals_pct=st.get("gh_pct"))
+
+
+def geizhals_passes(r: dict[str, Any], settings: dict[str, Any] | None) -> bool:
+    """Does the offer keep the search's Geizhals rule, judged as a search agent judges a hit
+    (search_agents.geizhals_passes, the price zones of today)? Without the rule or a new price: it passes."""
+    from app.services import search_agents
+    rule = geizhals_rule(settings)
+    if rule is None:
+        return True
+    hit = SimpleNamespace(price=r.get("price"), geizhals=r.get("geizhals"), item_condition=r.get("item_condition"),
+                          screen_deal=None)
+    return search_agents.geizhals_passes(rule, hit)
 
 
 async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None:

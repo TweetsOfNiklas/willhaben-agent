@@ -85,12 +85,13 @@ async def tg_search_result(request: Request, search_id: int, order: str = ""):
     if order in ORDERS:
         set_setting("tg_ps_order", order)
     order = get_setting("tg_ps_order") or "fit"
-    priced = any(product_search.discount(r) is not None for r in ps.results or [])
+    shown = [r for r in ps.results or [] if product_search.geizhals_passes(r, ps.settings)]     # the Geizhals rule
+    gh_out = [r for r in ps.results or [] if r not in shown]
+    priced = any(product_search.discount(r) is not None for r in shown)
     if order == "distance" and not home or order == "discount" and not priced:
         order = "fit"
     return _render(request, "search_result.html", **deals_web._search_ctx(search_id), order=order,
-                   results=_ordered(ps.results or [], order, home), home=home,
-                   priced=priced)
+                   results=_ordered(shown, order, home), home=home, priced=priced, gh_out=gh_out)
 
 
 # ------------------------------------------------------------------ price check of one ad

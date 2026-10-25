@@ -294,7 +294,7 @@ async def product_search_start(description: str = Form(""), depth: str = Form("n
                                categories: str = Form(""), sort: str = Form("relevance"), photos: str = Form(""),
                                ask: str = Form(""), sites: list[str] = Form([]), cond_new: str = Form(""),
                                cond_used: str = Form(""), cond_shown: str = Form(""), per_site: str = Form(""),
-                               over_budget: str = Form("")):
+                               over_budget: str = Form(""), gh_level: str = Form(""), gh_pct: str = Form("")):
     if not description.strip():
         return RedirectResponse("/deals?msg=empty", status_code=303)
     # an older form without the boxes searches both
@@ -302,7 +302,9 @@ async def product_search_start(description: str = Form(""), depth: str = Form("n
     settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask),
                                             sites=sites, condition=condition,
                                             per_site=int(per_site) if per_site.isdigit() else None,
-                                            over_budget=product_search.OVER_BUDGET_CHOICES.get(over_budget))
+                                            over_budget=product_search.OVER_BUDGET_CHOICES.get(over_budget),
+                                            gh_level=gh_level if gh_level != "pct" else None,
+                                            gh_pct=int(gh_pct) if gh_level == "pct" and gh_pct.strip().isdigit() else None)
     try:
         sid = product_search.start(description, settings)
     except product_search.Busy:

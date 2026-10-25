@@ -129,3 +129,38 @@ def test_nothing_priced_means_no_discount_order(lookups):
         tg = c.get(f"/tg/search/{sid}?order=discount").text
         assert 'aria-disabled="true"' in tg and tg.index("Billig") < tg.index("Teuer")
         c.get(f"/tg/search/{sid}?order=fit")
+
+
+def test_the_searchs_geizhals_rule_is_the_agents():
+    assert "gh_level" not in ps.make_settings() and "gh_pct" not in ps.make_settings()     # off: nothing stored
+    assert ps.make_settings(gh_level="cheap", gh_pct=40)["gh_level"] == "cheap" and "gh_pct" not in ps.make_settings(gh_level="cheap")
+    assert ps.make_settings(gh_pct=140)["gh_pct"] == 95 and "gh_level" not in ps.make_settings(gh_level="bogus")
+    st = {"gh_pct": 50}
+    assert not ps.geizhals_passes(_r("1", "x", 300.0, 90, geizhals=GH["bosch sms46"]), st)      # 25 % below
+    assert ps.geizhals_passes(_r("2", "x", 200.0, 90, geizhals=GH["bosch sms46"]), st)          # 50 % below
+    assert ps.geizhals_passes(_r("3", "x", 300.0, 90, geizhals={}), st)                         # Geizhals knows none
+    assert ps.geizhals_passes(_r("4", "x", 300.0, 90, geizhals=GH["bosch sms46"]), {})
+
+
+def test_offers_above_the_limit_fold_away(lookups, monkeypatch):
+    from app.main import app
+    results = [_r("1", "Wenig Rabatt", 300.0, 90, geizhals=GH["bosch sms46"]),
+               _r("2", "Ohne Neupreis", 50.0, 80, geizhals={}),
+               _r("3", "Viel Rabatt", 100.0, 70, geizhals=GH["bosch sms46"])]
+    sid = _row(results, status="done")
+    ps._update(sid, settings={"platforms": ["willhaben"], "gh_pct": 50})
+    with TestClient(app) as c:
+        web = c.get(f"/deals/search/{sid}").text
+        out = web[web.index("data-ps-gh-out"):]
+        assert "1 fitting offers above your Geizhals limit" in out and "Wenig Rabatt" in out
+        assert web.index("Viel Rabatt") < web.index("data-ps-gh-out") and "50 % below Geizhals" in web
+        tg = c.get(f"/tg/search/{sid}").text
+        assert tg.index("data-ps-gh-out") < tg.index("Wenig Rabatt") and "Best offers · 2" in tg
+        started = []
+        monkeypatch.setattr(ps, "start", lambda d, st: started.append(st) or sid)
+        c.post("/deals/search", data={"description": "x", "gh_level": "pct", "gh_pct": "40"}, follow_redirects=False)
+        c.post("/deals/search", data={"description": "x", "gh_level": "fair", "gh_pct": "40"}, follow_redirects=False)
+        c.post("/deals/search", data={"description": "x", "gh_level": ""}, follow_redirects=False)
+        assert [(s.get("gh_level"), s.get("gh_pct")) for s in started] == [(None, 40), ("fair", None), (None, None)]
+        form = c.get(f"/deals?from={sid}").text
+        assert 'name="gh_level"' in form and 'value="pct" selected' in form and 'name="gh_pct" min="1" max="95" step="1" value="50"' in form

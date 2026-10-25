@@ -333,9 +333,10 @@ from app.services import geo as _geo  # noqa: E402
 templates.env.globals.update(home_point=_geo.home_cached, home_address=_geo.home_address,   # distance from home to ads
                              result_km=_geo.distance_km, hit_km=_geo.hit_km)
 from app.services.product_search import discount as _ps_discount  # noqa: E402
+from app.services.product_search import geizhals_passes as _ps_gh_passes  # noqa: E402
 from app.services.product_search import red_flags as _red_flags  # noqa: E402
 
-templates.env.globals.update(ps_red_flags=_red_flags, ps_discount=_ps_discount)   # older stored results: without "shipping costs unclear"
+templates.env.globals.update(ps_red_flags=_red_flags, ps_discount=_ps_discount, ps_gh_passes=_ps_gh_passes)   # older stored results: without "shipping costs unclear"
 templates.env.globals.update(ad_ref=ad_ref, platform_name=_platform_name, platforms_multi=platforms.multi,
                              platforms_all=platforms.all, platform_get=platforms.get, platform_enabled=platforms.enabled,
                              vpn_health=vpn.health)

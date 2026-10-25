@@ -55,7 +55,7 @@
   {% if ps.status in ('done', 'more') or ps.status in ('ranking', 'photos') and ps.results %}
   {% if ps.warning %}<p style="font-size: 13px; color: #B07800; margin: 10px 4px">{{ ps.warning }}</p>{% endif %}
   {% if ps.note %}<p style="font-size: 14px; margin: 10px 4px">{{ ps.note }}</p>{% endif %}
-  <div class="sh">{{ _("Best offers") }} · {{ (ps.results or [])|length }}</div>
+  <div class="sh">{{ _("Best offers") }} · {{ results|length }}</div>
   <p class="sub" style="margin: 0 4px 8px">{{ _("{n} searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=1 + ((ps.progress or {}).calls or [((ps.candidates or 0) + ps_batch - 1) // ps_batch, 1]|max + ((ps.progress or {}).more or 0)) + (1 if st.photos else 0)) }}{% if (st.platforms or [])|length > 1 %} · {% for pid in st.platforms %}{{ platform_name(pid) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
   {% if results|length > 1 %}
   {# the order of the offers: Claude's, by price, by distance from home (kept for the next search) #}
@@ -97,7 +97,13 @@
     </div>
     {% endfor %}
   </div>
-  {% elif ps.status in ('done', 'more') %}<p class="empty">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
+  {% elif ps.status in ('done', 'more') and not gh_out %}<p class="empty">{{ _("No matching offers found. Try a broader description or the extended search options.") }}</p>{% endif %}
+  {# the search's Geizhals rule (as a search agent's): offers dearer than it, folded #}
+  {% if gh_out %}<details class="sec" style="margin-top: 10px; padding: 10px 14px" data-ps-gh-out>
+    <summary class="sub" style="cursor: pointer">{{ _("{n} fitting offers above your Geizhals limit", n=gh_out|length) }}</summary>
+    {% for r in gh_out %}{% set off = ps_discount(r) %}<a href="/tg/check/{{ r.get('platform') or 'willhaben' }}/{{ r.ad_id }}" style="display: flex; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--sep); color: var(--text)">
+      <span class="trunc" style="flex: 1; min-width: 0">{{ r.title }}</span>{% if off is not none %}<span class="sub">{{ _("{n} % below new", n=off) if off >= 0 else _("{n} % above new", n=-off) }}</span>{% endif %}<span>{{ r.price_display or (r.price|eur if r.price is not none else '') }}</span></a>{% endfor %}
+  </details>{% endif %}
   {# the offers Claude ranked and found unfitting: folded #}
   {% if ps.passed %}<details class="sec" style="margin-top: 10px; padding: 10px 14px" data-ps-passed>
     <summary class="sub" style="cursor: pointer">{{ _("{n} more offers Claude found not fitting", n=ps.passed|length) }}</summary>
