@@ -59,7 +59,10 @@
 
   <div class="sh">{{ _("As buyers see it") }}</div>
   <div class="sec" style="padding: 10px 14px" hx-get="/myads/{{ a.ad_id }}/description" hx-trigger="load" hx-swap="innerHTML" hx-disinherit="*" data-description>
-    <span class="sub">{{ _("Loading the ad from willhaben …") }}</span>
+    <span style="display: flex; flex-direction: column; gap: 10px" role="status" aria-label="{{ _('Loading the ad from willhaben …') }}">
+      <span style="display: flex; gap: 8px; align-items: center">{{ m.skel('90px', '22px', '8px') }}{{ m.skel('34px', '34px', '17px') }}</span>
+      {{ m.skel('100%', '200px', '10px') }}
+      {{ m.skel_lines(4) }}</span>
   </div>
 </div>
 </main>

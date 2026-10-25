@@ -98,6 +98,9 @@
   .tg-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: tg-turn .7s linear infinite; }
   @keyframes tg-turn { to { transform: rotate(360deg); } }
   a.htmx-request, button.htmx-request, form.htmx-request button, .cell.htmx-request { opacity: .5; }
+  /* loading scaffolds (tg/_m.html skel*): grey, pulsing shapes where the content will be */
+  .skel { display: block; flex-shrink: 0; border-radius: 999px; background: var(--sep); animation: tg-pulse 1.4s ease-in-out infinite; }
+  @keyframes tg-pulse { 50% { opacity: .45; } }
   .chip { height: 34px; border: 1px solid var(--sep); background: var(--section); border-radius: 17px; padding: 0 13px; font-size: 13px; white-space: nowrap; }
 </style>
 </head>

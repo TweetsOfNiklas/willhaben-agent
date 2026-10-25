@@ -10,6 +10,7 @@
       <button type="button" class="btn btn-ghost btn-sm btn-square ml-auto text-muted" data-adv-close aria-label="{{ _('Close') }}" title="{{ _('Close (Esc)') }}">{{ ui.icon('x', 16) }}</button>
     </header>
     <div data-adv-body></div>
+    <template data-adv-skeleton>{{ ui.skel_ad() }}</template>
   </article>
 </dialog>
 <script>
@@ -19,7 +20,10 @@
   const body = dlg.querySelector('[data-adv-body]'), pos = dlg.querySelector('[data-adv-pos]'), T = dlg.dataset;
   // one element per message; the classes are literal here so the stylesheet build finds them
   const msg = (cls, text) => { const p = document.createElement('p'); p.className = cls; p.textContent = text; return p; };
+  // while an ad loads: the scaffold of the ad viewer (grey shapes where photo, title, price and price check go)
+  const skeleton = dlg.querySelector('template[data-adv-skeleton]');
   const loading = text => {
+    if (skeleton) return skeleton.content.cloneNode(true);
     const p = msg('flex items-center gap-2.5 px-6 py-6 text-muted', text);
     p.prepend(Object.assign(document.createElement('span'), {className: 'loading loading-spinner loading-sm'}));
     return p;

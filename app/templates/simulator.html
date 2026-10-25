@@ -10,7 +10,7 @@
 {% macro prompt_details(sid, i, run='') -%}
 <details class="chat-footer mt-0.5 w-full max-w-[85%] text-[11.5px] md:max-w-[72%]" data-prompt>
   <summary class="cursor-pointer text-muted hover:text-base-content">{{ _("Show prompt") }}</summary>
-  <div hx-get="/simulator/{{ sid }}/prompt/{{ i }}{{ '?run=' ~ run if run else '' }}" hx-trigger="toggle from:closest details once" hx-swap="innerHTML"><span class="loading loading-spinner loading-xs"></span></div>
+  <div hx-get="/simulator/{{ sid }}/prompt/{{ i }}{{ '?run=' ~ run if run else '' }}" hx-trigger="toggle from:closest details once" hx-swap="innerHTML">{{ ui.skel_lines(5, 'py-2') }}</div>
 </details>
 {%- endmacro %}
 {% macro sim_badge(s) -%}

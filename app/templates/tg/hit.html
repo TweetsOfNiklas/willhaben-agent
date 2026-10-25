@@ -39,7 +39,7 @@
       <span style="border-top: 1px solid var(--sep); font-weight: 600">{{ _("Total from") if (opts|map(attribute='home')|reject('none')|list + opts|map(attribute='point')|reject('none')|list)|length > 1 else _("Total") }}</span><span style="border-top: 1px solid var(--sep); font-weight: 600; text-align: right">{{ (d.price + sp + (bf.amount if bf else 0))|eur }}</span>
       {% if not bf and pl_on and (d.platform or 'willhaben') == 'willhaben' %}
       {% set cheapest = (opts|map(attribute='point')|reject('none')|list + opts|map(attribute='home')|reject('none')|list + [sp])|min %}
-      <span style="display: contents" hx-get="/wh-fee/{{ d.ad_id }}?price={{ d.price }}&amp;sp={{ cheapest }}" hx-trigger="load" hx-swap="outerHTML" hx-disinherit="*"><span class="sub" style="grid-column: 1 / -1">{{ _("Loading the buyer protection fee from willhaben …") }}</span></span>
+      <span style="display: contents" hx-get="/wh-fee/{{ d.ad_id }}?price={{ d.price }}&amp;sp={{ cheapest }}" hx-trigger="load" hx-swap="outerHTML" hx-disinherit="*"><span style="grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 20px; padding: 3px 0" role="status" aria-label="{{ _('Loading the buyer protection fee from willhaben …') }}">{{ m.skel('40%') }}{{ m.skel('56px') }}</span></span>
       {% endif %}
     </div>
     {% elif h.shipping == 'pickup' or h.shipping_price or h.buyer_fee %}<span class="sub">{% if h.shipping == 'pickup' %}{{ _("pickup only") }}{% else %}{% if h.shipping_price %}{{ _("+ {price} shipping", price=h.shipping_price|eur) }}{% endif %}{% if h.buyer_fee %}{{ ' · ' if h.shipping_price else '' }}{{ _("+ {price} buyer protection", price=h.buyer_fee|eur) }}{% endif %}{% endif %}</span>{% endif %}

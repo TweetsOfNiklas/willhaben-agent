@@ -68,6 +68,6 @@
 {% if d.description %}<p class="m-0 whitespace-pre-line text-[13.5px] leading-relaxed">{{ d.description }}</p>{% endif %}
 {# the price check of the ad viewer: comparable ads, Geizhals' new price and the rating #}
 <section class="flex flex-col gap-2" hx-get="/hits/ad/{{ a.ad_id }}/deal" hx-trigger="load" hx-swap="outerHTML">
-  <span class="text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Price is being checked …") }}</span>
+  {{ ui.skel_deal() }}
 </section>
 {% endif %}

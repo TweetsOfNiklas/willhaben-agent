@@ -40,7 +40,7 @@
         {% set cheapest = (opts|map(attribute='point')|reject('none')|list + opts|map(attribute='home')|reject('none')|list + [sp])|min %}
         {# willhaben's exact fee, read from the chat's PayLivery window (app/willhaben/paylivery_fee.py) #}
         <div class="contents" hx-get="/wh-fee/{{ d.ad_id }}?price={{ d.price }}&amp;sp={{ cheapest }}" hx-trigger="load" hx-swap="outerHTML">
-          <span class="col-span-2 text-[12px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Loading the buyer protection fee from willhaben …") }}</span></div>
+          <span class="col-span-2 flex items-center justify-between gap-6 py-0.5" role="status" aria-label="{{ _('Loading the buyer protection fee from willhaben …') }}">{{ ui.skel('h-2.5 w-2/5') }}{{ ui.skel('h-2.5 w-14') }}</span></div>
         {% endif %}
       </div>
       {% endif %}
@@ -53,7 +53,7 @@
       {% if h %}{% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}<button type="button" class="btn disabled:opacity-60 {{ 'border-primary bg-brand-soft text-primary' if h.state == s else '' }}" data-state="{{ 'new' if h.state == s else s }}" data-hit="{{ h.id }}">{{ '✓ ' if h.state == s }}{{ label }}</button>{% endfor %}{% endif %}
       <a href="{{ '/deals/ad/' ~ d.ad_id if wh else '/deals/ad/' ~ platform.id ~ '/' ~ d.ad_id ~ ('?hit=' ~ h.id if h else '') }}" class="btn">{{ _("Check price closely") }}</a>
     </div>
-    <div hx-get="{{ '/hits/ad/' ~ d.ad_id if wh else '/hits/ad/' ~ platform.id ~ '/' ~ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML"><small class="text-muted"><span class="loading loading-spinner loading-xs align-middle"></span> {{ _("Checking the price …") }}</small></div>
+    <div hx-get="{{ '/hits/ad/' ~ d.ad_id if wh else '/hits/ad/' ~ platform.id ~ '/' ~ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML">{{ ui.skel_deal() }}</div>
     {% if detail_error %}<small class="text-[12.5px] text-muted">{{ _("{platform} could not be reached ({error}); this is what the list showed.", platform=platform.name, error=detail_error) }}</small>
     {% elif reduced %}<small class="text-[12.5px] text-muted">{{ _("{platform} shows no details here: the description is the listing's teaser, the price check compares with willhaben ads.", platform=platform.name) }}</small>{% endif %}
     {% if h and h.screen_relevant is not none %}

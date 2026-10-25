@@ -203,3 +203,50 @@
 {% macro question(q) -%}
 <fieldset class="m-0 flex flex-col gap-1.5 border-0 p-0"><legend class="mb-1 font-semibold">{{ q.text }}</legend><div class="flex flex-wrap gap-1.5">{% for o in q.options %}<label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-[13px] has-[:checked]:border-primary has-[:checked]:bg-brand-soft has-[:checked]:text-primary"><input type="radio" name="q_{{ q.id }}" value="{{ o }}" class="radio radio-primary radio-xs">{{ o }}</label>{% endfor %}</div><input type="text" name="t_{{ q.id }}" maxlength="200" placeholder="{{ _('other answer') }}" aria-label="{{ q.text }} – {{ _('other answer') }}" class="input input-sm w-full max-w-[420px] bg-base-100"></fieldset>
 {%- endmacro %}
+
+{# Loading scaffolds: grey, pulsing shapes where the content will be, instead of a spinner and a sentence – the page
+   keeps its shape while it loads. role=status with a label for screen readers; the shapes themselves are hidden. #}
+{% macro skel(cls='h-3 w-full', round='rounded-full') -%}
+<span class="block shrink-0 animate-pulse bg-base-300 {{ round }} {{ cls }}" aria-hidden="true"></span>
+{%- endmacro %}
+
+{% macro skel_lines(n=3, cls='') -%}
+<div class="flex min-w-0 flex-col gap-2 {{ cls }}" role="status" aria-label="{{ _('Loading …') }}">
+  {%- for w in ['w-11/12', 'w-4/5', 'w-3/5', 'w-2/3', 'w-1/2', 'w-3/4'][:n] %}{{ skel('h-2.5 ' ~ w) }}{% endfor %}</div>
+{%- endmacro %}
+
+{# the price section of the ad viewer: the level and its line, the bar, the explanation #}
+{% macro skel_deal(cls='') -%}
+<div class="flex min-w-0 flex-col gap-3 rounded-box border border-base-300 px-4 py-3.5 {{ cls }}" role="status" aria-label="{{ _('Loading …') }}">
+  <div class="flex items-center gap-2.5">{{ skel('h-5 w-16') }}{{ skel('h-2.5 w-40') }}<span class="flex-1"></span>{{ skel('h-2.5 w-20') }}</div>
+  {{ skel('h-2.5 w-full') }}
+  <div class="flex flex-col gap-2">{{ skel('h-2.5 w-11/12') }}{{ skel('h-2.5 w-3/5') }}</div>
+</div>
+{%- endmacro %}
+
+{# the ad viewer (_ad_detail.html): the photo and text on the left, title, price, rows, buttons and the price check #}
+{% macro skel_ad() -%}
+<div class="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(320px,1fr)]" role="status" aria-label="{{ _('Loading ad …') }}">
+  <div class="flex min-w-0 flex-col gap-2 bg-base-200 p-4">
+    {{ skel('aspect-[4/3] w-full', 'rounded-[10px]') }}
+    <div class="flex gap-1.5">{% for _i in range(4) %}{{ skel('h-12 w-16', 'rounded-md') }}{% endfor %}</div>
+    <div class="mt-2 flex flex-col gap-2">{{ skel('h-2.5 w-11/12') }}{{ skel('h-2.5 w-4/5') }}{{ skel('h-2.5 w-2/3') }}</div>
+  </div>
+  <div class="flex min-w-0 flex-col gap-3.5 px-5 py-[18px] pb-5 md:border-l md:border-base-300">
+    <div class="flex flex-col gap-2.5">{{ skel('h-4 w-4/5') }}{{ skel('h-4 w-1/2') }}</div>
+    <div class="flex items-center gap-2.5">{{ skel('h-7 w-24', 'rounded-lg') }}{{ skel('h-2.5 w-24') }}</div>
+    <div class="flex flex-col gap-2">{% for _i in range(4) %}<div class="flex justify-between gap-6">{{ skel('h-2.5 w-2/5') }}{{ skel('h-2.5 w-14') }}</div>{% endfor %}</div>
+    {{ skel('h-2.5 w-3/4') }}
+    <div class="flex gap-2">{{ skel('h-9 w-20', 'rounded-field') }}{{ skel('h-9 w-24', 'rounded-field') }}{{ skel('h-9 w-28', 'rounded-field') }}</div>
+    {{ skel_deal() }}
+  </div>
+</div>
+{%- endmacro %}
+
+{# a hit card of the hits page, while the next batch loads #}
+{% macro skel_hit() -%}
+<article class="flex min-w-0 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)] max-sm:gap-x-3 max-sm:p-2.5" aria-hidden="true">
+  {{ skel('h-40 w-full max-sm:h-24', 'rounded-none max-sm:rounded-md') }}
+  <div class="flex min-w-0 flex-col gap-2.5 p-3.5 max-sm:p-0">{{ skel('h-3.5 w-11/12') }}{{ skel('h-3.5 w-3/5') }}{{ skel('h-5 w-20') }}{{ skel('h-2.5 w-4/5') }}{{ skel('h-2.5 w-1/2') }}</div>
+</article>
+{%- endmacro %}

@@ -57,9 +57,9 @@
     <div x-show="mode === 'direct'"{% if not direct %} x-cloak{% endif %} class="flex min-w-0 flex-col gap-5">
     {% if res %}{% include "_deal_result.html" %}
     {% elif pending_ad %}
-    <section hx-get="{{ '/deals/ad/' ~ pending_ad if (pending_platform or 'willhaben') == 'willhaben' else '/deals/ad/' ~ pending_platform ~ '/' ~ pending_ad }}/result?q={{ quote(q) }}&amp;cat={{ quote(pending_cat or '') }}{% if pending_hit %}&amp;hit={{ pending_hit }}{% endif %}{% if pending_own %}&amp;own=1{% endif %}" hx-trigger="load" hx-swap="outerHTML" class="flex items-center gap-3 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-      <span class="loading loading-spinner loading-sm shrink-0 text-primary"></span>
-      <div><div class="font-semibold">{{ _("Checking the price …") }}</div><div class="text-[12.5px] text-muted">{{ _("Comparable ads are loaded from willhaben; this takes a few seconds the first time, then it is cached for an hour.") }}</div></div>
+    <section hx-get="{{ '/deals/ad/' ~ pending_ad if (pending_platform or 'willhaben') == 'willhaben' else '/deals/ad/' ~ pending_platform ~ '/' ~ pending_ad }}/result?q={{ quote(q) }}&amp;cat={{ quote(pending_cat or '') }}{% if pending_hit %}&amp;hit={{ pending_hit }}{% endif %}{% if pending_own %}&amp;own=1{% endif %}" hx-trigger="load" hx-swap="outerHTML" class="flex flex-col gap-3">
+      <div class="flex items-center gap-2 text-[13px] font-semibold text-muted">{{ _("Checking the price …") }}<span class="font-normal">· {{ _("Comparable ads are loaded from willhaben; this takes a few seconds the first time, then it is cached for an hour.") }}</span></div>
+      {{ ui.skel_deal() }}
     </section>
     {% elif results is not none %}
     {% for line in site_errors or [] %}{{ ui.msg(line, 'warn') }}{% endfor %}

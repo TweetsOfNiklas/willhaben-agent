@@ -58,3 +58,21 @@
   <span class="btnrow">{% for o in q.options %}<label class="chip" style="display: inline-flex; align-items: center; gap: 6px"><input type="radio" name="q_{{ q.id }}" value="{{ o }}">{{ o }}</label>{% endfor %}</span>
   <input class="field" name="t_{{ q.id }}" maxlength="200" placeholder="{{ _('other answer') }}" aria-label="{{ q.text }} – {{ _('other answer') }}"></fieldset>
 {%- endmacro %}
+
+{# loading scaffolds: grey shapes in the content's place while it loads (the .skel style in tg/_base.html) #}
+{% macro skel(w='100%', h='10px', radius='999px') -%}
+<span class="skel" style="width: {{ w }}; height: {{ h }}; border-radius: {{ radius }}" aria-hidden="true"></span>
+{%- endmacro %}
+
+{% macro skel_lines(n=3) -%}
+<span style="display: flex; flex-direction: column; gap: 8px" role="status" aria-label="{{ _('Loading …') }}">
+  {%- for w in ['92%', '80%', '60%', '70%', '50%'][:n] %}{{ skel(w) }}{% endfor %}</span>
+{%- endmacro %}
+
+{# a price check: level and line, the bar, the explanation #}
+{% macro skel_deal() -%}
+<span style="display: flex; flex-direction: column; gap: 10px" role="status" aria-label="{{ _('Loading …') }}">
+  <span style="display: flex; gap: 8px; align-items: center">{{ skel('64px', '20px') }}{{ skel('45%') }}</span>
+  {{ skel('100%', '10px') }}
+  {{ skel('90%') }}{{ skel('60%') }}</span>
+{%- endmacro %}

@@ -201,7 +201,11 @@
   {# the ad's text as willhaben shows it (its public page, cached briefly), loaded once the panel is open #}
   <section class="flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 px-5 py-4" id="myad-description"
            hx-get="/myads/{{ a.ad_id }}/description" hx-trigger="load" hx-swap="innerHTML">
-    {{ ui.eyebrow(_("As buyers see it")) }}<span class="text-[13px] text-muted"><span class="loading loading-spinner loading-xs"></span> {{ _("Loading the ad from willhaben …") }}</span>
+    {{ ui.eyebrow(_("As buyers see it")) }}
+    <div class="flex flex-col gap-3" role="status" aria-label="{{ _('Loading the ad from willhaben …') }}">
+      <div class="flex items-center gap-2.5">{{ ui.skel('h-6 w-24', 'rounded-lg') }}{{ ui.skel('h-5 w-20') }}</div>
+      {{ ui.skel('aspect-[4/3] max-h-[50vh] w-full', 'rounded-[10px]') }}
+      {{ ui.skel_lines(4) }}</div>
   </section>
   <div class="flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
     {% if a.replaced_by %}<span>· {{ _("renewed as") }} <a class="link link-primary no-underline" href="https://www.willhaben.at/iad/object?adId={{ a.replaced_by }}" target="_blank" rel="noopener">{{ a.replaced_by }}</a></span>{% endif %}
