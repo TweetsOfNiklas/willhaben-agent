@@ -35,7 +35,7 @@
 {% set links = {
   'sell': [('/settings/selling', _("Selling preferences: handover, shipping, payment")), ('/myads', _("Instructions for automatic answers of one ad (My ads)"))],
   'buy': [('/agents', _("Descriptions of the search agents (what Claude checks hits against)")), ('/settings/purchase', _("Purchase orders on or off, wish-price discount"))],
-  'sim': [('/simulator', _("Simulator"))]} %}
+  'sim': [('/simulator', _("Chat simulator")), ('/agent-sim', _("Search agent simulator"))]} %}
 <form id="general" method="post" action="/settings"><input type="hidden" name="section" value="rules"></form>{# the style card's form #}
 {% for g, title in ai.groups %}
 <h2 class="mt-3 text-[13px] font-semibold tracking-wide text-muted uppercase" id="ai-group-{{ g }}" data-ai-group="{{ g }}">{{ _(title) }}</h2>

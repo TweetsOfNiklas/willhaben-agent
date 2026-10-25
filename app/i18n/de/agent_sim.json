@@ -72,5 +72,6 @@
  "{n} would be held back now": "{n} würden jetzt zurückgehalten",
  "{n} would push now": "{n} würden jetzt gemeldet",
  "{n} would push": "{n} würden gemeldet",
- "{ok} of {n} as expected": "{ok} von {n} wie erwartet"
+ "{ok} of {n} as expected": "{ok} von {n} wie erwartet",
+ "Test in the simulator": "Im Simulator testen"
 }

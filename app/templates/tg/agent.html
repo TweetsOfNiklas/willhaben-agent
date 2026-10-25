@@ -22,6 +22,7 @@
   <div class="sec" style="margin-top: 12px">
     <a class="cell" href="/tg/hits"><span class="body"><span>{{ _("Hits") }}{% if new %} <span class="badge">{{ new }}</span>{% endif %}</span>{{ m.chev() }}</span></a>
     {% if not busy %}<form method="post" action="/agents/{{ a.id }}/run" style="margin: 0"><button class="cell" data-run><span class="body"><span>{{ _("Check now") }}</span>{{ ui.icon('refresh', 15, 2) }}</span></button></form>{% endif %}
+    <a class="cell" href="/agent-sim?agent={{ a.id }}" hx-boost="false" data-agent-sim><span class="body"><span>{{ _("Test in the simulator") }}</span>{{ m.chev() }}</span></a>
     <form method="post" action="/tg/agents/{{ a.id }}/toggle" class="cell" style="margin: 0"><input type="hidden" name="back" value="/tg/agents/{{ a.id }}">
       <span class="body"><span>{{ _("Running") }}</span>{{ m.switch(a.enabled, _("Running")) }}</span></form>
     <a class="cell" href="{{ a.source_url }}" target="_blank" hx-boost="false"><span class="body"><span>{{ _("Search on {platform}", platform=platform_name(a.platform)) }}</span><span style="color: var(--link)">{{ ui.icon('external', 15, 2) }}</span></span></a>

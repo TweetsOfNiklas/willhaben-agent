@@ -13,6 +13,7 @@
 </label>
 {%- endmacro %}
 {% call ui.head(_("Search agents"), _("Watch searches on {sites} and report new ads and price drops. Checks run at irregular, human-like intervals and slow down at night.", sites=platforms_all()|map(attribute='name')|join(', '))) %}
+  <a href="/agent-sim" class="btn" data-agent-sim>{{ ui.icon('play', 14) }}{{ _("Simulator") }}</a>
   <a href="/agents/new" class="btn btn-primary">+ {{ _("New search agent") }}</a>
 {% endcall %}
 {% if quiet and quiet.active and agents %}
@@ -210,6 +211,7 @@
           <footer class="mt-auto flex flex-wrap items-center gap-2 border-t border-base-300 pt-3.5">
             <button class="btn btn-primary">{{ _("Save") }}</button>
             <button type="button" class="btn btn-ghost" @click="$refs.dlg.close()">{{ _("Cancel") }}</button>
+            <a href="/agent-sim?agent={{ a.id }}" class="btn btn-ghost">{{ ui.icon('play', 14) }}{{ _("Test in the simulator") }}</a>
             <span class="flex-1"></span>
             {# gone for good, no undo: the confirm stays (hx-confirm, since the form sends through htmx); the card vanishes #}
             <button class="btn btn-ghost text-error hover:bg-bad-soft" formaction="/agents/{{ a.id }}/delete" hx-post="/agents/{{ a.id }}/delete" hx-confirm="{{ _('Delete search agent and its hits?') }}">{{ _("Delete agent") }}</button>
