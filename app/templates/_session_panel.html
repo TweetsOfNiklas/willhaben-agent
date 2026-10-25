@@ -52,7 +52,9 @@
       <button type="button" class="btn btn-xs" data-scroll="-650" title="{{ _('Scroll up') }}" aria-label="{{ _('Scroll up') }}">▲</button><button type="button" class="btn btn-xs" data-scroll="650" title="{{ _('Scroll down') }}" aria-label="{{ _('Scroll down') }}">▼</button>
       {% if embed %}<span class="remote-state text-xs text-muted"></span>{% endif %}
     </div>
-    <div class="remote-screen overflow-hidden rounded-lg border-2 border-base-300 bg-white leading-[0] outline-none focus:border-primary" tabindex="0" title="{{ _('Click, then type') }}"><img alt="{{ _('Loading browser window …') }}" draggable="false" class="w-full cursor-pointer touch-none select-none"></div>
+    <div class="remote-screen relative overflow-hidden rounded-lg border-2 border-base-300 bg-white leading-[0] outline-none focus:border-primary" tabindex="0" title="{{ _('Click, then type') }}"><img alt="{{ _('Loading browser window …') }}" draggable="false" class="w-full cursor-pointer touch-none select-none">
+      {# shown after a while without input: no frames are fetched, so the browser page may go idle #}
+      <div class="remote-paused absolute inset-0 grid cursor-pointer place-items-center bg-black/60 text-sm font-semibold leading-normal text-white" hidden>{{ _("Paused – click to continue") }}</div></div>
     {# recording what this window does (a named capture, data/captures) and the captures so far #}
     <div class="flex flex-wrap items-center gap-2 text-[12.5px]" data-remote-record>
       {% if session_status.capturing %}
@@ -75,26 +77,59 @@
     const T = {{ {"failed": _("Input failed ({status})"), "lost": _("Connection lost"),
                   "interrupted": _("Connection to the browser interrupted …")}|tojson }};
     const box = document.querySelector('.remote-screen'), img = box.querySelector('img');
-    const state = document.querySelector('.remote-state');
-    let queue = Promise.resolve(), wake = null, fails = 0;
+    const state = document.querySelector('.remote-state'), paused = box.querySelector('.remote-paused');
+    let pending = [], sending = false, wake = null, fails = 0, fastUntil = 0, lastInput = performance.now();
+    const IDLE_MS = 120000;
     const KEYS = {Enter:1, Tab:1, Backspace:1, Delete:1, Escape:1, ArrowLeft:1, ArrowRight:1, ArrowUp:1,
                   ArrowDown:1, Home:1, End:1, PageUp:1, PageDown:1};
 
-    // Inputs go out strictly in order; a frame is fetched right after each one.
+    // Inputs go out strictly in order, one request at a time; a frame is fetched right after each one. While a request
+    // is on its way the next inputs wait and merge: wheel steps into one scroll, typed characters into one text (a
+    // trackpad swipe fires ~60 wheel events a second; sent one by one they queued up for many seconds).
     function send(ev) {
-      queue = queue.then(() => fetch('/session/input', {method: 'POST', headers: {'content-type': 'application/json'},
-                                                        body: JSON.stringify(ev)}))
-                   .then(r => { if (!r.ok) state.textContent = T.failed.replace('{status}', r.status); })
-                   .catch(() => { state.textContent = T.lost; })
-                   .finally(() => wake && wake());
+      resume();
+      const last = pending[pending.length - 1];
+      if (last?.type === 'scroll' && ev.type === 'scroll' && Math.abs(last.dy + ev.dy) <= 3000) last.dy += ev.dy;
+      else if (last?.type === 'text' && ev.type === 'text' && last.text.length + ev.text.length <= 2000) last.text += ev.text;
+      else pending.push({...ev});
+      pump();
+    }
+    async function pump() {
+      if (sending) return;
+      sending = true;
+      while (pending.length) {
+        const ev = pending.shift();
+        try {
+          const r = await fetch('/session/input', {method: 'POST', headers: {'content-type': 'application/json'},
+                                                   body: JSON.stringify(ev)});
+          if (!r.ok) state.textContent = T.failed.replace('{status}', r.status);
+        } catch (e) { state.textContent = T.lost; }
+        fastUntil = performance.now() + 3000;
+        wake && wake();
+      }
+      sending = false;
     }
 
-    // Frame loop: next frame when the previous one arrived, faster right after input. A hidden browser tab fetches
-    // nothing at all: every frame counts as use of the browser page, which otherwise never idles (CPU).
+    // Two minutes without input: the view pauses on its last frame until a click into it (that click only resumes) or
+    // the next input. Coming back to the browser tab counts as input.
+    function resume() {
+      lastInput = performance.now();
+      if (!paused.hidden) { paused.hidden = true; wake && wake(); }
+    }
+    paused.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); box.focus(); resume(); });
+
+    // Frame loop: next frame when the previous one arrived – every 250 ms for 3 s after an input (a page loading or
+    // scrolling shows), else every second. A hidden browser tab or a paused view fetches nothing at all: every frame
+    // counts as use of the browser page, which otherwise never idles (CPU).
     const visible = () => new Promise(res => document.addEventListener('visibilitychange', res, {once: true}));
     async function loop() {
       for (;;) {
-        if (document.hidden) { await visible(); continue; }
+        if (document.hidden) { await visible(); resume(); continue; }
+        if (performance.now() - lastInput > IDLE_MS) {
+          paused.hidden = false;
+          await new Promise(res => { wake = res; });
+          continue;
+        }
         if (box.offsetParent === null) {          // panel hidden (another settings section is open): don't poll
           await new Promise(res => { wake = res; setTimeout(res, 1000); });
           continue;
@@ -106,7 +141,8 @@
           img.src = url; if (old.startsWith('blob:')) URL.revokeObjectURL(old);
           fails = 0; if (state.textContent === T.lost || state.textContent === T.interrupted) state.textContent = '';
         } catch (e) { fails++; state.textContent = T.interrupted; }
-        await new Promise(res => { wake = res; setTimeout(res, Math.min(1000 + fails * 1000, 8000)); });
+        const pause = fails ? Math.min(1000 + fails * 1000, 8000) : performance.now() < fastUntil ? 250 : 1000;
+        await new Promise(res => { wake = res; setTimeout(res, pause); });
       }
     }
 

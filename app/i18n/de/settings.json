@@ -166,6 +166,7 @@
  "Input failed ({status})": "Eingabe fehlgeschlagen ({status})",
  "Connection lost": "Verbindung weg",
  "Connection to the browser interrupted …": "Verbindung zum Browser unterbrochen …",
+ "Paused – click to continue": "Pausiert – klicken zum Fortsetzen",
  "Advanced": "Erweitert",
  "API recording": "API-Aufzeichnung",
  "Records every willhaben API call of the browser window (cookies and CSRF tokens are removed, responses with chat content stay local in": "Zeichnet alle willhaben-API-Aufrufe des Browserfensters auf (Cookies und CSRF-Token werden entfernt, Antworten mit Chat-Inhalten bleiben lokal unter",
