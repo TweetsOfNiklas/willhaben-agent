@@ -118,7 +118,7 @@ def _known(p: platforms.Platform, ad_id: str, hit: Hit | None) -> AdDetail | Non
 
 async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str | None = None,
                     use_claude: bool = False, cat: str | None = None, hit: Hit | None = None,
-                    find_geizhals: bool = False, own: bool = False, quick: bool = False
+                    find_geizhals: bool = False, own: bool = False, quick: bool = False, find_parts: bool = False
                     ) -> tuple[dict[str, Any] | None, str | None]:
     """(result, error). A fresh cached result costs no request; otherwise ad detail (cached) + analysis. Sites
     without an ad-detail call, and a site that fails, use what the hit or the list that showed the ad knows (as the
@@ -130,7 +130,7 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
     stale = res is not None and hit is not None and (
         bool(hit.item_condition) and (res.get("ad") or {}).get("item_condition") != hit.item_condition
         or bool((hit.geizhals or {}).get("price_from")) and not res.get("geizhals"))   # a product the hit knows
-    if res is not None and not (use_claude or find_geizhals or stale):
+    if res is not None and not (use_claude or find_geizhals or find_parts or stale):
         return res, None
     if p.can("detail"):
         try:
@@ -147,6 +147,7 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
     from app.platforms import ratelimit
     with ratelimit.urgent():         # someone waits on the page: first in each site's queue, slow sites left out
         res = await deals.analyze(d, query=q, own_query=own, use_claude=use_claude, find_geizhals=find_geizhals,
+                                  find_parts=find_parts,
                                   fallback_query=fallback, category_url=cat,
                                   known_geizhals=hit.geizhals if hit is not None else None, quick=quick)
     if hit is not None and res.get("geizhals_rejected"):     # Claude: the hit's product was another one
@@ -215,21 +216,24 @@ async def deal_claude_platform(request: Request, platform: str, ad_id: str, q: s
 
 @router.post("/deals/ad/{platform}/{ad_id}/geizhals", response_class=HTMLResponse)
 async def deal_geizhals_platform(request: Request, platform: str, ad_id: str, q: str = Form(""), hit: str = Form(""),
-                                 cat: str = Form(""), compact: str = Form(""), own: str = Form("")):
-    """Claude looks for the product on Geizhals – only on this explicit click, when the automatic lookup found none.
+                                 cat: str = Form(""), compact: str = Form(""), own: str = Form(""),
+                                 parts: str = Form("")):
+    """Claude looks for the product on Geizhals – only on this explicit click, when the automatic lookup found none;
+    with `parts` it names the ad's components and their new prices are summed ("Price the components", any time).
     Answers with the whole price section: a new price can place the ad on the bar. A hit the viewer was opened from
     gets the product too (the hit list shows the comparison)."""
     h, fallback = _hit(int(hit) if hit.isdigit() else None)
-    async with jobs.track("geizhals-claude", t("Claude searches Geizhals: „{title}“",
-                                               title=_title(platform, ad_id, q, cat, h, own == "1")),
-                          link=_page(platform, ad_id), quiet=True) as job:
+    title = _title(platform, ad_id, q, cat, h, own == "1")
+    label = t("Claude prices the components: „{title}“", title=title) if parts else \
+        t("Claude searches Geizhals: „{title}“", title=title)
+    async with jobs.track("geizhals-claude", label, link=_page(platform, ad_id), quiet=True) as job:
         res, error = await _analysis(platform, ad_id, q or None, fallback, cat=_cat(cat, platform), hit=h,
-                                     find_geizhals=True, own=own == "1")
+                                     find_geizhals=not parts, find_parts=bool(parts), own=own == "1")
         r = res or {}
         if error or r.get("geizhals_error"):
             job.status, job.result = "failed", error or r["geizhals_error"]
         else:
-            job.result = (r.get("geizhals") or {}).get("name") or r.get("geizhals_none") or ""
+            job.result = (r.get("geizhals") or {}).get("name") or r.get("parts_none") or r.get("geizhals_none") or ""
     if res is not None:
         deals.remember(res)
         if h is not None and (res.get("geizhals") or {}).get("by") == "claude":

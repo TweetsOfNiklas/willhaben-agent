@@ -94,6 +94,14 @@
       <span class="loading loading-spinner loading-xs hidden busy:inline-block"></span> {{ _("Let Claude search Geizhals") }}</button>
     {% if res.geizhals_error %}<span>{{ _("Claude failed: {error}", error=res.geizhals_error) }}</span>{% endif %}</div>
   {% endif %}
+  {# any time: Claude names the ad's components, their new prices summed (a mini PC with its RAM and SSD) #}
+  {% if not (gh and gh.parts) %}<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted" data-gh-parts-ask>
+    <button type="button" class="btn btn-xs disabled:opacity-60" hx-post="/deals/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}/geizhals"
+            hx-vals='{"q": {{ (res.asked_query or '')|tojson }}, "hit": {{ (h.id if h else '')|string|tojson }}, "cat": {{ (res.category_url or '')|tojson }}, "compact": {{ ('1' if compact else '')|tojson }}, "own": {{ ('1' if res.own_query else '')|tojson }}, "parts": "1"}'
+            hx-target="closest section" hx-swap="outerHTML" hx-disabled-elt="this" title="{{ _('Claude names the components (e.g. barebone, RAM, SSD), the app sums their lowest new prices on Geizhals') }}">
+      <span class="loading loading-spinner loading-xs hidden busy:inline-block"></span>{{ ui.icon('sparkle', 12, 2) }} {{ _("Price the components on Geizhals") }}</button>
+    {% if res.parts_none %}<span data-parts-none>{{ res.parts_none }}</span>{% endif %}
+    {% if res.geizhals_error and (gh or res.geizhals_none) %}<span>{{ _("Claude failed: {error}", error=res.geizhals_error) }}</span>{% endif %}</div>{% endif %}
   {% if not (compact and h and h.screen_relevant is not none) %}{% with q=res.asked_query or '', hit=(h.id if h else '') %}{% include "_deal_claude.html" %}{% endwith %}{% endif %}
   {% if c.closest %}
   <details {% if not compact %}open{% endif %} class="group text-[13px]"><summary class="flex cursor-pointer list-none items-center gap-1.5 font-semibold hover:text-primary [&::-webkit-details-marker]:hidden"><span class="text-muted transition-transform group-open:rotate-90">{{ ui.icon('chevron-right', 14) }}</span>{{ _("Comparable ads ({n})", n=c.closest|length) }}<small class="ml-auto font-normal text-muted">{{ _("closest by price") }}</small></summary>

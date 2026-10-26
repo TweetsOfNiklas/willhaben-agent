@@ -1905,3 +1905,31 @@ async def test_quick_analysis_shows_the_new_price_and_loads_the_comparables_next
     searched.clear()
     res, err = await _analysis("willhaben", AD_ID, None, quick=True)            # cached: the full result at once
     assert searched == [] and res["comparables"]["count"] == 5
+
+
+async def test_price_the_components_of_a_mini_pc(wh, no_auto_gh, monkeypatch):
+    """10-26: a NUC 13 Pro with 16 GB RAM and a 990 PRO had no Geizhals price as a whole; "Price the components"
+    asks Claude for its parts – any time, also over a product found before – and rates by the sum."""
+    prices = {"Intel NUC 13 Pro Barebone NUC13ANKi7": 520.0, "Kingston 16GB DDR4-3200 SO-DIMM": 35.0,
+              "Samsung 990 PRO 1TB": 95.0}
+
+    async def match(q, raise_errors=False):
+        return {"name": q, "url": f"https://geizhals.at/{len(q)}", "price_from": prices[q]} if q in prices else None
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    fake = ScriptedClaude({"parts": list(prices), "reason": ""})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    ad = _ad(450, heading="Intel NUC 13 Pro i7-1360P | 16 GB RAM | Samsung 990 PRO 1 TB")
+    res = await deals.analyze(ad, find_parts=True)
+    gh = res["geizhals"]
+    assert gh["price_from"] == 650.0 and gh["by"] == "claude" and len(gh["parts"]) == 3
+    assert res["position"]["basis"] == "geizhals" and res["position"]["pct"] == 69
+    assert "Barebone" in fake.calls[0]["system"] and fake.calls[0]["schema"]["required"] == ["parts", "reason"]
+    html = _plain(_render_deal(res, lang="en"))
+    assert "Sum of 3 parts" in html and "data-gh-parts-ask" not in html           # a sum already: no button
+    fake2 = ScriptedClaude({"parts": [], "reason": "Ein Einzelgerät ohne Komponenten."})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake2)
+    deals.clear_cache()
+    res = await deals.analyze(_ad(450, heading="Dyson V11", ad_id="2000000001"), find_parts=True)
+    assert res["parts_none"] == "Ein Einzelgerät ohne Komponenten." and res["geizhals"] is None
+    html = _render_deal(res, lang="en")
+    assert "data-gh-parts-ask" in html and "Ein Einzelgerät ohne Komponenten." in html and '"parts": "1"' in html
