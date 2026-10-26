@@ -128,6 +128,57 @@ class Trial:
 
 
 _trial: ContextVar[Trial | None] = ContextVar("vpn_trial", default=None)
+
+
+class LaneLost(Blocked):
+    """The lane's server is gone or the site refused it: this lane stops, its work goes to the other lanes."""
+
+
+@dataclass
+class Lane:
+    """One of a site's parallel connections (vpn.lanes(); the product search runs one worker per lane): requests of
+    the task that set it go out through `route` alone, paced by `limiter` – that server's own, sites pace per IP –
+    as a visitor of their own. A refusal or an unreachable server ends the lane (`lost`, LaneLost): the server is
+    marked for the site (vpn.lane_refused) and no request of this lane goes anywhere else."""
+    pid: str
+    route: Route
+    limiter: RateLimiter
+    lost: str | None = None
+    visitors: dict[int, tuple[Any, _Visitor]] = field(default_factory=dict, repr=False)
+
+    def visitor(self, client: Any) -> _Visitor:
+        return self.visitors.setdefault(id(client), (client, _Visitor()))[1]
+
+    def close(self) -> None:
+        for _client, v in self.visitors.values():
+            if v.transport is not None:
+                _close_later(v.transport)
+            v.transport = None
+        self.visitors.clear()
+
+
+_lane: ContextVar[Lane | None] = ContextVar("vpn_lane", default=None)
+_lane_limiters: dict[tuple[str, str], RateLimiter] = {}
+
+
+def lane_limiter(pid: str, server: str, like: RateLimiter) -> RateLimiter:
+    """The limiter of one server for one site: the site's pacing and hourly budget, counted for that server's IP
+    alone (kept while the app runs, so the budget holds across searches)."""
+    lim = _lane_limiters.get((pid, server))
+    if lim is None:
+        lim = _lane_limiters[(pid, server)] = RateLimiter(like.min_gap_s, like.per_hour, like.max_wait_s,
+                                                          name=f"{like.name} · {server}")
+    return lim
+
+
+@contextmanager
+def lane(ln: Lane) -> Iterator[Lane]:
+    """Within the block (this task only) the site's requests go through the lane."""
+    token = _lane.set(ln)
+    try:
+        yield ln
+    finally:
+        _lane.reset(token)
 _closing: set[asyncio.Task] = set()     # transports of tests and of dropped visitors, closing in the background
 
 
@@ -241,7 +292,7 @@ class HttpPlatformClient:
         self.platform = platform_id
         self.name = name or platform_id
         self.channel = channel
-        self.limiter = limiter
+        self._limiter = limiter
         self.session_s = session_s
         self._cache: dict[Any, tuple[float, FetchResponse]] = {}
         headers = headers or {}
@@ -263,10 +314,28 @@ class HttpPlatformClient:
         self._tunnel: Callable[[], Tunnel | None] = tunnel or (lambda: None)
         self._live = _Visitor(transport_factory(None) if injected else None)   # else built on first use
 
+    @property
+    def limiter(self) -> RateLimiter:
+        """The site's limiter – within a lane of this site (parallel work) the lane's server's own."""
+        ln = self._lane()
+        return ln.limiter if ln is not None else self._limiter
+
+    @limiter.setter
+    def limiter(self, value: RateLimiter) -> None:
+        self._limiter = value
+
+    def _lane(self) -> Lane | None:
+        ln = _lane.get()
+        return ln if ln is not None and ln.pid == self.platform and _trial.get() is None else None
+
     def _visitor(self) -> _Visitor:
-        """The visitor this request belongs to: the Trial's own under the VPN search, else the live one."""
+        """The visitor this request belongs to: the Trial's own under the VPN search, a lane's own, else the live
+        one."""
         tr = _trial.get()
-        return tr.visitor(self) if tr is not None else self._live
+        if tr is not None:
+            return tr.visitor(self)
+        ln = self._lane()
+        return ln.visitor(self) if ln is not None else self._live
 
     @property
     def _transport(self) -> Transport | None:
@@ -459,7 +528,10 @@ class HttpPlatformClient:
         tunnel = self._tunnel()
         if tunnel is None:
             return False
-        return tunnel.alive(route) if _trial.get() is not None else tunnel.current() == route
+        ln = self._lane()
+        if _trial.get() is not None or ln is not None and ln.route == route:
+            return tunnel.alive(route)
+        return tunnel.current() == route
 
     def _hold(self, route: Route | None) -> Any:
         """A request in flight on `route`: a switch-over lets it finish before that server stops."""
@@ -487,6 +559,8 @@ class HttpPlatformClient:
         direct request. Under a Trial (the VPN search) one try through its server only (_send_trial)."""
         if (tr := _trial.get()) is not None:
             return await self._send_trial(tunnel, tr, full, kind, headers, valid)
+        if (ln := self._lane()) is not None:
+            return await self._send_lane(tunnel, ln, full, kind, headers, valid)
         last: PlatformError | None = None
         exits: set[Route] = set()
         for _ in range(VPN_TRIES):
@@ -522,6 +596,41 @@ class HttpPlatformClient:
             last.sent = True
         assert last is not None
         raise last
+
+    async def _send_lane(self, tunnel: Tunnel, ln: Lane, full: str, kind: str, headers: dict[str, str] | None,
+                         valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:
+        """A lane's request: through its server only. Gone, unreachable or refused (403/429, a bot check): the lane
+        is lost (LaneLost; a refusal marks the server for the site), never another route and never directly."""
+        from app.platforms import vpn
+
+        def lost(reason: str, msg: str, sent: bool = False) -> LaneLost:
+            ln.lost = reason
+            if reason in ("blocked", "rate", "botcheck", "unreachable"):
+                vpn.lane_refused(self.platform, ln.route, reason)
+            e = LaneLost(msg)
+            e.sent = sent
+            return e
+
+        if ln.lost:
+            raise LaneLost(t("{name}: this VPN server is out of the search ({reason})", name=self.name, reason=ln.lost))
+        if not tunnel.alive(ln.route):
+            raise lost("gone", t("{name}: the VPN server stopped", name=self.name))
+        try:
+            r = await self._send_once(full, kind, headers, ln.route)
+        except ExitMoved as e:
+            raise lost("gone", str(e)) from e
+        except TransportError as e:
+            if not self._exit_unreachable(full):
+                raise PlatformError(t("Network error through the VPN: {error}", error=e)) from e
+            raise lost("unreachable", t("Network error through the VPN: {error}", error=e), sent=True) from e
+        if self._exit_blocked(r):
+            self.new_anonymous_session()
+            raise lost("rate" if r.status_code == 429 else "blocked",
+                       t("{name} refused the VPN server (HTTP {status})", name=self.name, status=r.status_code), sent=True)
+        if (is_challenge(r) or (r.status_code == 200 and valid is not None and not valid(r))) and not tunnel.odd():
+            self.new_anonymous_session()
+            raise lost("botcheck", t("{name} answered through the VPN server with a bot check", name=self.name), sent=True)
+        return r
 
     async def _send_trial(self, tunnel: Tunnel, tr: Trial, full: str, kind: str, headers: dict[str, str] | None,
                           valid: Callable[[FetchResponse], bool] | None = None) -> FetchResponse:

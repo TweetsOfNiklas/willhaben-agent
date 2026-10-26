@@ -1329,3 +1329,42 @@ async def test_load_more_counts_its_calls_and_passed_offers_can_be_checked(wh, c
     assert row.progress["calls"] == first + 1                       # load more's call counted, not overwritten
     p = row.passed[0]                                               # passed over: its price check finds it
     assert deals.shown_result(p.get("platform") or "willhaben", str(p["ad_id"]))["ad_id"] == p["ad_id"]
+
+
+async def test_a_sites_searches_spread_over_parallel_lanes(wh, fake_site, monkeypatch):
+    """Parallel VPN servers: one worker per lane takes the site's searches; a lane its server lost hands its search
+    back to the others; every search runs once."""
+    import asyncio as _asyncio
+
+    from app.platforms import httpclient
+    from app.platforms.ratelimit import RateLimiter
+    from app.platforms.vpn import Route
+    from tests.fake_platform import listing
+
+    lanes = [httpclient.Lane("fake", Route(f"http://exit{n}", n, f"srv{n}"), RateLimiter(0)) for n in (2, 3)]
+
+    async def site_lanes(p):
+        return [ln for ln in lanes if ln.pid == p.id]
+    monkeypatch.setattr(ps, "_site_lanes", site_lanes)
+    by_lane, lost_once = [], []
+    real = fake_site.search
+
+    async def search(spec, **kw):
+        ln = httpclient._lane.get()
+        name = ln.route.name if ln else "own"
+        if name == "srv3" and not lost_once:                  # the site refuses srv3 once: that lane is out
+            lost_once.append(spec.keyword)
+            ln.lost = "blocked"
+            raise httpclient.LaneLost("refused")
+        by_lane.append((name, spec.keyword))
+        await _asyncio.sleep(0.01)
+        return await real(spec, **kw)
+    monkeypatch.setattr(fake_site, "search", search)
+    fake_site.pages = [[listing("1", "Geschirrspüler Bosch 60 cm", 150.0)]]
+    plan = ps.normalize_plan({**PLAN, "queries": PLAN["queries"] * 2}, 6)
+    found = await ps.run_queries(plan, ps.make_settings(sites=["fake"]))
+    keywords = [q["keyword"] for q in plan["queries"]]
+    assert sorted(k for _, k in by_lane) == sorted(keywords)                  # each search once, none lost
+    assert {n for n, _ in by_lane} == {"own", "srv2"} and "srv3" not in {n for n, _ in by_lane}
+    assert lost_once and all(e["found"] is not None for e in found["per_query"])
+    assert found["lanes"] == {"fake": 3}

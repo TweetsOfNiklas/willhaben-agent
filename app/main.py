@@ -3486,6 +3486,17 @@ async def settings_vpn_interval(hours: str = Form("")):
     return _vpn_back(t("Changes saved"))
 
 
+@app.post("/settings/vpn/parallel")
+async def settings_vpn_parallel(n: str = Form("1")):
+    """How many VPN servers one site's parallel work (the product search) may use at once (1 = its own only)."""
+    if not n.strip().isdecimal():
+        return _vpn_back(t("Choose a number of servers"))
+    vpn.set_parallel(int(n))
+    if vpn.parallel() == 1:
+        await vpn.conn.prune_helpers(idle_s=0)          # off: the helper servers stop now
+    return _vpn_back(t("Changes saved"))
+
+
 @app.get("/settings/vpn/test", response_class=HTMLResponse)
 async def settings_vpn_test_panel(request: Request):
     """The connection panel (settings/_vpn_test.html); its body is polled while a search runs."""

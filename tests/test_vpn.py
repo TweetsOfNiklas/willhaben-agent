@@ -861,3 +861,44 @@ def test_settings_upload_switches_and_remove(fake, monkeypatch):
         assert "Upload a .zip" in r.text and vpn.source()[0] == "profile"
         r = c.post("/settings/vpn/clear")
         assert "Nothing uploaded" in r.text and vpn.source() == (None, [])
+
+
+async def test_parallel_lanes_start_helper_servers_beside_the_sites_own(fake, no_search):
+    """Settings → VPN, parallel servers: a site's parallel work gets its own server and helpers – the ones it answered
+    through first, never a live one, never one it refused, each reaching its host; idle helpers stop."""
+    _collection("at-vie-wg-001", "at-vie-wg-002", "at-vie-wg-003", "de-fra-wg-001", "de-fra-wg-002")
+    _on("willhaben", "kleinanzeigen")
+    vpn.update_conn(servers=["at-vie-wg-001"])
+    assert vpn.parallel() == 1 and len(await vpn.lanes("willhaben")) == 1          # off: the site's own only
+    assert vpn.set_parallel(3) == 3 and vpn.set_parallel(99) == vpn.MAX_PARALLEL
+    vpn.set_parallel(3)
+    vpn.mark("willhaben", "at-vie-wg-002", "blocked")
+    vpn.mark("willhaben", "de-fra-wg-001", "ok")                     # answered through it lately: tried first
+    fake.unreachable.add("at-vie-wg-003")
+    routes = await vpn.lanes("willhaben")
+    names = [r.name for r in routes]
+    assert names[0] == "at-vie-wg-001" and names[1] == "de-fra-wg-001" and len(names) == 3
+    assert "at-vie-wg-002" not in names and "at-vie-wg-003" not in names         # refused / unreachable
+    assert vpn.marks("willhaben")["at-vie-wg-003"][1] == "unreachable"
+    assert sorted(vpn.conn.helpers) == sorted(names[1:]) and fake.alive() == 3
+    again = await vpn.lanes("kleinanzeigen")                             # the helpers run: reused, no second process
+    assert [r.name for r in again][0] == "at-vie-wg-001" and fake.alive() <= 4
+    vpn.lane_refused("willhaben", routes[1], "rate")
+    assert vpn.marks("willhaben")["de-fra-wg-001"][1] == "rate"
+    await vpn.conn.prune_helpers(idle_s=0)
+    assert vpn.conn.helpers == {} and fake.alive() == 1                  # the site's own server stays
+    vpn.set_parallel(1)
+
+
+def test_the_parallel_setting_on_the_vpn_page(fake):
+    from app.main import app
+    _collection("at-vie-wg-001", "de-fra-wg-001")
+    with TestClient(app) as c:
+        page = c.get("/settings/vpn/test").text
+        assert 'data-vpn-parallel' in page and "1 server per site (off)" in page
+        c.post("/settings/vpn/parallel", data={"n": "5"})
+        assert vpn.parallel() == 5 and 'value="5" selected' in c.get("/settings/vpn/test").text
+        c.post("/settings/vpn/parallel", data={"n": "x"})
+        assert vpn.parallel() == 5
+        c.post("/settings/vpn/parallel", data={"n": "1"})
+        assert vpn.parallel() == 1

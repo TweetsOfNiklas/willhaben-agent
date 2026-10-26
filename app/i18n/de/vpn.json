@@ -208,5 +208,14 @@
  "via {server}": "über {server}",
  "Working servers ({n})": "Funktionierende Server ({n})",
  "all sites": "alle Seiten",
- "Geizhals shows a browser check for this search (not because of the VPN server); it is tried again in a few hours": "Geizhals zeigt für diese Suche eine Browser-Prüfung (nicht wegen des VPN-Servers); sie wird in ein paar Stunden wieder versucht"
+ "Geizhals shows a browser check for this search (not because of the VPN server); it is tried again in a few hours": "Geizhals zeigt für diese Suche eine Browser-Prüfung (nicht wegen des VPN-Servers); sie wird in ein paar Stunden wieder versucht",
+ "Parallel": "Parallel",
+ "Servers per site at once": "Server je Seite gleichzeitig",
+ "1 server per site (off)": "1 Server je Seite (aus)",
+ "{n} servers per site": "{n} Server je Seite",
+ "Choose a number of servers": "Wähl eine Anzahl Server",
+ "The product search runs a site's searches over this many VPN servers at once, each paced on its own – for the sites with their VPN switch on. Extra servers start for the search and stop after 5 idle minutes; a server a site refuses drops out.": "Die Produktsuche verteilt die Suchen einer Seite auf so viele VPN-Server gleichzeitig, jeder mit eigenem Tempo – für die Seiten mit eingeschaltetem VPN. Zusätzliche Server starten für die Suche und stoppen nach 5 Minuten ohne Nutzung; ein Server, den eine Seite ablehnt, fällt heraus.",
+ "Needs a collection of configs (one dedicated profile is one server).": "Braucht eine Sammlung von Configs (ein einzelnes Profil ist ein Server).",
+ "{name}: this VPN server is out of the search ({reason})": "{name}: Dieser VPN-Server ist aus der Suche raus ({reason})",
+ "{name}: the VPN server stopped": "{name}: Der VPN-Server wurde gestoppt"
 }

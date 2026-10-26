@@ -93,6 +93,14 @@
         <label id="s-vpn-hours" class="input input-sm w-[7.5rem] bg-base-100"><input type="number" name="hours" min="1" max="168" step="1" value="{{ vt.interval }}" required aria-label="{{ _('Hours between two regular searches') }}" class="tabular-nums"><span class="text-muted">{{ _("hours") }}</span></label>
         <button class="btn btn-sm">{{ _("Save") }}</button>
       </form></dd>
+    {# parallel work (the product search): helper servers beside a site's own, each with its own pacing #}
+    <dt class="text-muted">{{ _("Parallel") }}</dt>
+    <dd class="m-0">
+      <form method="post" action="/settings/vpn/parallel" class="m-0 flex flex-wrap items-center gap-2" data-vpn-parallel>
+        <select name="n" class="select select-sm w-auto bg-base-100" aria-label="{{ _('Servers per site at once') }}"{% if not vt.parallel_ok %} disabled{% endif %}>{% for n in (1, 2, 3, 5, 8) %}<option value="{{ n }}"{% if vt.parallel == n %} selected{% endif %}>{{ _("1 server per site (off)") if n == 1 else _("{n} servers per site", n=n) }}</option>{% endfor %}</select>
+        <button class="btn btn-sm"{% if not vt.parallel_ok %} disabled{% endif %}>{{ _("Save") }}</button>
+      </form>
+      <span class="mt-1 block text-[12.5px] text-muted">{{ _("The product search runs a site's searches over this many VPN servers at once, each paced on its own – for the sites with their VPN switch on. Extra servers start for the search and stop after 5 idle minutes; a server a site refuses drops out.") if vt.parallel_ok else _("Needs a collection of configs (one dedicated profile is one server).") }}</span></dd>
   </dl>
 
   {% if vt.working %}{# every server that answered lately (searches, "Test again"), with the sites it answered #}

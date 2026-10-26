@@ -34,6 +34,8 @@ no new questions; the stored answers are kept).
 from __future__ import annotations
 
 import asyncio
+from collections import deque
+from contextlib import nullcontext
 import logging
 import re
 import tempfile
@@ -62,7 +64,7 @@ from app.llm.prompts import (
 )
 from app.services import ad_images, deals, geo, price_zones, scam
 from app import platforms
-from app.platforms import Blocked, Listing, PlatformError, SearchPage, SearchSpec, ratelimit, shipping_info
+from app.platforms import Blocked, Listing, PlatformError, SearchPage, SearchSpec, httpclient, ratelimit, shipping_info
 from app.platforms.text import mentions
 from app.services import timeline
 
@@ -74,7 +76,7 @@ ROWS = 30
 SORTS = {"relevance": 7, "newest": 1}        # willhaben's codes; the adapters map the names
 MAX_CANDIDATES = 40          # offers per ranking call (a batch); every candidate is ranked, batch by batch
 TOP_N = 10                   # the best few that get the photo check and their shipping loaded
-RANK_PARALLEL = 3            # ranking calls at the same time (a 600-offer search: 5 rounds, not 15 calls in a row)
+RANK_PARALLEL = 5            # ranking calls at the same time (a 600-offer search: 3 rounds, not 15 calls in a row)
 MAX_RANKED = 600             # offers ranked in one search (15 calls at most); the rest waits for "load more"
 PER_SITE = (30, 100, 200, 500)   # ads per search and site the form offers (page after page up to it)
 PER_SITE_DEFAULT = 100
@@ -505,9 +507,16 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
         size = max(1, int(getattr(p, "PAGE_SIZE_MAX", ROWS) or ROWS))
         paging = k is None and getattr(p, "CAN_PAGE", False) and want > size
         spec = SearchSpec.from_json(entry["spec"])
+        handed_back = False
         try:
             page = await p.search(spec, rows=size if paging else want)   # uncached: real requests
             count["requests"] += 1
+        except httpclient.LaneLost as e:            # this lane's server is out: another lane runs the search
+            count["requests"] += int(getattr(e, "sent", False))
+            if left[p.id] is not None:
+                left[p.id] += 1
+            handed_back = True
+            raise
         except Blocked as e:
             count["requests"] += int(getattr(e, "sent", False))   # False: refused by the limiter, nothing was sent
             entry["error"] = str(e)
@@ -521,9 +530,10 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             entry["error"] = str(e)
             return
         finally:
-            count["done"] += 1
-            if on_progress:
-                on_progress(count["done"], len(jobs), count["requests"])
+            if not handed_back:
+                count["done"] += 1
+                if on_progress:
+                    on_progress(count["done"], len(jobs), count["requests"])
         entry["found"] = page.rows_found
         entry["kept"] = take(i, k, page)
         if k is not None:
@@ -544,6 +554,12 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
         try:
             page = await p.search(st["spec"], rows=st["size"], page=st["nr"])
             count["requests"] += 1
+        except httpclient.LaneLost as e:            # this lane's server is out: the page comes in another round
+            count["requests"] += int(getattr(e, "sent", False))
+            st["nr"] -= 1
+            if left[p.id] is not None:
+                left[p.id] += 1
+            raise
         except Blocked as e:                               # the pages so far stay counted; this site stops paging
             count["requests"] += int(getattr(e, "sent", False))
             stopped.add(p.id)
@@ -566,34 +582,88 @@ async def run_queries(plan: dict[str, Any], settings: dict[str, Any],
             deep.pop(i, None)
 
     async def site(pid: str) -> None:
-        """One site's searches: every search's first page in their order (its limiter paces them; bands after the
-        whole-range searches), then the further pages round by round, so the hourly budget reaches every search."""
-        for i, k in jobs:
-            if runs[i][2].id == pid:
-                await one(i, k)
-        while mine := [i for i in deep if runs[i][2].id == pid]:
-            for i in mine:
+        """One site's searches: every search's first page in their order (its limiter paces them), then the price
+        bands, then the further pages round by round, so the hourly budget reaches every search. With parallel VPN
+        servers (Settings → VPN) each phase is spread over the site's lanes: one worker per server, each paced by
+        its own limiter; a lane whose server the site refuses hands its item back and stops."""
+        p = next(x for x in sites if x.id == pid)
+        mine = [(i, k) for i, k in jobs if runs[i][2].id == pid]
+        lanes = await _site_lanes(p) if len(mine) > 1 else []
+        for ln in lanes:                             # each helper server has a budget of its own
+            if left[pid] is not None:
+                free = (ln.limiter.per_hour - ln.limiter.last_hour) if ln.limiter.per_hour else None
+                left[pid] = None if free is None else left[pid] + free
+        workers: list[httpclient.Lane | None] = [None, *lanes]
+        if lanes:
+            lanes_used[pid] = len(workers)
+
+        async def phase(items: list[Any], fn: Callable[..., Any]) -> None:
+            todo = deque(items)
+
+            async def work(ln: httpclient.Lane | None) -> None:
+                with httpclient.lane(ln) if ln is not None else nullcontext():
+                    # a stopped site's first pages still pass one(): it marks them skipped without a request
+                    while todo and (pid not in stopped or fn is one):
+                        item = todo.popleft()
+                        try:
+                            await fn(*item) if isinstance(item, tuple) else await fn(item)
+                        except httpclient.LaneLost:
+                            todo.appendleft(item)
+                            workers.remove(ln)
+                            return
+            await asyncio.gather(*(work(ln) for ln in list(workers)))
+
+        try:
+            await phase([(i, k) for i, k in mine if k is None], one)
+            await phase([(i, k) for i, k in mine if k is not None], one)
+            while runs_deep := [i for i in deep if runs[i][2].id == pid]:
                 if pid in stopped:
-                    deep.pop(i, None)
-                elif left[pid] is not None and left[pid] <= 0:
-                    deep.pop(i, None)
+                    for i in runs_deep:
+                        deep.pop(i, None)
+                    break
+                if left[pid] is not None and left[pid] <= 0:
+                    for i in runs_deep:
+                        deep.pop(i, None)
                     if not any(w.startswith(f"[{pid}]") for w in short):
                         short.append(f"[{pid}]")
                         warnings.append(t("Hourly request limit of {platform} reached: further result pages were "
-                                          "left out.", platform=runs[i][2].name))
-                else:
-                    await deeper(i)
+                                          "left out.", platform=p.name))
+                    break
+                await phase(runs_deep[:max(1, left[pid])] if left[pid] is not None else runs_deep, deeper)
+        finally:
+            for ln in lanes:
+                ln.close()
 
     short: list[str] = []
+    lanes_used: dict[str, int] = {}
     # the sites at once: each answers at its own pace, so a search takes as long as its slowest site, not their sum
-    await asyncio.gather(*(site(p.id) for p in sites))
+    try:
+        await asyncio.gather(*(site(p.id) for p in sites))
+    finally:
+        if lanes_used:
+            from app.platforms import vpn
+            vpn.conn.release_helpers()
     requests = count["requests"]
     for e in per_query:
         e.pop("spec", None)
         for b in e.get("bands") or []:
             b.pop("spec", None)
     return {"per_query": per_query, "pools": pools, "prices": prices, "query_of": [qi for qi, _, _ in runs],
-            "requests": requests, "warning": " ".join(warnings) or None}
+            "requests": requests, "warning": " ".join(warnings) or None, "lanes": lanes_used}
+
+
+async def _site_lanes(p: platforms.Platform) -> list[httpclient.Lane]:
+    """The helper lanes of one site (beside its own server) when parallel VPN servers are set up and its VPN is on;
+    [] otherwise or when none starts (the search then runs on the site's own server, as before)."""
+    from app.platforms import vpn
+    if vpn.parallel() <= 1:
+        return []
+    try:
+        routes = await vpn.lanes(p.id)
+    except PlatformError as e:
+        log.info("no parallel lanes for %s: %s", p.id, e)
+        return []
+    return [httpclient.Lane(p.id, r, httpclient.lane_limiter(p.id, r.name, p.limiter)) for r in routes[1:]]
 
 
 def detail_todo(picked: list[tuple[int, Listing]]) -> list[tuple[int, Listing]]:
@@ -853,10 +923,17 @@ _SHIP_UNKNOWN = re.compile(r"versand\w*\W.*(unklar|unbekannt|nicht angegeben)|(u
 
 async def fill_shipping(results: list[dict[str, Any]]) -> None:
     """The best offers that ship but whose list named no price (willhaben, Vinted): their ad page, one request each
-    through the site's limiter, so the photo check and the cards know the shipping (in place; failures stay open)."""
+    through the site's limiter, so the photo check and the cards know the shipping (in place; failures stay open).
+    The sites at once, each at its own pace."""
+    todo: dict[str, list[dict[str, Any]]] = {}
     for r in results:
-        if r.get("shipping_price") is not None or r.get("shipping") != shipping_info.SHIP:
-            continue                        # price known, pickup only, or the list says nothing: no request
+        if r.get("shipping_price") is None and r.get("shipping") == shipping_info.SHIP:   # else: no request
+            todo.setdefault(r.get("platform") or "willhaben", []).append(r)
+    await asyncio.gather(*(_fill_site(rows) for rows in todo.values()))
+
+
+async def _fill_site(rows: list[dict[str, Any]]) -> None:
+    for r in rows:
         try:
             p = platforms.get(r.get("platform") or "willhaben")
             if not p.can("detail"):

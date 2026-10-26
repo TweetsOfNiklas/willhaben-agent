@@ -614,3 +614,53 @@ async def test_a_request_is_held_on_its_route_while_it_is_under_way():
     gate.set()
     await task
     assert tunnel.held == []
+
+
+# ------------------------------------------------------------------ parallel lanes (vpn.lanes, the product search)
+async def test_a_lane_sends_through_its_own_server_with_its_own_limiter_and_visitor(monkeypatch):
+    from app.platforms import httpclient, vpn
+    from app.platforms.vpn import Route
+
+    tunnel = FakeTunnel()
+    helper = Route("http://exit7", 7, "de-fra-wg-007")
+    tunnel.running.add(helper)
+    c, transports, built = _vpn_client({"http://exit1": [(200, b"{}")], "http://exit7": [(200, b"{}"), (200, b"{}")]},
+                                       tunnel)
+    marked = []
+    monkeypatch.setattr(vpn, "lane_refused", lambda pid, route, reason: marked.append((pid, route.name, reason)))
+    lim = httpclient.lane_limiter("fake", "de-fra-wg-007", c.limiter)
+    assert lim is not c.limiter and lim.per_hour == c.limiter.per_hour
+    assert httpclient.lane_limiter("fake", "de-fra-wg-007", c.limiter) is lim          # one per server and site
+    ln = httpclient.Lane("fake", helper, lim)
+    await c._get("https://fake.example/a")                     # the site's own server, the live visitor
+    with httpclient.lane(ln):
+        assert c.limiter is lim
+        await c._get("https://fake.example/b")
+        await c._get("https://fake.example/c")
+    assert c.limiter is not lim and lim.last_hour == 2 and c.proxy == "http://exit1"
+    assert [len(transports[p].calls) for p in ("http://exit1", "http://exit7")] == [1, 2] and marked == []
+
+
+async def test_a_refused_lane_is_lost_and_its_server_marked(monkeypatch):
+    from app.platforms import httpclient, vpn
+    from app.platforms.vpn import Route
+
+    tunnel = FakeTunnel()
+    helper = Route("http://exit7", 7, "de-fra-wg-007")
+    tunnel.running.add(helper)
+    c, transports, _ = _vpn_client({"http://exit7": [(403, b"cloudflare")]}, tunnel)
+    marked = []
+    monkeypatch.setattr(vpn, "lane_refused", lambda pid, route, reason: marked.append((pid, route.name, reason)))
+    ln = httpclient.Lane("fake", helper, RateLimiter(0, name="Fake · x"))
+    with httpclient.lane(ln), pytest.raises(httpclient.LaneLost):
+        await c._get("https://fake.example/b")
+    assert ln.lost == "blocked" and marked == [("fake", "de-fra-wg-007", "blocked")]
+    assert tunnel.failures == [] and c.limiter.cooling_down_s == 0      # the site's own server and limiter untouched
+    with httpclient.lane(ln), pytest.raises(httpclient.LaneLost):
+        await c._get("https://fake.example/c")                          # a lost lane sends nothing more
+    assert len(transports["http://exit7"].calls) == 1
+    tunnel.running.clear()
+    gone = httpclient.Lane("fake", helper, RateLimiter(0))
+    with httpclient.lane(gone), pytest.raises(httpclient.LaneLost):
+        await c._get("https://fake.example/d")                          # its server stopped: never another route
+    assert gone.lost == "gone"

@@ -77,6 +77,9 @@ MARK_TTL_S = {"blocked": 24 * 3600, "rate": 3600, "botcheck": 3600,   # botcheck
               "dead": 24 * 3600, "broken": 24 * 3600,   # no handshake / does not start, confirmed: stale configs
               "ok": 24 * 3600}       # answered through it: tried first when the site needs a server again
 MAX_LIVE = 2                   # live connections at most (the search's tunnels come on top)
+PARALLEL_KEY = "vpn_parallel"  # servers one site's parallel work (the product search) may use at once, its own one
+MAX_PARALLEL = 8               # included (setting, Settings → VPN); 1 = only the site's own server, as before
+HELPER_IDLE_S = 300            # a helper server no request used for this long stops
 CONFIRM = 3                    # refusals in a row (403/429/bot check) before a site leaves its live server
 CONFIRM_UNREACHABLE = 2        # ... network errors in a row (a single timeout is no dead server)
 CONFIRM_WINDOW_S = 900         # older refusals no longer count
@@ -702,6 +705,9 @@ class Connection:
         self._inflight: dict[int, int] = {}                # route gen -> requests in flight
         self._retiring: set[_Proc] = set()                 # switched away from, stopping once their requests ended
         self._tasks: set[asyncio.Task] = set()
+        # extra servers for one site's parallel work (lanes()): never a live one, never one of the search's
+        self.helpers: dict[str, tuple[_Proc, Route]] = {}
+        self.helper_used: dict[str, float] = {}             # server -> monotonic time of its last lane
 
     # ---- reads (no lock)
     def route(self, name: str | None) -> Route | None:
@@ -718,7 +724,7 @@ class Connection:
         return self.route(servers[0]) if servers else None
 
     def _procs(self) -> list[_Proc]:
-        return [p for p, _r in [*self.live.values(), *self.probes.values()]] + list(self._retiring)
+        return [p for p, _r in [*self.live.values(), *self.probes.values(), *self.helpers.values()]] + list(self._retiring)
 
     def alive(self, route: Route) -> bool:
         """`route`'s process still runs: a live one, the search's tunnel (also once taken over), or one that stops
@@ -735,7 +741,7 @@ class Connection:
 
     def busy(self) -> set[str]:
         """Servers with a process or a start now (the search starts none of them)."""
-        return {*self.live, *self.probes, *self._starting, *(p.name for p in self._retiring if p.alive)}
+        return {*self.live, *self.probes, *self.helpers, *self._starting, *(p.name for p in self._retiring if p.alive)}
 
     def draining(self) -> int:
         return sum(p.alive for p in self._retiring)
@@ -846,6 +852,64 @@ class Connection:
         for proc, _r in gone:
             await self._stop(proc)
 
+    async def helper(self, name: str, host: str) -> Route:
+        """The route of helper server `name` for parallel work (started when it does not run; it must reach `host`).
+        Never a server that has another process (live, the search's, one still draining). OSError / Unreachable /
+        RuntimeError: not available."""
+        async with _lock("search"):
+            if self.closing:
+                raise PlatformError(t("The app is shutting down"))
+            p = self.helpers.get(name)
+            if p is not None and p[0].alive:
+                self.helper_used[name] = time.monotonic()
+                return p[1]
+            if p is not None:
+                self.helpers.pop(name, None)
+            if name in self.busy() or name in live_servers():
+                raise RuntimeError(f"{name} runs already")
+            self._starting.add(name)
+        try:
+            proc, _ = await self._start(name, host)
+        finally:
+            self._starting.discard(name)
+        async with _lock("search"):
+            self.helpers[name] = (proc, self._route(proc))
+            self.helper_used[name] = time.monotonic()
+        log.info("VPN: helper server %s started", name)
+        return self.helpers[name][1]
+
+    async def stop_helper(self, name: str) -> None:
+        """Helper `name` stops once its requests in flight ended."""
+        async with _lock("search"):
+            p = self.helpers.pop(name, None)
+            self.helper_used.pop(name, None)
+            if p is not None:
+                self._retiring.add(p[0])
+        if p is not None:
+            await self._stop_or_retire(p[0])
+
+    async def prune_helpers(self, idle_s: float = HELPER_IDLE_S) -> None:
+        now = time.monotonic()
+        for name in [n for n, at in self.helper_used.items() if now - at >= idle_s]:
+            await self.stop_helper(name)
+
+    def release_helpers(self) -> None:
+        """Parallel work ended: its helpers count as used now and stop once idle for HELPER_IDLE_S (unless the next
+        parallel work takes them again)."""
+        if not self.helpers:
+            return
+        now = time.monotonic()
+        for name in self.helpers:
+            self.helper_used[name] = now
+
+        async def later() -> None:
+            await asyncio.sleep(HELPER_IDLE_S + 1)
+            await self.prune_helpers()
+
+        task = asyncio.get_running_loop().create_task(later())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
     def testing(self) -> list[str]:
         """The servers on the search's tunnels (starting or started)."""
         return sorted({*self.probes, *self._starting})
@@ -925,8 +989,8 @@ class Connection:
     async def disconnect(self) -> None:
         """Every process stops, also the ones still finishing requests (the configs changed, the app shuts down)."""
         async with _lock("live"), _lock("search"):
-            procs = [p for p, _r in [*self.live.values(), *self.probes.values()]]
-            self.live, self.probes = {}, {}
+            procs = [p for p, _r in [*self.live.values(), *self.probes.values(), *self.helpers.values()]]
+            self.live, self.probes, self.helpers, self.helper_used = {}, {}, {}, {}
             self._retiring.update(procs)
         for task in list(self._tasks):
             task.cancel()
@@ -988,6 +1052,64 @@ async def prune() -> None:
     for s in servers:
         if s not in keep:
             await conn.drop(s)
+
+
+def parallel() -> int:
+    """How many servers one site's parallel work may use at once (its own included); 1 = its own only."""
+    from app.db import get_setting
+    try:
+        n = int(get_setting(PARALLEL_KEY) or 1)
+    except ValueError:
+        n = 1
+    return max(1, min(n, MAX_PARALLEL))
+
+
+def set_parallel(n: int) -> int:
+    from app.db import set_setting
+    n = max(1, min(int(n), MAX_PARALLEL))
+    set_setting(PARALLEL_KEY, str(n))
+    return n
+
+
+async def lanes(pid: str, want: int | None = None) -> list[Route]:
+    """Routes for one site's parallel work: its own server's first, then helper servers – the ones it answered
+    through lately (standby()), then other allowed servers in the search's order – each started here and reaching
+    the site's host (a CONNECT, no request), up to `want` (default parallel()) in all. [] while the site's VPN is
+    off (its requests go out directly: one connection, its limiter paces them); just its own route when no helper
+    starts. A helper the site refuses later is marked for it (lane_refused) like any refused server."""
+    tn = tunnel_for(pid)
+    if tn is None:
+        return []
+    want = parallel() if want is None else max(1, min(want, MAX_PARALLEL))
+    first = await tn.ensure()
+    routes = [first]
+    if want <= 1:
+        return routes
+    refused = marks(pid)
+    tried = 0
+    # helpers that run already first (no start), then the site's standby servers, then the rest of the source
+    running = [n for n in conn.helpers if n not in refused and n != first.name]
+    candidates = list(dict.fromkeys(running + standby(pid, exclude=[first.name]) + order(exclude=[first.name])))
+    for name in candidates:
+        if len(routes) >= want or tried >= 2 * want:
+            break
+        if name in refused or name in live_servers() or not allowed(name):
+            continue
+        tried += 1
+        try:
+            routes.append(await conn.helper(name, tn.host))
+        except Unreachable as e:
+            mark(pid, name, "unreachable")
+            log.info("VPN %s: helper %s unreachable: %s", pid, name, e.detail)
+        except (OSError, RuntimeError, PlatformError) as e:
+            log.info("VPN %s: helper %s not started: %s", pid, name, e)
+    return routes
+
+
+def lane_refused(pid: str, route: Route, reason: str) -> None:
+    """A site refused a helper's (or its own) server during parallel work: marked for the site, so neither the next
+    lanes() nor a failover picks it; its own server goes the usual way (Tunnel.refused)."""
+    mark(pid, route.name, reason)
 
 
 def standby(pid: str, exclude: Collection[str] = ()) -> list[str]:

@@ -1534,7 +1534,8 @@ def view() -> dict[str, Any]:
     out: dict[str, Any] = {
         "live": live, "blocked": None if live else blocker(), "profile": mode == "profile",
         "connections": conns, "two": len(conns) > 1, "waiting": waiting, "connected": bool(vpn.conn.routes()),
-        "error": st.get("error") or "", "interval": interval_h(), "next_at": _dt(nxt),
+        "error": st.get("error") or "", "interval": interval_h(), "next_at": _dt(nxt), "parallel": vpn.parallel(),
+        "parallel_ok": vpn.source()[0] == "collection",
         "next_due": nxt is not None and nxt <= time.time(), "pending": _pending_text(pend) if pend else "",
         "run": sh is not None, "progress": "", "now": "", "best": "", "wait": "", "clock": "", "summary": "",
         "tone": "", "trigger": "", "finished_at": None, "rows": [], "servers": [], "more": 0,
