@@ -164,3 +164,20 @@ def test_offers_above_the_limit_fold_away(lookups, monkeypatch):
         assert [(s.get("gh_level"), s.get("gh_pct")) for s in started] == [(None, 40), ("fair", None), (None, None)]
         form = c.get(f"/deals?from={sid}").text
         assert 'name="gh_level"' in form and 'value="pct" selected' in form and 'name="gh_pct" x-model="ghPct" min="1" max="95" step="1" value="50"' in form
+
+
+async def test_claudes_product_name_comes_first(lookups):
+    """The product Claude names while ranking is what Geizhals is asked; the title's name only without one."""
+    cards = [_r("1", "8GB Raspberry Pi 5 + Kühlgehäuse +256gb Micro SD", 120.0, None),
+             _r("2", "Bosch SMS46 Geschirrspüler", 300.0, None)]
+    merged = ps.merge_ranking({"results": [{"nr": 1, "fit": 90, "reason": "", "red_flags": [], "product": " Raspberry Pi 5\n8GB "},
+                                           {"nr": 2, "fit": 80, "reason": "", "red_flags": [], "product": ""}]}, cards)
+    assert [r["product"] for r in merged] == ["Raspberry Pi 5 8GB", ""]
+    await ps.geizhals_prices(_row(merged), merged)
+    assert lookups == ["Raspberry Pi 5 8GB", "Bosch SMS46"] and [ps.discount(r) for r in merged] == [-50, 25]
+
+
+def test_the_ranking_asks_for_the_product():
+    from app.llm.prompts import SEARCH_RANK_SCHEMA, SEARCH_RANK_SYSTEM
+    item = SEARCH_RANK_SCHEMA["properties"]["results"]["items"]
+    assert "product" in item["required"] and "Geizhals" in SEARCH_RANK_SYSTEM

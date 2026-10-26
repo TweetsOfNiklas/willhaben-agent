@@ -712,8 +712,9 @@ def discount(r: dict[str, Any]) -> int | None:
 
 def _lookups(results: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
     """The Geizhals lookups the offers not asked yet need, one per product name (whatever its case), best offers
-    first, at most MAX_NEW_PRICES. What needs no request is filled in place: Claude's pick from an earlier price
-    check of the ad, {} for a title without a product name (asked, none)."""
+    first, at most MAX_NEW_PRICES. The name is the product Claude named while ranking, else the one the title gives
+    (deals.geizhals_query). What needs no request is filled in place: Claude's pick from an earlier price check of
+    the ad, {} without a product name (asked, none)."""
     groups: dict[str, tuple[str, list[dict[str, Any]]]] = {}
     for r in results:
         if "geizhals" in r:
@@ -721,7 +722,7 @@ def _lookups(results: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, An
         if gh := deals.stored_geizhals(str(r.get("ref") or r.get("ad_id"))):
             r["geizhals"] = {k: gh.get(k) for k in ("name", "url", "price_from", "by")}
             continue
-        q = deals.geizhals_query(r.get("title"))
+        q = r.get("product") or deals.geizhals_query(r.get("title"))
         if q:
             groups.setdefault(q.lower(), (q, []))[1].append(r)
         else:
@@ -855,7 +856,8 @@ def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int 
         fit = r.get("fit")
         fit = max(0, min(100, int(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else None
         out.append({**cards[nr - 1], "fit": fit, "reason": str(r.get("reason") or "").strip()[:500],
-                    "red_flags": red_flags(_texts(r.get("red_flags"), limit=5, chars=80))})
+                    "red_flags": red_flags(_texts(r.get("red_flags"), limit=5, chars=80)),
+                    "product": _one_line(str(r.get("product") or ""))[:80]})
     out.sort(key=lambda c: -(c["fit"] if c["fit"] is not None else -1))
     return out[:top_n]
 

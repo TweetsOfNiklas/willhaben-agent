@@ -819,6 +819,10 @@ die besten Angebote für ihren Bedarf aus.
 - reason: ein knapper Satz auf Deutsch (max. 160 Zeichen): was die Anzeige gut oder schwächer macht.
 - red_flags: kurze deutsche Stichworte zu Bedenken (z. B. "Foto passt nicht zur Beschreibung", "nur Versand",
   "Zustand unklar", "Händler"), sonst leer. Fehlende Versandkosten sind kein Bedenken: die App lädt sie selbst.
+- product: das konkrete Produkt der Anzeige, so wie man es auf Geizhals sucht: Hersteller, Modell und die
+  preisbestimmende Variante (z. B. "Raspberry Pi 5 8GB", "Apple HomePod mini", "Samsung 980 PRO 1TB"), ohne
+  Zubehör, Zustand oder Füllwörter. "" bei Konvoluten, Bastlerware ohne erkennbares Modell oder allgemeinen Artikeln.
+  Die App sucht damit den Neupreis.
 - note: ein kurzer deutscher Satz zum Gesamtbild dieses Teils (z. B. "Unter 300 € gibt es kaum gute Angebote") oder "".
 - Die Preis-Einordnung (billig … teuer) vergleicht jede Anzeige mit den anderen Ergebnissen derselben Suche; sie
   ist ein Hinweis, kein Urteil. Nutze auch dein Wissen über Neu- und Gebrauchtpreise.
@@ -840,8 +844,9 @@ SEARCH_RANK_SCHEMA: dict[str, Any] = {
                     "fit": {"type": "integer"},
                     "reason": {"type": "string"},
                     "red_flags": {"type": "array", "items": {"type": "string"}},
+                    "product": {"type": "string"},
                 },
-                "required": ["nr", "fit", "reason", "red_flags"],
+                "required": ["nr", "fit", "reason", "red_flags", "product"],
                 "additionalProperties": False,
             },
         },
