@@ -453,16 +453,22 @@ class BrowserSession:
             self.touch_ui()
 
     async def park_idle_ui(self, idle_s: float = UI_IDLE_S) -> bool:
-        """Visible page unused for idle_s: go to about:blank. True if it was parked."""
-        page = self.ui_page
-        if (page is None or page.is_closed() or self._ui_holds or self.capturing or page.url in ("about:blank", "")
-                or time.monotonic() - self._ui_used_at < idle_s):
+        """The remote view unused for idle_s: every page it shows goes to about:blank – the visible one, and the
+        willhaben window and the Kleinanzeigen and Vinted tabs behind it (once a site's tab had been shown, the
+        willhaben home page behind it kept its ads and their processes: 1.2 GB of renderers, 10-26). The working
+        pages (api_page, chat_page) stay; logins live in the cookies. True if one was parked."""
+        pages = [p for p in dict.fromkeys([self.ui_page, self.home_page, *self.site_pages.values()])
+                 if p is not None and not p.is_closed() and p is not self.api_page and p is not self.chat_page
+                 and p.url not in ("about:blank", "")]
+        if not pages or self._ui_holds or self.capturing or time.monotonic() - self._ui_used_at < idle_s:
             return False
         if vnc_viewer_connected():
             self.touch_ui()      # someone watches in noVNC
             return False
-        await page.goto("about:blank")
-        log.info("visible browser page idle, parked on about:blank")
+        for page in pages:
+            with suppress(Exception):          # a page closing meanwhile: nothing to park
+                await page.goto("about:blank")
+        log.info("browser idle: %d page(s) parked on about:blank", len(pages))
         return True
 
     def show_home(self) -> None:

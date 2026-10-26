@@ -57,3 +57,15 @@ def test_vnc_viewer_detection(tmp_path, monkeypatch):
     assert not session_mod.vnc_viewer_connected()
     tcp.write_text(head + "   1: 0100007F:170C 0100007F:D431 01\n")              # websockify connected
     assert session_mod.vnc_viewer_connected()
+
+
+async def test_the_pages_behind_the_visible_one_are_parked_too(monkeypatch):
+    """10-26: the Kleinanzeigen tab was the visible one; the willhaben home behind it and the Vinted tab kept their ads
+    (25 renderer processes, 1.2 GB). All shown pages go; the working pages (API, live chat) stay."""
+    monkeypatch.setattr(session_mod, "vnc_viewer_connected", lambda: False)
+    home, ka, vinted = _Page(), _Page("https://www.kleinanzeigen.de/m-nachrichten.html"), _Page("https://www.vinted.at/inbox")
+    api, chat = _Page("https://www.willhaben.at/robots.txt"), _Page("https://www.willhaben.at/robots.txt")
+    s = _sess(ka, session_mod.UI_IDLE_S + 1)
+    s.home_page, s.site_pages, s.api_page, s.chat_page = home, {"kleinanzeigen": ka, "vinted": vinted}, api, chat
+    assert await s.park_idle_ui()
+    assert home.visits == ka.visits == vinted.visits == ["about:blank"] and api.visits == chat.visits == []
