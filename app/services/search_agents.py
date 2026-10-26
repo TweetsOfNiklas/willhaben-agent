@@ -14,7 +14,7 @@ import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import or_
@@ -773,6 +773,8 @@ async def _run_agent(agent_id: int) -> RunResult:
     gh_check = bool(agent.screen and agent.geizhals_check)
     if (geizhals_rule(agent) or agent.screen) and to_notify:   # the screening rates against the new price too
         await _geizhals_prices(to_notify)
+    if agent.geizhals_level in LEVELS and to_notify:          # no new price: their similar ads rate them
+        await _similar_prices([h for h in to_notify if _geizhals_cents(h) is None and distance_passes(agent, h)])
     # held back anyway: no Claude call – unless Claude is to check the product the rule judged by (the screening's call
     # does that too: geizhals_check.SCREEN_RULES)
     from app.services import geizhals_check
@@ -884,7 +886,10 @@ def geizhals_passes(agent: SearchAgent, hit: Hit) -> bool:
     cents = _geizhals_cents(hit)
     if not geizhals_rule(agent):
         return True
-    if cents is None:            # no Geizhals price: a price zone asks Claude's price verdict instead, if there is one
+    if cents is None and agent.geizhals_level in LEVELS and (hit.similar or {}).get("level"):
+        from app.services import price_zones           # no Geizhals price: the similar ads' rating (_similar_prices)
+        return price_zones.NAMES.index(hit.similar["level"]) <= price_zones.NAMES.index(agent.geizhals_level)
+    if cents is None:            # nor a rating by similar ads: a price zone asks Claude's price verdict, if there is one
         need = LEVEL_DEAL.get(agent.geizhals_level or "")
         return need is None or hit.screen_deal in (None, "unknown") or \
             screening.DEAL_RANK.get(hit.screen_deal, 1) >= screening.DEAL_RANK[need]
@@ -954,6 +959,43 @@ async def locate_job() -> None:
                     row.lat, row.lon = h.lat, h.lon
                     db.add(row)
             db.commit()
+
+
+SIMILAR_PER_RUN = 8              # hits rated by their similar ads per check (each: the sites' searches, Claude's pick)
+SIMILAR_TTL = timedelta(days=3)
+
+
+async def _similar_prices(hits: list[Hit]) -> None:
+    """For hits without a Geizhals new price: their rating among similar ads (the price check: comparable searches,
+    Claude's choice; the user's limits for similar ads), stored as hit.similar – the price-zone rule goes by it. At
+    most SIMILAR_PER_RUN per check, again after SIMILAR_TTL; a failing check leaves the hit to Claude's verdict."""
+    from app.platforms.types import AdDetail
+    from app.services import deals
+
+    todo = [h for h in hits if not h.similar or utcnow() - _aware_dt(h.similar.get("at")) > SIMILAR_TTL][:SIMILAR_PER_RUN]
+    for h in todo:
+        try:
+            res = await deals.analyze(AdDetail.from_hit(h))
+        except Exception as e:  # noqa: BLE001 - one hit's searches must not stop the check
+            log.info("similar ads of hit %s not rated: %s", h.id, e)
+            continue
+        pos, comp = res.get("position") or {}, res.get("comparables") or {}
+        h.similar = {"level": pos.get("level") if pos.get("basis") == "comparables" else None,
+                     "median": pos.get("median"), "count": comp.get("count") or 0, "at": utcnow().isoformat()}
+        with session() as db:
+            row = db.get(Hit, h.id)
+            if row is not None:
+                row.similar = h.similar
+                db.add(row)
+                db.commit()
+
+
+def _aware_dt(raw: str | None) -> datetime:
+    try:
+        at = datetime.fromisoformat(raw) if raw else datetime.min.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
 
 
 async def _geizhals_prices(hits: list[Hit]) -> None:

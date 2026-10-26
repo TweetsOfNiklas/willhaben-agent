@@ -442,3 +442,37 @@ async def test_the_first_checks_hits_are_judged_too_without_a_push(fake, world, 
     fake.pages = [[listing("9", "Hülle", 5.0)]]
     await run_agent(b.id)
     assert _hits(b.id)["9"].state == "seen" and _hits(b.id)["9"].quiet is None
+
+
+def test_without_a_geizhals_price_the_zone_asks_the_similar_ads_first():
+    """No new price: the hit's rating among similar ads decides the zone (then Claude's verdict, as before)."""
+    a = SearchAgent(name="x", source_url="x", webapi_url="x", geizhals_level="cheap")
+    h = Hit(agent_id=1, ad_id="1", heading="KNX Jalousieaktor 4-fach", url="x", price=80.0, geizhals={},
+            screen_deal="good", similar={"level": "fair", "median": 90.0, "count": 9, "at": "2026-10-26T00:00:00+00:00"})
+    assert not geizhals_passes(a, h)                      # fair among similar ads, although Claude said "good"
+    h.similar["level"] = "bargain"
+    assert geizhals_passes(a, h)
+    h.similar["level"] = None                            # too few similar ads: Claude's verdict
+    assert geizhals_passes(a, h)
+
+
+async def test_the_check_rates_hits_without_a_new_price_by_their_similar_ads(fake, world, monkeypatch):
+    lookups, sent = world
+    rated = []
+
+    async def analyze(ad, **kw):
+        rated.append(ad.heading)
+        return {"position": {"basis": "comparables", "level": "expensive", "median": 60.0},
+                "comparables": {"count": 8}}
+    monkeypatch.setattr(deals, "analyze", analyze)
+    a = create_agent("https://fake.example/s/knx")
+    fake.pages = [[]]
+    await run_agent(a.id)
+    _set(a.id, geizhals_level="cheap")
+    fake.pages = [[listing("1", "KNX Jalousieaktor 4-fach", 90.0), listing("2", "iPhone 13 128GB", 300.0)]]
+    await run_agent(a.id)
+    hits = _hits(a.id)
+    assert rated == ["KNX Jalousieaktor 4-fach"]                       # the iPhone has a Geizhals price
+    assert hits["1"].similar["level"] == "expensive" and hits["1"].state == "filtered"
+    await run_agent(a.id)
+    assert rated == ["KNX Jalousieaktor 4-fach"]                       # rated once (again after 3 days)

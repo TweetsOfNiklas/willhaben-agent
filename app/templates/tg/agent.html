@@ -42,7 +42,7 @@
     {% set lvl0 = a.geizhals_level or ('pct' if a.geizhals_pct else 'cheap') %}
     <div class="sec" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 8px" data-gh-rule>
       <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px"><span>{{ _("Below the Geizhals price") }}</span><input type="checkbox" name="gh_on" {% if a.geizhals_pct or a.geizhals_level %}checked{% endif %} style="width: 22px; height: 22px"></label>
-      <span class="sub">{{ _("Only show and push ads in this price range, measured against the lowest new price on Geizhals. Dearer ones go to “Filtered” without a push. For ads Geizhals does not know, Claude's price verdict counts (with the screening on); without one they are pushed as usual.") }}</span>
+      <span class="sub">{{ _("Only show and push ads in this price range, measured against the lowest new price on Geizhals. Dearer ones go to “Filtered” without a push. For ads Geizhals does not know, a price range is judged by their similar ads (your limits for similar ads), else by Claude's price verdict (with the screening on); without either they are pushed as usual.") }}</span>
       <select class="field" name="gh_level" aria-label="{{ _('Price range') }}">{% for v, lbl in geizhals_levels() %}<option value="{{ v }}"{% if v == lvl0 %} selected{% endif %}>{{ lbl }}</option>{% endfor %}<option value="pct"{% if lvl0 == 'pct' %} selected{% endif %}>{{ _("Own percentage") }}</option></select>
       <label class="sub">{{ _("% below the Geizhals new price") }} ({{ _("Own percentage") }})<input class="field" type="number" name="gh_pct" min="1" max="95" step="1" value="{{ a.geizhals_pct or 30 }}"></label>
     </div>
