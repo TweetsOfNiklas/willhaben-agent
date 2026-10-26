@@ -296,11 +296,11 @@ def test_settings_drawer_and_pages(fake):
                        item_condition_label="Defekt"))
             db.commit()
         page = c.get("/hits?state=filtered").text
-        assert "<dt class=\"text-muted\">Geizhals</dt>" in page and GH["url"] in page    # each rating names its source
-        assert 'bg-lvl-expensive">expensive</span>' in page              # 80 % of new: the user's used zones
+        assert 'data-rating="geizhals"' in page and GH["url"] in page              # each rating names its source
+        assert 'data-rating="geizhals">' in page              # 80 % of new: the user's used zones
         # next to a zone badge the share it comes from (a floored "20 % less" next to it read as 80 % or 81 %)
         assert "80\xa0% of €\xa0500 new" in page and "20 % less" not in page
-        assert 'title="By the Geizhals new price alone; the price check of the ad also weighs comparable ads."' in page
+        assert 'By the Geizhals new price alone; the price check of the ad also weighs comparable ads."' in page
         assert "new from €\xa0500 · 80\xa0% less" in page              # no badge for a defective item: the saving
         assert '>Defekt</span>' in page and "bg-bad-soft text-error" in page     # its condition as a pill
 

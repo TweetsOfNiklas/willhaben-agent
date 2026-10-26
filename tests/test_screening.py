@@ -265,10 +265,12 @@ def test_hit_card_names_the_source_of_each_rating(client):  # noqa: F811
                          screen_reason="Marktüblich für einen neuen Pi 5."))
         db.commit()
     page = client.get(f"/hits?agent_id={agent.id}").text
-    assert '<dt class="text-muted">Geizhals <span class="text-success" title="checked by Claude"' in page
-    assert '<dt class="text-muted">Claude</dt>' in page
-    assert 'bg-lvl-expensive">expensive</span>' in page and "101\xa0% of €\xa0118,50 new" in page
-    assert 'bg-lvl-fair">fair price</span>' in page
+    card = page[page.index("data-ratings"):]
+    geizhals = card[:card.index('data-rating="claude"')]
+    assert "bg-lvl-expensive" in geizhals and "Geizhals ✓ checked by Claude: Raspberry Pi 5" in geizhals   # its source
+    assert ">expensive</span>" in geizhals and "101\xa0% of €\xa0118,50 new" in geizhals and 'title="checked by Claude"' in geizhals
+    claude = card[card.index('data-rating="geizhals"'):]
+    assert "bg-lvl-fair" in claude and "Claude&#39;s assessment" in claude and ">fair price</span>" in claude
     assert 'title="Marktüblich für einen neuen Pi 5.">Marktüblich für einen neuen Pi 5.</p>' in page
 
 

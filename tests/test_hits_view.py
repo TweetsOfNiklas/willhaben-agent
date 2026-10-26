@@ -264,7 +264,7 @@ def test_a_card_has_tidy_place_time_and_status_lines():
     status = card[card.index("data-hit-status"):][:600]
     assert "still online" in status and 'title="listed' in status and ">listed" not in status   # ages in the tooltip
     other = page[page.index("With place"):]
-    assert "Haag (3350) · dealer" in other[other.index("data-hit-place"):][:200]
+    assert "Haag (3350)</span>\xa0· <span>dealer" in other[other.index("data-hit-place"):][:200]
 
 
 def test_a_sold_hit_is_greyed_out_and_a_fresh_one_does_not_repeat_its_time():

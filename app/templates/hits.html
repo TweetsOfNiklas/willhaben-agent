@@ -129,52 +129,51 @@
         {% if platform_ids %}<span class="badge badge-sm ml-auto max-w-[45%] shrink-0 overflow-hidden border-0 bg-black/55 font-medium leading-5 text-white"><span class="min-w-0 truncate">{{ platform_name(h.platform) }}</span></span>{% endif %}
       </div>{% endif %}
     </a>
-    <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-2.5">
-      <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="leading-snug font-semibold text-base-content no-underline hover:underline max-sm:line-clamp-2 max-sm:text-[13.5px]">{{ h.heading }}</a>
-      <div class="flex flex-wrap items-baseline gap-2"><span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>{{ ui.ship(h) }}
-        {% if h.old_price and h.price and h.old_price > h.price %}<span class="text-[13px] text-muted line-through">{{ h.old_price|eur }}</span><span class="text-[12.5px] font-semibold text-success">{{ _("price drop") }}</span>{% endif %}{{ ui.condition_pill(h.item_condition, h.item_condition_label, h.platform, 'self-center') }}</div>
-      {# the price ratings, each named by its source in the same colours: the user's zones of the Geizhals new price
-         (with the share it comes from: a floored "20 % less" beside it reads as 80 % or 81 %; without a zone, e.g.
-         defective, the saving), then Claude's screening verdict and its reason, cut by lines (the tooltip has it all) #}
+    <div class="flex min-w-0 flex-col gap-1.5 sm:px-3.5 sm:pt-3 sm:pb-1.5">
+      <a href="{{ h.url }}" target="_blank" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}" class="line-clamp-2 leading-snug font-semibold text-base-content no-underline hover:underline max-sm:text-[13.5px]" title="{{ h.heading }}">{{ h.heading }}</a>
+      {# the price: what it costs now, a drop from what it cost, shipping, the condition #}
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span class="text-base font-semibold tabular-nums">{{ h.price_display or (h.price|eur) }}</span>
+        {%- if h.old_price and h.price and h.old_price > h.price %}<span class="inline-flex items-baseline gap-1 text-[12px]" title="{{ _('price drop') }}" data-price-drop><span class="text-muted line-through decoration-1">{{ h.old_price|eur }}</span><span class="font-semibold text-success">−{{ (h.old_price - h.price)|eur }}</span></span>{% endif %}
+        {{ ui.ship(h, 'text-[12px]') }}{{ ui.condition_pill(h.item_condition, h.item_condition_label, h.platform) }}
+      </div>
+    </div>
+    {# phone: title and price beside the photo, the rest across the card's full width; wider: one column #}
+    <div class="flex min-w-0 flex-1 flex-col gap-1.5 max-sm:col-span-2 max-sm:mt-2 sm:px-3.5 sm:pb-2.5">
+      {# the ratings in one row, each with its source's icon: the user's zone of the Geizhals new price (the share of it
+         beside: a floored "20 % less" reads as 80 % or 81 %; without a zone – defective – the saving), Claude's verdict #}
       {% set gh_pct = geizhals_below_pct(h) %}{% set lvl = hit_level(h, pz) if gh_pct is not none else none %}
-      {% if gh_pct is not none or h.screen_relevant is not none %}
-      <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-1.5 text-[12.5px]">
+      {% set labels = screen_labels(h) if h.screen_relevant is not none else [] %}
+      {% if gh_pct is not none or labels %}
+      <div class="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px]" data-ratings>
         {% if gh_pct is not none %}{% set share = share_pct(h.price, h.geizhals.price_from) if lvl else none %}
-        <dt class="text-muted">Geizhals{% if h.geizhals.checked %} <span class="text-success" title="{{ _('checked by Claude') }}" aria-label="{{ _('checked by Claude') }}">{{ ui.icon('check', 12, 2.5, 'inline-block align-[-1px]') }}</span>{% endif %}</dt>
-        <dd class="m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-          {%- if lvl %}<span title="{{ _('By the Geizhals new price alone; the price check of the ad also weighs comparable ads.') }}">{{ ui.deal_lvl(lvl, deal_level_label(lvl)) }}</span>{% endif %}
-          <a href="{{ h.geizhals.url }}" target="_blank" rel="noopener" class="min-w-0 text-muted no-underline hover:underline" title="{{ h.geizhals.name }}">
-            {%- if lvl %}{{ (_("{n} % of {price} new", n=share, price=h.geizhals.price_from|eur) if share else _("below 1 % of the new price"))|nb }}
-            {%- else %}{{ (_("new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)))|nb }}{% endif %}</a></dd>
+        {%- set gh_title = 'Geizhals' ~ (' ✓ ' ~ _('checked by Claude') if h.geizhals.checked else '') ~ ': ' ~ (h.geizhals.name or '') ~ (' – ' ~ _('By the Geizhals new price alone; the price check of the ad also weighs comparable ads.') if lvl else '') %}
+        {{ ui.rating(lvl, deal_level_label(lvl) if lvl else _('Geizhals'), 'percent', gh_title, 'geizhals') }}
+        <a href="{{ h.geizhals.url }}" target="_blank" rel="noopener" class="min-w-0 text-muted no-underline hover:underline" title="{{ h.geizhals.name }}">
+          {%- if lvl %}{{ (_("{n} % of {price} new", n=share, price=h.geizhals.price_from|eur) if share else _("below 1 % of the new price"))|nb }}
+          {%- else %}{{ (_("new from {price}", price=h.geizhals.price_from|eur) ~ ' · ' ~ (_("{pct} % less", pct=gh_pct) if gh_pct >= 0 else _("{pct} % more", pct=-gh_pct)))|nb }}{% endif %}
+          {%- if h.geizhals.checked %}<span class="text-success" title="{{ _('checked by Claude') }}" aria-label="{{ _('checked by Claude') }}">{{ ui.icon('check', 11, 2.5, 'ml-0.5 inline-block align-[-1px]') }}</span>{% endif %}</a>
         {% endif %}
-        {% if h.screen_relevant is not none %}{% set labels = screen_labels(h) %}
-        <dt class="text-muted">Claude</dt>
-        <dd class="m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-          {%- if h.screen_relevant and h.screen_deal in screen_levels %}{{ ui.deal_lvl(screen_levels[h.screen_deal], labels|first) }}
-          {%- else %}{{ ui.pill(labels|first, '' if h.screen_relevant else 'bad', false) }}{% endif %}
-          {%- if labels|length > 1 %}<span class="text-muted">{{ labels[1:]|join(' · ') }}</span>{% endif %}</dd>
+        {% if labels %}{% set level = screen_levels[h.screen_deal] if h.screen_relevant and h.screen_deal in screen_levels else ('bad' if not h.screen_relevant else none) %}
+        {{ ui.rating(level, labels|first, 'sparkle', _("Claude's assessment"), 'claude') }}
+        {%- for extra in labels[1:] %}{{ ui.pill(extra, '', false) }}{% endfor %}
         {% endif %}
-      </dl>
-      {% if h.screen_reason %}<p class="m-0 line-clamp-3 text-[12.5px] leading-snug text-muted max-sm:line-clamp-2" title="{{ h.screen_reason }}">{{ h.screen_reason }}</p>{% endif %}
+      </div>
+      {% if h.screen_reason %}<p class="m-0 line-clamp-2 text-[12.5px] leading-snug text-muted" title="{{ h.screen_reason }}">{{ h.screen_reason }}</p>{% endif %}
       {% endif %}
-      {% if h.state == 'filtered' %}{% set why = held_back_reasons(agents.get(h.agent_id), h) %}{% if why %}<p class="m-0 text-[12.5px] text-warning" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</p>{% endif %}{% endif %}
+      {% if h.state == 'filtered' %}{% set why = held_back_reasons(agents.get(h.agent_id), h) %}{% if why %}<p class="m-0 text-[12.5px] leading-snug text-warning" data-held-back>{{ _("Held back: {why}", why=why|join(' · ')) }}</p>{% endif %}{% endif %}
       {% set scam_w = scam_warnings(h.scam_flags) %}{% if scam_w %}
-      {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start rounded-md', _('Scam check (rules, no AI)')) }}{% endif %}
-      {# where (only the parts there are, so no stray separators) and when; the status line below #}
+      {{ ui.pill(scam_w|map(attribute='label')|join(' · '), 'bad', false, 'self-start h-auto whitespace-normal rounded-md py-0.5', _('Scam check (rules, no AI)')) }}{% endif %}
+      {# where, from which agent, when – one muted line (only the parts there are); then the site's status #}
       {% set km = hit_km(h, home) %}{% set far = agents.get(h.agent_id) and agents[h.agent_id].max_km and km is not none and km > agents[h.agent_id].max_km and h.shipping != 'ship' and h.shipping_price is none %}
-      {% set seen_place = h.location or h.postcode or km is not none or h.is_private == false %}
-      {% if (not agent_id and agents.get(h.agent_id)) or platform_ids %}<div class="text-[12.5px] text-muted sm:hidden" data-hit-origin>
-        {%- set sep = joiner(' · ') %}
-        {%- if not agent_id and agents.get(h.agent_id) %}{{ sep() }}{{ agents[h.agent_id].name }}{% endif %}
-        {%- if platform_ids %}{{ sep() }}{{ platform_name(h.platform) }}{% endif %}
-      </div>{% endif %}
-      {% if seen_place %}<div class="text-[12.5px] text-muted" data-hit-place>
-        {%- set sep2 = joiner(' · ') %}
-        {%- if h.location or h.postcode %}{{ sep2() }}{{ h.location or '' }}{% if h.postcode %} ({{ h.postcode }}){% endif %}{% endif %}
-        {%- if km is not none %}{{ sep2() }}<span data-km class="{{ 'text-warning' if far else '' }}">{{ _("{n} km", n=km|round|int) }}</span>{% endif %}
-        {%- if h.is_private == false %}{{ sep2() }}{{ _("dealer") }}{% endif %}
-      </div>{% endif %}
-      <div class="text-[12.5px] text-muted" data-hit-when><span data-found{% if view.sort in ('newest', 'oldest') %} class="font-medium text-base-content"{% endif %}>{{ _("found {ago}", ago=h.first_seen_at|ago) }}</span>{% if h.published_at %} · {{ _("published {ago}", ago=h.published_at|ago) }}{% endif %}{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}</div>
+      <div class="mt-auto text-[12px] leading-snug text-muted" data-hit-meta>
+        {%- set sep = joiner(' · ') %}
+        {%- if h.location or h.postcode %}{{ sep() }}<span data-hit-place>{{ h.location or h.postcode }}{% if h.postcode and h.location and h.postcode not in h.location %} ({{ h.postcode }}){% endif %}</span>{% endif %}
+        {%- if km is not none %}{{ sep() }}<span data-km class="{{ 'text-warning' if far else '' }}">{{ _("{n} km", n=km|round|int) }}</span>{% endif %}
+        {%- if h.is_private == false %}{{ sep() }}<span>{{ _("dealer") }}</span>{% endif %}
+        {%- if not agent_id and agents.get(h.agent_id) %}<span class="sm:hidden" data-hit-origin>{{ sep() }}{{ agents[h.agent_id].name }}</span>{% endif %}
+        {{- sep() }}<span data-hit-when><span data-found{% if view.sort in ('newest', 'oldest') %} class="font-medium text-base-content"{% endif %} title="{{ (_('published {ago}', ago=h.published_at|ago) ~ ' · ') if h.published_at else '' }}{{ _('found {ago}', ago=h.first_seen_at|ago) }}">{{ _("found {ago}", ago=h.first_seen_at|ago) }}</span>{% if h.bumped_count %} · {{ _("bumped {n}×", n=h.bumped_count) }}{% endif %}</span>
+      </div>
       {% with sync_error=none, can_sync=hit_can_sync(h) %}{% include "_hit_status.html" %}{% endwith %}
     </div>
     {# three equal columns, one line each (icon and label): a card is one row shorter than with stacked buttons #}

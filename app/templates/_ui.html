@@ -123,6 +123,11 @@
 {%- endmacro %}
 
 {# price level chip (price gauge): level bargain | cheap | fair | expensive | very_expensive #}
+{# a rating with its source's icon in front (hit cards: % = the Geizhals new price, sparkle = Claude) #}
+{% macro rating(level, text, icon_name, title='', kind='') -%}
+<span class="inline-flex items-center gap-1 rounded-full py-0.5 pr-2.5 pl-1.5 text-xs font-semibold whitespace-nowrap {{ {'bargain': 'bg-lvl-bargain text-white', 'cheap': 'bg-lvl-cheap text-white', 'fair': 'bg-lvl-fair text-white', 'expensive': 'bg-lvl-expensive text-white', 'very_expensive': 'bg-lvl-very_expensive text-white', 'bad': 'bg-bad-soft text-error'}.get(level, 'bg-hover text-muted') }}"{% if title %} title="{{ title }}"{% endif %}{% if kind %} data-rating="{{ kind }}"{% endif %}>{{ icon(icon_name, 12, 2.5) }}{{ text }}</span>
+{%- endmacro %}
+
 {% macro deal_lvl(level, text) -%}
 <span class="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold text-white {{ {'bargain': 'bg-lvl-bargain', 'cheap': 'bg-lvl-cheap', 'fair': 'bg-lvl-fair', 'expensive': 'bg-lvl-expensive', 'very_expensive': 'bg-lvl-very_expensive'}.get(level, 'bg-muted') }}">{{ text }}</span>
 {%- endmacro %}
