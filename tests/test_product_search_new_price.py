@@ -163,4 +163,4 @@ def test_offers_above_the_limit_fold_away(lookups, monkeypatch):
         c.post("/deals/search", data={"description": "x", "gh_level": ""}, follow_redirects=False)
         assert [(s.get("gh_level"), s.get("gh_pct")) for s in started] == [(None, 40), ("fair", None), (None, None)]
         form = c.get(f"/deals?from={sid}").text
-        assert 'name="gh_level"' in form and 'value="pct" selected' in form and 'name="gh_pct" min="1" max="95" step="1" value="50"' in form
+        assert 'name="gh_level"' in form and 'value="pct" selected' in form and 'name="gh_pct" x-model="ghPct" min="1" max="95" step="1" value="50"' in form

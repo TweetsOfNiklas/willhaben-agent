@@ -420,7 +420,7 @@ def test_page_renamed_and_search_flow(app_client):
     assert 'href="/deals"' in page and 'title="Product search"' in page and "<h1>Product search</h1>" in page
     assert "Price check" not in page
     assert 'name="description"' in page and "Unusual names" in page and "Other categories" in page
-    assert "Normal (≈3 searches)" in page and "Thorough (≈6)" in page and "Deep (≈12)" in page
+    assert all(f'name="depth" value="{d}"' in page for d in ("normal", "thorough", "deep")) and "≈3" in page and "≈12" in page
     assert "one call per 40 offers ranked" in page and "AI search" in page and "Direct search" in page
     assert "Check photos" in page and 'name="photos" value="1" id="ps-photos" checked' in page
     assert "one call per 40 offers ranked, the photo check" in page
@@ -460,7 +460,7 @@ def test_page_german(app_client):
     page = app_client.get("/deals").text
     assert "Produktsuche" in page and "Preischeck</a>" not in page
     assert "Ungewöhnliche Namen" in page and "Andere Kategorien" in page
-    assert "Normal (≈3 Suchen)" in page and "Gründlich (≈6)" in page and "Tief (≈12)" in page
+    assert "Gründlich" in page and "Tief" in page and ">Optionen<" in page and ">Beides<" in page and "Umfang" in page
 
 
 # ------------------------------------------------------------------ purpose + usage
@@ -969,7 +969,7 @@ def test_new_search_from_a_past_one_only_fills_the_form(app_client):
     assert ">Rennrad Größe M bis 800 €</textarea>" in page and f"Text and options taken from search #{row.id}" in page
     assert 'name="unusual" value="1" checked' in page and 'name="categories" value="1">' in page
     assert 'id="ps-photos">' in page and 'name="ask" value="1" checked' in page
-    assert '<option value="deep" data-n="12" selected>' in page and '<option value="newest" selected>' in page
+    assert 'name="depth" value="deep" x-model="depth" checked' in page and 'name="sort" value="newest" x-model="sort" checked' in page
     assert "{ mode: 'ai' }" in page and f'data-search="{row.id}"' in page        # the past search is shown below
     assert len(app_client.fake.calls) == calls and ps.running() is None           # nothing started
     assert "New search" in page and "/rerun" not in page
@@ -1199,10 +1199,11 @@ def test_the_form_sends_the_condition(wh, claude, monkeypatch):
     monkeypatch.setattr(ps, "start", lambda d, s: started.append(s) or 1)
     with TestClient(app) as c:
         page = c.get("/deals").text
-        assert 'name="cond_new" value="1" checked' in page and 'name="cond_used" value="1" checked' in page
-        c.post("/deals/search", data={"description": "Rad", "cond_shown": "1", "cond_used": "1"})
-        c.post("/deals/search", data={"description": "Rad"})                 # an older form: either
-    assert [s["condition"] for s in started] == ["used", "any"]
+        assert 'name="condition" value="any" x-model="cond" checked' in page
+        c.post("/deals/search", data={"description": "Rad", "condition": "new"})
+        c.post("/deals/search", data={"description": "Rad", "cond_shown": "1", "cond_used": "1"})   # an older form
+        c.post("/deals/search", data={"description": "Rad"})                 # an older one still: either
+    assert [s["condition"] for s in started] == ["new", "used", "any"]
 
 
 def test_the_page_says_when_a_waiting_search_goes_on(app_client):

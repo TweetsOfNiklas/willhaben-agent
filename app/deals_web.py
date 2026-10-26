@@ -294,11 +294,13 @@ async def product_search_start(description: str = Form(""), depth: str = Form("n
                                categories: str = Form(""), sort: str = Form("relevance"), photos: str = Form(""),
                                ask: str = Form(""), sites: list[str] = Form([]), cond_new: str = Form(""),
                                cond_used: str = Form(""), cond_shown: str = Form(""), per_site: str = Form(""),
-                               over_budget: str = Form(""), gh_level: str = Form(""), gh_pct: str = Form("")):
+                               over_budget: str = Form(""), gh_level: str = Form(""), gh_pct: str = Form(""),
+                               condition: str = Form("")):
     if not description.strip():
         return RedirectResponse("/deals?msg=empty", status_code=303)
     # an older form without the boxes searches both
-    condition = product_search.condition_wanted(bool(cond_new), bool(cond_used)) if cond_shown else "any"
+    if condition not in product_search.CONDITIONS_WANTED:      # the form's choice; an older form's two boxes
+        condition = product_search.condition_wanted(bool(cond_new), bool(cond_used)) if cond_shown else "any"
     settings = product_search.make_settings(depth, bool(unusual), bool(categories), sort, bool(photos), bool(ask),
                                             sites=sites, condition=condition,
                                             per_site=int(per_site) if per_site.isdigit() else None,
