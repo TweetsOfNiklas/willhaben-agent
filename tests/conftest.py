@@ -122,6 +122,14 @@ def fresh_db():
     jobs.reset()                # background jobs are per event loop
     chats.reset()               # failed automatic answers are per test
     adaptive_pace.reset()       # the learned hourly profiles belong to the test's hits
+    from app.services import deals, product_search
+    # searches, ads and their ids start afresh with each test's database: what a background lookup of one test left
+    # behind (an older search's new prices, a site resting after a slow answer, Claude's product of an ad) must not
+    # meet the next test's search 1 or ad (10-26: CI failed, a backfill of search 1 was still "running")
+    product_search._backfill.clear()
+    product_search._backfill_tried.clear()
+    deals._slow_until.clear()
+    deals._identities.clear()
     recorder.sync_writes = True  # one in-memory connection: willhaben recordings are written right away
     yield
     recorder.reset()
