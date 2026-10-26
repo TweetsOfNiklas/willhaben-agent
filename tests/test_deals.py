@@ -2068,3 +2068,18 @@ def test_seller_hint():
     p = deals.position(100, deals.stats(PRICES), None)              # median 105, similar zones 70/90/115/135
     assert deals.seller_hint(p) == {"fair_from": 95, "fair_to": 121, "level": "fair", "basis": "comparables"}
     assert deals.seller_hint({"pos": None}) is None
+
+
+async def test_a_buyers_draft_knows_the_price_rating(monkeypatch):
+    """Writing to a seller (no purchase order): Claude's draft gets the price check's rating and where to start."""
+    from app.db import Conversation
+    from app.services import chats
+    _fake_search(monkeypatch, [_summ(n, "Bosch GSR 18V-55", p) for n, p in enumerate([90, 95, 100, 105, 110])])
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben"])
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    await deals.analyze(_ad(100))                                            # the price check ran: cached
+    conv = Conversation(id="b1", ad_id=AD_ID, role="buyer", partner_name="x", ad_context={"title": "Bosch", "price": 100})
+    req = await chats.compose(conv, [("in", None, "Hallo, noch da?")], auto=False, ad=None)
+    assert "Preiseinschätzung der App (nach ähnlichen Anzeigen)" in req["prompt"] and "zuerst um 90 €" in req["prompt"]          # median 100: fair from 90
+    seller = Conversation(id="s1", ad_id=AD_ID, role="seller", partner_name="x", ad_context={"title": "Bosch"})
+    assert "Preiseinschätzung" not in (await chats.compose(seller, [("in", None, "?")], auto=False, ad=None))["prompt"]

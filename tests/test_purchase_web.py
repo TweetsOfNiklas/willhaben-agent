@@ -462,8 +462,9 @@ def test_step2_has_three_chips_with_the_item_price_and_the_label_of_the_mode(cli
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     chips = re.findall(r'<button type="button" class="k-(\w+) [^"]*" data-v="([\d.]+)"[^>]*data-tpl="([^"]*)"[^>]*>([^<]*)</button>', step2)
-    # the cheapest comparable first, then lower quartile and median (item prices; the script adds the shipping of the mode); no −10 %
-    assert chips == [("min", "180.00", "Cheapest · {x}", "Cheapest · € 180"), ("cheap", "200.00", "Cheap · {x}", "Cheap · € 200"),
+    # the cheapest comparable first, then where "fair" starts (90 % of the median 220: the zones for similar ads) and the
+    # median (item prices; the script adds the shipping of the mode); no −10 %
+    assert chips == [("min", "180.00", "Cheapest · {x}", "Cheapest · € 180"), ("cheap", "198.00", "Cheap · {x}", "Cheap · € 198"),
                      ("market", "220.00", "Market price · {x}", "Market price · € 220")]
     assert 'onclick="wbBuy.pick(this.form, +this.dataset.v)"' in step2
 
@@ -473,22 +474,22 @@ def test_chip_labels_start_with_the_shipping_of_the_preselected_mode(client, mon
     set_setting(svc.SETTING_PREFER_PAYLIVERY, "1")
     _use(monkeypatch, _ad(shipping=7.9), _market_res(180.0, 200.0, 220.0))
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    # item price of the comparable + the ad's shipping 7.90 + its buyer protection fee (4.5 %: 8.10, 9, 9.90)
-    assert "Cheapest · € 196" in step2 and "Cheap · € 216,90" in step2 and "Market price · € 237,80" in step2 and 'data-v="200.00"' in step2
+    # item price of the comparable + the ad's shipping 7.90 + its buyer protection fee (4.5 %: 8.10, 8.91, 9.90)
+    assert "Cheapest · € 196" in step2 and "Cheap · € 214,81" in step2 and "Market price · € 237,80" in step2 and 'data-v="198.00"' in step2
 
 
 def test_chips_only_below_the_asking_price_and_not_twice(client, monkeypatch):  # noqa: F811
     _switch_on()
-    _use(monkeypatch, _ad(), _market_res(249.0, 249.5, 260.0))            # min and p25 under 1 % below the ask, the median above it
+    _use(monkeypatch, _ad(), _market_res(249.0, 249.5, 278.0))            # min under 1 % below the ask, fair from 250.20 and the median above it
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert "bd-sugg" not in step2 and "bd-gauge" in step2                  # the bar stays, no chips
-    _use(monkeypatch, _ad(), _market_res(180.0, 249.0, 260.0))            # only the cheapest is worth a chip
+    _use(monkeypatch, _ad(), _market_res(180.0, 249.0, 278.0))            # only the cheapest is worth a chip
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert step2.count('data-v="') == 1 and 'class="k-min ' in step2
-    _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 200.4))            # median rounds to the same price as the quartile
+    _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 200.4))            # "cheap" (180.36) rounds to the cheapest
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert step2.count('data-v="') == 2 and 'class="k-cheap ' in step2 and 'class="k-market ' not in step2
-    _use(monkeypatch, _ad(), _market_res(200.0, 200.2, 220.0))            # quartile rounds to the cheapest: one chip less
+    assert re.findall(r'class="k-(\w+) ', step2) == ["min", "market"]
+    _use(monkeypatch, _ad(), _market_res(200.0, 200.2, 220.0))            # "cheap" (198) below the cheapest: left out
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert re.findall(r'class="k-(\w+) ', step2) == ["min", "market"]
     _use(monkeypatch, _ad(), _market_res(300.0, 280.0, 290.0, price=250.0))   # everything above the asking price
@@ -503,12 +504,14 @@ def test_step2_marks_the_median_of_the_similar_ads(client, monkeypatch):  # noqa
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
     assert "bd-ends" not in step2 and re.search(r">Ø €\W{0,2}220</span>", step2)
     assert step2.index('class="bd-gauge ') < step2.index('class="bd-new') < step2.index('class="bd-sugg')
-    # too few comparable ads, but a Geizhals new price: the zones decide, a straight scale to drag on, no ends, no chips
+    # too few comparable ads, but a Geizhals new price: the zones decide, a straight scale to drag on, no ends; one chip,
+    # "cheap" where the zones' fair range starts (used: 55 % of € 300)
     res = _market_res(180.0, 200.0, 220.0, count=3)
     res["geizhals"] = {"price_from": 300.0}
     _use(monkeypatch, _ad(), res)
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert "bd-ends" not in step2 and "bd-drag" in step2 and 'class="bd-gauge ' in step2 and "bd-sugg" not in step2
+    assert "bd-ends" not in step2 and "bd-drag" in step2 and 'class="bd-gauge ' in step2
+    assert re.findall(r'class="k-(\w+) [^"]*" data-v="([\d.]+)"', step2) == [("cheap", "165.00")]
     assert step2.index('class="bd-gauge ') < step2.index('class="bd-new')    # the marker's name under the bar
     from app import purchase_routes
     assert purchase_routes._fair(_ad(), _market_res(180.0, 200.0, 220.0))["median"] == 220.0
@@ -524,12 +527,13 @@ def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noq
         assert gone not in step2 and gone not in summary, gone
     assert "data-fair" not in frag and 'name="max_price"' in step2 and "Rating" not in summary
     # too few comparable ads: the zones rate against the Geizhals new price (€ 250 of € 300 = 83 %: expensive); the
-    # browser gets their rule, so the pill, the pin and the drag work; no chips without 5 comparables
+    # browser gets their rule, so the pill, the pin and the drag work; one chip: "cheap" where the fair range starts
     res = _market_res(180.0, 200.0, 220.0, count=3)
     res["geizhals"] = {"price_from": 300.0}
     _use(monkeypatch, _ad(), res)
     frag = client.get(DIALOG.format(sid=3), headers=FRAGMENT).text
-    assert "bd-gauge" in frag and "data-fair" in frag and "bd-sugg" not in frag and "bd-live" in frag and "bd-pin" in frag
+    assert "bd-gauge" in frag and "data-fair" in frag and "k-cheap" in frag and "k-min" not in frag and "bd-live" in frag
+    assert "bd-pin" in frag
     assert "83 % of the new price · 3 comparable ads" in frag and "bg-lvl-expensive" in frag and "bd-ends" not in frag
     # the new-price marker is named right under it (right-aligned to it near the end), never a second unnamed needle
     new = re.search(r'<div class="bd-new[^"]*"><span class="([^"]*)" style="left:([\d.]+)%">([^<]*)</span>', frag)

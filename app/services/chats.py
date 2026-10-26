@@ -26,7 +26,7 @@ from app.llm.prompts import (
     price_floor, reply_prompt,
 )
 from app.services import feedback, gcal, humanize, jobs, meetups, min_price, paylivery, purchase, shipping, telegram, topic
-from app.services import my_ads, paylivery_advice, selling, stock, style, system_prompts
+from app.services import deals, my_ads, paylivery_advice, selling, stock, style, system_prompts
 from app.services.notify import clear_push, notify
 from app.willhaben.account import AccountClient, EndpointUnknown, SendFailed, _when
 from app.willhaben.public import WillhabenError, get_public
@@ -955,6 +955,10 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         others = _others_said(conv.id, conv.ad_id) if conv.role == "seller" else []
     if line := platform_rule(platform):
         rules = f"{rules}\n\n{line}"
+    if conv.role == "buyer" and buy is None and conv.ad_id:      # the price check's rating, if there was one
+        from app.platforms import ad_ref
+        if advice := deals.buyer_advice(ad_ref(platform, conv.ad_id)):
+            rules = f"{rules}\n\n{advice}"
     if platform == "vinted" and (line := language_rule(await _vinted_partner_country(conv))):
         rules = f"{rules}\n\n{line}"
     pl, pl_asking, pl_floor = paylivery_advice.for_draft(conv, ad)

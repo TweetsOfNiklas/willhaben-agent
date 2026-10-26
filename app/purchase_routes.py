@@ -187,10 +187,18 @@ def _fair(d, res: dict[str, Any] | None) -> dict[str, Any] | None:
     st = comp.get("stats") or {}
     median = st.get("median")
     chips: list[dict[str, Any]] = []
-    if deals.anchors(st):
-        for key, v in (("min", st["min"]), ("cheap", st["p25"]), ("market", median)):
-            if round((ask - v) * 100 / ask) >= 1 and not (chips and round(v) == round(chips[-1]["v"])):
-                chips.append({"key": key, "v": round(v, 2)})
+    # the suggestions: the cheapest comparable, "cheap" where the rating's fair range starts (the user's zones of the
+    # new price or the similar ads' median), the market's median
+    hint = deals.seller_hint(pos)
+    cands = ([("min", st["min"])] if deals.anchors(st) else []) \
+        + ([("cheap", hint["fair_from"])] if hint else [("cheap", st["p25"])] if deals.anchors(st) else []) \
+        + ([("market", median)] if deals.anchors(st) else [])
+    low = st["min"] if deals.anchors(st) else None
+    for key, v in sorted(cands, key=lambda kv: kv[1]):
+        if key == "cheap" and low is not None and v < low:
+            continue                 # "cheap" below the cheapest similar ad: "Cheapest" says it better
+        if round((ask - v) * 100 / ask) >= 1 and not (chips and round(v) == round(chips[-1]["v"])):
+            chips.append({"key": key, "v": round(v, 2)})
     scale, rule = deals.js_scale(pos, st), deals.js_rule(pos, st)
     return {"pos": pos["pos"], "level": pos["level"], "basis": pos.get("basis"), "pct": pos.get("pct"),
             "new_price": pos.get("new_price"), "diff": round((ask - median) * 100 / median) if median else None,

@@ -459,6 +459,20 @@ def zone_span(p: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def buyer_advice(ref: str) -> str | None:
+    """For Claude's draft when I am the buyer (no purchase order): the ad's price rating from a recent price check
+    (cached, no search) – its label, where "fair" lies, and to offer around its start; None without one."""
+    res = rerate(cached(ref, None, None, False))
+    p = (res or {}).get("position") or {}
+    hint = seller_hint(p) if p else None
+    if not hint:
+        return None
+    basis = "dem Neupreis auf Geizhals" if p.get("basis") == "geizhals" else "ähnlichen Anzeigen"
+    return (f"Preiseinschätzung der App (nach {basis}): der Angebotspreis gilt als „{level_label(p['level'])}“; fair "
+            f"ist etwa {hint['fair_from']} € bis unter {hint['fair_to']} €. Als Käufer, wenn es ums Verhandeln geht: "
+            f"zuerst um {hint['fair_from']} € oder etwas darunter anbieten, nie über dem Angebotspreis.")
+
+
 def seller_hint(p: dict[str, Any]) -> dict[str, Any] | None:
     """For one's own ad (My ads): the prices where "fair" starts and ends by the rating's zones and reference (the new
     price or the similar ads' median) – below the first it counts as cheap and sells faster; None without a rating."""
