@@ -44,7 +44,7 @@
       {% if st %}<span style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px">
         <label class="sub">{{ _("Pieces") }}<input class="field" type="number" name="pieces" value="1" min="1" max="{{ st.remaining }}" required></label>
         <label class="sub">{{ _("Total price (€, optional)") }}<input class="field" inputmode="decimal" name="price" value="{{ ('%.2f'|format(p.agreed)).rstrip('0').rstrip('.') if p.agreed is not none else '' }}"></label></span>{% endif %}
-      <button class="chip primary" style="width: 100%" data-sell>{{ ui.icon('check', 14) }} {% if who %}{{ _("Sold to {name}", name=who) }}{% elif st %}{{ _("Record sale") }}{% else %}{{ _("Mark sold") }}{% endif %}</button>
+      <button class="chip primary" style="width: 100%" data-sell>{{ ui.icon('check', 14) }} {% if who %}{{ _("Mark sold to {name}", name=who) }}{% elif st %}{{ _("Record sale") }}{% else %}{{ _("Mark sold") }}{% endif %}</button>
     </form>
     {% endif %}
     {% if kind == 'reserved' %}

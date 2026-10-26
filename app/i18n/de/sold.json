@@ -84,5 +84,6 @@
  "Sale page: stock, the other buyers": "Verkaufsseite: Lagerstand, die anderen Interessenten",
  "Sold or reserved": "Verkauft oder reserviert",
  "Nothing happens without your click. The willhaben step runs in the background; a sale waits a few seconds there, so you can take it back.": "Ohne deinen Klick passiert nichts. Der willhaben-Schritt läuft im Hintergrund; ein Verkauf wartet dort ein paar Sekunden, damit du ihn zurücknehmen kannst.",
- "They go out one after another, each after a few seconds in the queue, where you can take it back.": "Sie gehen nacheinander raus, jede nach ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst."
+ "They go out one after another, each after a few seconds in the queue, where you can take it back.": "Sie gehen nacheinander raus, jede nach ein paar Sekunden in der Warteschlange, wo du es noch zurücknehmen kannst.",
+ "Mark sold to {name}": "Als verkauft an {name} markieren"
 }

@@ -68,3 +68,13 @@ def test_one_takes_the_singular():
     assert i18n.t("{n} comparable ads", n=1) == "1 vergleichbare Anzeige"
     assert i18n.t("{n} new hits", n=3) == "3 neue Treffer"
     i18n.set_request_lang("en")
+
+
+def test_a_chats_ad_status_in_the_ui_language():
+    from app.services.chats import ad_status_label
+    i18n.set_request_lang("en")
+    assert ad_status_label("aktiv (eigene Anzeige, Daten aus dem Anzeigen-Editor)") == "" and ad_status_label("active") == ""
+    assert ad_status_label("nicht mehr online") == "no longer online" and ad_status_label("sold") == "sold"
+    i18n.set_request_lang("de")
+    assert ad_status_label("reserved") == "reserviert"
+    i18n.set_request_lang("en")

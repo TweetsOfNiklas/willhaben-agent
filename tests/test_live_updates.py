@@ -59,7 +59,7 @@ async def test_ad_batch_shows_as_a_job_with_its_result():
     ad_batch.spawn(wrote_one_draft(), batch_id=b.id, label="Claude schreibt 2 Entwürfe")
     await asyncio.gather(*ad_batch._tasks)
     done = jobs.snapshot()["recent"][0]
-    assert done["result"] == "1 drafts written" and done["problems"] == 1
+    assert done["result"] == "1 draft written" and done["problems"] == 1
 
     async def failed():
         ad_batch._update(b.id, status="error", error="Sorting failed: timeout")

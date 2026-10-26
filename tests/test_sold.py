@@ -271,10 +271,10 @@ def test_web_flow(ad_with_chats, monkeypatch):
     s = FakeSession(_page(_links("setAdSold"), "adId=1"), REASONS)
     monkeypatch.setattr(sold, "get_session", lambda: s)
     with TestClient(app) as c:
-        assert "Sold to Max Muster" in c.get("/chats/c-buyer").text
+        assert "Mark sold to Max Muster" in c.get("/chats/c-buyer").text
         assert f"/sold/{AD}?kind=sold" in c.get("/myads").text
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
-        assert "Erika Muster" in page and "Sold to Max Muster" in page and "Reserve for Max Muster" in page
+        assert "Erika Muster" in page and "Mark sold to Max Muster" in page and "Reserve for Max Muster" in page
         assert 'hx-post="/sold/1000000001/reserve"' in c.get("/chats/c-buyer").text        # one click, no extra page
         myads = c.get(f"/myads?ad={AD}").text
         assert 'hx-post="/sold/1000000001/sell"' in myads and "Mark sold…" not in myads
@@ -316,7 +316,7 @@ def test_web_flow(ad_with_chats, monkeypatch):
 
         # the sold ad: no second sale button; "Not sold after all" lifts the local status only
         page = c.get("/chats/c-buyer").text
-        assert "to this buyer" in page and "Sold to Max Muster" not in page and "Not sold after all" in page
+        assert "to this buyer" in page and "Mark sold to Max Muster" not in page and "Not sold after all" in page
         r = c.post(f"/sold/{AD}/reset", data={"kind": "sold", "buyer": "c-buyer", "next": "/chats/c-buyer"}, follow_redirects=False)
         assert r.headers["location"] == "/chats/c-buyer" and sold.ad_row(AD).sale_status is None
 
@@ -607,7 +607,7 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
         db.commit()
     with TestClient(app) as c:
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
-        assert 'name="pieces"' not in page and "Sold to Max Muster" in page and "Stock" not in page   # one item: as before
+        assert 'name="pieces"' not in page and "Mark sold to Max Muster" in page and "Stock" not in page   # one item: as before
 
         assert c.post(f"/myads/{AD}/quantity", data={"quantity": "3"}, headers=auto).json() == {"ok": True, "error": None}
         for bad in ("0", "1000", "abc", "-2"):
@@ -618,7 +618,7 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
 
         page = c.get(f"/sold/{AD}?kind=sold&buyer=c-buyer").text
         assert "3 of 3 pieces left" in page and 'name="pieces"' in page and 'value="40.5"' in page
-        assert "Sold to Max Muster" in page and "Mark on willhaben" not in page and 'name="conv"' not in page
+        assert "Mark sold to Max Muster" in page and "Mark on willhaben" not in page and 'name="conv"' not in page
         assert page.count("the others are told only with the last piece") == 1
         assert "Record sale" in c.get(f"/sold/{AD}?kind=sold").text                      # no buyer: the plain label
 
@@ -672,7 +672,7 @@ def test_stock_web_flow(ad_with_chats, monkeypatch):
         last = _sale_of("c-2")
         r = c.post(f"/sold/{AD}/sales/{last.id}/undo", data={"kind": "sold", "buyer": "c-2"})
         assert "automatic answers and auto-renew stay off until you switch them on again" in r.text
-        assert "Sold to Erika Muster" in r.text and 'name="pieces"' in r.text          # pieces again: the sale form is back
+        assert "Mark sold to Erika Muster" in r.text and 'name="pieces"' in r.text          # pieces again: the sale form is back
         assert c.post(f"/myads/{AD}/quantity", data={"quantity": ""}, headers=auto).json()["ok"] is True
     assert sold.ad_row(AD).quantity is None
 

@@ -25,7 +25,7 @@
     {% if ad.images %}<img src="{{ ad.images[0] }}" alt="" style="display: block; width: 100%; height: 180px; object-fit: cover; background: rgba(118,118,128,.2)" onerror="this.style.display='none'">{% endif %}
     <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 4px">
       <a href="{{ ad.url }}" target="_blank" hx-boost="false" style="font-weight: 600; color: var(--text)">{{ ad.title }} ↗</a>
-      {% set where = [ad.location, ad.status]|select|join(' · ') %}
+      {% set where = [ad.location, ad_status_label(ad.status)]|select|join(' · ') %}
       <span>{% if ad.price %}<strong>{{ ad.price }}</strong>{% endif %}{% if where %} <span class="sub">{{ where }}</span>{% endif %}</span>
       {% if ad.description %}<details><summary class="sub" style="color: var(--link)">{{ _("Description") }}</summary><p style="font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere">{{ ad.description }}</p></details>{% endif %}
     </div>

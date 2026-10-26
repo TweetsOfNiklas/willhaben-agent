@@ -823,6 +823,20 @@ def clean_alternatives(raw: Any) -> list[dict[str, str]] | None:
     return out or None
 
 
+def ad_status_label(status: str | None) -> str:
+    """The ad's status from a chat's ad context, for the page (Jinja global): stored in German or as the site's word
+    because Claude reads it; shown in the UI language, and "" while the ad is simply online."""
+    low = (status or "").strip().lower()
+    if not low or low.startswith(("active", "aktiv")):
+        return ""
+    if "nicht mehr online" in low or low in ("gone", "deleted"):
+        return t("no longer online")
+    for key in ("sold", "reserved", "expired"):
+        if low.startswith(key) or low.startswith({"sold": "verkauft", "reserved": "reserviert", "expired": "abgelaufen"}[key]):
+            return t(key)
+    return status or ""
+
+
 def intent_label(intent: str | None) -> str:
     """A draft's intent in the UI language (Jinja global, the draft's header on the chat page): REPLY_SCHEMA's enum
     and sold.NOTICE_INTENTS. "" for none and for "other" (says nothing); an unknown value (a draft saved over the API)

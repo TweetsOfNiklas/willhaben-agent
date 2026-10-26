@@ -318,11 +318,11 @@ def seed() -> None:
                            read=True if d == "out" else None))
         db.add(Draft(conversation_id="c1", text="Hallo Hanna, Samstag um 10 Uhr passt gut. Die Adresse ist Musterstraße 1, "
                      "1070 Wien – läute bitte bei Muster. Das Rad ist frisch geputzt und die Bremsen sind eingestellt.",
-                     intent="appointment", model="claude-sonnet-5-5", created_at=ago(minutes=5),
+                     intent="logistics", model="claude-sonnet-5-5", created_at=ago(minutes=5),
                      alternatives=[{"label": "Sonntag vorschlagen", "instruction": "Schlag Sonntag 11 Uhr vor"},
                                    {"label": "Nur Versand", "instruction": "Biete Versand an"}]))
         db.add(Draft(conversation_id="c3", text="Hallo Sabine, 220 € ist mir zu wenig – 245 € inklusive der beiden Spiele "
-                     "wäre für mich in Ordnung.", intent="negotiate", model="claude-sonnet-5-5", created_at=ago(minutes=119),
+                     "wäre für mich in Ordnung.", intent="price_negotiation", model="claude-sonnet-5-5", created_at=ago(minutes=119),
                      suggested_price=245))
 
         # own ads

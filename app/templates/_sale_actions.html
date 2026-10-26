@@ -57,7 +57,7 @@
       {% endif %}
       <button class="{{ 'btn btn-primary whitespace-nowrap max-sm:px-2 max-sm:text-[13px]' if inline else 'btn btn-primary btn-sm h-auto min-h-8 w-full justify-start py-1.5 text-left whitespace-normal break-words' }}"
               title="{{ _('Records the sale here (automatic answers off) and marks the ad sold on willhaben – that step waits a few seconds in the queue, where you can take it back.') if not st else _('Records the sale here; the last piece marks the ad sold on willhaben.') }}">
-        {{ ui.icon('check', 14) }}{% if who %}{{ _("Sold to {name}", name=who) }}{% elif st %}{{ _("Record sale") }}{% else %}{{ _("Mark sold") }}{% endif %}</button>
+        {{ ui.icon('check', 14) }}{% if who %}{{ _("Mark sold to {name}", name=who) }}{% elif st %}{{ _("Record sale") }}{% else %}{{ _("Mark sold") }}{% endif %}</button>
     </form>
     {% endif %}
     {% if kind == 'reserved' %}

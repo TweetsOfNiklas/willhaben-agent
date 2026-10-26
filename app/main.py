@@ -290,7 +290,7 @@ templates.env.globals.update(presence_of=lambda conv: chats.presence_of(conv),  
 templates.env.globals.update(credentials_state=credentials_svc.stored)   # login details card (services/credentials.py)
 templates.env.globals.update(login_sites=lambda: [("willhaben", "willhaben")] + [(s.id, s.name) for s in site_accounts.SITES.values()])
 templates.env.globals.update(paylivery_step=lambda d, conv: paylivery_advice.view(d, conv))   # the draft's PayLivery step
-templates.env.globals.update(intent_label=chats.intent_label)        # the draft's header on the chat page
+templates.env.globals.update(intent_label=chats.intent_label, ad_status_label=chats.ad_status_label)        # the draft's header on the chat page
 templates.env.globals.update(style_panel=style_svc.panel)   # Settings → My rules → Writing style
 templates.env.globals.update(purchase_card=purchase_svc.card, purchase_enabled=purchase_routes.enabled,   # Kaufauftrag
                              purchase_settings=purchase_routes.settings_values, purchase_notice=purchase_routes.notice)

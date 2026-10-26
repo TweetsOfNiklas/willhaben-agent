@@ -288,7 +288,7 @@ def test_settings_lists_the_cache_and_clears_it(client):  # noqa: F811
         ses.commit()
     page = client.get("/settings/geizhals").text
     assert "Cached lookups" in page and "RTX 4.090" in page and "NVIDIA RTX 4090 Founders Edition" in page
-    assert "1 hits" in page and "fetched again on the next lookup" in page        # the product page is over a week old
+    assert "1 hit" in page and "1 hits" not in page and "fetched again on the next lookup" in page        # the product page is over a week old
     r = client.post("/settings/geizhals/clear", follow_redirects=False)
     assert r.status_code == 303 and "2%20cached%20answers%20deleted" in r.headers["location"]
     assert "Nothing cached yet." in client.get("/settings/geizhals").text
