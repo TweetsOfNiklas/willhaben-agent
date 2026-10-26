@@ -1,9 +1,12 @@
 {% import "_ui.html" as ui %}
 {# Ad viewer dialog (included by base.html on every page). Script hooks: #ad-viewer, [data-adv-body], [data-adv-pos], [data-step],
-   [data-adv-close], [data-adv-thumbs] img (data-on marks the picture shown), [data-adv-main], button[data-state]. #}
+   [data-adv-back], [data-adv-close], [data-adv-thumbs] img (data-on marks the picture shown), [data-adv-main], button[data-state].
+   An ad opened from inside the viewer (a comparable ad of the price check) steps through those ads; "Back" returns to
+   the ad it came from, in its own list. #}
 <dialog id="ad-viewer" class="modal p-0 backdrop:bg-[rgba(10,14,20,.55)]" data-loading="{{ _('Loading ad …') }}" data-error="{{ _('Error {status}') }}" data-offline="{{ _('Connection failed') }}">
   <article class="modal-box flex max-h-[92vh] w-[min(1120px,96vw)] max-w-none flex-col overflow-auto rounded-2xl border border-base-300 bg-base-100 p-0 shadow-[0_24px_80px_rgba(0,0,0,.35)] max-md:h-dvh max-md:max-h-dvh max-md:w-screen max-md:rounded-none">
     <header class="sticky top-0 z-[1] flex items-center gap-2 border-b border-base-300 bg-base-100 py-2.5 pr-3 pl-4">
+      <button type="button" class="btn btn-sm gap-1 pl-2" data-adv-back hidden>{{ ui.icon('back', 15) }}{{ _("Back") }}</button>
       <button type="button" class="btn btn-ghost btn-sm w-8 px-0" data-step="-1" title="{{ _('Previous (←)') }}" aria-label="{{ _('Previous (←)') }}">{{ ui.icon('chevron-right', 16, 2, 'rotate-180') }}</button>
       <button type="button" class="btn btn-ghost btn-sm w-8 px-0" data-step="1" title="{{ _('Next (→)') }}" aria-label="{{ _('Next (→)') }}">{{ ui.icon('chevron-right', 16) }}</button>
       <span class="text-[13px] text-muted tabular-nums" data-adv-pos></span>
@@ -29,6 +32,13 @@
     return p;
   };
   let list = [], idx = -1;
+  // where "Back" goes: the lists and positions left by opening an ad from inside the viewer
+  const back = [], backBtn = dlg.querySelector('[data-adv-back]');
+  const backShown = () => {
+    backBtn.hidden = !back.length;
+    const prev = back[back.length - 1];
+    backBtn.title = prev ? prev.title : '';
+  };
   // a ref is the ad id, or "<platform>:<id>" for sites other than willhaben (app/platforms)
   const path = ref => { const i = ref.indexOf(':'); return i < 0 ? '/hits/ad/' + encodeURIComponent(ref)
     : '/hits/ad/' + encodeURIComponent(ref.slice(0, i)) + '/' + encodeURIComponent(ref.slice(i + 1)); };
@@ -70,14 +80,32 @@
     const a = e.target.closest('a[data-ad]');
     if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    list = collect();
+    if (dlg.open && body.contains(a)) {
+      // a comparable ad of the ad shown: remember this one for "Back", step through the comparable ads
+      const title = body.querySelector('h1, h2')?.textContent.trim() || '';
+      back.push({list, idx, title});
+      const seen = new Set();
+      list = [...body.querySelectorAll('a[data-ad]')].filter(x => !seen.has(x.dataset.ad) && seen.add(x.dataset.ad))
+        .map(x => ({ad: x.dataset.ad, hit: x.dataset.hit || ''}));
+    } else {
+      back.length = 0;
+      list = collect();
+    }
+    backShown();
     show(list.findIndex(x => x.ad === a.dataset.ad));
   });
+  dlg.addEventListener('close', () => { back.length = 0; backShown(); });
 
   dlg.addEventListener('click', async e => {
     if (e.target === dlg) return dlg.close();                       // click on the backdrop
     const nav = e.target.closest('[data-step]');
     if (nav) return show(idx + Number(nav.dataset.step));
+    if (e.target.closest('[data-adv-back]')) {
+      const prev = back.pop();
+      backShown();
+      if (prev) { list = prev.list; show(prev.idx); }
+      return;
+    }
     if (e.target.closest('[data-adv-close]')) return dlg.close();
     const thumb = e.target.closest('[data-adv-thumbs] img');
     if (thumb) {
