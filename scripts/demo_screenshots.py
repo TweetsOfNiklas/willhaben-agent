@@ -238,6 +238,8 @@ HITS = [
      "Fair, but at the top of the budget.", 240, "Wie neu.", "used"),
 ]
 
+SITE_OF = {2: "vinted", 4: "kleinanzeigen", 9: "vinted", 11: "shpock"}   # the rest: willhaben
+
 GEO = {"1070": (48.202, 16.349), "8020": (47.071, 15.42), "1100": (48.165, 16.38), "4020": (48.306, 14.286),
        "2340": (48.086, 16.283), "1030": (48.198, 16.394), "6900": (47.503, 9.747), "5020": (47.809, 13.055),
        "3100": (48.204, 15.626), "6020": (47.269, 11.404), "9020": (46.624, 14.307), "1210": (48.27, 16.4)}
@@ -290,7 +292,8 @@ def seed() -> None:
                     scam_flags=[{"code": "prepayment", "label": "Prepayment only", "severity": "high"}] if "sealed" in title else None,
                     geizhals=gh, item_condition=cond, shipping="ship" if ai in (1, 3) else "pickup",
                     shipping_price=4.49 if ai in (1, 3) else None, site_status="active", status_checked_at=ago(minutes=5),
-                    bumped_count=2 if "Rancilio" in title else 0)
+                    bumped_count=2 if "Rancilio" in title else 0,
+                    platform=SITE_OF.get(n, "willhaben"))
             db.add(h)
         db.commit()
 

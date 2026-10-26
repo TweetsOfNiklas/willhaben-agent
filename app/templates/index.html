@@ -72,7 +72,7 @@
     {% for h in latest %}
     <a href="{{ h.url }}" target="_blank" rel="noopener" data-ad="{{ ad_ref(h.platform, h.ad_id) }}" data-hit="{{ h.id }}"
        class="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 border-b border-base-300 px-4 py-2.5 text-base-content no-underline hover:bg-hover">
-      {{ ui.thumb(h.image_url, 'h-[38px] w-[52px]', 'rounded-md') }}
+      <span class="relative">{{ ui.thumb(h.image_url, 'h-[38px] w-[52px]', 'rounded-md') }}<span class="pointer-events-none absolute -bottom-1 -left-1 inline-flex rounded-md bg-base-100 p-[2px] shadow-sm" data-site-badge>{{ ui.site_mark(h.platform, 11) }}</span></span>
       <span class="min-w-0">
         <span class="block truncate font-medium">{{ h.heading }}</span>
         {% set meta = [h.location, (h.published_at|ago) if h.published_at else none]|select|list %}
