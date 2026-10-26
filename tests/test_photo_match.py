@@ -83,3 +83,18 @@ async def test_a_photo_many_ads_share_is_no_sign(photos):
     await photo_match.photo_job()
     with session() as db:
         assert all(not h.scam_flags for h in db.exec(photo_match.select(Hit)))
+
+
+async def test_one_site_without_places_is_a_relisting_and_old_flags_are_judged_again(photos):
+    """10-26: two models of one dealer on Vinted (no postcodes) with the same picture were called a copy."""
+    photos.update({"v1": _png(7), "v2": _png(7, shift=1)})
+    with session() as db:
+        db.add(_hit("71", "v1", platform="vinted", postcode=None, days=3))
+        db.add(_hit("72", "v2", platform="vinted", postcode=None,
+                    scam_flags=[{"code": "photo_copy", "severity": "warn", "params": {}}]))     # by the old rule
+        db.commit()
+    await photo_match.photo_job()
+    with session() as db:
+        hits = {h.ad_id: h for h in db.exec(photo_match.select(Hit))}
+    assert [f["code"] for f in hits["72"].scam_flags] == ["relisted"]
+    assert scam.warnings(hits["72"].scam_flags) == []

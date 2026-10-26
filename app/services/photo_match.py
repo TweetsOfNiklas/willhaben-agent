@@ -55,8 +55,10 @@ async def _fetch(client: httpx.AsyncClient, url: str) -> bytes | None:
 
 def _flag(h: Hit, other: Hit) -> dict[str, Any]:
     """The flag of hit `h` for the same photo in `other` (an older hit)."""
-    same_place = (h.platform or "willhaben") == (other.platform or "willhaben") and bool(h.postcode) \
-        and h.postcode == other.postcode
+    # the same site, and the same place or one of them without a place (Vinted and Facebook list none): the seller
+    # again – most likely, a dealer showing one picture for several models (10-26: two mini PCs on Vinted) included
+    same_place = (h.platform or "willhaben") == (other.platform or "willhaben") and (
+        not h.postcode or not other.postcode or h.postcode == other.postcode)
     price = f"{other.price:g} €" if other.price else "–"
     from app.services import scam
     if same_place:
@@ -80,7 +82,9 @@ async def photo_job() -> None:
         todo = list(db.exec(select(Hit).where(col(Hit.photo_hash).is_(None), col(Hit.image_url).is_not(None),
                                                Hit.first_seen_at >= now - timedelta(days=NEW_DAYS))
                             .order_by(col(Hit.id).desc()).limit(PER_RUN)))
+    flagged = _flagged()
     if not todo:
+        match(flagged)                   # re-judged by the current rule
         return
     async with httpx.AsyncClient(timeout=10, follow_redirects=True,
                                  headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"}) as client:
@@ -96,7 +100,24 @@ async def photo_job() -> None:
                 row.photo_hash = h.photo_hash
                 db.add(row)
         db.commit()
-    match([h for h in hashed if h.photo_hash != "-"])
+    match([h for h in hashed if h.photo_hash != "-"] + [h for h in flagged if h.id not in {x.id for x in hashed}])
+
+
+def _flagged() -> list[Hit]:
+    """Hits with a photo flag already: judged again each run, so a changed rule or a removed ad corrects them."""
+    with session() as db:
+        return [h for h in db.exec(select(Hit).where(col(Hit.photo_hash).is_not(None), Hit.photo_hash != "-",
+                                                     col(Hit.scam_flags).is_not(None)))
+                if any(f.get("code") in ("relisted", "photo_copy") for f in h.scam_flags or [])]
+
+
+def _drop_flag(h: Hit) -> None:
+    with session() as db:
+        for row in db.exec(select(Hit).where(Hit.platform == h.platform, Hit.ad_id == h.ad_id)):
+            if any(f.get("code") in ("relisted", "photo_copy") for f in row.scam_flags or []):
+                row.scam_flags = [f for f in row.scam_flags if f.get("code") not in ("relisted", "photo_copy")]
+                db.add(row)
+        db.commit()
 
 
 def match(hits: list[Hit]) -> None:
@@ -114,6 +135,7 @@ def match(hits: list[Hit]) -> None:
             if key != me and key not in others and distance(h.photo_hash, o.photo_hash) <= MAX_DISTANCE:
                 others[key] = o
         if not others or len(others) >= STOCK_MATCHES:
+            _drop_flag(h)                 # no (or a manufacturer's) photo match any more
             continue
         other = min(others.values(), key=lambda o: o.first_seen_at or utcnow())      # the earliest
         flag = _flag(h, other)
