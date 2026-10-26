@@ -700,6 +700,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     ),
     "auto_draft": "0",
     "notify_messages": "1",
+    "weekly_digest": "1",        # Mondays 8:00: the week in a few lines (services/digest)
     "chat_sync_limit": "10",    # sync only the N latest conversations
     "chat_sync_days": "",       # whole days: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",

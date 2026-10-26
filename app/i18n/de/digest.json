@@ -1,0 +1,11 @@
+{
+ "Weekly summary": "Wochenübersicht",
+ "Mondays at 8: new hits per agent, purchases, sales, messages, requests the Geizhals cache saved, Claude calls.": "Montags um 8: neue Treffer je Agent, Käufe, Verkäufe, Nachrichten, vom Geizhals-Cache gesparte Anfragen, Claude-Aufrufe.",
+ "New hits: {n} ({agents})": "Neue Treffer: {n} ({agents})",
+ "Bought: {n} · open purchase orders: {m}": "Gekauft: {n} · offene Kaufaufträge: {m}",
+ "Own ads sold: {n}": "Eigene Anzeigen verkauft: {n}",
+ "Messages received: {n}": "Nachrichten erhalten: {n}",
+ "Geizhals requests saved by the cache: {n}": "Vom Cache gesparte Geizhals-Anfragen: {n}",
+ "Claude calls: {n}": "Claude-Aufrufe: {n}",
+ "Your week": "Deine Woche"
+}
