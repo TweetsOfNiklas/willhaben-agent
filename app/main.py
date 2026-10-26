@@ -508,7 +508,9 @@ async def index(request: Request):
             "new_hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
             "unread": db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))).one(),
             "open_drafts": db.exec(select(func.count()).select_from(Draft).where(Draft.status == "draft")).one(),
-            "myads": db.exec(select(func.count()).select_from(MyAd)).one(),
+            # online only (as the Mini App's home): not expired, sold, deleted or hidden from the list
+            "myads": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "active",
+                                                                            col(MyAd.hidden).is_not(True))).one(),
             "expired": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "expired",
                                                                              col(MyAd.replaced_by).is_(None))).one(),
         }

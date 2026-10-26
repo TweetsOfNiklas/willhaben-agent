@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 
 import httpx
@@ -439,3 +440,13 @@ def test_home_lists_only_ads_expiring_within_5_days_and_8_activities(client):  #
     assert "Bald weg" in soon and "Noch lange" not in soon
     activity = page.split('id="activity"')[1].split("</section>")[0]          # the inbox popover has its own list
     assert sum(f"Ereignis {i:02d}" in activity for i in range(12)) == 8
+
+
+def test_home_counts_only_own_ads_online(client):
+    with dbmod.session() as db:
+        for n, (status, hidden) in enumerate((("active", None), ("active", False), ("active", True), ("expired", None),
+                                              ("sold", None), ("deleted", None))):
+            db.add(dbmod.MyAd(ad_id=f"9{n}", heading="Rad", status=status, hidden=hidden))
+        db.commit()
+    page = client.get("/").text
+    assert re.search(r">2</div>\s*<div[^>]*>own ads online", page)
