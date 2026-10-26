@@ -1396,7 +1396,8 @@ def record_status(platform_id: str, ad_id: str, status: str, detail: Any = None)
                 if was_far and ships(h) and status == "active":
                     agent = agents.get(h.agent_id) or db.get(SearchAgent, h.agent_id)
                     agents[h.agent_id] = agent
-                    if agent is not None and passes(agent, h):
+                    # never judged by Claude (held back before the screening): not into New unscreened
+                    if agent is not None and passes(agent, h) and not (agent.screen and h.screen_relevant is None):
                         h.state = "new"
             db.add(h)
             photos = getattr(detail, "images", None) or []

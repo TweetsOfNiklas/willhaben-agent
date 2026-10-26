@@ -10,6 +10,14 @@ from app.platforms.types import AdDetail
 from app.services import auto_buy, jobs, purchase
 
 
+@pytest.fixture(autouse=True)
+def purchases_on():
+    from app.db import set_setting
+    set_setting(purchase.SETTING_ENABLED, "1")
+    yield
+    set_setting(purchase.SETTING_ENABLED, "")
+
+
 @pytest.fixture
 def agent():
     with session() as db:
@@ -74,7 +82,7 @@ async def test_the_countdown_and_telegrams_cancel(agent, pushes, monkeypatch):
     assert any(b["verb"] == "AB_STOP" and b["ref"] == str(pid) for r in rows for b in r)
     assert jobs.cancel_key(f"purchase:{pid}")
     assert purchase.get(pid).status == "cancelled"
-    assert await auto_buy.schedule(agent, h) is not None                # cancelled: a later check may buy again
+    assert await auto_buy.schedule(agent, h) is None                    # cancelled: this ad is not bought again
 
 
 async def test_it_buys_after_checking_the_ad_again(agent, pushes, monkeypatch):
@@ -87,8 +95,7 @@ async def test_it_buys_after_checking_the_ad_again(agent, pushes, monkeypatch):
 
     async def run_action(cid, action, amount=None, claimed=False):
         calls.append((cid, action, amount))
-        row = purchase.for_conversation(cid)
-        purchase._change(row.id, lambda r: purchase._move(r, "paid", "Paid with PayLivery"))
+        paylivery._record(cid, action, True, "ok", amount)     # as the real one: the chat's stage, the order later
         return "ok"
     monkeypatch.setattr(platforms.get("willhaben"), "detail", detail)
     monkeypatch.setattr(paylivery, "run_action", run_action)
@@ -101,6 +108,9 @@ async def test_it_buys_after_checking_the_ad_again(agent, pushes, monkeypatch):
     row = purchase.get(pid)
     assert row.status == "paid" and row.agreed_price == 40.0 and row.agreed_total <= 60.0
     assert any(p["title"].startswith("Bought") for p in pushes)
+    assert not any(p["title"].startswith("Purchase paused") for p in pushes)
+    with session() as db:
+        assert db.get(SearchAgent, agent.id).auto_buy is False              # one purchase: the switch goes off
 
 
 async def test_a_higher_price_or_no_buy_now_stops_it(agent, pushes, monkeypatch):
@@ -181,3 +191,36 @@ async def test_an_agent_run_hands_its_passing_hits_to_auto_buy(monkeypatch):
         assert seen == [["1"]]
     finally:
         platforms.reset()
+
+
+def test_no_money_on_a_guess(agent, monkeypatch):
+    """With the screening on, a hit Claude did not judge (its call failed) is not bought; with a Geizhals limit, one
+    without a checked new price neither; nothing at all while purchases are switched off."""
+    from app.db import set_setting
+    with session() as db:
+        a = db.get(SearchAgent, agent.id)
+        a.screen = True
+        db.add(a)
+        db.commit()
+        db.refresh(a)
+    assert not auto_buy.candidate(a, _hit(a, "11", 40.0))                           # not judged
+    assert auto_buy.candidate(a, _hit(a, "12", 40.0, screen_relevant=True))
+    a.geizhals_pct = 30
+    assert not auto_buy.candidate(a, _hit(a, "13", 40.0, screen_relevant=True))    # no Geizhals price
+    assert auto_buy.candidate(a, _hit(a, "14", 40.0, screen_relevant=True,
+                                      geizhals={"name": "x", "url": "u", "price_from": 100.0}))
+    set_setting(purchase.SETTING_ENABLED, "")
+    assert auto_buy.why_not(a, _hit(a, "15", 40.0, screen_relevant=True)) == "auto-buy is off"
+
+
+async def test_one_auto_buy_per_agent_and_a_gone_ad_stops(agent, pushes, monkeypatch):
+    from app import platforms
+    first = await auto_buy.schedule(agent, _hit(agent, "21"))
+    assert first and await auto_buy.schedule(agent, _hit(agent, "22")) is None    # the first one runs still
+
+    async def gone(ad_id, url=None):
+        return None
+    monkeypatch.setattr(platforms.get("willhaben"), "detail", gone)
+    await auto_buy.buy(first)
+    assert purchase.get(first).status == "failed"
+    assert {a["name"] for a in purchase.actions(purchase.get(first))}.isdisjoint({"restart"})   # never a negotiation

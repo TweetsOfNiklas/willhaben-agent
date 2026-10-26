@@ -26,7 +26,11 @@ PLATFORMS = ("willhaben",)
 
 
 def enabled(agent: SearchAgent) -> bool:
-    return bool(agent.auto_buy and agent.auto_buy_max and agent.auto_buy_max > 0)
+    """The agent's switch and maximum, and purchases allowed at all (Settings → Purchases)."""
+    from app.db import get_setting
+    from app.services import purchase
+    return bool(agent.auto_buy and agent.auto_buy_max and agent.auto_buy_max > 0
+                and get_setting(purchase.SETTING_ENABLED) == "1")
 
 
 def estimate(h: Hit) -> float | None:
@@ -53,6 +57,11 @@ def why_not(agent: SearchAgent, h: Hit) -> str | None:
         return t("{total} is above the maximum {max}", total=_eur(total), max=_eur(agent.auto_buy_max))
     if h.screen_relevant is False:
         return t("not the item")
+    if agent.screen and h.screen_relevant is None:      # the screening failed or left it out: no money on a guess
+        return t("Claude has not judged it")
+    from app.services import search_agents
+    if search_agents.geizhals_rule(agent) and not ((h.geizhals or {}).get("price_from") and h.price):
+        return t("no Geizhals price to check the limit against")
     issues = set(h.screen_issues or [])
     if "scam_suspect" in issues:
         return t("suspected scam")
@@ -93,8 +102,13 @@ async def schedule(agent: SearchAgent, h: Hit) -> int | None:
     with session() as db:
         if db.exec(select(Purchase).where(Purchase.ad_id == h.ad_id, col(Purchase.status).in_(purchase.OPEN))).first():
             return None                   # an order for this ad runs already (a price drop of the same ad)
+        if db.exec(select(Purchase).where(Purchase.agent_id == agent.id, col(Purchase.status).in_(purchase.OPEN))).first():
+            return None                   # one auto-buy per agent at a time: the first passing hit, not every one
+        if db.exec(select(Purchase).where(Purchase.ad_id == h.ad_id, Purchase.agent_id == agent.id,
+                                          Purchase.status == "cancelled")).first():
+            return None                   # cancelled once: this ad is not bought automatically again
         row = Purchase(ad_id=h.ad_id, ad_title=h.heading, ad_url=h.url, image_url=h.image_url, asking_price=h.price,
-                       max_price=agent.auto_buy_max, mode="paylivery", status="new", log=[],
+                       max_price=agent.auto_buy_max, mode="paylivery", status="new", log=[], agent_id=agent.id,
                        shipping_cost=h.shipping_price, shipping_source="ad" if h.shipping_price is not None else None)
         purchase._line(row, t("Auto-buy by the search agent „{name}“ – buying in {n} s unless cancelled",
                               name=agent.name, n=COUNTDOWN_S))
@@ -104,7 +118,11 @@ async def schedule(agent: SearchAgent, h: Hit) -> int | None:
         pid = row.id
 
     async def run(job) -> str:
-        return await buy(pid)
+        try:
+            return await buy(pid)
+        except Exception as e:  # noqa: BLE001 - the order must not stay "new": it stops with the reason
+            log.exception("auto-buy %s failed", pid)
+            return await _stop(pid, str(e) or type(e).__name__)
 
     jobs.submit("auto-buy", t("Auto-buy „{title}“", title=(h.heading or h.ad_id)[:60]), run, lane="chat",
                 current=f"purchase:{pid}", on_cancel=lambda: cancelled(pid), grace=COUNTDOWN_S, link=f"/purchases/{pid}")
@@ -138,7 +156,7 @@ async def buy(pid: int) -> str:
         d = await platforms.get("willhaben").detail(row.ad_id, url=row.ad_url)
     except Exception as e:  # noqa: BLE001 - the ad cannot be read: nothing is bought
         return await _stop(pid, t("The ad could not be read: {error}", error=e))
-    if (d.status or "active") != "active":
+    if d is None or (d.status or "active") != "active":
         return await _stop(pid, t("The ad is no longer for sale"))
     if not (d.paylivery_enabled and d.buy_now):
         return await _stop(pid, t("The ad has no PayLivery buy-now price"))
@@ -167,6 +185,13 @@ async def buy(pid: int) -> str:
         result = await paylivery.run_action(cid, "buy", float(d.price))
     except paylivery.PayLiveryError as e:
         return await _stop(pid, str(e))
+    with session() as db:              # a successful buy moved the chat to "paid" (the order follows by a hook, later)
+        conv = db.get(Conversation, cid)
+        stage = ((conv.paylivery if conv else None) or {}).get("stage")
+    if stage == "paid":
+        purchase._change(pid, lambda r: purchase._move(r, "paid", t("Paid with PayLivery"))
+                         if r.status in ("pay_now", "paused") else None)
+        _switch_off(row.agent_id)
     row = purchase.get(pid)
     if row is not None and row.status == "paid":
         await notify("purchase", t("Bought: {title}", title=row.ad_title or row.ad_id),
@@ -175,6 +200,18 @@ async def buy(pid: int) -> str:
         return t("Bought")
     await purchase.pause(pid, t("Auto-buy did not finish: {result}", result=result[:300]), push=True)
     return t("Not bought")
+
+
+def _switch_off(agent_id: int | None) -> None:
+    """After a purchase the agent buys no more on its own: the switch goes off (the owner turns it on again)."""
+    if agent_id is None:
+        return
+    with session() as db:
+        a = db.get(SearchAgent, agent_id)
+        if a is not None and a.auto_buy:
+            a.auto_buy = False
+            db.add(a)
+            db.commit()
 
 
 async def _stop(pid: int, reason: str) -> str:

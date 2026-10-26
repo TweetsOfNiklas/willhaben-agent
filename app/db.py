@@ -380,6 +380,7 @@ class Purchase(SQLModel, table=True):
     note: str | None = None                # last remark of Claude, or why it is paused / failed
     log: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))  # [{at, status, text}], newest last
     search_id: int | None = None           # ProductSearch the order came from
+    agent_id: int | None = None            # the search agent whose auto-buy started it (app/services/auto_buy.py)
     query: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

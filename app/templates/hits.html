@@ -202,11 +202,18 @@
 // A hit that changes state (card buttons, the viewer's Save / Ignore, opened = seen) leaves this tab's count and
 // joins the other one's – without fetching the page again.
 (() => {
+  // the state choice's labels carry the counts ("New · 5"): the option's label and, showing it, the summary
   const count = (state, by) => {
-    const tab = document.querySelector('#hits-page a[href*="state=' + state + '"] small, #hits-page a[href$="/hits"] small');
-    if (!tab) return;
-    const n = Math.max(0, (parseInt(tab.textContent) || 0) + by);
-    tab.textContent = n;
+    const box = document.querySelector('#hits-page [data-multi="state"]');
+    const input = box && box.querySelector('input[value="' + state + '"]');
+    const label = input && input.nextElementSibling;
+    if (!label) return;
+    const [, base, num] = label.textContent.trim().match(/^(.*?)(?: · (\d+))?$/);
+    const n = Math.max(0, (parseInt(num) || 0) + by);
+    const text = n ? base + ' · ' + n : base;
+    const summary = box.querySelector('summary span');
+    if (summary && summary.textContent.trim() === label.textContent.trim()) summary.textContent = text;
+    label.textContent = text;
   };
   const moved = (from, to) => { if (from && from !== to) { count(from, -1); count(to, 1); } };
   document.addEventListener('htmx:afterRequest', e => {

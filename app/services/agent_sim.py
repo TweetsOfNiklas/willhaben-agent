@@ -103,14 +103,17 @@ def changed_settings(agent: SearchAgent, settings: dict[str, Any]) -> list[str]:
 
 
 def apply_settings(agent_id: int, settings: dict[str, Any]) -> None:
-    """The simulated settings become the agent's own."""
+    """The simulated settings become the agent's own – except auto-buy: money is switched on only in the agent's own
+    form (an older run's maximum would come back with it)."""
     with session() as db:
         agent = db.get(SearchAgent, agent_id)
         if agent is None:
             return
         for k in SETTING_KEYS:
-            if k in settings:
+            if k in settings and k not in ("auto_buy", "auto_buy_max"):
                 setattr(agent, k, settings[k])
+        if agent.geizhals_pct is not None:
+            agent.geizhals_pct = min(max(int(agent.geizhals_pct), 1), 95)
         agent.screen_hide = ",".join(settings.get("screen_hide") or []) or "-"
         db.add(agent)
         db.commit()

@@ -1030,7 +1030,9 @@ async def _push_direct_pay(row: Purchase) -> None:
 # ------------------------------------------------------------------ pauses, failures and user buttons
 async def pause(pid: int, note: str | None = None, *, push: bool = True) -> None:
     """Ask the user: the purchase waits until it is resumed (the previous status is kept in the log)."""
-    row = _change(pid, lambda r: (_move(r, "paused", note or "", note=note or r.note) if r.status != "paused" else None))
+    # a finished, cancelled or failed order stays so (a buy step that ended after the user cancelled it)
+    row = _change(pid, lambda r: (_move(r, "paused", note or "", note=note or r.note)
+                                  if r.status not in ("paused", "paid", "shipped", "received", "cancelled", "failed") else None))
     if row is not None and push:
         await _push(row, t("Purchase paused"), note or t("Your decision is needed."))
 
@@ -1081,7 +1083,9 @@ def actions(row: Purchase) -> list[dict[str, Any]]:
         out.append({"name": "resume", "label": t("Resume")})
     if s in ("contacting", "negotiating", "agreed", "meetup", "pay_now"):
         out.append({"name": "pause", "label": t("Pause")})
-    if s in ("contacting", "negotiating", "agreed", "meetup", "pay_now", "paused"):
+    from app.services import paylivery
+    paying = s == "pay_now" and row.conversation_id in paylivery._busy      # the buy runs in the browser right now
+    if s in ("contacting", "negotiating", "agreed", "meetup", "pay_now", "paused") and not paying:
         out.append({"name": "cancel", "label": t("Cancel purchase"), "confirm": True})
     if s in ("contacting", "negotiating", "agreed", "pay_now", "paused"):
         out.append({"name": "max_price", "label": t("Maximum price"), "input": True})
@@ -1091,9 +1095,14 @@ def actions(row: Purchase) -> list[dict[str, Any]]:
         out.append({"name": "received", "label": t("Received"), "confirm": True})
     if row.mode == "pickup" and s == "meetup":
         out.append({"name": "collected", "label": t("Collected & paid"), "confirm": True})
-    if s == "failed":
-        out.append({"name": "restart", "label": t("Try again")})
+    if s == "failed" and not is_auto_buy(row):
+        out.append({"name": "restart", "label": t("Try again")})      # an auto-buy is never restarted as a negotiation
     return out
+
+
+def is_auto_buy(row: Purchase) -> bool:
+    """Started by a search agent's auto-buy: no seller talks, buy-now only (also an order from before agent_id)."""
+    return row.agent_id is not None or (row.conversation_id or "").startswith("autobuy-")
 
 
 def set_max_price(pid: int, value: float) -> None:

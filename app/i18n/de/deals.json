@@ -47,5 +47,6 @@
  "New price as the sum of {n} parts": "Neupreis als Summe aus {n} Teilen",
  "Without a new price: {parts}": "Ohne Neupreis: {parts}",
  "Geizhals has a new price for too few of the parts ({parts}).": "Geizhals kennt nur für zu wenige Teile einen Neupreis ({parts}).",
- "Sum of {n} parts": "Summe aus {n} Teilen"
+ "Sum of {n} parts": "Summe aus {n} Teilen",
+ "the purchase was cancelled – not paying": "der Kauf wurde abgebrochen – es wird nicht bezahlt"
 }

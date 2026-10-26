@@ -97,6 +97,8 @@ async def test_replay_rules_without_claude(agent):
 async def test_replay_says_which_hits_auto_buy_would_buy(agent):
     """With auto-buy in the simulated settings each hit that would be a hit says whether it would be bought (the
     estimated total incl. shipping and buyer protection within the maximum) or why not; nothing is bought."""
+    from app.db import set_setting
+    set_setting("purchase_enabled", "1")                 # purchases allowed at all (Settings)
     _hit(agent, 1, "Echo Show 8", "new", price=30.0, shipping_price=3.49)
     _hit(agent, 2, "Echo Show 8", "new", price=80.0, shipping_price=3.49)
     settings = {**agent_sim.settings_of(agent), "screen": False, "auto_buy": True, "auto_buy_max": 50.0}
