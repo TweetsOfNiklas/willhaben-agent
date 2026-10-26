@@ -152,6 +152,7 @@ paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purc
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
 from app.services import paylivery_advice  # noqa: E402
 paylivery_routes.paylivery.on_stage(paylivery_advice.on_stage)          # an offer came in: a draft with its step
+paylivery_routes.paylivery.on_stage(sold.on_paylivery_stage)            # a paid piece counts; pieces left: online again
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 

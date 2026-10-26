@@ -662,3 +662,69 @@ async def publish(s: BrowserSession, ad: dict[str, Any], photos: list[tuple[str,
                           f"{', Zahlung verlangt' if (done or {}).get('paymentUrl') else ''}) – nichts bezahlt")
     trace["checkout"] = _shape(done)
     return {"ad_id": ad_id, "ad_uuid": ad_uuid, "url": f"https://www.willhaben.at/iad/object?adId={ad_id}", "trace": trace}
+
+
+# ------------------------------------------------------------------ an own ad again as a new insertion
+# A sold ad offers neither "Aktivieren" nor "Neu veröffentlichen" ("Auf verkauft gesetzte Anzeigen können nicht wieder
+# aktiviert oder neu veröffentlicht werden"): it is placed again like a new ad from its editor JSON. NEEDS LIVE
+# VERIFICATION: whether a sold ad's editor JSON, photo list and p2ppUserOptions can still be read.
+COPY_KEYS = ("heading", "description", "price", "categoryPath", "treeAttributes")
+
+
+def handover_of(ad: dict[str, Any]) -> str:
+    """pickup | shipping | both from the ad's Uebergabe attribute (pickup when it has none)."""
+    nodes = next((a.get("selectedAttributeValueNodes") or [] for a in ad.get("treeAttributes") or []
+                  if (a.get("attributeNode") or {}).get("code") == HANDOVER), [])
+    codes = {n.get("code") for n in nodes}
+    if SHIPPING["code"] not in codes:
+        return "pickup"
+    return "both" if PICKUP["code"] in codes else "shipping"
+
+
+async def shipping_of(s: BrowserSession, ad: dict[str, Any]) -> dict[str, Any]:
+    """The handover of an own ad and, with Versand, its chosen PayLivery option ({size, carrier}), in the shape
+    publish() takes. Raises InsertError when the ad ships but its PayLivery option cannot be read (a copy without
+    PayLivery would quietly sell differently)."""
+    handover = handover_of(ad)
+    if handover == "pickup":
+        return {"handover": "pickup"}
+    link = _link(ad, "p2ppUserOptions")
+    opts = await s.api_json("GET", _webapi(link)) if link else None
+    if not isinstance(opts, dict):
+        raise InsertError("Versand: die PayLivery-Optionen der Anzeige sind nicht lesbar")
+    chosen = {o.get("deliveryOptionUuid") for o in opts.get("selectedDeliveryOptions") or []}
+    if not chosen:
+        return {"handover": handover, "paylivery": False}
+    opt = next((o for o in opts.get("deliveryOptions") or [] if o.get("uuid") in chosen), None)
+    if opt is None:
+        raise InsertError("Versand: die gewählte PayLivery-Option der Anzeige ist nicht lesbar")
+    return {"handover": handover, "paylivery": True, "size": (opt.get("parcelSize") or {}).get("size"),
+            "carrier": (opt.get("carrier") or {}).get("description")}
+
+
+def image_url(img: dict[str, Any]) -> str:
+    """The full-size URL of an existing photo."""
+    url = img.get("mainImageUrl") or img.get("referenceImageUrl")
+    return url or f"https://cache.willhaben.at/mmo/{img.get('reference')}"
+
+
+async def copy_plan(s: BrowserSession, ad_id: str) -> dict[str, Any]:
+    """Everything a copy of an own ad needs, read before anything is created: the ad in the form's template (fresh
+    contact, location and context links; heading, text, price, category and attributes from the ad), its photo URLs
+    and its shipping. Read-only."""
+    import copy
+
+    old = await get_own_ad(s, ad_id)
+    if not isinstance(old, dict) or not old.get("heading"):
+        raise InsertError(f"Anzeige {ad_id} nicht im Editor gefunden")
+    shipping = await shipping_of(s, old)
+    photos = [image_url(i) for i in (await get_own_images(s, old))["advertImage"]][:MAX_PHOTOS]
+    if not photos:
+        raise InsertError("Die Anzeige hat keine Fotos mehr – bitte auf willhaben neu einstellen")
+    form = await load_form(s)
+    ad = copy.deepcopy(form.get("ad") or {})
+    for k in COPY_KEYS:
+        if k in old:
+            ad[k] = copy.deepcopy(old[k])
+    ad.pop("treeAttributeIds", None)
+    return {"ad": ad, "photos": photos, "shipping": shipping}

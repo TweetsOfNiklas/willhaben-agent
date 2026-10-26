@@ -4,6 +4,9 @@ Assumptions (the owner could not be asked): stock is local to the app, willhaben
 so the ad text says how many pieces there are and the owner edits it there when that changes. The price is per
 piece (MyAd.min_price is a per-piece floor) and a reservation stays ad-wide. A renewed ad gets a new willhaben id
 (MyAd.replaced_by) while its chats keep the old one: sales recorded on any copy count for the whole chain.
+A piece paid with PayLivery is recorded by itself (sold.on_paylivery_stage). willhaben takes the ad offline after such
+a sale (seen by the owner; which status it shows is not recorded yet): with pieces left the app puts it online again,
+as a new ad when willhaben offers no way back (my_ads.relist), and that copy joins the chain.
 """
 from __future__ import annotations
 
