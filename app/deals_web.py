@@ -242,11 +242,11 @@ def _page(platform: str, ad_id: str) -> str:
     return f"/deals/ad/{ad_id}" if platform == "willhaben" else f"/deals/ad/{platform}/{ad_id}"
 
 
-def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = False) -> dict[str, Any]:
+def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = False, backfill: bool = False) -> dict[str, Any]:
     """Template context of the product search part of the page. `msg` is a short code from our own redirects;
     unknown values show nothing (no attacker-chosen banner text via a crafted link)."""
-    if search:
-        product_search.fill_new_prices(search)      # an older search: its offers' new prices, for the discount order
+    if search and backfill:
+        product_search.fill_new_prices(search)      # an older search opened: its offers' new prices, in the background
     run = product_search.running()
     shown = product_search.get(search) if search else run
     notice = {"busy": t("A product search is still running – wait for it to finish."),
@@ -256,7 +256,7 @@ def _search_ctx(search: int | None = None, msg: str | None = None, oob: bool = F
             "ps_depths": product_search.DEPTHS, "ps_claude_calls": product_search.CLAUDE_CALLS,
             "ps_per_site": product_search.PER_SITE, "ps_batch": product_search.MAX_CANDIDATES,
             "ps_max_ranked": product_search.MAX_RANKED,
-            "ps_is_running": product_search.is_running, "ps_waiting_for": product_search.waiting_for,
+            "ps_is_running": product_search.is_running, "ps_backfilling": product_search.backfilling, "ps_waiting_for": product_search.waiting_for,
             "ps_answer_pairs": product_search.answer_pairs,
             "ps_planned": product_search.planned, "ps_by_term": product_search.by_term, **_agent_ctx(shown)}
 
@@ -391,7 +391,7 @@ async def product_search_status(request: Request, search_id: int):
     """The result block of one search; polled by htmx while the search runs."""
     if product_search.get(search_id) is None:
         raise HTTPException(404)
-    return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id, oob=True))
+    return _templates().TemplateResponse(request, "_product_search.html", _search_ctx(search_id, oob=True, backfill=True))
 
 
 def _direct_ctx(sites: list[str] | None = None) -> dict[str, Any]:
@@ -472,7 +472,7 @@ async def deals_page(request: Request, q: str = "", search: int | None = None, m
     prefill = _prefill(from_)
     return render(request, "deals.html", q=q, results=results, spread=spread, error=error, recent=deals.recent(),
                   res=None, quote=quote, ps_prefill=prefill, site_errors=site_errors if results is not None else [],
-                  site_counts=site_counts, **direct, **_search_ctx(search or (prefill or {}).get("id"), msg))
+                  site_counts=site_counts, **direct, **_search_ctx(search or (prefill or {}).get("id"), msg, backfill=bool(search)))
 
 
 @router.get("/deals/ad/{ad_id}/result", response_class=HTMLResponse)

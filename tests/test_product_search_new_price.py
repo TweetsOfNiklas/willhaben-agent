@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.db import ProductSearch, session, utcnow
 from app.services import deals, geizhals
 from app.services import product_search as ps
+from tests.test_product_search import _clean, claude, wh  # noqa: F401  (pytest fixtures)
 
 GH = {"bosch sms46": {"name": "Bosch Serie 4 SMS46", "url": "https://geizhals.at/a1", "price_from": 400.0},
       "raspberry pi 5 8gb": {"name": "Raspberry Pi 5 8GB", "url": "https://geizhals.at/a2", "price_from": 80.0}}
@@ -112,11 +113,14 @@ async def test_an_older_search_looks_its_new_prices_up_when_opened(lookups):
     from tests.test_product_search import _finish
     results = [_r("1", "Bosch SMS46 Geschirrspüler", 300.0, 90), _r("2", "Bosch SMS46", 100.0, 80)]
     sid = _row(results, status="done")
-    assert ps.fill_new_prices(sid) is True and ps.get(sid).status == "prices" and ps.running().id == sid
+    assert ps.fill_new_prices(sid) is True and ps.backfilling(sid)
+    assert ps.get(sid).status == "done" and ps.running() is None              # blocks no new search, no other page
     assert ps.fill_new_prices(sid) is False                                   # already on it
+    with pytest.raises(ps.Busy):
+        ps.rerun(sid)                                                         # this search's own re-run waits
     await _finish()
     row = ps.get(sid)
-    assert row.status == "done" and [ps.discount(r) for r in row.results] == [25, 75] and ps.running() is None
+    assert row.status == "done" and [ps.discount(r) for r in row.results] == [25, 75] and not ps.backfilling(sid)
     assert ps.fill_new_prices(sid) is False and lookups == ["Bosch SMS46"]   # all asked: nothing more
 
 
@@ -152,7 +156,7 @@ def test_offers_above_the_limit_fold_away(lookups, monkeypatch):
     with TestClient(app) as c:
         web = c.get(f"/deals/search/{sid}").text
         out = web[web.index("data-ps-gh-out"):]
-        assert "1 fitting offers above your Geizhals limit" in out and "Wenig Rabatt" in out
+        assert "1 fitting offer above your Geizhals limit" in out and "Wenig Rabatt" in out
         assert web.index("Viel Rabatt") < web.index("data-ps-gh-out") and "50 % below Geizhals" in web
         tg = c.get(f"/tg/search/{sid}").text
         assert tg.index("data-ps-gh-out") < tg.index("Wenig Rabatt") and "Best offers · 2" in tg
@@ -217,3 +221,31 @@ def test_a_new_price_the_comparables_contradict_is_no_discount():
            stats={"median": 85.0})
     assert ps.discount(r) is None
     assert ps.discount({**r, "stats": {"median": 900.0}}) == 67
+
+
+async def test_load_more_does_not_rank_what_is_shown_already(wh, claude, monkeypatch):  # noqa: F811
+    """An interrupted "load more" stored some of its batch already: the next one skips those offers."""
+    from tests.test_product_search import _finish
+    monkeypatch.setattr(ps, "MAX_CANDIDATES", 4)
+    monkeypatch.setattr(ps, "MAX_RANKED", 4)
+    sid = ps.start("Leiser Geschirrspüler", ps.make_settings(photos=False))
+    await _finish()
+    row = ps.get(sid)
+    shown = row.pool[0]
+    ps._update(sid, results=list(row.results) + [{**shown, "fit": 50, "reason": "", "red_flags": []}])
+    assert ps.load_more(sid)
+    await _finish()
+    keys = [ps._key(r) for r in ps.get(sid).results]
+    assert len(keys) == len(set(keys))
+
+
+def test_restart_keeps_partly_ranked_offers():
+    sid = _row([_r("1", "Bosch SMS46", 300.0, 90)], status="ranking")
+    ps.recover()
+    row = ps.get(sid)
+    assert row.status == "done" and "restart" in row.warning and row.results
+
+
+def test_the_mismatch_rule_also_spares_the_geizhals_limit():
+    r = _r("1", "Mini PC", 200.0, 90, geizhals={"name": "Zubehör", "url": "u", "price_from": 40.0}, stats={"median": 250.0})
+    assert ps.discount(r) is None and ps.geizhals_passes(r, {"gh_pct": 30})

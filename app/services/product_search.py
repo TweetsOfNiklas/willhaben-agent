@@ -37,6 +37,7 @@ import asyncio
 import logging
 import re
 import tempfile
+import time
 from types import SimpleNamespace
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -756,8 +757,8 @@ def geizhals_passes(r: dict[str, Any], settings: dict[str, Any] | None) -> bool:
     rule = geizhals_rule(settings)
     if rule is None:
         return True
-    hit = SimpleNamespace(price=r.get("price"), geizhals=r.get("geizhals"), item_condition=r.get("item_condition"),
-                          screen_deal=None)
+    gh = r.get("geizhals") if discount(r) is not None else None      # a new price the comparables contradict counts not
+    hit = SimpleNamespace(price=r.get("price"), geizhals=gh, item_condition=r.get("item_condition"), screen_deal=None)
     return search_agents.geizhals_passes(rule, hit)
 
 
@@ -782,12 +783,25 @@ async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None
     _update(search_id, results=results, progress=progress)
 
 
+_backfill: set[int] = set()      # finished searches whose new prices are being looked up (fill_new_prices)
+_backfill_tried: dict[int, float] = {}   # ... and when one ended with offers still not asked (Geizhals refusing)
+BACKFILL_RETRY_S = 15 * 60
+BACKFILL_ROUNDS = 10             # × MAX_NEW_PRICES lookups at most per opening
+
+
+def backfilling(search_id: int) -> bool:
+    return search_id in _backfill
+
+
 def fill_new_prices(search_id: int) -> bool:
     """A finished search whose offers were not looked up on Geizhals yet (stored before the step existed, or Geizhals
-    failed then): look them up in the background now, so its list can sort by discount. False when nothing is to do
-    or another search runs (what needs no request is filled in at once)."""
+    failed then, or more than one step's MAX_NEW_PRICES): look them up in the background now, so its list can sort by
+    discount. The search stays "done" and blocks nothing – no new search, no other page; only "load more" and a re-run
+    of this search wait (backfilling). False when nothing is to do (what needs no request is filled in at once)."""
     row = get(search_id)
-    if row is None or row.status != "done" or not any("geizhals" not in r for r in row.results or []) or running():
+    if row is None or row.status != "done" or search_id in _backfill \
+            or time.monotonic() - _backfill_tried.get(search_id, -1e9) < BACKFILL_RETRY_S \
+            or not any("geizhals" not in r for r in row.results or []):
         return False
     try:
         asyncio.get_running_loop()
@@ -797,22 +811,31 @@ def fill_new_prices(search_id: int) -> bool:
     if not _lookups(results):                       # nothing that needs a request: stored at once
         _update(search_id, results=results)
         return False
-    _update(search_id, status="prices")
-    _active.add(search_id)
+    _backfill.add(search_id)
     _spawn(_new_prices(search_id), search_id)
     return True
 
 
 async def _new_prices(search_id: int) -> None:
+    """Round after round until every offer is asked (or a round gets no further: Geizhals refusing)."""
     try:
-        row = get(search_id)
-        if row is not None:
-            await geizhals_prices(search_id, list(row.results or []))
+        for _ in range(BACKFILL_ROUNDS):
+            row = get(search_id)
+            if row is None or row.status != "done":
+                break
+            results = list(row.results or [])
+            todo = len(_lookups(list(dict(r) for r in results)))
+            if not todo:
+                break
+            await geizhals_prices(search_id, results)
+            if len(_lookups(list(dict(r) for r in results))) >= todo:
+                _backfill_tried[search_id] = time.monotonic()        # no further: not again for a while
+                break
     except Exception:  # noqa: BLE001 - the offers stay as they were
         log.exception("new prices of product search %s failed", search_id)
+        _backfill_tried[search_id] = time.monotonic()
     finally:
-        _update(search_id, status="done")
-        _active.discard(search_id)
+        _backfill.discard(search_id)
 
 
 # ------------------------------------------------------------------ ranking
@@ -1087,6 +1110,8 @@ def rerun(search_id: int) -> None:
     re-plan."""
     if running():
         raise Busy(t("A product search is still running – wait for it to finish."))
+    if search_id in _backfill:
+        raise Busy(t("The new prices of this search are still being looked up – try again in a moment."))
     row = get(search_id)
     if row is None:
         raise KeyError(search_id)
@@ -1123,7 +1148,11 @@ def recover() -> None:
     with session() as db:
         for row in db.exec(select(ProductSearch).where(col(ProductSearch.status).in_(RUNNING))):
             if row.status in ("more", "prices"):  # loading more or new prices: the offers shown before stay
-                row.status = "done"
+                row.status, row.finished_at = "done", row.finished_at or utcnow()
+            elif row.status in ("ranking", "photos") and row.results:   # ranked in part: those offers stay
+                msg = t("Interrupted by a restart – the offers ranked until then are shown.")
+                row.status, row.finished_at, row.cards = "done", utcnow(), None
+                row.warning = f"{row.warning} {msg}" if row.warning else msg
             else:
                 row.status, row.error, row.finished_at = "error", t("Interrupted by a restart."), utcnow()
             db.add(row)
@@ -1206,8 +1235,9 @@ async def _continue(search_id: int) -> None:
 async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any], settings: dict[str, Any],
                            cards: list[dict[str, Any]], answers: dict[str, Any] | None, warning: str | None,
                            reserve: list[dict[str, Any]] | None = None) -> None:
-    """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped. The offers not shown stay
-    in `pool` for "load more": the unseen reserve first, then the cards Claude passed over."""
+    """Ranking (+ photo check) of the cards, then status done; the stored cards are dropped. The offers not ranked stay
+    in `pool` for "load more": the cards of a batch Claude could not rank first (they came earlier in the order),
+    then the unseen reserve."""
     pairs = answer_pairs(plan, answers, settings)
     note, passed = "", []
     unseen: list[dict[str, Any]] = []     # cards Claude never ranked (its call failed): they keep their turn
@@ -1232,12 +1262,14 @@ async def _rank_and_finish(search_id: int, description: str, plan: dict[str, Any
                 if msg:
                     warning = f"{warning} {msg}" if warning else msg
             results = _by_fit(best + rest)
-        if results:
-            _update(search_id, status="prices", results=results)
-            await geizhals_prices(search_id, results)
+    pool = _pool(unseen, reserve or [], results + passed)
+    if results:      # the ranking's outcome stored first: a restart during the lookups loses none of it (recover)
+        _update(search_id, status="prices", results=results, passed=passed or None, note=note or None, warning=warning,
+                cards=None, pool=pool)
+        await geizhals_prices(search_id, results)
     await geo.locate(results)           # coordinates from postcodes, home geocoded once: the list can sort by distance
     _update(search_id, status="done", results=results, passed=passed or None, note=note or None, warning=warning,
-            finished_at=utcnow(), cards=None, pool=_pool(reserve or [], unseen, results + passed))
+            finished_at=utcnow(), cards=None, pool=pool)
 
 
 def _key(c: dict[str, Any]) -> tuple[str, str]:
@@ -1262,6 +1294,8 @@ def load_more(search_id: int) -> bool:
         return False
     if running():
         raise Busy(t("A product search is still running – wait for it to finish."))
+    if search_id in _backfill:
+        raise Busy(t("The new prices of this search are still being looked up – try again in a moment."))
     _update(search_id, status="more")
     _active.add(search_id)
     _spawn(_more(search_id), search_id)
@@ -1280,7 +1314,10 @@ async def _more(search_id: int) -> None:
         if row is None:
             return
         progress = dict(row.progress or {})
-        plan, settings, pool = row.plan or {}, row.settings or make_settings(), list(row.pool or [])
+        plan, settings = row.plan or {}, row.settings or make_settings()
+        # what an interrupted load stored already (results and passed are written per batch): not ranked twice
+        shown = {_key(c) for c in (row.results or []) + (row.passed or [])}
+        pool = [c for c in row.pool or [] if _key(c) not in shown]
         batch, rest = pool[:MAX_RANKED], pool[MAX_RANKED:]
         pairs = answer_pairs(plan, row.answers, settings)
         results, passed, unseen, _note, warning, progress = await _rank_all(
@@ -1290,7 +1327,7 @@ async def _more(search_id: int) -> None:
             warning = t("Claude could not rank the offers; showing the cheapest ones instead.")
         await geizhals_prices(search_id, results)
         await geo.locate(results)
-        _update(search_id, status="done", results=results, passed=passed or None, pool=_pool(rest, unseen, results + passed),
+        _update(search_id, status="done", results=results, passed=passed or None, pool=_pool(unseen, rest, results + passed),
                 candidates=(row.candidates or 0) + len(batch),
                 progress={**progress, "rank": None, "more": int(progress.get("more") or 0) + 1, "more_warning": warning})
     except Exception as e:  # noqa: BLE001 - the results shown so far stay; the failure is a warning

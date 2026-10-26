@@ -71,10 +71,11 @@
   {% endif %}
 
   {# the offers as they come: after each ranked batch, while the next ones are still being ranked #}
-  {% if ps.status in ('done', 'more') or ps.status in ('ranking', 'photos') and ps.results %}
+  {% if ps.status in ('done', 'more') or ps.status in ('ranking', 'photos', 'prices') and ps.results %}
   {% if ps.warning %}<p style="font-size: 13px; color: #B07800; margin: 10px 4px">{{ ps.warning }}</p>{% endif %}
   {% if ps.note %}<p style="font-size: 14px; margin: 10px 4px">{{ ps.note }}</p>{% endif %}
   <div class="sh">{{ _("Best offers") }} · {{ results|length }}</div>
+  {% if ps_backfilling(ps.id) %}<p class="sub" style="margin: 0 4px 8px; color: var(--link)" data-ps-backfill hx-get="/tg/search/{{ ps.id }}" hx-trigger="every 3s" hx-select="[data-ps]" hx-target="[data-ps]" hx-swap="outerHTML">{{ _("Looking up new prices on Geizhals") }} …</p>{% endif %}
   <p class="sub" style="margin: 0 4px 8px">{{ _("{n} searches · {c} candidates looked at · {k} Claude calls", n=ps.requests or 0, c=ps.candidates or 0, k=1 + ((ps.progress or {}).calls or [((ps.candidates or 0) + ps_batch - 1) // ps_batch, 1]|max + ((ps.progress or {}).more or 0)) + (1 if st.photos else 0)) }}{% if (st.platforms or [])|length > 1 %} · {% for pid in st.platforms %}{{ platform_name(pid) }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
   {% if results|length > 1 %}
   {# the order of the offers: Claude's, by price, by distance from home (kept for the next search) #}

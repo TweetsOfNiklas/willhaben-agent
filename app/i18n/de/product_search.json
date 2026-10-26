@@ -136,5 +136,7 @@
  "{n} ads per site": "{n} Anzeigen je Seite",
  "≈{n} searches": "≈{n} Suchen",
  "Searches Claude plans per site": "Suchen, die Claude je Seite plant",
- "{n} % below Geizhals": "{n} % unter Geizhals"
+ "{n} % below Geizhals": "{n} % unter Geizhals",
+ "The new prices of this search are still being looked up – try again in a moment.": "Die Neupreise dieser Suche werden noch nachgeschlagen – versuch es gleich noch einmal.",
+ "Interrupted by a restart – the offers ranked until then are shown.": "Durch einen Neustart unterbrochen – die bis dahin bewerteten Angebote werden angezeigt."
 }

@@ -90,7 +90,7 @@ async def tg_search_result(request: Request, search_id: int, order: str = ""):
     priced = any(product_search.discount(r) is not None for r in shown)
     if order == "distance" and not home or order == "discount" and not priced:
         order = "fit"
-    return _render(request, "search_result.html", **deals_web._search_ctx(search_id), order=order,
+    return _render(request, "search_result.html", **deals_web._search_ctx(search_id, backfill=True), order=order,
                    results=_ordered(shown, order, home), home=home, priced=priced, gh_out=gh_out)
 
 
