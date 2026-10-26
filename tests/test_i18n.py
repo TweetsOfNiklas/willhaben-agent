@@ -54,3 +54,17 @@ def test_fragments_do_not_conflict():
                 clashes.append((en, seen[en], (f.name, de)))
             seen.setdefault(en, (f.name, de))
     assert not clashes, clashes
+
+
+def test_one_takes_the_singular():
+    """A count of one says "1 comparable ad"; every singular has its German entry with the same placeholders."""
+    from app.i18n.plural import SINGULAR
+    de = i18n.catalog("de")
+    assert all(one in de and _fields(one) == _fields(many) for many, one in SINGULAR.items()), \
+        [one for one in SINGULAR.values() if one not in de]
+    i18n.set_request_lang("en")
+    assert i18n.t("{n} comparable ads", n=1) == "1 comparable ad" and i18n.t("{n} comparable ads", n=2) == "2 comparable ads"
+    i18n.set_request_lang("de")
+    assert i18n.t("{n} comparable ads", n=1) == "1 vergleichbare Anzeige"
+    assert i18n.t("{n} new hits", n=3) == "3 neue Treffer"
+    i18n.set_request_lang("en")

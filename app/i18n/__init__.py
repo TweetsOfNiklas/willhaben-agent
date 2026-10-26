@@ -11,6 +11,8 @@ from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 
+from app.i18n.plural import SINGULAR
+
 LANGS = {"en": "English", "de": "Deutsch"}
 DEFAULT = "en"
 _current: ContextVar[str | None] = ContextVar("ui_lang", default=None)
@@ -58,5 +60,7 @@ def set_request_lang(code: str) -> None:
 
 def t(text: str, /, **kwargs) -> str:
     code = lang()
+    if kwargs.get("n") == 1 and text in SINGULAR:      # "1 comparable ad", not "1 comparable ads"
+        text = SINGULAR[text]
     out = catalog(code).get(text, text) if code != "en" else text
     return out.format(**kwargs) if kwargs else out
