@@ -1820,3 +1820,54 @@ async def test_claude_calls_the_geizhals_product_wrong_and_the_right_one_is_used
     assert "geizhals_ok" in fake.calls[0]["schema"]["required"]
     deals.remember(res)
     assert deals.stored_geizhals(ad.ref)["url"] == "https://geizhals.at/nuc8"        # kept for the ad
+
+
+# ------------------------------------------------------------------ an automatic Geizhals lookup that finds another product
+KINGSTON = {"name": "Kingston NV3 NVMe PCIe 4.0 SSD 1TB, M.2 2280 / M-Key / PCIe 4.0 x4",
+            "url": "https://geizhals.at/kingston-nv3-a3155.html", "price_from": 148.69}
+
+
+@pytest.mark.parametrize("title, query", [
+    # 10-26: "M.2" was taken for the model, so "SSD NVMe M.2" found any SSD; French "Go" is GB
+    ("SSD NVMe M.2 Western Digital de 512 Go", "Western Digital 512GB"),
+    ("Samsung 990 Pro 2TB NVMe M.2 PCIe 4.0", "Samsung 990 Pro 2TB"),
+    ("WD SN740 256GB NVMe M.2 2230 SSD, PCIe Gen4", "WD SN740 256GB"),
+    ("Kingston NV3 1TB M.2 2280", "Kingston NV3 1TB"),
+])
+def test_geizhals_query_skips_slots_and_interfaces(title, query):
+    assert deals.geizhals_query(title) == query
+
+
+@pytest.mark.parametrize("name, title, why", [
+    (KINGSTON["name"], "SSD NVMe M.2 Western Digital de 512 Go", "capacity"),
+    (KINGSTON["name"], "SSD NVMe M.2 Western Digital", "product"),           # no size to compare: not its brand or model
+    ("Raspberry Pi 5 8GB", "Raspberry Pi 5 4GB", "capacity"),
+    (KINGSTON["name"], "Kingston NV3 1TB", None),
+    ("Apple iPhone 13 128GB", "iPhone 13 128GB Mitternacht", None),          # the brand Geizhals adds: the next word
+    ("Ubiquiti UniFi U6 Lite", "UniFi Access Point U6 Lite", None),
+    ("Western Digital WD_BLACK SN850X NVMe SSD 1TB", "WD SN850X 1TB", None),  # the model word
+    ("Bosch Professional GSR 18V-55", "GSR 18V-55 Akkuschrauber", None),
+    ("Samsung SSD 990 PRO 2TB", "Samsung 990 Pro 2 TB NVMe", None),
+])
+def test_title_conflict(name, title, why):
+    assert geizhals.title_conflict(name, title) == why
+
+
+async def test_price_check_drops_a_lookup_of_another_product_and_keeps_the_agents_verdict(monkeypatch):
+    """The price box looked the product up by itself when an ad was opened and took a 1 TB Kingston for a 512 GB WD;
+    and it did so although the agent's check (Claude, the same candidates) had found none of them to fit."""
+    _fake_search(monkeypatch, [_summ(n, "WD SN5000S 512GB NVMe", p) for n, p in enumerate([45, 50, 55, 60, 65])])
+    asked = []
+
+    async def match(q, raise_errors=False):
+        asked.append(q)
+        return KINGSTON
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    ad = _ad(55, "SSD NVMe M.2 Western Digital de 512 Go")
+    res = await deals.analyze(ad)
+    assert asked == ["Western Digital 512GB"] and res["geizhals"] is None
+    assert res["position"].get("basis") != "geizhals"                    # not rated by its new price
+    deals.clear_cache()
+    asked.clear()
+    res = await deals.analyze(_ad(55, "Kingston NV3 1TB M.2", ad_id="1234567"), known_geizhals={"checked": True})
+    assert asked == [] and res["geizhals"] is None                       # the agent's check said: none fits

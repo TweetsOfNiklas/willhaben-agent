@@ -197,7 +197,9 @@ def _model_token(toks: list[str], i: int) -> bool:
     """A model identifier such as "iPhone 13", "128GB", "18V-55" – not a size like "20 Zoll" or "56cm"."""
     tok = toks[i]
     low = tok.lower()
-    if not re.search(r"\d", tok):
+    if not re.search(r"\d", tok) or _INTERFACE_RE.fullmatch(tok):
+        return False
+    if i and toks[i - 1].lower() in _INTERFACE_WORDS:           # "PCIe 4.0", "USB 3.2", "SATA 3": the interface's version
         return False
     if re.fullmatch(r"\d+([.,]\d+)?", tok):
         nxt = toks[i + 1].lower() if i + 1 < len(toks) else ""
@@ -205,6 +207,9 @@ def _model_token(toks: list[str], i: int) -> bool:
     return not re.fullmatch(r"\d+([.,]\d+)?(cm|mm|m|kg|g|l|ml|cl|oz|er|w|x\d*|-?ports?)", low)   # "24x", "16-Port"
 
 
+# a slot, interface or form factor, not the model: "M.2", "Gen4", "x4", "2280"
+_INTERFACE_RE = re.compile(r"m\.?2|gen\d|x\d{1,2}|22(?:30|42|60|80|110)", re.I)
+_INTERFACE_WORDS = {"pcie", "usb", "sata", "gen", "thunderbolt", "hdmi", "displayport", "wifi", "wi-fi", "bluetooth"}
 _WATTS_RE = re.compile(r"\d+w", re.I)
 _COUNT_RE = re.compile(r"\d+(x|er|stk|stück)", re.I)     # "4x Ubiquiti …", "3er Set": how many, not which
 _LOT_COUNT_RE = re.compile(r"\blots?\s+(?:de\s+|of\s+)?\d+\b|(?<![\w.,])\d+\s*[x×](?=\s)"
@@ -232,6 +237,8 @@ def geizhals_query(title: str | None, category_path: list[str] | None = None) ->
     if first < 0:            # no model number: a brand's product by its name ("Ubiquiti UniFi Cloud Gateway Max")
         return " ".join(toks[:5]) if len(toks) >= 2 and any(_fold(w) in BRANDS for w in toks) else None
     lead = toks[:first]
+    if len(lead) > 4:          # "SSD NVMe M.2 Western Digital de 512 Go": the kind and the small words go first
+        lead = [w for w in lead if _fold(w) not in geizhals.GENERIC_WORDS and not (len(w) <= 2 and w.islower())] or lead
     if len(lead) > 4:
         lead = lead[:2] + [w for w in lead[2:-1] if w.lower() in geizhals.VARIANT_WORDS] + lead[-1:]
     end = first + 1
@@ -1385,6 +1392,18 @@ def shown_result(platform: str, ad_id: str) -> dict[str, Any] | None:
     return None
 
 
+async def title_match(title: str | None, category_path: list[str] | None = None,
+                      raise_errors: bool = False) -> dict[str, Any] | None:
+    """The automatic lookup of an ad's product by its title: geizhals_match of geizhals_query, the product dropped when
+    it cannot be the ad's (geizhals.title_conflict: another storage size, none of its brand or model words)."""
+    q = geizhals_query(title, category_path)
+    gh = await (geizhals_match(q, raise_errors=True) if raise_errors else geizhals_match(q))
+    if gh and (why := geizhals.title_conflict(gh.get("name") or "", title or "")):
+        log.info("Geizhals product %r dropped for %r: %s", gh.get("name"), title, why)
+        return None
+    return gh
+
+
 async def geizhals_match(query: str | None, raise_errors: bool = False) -> dict[str, Any] | None:
     """{name, url, price_from} of the matching Geizhals product, or None (cached 6 h). When Geizhals fails (blocked,
     down; remembered 15 min) also None, or with `raise_errors` GeizhalsError: a caller that keeps the answer must
@@ -1547,6 +1566,8 @@ async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = F
     `known_geizhals`: the product a search-agent hit already has (its lookup or Claude's check), used before a lookup
     by the title, which may find nothing ("Dream Machine (UDM SE)")."""
     own = bool(own_query and (query or "").strip())
+    # the agent's Geizhals check saw the results and found none to be this product: no automatic lookup either
+    ruled_out = (known_geizhals or {}).get("checked") and not (known_geizhals or {}).get("price_from")
     known = {k: v for k, v in (known_geizhals or {}).items() if k in ("name", "url", "price_from", "by", "checked")} \
         if (known_geizhals or {}).get("price_from") and (known_geizhals or {}).get("url") else None
     res = cached(ad.ref, query, category_url, own)
@@ -1563,7 +1584,7 @@ async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = F
                                  platform=ad.platform)
         # Claude's pick first, then the hit's product; the automatic lookup only for an ad Claude did not rule out
         gh = stored_geizhals(ad.ref) or known or (
-            None if stored_geizhals_none(ad.ref) else await geizhals_match(geizhals_query(ad.heading, ad.category_path)))
+            None if stored_geizhals_none(ad.ref) or ruled_out else await title_match(ad.heading, ad.category_path))
         res = {"ad": _ad_summary(ad), "query": q, "asked_query": (query or "").strip() or None, "own_query": own,
                "category_url": category_url, "category_path": ad.category_path,
                "comparables": comp, "geizhals": gh,

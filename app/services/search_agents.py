@@ -966,7 +966,7 @@ async def _geizhals_prices(hits: list[Hit]) -> None:
         if h.geizhals is not None:
             continue
         try:
-            gh = await deals.geizhals_match(deals.geizhals_query(h.heading), raise_errors=True)
+            gh = await deals.title_match(h.heading, raise_errors=True)
         except geizhals.GeizhalsError:
             continue
         h.geizhals = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}

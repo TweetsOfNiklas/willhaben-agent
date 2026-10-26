@@ -379,9 +379,14 @@ async def product(url: str) -> Product:
                    specs=[(k, v) for k, v in d.get("specs") or []])
 
 
+_FR_UNIT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(Go|To)\b")     # French "512 Go", "1 To" (case kept: "to" is a word)
+
+
 def glue_units(s: str) -> str:
-    """Number and capacity unit as one word, case kept: "4 GB" -> "4GB", "1,5 TB" -> "1.5TB"."""
-    return _UNIT_RE.sub(lambda m: m.group(1).replace(",", ".") + m.group(2), s or "")
+    """Number and capacity unit as one word, case kept: "4 GB" -> "4GB", "1,5 TB" -> "1.5TB"; French "512 Go" ->
+    "512GB"."""
+    s = _FR_UNIT_RE.sub(lambda m: m.group(1) + {"Go": "GB", "To": "TB"}[m.group(2)], s or "")
+    return _UNIT_RE.sub(lambda m: m.group(1).replace(",", ".") + m.group(2), s)
 
 
 _WATT_RE = re.compile(r"(\d)\s*w\b", re.I)
@@ -396,6 +401,35 @@ BRANDS = frozenset({"ubiquiti", "unifi", "apple", "amazon", "samsung", "sony", "
 # a result with one of these the query lacks is something else: an accessory, a multi-pack or a bundle
 OTHER_THING_WORDS = {"kit", "halterung", "mount", "hülle", "case", "cover", "adapter", "kabel", "netzteil", "upgrade",
                      "ersatzteil", "ersatzteile", "zubehör", "pack", "bundle", "bundles"}
+
+
+# words that name a kind of thing or its interface, not a product: shared by any two SSDs
+GENERIC_WORDS = frozenset({"ssd", "nvme", "hdd", "pcie", "sata", "usb", "m2", "m.2", "intern", "extern", "internal",
+                           "external", "gen3", "gen4", "gen5", "neu", "new"})
+
+
+def _gb(cap: str) -> float:
+    v, unit = float(re.match(r"[\d.]+", cap.replace(",", ".")).group()), cap[-2:].lower()
+    return {"tb": v * 1000, "gb": v, "mb": v / 1000}.get(unit, -1)
+
+
+def title_conflict(name: str, title: str) -> str | None:
+    """Why a product found by an automatic lookup cannot be the ad's (its full title), or None: storage sizes that
+    differ ("1TB" for a "512 Go" ad) or none of the product's brand and model words in the title (the first two
+    words that are no GENERIC_WORDS, and those mixing letters and digits: "Kingston NV3 NVMe …" for a "Western
+    Digital … 512 Go" ad, found by a query that kept only "SSD NVMe M.2")."""
+    t_caps = {_gb(c) for c in CAPACITY_RE.findall(glue_units(title)) if not c.lower().endswith("mah")}
+    n_caps = {_gb(c) for c in CAPACITY_RE.findall(glue_units(name)) if not c.lower().endswith("mah")}
+    if t_caps and n_caps and not any(abs(a - b) <= 0.03 * max(a, b) for a in t_caps for b in n_caps):
+        return "capacity"
+    flat = _flat(glue_units(title))
+    words = [w for w in (_flat(x) for x in _QTOK_RE.findall(glue_units(name)))
+             if re.search(r"[a-zäöüß]", w) and w not in GENERIC_WORDS and not CAPACITY_RE.fullmatch(w)]
+    key = words[:2] + [w for w in words if re.search(r"\d", w)]
+    if key and not any(w in flat if len(w) >= 3 else re.search(rf"(?<![a-z0-9]){w}(?![a-z0-9])", glue_units(title).lower())
+                       for w in key):
+        return "product"
+    return None
 
 
 def _norm(s: str) -> str:
