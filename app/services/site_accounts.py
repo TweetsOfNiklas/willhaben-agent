@@ -8,6 +8,11 @@ Whether a session is still valid is seen by loading a page that needs one in a s
 so the sites' bot protection (DataDome on Vinted) lets it through, where a bare request would be refused. A redirect
 to the login page means logged out. The state is kept in the setting `account_<site>` ({logged_in, checked_at,
 error}); it is checked on demand and every few hours once the owner logged in.
+
+A login a site keeps in session cookies (no expiry) is gone when the browser restarts – every update of the app
+logged out of Kleinanzeigen. So a check that finds the owner logged in keeps the site's session cookies in
+data/site-cookies-<site>.json (owner-only), and the browser gets them back when it starts (restore_cookies); "Reset"
+deletes the file with the cookies.
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from app.config import get_settings
 from app.db import get_setting, set_setting, utcnow
 from app.i18n import t
 
@@ -100,6 +106,50 @@ def seen_in_tab(pid: str, url: str | None) -> None:
         _save(pid, False)
 
 
+def _cookie_file(pid: str):
+    return get_settings().data_dir / f"site-cookies-{pid}.json"
+
+
+def _site_pattern(site: SiteAccount) -> re.Pattern:
+    return re.compile(r"(?:^|\.)(?:" + "|".join(re.escape(h.split(".")[0]) for h in site.hosts) + r")\.[a-z.]+$")
+
+
+async def keep_cookies(pid: str) -> int:
+    """The site's session cookies (no expiry: the browser forgets them on restart) into its file; how many."""
+    from app.willhaben.session import get_session
+
+    site, sess = SITES[pid], get_session()
+    if not sess.context:
+        return 0
+    pattern = _site_pattern(site)
+    keep = [c for c in await sess.context.cookies()
+            if pattern.search((c.get("domain") or "").lstrip(".")) and (c.get("expires") or -1) < 0]
+    path = _cookie_file(pid)
+    if not keep:
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(keep))
+    path.chmod(0o600)
+    return len(keep)
+
+
+async def restore_cookies(context: Any) -> int:
+    """After the browser started: the kept session cookies of each site it does not have now; how many."""
+    have = {(c.get("domain"), c.get("path"), c.get("name")) for c in await context.cookies()}
+    back = []
+    for pid in SITES:
+        path = _cookie_file(pid)
+        try:
+            kept = json.loads(path.read_text()) if path.exists() else []
+        except (OSError, ValueError):
+            continue
+        back += [c for c in kept if (c.get("domain"), c.get("path"), c.get("name")) not in have]
+    if back:
+        await context.add_cookies(back)
+        log.info("browser: %d kept session cookies of other sites restored", len(back))
+    return len(back)
+
+
 async def forget(pid: str) -> int:
     """Delete every cookie of the site in the app's browser (login, the bot protection's mark): a fresh start after
     the site blocked this browser ("Deine Sitzung wurde blockiert"). Returns how many went."""
@@ -111,6 +161,7 @@ async def forget(pid: str) -> int:
     pattern = re.compile(r"(?:^|\.)(?:" + "|".join(re.escape(h.split(".")[0]) for h in site.hosts) + r")\.[a-z.]+$")
     gone = [c for c in await sess.context.cookies() if pattern.search((c.get("domain") or "").lstrip("."))]
     await sess.context.clear_cookies(domain=re.compile(pattern.pattern))
+    _cookie_file(pid).unlink(missing_ok=True)
     _save(pid, False)
     return len(gone)
 
@@ -133,6 +184,10 @@ async def check(pid: str) -> dict[str, Any]:
                                    "again", site=site.name))
     if logged_out_url(site, final) or (site.logged_out_text and re.search(site.logged_out_text, text or "")):
         return _save(pid, False)
+    try:
+        await keep_cookies(pid)          # logged in: its session cookies survive the next restart
+    except Exception as e:  # noqa: BLE001 - keeping them is a nicety
+        log.info("%s session cookies not kept: %s", site.name, e)
     return _save(pid, True)
 
 

@@ -152,6 +152,9 @@ class BrowserSession:
                 )
                 self.engine = "chromium"
             log.info("browser started: %s", self.engine)
+            from app.services import site_accounts
+            with suppress(Exception):            # other sites' logins kept in session cookies (site_accounts)
+                await site_accounts.restore_cookies(self.context)
             from app.willhaben import record_all
             record_all.attach(self.context)          # everything the browser does, while switched on (session page)
             self.ui_page = self.context.pages[0] if self.context.pages else await self.context.new_page()
