@@ -1,5 +1,6 @@
 """Price zones of the price check (Settings → Search & prices → Price rating): from which share of the lowest Geizhals new
-price an ad counts as bargain, cheap, fair, expensive or very expensive, separately for used and new items.
+price an ad counts as bargain, cheap, fair, expensive or very expensive, separately for used and new items – and, for
+an ad rated by similar ads instead (no new price, or one that is not the item), from which share of their median.
 
 One owner of reading, writing and checking the setting (the human_pace pattern). The arithmetic is in whole cents,
 as search_agents._geizhals_cents: the floored % shown next to a label and the label itself never disagree.
@@ -15,11 +16,13 @@ from app.i18n import t
 
 KEY = "price_zones"     # JSON {"used": [4 ints], "new": [4 ints]}, only groups that differ from DEFAULTS; "" = defaults
 NAMES = ("bargain", "cheap", "fair", "expensive", "very_expensive")
-GROUPS = ("used", "new")
+GROUPS = ("used", "new", "similar")      # similar: % of the median of the similar ads (deals.position, basis comparables)
 # the "from" limits in % of the new price: from X % on the next label applies. Used: 55-74 % is the usual resale price
 # of a used item in good condition; from 90 % on, new costs barely more and comes with warranty and return rights.
 # New: a private sale has no return right, so fair is a bit below the lowest shop price; at that price, order it
-DEFAULTS: dict[str, tuple[int, int, int, int]] = {"used": (35, 55, 75, 90), "new": (70, 85, 100, 115)}
+# Similar ads: around their median is fair (90-114 %), a third below it a bargain, a third above it very expensive
+DEFAULTS: dict[str, tuple[int, int, int, int]] = {"used": (35, 55, 75, 90), "new": (70, 85, 100, 115),
+                                                  "similar": (70, 90, 115, 135)}
 LOW, HIGH = 1, 300
 
 
@@ -73,7 +76,8 @@ def config() -> dict[str, tuple[int, ...]]:
 def save(zones: dict[str, Any]) -> dict[str, tuple[int, ...]]:
     """Checks both groups first (all or nothing, ZoneError), then stores only the groups that differ from the
     defaults ("" when none does)."""
-    parsed = {g: parse(zones.get(g), g) for g in GROUPS}
+    current = config()
+    parsed = {g: parse(zones.get(g), g) if zones.get(g) else current[g] for g in GROUPS}   # a form without a group keeps it
     custom = {g: list(v) for g, v in parsed.items() if v != DEFAULTS[g]}
     set_setting(KEY, json.dumps(custom) if custom else "")
     return parsed
@@ -113,7 +117,7 @@ def price_from(new_price: float, limit: int) -> float:
 def error_text(code: str | None) -> str | None:
     """The message of an error code from our own redirect ("used-range", "new-order"); None for anything else."""
     grp, _, kind = (code or "").partition("-")
-    name = {"used": t("Used items"), "new": t("New items")}.get(grp)
+    name = {"used": t("Used items"), "new": t("New items"), "similar": t("Similar ads")}.get(grp)
     if name is None:
         return None
     if kind == "range":

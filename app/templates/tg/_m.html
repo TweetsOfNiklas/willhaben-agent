@@ -39,17 +39,19 @@
    ad's own one in full colour), the ring at the price, the Geizhals new-price marker, the comparables' usual range
    under the track, the labels above and below. #}
 {% macro pricebar(b) -%}
+{%- if b %}
 {%- set col = {'bargain': '#2F9E44', 'cheap': '#66A80F', 'fair': '#B38600', 'expensive': '#F76707', 'very_expensive': '#E5484D'} %}
 <div style="position: relative; margin: 0 8px; padding: 22px 0 {{ '22px' if b.band and not b.lane else '4px' }}" role="img" aria-label="{{ b.aria }}" data-pricebar>
   {% for l in b.top if not l.from_px or l.from_px <= 360 %}<span style="position: absolute; top: 0; left: {{ l.x }}%; transform: translateX({{ {'c': '-50%', 'l': '0', 'r': '-100%'}[l.anchor] }}); white-space: nowrap; font-size: 12.5px; {{ 'font-weight: 700' if l.kind == 'price' else 'font-weight: 600; color: var(--hint)' }}">{{ l.text }}</span>{% endfor %}
   <div style="position: relative; height: 10px">
-    <div style="position: absolute; inset: 0; border-radius: 5px; overflow: hidden">{% for sg in b.segments %}<span style="position: absolute; top: 0; bottom: 0; left: {{ sg.from }}%; width: {{ (sg.to - sg.from)|round(2) }}%; background: {{ col.get(sg.level, '#999') }}; opacity: {{ '1' if sg.level == b.level else '.32' }}; {{ '' if loop.first else 'border-left: 2px solid var(--section)' }}"></span>{% endfor %}</div>
+    <div style="position: absolute; inset: 0; border-radius: 5px; overflow: hidden">{% for sg in b.segments %}<span style="position: absolute; top: 0; bottom: 0; left: {{ sg.from }}%; width: {{ (sg.to - sg.from)|round(2) }}%; background: {{ col.get(sg.level, '#999') }}; opacity: {{ '1' if sg.level == b.level else '.32' }}; {{ '' if loop.first else 'border-left: 2px solid var(--section)' }}"></span>{% endfor %}{% if b.basis == 'comparables' %}<span style="position: absolute; inset: 0; background: repeating-linear-gradient(135deg, rgba(255,255,255,.38) 0 3px, transparent 3px 7px)" data-similar-stripes></span>{% endif %}</div>
     {% if b.band %}<span style="position: absolute; top: 15px; height: 6px; left: {{ b.band.from }}%; width: {{ [(b.band.to - b.band.from)|round(1), 1]|max }}%; border-left: 2px solid var(--hint); {{ '' if b.band.off else 'border-right: 2px solid var(--hint);' }}"><span style="position: absolute; left: 0; right: 0; top: 2px; height: 2px; background: var(--hint); opacity: .7"></span></span>{% endif %}
-    {% if b.new_at is not none %}<span style="position: absolute; top: -6px; bottom: -6px; width: 2px; left: {{ b.new_at }}%; transform: translateX(-50%); border-radius: 1px; background: var(--text)"></span>{% endif %}
+    {% if b.new_at is not none %}<span style="position: absolute; top: -6px; bottom: -6px; width: 2px; left: {{ b.new_at }}%; transform: translateX(-50%); {{ 'border-left: 2px dashed var(--text)' if b.basis == 'comparables' else 'border-radius: 1px; background: var(--text)' }}"></span>{% endif %}
     <span style="position: absolute; top: 50%; left: {{ b.ring }}%; width: 16px; height: 16px; transform: translate(-50%, -50%); border-radius: 50%; border: 3px solid var(--text); background: var(--section); box-shadow: 0 1px 2px rgba(0,0,0,.25)"></span>
   </div>
   {% if b.lane %}<div style="position: relative; height: 16px; margin-top: {{ '14px' if b.band else '8px' }}; font-size: 11.5px; color: var(--hint)">{% for l in b.lane if not l.from_px or l.from_px <= 360 %}<span style="position: absolute; left: {{ l.x }}%; transform: translateX({{ {'c': '-50%', 'l': '0', 'r': '-100%'}[l.anchor] }}); white-space: nowrap">{{ l.text }}</span>{% endfor %}</div>{% endif %}
 </div>
+{%- endif %}
 {%- endmacro %}
 
 {# one of Claude's questions (ui.question): options as chips, or an own answer #}

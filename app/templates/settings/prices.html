@@ -3,49 +3,50 @@
    error code only (?err=used-order), whose text price_zone_error() looks up. #}
 {% import "_ui.html" as ui %}{% set v = price_zone_view() %}{% set err = price_zone_error(request.query_params.get('err')) %}
 <section class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
-  <p class="text-muted">{{ _("When Geizhals knows the new price, the price check rates an ad by its price as a share of the lowest new price there – a used item only while there are fewer than 5 comparable ads; with more, they decide. Set from which share each label applies, separately for used and new items.") }}</p>
+  <p class="text-muted">{{ _("When Geizhals knows the new price, the price check rates an ad by its price as a share of the lowest new price there – a used item only while there are fewer than 5 comparable ads; with more, they decide. Set from which share each label applies, separately for used and new items, and for the rating by similar ads.") }}</p>
   {% if err %}{{ ui.msg(err, 'error') }}{% endif %}
   <form method="post" action="/settings/prices" x-data="priceZones({{ v|tojson|forceescape }})" class="flex flex-col gap-5">
-  {% for g, title, hint in [('used', _("Used items"), _("Also like new, refurbished and ads whose condition the site does not say.")),
-                            ('new', _("New items"), _("Only ads the site marks as new, and shop deals from Preisjäger. Geizhals shows the lowest shop price, which is usually below the RRP."))] %}
+  {% for g, title, hint, mark, unit in [('used', _("Used items"), _("Also like new, refurbished and ads whose condition the site does not say."), _("New"), _("% of the new price")),
+                            ('new', _("New items"), _("Only ads the site marks as new, and shop deals from Preisjäger. Geizhals shows the lowest shop price, which is usually below the RRP."), _("New"), _("% of the new price")),
+                            ('similar', _("Similar ads"), _("Without a Geizhals new price, with one the similar ads contradict (probably another product), or for a used item with 5 or more comparable ads: the ad's price as a share of the median (Ø) of the similar ads. Its bar is striped, the median a dashed line."), "Ø", _("% of the median"))] %}
     <fieldset id="s-prices-{{ g }}" class="flex min-w-0 flex-col gap-3 border-t border-base-300 pt-4 first-of-type:border-t-0 first-of-type:pt-0">
       <div class="flex items-center justify-between gap-2"><span class="font-medium">{{ title }}</span><button type="button" class="btn btn-ghost btn-xs" title="{{ v.defaults[g]|join(' / ') }} %" @click="reset('{{ g }}')">{{ _("Default values") }}</button></div>
       <small class="-mt-2 text-[12.5px] text-muted">{{ hint }}</small>
-      {# preview: the zones, the new price at 100 %, the example as a ring (drawn by the script only) #}
+      {# preview: the zones, the new price (or the median) at 100 %, the example as a ring (drawn by the script only) #}
       <div class="relative mx-2 pt-6 pb-1" aria-hidden="true" x-cloak>
         <span class="absolute top-0 -translate-x-1/2 whitespace-nowrap text-[12.5px] font-bold tabular-nums" :style="`left:${at('{{ g }}', probe['{{ g }}'])}%`" x-text="`${probe['{{ g }}']} %`"></span>
         <div class="relative h-2.5">
-          <div class="absolute inset-0 overflow-hidden rounded-full bg-base-300"><template x-for="s in segs('{{ g }}')" :key="s.level"><span class="absolute inset-y-0 border-l-2 border-base-100 first-of-type:border-l-0" :class="[cls[s.level], s.level === level('{{ g }}') ? '' : 'opacity-60']" :style="`left:${s.from}%;width:${s.to - s.from}%`"></span></template></div>
-          <span class="absolute -top-1.5 -bottom-1.5 w-0.5 -translate-x-1/2 rounded-full bg-base-content" :style="`left:${at('{{ g }}', 100)}%`"></span>
+          <div class="absolute inset-0 overflow-hidden rounded-full bg-base-300"><template x-for="s in segs('{{ g }}')" :key="s.level"><span class="absolute inset-y-0 border-l-2 border-base-100 first-of-type:border-l-0" :class="[cls[s.level], s.level === level('{{ g }}') ? '' : 'opacity-60']" :style="`left:${s.from}%;width:${s.to - s.from}%`"></span></template>{% if g == 'similar' %}<span class="absolute inset-0 bg-[repeating-linear-gradient(135deg,rgb(255_255_255/.38)_0_3px,transparent_3px_7px)]"></span>{% endif %}</div>
+          {% if g == 'similar' %}<span class="absolute -top-1.5 -bottom-1.5 -translate-x-1/2 border-l-2 border-dashed border-base-content" :style="`left:${at('{{ g }}', 100)}%`"></span>
+          {% else %}<span class="absolute -top-1.5 -bottom-1.5 w-0.5 -translate-x-1/2 rounded-full bg-base-content" :style="`left:${at('{{ g }}', 100)}%`"></span>{% endif %}
           <span class="absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-base-content bg-base-100 shadow-sm" :style="`left:${at('{{ g }}', probe['{{ g }}'])}%`"></span>
         </div>
-        <div class="relative mt-2.5 h-4 text-[11.5px] leading-4 text-muted"><span class="absolute whitespace-nowrap font-semibold" :class="at('{{ g }}', 100) > 80 ? '-translate-x-full' : '-translate-x-1/2'" :style="`left:${at('{{ g }}', 100)}%`">{{ _("New") }} = 100 %</span></div>
+        <div class="relative mt-2.5 h-4 text-[11.5px] leading-4 text-muted"><span class="absolute whitespace-nowrap font-semibold" :class="at('{{ g }}', 100) > 80 ? '-translate-x-full' : '-translate-x-1/2'" :style="`left:${at('{{ g }}', 100)}%`">{{ mark }} = 100 %</span></div>
       </div>
       <label class="flex flex-wrap items-center gap-1.5 text-[13px] text-muted" x-cloak>{{ _("Example:") }}
-        <input type="number" min="1" max="300" step="1" inputmode="numeric" x-model.number="probe['{{ g }}']" class="input input-sm w-[72px] bg-base-200 text-right tabular-nums"> {{ _("% of the new price") }}
+        <input type="number" min="1" max="300" step="1" inputmode="numeric" x-model.number="probe['{{ g }}']" class="input input-sm w-[72px] bg-base-200 text-right tabular-nums"> {{ unit }}
         <span class="whitespace-nowrap" x-show="ok('{{ g }}')">→ <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold text-white" :class="cls[level('{{ g }}')]" x-text="labels[level('{{ g }}')]"></span></span></label>
       <div class="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-2">
         <span>{{ ui.deal_lvl('bargain', deal_level_label('bargain')) }}</span>
         <span class="col-span-2 text-[13px] text-muted" x-text="range('{{ g }}', 0)">{{ _("below {n} %", n=v[g][0]) }}</span>
         {% for name in ['cheap', 'fair', 'expensive', 'very_expensive'] %}{% set i = loop.index %}
         <span>{{ ui.deal_lvl(name, deal_level_label(name)) }}</span>
-        <label class="input input-sm w-auto gap-1 bg-base-200" :class="{'input-error': bad('{{ g }}', {{ i - 1 }})}"><span class="text-muted">{{ _("starting at") }}</span><input type="number" name="{{ g }}" min="1" max="300" step="1" required inputmode="numeric" value="{{ v[g][i - 1] }}" x-model="z['{{ g }}'][{{ i - 1 }}]" :aria-invalid="bad('{{ g }}', {{ i - 1 }})" class="w-9 text-right font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" aria-label="{{ _('{level}: from this share of the new price (%)', level=deal_level_label(name)) }}"><span class="text-muted">%</span></label>
+        <label class="input input-sm w-auto gap-1 bg-base-200" :class="{'input-error': bad('{{ g }}', {{ i - 1 }})}"><span class="text-muted">{{ _("starting at") }}</span><input type="number" name="{{ g }}" min="1" max="300" step="1" required inputmode="numeric" value="{{ v[g][i - 1] }}" x-model="z['{{ g }}'][{{ i - 1 }}]" :aria-invalid="bad('{{ g }}', {{ i - 1 }})" class="w-9 text-right font-semibold tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" aria-label="{{ (_('{level}: from this share of the median (%)', level=deal_level_label(name)) if g == 'similar' else _('{level}: from this share of the new price (%)', level=deal_level_label(name))) }}"><span class="text-muted">%</span></label>
         <span class="justify-self-start whitespace-nowrap rounded-full bg-hover px-1.5 py-0.5 text-[12px] text-muted tabular-nums" x-text="range('{{ g }}', {{ i }})">{% if i == 4 %}{{ _("from {n} %", n=v[g][3]) }}{% elif v[g][i] - 1 == v[g][i - 1] %}{{ v[g][i - 1] }} %{% else %}{{ v[g][i - 1] }}–{{ v[g][i] - 1 }} %{% endif %}</span>
         {% endfor %}
       </div>
       <small class="text-[12.5px] text-error" x-show="!ok('{{ g }}')" x-cloak>{{ _("Whole numbers from 1 to 300 %, each higher than the one before.") }}</small>
     </fieldset>
   {% endfor %}
-    <p class="text-[12.5px] text-muted">{{ _("Without a new price the comparable ads decide: the middle half of their prices counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.") }}</p>
-    <div class="flex flex-wrap gap-2"><button class="btn btn-primary" :disabled="!ok('used') || !ok('new')">{{ _("Save") }}</button>
-      <button id="s-prices-reset" name="reset" value="1" class="btn btn-ghost" formnovalidate :disabled="isDefault()" data-confirm="{{ _('Set both groups back to the default values and save?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Reset to default values") }}</button></div>
+    <div class="flex flex-wrap gap-2"><button class="btn btn-primary" :disabled="!ok('used') || !ok('new') || !ok('similar')">{{ _("Save") }}</button>
+      <button id="s-prices-reset" name="reset" value="1" class="btn btn-ghost" formnovalidate :disabled="isDefault()" data-confirm="{{ _('Set all groups back to the default values and save?') }}" onclick="return confirm(this.dataset.confirm)">{{ _("Reset to default values") }}</button></div>
   </form>
 </section>
 <script>
 document.addEventListener('alpine:init', () => Alpine.data('priceZones', (o) => ({
-  // the zones of both groups as typed, raw text (written z['new']: new is a keyword)
-  z: {used: [...o.used], 'new': [...o['new']]}, saved: {used: o.used, 'new': o['new']}, d: o.defaults, names: o.names, labels: o.labels, t: o.t, ax: o.axis,
-  probe: {used: 68, 'new': 98},
+  // the zones of the groups as typed, raw text (written z['new']: new is a keyword)
+  z: {used: [...o.used], 'new': [...o['new']], similar: [...o.similar]}, saved: {used: o.used, 'new': o['new'], similar: o.similar}, d: o.defaults, names: o.names, labels: o.labels, t: o.t, ax: o.axis,
+  probe: {used: 68, 'new': 98, similar: 85},
   cls: {bargain: 'bg-lvl-bargain', cheap: 'bg-lvl-cheap', fair: 'bg-lvl-fair', expensive: 'bg-lvl-expensive', very_expensive: 'bg-lvl-very_expensive'},
   // the server's price_zones.parse: the text of four whole numbers 1..300 ("1e2" is not one), strictly ascending
   num(x) { return /^\d{1,3}$/.test(String(x).trim()) && +x >= 1 && +x <= 300; },
@@ -63,8 +64,8 @@ document.addEventListener('alpine:init', () => Alpine.data('priceZones', (o) => 
     if (i === 0) return this.t.below.replace('{n}', v[0]); if (i === 4) return this.t.from.replace('{n}', v[3]);
     return v[i] - 1 === v[i - 1] ? `${v[i - 1]} %` : `${v[i - 1]}–${v[i] - 1} %`; },
   reset(g) { this.z[g] = [...this.d[g]]; },
-  // "Reset to default values" has nothing to do once the saved and the typed zones of both groups are the defaults
+  // "Reset to default values" has nothing to do once the saved and the typed zones of all groups are the defaults
   same(a, b) { return a.every((x, i) => +x === +b[i]); },
-  isDefault() { return ['used', 'new'].every(g => this.same(this.saved[g], this.d[g]) && this.same(this.z[g], this.d[g])); },
+  isDefault() { return ['used', 'new', 'similar'].every(g => this.same(this.saved[g], this.d[g]) && this.same(this.z[g], this.d[g])); },
 })));
 </script>

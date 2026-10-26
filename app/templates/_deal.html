@@ -1,7 +1,8 @@
 {# Price position of one ad. res = deals.analyze() (re-rated on read) or None, compact = inside the ad viewer, h = Hit or None.
-   A used item with 5+ comparable ads is rated by them (bar: their percentile segments; the Geizhals price below as
-   information); otherwise, with a Geizhals new price, the user's zones decide (bar: zones, the new-price marker, the
-   comparables' usual range as a bracket); without either the comparable ads do. #}
+   Rated by the Geizhals new price (the user's zones of it, the new-price marker, the comparables' usual range as a
+   bracket), or – without a new price, with one the similar ads contradict, or for a used item with a market of its
+   own – by the similar ads: a bar of its own look (stripes, a dashed marker at their median), its zones the user's
+   for similar ads, said in words above it, so it never reads as the new-price bar. #}
 {% import "_ui.html" as ui %}{% import "_price_bar.html" as pb %}
 {% if error and not res %}<p class="text-[13px] text-muted">{{ _("Price check failed: {error}", error=error) }}</p>
 {% elif res %}
@@ -17,6 +18,7 @@
     {% if head %}<small class="text-muted">{{ head|join(' · ') }}</small>{% endif %}
   </div>
   {% if p.pos is not none %}{% set b = deal_bar(p, ad.price|eur) %}
+  {% if b.basis == 'comparables' %}<div class="flex items-center gap-1.5 self-start rounded-md bg-base-100 px-2 py-1 text-[12.5px] font-medium" data-similar-basis>{{ ui.icon('layers', 13, 2) }}{{ _("Rated by {n} similar ads – not by a new price", n=p.count or c.count or 0) }}</div>{% endif %}
   {{ pb.bar(b) }}
   {% if b.basis == 'geizhals' %}
   {# legend: the marker is the Geizhals new price, the bracket the middle half of the comparable ads #}
@@ -24,11 +26,17 @@
     {% if gh %}<span><a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary no-underline"><span class="mr-1.5 inline-block h-3 w-0.5 rounded-full bg-base-content align-[-2px]" aria-hidden="true"></span><span class="font-semibold" data-gh-name>{{ _("Sum of {n} parts", n=gh.parts|length) if gh.parts else gh.name }}</span>: {{ _("new from {price} on Geizhals", price=gh.price_from|eur)|nb }} ↗</a>{% if gh.by == 'claude' %} · {{ _("found by Claude") }}{% endif %}</span>{% endif %}
     {% if b.band %}<span>{{ pb.band_glyph() }}{{ _("usual among comparable ads:") }} <span class="whitespace-nowrap">{{ b.band.text }}</span>{% if b.band.out %} · {{ _("outside the scale") }}{% elif b.band.off %} · {{ _("reaches past the scale") }}{% endif %}</span>{% endif %}
   </div>
+  {% else %}
+  {# legend: the dashed marker is the similar ads' median, the bracket their middle half #}
+  <div class="mx-2 flex flex-wrap gap-x-3 gap-y-1 text-[12.5px] text-muted">
+    <span><span class="mr-1.5 inline-block h-3 border-l-2 border-dashed border-base-content align-[-2px]" aria-hidden="true"></span><span class="font-semibold">Ø</span> {{ _("median of {n} similar ads: {price}", n=p.count or 0, price=p.median|eur)|nb }}</span>
+    {% if b.band %}<span>{{ pb.band_glyph() }}{{ _("usual among them:") }} <span class="whitespace-nowrap">{{ b.band.text }}</span></span>{% endif %}
+  </div>
   {% endif %}
   {% if p.suspicious %}<div class="self-start rounded-md bg-bad-soft px-2 py-1 text-[12.5px] font-semibold text-error">{{ _("Unusually cheap – check condition, details and seller carefully.") }}</div>{% endif %}
   {% if p.mismatch %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Comparable ads cost {n} % of the new price on average – is the Geizhals product the right one?", n=p.mismatch)|nb }}</div>{% endif %}
   {% if p.comparables_low %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Comparable ads cost only {n} % of the new price on average – probably cheaper models, so the new price rates this ad.", n=p.comparables_low)|nb }}</div>{% endif %}
-  {% if p.new_price_ignored %}<div class="self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning">{{ _("Geizhals new price not used: the comparable ads cost {n} % of it on average – probably another product.", n=p.new_price_ignored)|nb }}</div>{% endif %}
+  {% if p.new_price_ignored or (res.geizhals_rejected and not gh) %}<div class="flex items-start gap-1.5 self-start rounded-md bg-warn-soft px-2 py-1 text-[12.5px] text-warning" data-gh-doubt>{{ ui.icon('x', 13, 2.4, 'mt-0.5') }}<span><strong>{{ _("Geizhals product probably wrong – not used.") }}</strong> {% if res.geizhals_rejected and not gh %}{{ _("Claude: the ad is another product ({name} was found).", name=res.geizhals_rejected) }}{% else %}{{ _("The comparable ads cost {n} % of its new price on average.", n=p.new_price_ignored)|nb }}{% endif %}{% if p.basis == 'comparables' %} {{ _("The similar ads rate this ad instead.") }}{% endif %}</span></div>{% endif %}
   {% set cond_line = (_("Condition assumed: {label}.", label=cond) if guessed else _("Condition according to the ad: {label}.", label=cond)) if cond else '' %}
   <p class="text-[12.5px] text-muted">
     {%- if b.basis == 'geizhals' %}{% set zs = deal_zone_span(p) %}
@@ -37,8 +45,12 @@
     {%- else %}{% set rng = (zs.from_pct ~ ' %') if zs.to_pct - 1 == zs.from_pct else (zs.from_pct ~ '–' ~ (zs.to_pct - 1) ~ ' %') %}{% set prices = _("{low} to below {high}", low=zs.from|eur, high=zs.to|eur) %}{% endif %}
     {{ (_("For new items „{level}“ means: {range} of the new price ({prices}).", range=rng, level=deal_level_label(p.level), prices=prices) if p.group == 'new' else _("For used items „{level}“ means: {range} of the new price ({prices}).", range=rng, level=deal_level_label(p.level), prices=prices))|nb }}
     {{ cond_line or _("Condition unknown – the zones for used items apply.") }} <a class="link link-primary whitespace-nowrap no-underline" href="/settings/prices">{{ _("Change zones") }} →</a>
-    {%- else %}
-    {{ _("Among the comparable ads the middle half ({low}–{high}) counts as fair, the cheapest tenth as a bargain and the dearest tenth as very expensive.", low=st.p25|eur, high=st.p75|eur)|nb }}{% if p.above_new %} {{ _("This ad costs {pct} % of the lowest new price, so it counts as expensive at best, however dear the other ads are.", pct=p.above_new)|nb }}{% elif p.market %} {{ _("For used items enough comparable ads decide; the Geizhals new price below is for information.") }}{% endif %}{% if cond_line %} {{ cond_line }}{% endif %}
+    {%- else %}{% set zs = deal_zone_span(p) %}
+    {%- if zs.from_pct is none %}{% set rng, prices = _("below {n} %", n=zs.to_pct), _("below {price}", price=zs.to|eur) %}
+    {%- elif zs.to_pct is none %}{% set rng, prices = _("from {n} %", n=zs.from_pct), _("from {price}", price=zs.from|eur) %}
+    {%- else %}{% set rng = (zs.from_pct ~ ' %') if zs.to_pct - 1 == zs.from_pct else (zs.from_pct ~ '–' ~ (zs.to_pct - 1) ~ ' %') %}{% set prices = _("{low} to below {high}", low=zs.from|eur, high=zs.to|eur) %}{% endif %}
+    {{ _("Ø is the median of the similar ads ({median}); „{level}“ means {range} of it ({prices}).", median=p.median|eur, level=deal_level_label(p.level), range=rng, prices=prices)|nb }}
+    <a class="link link-primary whitespace-nowrap no-underline" href="/settings/prices#s-prices-similar">{{ _("Change limits") }} →</a>{% if p.above_new %} {{ _("This ad costs {pct} % of the lowest new price, so it counts as expensive at best, however dear the other ads are.", pct=p.above_new)|nb }}{% elif p.market %} {{ _("For used items enough comparable ads decide; the Geizhals new price below is for information.") }}{% endif %}{% if cond_line %} {{ cond_line }}{% endif %}
     {%- endif %}</p>
   {% elif c.error_kind == 'vpn' %}{# only the VPN held the searches (a server search for that site runs): no failure #}
   <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted"><span>{{ _("Comparable ads can't be fetched right now: the VPN is looking for a server for {site}.", site=platform_name(c.error_site)) }}</span>
@@ -49,8 +61,8 @@
     {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
     {% if fl.model %} {{ _("{n} other products, models or variants left out.", n=fl.model) }}{% endif %}{% if fl.kind %} {{ _("{n} accessories or parts left out.", n=fl.kind) }}{% endif %}{% if fl.condition %} {{ _("{n} ads in another condition left out.", n=fl.condition) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
     {% if compact %} <a class="link link-primary whitespace-nowrap no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>
-  {% if res.geizhals_rejected %}<div class="text-[12.5px] text-muted" data-gh-rejected>{{ ui.icon('sparkle', 12, 2, 'inline-block align-[-1px] text-primary') }} {{ _("Claude: this Geizhals product was another one: {name}", name=res.geizhals_rejected) }}</div>{% endif %}
-  {% if gh %}{% if p.basis != 'geizhals' %}<a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary text-[13px] no-underline"><span class="font-semibold" data-gh-name>{{ _("Sum of {n} parts", n=gh.parts|length) if gh.parts else gh.name }}</span>: {{ _("new from {price} on Geizhals", price=gh.price_from|eur)|nb }} ↗{% if ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}</span>{% endif %}{% if gh.by == 'claude' %} <span class="text-muted">· {{ _("found by Claude") }}</span>{% endif %}</a>{% endif %}
+  {% if res.geizhals_rejected and gh %}<div class="text-[12.5px] text-muted" data-gh-rejected>{{ ui.icon('sparkle', 12, 2, 'inline-block align-[-1px] text-primary') }} {{ _("Claude: this Geizhals product was another one: {name}", name=res.geizhals_rejected) }}</div>{% endif %}
+  {% if gh %}{% if p.basis != 'geizhals' %}<a href="{{ gh.url }}" target="_blank" rel="noopener" title="{{ gh.name }}" class="link link-primary text-[13px] no-underline"><span class="font-semibold" data-gh-name>{{ _("Sum of {n} parts", n=gh.parts|length) if gh.parts else gh.name }}</span>: {{ _("new from {price} on Geizhals", price=gh.price_from|eur)|nb }} ↗{% if p.new_price_ignored %} <span class="text-warning">· {{ _("probably another product, not used") }}</span>{% elif ad.price and gh.price_from %} <span class="text-muted">· {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}</span>{% endif %}{% if gh.by == 'claude' %} <span class="text-muted">· {{ _("found by Claude") }}</span>{% endif %}</a>{% endif %}
   {# an ad of several products: their new prices, summed #}
   {% if gh.parts %}<div class="flex flex-col gap-0.5 rounded-field border border-base-300 bg-base-100 px-3 py-2 text-[12.5px]" data-gh-parts>
     <span class="font-semibold">{{ _("New price as the sum of {n} parts", n=gh.parts|length) }}</span>

@@ -71,9 +71,6 @@ DEAL_ENUM = ["great", "good", "fair", "overpriced", "unknown"]
 LEVEL_NAMES = price_zones.NAMES      # cheap to expensive
 LEVEL_DE = {"bargain": "Schnäppchen", "cheap": "günstig", "fair": "fair", "expensive": "teuer",
             "very_expensive": "sehr teuer"}          # for Claude's prompts (always German)
-# the comparables bar: fixed percentile segments, so the colour under the ring is the label even with tied prices
-QUANTILE_SEGMENTS = {"bargain": (0.0, 0.10), "cheap": (0.10, 0.25), "fair": (0.25, 0.75),
-                     "expensive": (0.75, 0.90), "very_expensive": (0.90, 1.0)}
 MISMATCH_LOW, MISMATCH_HIGH = 0.15, 2.0   # comparables median outside this × new price: the new price is ignored
 MISMATCH_HINT = 1.25                      # comparables median above this × new price: a hint only
 # comparables median below this × new price: they do not rate a used item; the new price does. A used item in good
@@ -289,18 +286,10 @@ def _interp(x: float, anchors: list[tuple[float, float]]) -> float:
     return pts[-1][1]
 
 
-def comparables_level(price: float, st: dict[str, Any]) -> str:
-    """The label of a price among the comparable ads: below p10 bargain, below p25 cheap, p25..p75 fair (both ends),
-    up to p90 expensive, above very expensive. The € caption and the buy dialog's script use the same rule."""
-    if price < st["p10"]:
-        return "bargain"
-    if price < st["p25"]:
-        return "cheap"
-    if price <= st["p75"]:
-        return "fair"
-    if price <= st["p90"]:
-        return "expensive"
-    return "very_expensive"
+def comparables_level(price: float, st: dict[str, Any], zones: dict[str, Any] | None = None) -> str:
+    """The label of a price among similar ads: its share of their median against the user's zones for similar ads
+    (Settings → Price rating). The buy dialog's script uses the same rule (js_rule)."""
+    return price_zones.level_for(price, st["median"], tuple((zones or price_zones.config())["similar"]))
 
 
 def level_at(pos: float) -> str:
@@ -390,24 +379,23 @@ def position(price: float | None, comp: dict[str, Any] | None, new_price: float 
                 "comparables_low": round(comp["median"] * 100 / new_price)
                 if comp and scale and g == "used" and comp["median"] < MARKET_LOW * new_price else None,
                 "suspicious": exact < lim[0] / 2 or bool(comp and scale and price < 0.5 * comp["p25"])}
-    if comp and scale:
-        lvl = comparables_level(price, comp)
+    if comp and scale and price_zones._cents(comp["median"]) > 0:
+        # similar ads decide (no new price, one they contradict, or a used item with a market of its own): the price
+        # as a share of their median against the user's zones for similar ads – a bar of its own (price_bar), the
+        # median as its marker
+        lim = tuple((zones or price_zones.config())["similar"])
+        median = comp["median"]
+        exact = price_zones.share_exact(price, median)
+        axis = min(AXIS_MAX, math.ceil(max(AXIS_MIN, lim[3] + 10, exact + 8) / 10) * 10)
+        lvl = price_zones.level_for(price, median, lim)
+        pos = min(1.0, exact / axis)
         if above_new is not None and LEVEL_NAMES.index(lvl) < LEVEL_NAMES.index("expensive"):
-            lvl = "expensive"
+            lvl, pos = "expensive", max(pos, lim[2] / axis)      # at or above new: expensive at best, ring in its zone
         else:
-            above_new = None              # the comparables alone already say expensive: nothing to explain
-        lo, hi = QUANTILE_SEGMENTS[lvl]
-        pos = min(hi, max(lo, _interp(price, scale)))
-        ticks: list[list[float]] = []      # the marks at the fair segment's ends and the middle, equal € once
-        if _whole(comp["p25"]) == _whole(comp["p75"]):
-            ticks = [[0.5, _whole(comp["median"])]]
-        else:
-            seen: set[int] = set()
-            for at, key in ((0.25, "p25"), (0.5, "median"), (0.75, "p75")):
-                if (v := _whole(comp[key])) not in seen:
-                    seen.add(v)
-                    ticks.append([at, v])
-        return {"pos": round(pos, 3), "level": lvl, "basis": "comparables", "condition": condition, "ticks": ticks,
+            above_new = None              # the similar ads alone already say expensive: nothing to explain
+        return {"pos": round(pos, 3), "level": lvl, "basis": "comparables", "condition": condition,
+                "zones": list(lim), "axis": axis, "pct": price_zones.share(price, median), "median": median,
+                "count": comp["count"],
                 "band": {"low": comp["p25"], "high": comp["p75"], "count": comp["count"]}, "market": market,
                 "above_new": above_new, "new_price_ignored": ignored, "suspicious": price < 0.5 * comp["p25"]}
     return {"pos": None, "reason": "few_data"}
@@ -450,34 +438,35 @@ def hit_level(h: Any, zones: dict[str, Any] | None = None) -> str | None:
 
 
 def zone_span(p: dict[str, Any]) -> dict[str, Any]:
-    """The current zone of a zones-basis position: its % limits and the prices where it starts and where the next
-    one starts (None at the open ends)."""
-    z, new_price = p["zones"], p["new_price"]
+    """The current zone of a position: its % limits and the prices where it starts and where the next one starts (None
+    at the open ends) – of the new price, or of the similar ads' median."""
+    z, new_price = p["zones"], (p.get("new_price") if p.get("basis") == "geizhals" else p.get("median"))
     i = LEVEL_NAMES.index(p["level"])
     lo, hi = (z[i - 1] if i else None), (z[i] if i < 4 else None)
-    return {"from_pct": lo, "to_pct": hi,
-            "from": price_zones.price_from(new_price, lo) if lo is not None else None,
-            "to": price_zones.price_from(new_price, hi) if hi is not None else None}
+    out = {"from_pct": lo, "to_pct": hi,
+           "from": price_zones.price_from(new_price, lo) if lo is not None else None,
+           "to": price_zones.price_from(new_price, hi) if hi is not None else None}
+    if p.get("basis") != "geizhals":         # a share of a median: whole euros, as the bar's limits
+        out.update({k: _whole(v) for k in ("from", "to") if (v := out[k]) is not None})
+    return out
 
 
 def js_rule(p: dict[str, Any], st: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The rule of position() for the buy dialog's script (wbBuy.levelOf): the zones and the new price, or the
-    comparables' p10/p25/p75/p90 with the segment of each label."""
-    if p.get("basis") == "geizhals":
-        return {"kind": "share", "new_price": p["new_price"], "zones": list(p["zones"]), "names": list(LEVEL_NAMES)}
-    if p.get("basis") == "comparables" and st:
-        return {"kind": "quantile", "cuts": [st["p10"], st["p25"], st["p75"], st["p90"]],
-                "segs": {n: list(v) for n, v in QUANTILE_SEGMENTS.items()}, "names": list(LEVEL_NAMES)}
+    """The rule of position() for the buy dialog's script (wbBuy.levelOf): the zones and the reference price – the new
+    price, or the similar ads' median (the same arithmetic: a share of it against "from" limits)."""
+    ref = p.get("new_price") if p.get("basis") == "geizhals" else p.get("median")
+    if p.get("zones") and ref:
+        return {"kind": "share", "new_price": ref, "zones": list(p["zones"]), "names": list(LEVEL_NAMES)}
     return None
 
 
 def js_scale(p: dict[str, Any], st: dict[str, Any] | None) -> list[list[float]] | None:
     """The bar's price scale for the buy dialog's script ([price, 0..1] points, wbBuy.place): linear from 0 to the
-    end of the zones axis, or the comparables' anchors."""
-    if p.get("basis") == "geizhals":
-        return [[0.0, 0.0], [p["new_price"] * p["axis"] / 100, 1.0]]
-    sc = anchors(st) if p.get("basis") == "comparables" else None
-    return [[v, q] for v, q in sc] if sc else None
+    end of the zones axis (of the new price or of the similar ads' median)."""
+    ref = p.get("new_price") if p.get("basis") == "geizhals" else p.get("median")
+    if p.get("axis") and ref:
+        return [[0.0, 0.0], [ref * p["axis"] / 100, 1.0]]
+    return None
 
 
 def explain(res: dict[str, Any]) -> str:

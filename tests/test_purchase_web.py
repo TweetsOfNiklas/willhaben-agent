@@ -449,10 +449,10 @@ def test_step2_scale_for_the_browser_is_the_one_position_reads(client, monkeypat
     import json
     js = json.loads(htmllib.unescape(re.search(r"data-fair='([^']*)'", frag).group(1)))
     stats = res["comparables"]["stats"]
-    assert js["scale"] == [[v, q] for v, q in deals.anchors(stats)] and js["scale"][3] == [220.0, 0.5]
-    assert js["pos"] == res["position"]["pos"] and js["rule"]["kind"] == "quantile"
-    assert js["rule"]["cuts"] == [stats["p10"], stats["p25"], stats["p75"], stats["p90"]]
-    assert js["rule"]["segs"]["fair"] == [0.25, 0.75] and js["rule"]["names"] == list(deals.LEVEL_NAMES)
+    p = res["position"]                                          # by similar ads: a share of their median 220
+    assert js["scale"] == [[0, 0], [220.0 * p["axis"] / 100, 1]] and js["pos"] == p["pos"]
+    assert js["rule"] == {"kind": "share", "new_price": stats["median"], "zones": p["zones"],
+                          "names": list(deals.LEVEL_NAMES)}
     assert js["labels"]["cheap"] == "cheap" and set(js["labels"]) == set(deals.LEVEL_NAMES)
     assert re.search(r'class="bd-pin [^"]*" hidden', frag) and 'data-tpl="{n} % · {level}"' in frag and 'bd-drag ' in frag
 
@@ -497,13 +497,12 @@ def test_chips_only_below_the_asking_price_and_not_twice(client, monkeypatch):  
     assert "bd-sugg" not in frag and "Cheap ·" not in frag and "Cheapest ·" not in frag and "bd-gauge" in frag
 
 
-def test_step2_bar_ends_name_the_cheapest_and_the_dearest_comparable(client, monkeypatch):  # noqa: F811
+def test_step2_marks_the_median_of_the_similar_ads(client, monkeypatch):  # noqa: F811
     _switch_on()
     _use(monkeypatch, _ad(), _market_res(180.0, 200.0, 220.0))             # min 180, max 320
     step2 = _step2(client.get(DIALOG.format(sid=3), headers=FRAGMENT).text)
-    assert '<span>€ 180</span><span>€ 320</span>' in step2 and 'class="bd-ends' in step2
-    assert step2.index('class="bd-gauge ') < step2.index('class="bd-ends') < step2.index('class="bd-sugg')
-    assert "bd-new" not in step2                                           # no new-price marker on this basis
+    assert "bd-ends" not in step2 and re.search(r">Ø €\W{0,2}220</span>", step2)
+    assert step2.index('class="bd-gauge ') < step2.index('class="bd-new') < step2.index('class="bd-sugg')
     # too few comparable ads, but a Geizhals new price: the zones decide, a straight scale to drag on, no ends, no chips
     res = _market_res(180.0, 200.0, 220.0, count=3)
     res["geizhals"] = {"price_from": 300.0}
@@ -512,8 +511,8 @@ def test_step2_bar_ends_name_the_cheapest_and_the_dearest_comparable(client, mon
     assert "bd-ends" not in step2 and "bd-drag" in step2 and 'class="bd-gauge ' in step2 and "bd-sugg" not in step2
     assert step2.index('class="bd-gauge ') < step2.index('class="bd-new')    # the marker's name under the bar
     from app import purchase_routes
-    assert purchase_routes._fair(_ad(), _market_res(180.0, 200.0, 220.0))["min"] == 180.0
-    assert purchase_routes._fair(_ad(), res)["min"] is None and purchase_routes._fair(_ad(), res)["max"] is None
+    assert purchase_routes._fair(_ad(), _market_res(180.0, 200.0, 220.0))["median"] == 220.0
+    assert purchase_routes._fair(_ad(), res)["median"] is None
 
 
 def test_no_hint_without_comparables_just_the_field(client, monkeypatch):  # noqa: F811
@@ -742,10 +741,10 @@ function cls(names) { const set = new Set(names || []);
 function node(props) { return Object.assign({ dataset: {}, hidden: false, disabled: false, textContent: '', classList: cls(props && props.cls),
   style: {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
   focus() { this.focused = true; } }, props || {}); }
-// the scale of deals.anchors for min 100, p10 120, p25 150, median 200, p75 250, p90 300, max 400 (asking price 250 = 0.75)
+// a scale with bends (place/unplace are piecewise; the server's js_scale is one straight line of them) and the rule of
+// a rating by similar ads: median 220, the default zones 70/90/115/135 % (asking price 250 = 0.75, 114 %: fair)
 const FAIR = { pos: 0.75, scale: [[100, 0], [120, 0.1], [150, 0.25], [200, 0.5], [250, 0.75], [300, 0.9], [400, 1]],
-  rule: { kind: 'quantile', cuts: [120, 150, 250, 300], names: ['bargain', 'cheap', 'fair', 'expensive', 'very_expensive'],
-          segs: { bargain: [0, 0.1], cheap: [0.1, 0.25], fair: [0.25, 0.75], expensive: [0.75, 0.9], very_expensive: [0.9, 1] } },
+  rule: { kind: 'share', new_price: 220, zones: [70, 90, 115, 135], names: ['bargain', 'cheap', 'fair', 'expensive', 'very_expensive'] },
   labels: { bargain: 'bargain', cheap: 'cheap', fair: 'fair', expensive: 'expensive', very_expensive: 'very expensive' } };
 function form(o) {
   const radios = {};
@@ -1054,7 +1053,7 @@ console.log(JSON.stringify(out));
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is needed to run the dialog script")
 def test_buy_dialog_rating_is_the_one_of_position():
     """wbBuy.levelOf/rate (the live pill and the pin) against deals.position: every cent up to 3 × new for the zones,
-    and the comparables rule around every cut, tied quantiles included."""
+    and the similar ads' rule (a share of their median) around every cut."""
     import json
     import subprocess
 
@@ -1078,7 +1077,7 @@ def test_buy_dialog_rating_is_the_one_of_position():
         grid = [st["min"] - 10 + k / 2 for k in range(int((st["max"] - st["min"] + 20) * 2) + 1)]
         grid += [round(st[k] + d, 2) for k in ("p10", "p25", "p75", "p90") for d in (-0.01, 0, 0.01)]
         cases.append({"rule": deals.js_rule(own, st), "scale": deals.js_scale(own, st), "prices": grid})
-        checks.append(("quantile", st, None, own, grid))
+        checks.append(("similar", st, None, own, grid))
     out = subprocess.run(["node", "-e", code], input=json.dumps(cases), capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     answers = json.loads(out.stdout)
@@ -1095,7 +1094,9 @@ def test_buy_dialog_rating_is_the_one_of_position():
         else:
             for price, got in zip(prices, ans["rated"], strict=True):
                 p = deals.position(price, a, None)
-                assert got[0] == p["level"] and got[1] == pytest.approx(p["pos"], abs=0.001), (price, got, p)
+                assert got[0] == p["level"], (price, got, p)
+                if p["axis"] == own["axis"]:                     # the same scale as the dialog's bar
+                    assert got[1] == pytest.approx(p["pos"], abs=0.001), (price, got, p)
 
 
 # ------------------------------------------------------------------ start through the dialog (htmx)

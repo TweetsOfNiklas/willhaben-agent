@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import db as dbmod
 from app.llm.base import LLMError, LLMResult
-from app.services import deals, geizhals
+from app.services import deals, geizhals, price_zones
 from app.willhaben import public as public_mod
 from app.willhaben.parse import AdDetail
 from app.willhaben.public import PublicClient
@@ -200,13 +200,21 @@ def test_stats_percentiles():
     assert deals.stats([10, 20]) is None
 
 
-@pytest.mark.parametrize("price,lvl", [(30, "bargain"), (70, "cheap"), (105, "fair"), (140, "expensive"),
+@pytest.mark.parametrize("price,lvl", [(30, "bargain"), (80, "cheap"), (105, "fair"), (130, "expensive"),
                                        (250, "very_expensive")])
 def test_position_from_comparables(price, lvl):
+    """Without a new price the similar ads rate: the price as a share of their median (105) against the user's zones
+    for similar ads (default 70 / 90 / 115 / 135 %), on a scale with the median at 100 %."""
     p = deals.position(price, deals.stats(PRICES), None)
     assert p["basis"] == "comparables" and p["level"] == lvl and 0 <= p["pos"] <= 1
-    assert [round(x[0], 2) for x in p["ticks"]] == [0.25, 0.5, 0.75]
-    assert deals.position(105, deals.stats(PRICES), None)["pos"] == pytest.approx(0.5)
+    assert p["zones"] == [70, 90, 115, 135] and p["median"] == 105 and p["count"] == 10
+    m = deals.position(105, deals.stats(PRICES), None)
+    assert m["pct"] == 100 and m["axis"] == 150 and m["pos"] == pytest.approx(0.667, abs=0.001)
+
+
+def test_position_from_comparables_follows_the_users_limits():
+    zones = {**price_zones.config(), "similar": [50, 60, 70, 80]}
+    assert deals.position(80, deals.stats(PRICES), None, zones=zones)["level"] == "expensive"     # 76 % of 105
 
 
 def test_position_labels_and_suspicious():
@@ -248,8 +256,7 @@ def test_a_used_item_dearer_than_new_is_expensive_at_best():
     st = deals.stats(PRICES)
     p = deals.position(105, st, 90.0, "used")                  # fair among the comparables, 116 % of new
     assert p["basis"] == "comparables" and p["level"] == "expensive" and p["above_new"] == 116
-    lo, hi = deals.QUANTILE_SEGMENTS["expensive"]
-    assert lo <= p["pos"] <= hi
+    assert p["pos"] >= p["zones"][2] / p["axis"]                                    # the ring in its zone
     assert deals.position(105, st, 105.0)["level"] == "expensive"                  # exactly the new price too
     q = deals.position(105, st, 105.01)                                             # a cent below new: the market
     assert q["level"] == "fair" and q["above_new"] is None
@@ -325,20 +332,16 @@ def test_foreign_titles_of_accessories_are_not_the_item():
     assert deals.TitleMatch("Raspberry Pi 5 4GB Active Cooler Set").check("Raspberry Pi 5 4GB")[1] is None
 
 
-def test_tied_quantiles_keep_the_ring_in_its_zone():
-    p = deals.position(100, deals.stats([100] * 5 + [200]), None)
-    assert p["level"] == "fair" and p["pos"] == pytest.approx(0.32) and 0.25 <= p["pos"] <= 0.75
-    assert p["ticks"] == [[0.5, 100]]                                          # p25 == p75: one mark
-
-
 def test_comparables_rule_by_price():
-    st = deals.stats(PRICES)                                                   # p10 58, p25 82.5, p75 127.5, p90 155
-    assert [deals.comparables_level(x, st) for x in (57.99, 58, 82.49, 82.5, 127.5, 127.51, 155, 155.01)] == \
+    st = deals.stats(PRICES)                                                   # median 105: limits 73.5/94.5/120.75/141.75
+    assert [deals.comparables_level(x, st) for x in (73.49, 73.5, 94.49, 94.5, 120.74, 120.75, 141.74, 141.75)] == \
         ["bargain", "cheap", "cheap", "fair", "fair", "expensive", "expensive", "very_expensive"]
     for price in range(30, 260):
         p = deals.position(price, st, None)
-        lo, hi = deals.QUANTILE_SEGMENTS[p["level"]]
-        assert lo <= p["pos"] <= hi
+        assert p["level"] == deals.comparables_level(price, st)
+        i = deals.LEVEL_NAMES.index(p["level"])
+        lim = [0, *p["zones"], 10_000]
+        assert lim[i] / p["axis"] - 0.001 <= p["pos"] <= min(1, lim[i + 1] / p["axis"]) + 0.001
 
 
 def test_level_at_bounds():
@@ -724,7 +727,7 @@ async def test_comparables_same_item_and_trimmed(monkeypatch):
     assert out["filtered"] == {"model": 1, "kind": 7, "condition": 0, "outliers": 1}
     assert out["stats"]["min"] == 520 and out["stats"]["max"] == 640
     assert {a["title"] for a in out["closest"]} == {"iPhone 15 Pro 128GB"}           # the list is what the stats use
-    assert deals.position(490, out["stats"], None)["level"] == "bargain"      # was "teuer" against cases at €12
+    assert deals.position(490, out["stats"], None)["level"] == "cheap"        # 82 % of the median; "teuer" against cases at €12
 
 
 async def test_comparables_ignore_the_ads_category(monkeypatch):
@@ -1626,8 +1629,10 @@ def test_price_section_warnings_and_defect():
     assert "Comparable ads cost 150\xa0% of the new price on average" in html
     assert "usual among comparable ads:" in html                                  # their range under the zones
     html = _render_deal(_res(400, [380, 390, 400, 410, 420, 430], 100.0), lang="en")
-    assert "Geizhals new price not used: the comparable ads cost 405\xa0% of it on average" in html
-    assert "this ad is 400 % of new" in html and "Among the comparable ads the middle half" in html
+    assert "Geizhals product probably wrong – not used." in html and "data-gh-doubt" in html
+    assert "The comparable ads cost 405\xa0% of its new price on average." in html
+    assert "The similar ads rate this ad instead." in html and "probably another product, not used" in html
+    assert "this ad is 400 % of new" not in html and "Rated by 6 similar ads" in html
     html = _render_deal(_res(50, PRICES, 100.0, "defect", "Defekt"), lang="en")
     assert "Defective according to the ad" in html and "deal-zones" not in html and "this ad is 50 % of new" in html
     assert "below the median" not in html and "10 comparable ads" in html          # not measured against working items
@@ -1638,8 +1643,10 @@ def test_price_section_by_comparables_reads_the_stats_median():
     html = _render_deal(_res(100, PRICES, None))
     small = re.search(r'<small class="text-muted">([^<]*)</small>', html).group(1)
     assert small == "5 % unter dem Median · 10 vergleichbare Anzeigen"
-    assert "Unter den Vergleichsanzeigen gilt die mittlere Hälfte (€\xa082,50–\u2060€\xa0127,50) als fair" in html
-    assert ">€ 83<" in html and ">€ 105<" in html and ">€ 128<" in html            # the marks below the bar
+    assert "Eingestuft nach 10 ähnlichen Anzeigen – nicht nach einem Neupreis" in html and "data-similar-stripes" in html
+    assert "„fair“ heißt 90–114 % davon (€ 95 bis unter € 121)" in _plain(html)
+    assert 'href="/settings/prices#s-prices-similar"' in html
+    assert ">€ 95<" in html and ">€ 121<" in html and ">Ø<" in html                # the limits below the bar, the median
 
 
 # ------------------------------------------------------------------ the model query, the ad's own site

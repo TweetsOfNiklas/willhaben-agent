@@ -13,7 +13,7 @@ def test_defaults_when_unset_or_broken():
     set_setting(pz.KEY, "{not json")
     assert pz.config() == pz.DEFAULTS
     set_setting(pz.KEY, '{"used": [10, 20, 30, 40], "new": [5, 4, 3, 2]}')       # one bad group: its defaults only
-    assert pz.config() == {"used": (10, 20, 30, 40), "new": pz.DEFAULTS["new"]}
+    assert pz.config() == {"used": (10, 20, 30, 40), "new": pz.DEFAULTS["new"], "similar": pz.DEFAULTS["similar"]}
     set_setting(pz.KEY, '[1, 2, 3]')
     assert pz.config() == pz.DEFAULTS
 
@@ -127,7 +127,7 @@ def test_settings_save_and_refuse(client):
 
 
 def test_settings_reset_to_defaults(client):
-    """The reset button stores the defaults of both groups, whatever the fields hold (even broken ones)."""
+    """The reset button stores the defaults of all groups, whatever the fields hold (even broken ones)."""
     pz.save({"used": [20, 40, 70, 85], "new": [60, 80, 95, 110]})
     set_setting("ui_lang", "de")                                                # the message is translated at the post
     r = client.post("/settings/prices", data={"used": ["50", "x", "", "85"], "new": ["75"], "reset": "1"},
@@ -136,4 +136,18 @@ def test_settings_reset_to_defaults(client):
     assert pz.config() == pz.DEFAULTS and get_setting(pz.KEY) == ""
     page = client.get(r.headers["location"]).text
     assert "Standardwerte wiederhergestellt" in page and "Auf Standardwerte zurücksetzen" in page
-    assert "Beide Gruppen auf die Standardwerte zurücksetzen und speichern?" in page
+    assert "Alle Gruppen auf die Standardwerte zurücksetzen und speichern?" in page
+
+
+def test_similar_ads_limits_are_saved_and_kept(client):
+    """The limits for the rating by similar ads: a group of its own on the page; a form without it keeps them."""
+    page = client.get("/settings/prices").text
+    assert 'id="s-prices-similar"' in page and "% of the median" in page
+    r = client.post("/settings/prices", data={"used": ["30", "50", "80", "90"], "new": ["75", "100", "115", "130"],
+                                              "similar": ["60", "85", "120", "150"]}, follow_redirects=False)
+    assert r.status_code == 303 and pz.config()["similar"] == (60, 85, 120, 150)
+    pz.save({"used": [30, 50, 80, 90], "new": [75, 100, 115, 130]})
+    assert pz.config()["similar"] == (60, 85, 120, 150)
+    r = client.post("/settings/prices", data={"used": ["30", "50", "80", "90"], "new": ["75", "100", "115", "130"],
+                                              "similar": ["60", "50", "120", "150"]}, follow_redirects=False)
+    assert "err=similar-order" in r.headers["location"] and pz.config()["similar"] == (60, 85, 120, 150)

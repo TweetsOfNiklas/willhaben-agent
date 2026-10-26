@@ -190,12 +190,11 @@ def _fair(d, res: dict[str, Any] | None) -> dict[str, Any] | None:
         for key, v in (("min", st["min"]), ("cheap", st["p25"]), ("market", median)):
             if round((ask - v) * 100 / ask) >= 1 and not (chips and round(v) == round(chips[-1]["v"])):
                 chips.append({"key": key, "v": round(v, 2)})
-    comparables = pos.get("basis") == "comparables"
     scale, rule = deals.js_scale(pos, st), deals.js_rule(pos, st)
     return {"pos": pos["pos"], "level": pos["level"], "basis": pos.get("basis"), "pct": pos.get("pct"),
             "new_price": pos.get("new_price"), "diff": round((ask - median) * 100 / median) if median else None,
             "count": comp.get("count") or st.get("count"), "chips": chips,
-            "min": st["min"] if comparables else None, "max": st["max"] if comparables else None,
+            "median": pos.get("median") if pos.get("basis") == "comparables" else None,
             "bar": price_bar.layout(pos),
             "js": {"pos": pos["pos"], "scale": scale, "rule": rule,
                    "labels": {n: deals.level_label(n) for n in deals.LEVEL_NAMES}} if scale and rule else None}

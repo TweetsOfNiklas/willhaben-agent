@@ -18,8 +18,7 @@
     <span style="position: absolute; top: 5px; height: 24px; width: 4px; border-radius: 2px; left: {{ (fair.pos * 100)|round(1) }}%; transform: translateX(-50%); background: var(--text); box-shadow: 0 0 0 2px var(--section)" title="{{ _('Asking price') }}"></span>
     {% if fair.js %}<span class="bd-pin" style="position: absolute; top: 6px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; border: 3px solid var(--text); background: var(--section); box-shadow: 0 1px 3px rgba(0,0,0,.3)" hidden></span>{% endif %}
   </div>
-  {% if b.new_at is not none and fair.new_price %}<div style="position: relative; height: 16px; font-size: 11.5px; color: var(--hint)"><span style="position: absolute; white-space: nowrap; font-weight: 600; left: {{ b.new_at }}%; transform: translateX({{ '-100%' if b.new_at > 80 else '0' if b.new_at < 20 else '-50%' }})">{{ _("New") }} {{ fair.new_price|eur }}</span></div>{% endif %}
-  {% if fair.js and fair.min is not none %}<div style="display: flex; justify-content: space-between; font-size: 11.5px; color: var(--hint)"><span>{{ fair.min|eur }}</span><span>{{ fair.max|eur }}</span></div>{% endif %}
+  {% if b.new_at is not none and (fair.new_price or fair.median) %}<div style="position: relative; height: 16px; font-size: 11.5px; color: var(--hint)"><span style="position: absolute; white-space: nowrap; font-weight: 600; left: {{ b.new_at }}%; transform: translateX({{ '-100%' if b.new_at > 80 else '0' if b.new_at < 20 else '-50%' }})">{{ ('Ø ' ~ (fair.median|eur)) if fair.median else (_("New") ~ ' ' ~ (fair.new_price|eur)) }}</span></div>{% endif %}
   {% if fair.js %}<p class="sub" style="margin: 4px 0 0">{{ _("Drag the ring to set your maximum.") }}</p>{% endif %}
 </div>
 {% endmacro %}

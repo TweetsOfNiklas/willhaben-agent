@@ -10,8 +10,8 @@
     // is refilled with the default when it loses focus or the step is left. Next to the field one pill rates the value -
     // percent below the asking price incl. shipping, and the level of the item price (maximum minus shipping). The
     // rating is the one of deals.position(): form data-fair = {pos: where the ad's own price lies, scale: [[price, 0..1]]
-    // (deals.js_scale: the zones axis or the comparables' anchors), rule: deals.js_rule (kind "share": the user's zones
-    // against the Geizhals new price; kind "quantile": the comparables' p10/p25/p75/p90), labels: {name: text}};
+    // (deals.js_scale: the zones axis), rule: deals.js_rule (kind "share": the user's zones against the Geizhals new
+    // price or the similar ads' median), labels: {name: text}};
     // levelOf() mirrors position(). Without it (no position) there is no pill, no ring, no bar to drag and no chips.
     // Dragging the ring on the bar (.bd-drag) sets the item price through unplace() (the inverse of place()) plus the
     // shipping. Formatted like eur.
@@ -93,22 +93,18 @@
             return pts[i + 1][1] === pts[i][1] ? pts[i][0] : pts[i][0] + (pts[i + 1][0] - pts[i][0]) * (q - pts[i][1]) / (pts[i + 1][1] - pts[i][1]);
         return pts[last][0];
       },
-      // the level of an item price c, the mirror of deals.position(): share of the Geizhals new price in whole cents
-      // against the user's zones (rule kind "share"), or the price against p10/p25/p75/p90 with p25..p75 fair (kind "quantile")
+      // the level of an item price c, the mirror of deals.position(): share of the Geizhals new price in whole cents,
+      // or of the similar ads' median, against the user's zones (rule kind "share")
       levelOf: function (r, c) {
-        if (r.kind === 'share') {
-          var p = Math.round(c * 100), n = Math.round(r.new_price * 100);
-          return r.names[r.zones.filter(function (b) { return p * 100 >= n * b; }).length];
-        }
-        var k = r.cuts;
-        return r.names[c < k[0] ? 0 : c < k[1] ? 1 : c <= k[2] ? 2 : c <= k[3] ? 3 : 4];
+        if (r.kind !== 'share') return null;
+        var p = Math.round(c * 100), n = Math.round(r.new_price * 100);
+        return r.names[r.zones.filter(function (b) { return p * 100 >= n * b; }).length];
       },
       // {pos, level} of the item price at the maximum, or null (no scale or rule, no maximum, no asking price)
       rate: function (f) {
         var fair = this.fair(f), v = this.val(f), c = this.item(f, v);
         if (!fair || !fair.scale || !fair.rule || !(this.base(f) > 0) || !(c > 0)) return null;
-        var level = this.levelOf(fair.rule, c), pos = this.place(fair.scale, c), seg = (fair.rule.segs || {})[level];
-        if (seg) pos = Math.min(seg[1], Math.max(seg[0], pos));     // tied quantiles: the ring stays in its zone
+        var level = this.levelOf(fair.rule, c), pos = this.place(fair.scale, c);
         return {pos: pos, level: level, label: (fair.labels || {})[level] || ''};
       },
       fill: function (el, text, tone) {

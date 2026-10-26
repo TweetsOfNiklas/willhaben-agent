@@ -44,7 +44,7 @@ def price_zone_view() -> dict[str, Any]:
     """What settings/prices.html and its script need: the zones, the defaults, the label names and texts, and the
     ends of the bar's scale (deals.position's axis)."""
     zones = price_zones.config()
-    return {"used": list(zones["used"]), "new": list(zones["new"]),
+    return {"used": list(zones["used"]), "new": list(zones["new"]), "similar": list(zones["similar"]),
             "defaults": {g: list(v) for g, v in price_zones.DEFAULTS.items()}, "names": list(deals.LEVEL_NAMES),
             "labels": {n: deals.level_label(n) for n in deals.LEVEL_NAMES},
             "t": {"below": t("below {n} %"), "from": t("from {n} %")}, "axis": [deals.AXIS_MIN, deals.AXIS_MAX]}

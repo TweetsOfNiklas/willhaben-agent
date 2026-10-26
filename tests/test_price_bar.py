@@ -121,22 +121,18 @@ def test_off_scale_band_is_clipped():
     assert far["band"] == {"from": 99.0, "to": 100.0, "off": True, "out": True, "text": "€ 310–€ 330"}
 
 
-def test_comparables_ticks():
+def test_similar_ads_bar():
+    """Rated by similar ads: the user's zones for them on a scale of their median (Ø at 100 %), the limits in euros."""
     b = price_bar.layout(deals.position(105, deals.stats([40, 60, 80, 90, 100, 110, 120, 130, 150, 200]), None), "€ 105")
-    assert [s["from"] for s in b["segments"]] == [0, 10, 25, 75, 90] and b["new_at"] is None and b["band"] is None
-    # half up as the caption's "€ 82,50–€ 127,50"; the median's "€ 105" would repeat the price over the ring
-    assert [(lb["text"], lb["x"]) for lb in b["lane"]] == [("€ 83", 25.0), ("€ 128", 75.0)]
-    assert b["aria"] == "€ 105: fair among the comparable ads"
-    b = price_bar.layout(deals.position(100, deals.stats([40, 60, 80, 90, 100, 110, 120, 130, 150, 200]), None), "€ 100")
-    assert [lb["text"] for lb in b["lane"]] == ["€ 83", "€ 128", "€ 105"]
-    p = deals.position(400, deals.stats([380, 392.5, 402.5, 412.5, 420]), None)
-    assert [v for _, v in p["ticks"]] == [393, 403, 413]               # round() would give 392, 402, 412
-    tied = price_bar.layout(deals.position(100, deals.stats([100] * 5 + [200]), None), "€ 100")
-    assert [(lb["text"], lb["x"], lb["kind"]) for lb in tied["lane"]] == [("€ 100", 50.0, "tick")]
+    assert b["basis"] == "comparables" and b["new_at"] == pytest.approx(66.7, abs=0.1) and b["level"] == "fair"
+    assert [s["level"] for s in b["segments"]] == ["bargain", "cheap", "fair", "expensive", "very_expensive"]
+    assert {lb["text"] for lb in b["lane"] if lb["kind"] == "cut"} <= {"€ 74", "€ 95", "€ 121", "€ 142"}
+    assert "€ 95" in [lb["text"] for lb in b["lane"]] and "Ø" in [lb["text"] for lb in b["top"] + b["lane"]]
+    assert b["band"]["text"] == "€ 83–€ 128"                       # half up, as the caption's "€ 82,50–€ 127,50"
+    assert b["aria"] == "€ 105: fair, 100 % of the median of 10 similar ads"
     assert price_bar.layout({"pos": None, "reason": "defect"}) is None and price_bar.layout(None) is None
 
 
-def test_mini_bar_of_a_stored_card_without_zones():
-    """A product-search card stored before the zones: an old new-price position draws on the comparables segments."""
-    b = price_bar.layout({"pos": 0.4, "level": "fair", "basis": "geizhals", "ticks": [[0.25, 40]]})
-    assert b["basis"] == "comparables" and b["new_at"] is None and b["top"] == [] and b["aria"] == "fair"
+def test_no_bar_for_a_stored_card_without_zones():
+    """A product-search card stored before the zones has no scale to draw on: no bar (the label still shows)."""
+    assert price_bar.layout({"pos": 0.4, "level": "fair", "basis": "geizhals", "ticks": [[0.25, 40]]}) is None
