@@ -642,12 +642,21 @@ def overview(db) -> dict[str, Any]:
             answered[cid] = _aware(at)
     base = _seen_baseline()
     unread = {}
+    # the newest stored entry of each chat, notices included: does the history reach the list's newest one?
+    newest = {cid: _aware(at) for cid, at in db.exec(select(Message.conversation_id, func.max(Message.created_at))
+                                                    .group_by(Message.conversation_id)) if at is not None}
     for c in convs:
         seen = max([base] + [x for x in (_aware(c.app_seen_at), answered.get(c.id)) if x is not None])
         n = sum(1 for at in incoming.get(c.id, []) if at > seen)
-        # the site's own count too, for messages not fetched yet – unless the chat was opened here since
+        # the site's own count too, for messages not fetched yet – unless the chat was opened here since, or the
+        # stored history holds the list's newest entry and their last real message was seen or answered: willhaben
+        # counts its own notice ("item shipped") unread again, the "1" came back after every opening (10-26)
+        theirs = (last_in.get(c.id) or (None, None))[0]
+        fetched = c.last_message_at is not None and c.id in newest and \
+            newest[c.id] >= _aware(c.last_message_at) - HISTORY_SLACK
         if c.unread_count and not (c.app_seen_at and c.last_message_at
-                                   and _aware(c.app_seen_at) >= _aware(c.last_message_at)):
+                                   and _aware(c.app_seen_at) >= _aware(c.last_message_at)) \
+                and not (fetched and (theirs is None or seen >= theirs)):
             n = max(n, c.unread_count)
         if c.marked_unread:                 # Mark as unread
             n = max(n, 1)

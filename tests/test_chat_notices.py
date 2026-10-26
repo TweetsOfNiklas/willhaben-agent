@@ -121,3 +121,24 @@ async def test_a_notice_unread_again_is_no_message_from_the_buyer(monkeypatch):
     state["unread"] = 1
     await chats.sync()                                               # unread again, nothing new: was pushed
     assert pushed == [] and checked == []
+
+
+def test_a_notice_unread_on_the_site_does_not_bring_the_1_back():
+    """10-26: willhaben counted its shipping notice unread again; the chat had been opened after the buyer's last
+    message, but before the notice – the "1" came back after every opening. A history that ends with the notice and a
+    seen last message of theirs: not unread. A message not fetched yet still counts."""
+    from app.db import Message
+    seen = T0 + timedelta(minutes=3)
+    with session() as db:
+        db.add(Conversation(id="n1", ad_id="9", partner_name="x", unread_count=1, app_seen_at=seen,
+                            last_message_at=T0 + timedelta(minutes=5), last_message_text="Wir haben dem Käufer …"))
+        db.add(Message(conversation_id="n1", ext_id="a", direction="in", text="Dankeschön", created_at=T0 + timedelta(minutes=2)))
+        db.add(Message(conversation_id="n1", ext_id="b", direction="unknown", kind="integration", text="Wir haben dem Käufer …",
+                       created_at=T0 + timedelta(minutes=5)))
+        db.add(Conversation(id="n2", ad_id="9", partner_name="y", unread_count=1, app_seen_at=seen,
+                            last_message_at=T0 + timedelta(minutes=9), last_message_text="Noch da?"))   # not fetched yet
+        db.add(Message(conversation_id="n2", ext_id="c", direction="in", text="Hallo", created_at=T0 + timedelta(minutes=2)))
+        db.commit()
+    with session() as db:
+        unread = chats.overview(db)["unread"]
+    assert "n1" not in unread and unread.get("n2") == 1
