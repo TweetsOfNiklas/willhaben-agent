@@ -17,5 +17,7 @@
  "Scam check (rules, no AI)": "Betrugs-Check (Regeln, keine KI)",
  "Seller abroad, delivery by courier": "Verkäufer im Ausland, Lieferung per Kurier",
  "Shipping only, at a very low price": "Nur Versand, zu sehr niedrigem Preis",
- "Wants contact outside willhaben": "Will Kontakt außerhalb von willhaben"
+ "Wants contact outside willhaben": "Will Kontakt außerhalb von willhaben",
+ "Re-listed: the same photo as an earlier ad here ({price})": "Neu eingestellt: dasselbe Foto wie eine frühere Anzeige hier ({price})",
+ "Photo also in another ad: {title} ({site}, {place}, {price})": "Foto auch in einer anderen Anzeige: {title} ({site}, {place}, {price})"
 }

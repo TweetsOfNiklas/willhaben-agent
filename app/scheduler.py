@@ -174,6 +174,10 @@ def start() -> None:
     scheduler.add_job(watch_saved_job, IntervalTrigger(hours=2, jitter=600), id="hits-watch-saved",
                       replace_existing=True, max_instances=1, coalesce=True,   # saved hits: price drops, sold, gone
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=30))
+    from app.services import photo_match
+    scheduler.add_job(photo_match.photo_job, IntervalTrigger(hours=1, jitter=600), id="hits-photos",
+                      replace_existing=True, max_instances=1, coalesce=True,   # the same photo in another ad
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=50))
     scheduler.add_job(status_sweep_job, IntervalTrigger(hours=1, jitter=600), id="hits-status-sweep",
                       replace_existing=True, max_instances=1, coalesce=True,   # recent hits: sold or gone (sold prices)
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=45))

@@ -101,6 +101,10 @@ def _label(code: str, **p: Any) -> str:
         "messenger": lambda: t("Mentions WhatsApp/Telegram"),
         "private_dealer_text": lambda: t("Listed as private, text sounds like a dealer"),
         "dealer_private_text": lambda: t("Dealer ad, text says private sale"),
+        # services/photo_match: the same photo in another ad
+        "relisted": lambda: t("Re-listed: the same photo as an earlier ad here ({price})", price=p["price"]),
+        "photo_copy": lambda: t("Photo also in another ad: {title} ({site}, {place}, {price})", title=p["title"],
+                                site=p["site"], place=p["place"], price=p["price"]),
     }
     return labels[code]() if code in labels else code
 
