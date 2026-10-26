@@ -63,5 +63,7 @@
  "Similar ads chosen by Claude for „{product}“.": "Ähnliche Anzeigen von Claude ausgewählt für „{product}“.",
  "Sold or taken down recently:": "Kürzlich verkauft oder offline:",
  "median {price} of {n} ads": "Median {price} von {n} Anzeigen",
- "offline": "offline"
+ "offline": "offline",
+ "As a seller: fair here is {low} to below {high}; at {low} or less it counts as cheap and usually sells faster.": "Als Verkäufer: fair ist hier {low} bis unter {high}; ab {low} und darunter gilt es als günstig und verkauft sich meist schneller.",
+ "Your price is above that range.": "Dein Preis liegt darüber."
 }

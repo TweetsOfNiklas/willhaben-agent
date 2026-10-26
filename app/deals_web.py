@@ -34,6 +34,7 @@ def install(app: FastAPI, templates: Jinja2Templates) -> None:
                                  plan_query_url=plan_query_url, condition_text=condition.shown,
                                  condition_tone=condition.tone, deal_rerate=deals.rerate, deal_bar=price_bar.layout,
                                  deal_card_position=deals.card_position, deal_zone_span=deals.zone_span,
+                                 deal_seller_hint=deals.seller_hint,
                                  share_pct=price_zones.share, hit_level=deals.hit_level,
                                  price_zone_config=price_zones.config, price_zone_view=price_zone_view,
                                  price_zone_error=price_zones.error_text)
@@ -171,12 +172,13 @@ async def hit_ad_deal(request: Request, ad_id: str, hit: int | None = None, q: s
 
 @router.get("/hits/ad/{platform}/{ad_id}/deal", response_class=HTMLResponse)
 async def hit_ad_deal_platform(request: Request, platform: str, ad_id: str, hit: int | None = None,
-                               q: str | None = None, quick: int = 0):
+                               q: str | None = None, quick: int = 0, mine: int = 0):
     """`quick=1` (the viewer's first request): the Geizhals bar at once, the comparable ads loading – the section
     then fetches itself without `quick`, which searches them (a cached full result comes at once either way)."""
     h, fallback = _hit(hit)
     res, error = await _analysis(platform, ad_id, q, fallback, hit=h, quick=bool(quick))
-    return _templates().TemplateResponse(request, "_deal.html", {"res": res, "error": error, "compact": True, "h": h})
+    return _templates().TemplateResponse(request, "_deal.html", {"res": res, "error": error, "compact": True, "h": h,
+                                                                 "mine": bool(mine)})
 
 
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

@@ -459,6 +459,17 @@ def zone_span(p: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def seller_hint(p: dict[str, Any]) -> dict[str, Any] | None:
+    """For one's own ad (My ads): the prices where "fair" starts and ends by the rating's zones and reference (the new
+    price or the similar ads' median) – below the first it counts as cheap and sells faster; None without a rating."""
+    ref = p.get("new_price") if p.get("basis") == "geizhals" else p.get("median")
+    z = p.get("zones")
+    if not ref or not z or p.get("pos") is None:
+        return None
+    return {"fair_from": _whole(price_zones.price_from(ref, z[1])), "fair_to": _whole(price_zones.price_from(ref, z[2])),
+            "level": p.get("level"), "basis": p.get("basis")}
+
+
 def js_rule(p: dict[str, Any], st: dict[str, Any] | None) -> dict[str, Any] | None:
     """The rule of position() for the buy dialog's script (wbBuy.levelOf): the zones and the reference price – the new
     price, or the similar ads' median (the same arithmetic: a share of it against "from" limits)."""

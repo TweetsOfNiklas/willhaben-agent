@@ -2052,3 +2052,19 @@ async def test_the_status_sweep_reads_recent_hits_quietly(monkeypatch):
     read.clear()
     await search_agents.status_sweep_job()
     assert read == []                                                              # checked: not again for 2 days
+
+
+def test_own_ad_gets_the_sellers_view(app_client):
+    """My ads: the price section of one's own ad says where fair lies and what sells faster."""
+    frag = app_client.get(f"/hits/ad/willhaben/{AD_ID}/deal?mine=1").text
+    assert "data-seller-hint" in frag and "As a seller: fair here is" in frag
+    assert "data-seller-hint" not in app_client.get(f"/hits/ad/willhaben/{AD_ID}/deal").text
+    quick = app_client.get(f"/hits/ad/willhaben/{AD_ID}/deal?quick=1&mine=1").text
+    if "data-comparables-loading" in quick:                       # cached already: the full section at once
+        assert "mine=1" in quick
+
+
+def test_seller_hint():
+    p = deals.position(100, deals.stats(PRICES), None)              # median 105, similar zones 70/90/115/135
+    assert deals.seller_hint(p) == {"fair_from": 95, "fair_to": 121, "level": "fair", "basis": "comparables"}
+    assert deals.seller_hint({"pos": None}) is None

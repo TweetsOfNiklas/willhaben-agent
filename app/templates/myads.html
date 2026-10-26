@@ -154,6 +154,10 @@
   </section>
   {% endif %}
 
+  {# its price among similar ads (the price check, this ad left out): fair range, what sells faster #}
+  {% if a.status == 'active' and not a.sale_status %}
+  <div id="myad-price" hx-get="/hits/ad/willhaben/{{ a.ad_id }}/deal?quick=1&mine=1" hx-trigger="load delay:500ms" hx-swap="innerHTML">{{ ui.skel_deal() }}</div>
+  {% endif %}
   <section class="rounded-box border border-base-300 bg-base-100">
     <div class="grid grid-cols-1 gap-4 border-b border-base-300 px-5 py-4 sm:grid-cols-2">
       <div>{{ ui.eyebrow(_("Expires"), 'mb-1') }}<div class="text-base tabular-nums">{{ a.end_date|local('%d.%m.%Y %H:%M') }}</div><div class="text-[13px] text-muted">{{ a.end_date|ago }}</div></div>
