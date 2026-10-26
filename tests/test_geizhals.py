@@ -292,3 +292,11 @@ def test_settings_lists_the_cache_and_clears_it(client):  # noqa: F811
     r = client.post("/settings/geizhals/clear", follow_redirects=False)
     assert r.status_code == 303 and "2%20cached%20answers%20deleted" in r.headers["location"]
     assert "Nothing cached yet." in client.get("/settings/geizhals").text
+
+
+def test_a_graphics_cards_variant_suffix_counts():
+    from app.services.geizhals import matches
+    assert matches("PowerColor Hellhound Radeon RX 6600, 8GB GDDR6", "Radeon RX 6600")
+    assert not matches("PowerColor Hellhound Radeon RX 6600 XT, 8GB GDDR6", "Radeon RX 6600")
+    assert not matches("Gainward GeForce RTX 4070 Ti SUPER Panther OC, 16GB", "GeForce RTX 4070 Ti")
+    assert matches("Gainward GeForce RTX 4070 Ti Panther OC, 12GB", "GeForce RTX 4070 Ti")

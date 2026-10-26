@@ -388,7 +388,8 @@ _WATT_RE = re.compile(r"(\d)\s*w\b", re.I)
 _SLUG_RE = re.compile(r"https://geizhals\.at/(.+?)(?:-a\d+)?\.html")
 # words that make another product of the same line: "iPhone 16" is not the "16 Pro Max", "Switch 8" not "Enterprise 8"
 VARIANT_WORDS = {"max", "plus", "mini", "ultra", "lite", "pro", "se", "air", "fe", "neo", "enterprise", "flex", "xg",
-                 "compute", "mesh", "lr"}
+                 "compute", "mesh", "lr",
+                 "xt", "xtx", "ti", "super"}       # graphics cards: "RX 6600" is not the dearer "RX 6600 XT"
 # brands and lines a seller or Geizhals may leave out ("UniFi UNAS 2" is "Ubiquiti UNAS 2"; "U6 Mesh" sells without
 # "Ubiquiti UniFi"): a match need not have them, and the price check's comparable search drops them
 BRANDS = frozenset({"ubiquiti", "unifi", "apple", "amazon", "samsung", "sony", "google", "microsoft"})
