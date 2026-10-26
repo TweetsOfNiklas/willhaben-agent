@@ -137,3 +137,39 @@ def test_dashboard_links_in_telegram_open_as_a_mini_app_other_links_stay_links(m
     assert telegram.open_button("Open", "https://agent.example.evil/x")["url"]          # only the dashboard itself
     set_setting("telegram_chat_id", "-100123")                                             # a group: links only
     assert "url" in telegram.open_button("Open", "https://agent.example/hits/1")
+
+
+def test_another_sites_page_cannot_change_anything(pw):
+    """A state-changing request whose Origin is another host (or that the browser calls cross-site) is refused, with
+    or without the login cookie; same-origin pages, scripts with credentials and plain clients pass."""
+    basic = "Basic " + base64.b64encode(b"admin:geheim").decode()
+    with TestClient(app) as c:
+        c.post("/login", data={"username": "admin", "password": "geheim", "next": "/"})
+        evil = c.post("/settings/quiet", data={"start": "01:00"}, headers={"origin": "http://10.0.1.8:9999"})
+        assert evil.status_code == 403
+        assert c.post("/settings/quiet", data={}, headers={"origin": "null"}).status_code == 403
+        assert c.post("/settings/quiet", data={}, headers={"sec-fetch-site": "cross-site"}).status_code == 403
+        ok = c.post("/settings/quiet", data={"start": "01:00"}, headers={"origin": "http://testserver"}, follow_redirects=False)
+        assert ok.status_code == 303
+        assert c.post("/settings/quiet", data={}, headers={"origin": "http://elsewhere", "authorization": basic},
+                      follow_redirects=False).status_code == 303
+        assert c.get("/", headers={"origin": "http://elsewhere"}).status_code == 200      # reading is not changing
+        assert "frame-ancestors" in c.get("/tg").headers.get("content-security-policy", "")
+
+
+def test_redirect_targets_stay_local():
+    for bad in ("//evil.com", "/\t/evil.com", "/%2fevil.com", "/\\evil.com", "https://evil.com", "/a b", ""):
+        assert auth.safe_next(bad) == "/", bad
+    assert auth.safe_next("/myads?show_sold=1") == "/myads?show_sold=1"
+
+
+def test_the_login_page_language_is_this_browsers_only(pw):
+    from app.db import get_setting
+    with TestClient(app) as c:
+        before = get_setting("ui_lang")
+        r = c.post("/lang", data={"lang": "de", "next": "/login"}, follow_redirects=False)
+        assert r.status_code == 303 and get_setting("ui_lang") == before and "wh_lang=de" in r.headers["set-cookie"]
+        assert "Anmelden" in c.get("/login").text or 'lang="de"' in c.get("/login").text
+        c.post("/login", data={"username": "admin", "password": "geheim", "next": "/"})
+        c.post("/lang", data={"lang": "en", "next": "/"})
+        assert get_setting("ui_lang") == "en"

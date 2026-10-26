@@ -156,8 +156,11 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 class DashboardAuth(BaseHTTPMiddleware):
-    """Login cookie for browsers (see /login), HTTP Basic auth still accepted for scripts and the MCP server."""
+    """Login cookie for browsers (see /login), HTTP Basic auth still accepted for scripts and the MCP server. A
+    state-changing request another site's page sends is refused first (auth.cross_site), with or without a password."""
     async def dispatch(self, request: Request, call_next):
+        if auth.cross_site(request.method, request.headers):
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
         if not auth.enabled() or request.url.path in auth.PUBLIC_PATHS or request.url.path.startswith(auth.PUBLIC_PREFIXES):
             return await call_next(request)
         if auth.valid_token(request.cookies.get(auth.COOKIE)) or auth.valid_basic(request.headers.get("authorization", "")):
@@ -175,8 +178,20 @@ app.add_middleware(DashboardAuth)
 
 
 @app.middleware("http")
+async def tg_frames(request: Request, call_next):
+    """The Mini App's pages may be framed only by Telegram's web client (and the app itself)."""
+    response = await call_next(request)
+    if request.url.path.startswith("/tg"):
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'self' https://*.telegram.org"
+    return response
+
+
+LANG_COOKIE = "wh_lang"      # the language picked on the login page, before anyone is logged in (this browser only)
+
+
+@app.middleware("http")
 async def ui_language(request: Request, call_next):
-    pref = i18n.preference()
+    pref = request.cookies.get(LANG_COOKIE) if request.cookies.get(LANG_COOKIE) in i18n.LANGS else i18n.preference()
     code = pref if pref in i18n.LANGS else i18n.from_accept_language(request.headers.get("accept-language"))
     if pref not in i18n.LANGS and request.headers.get("accept-language") and get_setting("ui_lang_seen") != code:
         set_setting("ui_lang_seen", code)
@@ -3507,11 +3522,24 @@ async def _gcal_ctx() -> dict[str, Any]:
 
 @app.post("/lang")
 async def set_language(request: Request, lang: str = Form("auto"), next: str = Form("")):
-    set_setting("ui_lang", lang if lang in i18n.LANGS else "auto")
-    if next.startswith("/") and not next.startswith("//"):   # e.g. the language panel in Settings
-        return back(next)
-    ref = request.headers.get("referer") or "/"
-    return back(ref if ref.startswith(str(request.base_url)) or ref.startswith("/") else "/")
+    """The app's language (a setting for everyone). Open on the login page, but only a logged-in user changes it;
+    before the login the page follows the browser's language."""
+    logged_in = not auth.enabled() or auth.valid_token(request.cookies.get(auth.COOKIE)) \
+        or auth.valid_basic(request.headers.get("authorization", ""))
+    if logged_in:
+        set_setting("ui_lang", lang if lang in i18n.LANGS else "auto")
+    if next.startswith("/"):                                  # e.g. the language panel in Settings
+        r = back(auth.safe_next(next))
+    else:
+        ref = request.headers.get("referer") or "/"
+        r = back(ref if ref.startswith(str(request.base_url)) or ref.startswith("/") else "/")
+    if logged_in:
+        r.delete_cookie(LANG_COOKIE)
+    elif lang in i18n.LANGS:                                  # the login page: this browser only
+        r.set_cookie(LANG_COOKIE, lang, max_age=365 * 86400, samesite="lax")
+    else:
+        r.delete_cookie(LANG_COOKIE)
+    return r
 
 
 @app.post("/settings/quiet")

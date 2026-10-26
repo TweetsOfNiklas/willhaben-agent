@@ -11,10 +11,12 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 from collections import defaultdict, deque
-from urllib.parse import parse_qsl
+from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from app.config import get_settings
 
@@ -98,10 +100,28 @@ def record_failure(client: str, now: float | None = None) -> None:
 
 
 def safe_next(target: str | None) -> str:
-    """Only local paths, so the login form cannot be used to redirect elsewhere."""
-    if not target or not target.startswith("/") or target.startswith("//") or "\\" in target:
+    """Only local paths, so the login form cannot be used to redirect elsewhere: no "//", no backslash, no control
+    characters or spaces (a browser drops a tab: "/\t/evil.com" would be "//evil.com"), no encoded slashes."""
+    if not target or not target.startswith("/") or target.startswith("//") or "\\" in target \
+            or any(ord(c) <= 0x20 or ord(c) == 0x7f for c in target) or re.search(r"%(2f|5c)", target, re.I):
         return "/"
     return target
+
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def cross_site(method: str, headers: Any) -> bool:
+    """A state-changing browser request from another origin (CSRF): its Origin names another host than the one it was
+    sent to, or the browser says cross-site. Scripts with an Authorization header and requests without these browser
+    headers (curl, the tests) pass."""
+    if method.upper() not in UNSAFE_METHODS or headers.get("authorization"):
+        return False
+    origin = headers.get("origin")
+    if origin:
+        host = (headers.get("x-forwarded-host") or headers.get("host") or "").split(",")[0].strip().lower()
+        return origin == "null" or urlsplit(origin).netloc.lower() != host
+    return headers.get("sec-fetch-site") == "cross-site"
 
 
 def telegram_user(init_data: str | None, bot_token: str | None, now: float | None = None) -> int | None:

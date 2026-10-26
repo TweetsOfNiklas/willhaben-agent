@@ -134,7 +134,12 @@
   window.Telegram = window.Telegram || {};
   window.Telegram.WebView = Object.assign(window.Telegram.WebView || {}, {receiveEvent: receive});
   window.TelegramGameProxy = {receiveEvent: receive};
-  window.addEventListener('message', (e) => { try { const m = JSON.parse(e.data); if (m && m.eventType) receive(m.eventType, m.eventData); } catch (_) {} });
+  // Telegram Web runs the Mini App in its iframe and talks through postMessage: only that parent is listened to (a
+  // page that opened this one could otherwise press the main button or confirm a popup)
+  window.addEventListener('message', (e) => {
+    if (window.parent === window || e.source !== window.parent || !/^https:\/\/([a-z0-9-]+\.)*telegram\.org$/.test(e.origin)) return;
+    try { const m = JSON.parse(e.data); if (m && m.eventType) receive(m.eventType, m.eventData); } catch (_) {}
+  });
   const on = (type, f) => { (handlers[type] = handlers[type] || []).push(f); };
 
   // ---- theme: Telegram's colours (launch params, then theme_changed); kept for the following pages
