@@ -20,7 +20,7 @@ import logging
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlencode
@@ -284,9 +284,31 @@ def search_term(query: str) -> str:
     return " ".join(words)
 
 
+STATS_KEY = "geizhals_cache_stats"   # setting: the cache's counts since `since` (cache_view), per day for STATS_DAYS
+STATS_DAYS = 30
+
+
+def _count(what: str) -> None:
+    """One more lookup answered from the cache ("hits"), sent to Geizhals ("fetches") or answered by an old entry
+    because Geizhals failed ("stale"); per day too."""
+    import json
+    try:
+        st = json.loads(db.get_setting(STATS_KEY) or "{}") or {}
+    except ValueError:
+        st = {}
+    st.setdefault("since", datetime.now(timezone.utc).isoformat())
+    st[what] = int(st.get(what) or 0) + 1
+    days = st.setdefault("days", {})
+    day = days.setdefault(datetime.now(timezone.utc).date().isoformat(), {})
+    day[what] = int(day.get(what) or 0) + 1
+    st["days"] = dict(sorted(days.items())[-STATS_DAYS:])
+    db.set_setting(STATS_KEY, json.dumps(st))
+
+
 async def _cached(url: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
     """`fetch()`'s answer for `url` (JSON-able), from the local cache while it is younger than CACHE_DAYS; an older
-    one is fetched again (and still used when that fails). Never under a Trial (the VPN search tests the server)."""
+    one is fetched again (and still used when that fails). Never under a Trial (the VPN search tests the server).
+    Counted per entry (hits, fetches) and in all (_count)."""
     if current_trial() is not None:
         return await fetch()
     now = time.time()
@@ -294,9 +316,13 @@ async def _cached(url: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
         row = ses.get(db.GeizhalsCache, url)
         if row is not None:
             row.used_at = now
+            fresh = now - row.fetched_at < CACHE_DAYS * 86400
+            if fresh:
+                row.hits = (row.hits or 0) + 1
             ses.add(row)
             ses.commit()
-            if now - row.fetched_at < CACHE_DAYS * 86400:
+            if fresh:
+                _count("hits")
                 return row.data
     try:
         data = await fetch()
@@ -304,11 +330,15 @@ async def _cached(url: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
         if row is not None:
             log.info("Geizhals: %s could not be refreshed, the cached answer from %s stays", url,
                      time.strftime("%Y-%m-%d", time.localtime(row.fetched_at)))
+            _count("stale")
             return row.data
         raise
     with db.session() as ses:
-        ses.merge(db.GeizhalsCache(url=url, data=data, fetched_at=now, used_at=now))
+        old = ses.get(db.GeizhalsCache, url)
+        ses.merge(db.GeizhalsCache(url=url, data=data, fetched_at=now, used_at=now, hits=(old.hits if old else 0),
+                                   fetches=((old.fetches or 0) if old else 0) + 1))
         ses.commit()
+    _count("fetches")
     return data
 
 
@@ -341,8 +371,53 @@ def cache_view(limit: int = 300) -> dict[str, Any]:
             rows.append({"kind": "product", "label": d.get("name") or r.url, "href": r.url,
                          "result": t("{n} specs", n=len(d.get("specs") or [])), "top": "", "price": d.get("price_from")})
         rows[-1].update(fetched=datetime.fromtimestamp(r.fetched_at, timezone.utc),
-                        used=datetime.fromtimestamp(r.used_at, timezone.utc), stale=now - r.fetched_at >= CACHE_DAYS * 86400)
-    return {"count": count, "rows": rows, "days": CACHE_DAYS, "more": max(0, count - len(rows))}
+                        used=datetime.fromtimestamp(r.used_at, timezone.utc), stale=now - r.fetched_at >= CACHE_DAYS * 86400,
+                        hits=r.hits or 0, fetches=r.fetches or 0)
+    return {"count": count, "rows": rows, "days": CACHE_DAYS, "more": max(0, count - len(rows)), "stats": cache_stats()}
+
+
+def cache_stats() -> dict[str, Any]:
+    """The cache page's figures: entries (searches, product pages, fresh, outdated), their size in bytes, the oldest
+    fetch; since `since`: lookups answered from the cache (hits), requests sent (fetches), old entries used because
+    Geizhals failed (stale), the hit rate; per day for the last 7 days (date, hits, fetches); the most used entries."""
+    import json
+    from sqlalchemy import case
+
+    G = db.GeizhalsCache
+    cut = time.time() - CACHE_DAYS * 86400
+    with db.session() as ses:
+        n, size, fresh, oldest = ses.exec(select(
+            func.count(), func.coalesce(func.sum(func.length(G.data)), 0),
+            func.coalesce(func.sum(case((col(G.fetched_at) >= cut, 1), else_=0)), 0), func.min(G.fetched_at))).one()
+        searches = ses.exec(select(func.count()).select_from(G).where(col(G.url).contains("?fs="))).one()
+        top = ses.exec(select(G).where(col(G.hits) > 0).order_by(col(G.hits).desc()).limit(5)).all()
+    try:
+        st = json.loads(db.get_setting(STATS_KEY) or "{}") or {}
+    except ValueError:
+        st = {}
+    hits, fetches = int(st.get("hits") or 0), int(st.get("fetches") or 0)
+    today = datetime.now(timezone.utc).date()
+    week = []
+    for back in range(6, -1, -1):
+        day = (today - timedelta(days=back)).isoformat()
+        d = (st.get("days") or {}).get(day) or {}
+        week.append({"date": day, "hits": int(d.get("hits") or 0), "fetches": int(d.get("fetches") or 0)})
+    return {"entries": n, "searches": searches, "products": n - searches, "size": int(size), "fresh": int(fresh),
+            "stale_entries": n - int(fresh),
+            "oldest": datetime.fromtimestamp(oldest, timezone.utc) if oldest else None,
+            "since": datetime.fromisoformat(st["since"]) if st.get("since") else None,
+            "hits": hits, "fetches": fetches, "stale": int(st.get("stale") or 0),
+            "rate": round(hits * 100 / (hits + fetches)) if hits + fetches else None,
+            "week": week, "week_max": max([d["hits"] + d["fetches"] for d in week] + [1]),
+            "top": [{"label": parse_qs_label(r.url) if isinstance(r.data, list) else (r.data or {}).get("name") or r.url,
+                     "href": r.url, "hits": r.hits or 0, "kind": "search" if isinstance(r.data, list) else "product"}
+                    for r in top]}
+
+
+def parse_qs_label(url: str) -> str:
+    """The search term of a cached search URL (?fs=…)."""
+    from urllib.parse import parse_qs, urlparse
+    return parse_qs(urlparse(url).query).get("fs", [""])[0]
 
 
 def clear_cache() -> int:

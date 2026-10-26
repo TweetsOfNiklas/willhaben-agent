@@ -266,28 +266,37 @@ async def test_the_cache_answers_for_a_week_then_asks_again_and_forgets_what_nob
     assert geizhals.prune_cache() == 1
     with db.session() as ses:
         assert ses.exec(db.select(db.GeizhalsCache)).all() == []
+    st = geizhals.cache_stats()       # two lookups from the cache, three requests, one old answer while Geizhals was down
+    assert (st["hits"], st["fetches"], st["stale"], st["rate"]) == (2, 3, 1, 40)
+    assert sum(d["hits"] for d in st["week"]) == 2 and st["since"] is not None
 
 
 async def _fail(url):
     raise geizhals.GeizhalsError("down")
 
 
-def test_settings_lists_the_cache_and_clears_it(client):  # noqa: F811
+def test_settings_lists_the_cache_and_clears_it(client, monkeypatch):  # noqa: F811
     import time
 
     from app import db
+
+    monkeypatch.setattr(geizhals, "CACHE_DAYS", 7)                # the tests' setup turns the cache off
 
     now = time.time()
     with db.session() as ses:
         ses.add(db.GeizhalsCache(url="https://geizhals.at/?fs=RTX+4.090&hloc=at", fetched_at=now - 3600, used_at=now,
                                  data=[{"name": "NVIDIA RTX 4090 FE", "url": "https://geizhals.at/x-a1.html",
-                                        "price": 1799.0, "image": None}]))
+                                        "price": 1799.0, "image": None}], hits=4, fetches=1))
         ses.add(db.GeizhalsCache(url="https://geizhals.at/x-a1.html", fetched_at=now - 8 * 86400, used_at=now - 60,
                                  data={"name": "NVIDIA RTX 4090 Founders Edition", "url": "https://geizhals.at/x-a1.html",
                                        "price_from": 1799.0, "specs": [["Chip", "AD102"]]}))
         ses.commit()
     page = client.get("/settings/geizhals").text
-    assert "Cached lookups" in page and "RTX 4.090" in page and "NVIDIA RTX 4090 Founders Edition" in page
+    assert "Geizhals cache" in page and "RTX 4.090" in page and "NVIDIA RTX 4090 Founders Edition" in page
+    stats = page[page.index("data-gh-stats"):page.index("data-gh-week")]
+    assert "searches: 1 · product pages: 1" in stats and "1 up to date · 1 fetched again when used" in stats
+    assert "counted from now on" in stats                                          # no lookup counted yet
+    assert "4× from the cache" in page[page.index("data-gh-top"):]                 # the most used entry
     assert "1 hit" in page and "1 hits" not in page and "fetched again on the next lookup" in page        # the product page is over a week old
     r = client.post("/settings/geizhals/clear", follow_redirects=False)
     assert r.status_code == 303 and "2%20cached%20answers%20deleted" in r.headers["location"]

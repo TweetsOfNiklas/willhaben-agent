@@ -460,6 +460,8 @@ class GeizhalsCache(SQLModel, table=True):
     data: Any = Field(sa_column=Column(JSON))
     fetched_at: float = 0.0      # unix time of the last request to Geizhals for it
     used_at: float = 0.0         # unix time of the last lookup
+    hits: int | None = None      # lookups it answered without a request (the cache page's statistics)
+    fetches: int | None = None   # requests to Geizhals for it (the first and every refresh)
 
 
 class LLMCall(SQLModel, table=True):

@@ -1,11 +1,20 @@
 {# Settings → Search & prices → Geizhals: the searches and product pages kept locally (app/services/geizhals.py, table
-   geizhalscache), the last used first, and "Clear cache". gc = geizhals_cache(): {count, rows: [{kind, label, href,
-   result, top, price, fetched, used, stale}], days, more}. #}
-{% import "_ui.html" as ui %}{% set gc = geizhals_cache() %}
-<section id="s-geizhals-cache" class="flex flex-col gap-3.5 rounded-box border border-base-300 bg-base-100 px-5 py-4">
+   geizhalscache) – the figures first (geizhals.cache_stats: entries, size, hit rate, requests saved, the last 7 days,
+   the most used), then the entries, the last used first, filtered by kind in the browser, and "Clear cache".
+   gc = geizhals_cache(): {count, rows: [{kind, label, href, result, top, price, fetched, used, stale, hits, fetches}],
+   days, more, stats}. #}
+{% import "_ui.html" as ui %}{% set gc = geizhals_cache() %}{% set st = gc.stats %}
+{% macro tile(value, label, sub='') -%}
+<div class="flex min-w-0 flex-col gap-0.5 rounded-field border border-base-300 bg-base-200 px-3.5 py-2.5">
+  <span class="text-[22px] leading-tight font-semibold tabular-nums">{{ value }}</span>
+  <span class="text-[12.5px] text-muted">{{ label }}</span>
+  {%- if sub %}<span class="text-[12px] text-muted">{{ sub }}</span>{% endif %}
+</div>
+{%- endmacro %}
+<section id="s-geizhals-cache" class="flex flex-col gap-4 rounded-box border border-base-300 bg-base-100 px-5 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex min-w-0 flex-col gap-0.5">
-      <span class="font-medium">{{ _("Cached lookups") }} {{ ui.pill(gc.count|string, '', false) }}</span>
+      <span class="font-medium">{{ _("Geizhals cache") }}</span>
       <small class="text-[12.5px] text-muted">{{ _("Searches and product pages from Geizhals are kept here: a lookup within {d} days of the last fetch sends no request, an older one fetches again. An entry no lookup used for {d} days is deleted.", d=gc.days) }}</small>
     </div>
     {% if gc.count %}
@@ -13,20 +22,67 @@
       <button class="btn btn-sm max-sm:w-full">{{ ui.icon('x', 14) }}{{ _("Clear cache") }}</button></form>
     {% endif %}
   </div>
-  {% if gc.rows %}
-  <ul class="m-0 flex list-none flex-col p-0 text-[13px]">
-    {% for r in gc.rows %}
-    <li class="flex min-w-0 flex-col gap-0.5 border-t border-base-300 py-2 first:border-t-0">
-      <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        {{ ui.pill(_("Search results") if r.kind == 'search' else _("Product page"), '', false) }}
-        <a href="{{ r.href }}" target="_blank" rel="noopener noreferrer" class="link link-hover min-w-0 break-words font-medium">{{ r.label }}</a>
-        <span class="text-muted">· {{ r.result }}</span>
-      </div>
-      {% if r.top or r.price is not none %}<span class="min-w-0 break-words text-[12.5px] text-muted">{% if r.top %}{{ r.top }}{% endif %}{% if r.price is not none %}{% if r.top %} · {% endif %}<span class="whitespace-nowrap tabular-nums">{{ r.price|eur }}</span>{% endif %}</span>{% endif %}
-      <span class="text-[12px] text-muted"><span class="whitespace-nowrap">{{ _("fetched {time}", time=r.fetched|ago) }}</span> · <span class="whitespace-nowrap">{{ _("used {time}", time=r.used|ago) }}</span>{% if r.stale %} · <span class="text-warning">{{ _("fetched again on the next lookup") }}</span>{% endif %}</span>
-    </li>
+
+  {# the figures #}
+  <div class="grid grid-cols-2 gap-2.5 md:grid-cols-4" data-gh-stats>
+    {{ tile(st.entries, _("entries"), _("searches: {s} · product pages: {p}", s=st.searches, p=st.products)) }}
+    {{ tile(st.size|filesizeformat, _("size"), _("{n} up to date · {o} fetched again when used", n=st.fresh, o=st.stale_entries)) }}
+    {{ tile((st.rate ~ ' %') if st.rate is not none else '–', _("answered from the cache"), _("{h} of {n} lookups", h=st.hits, n=st.hits + st.fetches)) }}
+    {{ tile(st.hits, _("requests saved"), _("since {date}", date=st.since|local('%d.%m.%Y')) if st.since else _("counted from now on")) }}
+  </div>
+  {% if st.stale or st.oldest %}<p class="m-0 text-[12.5px] text-muted">
+    {%- if st.fetches %}{{ _("{n} requests sent to Geizhals.", n=st.fetches) }} {% endif %}
+    {%- if st.stale %}{{ _("{n}× Geizhals failed and an older entry answered instead.", n=st.stale) }} {% endif %}
+    {%- if st.oldest %}{{ _("Oldest fetch: {time}.", time=st.oldest|ago) }}{% endif %}</p>{% endif %}
+
+  {# the last 7 days: answered from the cache vs. sent to Geizhals #}
+  <div class="flex flex-col gap-1.5" data-gh-week>
+    <span class="text-[13px] font-medium">{{ _("Last 7 days") }}
+      <span class="ml-2 inline-flex items-center gap-1 text-[12px] font-normal text-muted"><span class="size-2 rounded-sm bg-success"></span>{{ _("from the cache") }}</span>
+      <span class="ml-2 inline-flex items-center gap-1 text-[12px] font-normal text-muted"><span class="size-2 rounded-sm bg-primary"></span>{{ _("from Geizhals") }}</span></span>
+    {% for d in st.week %}
+    <div class="grid grid-cols-[44px_minmax(0,1fr)_56px] items-center gap-2.5 text-[12px]">
+      <span class="text-muted tabular-nums">{{ d.date[8:10] }}.{{ d.date[5:7] }}.</span>
+      <span class="flex h-2.5 overflow-hidden rounded-full bg-base-200" role="img" aria-label="{{ _('{h} from the cache, {f} from Geizhals', h=d.hits, f=d.fetches) }}">
+        <span class="bg-success" style="width: {{ (d.hits * 100 / st.week_max)|round(1) }}%"></span><span class="bg-primary" style="width: {{ (d.fetches * 100 / st.week_max)|round(1) }}%"></span></span>
+      <span class="text-right text-muted tabular-nums">{{ d.hits }} · {{ d.fetches }}</span>
+    </div>
     {% endfor %}
-  </ul>
-  {% if gc.more %}<small class="text-[12.5px] text-muted">{{ _("… and {n} more", n=gc.more) }}</small>{% endif %}
+  </div>
+
+  {# the entries that saved the most requests #}
+  {% if st.top %}
+  <div class="flex flex-col gap-1" data-gh-top>
+    <span class="text-[13px] font-medium">{{ _("Used most") }}</span>
+    {% for r in st.top %}<div class="flex min-w-0 items-baseline gap-2 text-[13px]">
+      <a href="{{ r.href }}" target="_blank" rel="noopener noreferrer" class="link link-hover min-w-0 flex-1 truncate">{{ r.label }}</a>
+      <span class="shrink-0 text-[12px] text-muted tabular-nums">{{ _("{n}× from the cache", n=r.hits) }}</span></div>{% endfor %}
+  </div>
+  {% endif %}
+
+  {# the entries, the last used first; the chips filter them by kind #}
+  {% if gc.rows %}
+  <div x-data="{ kind: '' }" class="flex flex-col gap-1.5" data-gh-entries>
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <span class="text-[13px] font-medium">{{ _("Entries") }}</span>
+      <div role="group" aria-label="{{ _('Show') }}" class="inline-flex gap-0.5 rounded-field border border-base-300 bg-base-100 p-[3px] text-[12.5px]">
+        {% for k, label in [('', _('All')), ('search', _('Search results')), ('product', _('Product pages'))] %}<button type="button" @click="kind = '{{ k }}'" :aria-pressed="kind === '{{ k }}'" :class="kind === '{{ k }}' ? 'bg-brand-soft font-semibold text-primary' : 'hover:bg-hover'" class="rounded-md px-2.5 py-0.5">{{ label }}</button>{% endfor %}
+      </div>
+    </div>
+    <ul class="m-0 flex list-none flex-col p-0 text-[13px]">
+      {% for r in gc.rows %}
+      <li x-show="!kind || kind === '{{ r.kind }}'" class="flex min-w-0 flex-col gap-0.5 border-t border-base-300 py-2 first:border-t-0">
+        <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          {{ ui.pill(_("Search results") if r.kind == 'search' else _("Product page"), '', false) }}
+          <a href="{{ r.href }}" target="_blank" rel="noopener noreferrer" class="link link-hover min-w-0 break-words font-medium">{{ r.label }}</a>
+          <span class="text-muted">· {{ r.result }}</span>
+        </div>
+        {% if r.top or r.price is not none %}<span class="min-w-0 break-words text-[12.5px] text-muted">{% if r.top %}{{ r.top }}{% endif %}{% if r.price is not none %}{% if r.top %} · {% endif %}<span class="whitespace-nowrap tabular-nums">{{ r.price|eur }}</span>{% endif %}</span>{% endif %}
+        <span class="text-[12px] text-muted"><span class="whitespace-nowrap">{{ _("fetched {time}", time=r.fetched|ago) }}</span> · <span class="whitespace-nowrap">{{ _("used {time}", time=r.used|ago) }}</span>{% if r.hits %} · <span class="whitespace-nowrap">{{ _("{n}× from the cache", n=r.hits) }}</span>{% endif %}{% if r.stale %} · <span class="text-warning">{{ _("fetched again on the next lookup") }}</span>{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if gc.more %}<small class="text-[12.5px] text-muted">{{ _("… and {n} more", n=gc.more) }}</small>{% endif %}
+  </div>
   {% else %}<span class="text-[13px] text-muted">{{ _("Nothing cached yet.") }}</span>{% endif %}
 </section>
