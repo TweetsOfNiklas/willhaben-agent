@@ -103,3 +103,21 @@ def test_clean_text_list_items_in_lists_of_their_own():
     html = "<p>Daten:</p><ul><li>A</li></ul><ul><li>B</li></ul><p>Ende</p><p><br></p><p>Gruß</p>"
     assert clean_text(html) == "Daten:\n• A\n• B\nEnde\n\nGruß"            # as willhaben shows it
     assert clean_text("<p>Daten:</p><p><br></p><ul><li>A</li></ul>") == "Daten:\n\n• A"
+
+
+async def test_a_notice_unread_again_is_no_message_from_the_buyer(monkeypatch):
+    """10-26: after "Artikel versendet" willhaben counted the notice unread again (0 -> 1, no new message): the chat
+    is not fetched again then, but its stored history already ends with the notice – no push, no draft offer."""
+    state = {"unread": 0, "history": [_msg(1, "Wann kommt das Paket?"), _msg(2, "Morgen", "out", minutes=1),
+                                      _msg(3, "Dankeschön", minutes=2)]}
+    pushed, checked = _setup(monkeypatch, state)
+    await chats.sync()
+    state["unread"] = 1
+    state["history"].append(_msg(4, "Wir haben dem Käufer mitgeteilt, dass der Artikel unterwegs ist.", "unknown",
+                                 "integration", minutes=5))
+    await chats.sync()                                               # new: fetched, the notice is seen as one
+    state["unread"] = 0
+    await chats.sync()                                               # read on willhaben
+    state["unread"] = 1
+    await chats.sync()                                               # unread again, nothing new: was pushed
+    assert pushed == [] and checked == []

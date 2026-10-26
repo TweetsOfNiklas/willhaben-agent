@@ -111,7 +111,7 @@ async def sync(force: bool = False) -> dict[str, Any]:
 
     for cid in changed:
         await sync_messages(cid)
-    incoming = [r for r in incoming if _partner_wrote(r, known_until.get(r.id), fetched=r.id in changed)]
+    incoming = [r for r in incoming if _partner_wrote(r, known_until.get(r.id))]
 
     notify_on = get_setting("notify_messages") == "1"
     for row in incoming:
@@ -157,14 +157,15 @@ def _history_reaches(msgs: list[Message], conv: Conversation) -> bool:
                for m in msgs)
 
 
-def _partner_wrote(conv: Conversation, since: datetime | None, fetched: bool) -> bool:
+def _partner_wrote(conv: Conversation, since: datetime | None) -> bool:
     """Did the other person write since the last sync? The list only says that something new and unread came: a
     willhaben notice (PayLivery, shipping, status – the list marks it is_mine false) or our own answer counts there
-    too. The history just fetched tells; when it does not reach the list's newest message (not fetched, endpoint
-    unknown) the list has to do. On True, `conv.last_message_text` becomes their newest message: the push and the
-    address check quote it, not a notice."""
+    too. The stored history tells when it holds the list's newest message – fetched in this sync, or earlier when only
+    the unread count went up (willhaben counts a notice as unread again: a shipping notice was pushed twice as their
+    message); when it does not reach it (endpoint unknown) the list has to do. On True, `conv.last_message_text`
+    becomes their newest message: the push and the address check quote it, not a notice."""
     msgs = messages_of(conv.id)
-    if not fetched or not _history_reaches(msgs, conv):
+    if not _history_reaches(msgs, conv):
         return True
     theirs = [m for m in msgs if m.direction == "in" and not m.kind
               and (since is None or m.created_at is None or _aware(m.created_at) > _aware(since))]
