@@ -25,6 +25,10 @@ It runs on your own server, from your home internet connection, and you control 
   at irregular, human-like intervals and slow down at night.
   A search agent can also be created from a finished product search: it then runs all of that search's keyword
   searches on every check and drops new ads over the plan's budget or with an exclusion word before they are stored.
+  **Auto-buy** (opt-in per agent, willhaben PayLivery "buy now"): a hit that passes the agent and costs at most your
+  maximum (item, shipping and buyer protection) is bought after a two-minute countdown that a Telegram button or the
+  jobs list cancels; the price is checked again right before buying. The **search agent simulator** replays an
+  agent's past hits and test ads Claude writes for it, and shows whether each would have been a hit, pushed and bought.
 - **Chats**: your willhaben conversations, synced live. Claude drafts replies in your style and nothing is sent
   until you click. A draft answers exactly what the buyer asked (it never asks back what they already said, and ends
   with a question only when the next step needs their decision), and your rules are boundaries, not text to recite:
@@ -34,7 +38,8 @@ It runs on your own server, from your home internet connection, and you control 
   ("works fine", "only this one") is known in every chat of that ad; prices and agreements with others stay private.
   For your own ads you can opt in to automatic answers to simple questions, with a minimum price
   Claude never goes below, human-like timing and read receipts; your thumbs-up/down feedback goes into later answers. Chats you are done with can
-  be hidden or removed from the app (willhaben keeps them; they come back when the other person writes again).
+  be hidden (they come back when the other person writes again) or deleted, which deletes them on willhaben too
+  (Vinted chats are only removed from the app).
   Claude knows how many pieces of an ad are left and follows your selling preferences (both described below).
 - **Create ads quickly**: drop in notes and photos and Claude writes the title, description and category. You also get
   a price suggestion from comparable listings and the product's spec sheet from Geizhals. Upload photos of several
@@ -46,8 +51,15 @@ It runs on your own server, from your home internet connection, and you control 
   waits, until you confirm it in a shipment. A published draft links to its My ads entry and the sold page.
 - **Product search** (tab "Produktsuche"): describe what you need (item, size, budget, condition, location) and
   Claude plans a few searches, the app runs them anonymously on willhaben and on every other site switched on for it
-  (Settings → Platforms; the search form lets you pick and names the sites still switched off), and Claude picks the best offers, each with a
-  fit score, a short reason, red flags, the price bar and the scam check. An optional photo check (on by default)
+  (Settings → Platforms), page after page up to the number of ads per site you choose (30 / 100 / 200 / 500), and
+  Claude ranks every candidate in batches; the best offers appear while the next batch is still being ranked, each
+  with a fit score, a short reason, red flags, the price bar and the scam check, and the offers Claude found unfitting
+  stay folded below. The options (depth, ads per site, order, new/used, how far over the budget, a Geizhals limit,
+  the sites and Claude's switches) fold behind a one-line summary under the description. While ranking, Claude also
+  names each offer's product as one searches it on Geizhals – or, for an ad made of several products such as a
+  self-built PC, its parts – and the app looks up the new price (for parts: their sum), so the list can sort by the
+  discount on the new price ("Rabatt") and offers above a Geizhals limit fold away; a search agent created from the
+  search (offered at the top of the result) keeps that limit. An optional photo check (on by default)
   shows Claude the photos of the best offers (at most 10) and weighs damage, wear, wrong variants, stock photos or a
   different item against what you care about (a scratch barely counts if you prefer the lower price). When the
   description leaves something open (e.g. whether scratches are fine for a lower price), Claude may ask up to three
@@ -77,7 +89,9 @@ It runs on your own server, from your home internet connection, and you control 
   site; same model, variant and generation by their titles, in any category, without accessories, extreme prices and
   ads in another condition; you can pick a category) when a used item has 5 or more, else by the ad's share of the
   Geizhals new price per your zones for used and new items (Settings → Search & prices; the condition the site states picks
-  the zones), with the comparables' usual range drawn under the bar, and, on click, Claude's verdict. Also in the hit
+  the zones), with the comparables' usual range drawn under the bar, and, on click, Claude's verdict. "Ask Claude"
+  also finds the right Geizhals product when the automatic lookup has none; an ad made of several products (a
+  self-built PC, a console with games) is priced as the sum of its parts, each listed with its new price. Also in the hit
   viewer, with the zone label and Claude's screening verdict on hit cards.
 - **Your ads**: imported from your account, with a reminder before they expire. A list with a detail pane per ad and
   three toggles (Active, Deactivated, Sold / reserved, each with its count). Per ad: auto-renew when it expires,
@@ -134,6 +148,10 @@ It runs on your own server, from your home internet connection, and you control 
   buy or make an offer as a buyer, only with your confirmation) runs in the browser window with the API recording on,
   since willhaben's PayLivery calls are not documented yet.
 - **Google Calendar** (optional): free times go into reply drafts, agreed appointments become calendar entries on a tap.
+- **Telegram Mini App** (`/tg`, opened from the bot's menu button): the dashboard on the phone inside Telegram –
+  hits with filters and bulk actions, chats with drafts, my ads and the sale page, new ads, product search and price
+  check, purchases, search agents, the notification inbox and background jobs – in Telegram's own look and colours,
+  signed in with your Telegram account (only the owner's chat id is let in).
 - **Notifications** through Home Assistant (events always, phone pushes with action buttons: send / revise with Claude /
   discard) and/or a **Telegram bot** with the same buttons, feedback buttons, commands and a typing indicator. One
   Telegram message per matter: the draft, Claude's progress and the result are edited into the notification; a
@@ -161,19 +179,18 @@ Claude runs through the Claude Code CLI with your Claude subscription. You don't
 
 ## Screenshots
 
-*Demo data – all names, ads and photos are made up.*
+*Demo data – all names, ads and photos are made up (`scripts/demo_screenshots.py` makes them anew).*
 
 | | |
 |---|---|
 | ![Home page with counters, connection status, latest hits and activity](docs/images/dashboard.png) | ![Search agents with their newest hits](docs/images/search-agents.png) |
-| **Home**: counters, connection watchdog, latest hits, activity | **Search agents**: built from willhaben's own filters, optional Claude screening |
-| ![Hits with Claude's verdict, price drops and a scam warning](docs/images/hits.png) | ![Ad viewer with photos, price bar and comparable ads](docs/images/ad-viewer.png) |
-| **Hits**: Claude's verdict and reason, price drops | **Ad viewer**: price bar against the same kind of item, Geizhals new price |
-| ![Chat with a reply drafted by Claude](docs/images/chat.png) | ![Batch draft card with category, required fields and publish button](docs/images/batch-publish.png) |
-| **Chats**: Claude drafts the answer, you send it | **New ad**: Claude writes the listing, publish straight to willhaben |
-
-![My ads with auto-renew switches, automatic answers and a minimum price](docs/images/my-ads.png)
-**My ads**: auto-renew, automatic answers with a minimum price, deactivate / delete / mark sold.
+| **Home**: counters, connection watchdog, latest hits, activity | **Search agents**: Claude screening, Geizhals limit, auto-buy |
+| ![Hits with Claude's verdict, the Geizhals price zone and price drops](docs/images/hits.png) | ![Ad viewer with photos, price bar against the Geizhals new price and Claude's assessment](docs/images/ad-viewer.png) |
+| **Hits**: Claude's verdict, Geizhals price zone, price drops | **Ad viewer**: price bar, Geizhals new price, Claude's assessment |
+| ![Product search result with Claude's criteria, sorting and ranked offers](docs/images/product-search.png) | ![Chat with a reply drafted by Claude](docs/images/chat.png) |
+| **Product search**: Claude's criteria, offers ranked, sort by discount | **Chats**: Claude drafts the answer, you send it |
+| ![My ads with auto-renew, automatic answers and a minimum price](docs/images/my-ads.png) | ![Telegram Mini App: the hits list on a phone](docs/images/telegram.png) |
+| **My ads**: auto-renew, automatic answers with a minimum price | **Telegram Mini App**: the dashboard on the phone |
 
 ## Supported platforms
 
@@ -367,6 +384,8 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Feature | Status |
 |---|---|
 | Search agents, hits, price drops, quiet hours, human pace | done |
+| Search agent simulator (past hits and Claude's test ads) | done |
+| Auto-buy (PayLivery buy-now after a countdown, per-agent maximum) | built and tested with fakes; **no real purchase yet** (Vinted not yet) |
 | Search agents on kleinanzeigen.de (platform adapter framework) | built; the API answers were checked once live, **no agent has run against it for days yet** |
 | Search agents on Shpock, Vinted and Preisjäger | built; searches and ad pages were checked once live (2026-10-12), **no agent has run against them for days yet** |
 | Search agents on Facebook Marketplace (logged out, newest ~24 per search) | built; searches and listing pages were checked live (2026-10-15), **no agent has run against it for days yet** |
@@ -382,9 +401,10 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Publishing ads directly | done for free private ads with pickup (batch cards and single draft page, category picker); shipping/PayLivery built from the bundle but **not yet live-tested** (also when Selling preferences preset it) |
 | Stock per ad: pieces on My ads and new ads, sales ledger with undo, selling piece by piece, stock in Claude's answers | built and tested with fakes; the stock is local to the app, so only the existing sold step on willhaben ("sold / reserved" above) is unverified |
 | Selling preferences (handover, shipping costs, carrier, payment, notes) and the e-mail/link rule | done |
-| Price check and product search (Produktsuche) | done (comparables of the same item by title, category selectable) |
+| Price check and product search (Produktsuche) | done (comparables of the same item by title, category selectable; Geizhals new price per offer, sums of parts) |
 | Home Assistant events, pushes with action buttons | done |
-| Telegram bot, Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
+| Telegram bot and Telegram Mini App | done (in daily use) |
+| Google Calendar, parcel labels | built and tested with fakes; **not yet live-tested** |
 | Paid status, label purchase approval and auto rules, label purchase in the browser, printing over IPP | built and tested with fakes and a fake IPP printer; **no live carrier checkout or real printer yet**; the parcel shop for "→ Shop" labels is looked up and passed to the form, but whether the carrier form takes it is **not live-tested** (so shop labels stay manual) |
 | Purchase orders (buyer side): contact, negotiation, PayLivery offer, pay-now push, pickup appointments | built and tested with fakes; **not yet live-tested** |
 | PayLivery notices and process (both roles) | built from the chat message types only; notice wording, label links and every action **unverified** – record them once (Settings → Platforms → willhaben → Advanced → API recording) |
@@ -416,6 +436,9 @@ Locally a real Chromium window opens for the login. Use `BROWSER_HEADLESS=1` for
   writes redacted fixtures from what the app recorded, and `tests/fake_willhaben.py` serves them to the clients.
 - **Offline**: after recording for a while, `WH_REPLAY=1 BROWSER_ENABLED=0 uv run python -m app` answers the recorded
   willhaben requests from the database (see `docs/willhaben-api.md`, "Recording, replay and fixtures").
+- **Screenshots**: `python scripts/demo_screenshots.py` (with Playwright's Chromium) fills a temporary database with
+  made-up demo data, starts the app offline (sites, Geizhals and the login answered from that data, no request
+  leaves the machine) and writes `docs/images/*.png`; `--serve` keeps the demo running on port 8093.
 - **CI**: `.github/workflows/docker.yml` runs lint and tests, then builds the image and pushes it to GitHub
   Container Registry. The default branch gets `latest`, tags `v1.2.3` get `1.2.3` and `1.2`, and every build gets
   `sha-<commit>`. Pull requests build without pushing. To release, bump the version in `app/__init__.py` and
