@@ -497,6 +497,7 @@ def serve(port: int) -> None:
 
 
 # ------------------------------------------------------------------ screenshots
+EXTRA = {"hits-phone"}     # only when asked for (--only): pictures for release notes, not the README
 SHOTS = {
     # name: (path, viewport, action)
     "dashboard": ("/", (1440, 900), None),
@@ -507,6 +508,7 @@ SHOTS = {
     "product-search": ("/deals?search=1#ps-result", (1440, 900), "scroll-result"),
     "my-ads": ("/myads", (1440, 900), None),
     "telegram": ("/tg/hits", (390, 844), "tg"),
+    "hits-phone": ("/hits", (390, 844), "cards"),          # release notes; not in the README
 }
 
 
@@ -516,7 +518,7 @@ async def shoot(base: str, out: Path, only: set[str] | None) -> None:
     async with async_playwright() as pw:
         b = await pw.chromium.launch()
         for name, (path, (w, h), action) in SHOTS.items():
-            if only and name not in only:
+            if only and name not in only or not only and name in EXTRA:
                 continue
             ctx = await b.new_context(viewport={"width": w, "height": h}, device_scale_factor=1.5 if w > 500 else 2,
                                       color_scheme="light", locale="en-US", timezone_id="Europe/Vienna")
@@ -531,6 +533,9 @@ async def shoot(base: str, out: Path, only: set[str] | None) -> None:
             if action == "viewer":
                 await p.locator("a[data-ad]").first.click()
                 await p.wait_for_timeout(1800)
+            elif action == "cards":
+                await p.evaluate("document.querySelector('article[id^=hit-]').scrollIntoView(); window.scrollBy(0, -12)")
+                await p.wait_for_timeout(300)
             elif action == "scroll-result":
                 await p.locator("#ps-box").scroll_into_view_if_needed()
                 await p.evaluate("window.scrollBy(0, -16)")

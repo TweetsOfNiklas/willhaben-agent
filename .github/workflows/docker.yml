@@ -128,8 +128,10 @@ jobs:
 
   # A GitHub release for every version tag that has none: the tag above (a raised version on master) or a tag v*
   # pushed by hand (after its image). Any other push to master checks the current version's tag too, so a release
-  # that failed once (or v0.2.4, tagged before releases existed) is made up for. Notes: the commits since the
-  # previous version, the image to pull and the compare link.
+  # that failed once (or v0.2.4, tagged before releases existed) is made up for. Notes: the hand-written ones in
+  # docs/releases/v<version>.md when there are some (their pictures in docs/releases/v<version>/, linked at the tag),
+  # with the commits folded below; else the commits since the previous version. Then the image to pull and the
+  # compare link.
   release:
     needs: [version, image, tag]
     if: >-
@@ -148,6 +150,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', needs.version.outputs.version) }}
           IMAGE: ghcr.io/${{ github.repository_owner }}/secondhandler
+          REPO: ${{ github.repository }}
           COMPARE: ${{ github.server_url }}/${{ github.repository }}/compare
         run: |
           git fetch --tags --force --quiet
@@ -161,11 +164,29 @@ jobs:
           fi
           version=${TAG#v}
           prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$TAG^" 2>/dev/null || true)
-          {
-            echo "## Changes"
-            echo
+          commits() {
             git log --no-merges --max-count=100 --invert-grep --grep='^Version [0-9.]*$' --format='- %s (%h)' \
               "${prev:+$prev..}$TAG"
+          }
+          written="docs/releases/$TAG.md"
+          {
+            if git cat-file -e "$TAG:$written" 2>/dev/null; then
+              # relative picture links (markdown and <img src>) point at the files as they are at the tag
+              raw="https://raw.githubusercontent.com/$REPO/$TAG/docs/releases"
+              git show "$TAG:$written" | sed -E \
+                -e "s#\]\((\./)?(v[0-9][^)]*)\)#](${raw}/\2)#g" \
+                -e "s#src=\"(\./)?(v[0-9][^\"]*)\"#src=\"${raw}/\2\"#g"
+              echo
+              echo "<details><summary>All commits</summary>"
+              echo
+              commits
+              echo
+              echo "</details>"
+            else
+              echo "## Changes"
+              echo
+              commits
+            fi
             echo
             echo "**Docker image:** \`$IMAGE:$version\` (also \`${version%.*}\` and \`latest\`)"
             if [ -n "$prev" ]; then
