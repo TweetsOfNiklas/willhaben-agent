@@ -982,6 +982,19 @@ async def _geizhals_prices(hits: list[Hit]) -> None:
         db.commit()
 
 
+def replace_geizhals(hit_id: int, gh: dict[str, Any] | None) -> None:
+    """Claude called the hit's Geizhals product wrong (price check): the product Claude named instead, or none – final
+    ("checked"), so neither the card nor the agent's Geizhals rule uses the wrong price again."""
+    with session() as db:
+        row = db.get(Hit, hit_id)
+        if row is None:
+            return
+        row.geizhals = ({k: gh.get(k) for k in ("name", "url", "price_from", "by", "parts", "missing") if k in gh}
+                        | {"checked": True}) if gh else {"checked": True}
+        db.add(row)
+        db.commit()
+
+
 def remember_geizhals(hit_id: int, gh: dict[str, Any]) -> None:
     """The product Claude found on Geizhals for a hit (price check in the viewer). The agent's rule has run already;
     an automatic match the hit has is kept."""

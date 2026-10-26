@@ -131,7 +131,7 @@ def test_nothing_priced_means_no_discount_order(lookups):
         web = c.get(f"/deals/search/{sid}").text
         assert "priced: false" in web and "Geizhals knows the new price of none" in web
         tg = c.get(f"/tg/search/{sid}?order=discount").text
-        assert 'aria-disabled="true"' in tg and tg.index("Billig") < tg.index("Teuer")
+        assert 'data-no-discount' in tg and tg.index("Billig") < tg.index("Teuer")
         c.get(f"/tg/search/{sid}?order=fit")
 
 
@@ -249,3 +249,19 @@ def test_restart_keeps_partly_ranked_offers():
 def test_the_mismatch_rule_also_spares_the_geizhals_limit():
     r = _r("1", "Mini PC", 200.0, 90, geizhals={"name": "Zubehör", "url": "u", "price_from": 40.0}, stats={"median": 250.0})
     assert ps.discount(r) is None and ps.geizhals_passes(r, {"gh_pct": 30})
+
+
+async def test_a_part_never_takes_a_whole_systems_price(monkeypatch):
+    """"NVIDIA GeForce RTX 3060" found a gaming PC on Geizhals: the lookup's other results give the card itself."""
+    async def match(q, raise_errors=False):
+        if "RTX" in q:
+            return {"name": "Komplettsystem, AMD Ryzen 5 5500, 16GB, NVIDIA GeForce RTX 3060", "url": "https://g/pc",
+                    "price_from": 989.0}
+        return {"name": q, "url": f"https://g/{len(q)}", "price_from": 100.0}
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    monkeypatch.setattr(deals, "geizhals_candidates", lambda q: [
+        {"name": "Komplettsystem, Intel Core i5, NVIDIA GeForce RTX 3060", "url": "https://g/pc2", "price": 899.0},
+        {"name": "Gainward GeForce RTX 3060 Ghost, 12GB GDDR6", "url": "https://g/card", "price": 289.0}])
+    monkeypatch.setattr(deals, "_matches", lambda name, q, url: "RTX 3060" in name)
+    res = await deals.parts_new_price(["NVIDIA GeForce RTX 3060 12GB", "AMD Ryzen 5 5600"])
+    assert [p["price_from"] for p in res["parts"]] == [289.0, 100.0] and res["price_from"] == 389.0

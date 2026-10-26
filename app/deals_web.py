@@ -145,9 +145,13 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
         d.item_condition, d.item_condition_label = hit.item_condition, hit.item_condition_label
     from app.platforms import ratelimit
     with ratelimit.urgent():         # someone waits on the page: first in each site's queue, slow sites left out
-        return await deals.analyze(d, query=q, own_query=own, use_claude=use_claude, find_geizhals=find_geizhals,
-                                   fallback_query=fallback, category_url=cat,
-                                   known_geizhals=hit.geizhals if hit is not None else None), None
+        res = await deals.analyze(d, query=q, own_query=own, use_claude=use_claude, find_geizhals=find_geizhals,
+                                  fallback_query=fallback, category_url=cat,
+                                  known_geizhals=hit.geizhals if hit is not None else None)
+    if hit is not None and res.get("geizhals_rejected"):     # Claude: the hit's product was another one
+        search_agents.replace_geizhals(hit.id, res.get("geizhals"))
+        hit.geizhals = res.get("geizhals") or {"checked": True}
+    return res, None
 
 
 # Route order matters: Starlette takes the first path that matches, so the 3-segment legacy routes

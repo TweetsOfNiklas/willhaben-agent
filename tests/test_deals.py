@@ -1791,3 +1791,25 @@ async def test_claude_names_the_parts_of_a_self_built_pc(wh, no_auto_gh, monkeyp
     html = templates.get_template("_deal.html").render(res={"ad": {"price": 250}, "geizhals": res["match"],
                                                            "position": {"pos": None}}, ad=_ad(250))
     assert "data-gh-parts" in html and "Sum of 2 parts" in html
+
+
+async def test_claude_calls_the_geizhals_product_wrong_and_the_right_one_is_used(wh, no_auto_gh, monkeypatch):
+    """The price check's verdict says the automatic Geizhals product is another one: its price goes, Claude's product
+    is looked up instead, and the wrong one does not come back for this ad."""
+    wrong = {"name": "ASUS NUC 16 Mini PC", "url": "https://geizhals.at/nuc16", "price_from": 1063.22}
+    asked = []
+
+    async def match(q, raise_errors=False):
+        asked.append(q)
+        return {"name": "Intel NUC 8 i5-8260U", "url": "https://geizhals.at/nuc8", "price_from": 299.0} if "NUC 8" in q else None
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    fake = ScriptedClaude({"deal": "overpriced", "reason": "Anderer NUC.", "geizhals_ok": False,
+                           "product": "Intel NUC 8 i5-8260U", "parts": []})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    ad = _ad(220, ad_id="1000000077", heading="Intel NUC Mini PC i5 16GB")
+    res = await deals.analyze(ad, use_claude=True, known_geizhals=wrong)
+    assert res["geizhals"]["url"] == "https://geizhals.at/nuc8" and res["geizhals"]["by"] == "claude"
+    assert res["geizhals_rejected"] == "ASUS NUC 16 Mini PC" and asked == ["Intel NUC 8 i5-8260U"]
+    assert "geizhals_ok" in fake.calls[0]["schema"]["required"]
+    deals.remember(res)
+    assert deals.stored_geizhals(ad.ref)["url"] == "https://geizhals.at/nuc8"        # kept for the ad

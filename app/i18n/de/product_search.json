@@ -138,5 +138,6 @@
  "Searches Claude plans per site": "Suchen, die Claude je Seite plant",
  "{n} % below Geizhals": "{n} % unter Geizhals",
  "The new prices of this search are still being looked up – try again in a moment.": "Die Neupreise dieser Suche werden noch nachgeschlagen – versuch es gleich noch einmal.",
- "Interrupted by a restart – the offers ranked until then are shown.": "Durch einen Neustart unterbrochen – die bis dahin bewerteten Angebote werden angezeigt."
+ "Interrupted by a restart – the offers ranked until then are shown.": "Durch einen Neustart unterbrochen – die bis dahin bewerteten Angebote werden angezeigt.",
+ "All offers with a Geizhals new price are above your Geizhals limit – they are folded below, so there is nothing to sort by discount here.": "Alle Angebote mit Geizhals-Neupreis liegen über deiner Geizhals-Grenze – sie sind unten eingeklappt, hier gibt es also nichts nach Rabatt zu sortieren."
 }

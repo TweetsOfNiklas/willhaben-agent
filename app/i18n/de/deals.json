@@ -48,5 +48,7 @@
  "Without a new price: {parts}": "Ohne Neupreis: {parts}",
  "Geizhals has a new price for too few of the parts ({parts}).": "Geizhals kennt nur für zu wenige Teile einen Neupreis ({parts}).",
  "Sum of {n} parts": "Summe aus {n} Teilen",
- "the purchase was cancelled – not paying": "der Kauf wurde abgebrochen – es wird nicht bezahlt"
+ "the purchase was cancelled – not paying": "der Kauf wurde abgebrochen – es wird nicht bezahlt",
+ "Claude: the Geizhals product found automatically ({name}) is another one.": "Claude: Das automatisch gefundene Geizhals-Produkt ({name}) ist ein anderes.",
+ "Claude: this Geizhals product was another one: {name}": "Claude: Dieses Geizhals-Produkt war ein anderes: {name}"
 }

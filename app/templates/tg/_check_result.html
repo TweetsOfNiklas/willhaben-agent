@@ -55,6 +55,7 @@
   </div>
 
   <div class="sh">Geizhals</div>
+  {% if res.geizhals_rejected %}<p class="sub" style="margin: 0 4px 6px" data-gh-rejected>{{ _("Claude: this Geizhals product was another one: {name}", name=res.geizhals_rejected) }}</p>{% endif %}
   <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 6px" data-geizhals>
     {% if gh %}<a href="{{ gh.url }}" target="_blank" hx-boost="false" style="font-size: 14px">{{ gh.name }} ↗</a>
       <span class="sub">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }}{% if ad.price and gh.price_from %} · {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}{% endif %}{% if gh.by == 'claude' %} · {{ _("found by Claude") }}{% endif %}</span>

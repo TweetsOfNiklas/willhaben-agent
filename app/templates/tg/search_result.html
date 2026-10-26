@@ -81,11 +81,12 @@
   {# the order of the offers: Claude's, by price, by distance from home (kept for the next search) #}
   <nav class="seg" aria-label="{{ _('Sort the offers') }}" data-ps-order>
     {% for key, label in [('fit', _('Best match')), ('price', _('Price')), ('discount', _('Discount')), ('distance', _('Distance'))] %}
-    {% if key == 'discount' and not priced %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Geizhals knows the new price of none of these offers (yet) – they are looked up after the ranking, for products with a model name.') }}">{{ label }}</a>
+    {% if key == 'discount' and not priced %}<a href="#" style="opacity: .55" data-no-discount onclick="const p = document.querySelector('[data-no-discount-why]'); p.hidden = !p.hidden; return false">{{ label }}</a>
     {% elif key == 'distance' and not home %}<a aria-disabled="true" style="opacity: .45" title="{{ _('Enter your address under Settings → Shipping & pickup to sort by distance.') }}">{{ label }}</a>
     {% else %}<a href="/tg/search/{{ ps.id }}?order={{ key }}"{% if order == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endif %}
     {% endfor %}
   </nav>
+  {% if not priced %}<p class="sub" style="margin: 6px 4px 0" data-no-discount-why hidden>{{ _('All offers with a Geizhals new price are above your Geizhals limit – they are folded below, so there is nothing to sort by discount here.') if gh_out|selectattr('geizhals')|list else _('Geizhals knows the new price of none of these offers (yet) – they are looked up after the ranking, for products with a model name.') }}</p>{% endif %}
   {% endif %}
   {% if results %}
   <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px" data-ps-results>
