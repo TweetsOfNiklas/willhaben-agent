@@ -88,10 +88,15 @@ async def tg_search_result(request: Request, search_id: int, order: str = ""):
     shown = [r for r in ps.results or [] if product_search.geizhals_passes(r, ps.settings)]     # the Geizhals rule
     gh_out = [r for r in ps.results or [] if r not in shown]
     priced = any(product_search.discount(r) is not None for r in shown)
-    if order == "distance" and not home or order == "discount" and not priced:
+    # none shown has a new price, but folded ones do: "Discount" sorts those in, marked (as the dashboard does)
+    extra = [] if priced else [r for r in gh_out if product_search.discount(r) is not None]
+    if order == "distance" and not home or order == "discount" and not (priced or extra):
         order = "fit"
+    over = {id(r) for r in extra} if order == "discount" else set()
+    results = _ordered(shown + extra if over else shown, order, home)
     return _render(request, "search_result.html", **deals_web._search_ctx(search_id, backfill=True), order=order,
-                   results=_ordered(shown, order, home), home=home, priced=priced, gh_out=gh_out)
+                   results=results, over=[id(r) in over for r in results], home=home, priced=priced or bool(extra),
+                   gh_out=gh_out, over_note=bool(over))
 
 
 # ------------------------------------------------------------------ price check of one ad

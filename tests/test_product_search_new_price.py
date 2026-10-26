@@ -1,5 +1,7 @@
 """Produktsuche: the Geizhals new price of every offer after the ranking (the price check's lookup, one per product
 name), the discount on it, and the order by discount on the dashboard and in the Telegram Mini App."""
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -265,3 +267,25 @@ async def test_a_part_never_takes_a_whole_systems_price(monkeypatch):
     monkeypatch.setattr(deals, "_matches", lambda name, q, url: "RTX 3060" in name)
     res = await deals.parts_new_price(["NVIDIA GeForce RTX 3060 12GB", "AMD Ryzen 5 5600"])
     assert [p["price_from"] for p in res["parts"]] == [289.0, 100.0] and res["price_from"] == 389.0
+
+
+def test_discount_sorts_folded_offers_in_when_no_shown_one_has_a_new_price(lookups):
+    """10-26: every offer with a new price was above the search's Geizhals limit (folded), so "Discount" only said
+    there was nothing to sort. It now sorts those in – shown in that order only, marked as above the limit."""
+    from app.main import app
+    sid = _row([_r("1", "Wenig Rabatt", 300.0, 90, geizhals=GH["bosch sms46"]),
+                _r("2", "Ohne Neupreis", 50.0, 80, geizhals={}),
+                _r("3", "Ohne Neupreis zwei", 60.0, 70, geizhals={})], status="done")
+    ps._update(sid, settings={"platforms": ["willhaben"], "gh_pct": 50})
+    with TestClient(app) as c:
+        web = c.get(f"/deals/search/{sid}").text
+    assert "priced: true" in web and "data-discount-over-limit" in web
+    tag = re.search(r"<article[^>]*data-over-limit[^>]*>", web).group(0)
+    assert 'data-off="-25"' in tag and "x-show=\"order === 'discount'\"" in tag, tag
+    assert "Above your Geizhals limit" in web[web.index(tag):web.index(tag) + 3000]
+    assert web.index("data-over-limit") < web.index("data-ps-gh-out")          # in the list, and still folded below
+    with TestClient(app) as c:
+        tg = c.get(f"/tg/search/{sid}?order=discount").text
+        c.get(f"/tg/search/{sid}?order=fit")
+    assert "data-no-discount" not in tg and "data-discount-over-limit" in tg and "data-over-limit" in tg
+    assert tg.index("Wenig Rabatt") < tg.index("Ohne Neupreis")              # with a new price first

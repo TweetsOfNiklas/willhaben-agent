@@ -88,12 +88,14 @@
   </nav>
   {% if not priced %}<p class="sub" style="margin: 6px 4px 0" data-no-discount-why hidden>{{ _('All offers with a Geizhals new price are above your Geizhals limit – they are folded below, so there is nothing to sort by discount here.') if gh_out|selectattr('geizhals')|list else _('Geizhals knows the new price of none of these offers (yet) – they are looked up after the ranking, for products with a model name.') }}</p>{% endif %}
   {% endif %}
+  {% if over_note %}<p class="sub" style="margin: 6px 4px 0" data-discount-over-limit>{{ _("Every offer with a Geizhals new price is above your Geizhals limit: sorted by discount, they are shown here too (otherwise folded below).") }}</p>{% endif %}
   {% if results %}
   <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px" data-ps-results>
-    {% for r in results %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set rp = r.get('platform') or 'willhaben' %}
+    {% for r in results %}{% set is_over = over and over[loop.index0] %}{% set p = deal_card_position(r) %}{% set km = result_km(r, home) %}{% set rp = r.get('platform') or 'willhaben' %}
     <div class="sec" style="padding: 10px 12px; display: flex; gap: 12px" data-offer="{{ ad_ref(rp, r.ad_id) }}">
       <a href="{{ r.url }}" target="_blank" hx-boost="false" style="flex-shrink: 0">{% if r.image_url %}<img class="thumb" src="{{ r.image_url }}" alt="" loading="lazy" width="80" height="80" style="width: 80px; height: 80px" onerror="this.style.visibility='hidden'">{% else %}<span class="thumb" style="width: 80px; height: 80px"></span>{% endif %}</a>
       <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+        {% if is_over %}<span class="pill warn" style="align-self: flex-start" data-over-limit>{{ _("Above your Geizhals limit") }}</span>{% endif %}
         <a href="{{ r.url }}" target="_blank" hx-boost="false" style="font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.25">{{ r.title }}</a>
         <span style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center"><strong style="font-size: 16px">{{ r.price_display or (r.price|eur) }}</strong><span class="sub" data-ship>{{ ui.ship_lazy(r) }}</span>
           {% if r.fit is not none %}<span class="pill {{ 'ok' if r.fit >= 75 else 'warn' if r.fit >= 50 else '' }}">{{ _("Fit {n}", n=r.fit) }}</span>{% endif %}
