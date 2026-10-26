@@ -1940,3 +1940,59 @@ def test_viewer_shows_the_sellers_account(app_client):
     page = app_client.get(f"/hits/ad/{AD_ID}").text
     assert "data-seller-trust" in page and "member since 20" in page
     assert f"/hits/ad/willhaben/{AD_ID}/seller?ad=" in page
+
+
+# ------------------------------------------------------------------ similar ads chosen by Claude
+async def test_claude_names_the_product_and_picks_the_same_variant(monkeypatch):
+    """10-26: the rules compared an "HP EliteDesk 800 G6" with G2 and G3 ads and searched a HomePod mini as "Space
+    Grau 2025". Claude names the product and variant, the app searches its terms, Claude picks the same ones."""
+    ads = {"EliteDesk 800 G6": [_summ(n, t, p) for n, (t, p) in enumerate([
+        ("HP EliteDesk 800 G6 Mini i5-10500T 16GB", 260), ("HP EliteDesk 800 G6 Mini PC", 240),
+        ("HP EliteDesk 800 G3 Mini i5-7500T", 110), ("HP EliteDesk 800 G6 Mini 8GB 256GB", 230),
+        ("HP EliteDesk 800 G2 Mini", 90), ("HP EliteDesk 800 G6 Mini, OVP", 280), ("HP EliteDesk 800 G6 Mini Win 11", 250)])]}
+    asked = []
+
+    async def search_ads(q):
+        asked.append(q)
+        found = ads.get(q, [])
+        return {"rows_found": len(found), "ads": found}
+    monkeypatch.setattr(deals, "search_ads", search_ads)
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben"])
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: "token")
+    monkeypatch.setattr(deals, "_identities", {})
+    fake = ScriptedClaude({"product": "HP EliteDesk 800 G6 Mini", "variant": "G6",
+                           "queries": ["EliteDesk 800 G6", "HP EliteDesk 800 G6 Mini"]},
+                          {"same": [1, 2, 3, 4, 5]})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.analyze(_ad(250, heading="HP EliteDesk 800 G6 Desktop Mini PC"))
+    comp = res["comparables"]
+    assert asked[0] == "EliteDesk 800 G6" and comp["by_claude"] == "HP EliteDesk 800 G6 Mini"
+    titles = {a["title"] for a in comp["closest"]}
+    assert comp["count"] == 5 and not any("G3" in x or "G2" in x for x in titles)
+    assert comp["filtered"]["model"] == 2
+    pick = fake.calls[1]["prompt"]
+    assert "Variante: G6" in pick and "HP EliteDesk 800 G2 Mini · 90 €" in pick
+    assert "Similar ads chosen by Claude for „HP EliteDesk 800 G6 Mini“." in _plain(_render_deal(res, lang="en"))
+
+
+async def test_claude_failing_leaves_the_rules(monkeypatch):
+    _fake_search(monkeypatch, [_summ(n, "Bosch GSR 18V-55", p) for n, p in enumerate([90, 95, 100, 105, 110])])
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben"])
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: "token")
+    monkeypatch.setattr(deals, "_identities", {})
+    fake = ScriptedClaude({"product": "Bosch GSR 18V-55", "variant": "", "queries": ["GSR 18V-55"]},
+                          LLMError("overloaded"))
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.analyze(_ad(100))
+    assert res["comparables"]["count"] == 5 and "by_claude" not in res["comparables"]        # the rules decided
+    deals.clear_cache()
+    from app.db import set_setting
+    set_setting(deals.COMPARE_SETTING, "0")                                   # switched off: Claude is not asked
+    fake.calls.clear()
+    await deals.analyze(_ad(100, ad_id="1000000099"))
+    assert fake.calls == []
+    monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: None)
+    set_setting(deals.COMPARE_SETTING, "1")
+    assert not deals.compare_by_claude()                                       # no Claude login: the rules

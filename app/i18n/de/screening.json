@@ -17,5 +17,6 @@
  "right item? good deal? – runs for every new hit, a fast model is enough": "richtiger Artikel? guter Preis? – läuft für jeden neuen Treffer, ein schnelles Modell reicht",
  "too expensive": "zu teuer",
  "top deal": "Top-Angebot",
- "wrong item": "falscher Artikel"
+ "wrong item": "falscher Artikel",
+ "names the product and picks the similar ads for the price check – two calls per check": "bestimmt das Produkt und wählt die ähnlichen Anzeigen für die Preisprüfung – zwei Aufrufe je Prüfung"
 }

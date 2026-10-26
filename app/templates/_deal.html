@@ -68,7 +68,8 @@
   {% else %}
   {% set left = c.searches|selectattr('error')|map(attribute='site')|unique|list %}
   <p class="text-[12.5px] text-muted">
-    {% if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
+    {% if c.by_claude %}<span data-compared-by-claude>{{ ui.icon('sparkle', 12, 2, 'inline-block align-[-1px] text-primary') }} {{ _("Similar ads chosen by Claude for „{product}“.", product=c.by_claude) }}</span> {% endif %}
+    {%- if c.scope == 'chosen' %}{{ _("Compared within the category you chose.") }}{% else %}{{ _("Compared across all categories.") }}{% endif %}
     {% if fl.model %} {{ _("{n} other products, models or variants left out.", n=fl.model) }}{% endif %}{% if fl.kind %} {{ _("{n} accessories or parts left out.", n=fl.kind) }}{% endif %}{% if fl.condition %} {{ _("{n} ads in another condition left out.", n=fl.condition) }}{% endif %}{% if fl.outliers %} {{ _("{n} extreme prices left out.", n=fl.outliers) }}{% endif %}
     {% if left %}{% set names = [] %}{% for x in left %}{% set _x = names.append(platform_name(x)) %}{% endfor %} <span data-left-out>{{ _("Left out: {sites}.", sites=names|join(', ')) }}</span>{% endif %}
     {% if compact %} <a class="link link-primary whitespace-nowrap no-underline" href="/deals/ad/{{ ad.ad_id }}">{{ _("Change category") }} →</a>{% endif %}</p>

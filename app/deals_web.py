@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import select
 
 from app import platforms, scheduler
-from app.db import Hit, SearchAgent, session
+from app.db import Hit, SearchAgent, get_setting, session, set_setting
 from app.i18n import t
 from app.platforms import AdDetail, InvalidSearchUrl, PlatformError, UnknownPlatform, condition
 from app.services import deals, jobs, price_bar, price_zones, product_search, screening, search_agents
@@ -45,6 +45,7 @@ def price_zone_view() -> dict[str, Any]:
     ends of the bar's scale (deals.position's axis)."""
     zones = price_zones.config()
     return {"used": list(zones["used"]), "new": list(zones["new"]), "similar": list(zones["similar"]),
+            "compare_claude": get_setting(deals.COMPARE_SETTING) != "0",
             "defaults": {g: list(v) for g, v in price_zones.DEFAULTS.items()}, "names": list(deals.LEVEL_NAMES),
             "labels": {n: deals.level_label(n) for n in deals.LEVEL_NAMES},
             "t": {"below": t("below {n} %"), "from": t("from {n} %")}, "axis": [deals.AXIS_MIN, deals.AXIS_MAX]}
@@ -63,6 +64,8 @@ async def settings_prices(request: Request):
         price_zones.save({g: form.getlist(g) for g in price_zones.GROUPS})
     except price_zones.ZoneError as e:
         return RedirectResponse(f"/settings/prices?err={e.code}", status_code=303)
+    if form.get("compare_seen"):          # the checkbox sends nothing when off
+        set_setting(deals.COMPARE_SETTING, "1" if form.get(deals.COMPARE_SETTING) else "0")
     return RedirectResponse(f"/settings/prices?msg={quote(t('Price zones saved'), safe='')}", status_code=303)
 
 

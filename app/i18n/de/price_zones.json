@@ -65,5 +65,7 @@
  "Change limits": "Grenzen ändern",
  "The badges compare each ad with the median of this search's results, by your limits for similar ads.": "Die Markierungen vergleichen jede Anzeige mit dem Median der Ergebnisse dieser Suche, nach deinen Grenzen für ähnliche Anzeigen.",
  "{price}: {level}, {n} % of the median of {count} similar ads": "{price}: {level}, {n} % des Medians von {count} ähnlichen Anzeigen",
- "probably another product, not used": "wohl ein anderer Artikel, nicht verwendet"
+ "probably another product, not used": "wohl ein anderer Artikel, nicht verwendet",
+ "Similar ads chosen by Claude": "Ähnliche Anzeigen von Claude auswählen lassen",
+ "Claude names the product and its variant (generation, size, model number), searches for it and picks among the ads found the ones that are the same – two calls per price check. Off, or without Claude: the rules by the title's words.": "Claude bestimmt Produkt und Variante (Generation, Größe, Modellnummer), sucht danach und wählt unter den gefundenen Anzeigen die gleichen aus – zwei Aufrufe je Preisprüfung. Aus, oder ohne Claude: die Regeln nach den Wörtern im Titel."
 }

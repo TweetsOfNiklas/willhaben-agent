@@ -36,6 +36,9 @@
         {% endfor %}
       </div>
       <small class="text-[12.5px] text-error" x-show="!ok('{{ g }}')" x-cloak>{{ _("Whole numbers from 1 to 300 %, each higher than the one before.") }}</small>
+      {% if g == 'similar' %}<input type="hidden" name="compare_seen" value="1">
+      <label class="flex items-start gap-2.5 text-[13px]" data-compare-claude><input type="checkbox" name="compare_claude" value="1" class="checkbox checkbox-sm mt-0.5"{% if v.compare_claude %} checked{% endif %}>
+        <span><span class="font-medium">{{ _("Similar ads chosen by Claude") }}</span><br><span class="text-muted">{{ _("Claude names the product and its variant (generation, size, model number), searches for it and picks among the ads found the ones that are the same – two calls per price check. Off, or without Claude: the rules by the title's words.") }}</span></span></label>{% endif %}
     </fieldset>
   {% endfor %}
     <div class="flex flex-wrap gap-2"><button class="btn btn-primary" :disabled="!ok('used') || !ok('new') || !ok('similar')">{{ _("Save") }}</button>
