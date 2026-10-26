@@ -58,6 +58,9 @@
   <div class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 6px" data-geizhals>
     {% if gh %}<a href="{{ gh.url }}" target="_blank" hx-boost="false" style="font-size: 14px">{{ gh.name }} ↗</a>
       <span class="sub">{{ _("New from {price} on Geizhals", price=gh.price_from|eur) }}{% if ad.price and gh.price_from %} · {{ _("this ad is {n} % of new", n=share_pct(ad.price, gh.price_from)) }}{% endif %}{% if gh.by == 'claude' %} · {{ _("found by Claude") }}{% endif %}</span>
+      {% if gh.parts %}<span class="sub" style="font-weight: 600" data-gh-parts>{{ _("New price as the sum of {n} parts", n=gh.parts|length) }}</span>
+      {% for x in gh.parts %}<a href="{{ x.url }}" target="_blank" hx-boost="false" style="display: flex; justify-content: space-between; gap: 10px; font-size: 13px"><span class="trunc">{{ x.name }}</span><span>{{ x.price_from|eur }}</span></a>{% endfor %}
+      {% if gh.missing %}<span class="sub">{{ _("Without a new price: {parts}", parts=gh.missing|join(", ")) }}</span>{% endif %}{% endif %}
     {% elif res.geizhals_none %}<strong style="font-size: 14px">{{ _("Not on Geizhals – Claude already searched") }}</strong><span class="sub">{{ res.geizhals_none }}{% if res.geizhals_none_at %} · {{ res.geizhals_none_at|ago }}{% endif %}</span>
     {% elif running.geizhals %}<span style="font-size: 14px; color: var(--link)">{{ _("Claude searches Geizhals …") }}</span>
     {% else %}<span class="sub">{{ _("No matching product found on Geizhals.") }}</span>

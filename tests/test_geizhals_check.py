@@ -312,3 +312,22 @@ async def test_a_product_geizhals_lists_without_a_price_is_a_final_answer(agent,
     assert await geizhals_check.check(agent, [h]) == 1
     assert _stored(h) == {"name": old.name, "url": old.url, "by": "claude", "checked": True}
     assert geizhals_check.backlog(agent, set()) == []                  # final: not asked again
+
+
+async def test_an_ad_of_several_products_gets_the_sum_of_theirs(agent, monkeypatch):
+    """A self-built PC: Claude names its parts, the app looks each up and stores the sum as the hit's new price."""
+    pc = _hit(agent, 7, "PC – i7 / 16GB RAM / GTX 1050 / SSD", {"name": "Acer Veriton S2722GT", "url": "https://geizhals.at/v.html",
+                                                                  "price_from": 1342.12})
+    prices = {"Intel Core i7-3770K": 120.0, "NVIDIA GeForce GTX 1050": 140.0, "Kingston 16GB DDR3": None}
+
+    async def match(q, raise_errors=False):
+        p = prices.get(q)
+        return {"name": q + " (Geizhals)", "url": f"https://geizhals.at/{len(q)}.html", "price_from": p} if p else None
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    fake = Script({"results": [{"nr": 1, "ok": False, "product": "", "queries": [], "parts": list(prices)}]})
+    monkeypatch.setattr(geizhals_check, "get_backend", lambda *a: fake)
+    assert await geizhals_check.check(agent, [pc]) == 1
+    gh = _stored(pc)
+    assert gh["price_from"] == 260.0 and gh["by"] == "claude" and gh["checked"] and gh["missing"] == ["Kingston 16GB DDR3"]
+    assert [p["query"] for p in gh["parts"]] == ["Intel Core i7-3770K", "NVIDIA GeForce GTX 1050"]
+    assert "parts:" in fake.calls[0]["system"]

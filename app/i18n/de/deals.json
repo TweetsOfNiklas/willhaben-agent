@@ -43,5 +43,9 @@
  "Comparable ads can't be fetched right now: the VPN is looking for a server for {site}.": "Vergleichsanzeigen gerade nicht abrufbar: das VPN sucht einen Server für {site}.",
  "{site}: no answer within {n} s – left out": "{site}: keine Antwort in {n} s – ausgelassen",
  "Not on Geizhals – Claude already searched": "Nicht auf Geizhals – Claude hat schon gesucht",
- "new from {price} on Geizhals": "neu ab {price} auf Geizhals"
+ "new from {price} on Geizhals": "neu ab {price} auf Geizhals",
+ "New price as the sum of {n} parts": "Neupreis als Summe aus {n} Teilen",
+ "Without a new price: {parts}": "Ohne Neupreis: {parts}",
+ "Geizhals has a new price for too few of the parts ({parts}).": "Geizhals kennt nur für zu wenige Teile einen Neupreis ({parts}).",
+ "Sum of {n} parts": "Summe aus {n} Teilen"
 }

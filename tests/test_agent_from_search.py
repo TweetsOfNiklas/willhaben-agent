@@ -232,7 +232,7 @@ def app_client(wh, monkeypatch):
 def test_create_from_the_product_search_page(app_client):
     sid = _search_row()
     page = app_client.get(f"/deals?search={sid}").text
-    assert "Create a search agent from this search" in page and f'action="/deals/search/{sid}/agent"' in page
+    assert "data-ps-agent" in page and f'action="/deals/search/{sid}/agent"' in page
     assert "3 searches per check" in page and 'name="interval_min" value="15"' in page
 
     r = app_client.post(f"/deals/search/{sid}/agent", data={"name": "", "interval_min": "", "screen_on": "on"},
@@ -248,7 +248,7 @@ def test_create_from_the_product_search_page(app_client):
     assert f"Searches from product search #{sid}" in page
 
     page = app_client.get(f"/deals?search={sid}").text
-    assert f"Search agent #{agents[0].id} exists" in page and "Create a search agent from this search" not in page
+    assert f"Search agent #{agents[0].id} exists" in page and 'name="interval_min"' not in page
 
     # the normal edit form keeps working for these agents
     r = app_client.post(f"/agents/{agents[0].id}/edit", data={"name": "Spüler", "interval_min": "20",
@@ -320,7 +320,7 @@ def test_one_agent_for_every_site_of_a_search(app_client):
         assert agent_platforms(a) == ["willhaben", "fake"] and a.interval_s == default_interval_s(n)   # per site
         assert platforms.multi() is True
         page = app_client.get(f"/deals?search={sid}").text
-        assert "exists" in page and "Create a search agent from this search" not in page
+        assert "exists" in page and 'name="interval_min"' not in page
         listing = app_client.get("/agents").text
         assert "willhaben · Fake" in listing
 

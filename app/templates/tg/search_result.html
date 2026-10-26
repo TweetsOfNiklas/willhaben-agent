@@ -27,6 +27,25 @@
       <form method="post" action="/deals/search/{{ ps.id }}/rerun" style="margin: 0"><button class="chip">{{ ui.icon('refresh', 13, 2) }} {{ _("Run again") }}</button></form></div>{% endif %}
   </div>
 
+  {# a search agent from this search: on top, where it is seen #}
+  {% if ps.status in ('done', 'more') and plan.queries %}
+    {% for a in ps_agents %}<a href="/tg/agents" class="sub" style="display: block; margin: 10px 4px 0; color: var(--link)">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% endfor %}
+    {% if ps_agent_sites and not live %}
+    <details class="sec" style="margin-top: 10px; padding: 10px 14px" data-keep="agent">
+    <summary style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--link); font-weight: 600">{{ ui.icon('target', 16) }} {{ _("Create a search agent from this search") }}</summary>
+    <form method="post" action="/deals/search/{{ ps.id }}/agent" style="padding: 10px 0 2px; display: flex; flex-direction: column; gap: 8px" data-ps-agent>
+      <label class="sub">{{ _("Name") }}<input class="field" name="name" value="{{ ps_agent_name }}" maxlength="120"></label>
+      <label class="sub">{{ _("Check every (minutes)") }}<input class="field" type="number" name="interval_min" value="{{ ps_agent_interval_min }}" min="1"></label>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px"><span>{{ _("Let Claude screen new hits") }}</span><input type="checkbox" name="screen_on" checked style="width: 22px; height: 22px"></label>
+      {% if ps_agent_sites|length > 1 %}<span style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px">{% for pc in ps_agent_sites %}<label><input type="checkbox" name="sites" value="{{ pc.id }}" checked> {{ pc.name }}</label>{% endfor %}</span>
+      {% else %}{% for pc in ps_agent_sites %}<input type="hidden" name="sites" value="{{ pc.id }}">{% endfor %}{% endif %}
+      <button class="chip primary">{{ _("Create search agent") }}</button>
+      <span class="sub">{{ _("The agent keeps running these {n} searches; new ads are filtered by budget and exclusions in code and, if enabled, checked by Claude before they notify you. Planning costs no further Claude call.", n=ps_agent_n) }}</span>
+    </form>
+    </details>
+    {% endif %}
+  {% endif %}
+
   {% if ps.status == 'asking' %}{% set qs = plan.questions or [] %}
   <div class="sh">{% if qs|length == 1 %}{{ _("Claude has one short question") }}{% else %}{{ _("Claude has {n} short questions", n=qs|length) }}{% endif %}</div>
   <form method="post" action="/deals/search/{{ ps.id }}/answers" class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 12px" data-ps-ask>
@@ -82,7 +101,7 @@
         {% if r.condition == 'worn' %}<span class="pill warn" style="align-self: flex-start">{{ _("worn") }}</span>{% elif r.condition == 'damaged' %}<span class="pill bad" style="align-self: flex-start">{{ _("damaged") }}</span>{% endif %}
         {% if r.reason %}<span class="sub">{{ r.reason }}</span>{% endif %}{% if r.photo_note %}<span class="sub">{{ r.photo_note }}</span>{% endif %}
         {% if p.pos is not none %}{{ m.pricebar(deal_bar(p, r.price_display or (r.price|eur))) }}{% endif %}
-        {% set off = ps_discount(r) %}{% if off is not none %}<a class="sub" href="{{ r.geizhals.url }}" target="_blank" hx-boost="false" data-new-price>{{ r.geizhals.name }} · {{ _("{n} % below the new price ({price}, Geizhals)", n=off, price=r.geizhals.price_from|eur) if off >= 0 else _("{n} % above the new price ({price}, Geizhals)", n=-off, price=r.geizhals.price_from|eur) }}</a>{% endif %}
+        {% set off = ps_discount(r) %}{% if off is not none %}<a class="sub" href="{{ r.geizhals.url }}" target="_blank" hx-boost="false" data-new-price>{{ _("Sum of {n} parts", n=r.geizhals.parts|length) if r.geizhals.parts else r.geizhals.name }} · {{ _("{n} % below the new price ({price}, Geizhals)", n=off, price=r.geizhals.price_from|eur) if off >= 0 else _("{n} % above the new price ({price}, Geizhals)", n=-off, price=r.geizhals.price_from|eur) }}</a>{% endif %}
         {% if r.median and r.price %}{% set diff = ((r.price - r.median) * 100 / r.median)|round|int %}<span class="sub">{% if diff < 0 %}{{ _("{n} % below the median", n=-diff) }}{% elif diff > 0 %}{{ _("{n} % above the median", n=diff) }}{% else %}{{ _("exactly the median") }}{% endif %} ({{ _("{n} comparable ads", n=r.comparables) }}){% if r.query %} · „{{ r.query }}“{% endif %}</span>{% endif %}
         {% set rf = ps_red_flags(r.get('red_flags')) %}{% if rf %}<span style="display: flex; flex-wrap: wrap; gap: 4px">{% for f in rf %}<span class="pill">{{ f }}</span>{% endfor %}</span>{% endif %}
         {% set where = [r.location, _("{km} km away", km=('%.1f'|format(km)).replace('.', ',') if km < 10 else km|round|int) if km is not none else none, _("dealer") if r.is_private == false else none]|select|list %}
@@ -145,21 +164,6 @@
   </details>
   {% endif %}
 
-  {% if ps.status in ('done', 'more') and plan.queries %}
-    {% for a in ps_agents %}<a href="/tg/agents" class="sub" style="display: block; margin: 10px 4px 0; color: var(--link)">{{ _("Search agent #{id} exists → open", id=a.id) }}</a>{% endfor %}
-    {% if ps_agent_sites and not live %}
-    <div class="sh">{{ _("Create a search agent from this search") }}</div>
-    <form method="post" action="/deals/search/{{ ps.id }}/agent" class="sec" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px" data-ps-agent>
-      <label class="sub">{{ _("Name") }}<input class="field" name="name" value="{{ ps_agent_name }}" maxlength="120"></label>
-      <label class="sub">{{ _("Check every (minutes)") }}<input class="field" type="number" name="interval_min" value="{{ ps_agent_interval_min }}" min="1"></label>
-      <label style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px"><span>{{ _("Let Claude screen new hits") }}</span><input type="checkbox" name="screen_on" checked style="width: 22px; height: 22px"></label>
-      {% if ps_agent_sites|length > 1 %}<span style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 15px">{% for pc in ps_agent_sites %}<label><input type="checkbox" name="sites" value="{{ pc.id }}" checked> {{ pc.name }}</label>{% endfor %}</span>
-      {% else %}{% for pc in ps_agent_sites %}<input type="hidden" name="sites" value="{{ pc.id }}">{% endfor %}{% endif %}
-      <button class="chip primary">{{ _("Create search agent") }}</button>
-      <span class="sub">{{ _("The agent keeps running these {n} searches; new ads are filtered by budget and exclusions in code and, if enabled, checked by Claude before they notify you. Planning costs no further Claude call.", n=ps_agent_n) }}</span>
-    </form>
-    {% endif %}
-  {% endif %}
 </div>
 </main>
 {% endblock %}

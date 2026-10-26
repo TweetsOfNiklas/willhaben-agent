@@ -167,17 +167,53 @@ def test_offers_above_the_limit_fold_away(lookups, monkeypatch):
 
 
 async def test_claudes_product_name_comes_first(lookups):
-    """The product Claude names while ranking is what Geizhals is asked; the title's name only without one."""
+    """The product Claude names while ranking is what Geizhals is asked; "" from Claude: a generic offer, no lookup
+    (the title's name would find some other product); the title's name only for an offer Claude did not rank."""
     cards = [_r("1", "8GB Raspberry Pi 5 + Kühlgehäuse +256gb Micro SD", 120.0, None),
              _r("2", "Bosch SMS46 Geschirrspüler", 300.0, None)]
     merged = ps.merge_ranking({"results": [{"nr": 1, "fit": 90, "reason": "", "red_flags": [], "product": " Raspberry Pi 5\n8GB "},
                                            {"nr": 2, "fit": 80, "reason": "", "red_flags": [], "product": ""}]}, cards)
     assert [r["product"] for r in merged] == ["Raspberry Pi 5 8GB", ""]
-    await ps.geizhals_prices(_row(merged), merged)
-    assert lookups == ["Raspberry Pi 5 8GB", "Bosch SMS46"] and [ps.discount(r) for r in merged] == [-50, 25]
+    unranked = _r("3", "Bosch SMS46 Geschirrspüler", 300.0, None)
+    rows = merged + [unranked]
+    await ps.geizhals_prices(_row(rows), rows)
+    assert lookups == ["Raspberry Pi 5 8GB", "Bosch SMS46"] and [ps.discount(r) for r in rows] == [-50, None, 25]
+    assert merged[1]["geizhals"] == {}
 
 
 def test_the_ranking_asks_for_the_product():
     from app.llm.prompts import SEARCH_RANK_SCHEMA, SEARCH_RANK_SYSTEM
     item = SEARCH_RANK_SCHEMA["properties"]["results"]["items"]
     assert "product" in item["required"] and "Geizhals" in SEARCH_RANK_SYSTEM
+
+
+async def test_the_sum_of_the_parts(monkeypatch):
+    found = {"cpu": 100.0, "gpu": 150.5, "ram": None, "ssd": 40.0}
+
+    async def match(q, raise_errors=False):
+        return {"name": q.upper(), "url": f"https://geizhals.at/{q}", "price_from": found[q]} if found.get(q) else None
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    res = await deals.parts_new_price(["cpu", "gpu", "ram", "ssd", " ", "cpu"])
+    assert res["price_from"] == 290.5 and res["missing"] == ["ram"] and res["name"] == "CPU + GPU + SSD"
+    assert await deals.parts_new_price(["ram", "x", "y", "cpu"]) is None          # fewer than half priced
+
+
+async def test_the_product_search_sums_an_offers_parts(lookups, monkeypatch):
+    async def parts(names):
+        lookups.append(tuple(names))
+        return {"name": " + ".join(names), "url": "https://geizhals.at/p", "price_from": 400.0,
+                "parts": [{"query": n, "name": n, "url": "u", "price_from": 200.0} for n in names], "missing": []}
+    monkeypatch.setattr(deals, "parts_new_price", parts)
+    cards = [_r("1", "PC i7 GTX", 100.0, None), _r("2", "noch ein PC", 300.0, None)]
+    merged = ps.merge_ranking({"results": [{"nr": i, "fit": 90 - i, "reason": "", "red_flags": [], "product": "",
+                                            "parts": ["Intel Core i7-3770K", "GTX 1050"]} for i in (1, 2)]}, cards)
+    await ps.geizhals_prices(_row(merged), merged)
+    assert lookups == [("Intel Core i7-3770K", "GTX 1050")]                   # the same parts: asked once
+    assert [ps.discount(r) for r in merged] == [75, 25] and len(merged[0]["geizhals"]["parts"]) == 2
+
+
+def test_a_new_price_the_comparables_contradict_is_no_discount():
+    r = _r("1", "Mini PC Ryzen 7", 450.0, 90, geizhals={"name": "HP EliteDesk", "url": "u", "price_from": 1383.45},
+           stats={"median": 85.0})
+    assert ps.discount(r) is None
+    assert ps.discount({**r, "stats": {"median": 900.0}}) == 67

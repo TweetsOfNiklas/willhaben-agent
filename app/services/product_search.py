@@ -703,26 +703,37 @@ def new_price(r: dict[str, Any]) -> float | None:
 
 
 def discount(r: dict[str, Any]) -> int | None:
-    """How far below the Geizhals new price the offer is, in % (negative: above it); None without both prices."""
+    """How far below the Geizhals new price the offer is, in % (negative: above it); None without both prices, and
+    when the comparable ads contradict the new price as the price check sees it (their median outside
+    deals.MISMATCH_LOW..MISMATCH_HIGH × new: most likely another product's price)."""
     price, new = r.get("price"), new_price(r)
     if not price or not new or price <= 0 or new <= 0:
+        return None
+    median = (r.get("stats") or {}).get("median")
+    if median and not deals.MISMATCH_LOW <= median / new <= deals.MISMATCH_HIGH:
         return None
     return round((1 - price / new) * 100)
 
 
-def _lookups(results: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
-    """The Geizhals lookups the offers not asked yet need, one per product name (whatever its case), best offers
-    first, at most MAX_NEW_PRICES. The name is the product Claude named while ranking, else the one the title gives
-    (deals.geizhals_query). What needs no request is filled in place: Claude's pick from an earlier price check of
-    the ad, {} without a product name (asked, none)."""
-    groups: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+def _lookups(results: list[dict[str, Any]]) -> list[tuple[str | tuple[str, ...], list[dict[str, Any]]]]:
+    """The Geizhals lookups the offers not asked yet need, one per product name (whatever its case) or set of parts,
+    best offers first, at most MAX_NEW_PRICES. The name is the product Claude named while ranking ("" there: a
+    generic offer, no lookup); the parts those of an offer made of several products (their prices are summed); only
+    an offer Claude did not rank takes the name its title gives (deals.geizhals_query), which for generic titles
+    ("Mini PC Ryzen 7") finds some other product. What needs no request is filled in place: Claude's pick from an
+    earlier price check of the ad, {} without a product name (asked, none)."""
+    groups: dict[Any, tuple[str | tuple[str, ...], list[dict[str, Any]]]] = {}
     for r in results:
         if "geizhals" in r:
             continue
         if gh := deals.stored_geizhals(str(r.get("ref") or r.get("ad_id"))):
             r["geizhals"] = {k: gh.get(k) for k in ("name", "url", "price_from", "by")}
             continue
-        q = r.get("product") or deals.geizhals_query(r.get("title"))
+        if len(r.get("parts") or []) >= 2:
+            key = tuple(r["parts"])
+            groups.setdefault(tuple(x.lower() for x in key), (key, []))[1].append(r)
+            continue
+        q = r.get("product") if "product" in r else deals.geizhals_query(r.get("title"))
         if q:
             groups.setdefault(q.lower(), (q, []))[1].append(r)
         else:
@@ -762,11 +773,11 @@ async def geizhals_prices(search_id: int, results: list[dict[str, Any]]) -> None
     for i, (q, rows) in enumerate(todo):
         _update(search_id, results=results, progress={**progress, "prices": {"done": i, "total": len(todo)}})
         try:
-            gh = await deals.geizhals_match(q, raise_errors=True)
+            gh = await (deals.parts_new_price(list(q)) if isinstance(q, tuple) else deals.geizhals_match(q, raise_errors=True))
         except geizhals.GeizhalsError:
             break
         for r in rows:
-            r["geizhals"] = {k: gh[k] for k in ("name", "url", "price_from")} if gh else {}
+            r["geizhals"] = {k: gh[k] for k in ("name", "url", "price_from", "parts", "missing") if k in gh} if gh else {}
     progress.pop("prices", None)
     _update(search_id, results=results, progress=progress)
 
@@ -857,7 +868,8 @@ def merge_ranking(data: dict[str, Any], cards: list[dict[str, Any]], top_n: int 
         fit = max(0, min(100, int(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else None
         out.append({**cards[nr - 1], "fit": fit, "reason": str(r.get("reason") or "").strip()[:500],
                     "red_flags": red_flags(_texts(r.get("red_flags"), limit=5, chars=80)),
-                    "product": _one_line(str(r.get("product") or ""))[:80]})
+                    "product": _one_line(str(r.get("product") or ""))[:80],
+                    "parts": [_one_line(x)[:80] for x in r.get("parts") or [] if isinstance(x, str) and x.strip()][:deals.MAX_PARTS]})
     out.sort(key=lambda c: -(c["fit"] if c["fit"] is not None else -1))
     return out[:top_n]
 

@@ -48,6 +48,8 @@ RULES = """\
   Neuprodukt mit festem Modell ist (Konvolut, Eigenbau, Sammlerstück, nur Teile). Bei ok true "".
 - queries: wenn product nicht leer ist, bis zu drei kurze Geizhals-Suchen (2 bis 5 Wörter: Hersteller, Modellname,
   Modellnummer oder Bestellnummer), die genaueste zuerst, Tippfehler der Anzeige richtig geschrieben; sonst leer.
+""" + deals.PARTS_RULE + """\
+  Bei parts sind product und queries leer.
 """
 
 CHECK_SYSTEM = """\
@@ -78,8 +80,9 @@ CHECK_SCHEMA: dict[str, Any] = {
     "properties": {"results": {"type": "array", "items": {
         "type": "object",
         "properties": {"nr": {"type": "integer"}, "ok": {"type": "boolean"}, "product": {"type": "string"},
-                       "queries": {"type": "array", "items": {"type": "string"}, "maxItems": deals.GH_FIND_SEARCHES}},
-        "required": ["nr", "ok", "product", "queries"],
+                       "queries": {"type": "array", "items": {"type": "string"}, "maxItems": deals.GH_FIND_SEARCHES},
+                       "parts": {"type": "array", "items": {"type": "string"}, "maxItems": deals.MAX_PARTS}},
+        "required": ["nr", "ok", "product", "queries", "parts"],
         "additionalProperties": False}}},
     "required": ["results"],
     "additionalProperties": False,
@@ -205,7 +208,8 @@ async def check(agent: SearchAgent, hits: list[Hit], with_backlog: bool = True) 
 
 
 async def settle(agent: SearchAgent, hits: list[Hit], verdicts: dict[int, dict[str, Any]]) -> int:
-    """Claude's check of `hits` ({nr: {ok, product, queries}}, nr counting from 1; from the screening also pick and
+    """Claude's check of `hits` ({nr: {ok, product, queries, parts}}, nr counting from 1; parts: an ad of several
+    products, priced as the sum of theirs (deals.parts_new_price); from the screening also pick and
     candidates: the lookup's results Claude chose from): keeps the right products, takes the picked ones, looks for
     the others (Geizhals searches, one more Claude call to pick: only when none of the lookup's results was it) and
     stores the result on the hits and the objects passed in. Returns how many got a final answer."""
@@ -225,6 +229,17 @@ async def settle(agent: SearchAgent, hits: list[Hit], verdicts: dict[int, dict[s
             c = cands[pick - 1]
             result[nr] = {"name": c["name"], "url": c["url"], **({"price_from": c["price"]} if c.get("price") else {}),
                           "by": "claude", "checked": True}
+            continue
+        parts = [x for x in v.get("parts") or [] if isinstance(x, str) and x.strip()]
+        if len(parts) >= 2:                             # several products: the sum of their new prices
+            try:
+                res = await deals.parts_new_price(parts)
+            except geizhals.GeizhalsError as e:          # blocked or down: unchecked, a later check asks again
+                log.info("Geizhals lookup of the parts failed: %s", e)
+                if auto:
+                    result[nr] = {}
+                continue
+            result[nr] = {**res, "by": "claude", "checked": True} if res else {"checked": True}
             continue
         product = (v.get("product") or "").strip()
         queries = list(dict.fromkeys(q.strip() for q in v.get("queries") or [] if q and q.strip()))

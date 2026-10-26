@@ -1775,3 +1775,19 @@ async def test_a_hits_own_geizhals_product_is_used(monkeypatch):
     assert res["geizhals"]["price_from"] == 528.41 and res["position"]["basis"] == "geizhals"
     assert res["position"]["pct"] == 54
     assert (await deals.analyze(ad, known_geizhals={"name": "x"}))["geizhals"]["price_from"] == 528.41   # kept
+
+
+async def test_claude_names_the_parts_of_a_self_built_pc(wh, no_auto_gh, monkeypatch):
+    """An ad of several products: Claude names the parts, the price check's new price is the sum of theirs."""
+    async def match(q, raise_errors=False):
+        return {"name": q, "url": f"https://geizhals.at/{len(q)}", "price_from": 100.0}
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    fake = ScriptedClaude({"product": "", "queries": [], "parts": ["Intel Core i7-3770K", "NVIDIA GeForce GTX 1050"]})
+    monkeypatch.setattr(deals, "get_backend", lambda *a: fake)
+    res = await deals.claude_geizhals(_ad(250, heading="PC – i7 / 16GB RAM / GTX 1050 / SSD"))
+    assert res["match"]["price_from"] == 200.0 and res["match"]["by"] == "claude" and len(res["match"]["parts"]) == 2
+    assert len(fake.calls) == 1 and "parts" in fake.calls[0]["schema"]["required"]
+    from app.main import templates
+    html = templates.get_template("_deal.html").render(res={"ad": {"price": 250}, "geizhals": res["match"],
+                                                           "position": {"pos": None}}, ad=_ad(250))
+    assert "data-gh-parts" in html and "Sum of 2 parts" in html

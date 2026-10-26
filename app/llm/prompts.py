@@ -642,8 +642,9 @@ SCREEN_GH_SCHEMA: dict[str, Any] = json.loads(json.dumps(SCREEN_SCHEMA))
 _gh_item = SCREEN_GH_SCHEMA["properties"]["results"]["items"]
 _gh_item["properties"].update({"geizhals_ok": {"type": "boolean"}, "geizhals_pick": {"type": "integer"},
                                "product": {"type": "string"},
+                               "parts": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                                "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 3}})
-_gh_item["required"] += ["geizhals_ok", "geizhals_pick", "product", "queries"]
+_gh_item["required"] += ["geizhals_ok", "geizhals_pick", "product", "queries", "parts"]
 
 
 def screen_prompt(*, agent_name: str, brief: str, hits: list[dict[str, Any]], stats: dict[str, Any] | None,
@@ -823,6 +824,11 @@ die besten Angebote für ihren Bedarf aus.
   preisbestimmende Variante (z. B. "Raspberry Pi 5 8GB", "Apple HomePod mini", "Samsung 980 PRO 1TB"), ohne
   Zubehör, Zustand oder Füllwörter. "" bei Konvoluten, Bastlerware ohne erkennbares Modell oder allgemeinen Artikeln.
   Die App sucht damit den Neupreis.
+- parts: besteht die Anzeige aus mehreren eigenständigen Produkten mit eigenem Neupreis (selbst zusammengestellter
+  PC: Prozessor, Grafikkarte, Arbeitsspeicher, SSD …; PC mit Monitor; Konsole mit Spielen; Set aus mehreren Geräten),
+  je Teil eine kurze Geizhals-Suche (Hersteller und Modell, z. B. "Intel Core i7-3770K", "NVIDIA GeForce GTX 1050"),
+  die teuersten zuerst, höchstens 8, Kleinteile ohne Modell weglassen; product ist dann "". Sonst leer – auch bei
+  mehreren Stück desselben Artikels und bei Beigaben zu einem Hauptgerät. Die App zählt die Neupreise zusammen.
 - note: ein kurzer deutscher Satz zum Gesamtbild dieses Teils (z. B. "Unter 300 € gibt es kaum gute Angebote") oder "".
 - Die Preis-Einordnung (billig … teuer) vergleicht jede Anzeige mit den anderen Ergebnissen derselben Suche; sie
   ist ein Hinweis, kein Urteil. Nutze auch dein Wissen über Neu- und Gebrauchtpreise.
@@ -845,8 +851,9 @@ SEARCH_RANK_SCHEMA: dict[str, Any] = {
                     "reason": {"type": "string"},
                     "red_flags": {"type": "array", "items": {"type": "string"}},
                     "product": {"type": "string"},
+                    "parts": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                 },
-                "required": ["nr", "fit", "reason", "red_flags", "product"],
+                "required": ["nr", "fit", "reason", "red_flags", "product", "parts"],
                 "additionalProperties": False,
             },
         },

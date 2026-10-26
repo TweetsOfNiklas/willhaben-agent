@@ -266,7 +266,7 @@ async def screen(agent_id: int, hits: list[Hit]) -> int:
         nrs = [nr for nr in check if nr in by_nr]
         await geizhals_check.settle(agent, [hits[nr - 1] for nr in nrs],
                                     {i: {"ok": by_nr[nr].get("geizhals_ok"), "product": by_nr[nr].get("product"),
-                                         "queries": by_nr[nr].get("queries"), "pick": by_nr[nr].get("geizhals_pick"),
+                                         "queries": by_nr[nr].get("queries"), "parts": by_nr[nr].get("parts"), "pick": by_nr[nr].get("geizhals_pick"),
                                          "candidates": cands.get(nr) or []} for i, nr in enumerate(nrs, 1)})
     for h in hits:          # callers keep using their objects
         with session() as db:

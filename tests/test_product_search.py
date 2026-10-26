@@ -1155,7 +1155,7 @@ def test_load_more_on_the_page(app_client, monkeypatch):
     assert f'action="/deals/search/{row.id}/more"' in frag and "2 more offers found" in frag
     assert "3 Claude calls" in frag                                            # plan + ranking + one more ranking
     assert "Search warning." in frag and "Loading more offers failed: x" in frag    # both shown, apart
-    assert "Create a search agent from this search" in frag and 'name="interval_min"' in frag
+    assert "data-ps-agent" in frag and 'name="interval_min"' in frag
     r = app_client.post(f"/deals/search/{row.id}/more", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == f"/deals?search={row.id}#ps-more" and asked == [row.id]
     ps._update(row.id, status="more", pool=rows[1:])
