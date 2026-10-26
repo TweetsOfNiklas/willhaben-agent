@@ -176,6 +176,26 @@ async def hit_ad_deal_platform(request: Request, platform: str, ad_id: str, hit:
     return _templates().TemplateResponse(request, "_deal.html", {"res": res, "error": error, "compact": True, "h": h})
 
 
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+@router.get("/hits/ad/{platform}/{ad_id}/seller", response_class=HTMLResponse)
+async def hit_ad_seller(request: Request, platform: str, ad_id: str, ad: str = "", user: str = ""):
+    """The seller line of the ad viewer with what their willhaben profile adds (PayLivery ratings, reply time), read
+    after the ad opened (cached a day). The sign-up date comes with the ad; on failure the line stays as it was."""
+    from app.willhaben.public import WillhabenError, get_public
+    if platform != "willhaben" or not _UUID_RE.fullmatch(ad) or not _UUID_RE.fullmatch(user):
+        raise HTTPException(400)
+    try:
+        prof = await get_public().member_profile(ad, user)
+    except (WillhabenError, PlatformError) as e:
+        log.info("seller profile for %s not loaded: %s", ad_id, e)
+        return HTMLResponse("", status_code=204)               # htmx keeps the line
+    return _templates().TemplateResponse(request, "_seller_trust.html", {
+        "since": prof["since"], "ratings": prof["ratings"], "reply": prof["reply_time"], "platform": "willhaben",
+        "lazy": None})
+
+
 @router.get("/hits/ad/{platform}/{ad_id}", response_class=HTMLResponse)
 async def hit_ad_detail_platform(request: Request, platform: str, ad_id: str, hit: int | None = None):
     """Ad detail of any platform as a fragment for the in-dashboard viewer (/hits/ad/<id> = willhaben)."""

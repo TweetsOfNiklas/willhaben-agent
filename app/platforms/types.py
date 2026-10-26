@@ -109,6 +109,9 @@ class AdDetail:
     seller_name: str | None = None
     seller_login_id: str | None = None
     seller_uuid: str | None = None
+    ad_uuid: str | None = None         # willhaben's internal ad uuid: with seller_uuid, the seller's profile page
+    seller_since: datetime | None = None   # when the seller's account was created (willhaben registerDate, eBay)
+    seller_ratings: int | None = None  # ratings the seller received (willhaben PayLivery, Vinted, eBay); None = unknown
     is_private: bool | None = None
     chat_enabled: bool | None = None
     category_path: list[str] = field(default_factory=list)

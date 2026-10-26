@@ -527,6 +527,16 @@ def _when_iso(raw: Any) -> datetime | None:
         return None
 
 
+PROFILE_REFRESH = timedelta(days=7)
+
+
+def partner_trust(conv: Conversation) -> dict[str, Any]:
+    """{flags, facts} of the other person's account (services/trust), as their profile said."""
+    from app.services import trust
+    return {"flags": trust.flags(conv.partner_since, conv.partner_ratings, conv.platform),
+            "facts": trust.facts(conv.partner_since, conv.partner_ratings, conv.partner_reply_time)}
+
+
 def presence_of(conv: Conversation) -> dict[str, Any] | None:
     """{online: bool, last_seen: datetime | None} of the other person, as their site last said; None when unknown."""
     if conv.platform == "vinted":
@@ -556,17 +566,22 @@ async def ask_presence(conv: Conversation) -> None:
             _keep_place(conv, m)
     elif conv.partner_uuid:
         await get_session().track_presence(conv.partner_uuid)
-        if conv.ad_uuid and not conv.partner_place_tried:       # their place: once, from their public profile
+        # their place and account (age, PayLivery ratings): from their public profile, again after a week
+        stale = conv.partner_trust_at is None or utcnow() - _aware(conv.partner_trust_at) > PROFILE_REFRESH
+        if conv.ad_uuid and stale:
             from app.willhaben.public import WillhabenError, get_public
             try:
-                place = await get_public().member_place(conv.ad_uuid, conv.partner_uuid)
+                prof = await get_public().member_profile(conv.ad_uuid, conv.partner_uuid)
             except (WillhabenError, Exception) as e:  # noqa: BLE001 - a nicety
                 log.info("willhaben profile of %s not loaded: %s", conv.id, e)
                 return
             with session() as db:
                 row = db.get(Conversation, conv.id)
                 if row is not None:
-                    row.partner_place, row.partner_place_tried = place, True
+                    row.partner_place = prof["place"] or row.partner_place
+                    row.partner_place_tried = True
+                    row.partner_since, row.partner_ratings = prof["since"], prof["ratings"]
+                    row.partner_reply_time, row.partner_trust_at = prof["reply_time"], utcnow()
                     db.add(row)
                     db.commit()
 
@@ -734,7 +749,8 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
             buys = [r.model_dump(mode="json") for r in db.exec(select(Purchase).where(Purchase.conversation_id == conv.id))]
             out["messages"] = fp(list(msgs))
-            out["presence"] = fp(presence_of(conv), partner_place(conv))
+            out["presence"] = fp(presence_of(conv), partner_place(conv), conv.partner_since, conv.partner_ratings,
+                                 conv.partner_reply_time)
             out["composer"] = fp([list(d) for d in drafts], conv.drafting, conv.draft_error)
             out["context"] = fp(conv.ad_context, conv.meetup, conv.paylivery, conv.hidden_at,
                                 ad and [ad.sale_status, ad.sale_conversation_id, ad.status, stock.numbers(ad),

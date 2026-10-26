@@ -1,0 +1,8 @@
+{# The seller's account in the ad viewer (services/trust): "member since 2012 · 9 ratings", warnings for a young account
+   or one without ratings. `lazy`: the URL that reads the rest from their profile (willhaben: PayLivery ratings) and
+   swaps this line; `since`, `ratings`, `reply`, `platform`. #}
+{% import "_ui.html" as ui %}{% set tr = seller_trust(since, ratings, platform, reply) %}
+<span class="inline-flex flex-wrap items-center gap-x-2 gap-y-1" data-seller-trust{% if lazy %} hx-get="{{ lazy }}" hx-trigger="load delay:400ms" hx-swap="outerHTML"{% endif %}>
+  {%- if tr.facts %}<span>{{ tr.facts|join(' · ') }}</span>{% endif %}
+  {%- for f in tr.flags %}{{ ui.pill(f.label, 'bad' if f.severity == 'high' else 'warn', true, '', _('Their account on the site – a young account or one without ratings is worth a second look')) }}{% endfor %}
+</span>

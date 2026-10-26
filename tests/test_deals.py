@@ -1933,3 +1933,10 @@ async def test_price_the_components_of_a_mini_pc(wh, no_auto_gh, monkeypatch):
     assert res["parts_none"] == "Ein Einzelgerät ohne Komponenten." and res["geizhals"] is None
     html = _render_deal(res, lang="en")
     assert "data-gh-parts-ask" in html and "Ein Einzelgerät ohne Komponenten." in html and '"parts": "1"' in html
+
+
+def test_viewer_shows_the_sellers_account(app_client):
+    """The seller's sign-up date comes with the ad; the PayLivery ratings are read from their profile next."""
+    page = app_client.get(f"/hits/ad/{AD_ID}").text
+    assert "data-seller-trust" in page and "member since 20" in page
+    assert f"/hits/ad/willhaben/{AD_ID}/seller?ad=" in page

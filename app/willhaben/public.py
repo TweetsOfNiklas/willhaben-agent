@@ -5,6 +5,8 @@ Every request goes through one shared RateLimiter so all jobs together stay poli
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from typing import Any
 
 import httpx
 
@@ -119,11 +121,35 @@ class PublicClient(httpclient.HttpPlatformClient):
     async def member_place(self, ad_uuid: str, user_uuid: str) -> str | None:
         """Where someone is, from their public profile page (the one the chat links, /iad/advert/<ad uuid>/seller/
         <user uuid>/profile): its location, else the place most of their ads are in; None when it says nothing."""
+        return (await self.member_profile(ad_uuid, user_uuid))["place"]
+
+    async def member_profile(self, ad_uuid: str, user_uuid: str) -> dict[str, Any]:
+        """Someone's public profile page (cached a day): parse_member_profile."""
         r = await self._get(f"https://www.willhaben.at/iad/advert/{ad_uuid}/seller/{user_uuid}/profile", json_api=False,
                             cache_s=86400, kind="detail")
         if r.status_code != 200:
             raise WillhabenError(t("Profile: HTTP {status}", status=r.status_code))
-        return parse_member_place(extract_next_data(r.text) or {})
+        return parse_member_profile(extract_next_data(r.text) or {})
+
+
+def parse_member_profile(nd: dict) -> dict[str, Any]:
+    """{place, since: when the account was created, ratings: PayLivery ratings received, score: their overall score
+    (scale not documented: 1 seen with 9 ratings), reply_time: "Antwortet meistens innerhalb von 10 Std."} of a
+    profile page (pageProps.sellerProfileWrapper.sellerProfile, pageProps.trustSignals); None where it says nothing."""
+    page = (nd.get("props") or {}).get("pageProps") or {}
+    profile = ((page.get("sellerProfileWrapper") or {}).get("sellerProfile")) or {}
+    trust = page.get("trustSignals") or {}
+    feedback = ((trust.get("reputation") or {}).get("feedback")) or {}
+    count = feedback.get("receivedCount")
+    score = feedback.get("overallScore")
+    since = profile.get("registerDate")
+    return {"place": parse_member_place(nd),
+            "since": datetime.fromisoformat(since) if isinstance(since, str) and since else None,
+            # a profile without any rating shows trust signals without a count: none received (no trust signals at all:
+            # the page changed, unknown)
+            "ratings": count if isinstance(count, int) else (0 if isinstance(page.get("trustSignals"), dict) else None),
+            "score": float(score) if isinstance(score, (int, float)) else None,
+            "reply_time": trust.get("replyTime") if isinstance(trust.get("replyTime"), str) else None}
 
 
 def parse_member_place(nd: dict) -> str | None:

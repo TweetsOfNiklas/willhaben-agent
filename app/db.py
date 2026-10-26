@@ -145,6 +145,11 @@ class Conversation(SQLModel, table=True):
     ad_uuid: str | None = None          # willhaben's internal ad uuid (ad_info.uuid): with partner_uuid, their profile page
     partner_place: str | None = None    # where they are, from their public profile ("8530 Deutschlandsberg")
     partner_place_tried: bool | None = None   # their profile was read once (a place or none)
+    # their account, from the same profile page (services/trust): created when, ratings received, reply time
+    partner_since: datetime | None = None
+    partner_ratings: int | None = None
+    partner_reply_time: str | None = None
+    partner_trust_at: datetime | None = None  # when the profile was read for these (read again after a week)
 
 
 class Message(SQLModel, table=True):

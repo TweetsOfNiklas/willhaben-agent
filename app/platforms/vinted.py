@@ -227,6 +227,7 @@ def parse_item(text: str, ad_id: str, host: str = HOST, now: datetime | None = N
                     status=_item_status(plugins, text), published_at=uploaded,
                     first_published_at=uploaded, end_date=None, url=f"https://{host}/items/{ad_id}", images=photos,
                     seller_name=one_line(seller.get("name")),
+                    seller_ratings=seller["feedback_count"] if isinstance(seller.get("feedback_count"), int) else None,
                     is_private=(not business) if isinstance(business, bool) else None, platform="vinted",
                     item_condition=item_condition, item_condition_label=item_condition_label,
                     shipping_price=shipping_price, shipping=shipping)

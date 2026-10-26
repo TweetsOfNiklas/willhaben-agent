@@ -240,6 +240,8 @@ def parse_detail(page_props: dict[str, Any]) -> AdDetail | None:
         seller_name=seller.get("name"),
         seller_login_id=str(ad.get("loginId")) if ad.get("loginId") is not None else None,
         seller_uuid=ad.get("loginUUid"),
+        ad_uuid=ad.get("uuid"),
+        seller_since=_iso(seller.get("registerDate")),
         is_private=None if private is None else private == "1",
         chat_enabled=ad.get("chatEnabled"),
         category_path=[c for c in crumbs if c],

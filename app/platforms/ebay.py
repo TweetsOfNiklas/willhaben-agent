@@ -409,9 +409,30 @@ def parse_item_page(page: str, ad_id: str, description: str | None = None, now: 
                     status="active" if status == "ACTIVE" else "expired", published_at=start, first_published_at=start,
                     end_date=None, url=f"{WEB}/itm/{ad_id}", images=_photos(product, root), location=place, place=place,
                     seller_name=_text(root.find("div", "x-sellercard-atf__about-seller-item--seller-name")),
+                    seller_since=_member_since(page), seller_ratings=_rating_count(page),
                     is_private=_SELLER_TYPES.get(seller_type) if seller_type else None,
                     category_path=[p for p in path if p], platform="ebay", item_condition=item_condition,
                     item_condition_label=item_condition_label, shipping_price=ship_price, shipping=ship_kind)
+
+
+_MEMBER_SINCE = re.compile(r"(?:Mitglied seit|Member since):?\s*([A-Za-zäÄ]{3,})\.?\s+(\d{4})")
+_MONTHS = {m: i for i, ms in enumerate((("jan",), ("feb",), ("mär", "mar", "mae"), ("apr",), ("mai", "may"), ("jun",),
+                                        ("jul",), ("aug",), ("sep",), ("okt", "oct"), ("nov",), ("dez", "dec")), 1)
+           for m in ms}
+# the seller card: the name, then the rating count in brackets ("(0)", "(1.234)")
+_RATING_COUNT = re.compile(r'data-testid=x-sellercard-atf__about-seller>(?:<!--[^>]*-->)*<span[^>]*>\((\d[\d.,]*)\)</span>')
+
+
+def _member_since(page: str) -> datetime | None:
+    """ "Mitglied seit Jul 2025" in the seller's box: the first of that month."""
+    m = _MEMBER_SINCE.search(page)
+    month = _MONTHS.get(m.group(1)[:3].lower()) if m else None
+    return datetime(int(m.group(2)), month, 1, tzinfo=timezone.utc) if month else None
+
+
+def _rating_count(page: str) -> int | None:
+    m = _RATING_COUNT.search(page)
+    return int(re.sub(r"[.,]", "", m.group(1))) if m else None
 
 
 # ------------------------------------------------------------------ the client
