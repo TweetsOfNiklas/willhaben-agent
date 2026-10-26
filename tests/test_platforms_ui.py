@@ -67,7 +67,7 @@ def test_viewer_with_details_from_the_site(client, fake):
     frag = client.get(f"/hits/ad/fake/77?hit={h.id}").text
     assert "Beschreibung lang" in frag and "Fake ↗" in frag and "https://fake.example/ad/77" in frag
     assert "/purchases/new/" not in frag                                      # buying is willhaben's
-    assert 'href="/deals/ad/fake/77?hit=' in frag and 'hx-get="/hits/ad/fake/77/deal?hit=' in frag
+    assert 'href="/deals/ad/fake/77?hit=' in frag and 'hx-get="/hits/ad/fake/77/deal?quick=1&hit=' in frag
     assert fake.detail_calls == ["77"] and _hit("fake").state == "seen"
     assert client.get("/hits/ad/nope/77").status_code == 404
 
