@@ -176,5 +176,9 @@
  "Chat deleted on willhaben and here": "Chat auf willhaben und hier gelöscht",
  "{n} chats deleted on willhaben and here": "{n} Chats auf willhaben und hier gelöscht",
  "Vinted chats can only be removed here so far ({n}) – on Vinted they stay": "Vinted-Chats lassen sich bisher nur hier entfernen ({n}) – auf Vinted bleiben sie",
- "willhaben did not delete the chat (HTTP {status})": "willhaben hat den Chat nicht gelöscht (HTTP {status})"
+ "willhaben did not delete the chat (HTTP {status})": "willhaben hat den Chat nicht gelöscht (HTTP {status})",
+ "Interrupted – it is unclear whether it went out: reload the history before sending again": "Unterbrochen – unklar, ob sie rausging: lade den Verlauf neu, bevor du nochmal sendest",
+ "Draft interrupted": "Entwurf abgebrochen",
+ "Goes out right away together with the PayLivery step – neither can be taken back.": "Geht sofort zusammen mit dem PayLivery-Schritt raus – beides lässt sich nicht zurücknehmen.",
+ "Answer sent, but the PayLivery step did not start: {error}": "Antwort gesendet, aber der PayLivery-Schritt ist nicht gestartet: {error}"
 }

@@ -785,3 +785,17 @@ def test_price_changes_from_the_panel_and_decimal_points_are_read_right(monkeypa
         assert acct.put_body["price"] == 12.5                        # the edit page reads a decimal point too
         page = c.get("/myads/1000000001/edit").text                  # and renders without %g surprises
         assert ('value="12.5"' in page or 'value="40"' in page) and "e+0" not in page
+
+
+async def test_deleting_a_renewed_ads_old_copy_keeps_its_row(account):
+    """The old copy of a renewed ad: deleted on willhaben, but its row stays (hidden) – chats and sales chain through it."""
+    await my_ads.import_from_account()
+    with session() as db:
+        row = db.get(MyAd, "1000000001")
+        row.replaced_by = "1000000099"
+        db.add(row)
+        db.commit()
+    await my_ads.delete("1000000001")
+    with session() as db:
+        row = db.get(MyAd, "1000000001")
+        assert row is not None and row.status == "deleted" and row.hidden and row.replaced_by == "1000000099"

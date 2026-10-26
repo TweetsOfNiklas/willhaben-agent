@@ -1068,11 +1068,14 @@ async def _send_job(draft_id: int) -> str:
         return t("Not sent: the draft changed meanwhile")
     try:
         await send_draft(draft_id, d.text)
-    except Exception as e:      # back to an open draft with the reason; the text stays as it was edited
+    except BaseException as e:  # back to an open draft with the reason; the text stays as it was edited
+        cut = not isinstance(e, Exception)      # the job's time ran out (cancelled): it may have gone out
         with session() as db:
             row = db.get(Draft, draft_id)
             if row and row.status == "sending":
-                row.status, row.error = "draft", str(e)
+                row.status = "draft"
+                row.error = t("Interrupted – it is unclear whether it went out: reload the history before sending again") \
+                    if cut else str(e)
                 db.add(row)
                 db.commit()
         raise
@@ -1116,6 +1119,9 @@ def enqueue_draft(conversation_id: str, hint: str | None = None) -> bool:
             await draft_reply(conversation_id, hint)
         except Exception as e:               # the reason shows in the chat, next to "Prepare answer"
             _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
+            raise
+        except BaseException:                # the job's time ran out: no "Claude is writing…" forever
+            _set_drafting(conversation_id, False, t("Draft interrupted"))
             raise
         _set_drafting(conversation_id, False)
         return t("Draft ready")
@@ -1630,6 +1636,11 @@ async def revise(draft_id: int, instruction: str, *, chosen: bool = False) -> Dr
     else:
         hint = f"Mein bisheriger Entwurf war: „{old.text}“. Überarbeite ihn so: {instruction}"
     new = await draft_reply(conv.id, hint=hint, auto=bool(old.auto))
+    with session() as db:                  # Claude took its time: the old draft may have been sent meanwhile
+        still_open = (db.get(Draft, draft_id) or Draft(conversation_id="", text="", status="gone")).status == "draft"
+    if not still_open:
+        discard_draft(new.id)              # answered already: no second answer on offer
+        return None
     discard_draft(draft_id)
     with session() as db:
         row = db.get(Draft, new.id)
@@ -1671,6 +1682,9 @@ def enqueue_revise(draft_id: int, instruction: str) -> bool:
             await revise(draft_id, instruction, chosen=True)
         except Exception as e:               # the reason shows in the chat, next to the draft
             _set_drafting(conversation_id, False, t("Draft failed: {error}", error=e))
+            raise
+        except BaseException:
+            _set_drafting(conversation_id, False, t("Draft interrupted"))
             raise
         _set_drafting(conversation_id, False)
         return t("Draft ready")

@@ -1853,8 +1853,8 @@ def _spawn(coro) -> None:
     task.add_done_callback(_tasks.discard)
 
 
-async def start_action(conversation_id: str, action: str, amount_text: str = "") -> str:
-    """The chat page's button: local actions run now, browser actions start in the background."""
+def validate_action(conversation_id: str, action: str, amount_text: str = "") -> tuple[Conversation, float | None]:
+    """The checks of start_action without starting anything: (chat, amount), or PayLiveryError with the reason."""
     conv = _conv(conversation_id)
     if conv is None:
         raise PayLiveryError(t("Conversation not found"))
@@ -1865,6 +1865,12 @@ async def start_action(conversation_id: str, action: str, amount_text: str = "")
     else:
         amount = None
     check_action(conv, action, amount)
+    return conv, amount
+
+
+async def start_action(conversation_id: str, action: str, amount_text: str = "") -> str:
+    """The chat page's button: local actions run now, browser actions start in the background."""
+    conv, amount = validate_action(conversation_id, action, amount_text)
     if action == "mark_shipped":
         return mark_shipped(conversation_id)
     _claim(conversation_id, action)

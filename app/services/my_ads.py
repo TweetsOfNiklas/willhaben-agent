@@ -52,11 +52,19 @@ def add(ref: str, auto_renew: bool = False) -> MyAd:
 
 
 def remove(ad_id: str) -> None:
+    """The ad is gone from willhaben: its row goes too – except the old copy of a renewed ad, which stays (deleted,
+    hidden): its buyers' chats still point at it and the renewals are chained through it (stock, minimum price,
+    automatic answers, the other buyers' notices)."""
     with session() as db:
         row = db.get(MyAd, ad_id)
-        if row:
+        if row is None:
+            return
+        if row.replaced_by:
+            row.status, row.hidden = "deleted", True
+            db.add(row)
+        else:
             db.delete(row)
-            db.commit()
+        db.commit()
 
 
 def _unlink_drafts(ad_id: str) -> None:
@@ -910,7 +918,7 @@ async def check_all(job: jobs.Job | None = None) -> dict[str, int]:
                 db.add(r)
                 db.commit()
             counts["warned"] += 1
-        if row.status == "expired" and row.auto_renew:
+        if row.status == "expired" and row.auto_renew and not row.pending_action:   # a queued delete/sold wins
             await _reactivate(row)
             counts["reactivation"] += 1
     with session() as db:

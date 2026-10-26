@@ -1801,13 +1801,20 @@ async def draft_send(draft_id: int, text: str = Form(...), paylivery_step: str =
     if d is None:
         raise HTTPException(404)
     step = paylivery_step if paylivery_step and (d.paylivery or {}).get("action") == paylivery_step else ""
-    if step:              # the step first: a refusal (amount, order maximum) keeps the answer unsent as well
+    pl = paylivery_routes.paylivery
+    if step:              # checked first: a refusal (amount, order maximum) keeps the answer unsent as well
         try:
-            await paylivery_routes.paylivery.start_action(d.conversation_id, step, pl_amount)
-        except paylivery_routes.paylivery.PayLiveryError as e:
+            pl.validate_action(d.conversation_id, step, pl_amount)
+        except pl.PayLiveryError as e:
             return back(f"/chats/{d.conversation_id}?msg={quote(str(e), safe='')}")
-    if not chats.enqueue_send(draft_id, text, now=now == "1"):
+    # with a PayLivery step the answer goes out at once: the step cannot be taken back, so neither can the answer
+    if not chats.enqueue_send(draft_id, text, now=now == "1" or bool(step)):
         return back(f"/chats/{d.conversation_id}?msg={quote(t('Not sent: the draft is not open any more or empty'), safe='')}")
+    if step:
+        try:
+            await pl.start_action(d.conversation_id, step, pl_amount)
+        except pl.PayLiveryError as e:
+            return back(f"/chats/{d.conversation_id}?msg={quote(t('Answer sent, but the PayLivery step did not start: {error}', error=e), safe='')}")
     return back(f"/chats/{d.conversation_id}#draft-{draft_id}")
 
 

@@ -681,3 +681,25 @@ async def test_an_app_discard_leaves_the_message_waiting(env):
     assert chats._waiting_for_answer("c1")
     chats.discard_draft(d.id, by_owner=True)
     assert not chats._waiting_for_answer("c1")
+
+
+async def test_a_revise_that_ends_after_the_send_offers_no_second_answer(env, monkeypatch):
+    """The old draft went out while Claude rewrote it: the sent answer stays sent, the new text is dropped."""
+    backend, account, notes = env
+    set_setting("send_verified", "0")
+    d = await chats.auto_reply("c1")
+    real = chats.draft_reply
+
+    async def slow_draft(*a, **k):
+        with session() as db:                   # meanwhile the owner sent the old one
+            row = db.get(Draft, d.id)
+            row.status = "sent"
+            db.add(row)
+            db.commit()
+        return await real(*a, **k)
+    monkeypatch.setattr(chats, "draft_reply", slow_draft)
+    backend.data = {"reply": "Neu formuliert."}
+    assert await chats.revise(d.id, "kürzer") is None
+    with session() as db:
+        assert db.get(Draft, d.id).status == "sent"
+        assert not db.exec(select(Draft).where(Draft.status == "draft")).all()
