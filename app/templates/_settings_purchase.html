@@ -11,6 +11,9 @@
                   {% if not pu.enabled %}disabled{% endif %} data-needs="enabled"></label>
     <script>(function (f) { var a = f.elements.enabled, b = f.elements.prefer_paylivery;
       a.addEventListener("change", function () { b.disabled = !a.checked; if (!a.checked) b.checked = false; }); })(document.currentScript.parentNode);</script>
+    <input type="hidden" name="trust_seen" value="1">
+    <label id="s-purchase-trust" class="flex cursor-pointer items-center justify-between gap-3"><span class="min-w-0"><span class="font-medium">{{ _("Auto-buy only from trustworthy accounts") }}</span><br><span class="text-[12.5px] text-muted">{{ _("A search agent's automatic purchase stops when the seller's account is younger than 90 days or has no PayLivery rating yet.") }}</span></span>
+      <input type="checkbox" class="toggle toggle-primary" name="auto_buy_trust" value="1" {% if pu.auto_buy_trust %}checked{% endif %}></label>
     <div id="s-purchase-rules" class="flex flex-col gap-0.5"><span class="text-[12.5px] text-muted">{{ _("My rules for purchases") }}</span><a href="/settings/rules#ai-purchase_rules" class="link link-hover text-[12.5px]">{{ _("Edited under AI rules and prompts, with all other rules") }} →</a></div>
     <label id="s-purchase-discount" class="flex flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("Discount for the suggested wish price (%)") }}</span>
       <input type="number" name="discount_pct" min="0" max="50" step="1" value="{{ pu.discount_pct }}" class="input w-36 min-w-0 bg-base-200"></label>

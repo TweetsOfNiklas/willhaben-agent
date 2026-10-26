@@ -224,3 +224,40 @@ async def test_one_auto_buy_per_agent_and_a_gone_ad_stops(agent, pushes, monkeyp
     await auto_buy.buy(first)
     assert purchase.get(first).status == "failed"
     assert {a["name"] for a in purchase.actions(purchase.get(first))}.isdisjoint({"restart"})   # never a negotiation
+
+
+async def test_a_doubtful_seller_account_stops_it(agent, pushes, monkeypatch):
+    """A young account, or one without a PayLivery rating (from their profile), is not bought from on its own;
+    Settings → Purchases can allow it."""
+    from datetime import timedelta
+
+    from app import platforms
+    from app.db import set_setting, utcnow
+    from app.services import paylivery
+    from app.willhaben import public
+    asked = []
+    monkeypatch.setattr(paylivery, "run_action", lambda *a, **k: asked.append(a))
+    ratings = {"n": 0}
+
+    class Pub:
+        async def member_profile(self, ad_uuid, user_uuid):
+            return {"place": None, "since": None, "ratings": ratings["n"], "score": None, "reply_time": None}
+    monkeypatch.setattr(public, "get_public", lambda: Pub())
+    old, young = utcnow() - timedelta(days=900), utcnow() - timedelta(days=12)
+    for ad_id, since, n in (("781", young, 5), ("782", old, 0)):
+        d = _detail(ad_id)
+        d.seller_since, d.ad_uuid, d.seller_uuid = since, "a" * 8, "u" * 8
+        ratings["n"] = n
+
+        async def detail(ad_id, url=None, d=d):
+            return d
+        monkeypatch.setattr(platforms.get("willhaben"), "detail", detail)
+        pid = await auto_buy.schedule(agent, _hit(agent, ad_id=ad_id))
+        await auto_buy.buy(pid)
+        row = purchase.get(pid)
+        assert row.status == "failed" and "account is doubtful" in str(row.log[-1]), row.log
+    assert asked == []
+    assert "Account only 12 days old" in str(purchase.get(pid - 1).log[-1])
+    assert "No PayLivery ratings yet" in str(purchase.get(pid).log[-1])
+    set_setting(auto_buy.SETTING_TRUST, "0")                             # allowed: no check
+    assert await auto_buy.seller_doubt(d) is None

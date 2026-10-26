@@ -21,7 +21,7 @@ from jinja2 import pass_context
 from app.db import get_setting, set_setting
 from app.i18n import t
 from app.platforms import fees
-from app.services import deals, price_bar, purchase, shipping
+from app.services import auto_buy, deals, price_bar, purchase, shipping
 from app.services.purchase import PurchaseError
 from app.willhaben.public import WillhabenError, get_public
 
@@ -143,6 +143,7 @@ def settings_values() -> dict[str, Any]:
     on = enabled()
     return {"enabled": on, "rules": get_setting(purchase.SETTING_RULES), "shipping_estimate": purchase.SHIPPING_ESTIMATE,
             "prefer_paylivery": on and get_setting(purchase.SETTING_PREFER_PAYLIVERY) == "1",
+            "auto_buy_trust": get_setting(auto_buy.SETTING_TRUST) != "0",
             "discount_pct": int(value) if value == int(value) else value}
 
 
@@ -373,7 +374,8 @@ async def purchase_detail(request: Request, pid: int):
 # ------------------------------------------------------------------ settings
 @router.post("/settings/purchase")
 async def settings_purchase(enabled_: str | None = Form(None, alias="enabled"), rules: str | None = Form(None),
-                            discount_pct: str = Form(""), prefer_paylivery: str | None = Form(None)):
+                            discount_pct: str = Form(""), prefer_paylivery: str | None = Form(None),
+                            auto_buy_trust: str | None = Form(None), trust_seen: str | None = Form(None)):
     raw = _float(discount_pct) if discount_pct.strip() else float(purchase.DEFAULT_DISCOUNT_PCT)
     if raw is None:
         return _go("/settings/purchase", t("Enter a discount between 0 and 50 %."))
@@ -383,4 +385,6 @@ async def settings_purchase(enabled_: str | None = Form(None, alias="enabled"), 
     if rules is not None:          # edited under Settings → AI rules now; a form without it keeps them
         set_setting(purchase.SETTING_RULES, rules.strip()[:4000])
     set_setting(purchase.SETTING_DISCOUNT, f"{pct:g}")
+    if trust_seen:                 # the checkbox sends nothing when off
+        set_setting(auto_buy.SETTING_TRUST, "1" if auto_buy_trust else "0")
     return _go("/settings/purchase", t("Changes saved"))

@@ -21,6 +21,7 @@ from app.i18n import t
 log = logging.getLogger(__name__)
 
 COUNTDOWN_S = 120
+SETTING_TRUST = "auto_buy_trust"     # "0": also buy from young accounts and accounts without a rating
 BUY_CHAT_PREFIX = "autobuy-"
 PLATFORMS = ("willhaben",)
 
@@ -165,6 +166,8 @@ async def buy(pid: int) -> str:
     purchase._change(pid, lambda r: (setattr(r, "asking_price", d.price),
                                      setattr(r, "shipping_cost", d.shipping_price if d.shipping_price is not None else r.shipping_cost),
                                      setattr(r, "shipping_source", "ad" if d.shipping_price is not None else r.shipping_source)))
+    if why := await seller_doubt(d):
+        return await _stop(pid, t("The seller's account is doubtful ({why}) – not bought automatically", why=why))
     total = _total(pid, d.price)
     row = purchase.get(pid)
     if row.max_price and total > row.max_price + 0.005:
@@ -200,6 +203,25 @@ async def buy(pid: int) -> str:
         return t("Bought")
     await purchase.pause(pid, t("Auto-buy did not finish: {result}", result=result[:300]), push=True)
     return t("Not bought")
+
+
+async def seller_doubt(d) -> str | None:
+    """Why the seller's account speaks against buying on its own (services/trust: young, no PayLivery rating), or None.
+    The ratings come from their profile (cached a day); unreadable, only the account's age counts. Off with
+    SETTING_TRUST "0"."""
+    from app.db import get_setting
+    from app.services import trust
+    from app.willhaben.public import WillhabenError, get_public
+    if get_setting(SETTING_TRUST) == "0":
+        return None
+    ratings = None
+    if d.ad_uuid and d.seller_uuid:
+        try:
+            ratings = (await get_public().member_profile(d.ad_uuid, d.seller_uuid))["ratings"]
+        except (WillhabenError, Exception) as e:  # noqa: BLE001 - the age still counts
+            log.info("seller profile of %s not read for auto-buy: %s", d.ad_id, e)
+    flags = trust.flags(d.seller_since, ratings, "willhaben")
+    return ", ".join(f["label"] for f in flags) or None
 
 
 def _switch_off(agent_id: int | None) -> None:

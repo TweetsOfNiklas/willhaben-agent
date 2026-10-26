@@ -35,5 +35,8 @@
  "no longer for sale": "nicht mehr zu haben",
  "no hit": "kein Treffer",
  "Claude has not judged it": "Claude hat ihn nicht beurteilt",
- "no Geizhals price to check the limit against": "kein Geizhals-Preis, um die Grenze zu prüfen"
+ "no Geizhals price to check the limit against": "kein Geizhals-Preis, um die Grenze zu prüfen",
+ "The seller's account is doubtful ({why}) – not bought automatically": "Das Konto des Verkäufers ist zweifelhaft ({why}) – nicht automatisch gekauft",
+ "Auto-buy only from trustworthy accounts": "Automatisch nur von vertrauenswürdigen Konten kaufen",
+ "A search agent's automatic purchase stops when the seller's account is younger than 90 days or has no PayLivery rating yet.": "Der automatische Kauf eines Suchagenten bricht ab, wenn das Konto des Verkäufers jünger als 90 Tage ist oder noch keine PayLivery-Bewertung hat."
 }
