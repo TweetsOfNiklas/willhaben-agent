@@ -972,29 +972,50 @@ class HitView:
         zones, top = price_zones.config(), _LEVEL_RANK[self.level]
         return [h for h in rows if _LEVEL_RANK.get(hit_label(h, zones) or "", 9) <= top]
 
+    def _far(self, db, radius: float, state: bool = True) -> dict[str, int]:
+        """Hits per state the pickup radius hides: only pickup-only ones (no shipping stated) can be too far, so only
+        those are loaded (a few columns) and measured in Python; saved hits are never hidden."""
+        q = self.where(select(Hit.state, Hit.lat, Hit.lon, Hit.postcode, Hit.location, Hit.shipping, Hit.shipping_price),
+                       state=state)
+        q = q.where(or_(col(Hit.shipping).is_(None), Hit.shipping != "ship"), col(Hit.shipping_price).is_(None),
+                    col(Hit.state).not_in(("saved", search_agents_svc.CLEARED)))
+        home, out = geo.home_cached(), {}
+        for st, lat, lon, postcode, location, ship, ship_price in db.exec(q):
+            x = {"lat": lat, "lon": lon, "postcode": postcode, "location": location, "shipping": ship,
+                 "shipping_price": ship_price}
+            if geo.too_far(x, radius, home):
+                out[st] = out.get(st, 0) + 1
+        return out
+
     def count(self, db) -> int:
-        """How many hits this view lists (all its pages)."""
-        if not self._python_filters():
-            return db.exec(self.where(select(func.count()).select_from(Hit))).one()
-        return len(self._filtered(list(db.exec(self.where(select(Hit))))))
+        """How many hits this view lists (all its pages): counted in SQL, the radius's far ones taken off."""
+        if self.level:                    # the price label is computed in Python: the whole list
+            return len(self._filtered(list(db.exec(self.where(select(Hit))))))
+        n = db.exec(self.where(select(func.count()).select_from(Hit))).one()
+        radius = self._radius()
+        return n - sum(self._far(db, radius).values()) if radius else n
 
     def counts(self, db) -> dict[str, int]:
         """Hits per state as each tab lists them with this view's filters (cleared ones left out), and "all": the
         tabs' counters. The pickup radius hides far ads in the tabs but not under filtered out and all (_radius)."""
         radius = geo.pickup_radius()
-        if not self.level and not radius:
-            q = self.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
-            out = dict(db.exec(q).all())
-            out.pop(search_agents_svc.CLEARED, None)
-            out["all"] = sum(out.values())
+        if self.level:
+            rows = self._of_level(list(db.exec(self.where(select(Hit), state=False)
+                                               .where(Hit.state != search_agents_svc.CLEARED))))
+            home = geo.home_cached() if radius else None
+            out = {"all": len(rows)}
+            for h in rows:
+                if not radius or h.state in ("filtered", "saved") or not geo.too_far(h, radius, home):
+                    out[h.state] = out.get(h.state, 0) + 1
             return out
-        rows = self._of_level(list(db.exec(self.where(select(Hit), state=False)
-                                           .where(Hit.state != search_agents_svc.CLEARED))))
-        home = geo.home_cached() if radius else None
-        out = {"all": len(rows)}
-        for h in rows:
-            if not radius or h.state in ("filtered", "saved") or not geo.too_far(h, radius, home):
-                out[h.state] = out.get(h.state, 0) + 1
+        q = self.where(select(Hit.state, func.count()), state=False).group_by(Hit.state)
+        out = dict(db.exec(q).all())
+        out.pop(search_agents_svc.CLEARED, None)
+        out["all"] = sum(out.values())
+        if radius:
+            for st, n in self._far(db, radius, state=False).items():
+                if st != "filtered" and st in out:
+                    out[st] -= n
         return out
 
     def hits(self, db, limit: int = 200, offset: int = 0) -> list[Hit]:
