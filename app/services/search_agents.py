@@ -1556,6 +1556,42 @@ async def _watch_one(h: Hit) -> None:
                            "price": price if price is not None else h.price, "status": status})
 
 
+SWEEP_PER_RUN = 20             # recent hits whose ad page is read per hourly run (sold prices for the price check)
+SWEEP_DAYS = 30                # first seen within this many days
+SWEEP_EVERY = timedelta(days=2)
+
+
+async def status_sweep_job() -> None:
+    """Hourly: the ad pages of a few recent hits (not cleared, not ruled out, still active as far as known, checked
+    longest ago) – their status kept quietly. A hit that went sold or gone keeps its last price: the price
+    check's "sold or taken down recently" (deals.sold_ads). Off with the setting "status_sweep" = "0"."""
+    if get_setting("status_sweep") == "0":
+        return
+    now = utcnow()
+    with session() as db:
+        rows = list(db.exec(select(Hit).where(
+            Hit.state != CLEARED, or_(col(Hit.screen_relevant).is_(None), Hit.screen_relevant == True),  # noqa: E712
+            or_(col(Hit.site_status).is_(None), col(Hit.site_status).in_(("active", "reserved"))),
+            Hit.first_seen_at >= now - timedelta(days=SWEEP_DAYS),
+            or_(col(Hit.status_checked_at).is_(None), Hit.status_checked_at < now - SWEEP_EVERY))
+            .order_by(col(Hit.status_checked_at).asc().nulls_first(), col(Hit.id).desc()).limit(SWEEP_PER_RUN * 3)))
+    seen: set[tuple[str, str]] = set()
+    for h in rows:
+        key = (h.platform or "willhaben", h.ad_id)
+        if key in seen or not _site(h.platform).can("detail"):
+            continue
+        seen.add(key)
+        if len(seen) > SWEEP_PER_RUN:
+            break
+        try:
+            d = await _site(h.platform).detail(h.ad_id, url=h.url)
+        except Exception as e:  # noqa: BLE001 - one ad must not stop the others; the next run asks again
+            log.info("status of hit %s not loaded: %s", h.id, e)
+            continue
+        # the status only: the price stays the list's (a drop is the agent's to notice and push)
+        record_status(h.platform or "willhaben", h.ad_id, site_status(d), d)
+
+
 async def check_hit(hit_id: int) -> Hit | None:
     """The sync button of a hit: load the ad from its site (one request through its limiter and VPN) and keep its
     status. PlatformError when the site cannot be asked; None when the hit is gone."""

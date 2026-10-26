@@ -1996,3 +1996,59 @@ async def test_claude_failing_leaves_the_rules(monkeypatch):
     monkeypatch.setattr("app.llm.claude_login.claude_token", lambda: None)
     set_setting(deals.COMPARE_SETTING, "1")
     assert not deals.compare_by_claude()                                       # no Claude login: the rules
+
+
+async def test_sold_ads_of_the_agents_hits_show_beside_the_comparables(monkeypatch):
+    """Hits that went sold or offline lately keep their last price: "sold or taken down recently", apart from the
+    asking prices of the stats; only those of this product (the title filter here, Claude's pick with Claude)."""
+    from datetime import timedelta
+
+    from app.db import Hit, session, utcnow
+    _fake_search(monkeypatch, [_summ(n, "Bosch GSR 18V-55", p) for n, p in enumerate([90, 95, 100, 105, 110])])
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben"])
+    monkeypatch.setattr(deals, "geizhals_match", _no_geizhals)
+    with session() as db:
+        for n, (title, price, status, days) in enumerate([("Bosch GSR 18V-55 Akkuschrauber", 70.0, "sold", 3),
+                                                          ("Bosch GSR 18V-55 solo", 80.0, "gone", 10),
+                                                          ("Bosch GSR 18V-60 Akkuschrauber", 150.0, "sold", 2),
+                                                          ("Bosch GSR 18V-55", 60.0, "sold", 200),       # too long ago
+                                                          ("Bosch GSR 18V-55", 75.0, "active", 1)]):
+            db.add(Hit(agent_id=1, ad_id=f"55{n}", heading=title, url=f"https://x/{n}", price=price, site_status=status,
+                       status_checked_at=utcnow() - timedelta(days=days)))
+        db.commit()
+    res = await deals.analyze(_ad(100))
+    sold = res["comparables"]["sold"]
+    assert sold["count"] == 2 and sold["median"] == 75.0 and res["comparables"]["count"] == 5
+    assert {a["price"] for a in sold["ads"]} == {70.0, 80.0}                     # the 18V-60 is another model
+    html = _plain(_render_deal(res, lang="en"))
+    assert "Sold or taken down recently:</span> median € 75 of 2 ads" in html and "data-sold" in html
+
+
+async def test_the_status_sweep_reads_recent_hits_quietly(monkeypatch):
+    from datetime import timedelta
+
+    from app import platforms
+    from app.db import Hit, session, utcnow
+    from app.services import search_agents
+    read = []
+
+    async def detail(ad_id, url=None):
+        read.append(ad_id)
+        return None if ad_id == "601" else _ad(100, ad_id=ad_id)
+    monkeypatch.setattr(platforms.get("willhaben"), "detail", detail)
+    with session() as db:
+        db.add(Hit(agent_id=1, ad_id="601", heading="a", url="x", price=10.0, first_seen_at=utcnow()))
+        db.add(Hit(agent_id=1, ad_id="602", heading="b", url="x", price=10.0, first_seen_at=utcnow(), site_status="active",
+                   status_checked_at=utcnow() - timedelta(days=5)))
+        db.add(Hit(agent_id=1, ad_id="603", heading="c", url="x", price=10.0, first_seen_at=utcnow(),
+                   screen_relevant=False))                                         # ruled out: not read
+        db.add(Hit(agent_id=1, ad_id="604", heading="d", url="x", price=10.0, first_seen_at=utcnow() - timedelta(days=60)))
+        db.commit()
+    await search_agents.status_sweep_job()
+    assert sorted(read) == ["601", "602"]
+    with session() as db:
+        st = {h.ad_id: h.site_status for h in db.exec(deals.select(Hit))}
+    assert st["601"] == "gone" and st["602"] == "active"
+    read.clear()
+    await search_agents.status_sweep_job()
+    assert read == []                                                              # checked: not again for 2 days

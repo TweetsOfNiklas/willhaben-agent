@@ -60,5 +60,8 @@
  "Claude names the components (e.g. barebone, RAM, SSD), the app sums their lowest new prices on Geizhals": "Claude nennt die Komponenten (z. B. Barebone, RAM, SSD), die App zählt ihre günstigsten Neupreise auf Geizhals zusammen",
  "Claude sees no components with a new price.": "Claude sieht keine Komponenten mit Neupreis.",
  "Claude prices the components: „{title}“": "Claude bewertet die Komponenten: „{title}“",
- "Similar ads chosen by Claude for „{product}“.": "Ähnliche Anzeigen von Claude ausgewählt für „{product}“."
+ "Similar ads chosen by Claude for „{product}“.": "Ähnliche Anzeigen von Claude ausgewählt für „{product}“.",
+ "Sold or taken down recently:": "Kürzlich verkauft oder offline:",
+ "median {price} of {n} ads": "Median {price} von {n} Anzeigen",
+ "offline": "offline"
 }

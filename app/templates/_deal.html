@@ -61,6 +61,9 @@
     {% if compact %}<button type="button" class="btn btn-xs disabled:opacity-60" hx-get="/hits/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}/deal{{ ('?hit=' ~ h.id) if h else '' }}" hx-target="closest section" hx-swap="outerHTML" hx-disabled-elt="this">{{ _("Try again") }}</button>
     {% else %}<a href="/deals/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}" class="btn btn-xs">{{ _("Try again") }}</a>{% endif %}</div>
   {% else %}<p class="text-[12.5px] text-muted">{{ deal_explain(res) }}</p>{% endif %}
+  {# the agents' hits of this product that went sold or offline lately: what it really went for, roughly #}
+  {% if c.sold %}<details class="group text-[12.5px]" data-sold><summary class="flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden"><span class="text-muted transition-transform group-open:rotate-90">{{ ui.icon('chevron-right', 13) }}</span><span><span class="font-semibold">{{ _("Sold or taken down recently:") }}</span> {{ _("median {price} of {n} ads", price=c.sold.median|eur, n=c.sold.count)|nb }}</span></summary>
+    <div class="mt-1 flex flex-col">{% for a in c.sold.ads %}<a href="{{ a.url }}" target="_blank" rel="noopener" class="grid grid-cols-[1fr_auto_auto] gap-3 px-2 py-1 text-base-content no-underline hover:underline"><span class="truncate">{{ a.title }}</span><span class="text-muted">{{ _("sold") if a.status == 'sold' else _("offline") }}{% if a.at %} · {{ a.at|ago }}{% endif %}</span><span class="tabular-nums">{{ a.price|eur }}</span></a>{% endfor %}</div></details>{% endif %}
   {% if c.loading %}
   <div class="flex items-center gap-2 text-[12.5px] text-muted" role="status" data-comparables-loading
        hx-get="/hits/ad/{{ ad.platform or 'willhaben' }}/{{ ad.ad_id }}/deal{{ ('?hit=' ~ h.id) if h else '' }}"

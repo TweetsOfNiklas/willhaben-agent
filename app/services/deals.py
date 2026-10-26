@@ -26,7 +26,7 @@ import re
 import statistics
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
@@ -1367,15 +1367,28 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
                 pool.setdefault((a.get("platform") or site, str(a["ad_id"])), a)
         if not ident:
             ads, dropped, titled = _same_item(candidates(), title, condition)
+    # the agents' hits of this product that went sold or offline lately: their last price (not in the stats above)
+    gone = [] if category_url else sold_candidates(query, exclude=(own, str(exclude_ad_id or "")))
+    sold: list[dict[str, Any]] = []
     if ident:                        # Claude picks the same product and variant among all found; failing: the rules
         found = candidates()
-        same = await pick_same(ident, found, price)
+        same = await pick_same(ident, found + gone, price)
         if same is None:
             ads, dropped, titled = _same_item(found, title, condition)
+            sold = _same_item(gone, title, condition)[0]
         else:
+            sold = [a for a in same if a.get("sold")]
+            same = [a for a in same if not a.get("sold")]
             ads = [a for a in same if _condition_kept(a.get("item_condition"), condition)]
             dropped = {"model": len(found) - len(same), "kind": 0, "condition": len(same) - len(ads)}
             out["by_claude"] = ident.get("product")
+            sold = [a for a in sold if _condition_kept(a.get("item_condition"), condition)]
+    elif gone:
+        sold = _same_item(gone, title, condition)[0]
+    if sold:
+        prices = [a["price"] for a in sold]
+        out["sold"] = {"count": len(sold), "median": statistics.median(prices),
+                       "ads": sorted(sold, key=lambda a: a.get("at") or "", reverse=True)[:5]}
     if errors and len(errors) == len(out["searches"]):
         out["error"] = str(errors[0][1])
         if all(isinstance(e, vpn.VpnWait) for _, e in errors):    # the VPN looks for a server: not the search
@@ -1502,6 +1515,36 @@ def _ad_summary(ad: AdDetail) -> dict[str, Any]:
 # ------------------------------------------------------------------ analysis
 def _norm_q(query: str | None) -> str:
     return re.sub(r"\s+", " ", (query or "").strip().lower())
+
+
+SOLD_DAYS = 90                  # sold or offline within this many days counts for "sold or taken down recently"
+SOLD_MAX = 40
+
+
+def sold_candidates(query: str | None, exclude: tuple[str, str] = ("", "")) -> list[dict[str, Any]]:
+    """The agents' hits whose ad went sold or offline within SOLD_DAYS (search_agents.status_sweep_job) and whose title
+    has every word of `query`, as comparable ads marked "sold" with their last price; the title filter or Claude's
+    pick decides which are this product."""
+    from app.db import Hit
+
+    words = [w for w in tokens(query) if len(w) >= 2][:4]
+    if not words:
+        return []
+    since = utcnow() - timedelta(days=SOLD_DAYS)
+    q = select(Hit).where(col(Hit.site_status).in_(("sold", "gone")), col(Hit.price) > 0, Hit.status_checked_at >= since)
+    for w in words:
+        q = q.where(col(Hit.heading).ilike(f"%{w}%"))
+    out, seen = [], {exclude}
+    with session() as db:
+        for h in db.exec(q.order_by(col(Hit.status_checked_at).desc()).limit(SOLD_MAX * 2)):
+            key = (h.platform or "willhaben", h.ad_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"platform": key[0], "ad_id": h.ad_id, "title": h.heading, "price": h.price, "url": h.url,
+                        "item_condition": h.item_condition, "sold": True, "status": h.site_status,
+                        "at": h.status_checked_at.isoformat() if h.status_checked_at else None})
+    return out[:SOLD_MAX]
 
 
 # ------------------------------------------------------------------ similar ads chosen by Claude
