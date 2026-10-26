@@ -878,13 +878,13 @@ async def _cmd_auto() -> None:
 async def _cmd_status() -> None:
     from sqlalchemy import func
 
+    from app.services import chats
     from app.willhaben.session import get_session
 
     st = get_session().status()
     with session() as db:
         new_hits = db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one()
-        unread = db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))).one()
-        drafts = db.exec(select(func.count()).select_from(Draft).where(Draft.status == "draft")).one()
+        unread, drafts = chats.summary_counts(db)       # as the chat list counts them
     login = t("logged in") if st.get("logged_in") else t("NOT logged in")
     await _say("\n".join([f"willhaben: <b>{login}</b>", t("New hits: {n}", n=new_hits),
                           t("Unread messages: {n}", n=unread), t("Open drafts: {n}", n=drafts)]))

@@ -506,14 +506,16 @@ async def index(request: Request):
         stats = {
             "agents": db.exec(select(func.count()).select_from(SearchAgent).where(SearchAgent.enabled)).one(),
             "new_hits": db.exec(select(func.count()).select_from(Hit).where(Hit.state == "new")).one(),
-            "unread": db.exec(select(func.coalesce(func.sum(Conversation.unread_count), 0))).one(),
-            "open_drafts": db.exec(select(func.count()).select_from(Draft).where(Draft.status == "draft")).one(),
+            # as the chat list counts: shown chats only (not hidden, removed or older than the sync window)
+            **dict(zip(("unread", "open_drafts"), chats.summary_counts(db), strict=True)),
             # online only (as the Mini App's home): not expired, sold, deleted or hidden from the list
             "myads": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "active",
                                                                             col(MyAd.hidden).is_not(True))).one(),
-            "expired": db.exec(select(func.count()).select_from(MyAd).where(MyAd.status == "expired",
-                                                                             col(MyAd.replaced_by).is_(None))).one(),
         }
+        # expired as the My-ads list counts them: ended within the cutoff (Settings → My ads), not hidden
+        cutoff = int(get_setting("myads_expired_days") or 0)
+        stats["expired"] = sum(my_ads.is_expired(a, cutoff) for a in db.exec(
+            select(MyAd).where(MyAd.status == "expired", col(MyAd.hidden).is_not(True))))
         soon = list(db.exec(select(MyAd).where(MyAd.status == "active", col(MyAd.end_date).is_not(None),
                                                col(MyAd.end_date) <= utcnow() + timedelta(days=HOME_EXPIRING_DAYS))
                             .order_by(MyAd.end_date).limit(5)))

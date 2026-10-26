@@ -450,3 +450,33 @@ def test_home_counts_only_own_ads_online(client):
         db.commit()
     page = client.get("/").text
     assert re.search(r">2</div>\s*<div[^>]*>own ads online", page)
+
+
+def test_home_counts_expired_own_ads_within_the_cutoff(client):
+    """"n expired" on Home: as the My-ads list, only ads that ended within the last 30 days (the setting)."""
+    from datetime import timedelta
+
+    from app.db import set_setting, utcnow
+    with dbmod.session() as db:
+        for n, (days, hidden) in enumerate(((2, None), (29, None), (31, None), (90, None), (5, True))):
+            db.add(dbmod.MyAd(ad_id=f"8{n}", heading="Rad", status="expired", hidden=hidden,
+                              end_date=utcnow() - timedelta(days=days)))
+        db.commit()
+    assert re.search(r">2 expired<", client.get("/").text)
+    set_setting("myads_expired_days", "100")
+    assert re.search(r">4 expired<", client.get("/").text)          # 90 days too; hidden never
+
+
+def test_home_counts_chats_with_a_draft_as_the_chat_list(client):
+    """"open drafts" on Home: the shown chats with a draft (the list's "Draft" filter), not every stored draft – two
+    drafts of one chat count once, a removed or hidden chat's draft not at all."""
+    from app.db import utcnow
+    with dbmod.session() as db:
+        for cid, extra in (("d1", {}), ("d2", {"removed": True}), ("d3", {"hidden_at": utcnow()})):
+            db.add(dbmod.Conversation(id=cid, ad_id="1", ad_title="Rad", partner_name="x", last_message_at=utcnow(),
+                                      **extra))
+        for cid in ("d1", "d1", "d2", "d3"):
+            db.add(dbmod.Draft(conversation_id=cid, text="Hallo", status="draft"))
+        db.commit()
+    page = client.get("/").text
+    assert re.search(r'href="/chats\?show=draft">\s*<div[^>]*>1</div>', page)

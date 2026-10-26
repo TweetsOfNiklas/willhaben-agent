@@ -676,6 +676,14 @@ def badge_counts(db) -> dict[str, int]:
             "chats_action": len(ids & (o["waiting"] | o["open_drafts"]))}
 
 
+def summary_counts(db) -> tuple[int, int]:
+    """Unread messages and chats with a draft (Home, the bot's /status), as the chat list counts them: shown chats
+    only, several drafts of one chat once (the list's "Draft" filter)."""
+    o = overview(db)
+    ids = {c.id for c in o["shown"]}
+    return sum(n for cid, n in o["unread"].items() if cid in ids), len(ids & o["open_drafts"])
+
+
 _clear_tasks: set[asyncio.Task] = set()
 
 
