@@ -173,3 +173,45 @@ def test_the_login_page_language_is_this_browsers_only(pw):
         c.post("/login", data={"username": "admin", "password": "geheim", "next": "/"})
         c.post("/lang", data={"lang": "en", "next": "/"})
         assert get_setting("ui_lang") == "en"
+
+
+def test_without_a_password_the_public_address_needs_the_telegram_login(monkeypatch, tmp_path):
+    """No DASHBOARD_PASSWORD: the home network stays open, a request over the public web address needs the linked
+    Telegram account's login (the Mini App); the login page says why and shows no password form."""
+    import time
+
+    from app.db import set_setting
+
+    monkeypatch.setattr(get_settings(), "dashboard_password", None)
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
+    from app.db import SETTING_PUBLIC_URL, apply_public_url
+    monkeypatch.setattr(get_settings(), "telegram_bot_token", "123:secret")
+    monkeypatch.setattr(auth, "_fails", type(auth._fails)(auth._fails.default_factory))
+    monkeypatch.setattr("app.main.asyncio.sleep", _no_sleep)
+    set_setting("telegram_chat_id", "4242")
+    set_setting(SETTING_PUBLIC_URL, "https://agent.example")      # Settings → Web address (applied at startup)
+    apply_public_url()
+    assert auth.public_host() == "agent.example"
+    html = {"accept": "text/html"}
+    with TestClient(app) as c:
+        assert c.get("/hits", headers=html).status_code == 200                              # home network: open
+        outside = {**html, "host": "agent.example", "x-forwarded-proto": "https"}
+        r = c.get("/hits", headers=outside, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/login")
+        spoofed = {**outside, "x-forwarded-host": "10.0.1.8"}
+        assert c.get("/hits", headers=spoofed, follow_redirects=False).status_code == 303   # the host still counts
+        page = c.get("/login?next=%2Ftg", headers=outside).text
+        assert "data-no-password" in page and 'name="password"' not in page and "/login/telegram" in page
+        r = c.post("/login/telegram", headers=outside,
+                   data={"init_data": _launch("123:secret", 4242, time.time()), "next": "/tg"})
+        cookie = r.headers["set-cookie"].lower()
+        assert r.status_code == 200 and "samesite=none" in cookie and "secure" in cookie   # Telegram Web's iframe
+        token = r.cookies.get(auth.COOKIE) or r.headers["set-cookie"].split(";")[0].split("=", 1)[1]
+        c.cookies.clear()                                    # Secure: sent over https only, as a browser would
+        assert c.get("/hits", headers={**outside, "cookie": f"{auth.COOKIE}={token}"},
+                     follow_redirects=False).status_code == 200
+    set_setting(SETTING_PUBLIC_URL, "")
+    apply_public_url()
+    for local in ("http://localhost:8000", "http://10.0.1.8:8010", "http://agent.local"):
+        monkeypatch.setattr(get_settings(), "public_url", local)
+        assert auth.public_host() is None

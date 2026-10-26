@@ -17,6 +17,13 @@
       </div>
       {% if error %}<div role="alert" class="rounded-[10px] bg-bad-soft px-3.5 py-2.5 text-[13px] text-error">{{ error }}</div>{% endif %}
       <div id="tg-login" role="status" hidden class="flex items-center gap-2.5 rounded-[10px] bg-brand-soft px-3.5 py-2.5 text-[13px]"><span class="loading loading-spinner loading-xs text-primary"></span><span>{{ _("Logging in with Telegram…") }}</span></div>
+      {% if password_set is defined and not password_set %}
+      {# no DASHBOARD_PASSWORD: over the public web address only the linked Telegram account gets in (auth.login_needed) #}
+      <div class="flex flex-col gap-2 rounded-[10px] bg-warn-soft px-3.5 py-3 text-[13px]" data-no-password>
+        <strong>{{ _("No dashboard password is set") }}</strong>
+        <span>{{ _("Over this web address only the Mini App opened from your Telegram bot can log in. To use the dashboard here in a browser, set DASHBOARD_PASSWORD in the .env file; in your home network it stays open without one.") }}</span>
+      </div>
+      {% else %}
       <form method="post" action="/login" class="flex flex-col gap-3.5">
         <input type="hidden" name="next" value="{{ next }}">
         <label class="flex min-w-0 flex-col gap-1.5"><span class="text-[12.5px] text-muted">{{ _("User name") }}</span>
@@ -30,6 +37,7 @@
         <button class="btn btn-primary mt-1 h-[42px] text-[15px] font-semibold">{{ _("Log in") }}</button>
       </form>
       <div class="border-t border-base-300 pt-3.5 text-center text-xs text-muted">{{ _("The password is DASHBOARD_PASSWORD from the .env file.") }}</div>
+      {% endif %}
     </div>
     <div class="flex items-center justify-between gap-3 px-1.5 text-xs text-muted">
       <span>v{{ app_version }} · {{ _("by {author}", author=app_author) }}</span>
@@ -43,7 +51,7 @@
   </div>
   <script>
     const pw = document.getElementById('pw'), b = document.getElementById('pw-toggle'), T = {show: {{ _("Show")|tojson }}, hide: {{ _("Hide")|tojson }}};
-    b.addEventListener('click', () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; b.textContent = show ? T.hide : T.show; pw.focus(); });
+    if (b) b.addEventListener('click', () => { const show = pw.type === 'password'; pw.type = show ? 'text' : 'password'; b.textContent = show ? T.hide : T.show; pw.focus(); });
     // Opened from a Telegram button (a Mini App): Telegram puts its signed launch data into the URL's fragment, which
     // the redirect to this page keeps. It logs in the linked chat's user (POST /login/telegram); else the form stays.
     const tg = new URLSearchParams(location.hash.slice(1)).get('tgWebAppData'), box = document.getElementById('tg-login');

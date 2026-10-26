@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import re
 import secrets
@@ -32,7 +33,35 @@ _fails: dict[str, deque[float]] = defaultdict(deque)
 
 
 def enabled() -> bool:
+    """A dashboard password is set (DASHBOARD_PASSWORD): every request needs a login."""
     return bool(get_settings().dashboard_password)
+
+
+def public_host() -> str | None:
+    """The host of the configured web address (Settings → Web address, PUBLIC_URL) when it is one from outside the
+    home network; None for localhost or a private address."""
+    host = (urlsplit(get_settings().public_url or "").hostname or "").lower()
+    if not host or host == "localhost" or host.endswith(".local"):
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    return None if ip.is_private or ip.is_loopback else host
+
+
+def login_needed(headers: Any) -> bool:
+    """Does this request need a login? Always with a password. Without one the dashboard stays open in the home
+    network, but a request that came in over the public web address needs the login of the linked Telegram account
+    (the Mini App, /login/telegram) – otherwise anyone who learns the address could use it. Host and
+    X-Forwarded-Host both count: the proxy routes by the host, a client cannot change that one."""
+    if enabled():
+        return True
+    pub = public_host()
+    if not pub:
+        return False
+    hosts = [headers.get("host") or "", *(headers.get("x-forwarded-host") or "").split(",")]
+    return any(h.strip().lower().rsplit(":", 1)[0] == pub for h in hosts if h.strip())
 
 
 def _secret() -> bytes:

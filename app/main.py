@@ -161,7 +161,8 @@ class DashboardAuth(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if auth.cross_site(request.method, request.headers):
             return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
-        if not auth.enabled() or request.url.path in auth.PUBLIC_PATHS or request.url.path.startswith(auth.PUBLIC_PREFIXES):
+        if not auth.login_needed(request.headers) or request.url.path in auth.PUBLIC_PATHS \
+                or request.url.path.startswith(auth.PUBLIC_PREFIXES):
             return await call_next(request)
         if auth.valid_token(request.cookies.get(auth.COOKIE)) or auth.valid_basic(request.headers.get("authorization", "")):
             return await call_next(request)
@@ -299,7 +300,7 @@ templates.env.globals.update(paylivery_offers=ad_creator.paylivery_offers, payli
                              parcel_sizes=_wh_insert.PARCEL_SIZES, parcel_carriers=_wh_insert.PAYLIVERY_CARRIERS,   # batch table
                              sell_handover_default=selling.handover)   # _wh_handover.html (preset: Selling preferences)
 templates.env.globals.update(_=t, ui_lang=i18n.lang, ui_langs=i18n.LANGS, ui_lang_pref=i18n.preference,
-                             app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, wh_limiter=willhaben_limiter,
+                             app_version=__version__, app_author=AUTHOR, auth_enabled=auth.enabled, public_host=auth.public_host, wh_limiter=willhaben_limiter,
                              wh_budget=lambda: _platform_per_hour("willhaben"), wh_popup=access_stats.popup,
                              wh_popups=access_stats.popups,
                              bg_jobs=jobs.snapshot, bg_working=jobs.working,   # background jobs (header, spinners)
@@ -427,10 +428,11 @@ def _https(request: Request) -> bool:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, next: str = "/"):
-    if not auth.enabled() or auth.valid_token(request.cookies.get(auth.COOKIE)):
+    if not auth.login_needed(request.headers) or auth.valid_token(request.cookies.get(auth.COOKIE)):
         return back(auth.safe_next(next))
     return templates.TemplateResponse(request, "login.html", {"next": auth.safe_next(next), "error": None,
-                                                              "user": get_settings().dashboard_user})
+                                                              "user": get_settings().dashboard_user,
+                                                              "password_set": auth.enabled()})
 
 
 @app.post("/login", response_class=HTMLResponse)
@@ -449,8 +451,8 @@ async def login_submit(request: Request, username: str = Form(""), password: str
         auth.record_failure(client)
         await asyncio.sleep(1)                     # slows down guessing
         error = t("Wrong user name or password.")
-    return templates.TemplateResponse(request, "login.html", {"next": target, "error": error, "user": username},
-                                      status_code=401)
+    return templates.TemplateResponse(request, "login.html", {"next": target, "error": error, "user": username,
+                                                              "password_set": auth.enabled()}, status_code=401)
 
 
 @app.post("/login/telegram")
@@ -466,8 +468,11 @@ async def login_telegram(request: Request, init_data: str = Form(""), next: str 
         await asyncio.sleep(1)
         return JSONResponse({"ok": False}, status_code=401)
     r = JSONResponse({"ok": True, "next": auth.safe_next(next)})
-    r.set_cookie(auth.COOKIE, auth.make_token(True), max_age=auth.REMEMBER_S, httponly=True, samesite="lax",
-                 secure=_https(request))
+    # Telegram Web shows the Mini App in its own iframe (another site): only a SameSite=None cookie goes along there.
+    # Safe since state-changing cross-site requests are refused (auth.cross_site); over plain http it stays Lax.
+    https = _https(request)
+    r.set_cookie(auth.COOKIE, auth.make_token(True), max_age=auth.REMEMBER_S, httponly=True,
+                 samesite="none" if https else "lax", secure=https)
     return r
 
 

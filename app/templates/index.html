@@ -51,13 +51,15 @@
 </div>
 {% endif %}
 
-{% if not session_status.logged_in or not llm_ok %}
+{% set open_web = not auth_enabled() and public_host() %}
+{% if not session_status.logged_in or not llm_ok or open_web %}
 {# setup hints: links inside the bar #}
 <div role="status" class="mb-4 flex flex-col gap-1 rounded-[10px] bg-warn-soft px-3.5 py-2.5 text-warning">
   <strong>{{ _("Setup") }}</strong>
   {% if not session_status.started %}<span>{{ _("Browser is not running.") }} {{ session_status.error or '' }} <a class="link font-semibold" href="/settings/willhaben">{{ _("Start") }}</a></span>
   {% elif not session_status.logged_in %}<span>{{ _("Not logged in to willhaben: chats and reactivation are inactive.") }} <a class="link font-semibold" href="/settings/willhaben">{{ _("Log in now") }}</a></span>{% endif %}
   {% if not llm_ok %}<span>{{ _("Claude is not signed in.") }} <a class="link font-semibold" href="/settings/claude">{{ _("Sign in now") }}</a></span>{% endif %}
+  {% if open_web %}<span data-no-password>{{ _("No dashboard password: over {host} only your Telegram Mini App gets in. Set DASHBOARD_PASSWORD in the .env file to use the dashboard there in a browser.", host=open_web) }}</span>{% endif %}
 </div>
 {% endif %}
 
