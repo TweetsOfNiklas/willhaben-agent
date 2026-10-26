@@ -53,7 +53,7 @@
       {% if h %}{% for s, label in [('saved', _('Save for later')), ('ignored', _('Ignore'))] %}<button type="button" class="btn disabled:opacity-60 {{ 'border-primary bg-brand-soft text-primary' if h.state == s else '' }}" data-state="{{ 'new' if h.state == s else s }}" data-hit="{{ h.id }}">{{ '✓ ' if h.state == s }}{{ label }}</button>{% endfor %}{% endif %}
       <a href="{{ '/deals/ad/' ~ d.ad_id if wh else '/deals/ad/' ~ platform.id ~ '/' ~ d.ad_id ~ ('?hit=' ~ h.id if h else '') }}" class="btn">{{ _("Check price closely") }}</a>
     </div>
-    <div hx-get="{{ '/hits/ad/' ~ d.ad_id if wh else '/hits/ad/' ~ platform.id ~ '/' ~ d.ad_id }}/deal{% if h %}?hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML">{{ ui.skel_deal() }}</div>
+    <div hx-get="{{ '/hits/ad/' ~ d.ad_id if wh else '/hits/ad/' ~ platform.id ~ '/' ~ d.ad_id }}/deal?quick=1{% if h %}&hit={{ h.id }}{% endif %}" hx-trigger="load delay:700ms" hx-swap="innerHTML">{{ ui.skel_deal() }}</div>
     {% if detail_error %}<small class="text-[12.5px] text-muted">{{ _("{platform} could not be reached ({error}); this is what the list showed.", platform=platform.name, error=detail_error) }}</small>
     {% elif reduced %}<small class="text-[12.5px] text-muted">{{ _("{platform} shows no details here: the description is the listing's teaser, the price check compares with willhaben ads.", platform=platform.name) }}</small>{% endif %}
     {% if h and h.screen_relevant is not none %}

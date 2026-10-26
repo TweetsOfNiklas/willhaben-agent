@@ -118,7 +118,8 @@ def _known(p: platforms.Platform, ad_id: str, hit: Hit | None) -> AdDetail | Non
 
 async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str | None = None,
                     use_claude: bool = False, cat: str | None = None, hit: Hit | None = None,
-                    find_geizhals: bool = False, own: bool = False) -> tuple[dict[str, Any] | None, str | None]:
+                    find_geizhals: bool = False, own: bool = False, quick: bool = False
+                    ) -> tuple[dict[str, Any] | None, str | None]:
     """(result, error). A fresh cached result costs no request; otherwise ad detail (cached) + analysis. Sites
     without an ad-detail call, and a site that fails, use what the hit or the list that showed the ad knows (as the
     ad viewer does); the comparables are willhaben listings either way. `own`: the user typed q to compare with
@@ -147,7 +148,7 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
     with ratelimit.urgent():         # someone waits on the page: first in each site's queue, slow sites left out
         res = await deals.analyze(d, query=q, own_query=own, use_claude=use_claude, find_geizhals=find_geizhals,
                                   fallback_query=fallback, category_url=cat,
-                                  known_geizhals=hit.geizhals if hit is not None else None)
+                                  known_geizhals=hit.geizhals if hit is not None else None, quick=quick)
     if hit is not None and res.get("geizhals_rejected"):     # Claude: the hit's product was another one
         search_agents.replace_geizhals(hit.id, res.get("geizhals"))
         hit.geizhals = res.get("geizhals") or {"checked": True}
@@ -157,18 +158,20 @@ async def _analysis(platform_id: str, ad_id: str, q: str | None, fallback: str |
 # Route order matters: Starlette takes the first path that matches, so the 3-segment legacy routes
 # (/hits/ad/<id>/deal, /deals/ad/<id>/result|claude) come before the 2-segment platform routes.
 @router.get("/hits/ad/{ad_id}/deal", response_class=HTMLResponse)
-async def hit_ad_deal(request: Request, ad_id: str, hit: int | None = None, q: str | None = None):
+async def hit_ad_deal(request: Request, ad_id: str, hit: int | None = None, q: str | None = None, quick: int = 0):
     """Price section of the ad viewer (willhaben ad), fetched after the ad itself so opening stays fast."""
     if not ad_id.isdigit():
         raise HTTPException(400)
-    return await hit_ad_deal_platform(request, "willhaben", ad_id, hit, q)
+    return await hit_ad_deal_platform(request, "willhaben", ad_id, hit, q, quick)
 
 
 @router.get("/hits/ad/{platform}/{ad_id}/deal", response_class=HTMLResponse)
 async def hit_ad_deal_platform(request: Request, platform: str, ad_id: str, hit: int | None = None,
-                               q: str | None = None):
+                               q: str | None = None, quick: int = 0):
+    """`quick=1` (the viewer's first request): the Geizhals bar at once, the comparable ads loading – the section
+    then fetches itself without `quick`, which searches them (a cached full result comes at once either way)."""
     h, fallback = _hit(hit)
-    res, error = await _analysis(platform, ad_id, q, fallback, hit=h)
+    res, error = await _analysis(platform, ad_id, q, fallback, hit=h, quick=bool(quick))
     return _templates().TemplateResponse(request, "_deal.html", {"res": res, "error": error, "compact": True, "h": h})
 
 

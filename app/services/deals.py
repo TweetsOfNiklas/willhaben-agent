@@ -1238,17 +1238,32 @@ async def _search(site: str, query: str) -> dict[str, Any]:
 
 
 SITE_WAIT_S = 8.0     # someone waits on the page (ratelimit.urgent): a site that takes longer is left out
+SLOW_SKIP_S = 120     # a site that did not answer in time (or waited for the VPN) is left out of the next checks this long
+_slow_until: dict[str, float] = {}
 
 
 class TooSlow(PlatformError):
     pass
 
 
+def _skip_slow(site: str) -> bool:
+    """Leave this site out of a price check someone waits for: it did not answer in time a moment ago (eBay while its
+    VPN server is being replaced, Vinted pacing): waiting SITE_WAIT_S again would only hold the page up. willhaben,
+    the source of the ads, is always asked."""
+    from app.platforms import ratelimit
+
+    return site != "willhaben" and ratelimit.is_urgent() and _slow_until.get(site, 0) > time.monotonic()
+
+
+def _note_slow(site: str, error: BaseException) -> None:
+    if isinstance(error, (TooSlow, vpn.VpnWait)):
+        _slow_until[site] = time.monotonic() + SLOW_SKIP_S
+
+
 async def _in_time(search: Any, site: str) -> dict[str, Any]:
     """One site's comparable search; while someone waits on the page (ratelimit.urgent) at most SITE_WAIT_S – a slow
     or refusing site (eBay's warm-up 403s are asked again after a pause, Vinted paces its requests) is left out instead
     of holding up the whole price check. The cancelled request costs no block or penalty."""
-    from app import platforms
     from app.platforms import ratelimit
 
     if not ratelimit.is_urgent():
@@ -1256,11 +1271,16 @@ async def _in_time(search: Any, site: str) -> dict[str, Any]:
     try:
         return await asyncio.wait_for(search, SITE_WAIT_S)
     except TimeoutError:
-        try:
-            name = platforms.get(site).name
-        except platforms.UnknownPlatform:
-            name = site
-        raise TooSlow(t("{site}: no answer within {n} s – left out", site=name, n=f"{SITE_WAIT_S:g}")) from None
+        raise TooSlow(t("{site}: no answer within {n} s – left out", site=_site_name(site),
+                        n=f"{SITE_WAIT_S:g}")) from None
+
+
+def _site_name(site: str) -> str:
+    from app import platforms
+    try:
+        return platforms.get(site).name
+    except platforms.UnknownPlatform:
+        return site
 
 
 def _same_item(ads: list[dict[str, Any]], title: str | None, condition: str | None
@@ -1309,15 +1329,29 @@ async def comparables(query: str, exclude_ad_id: str | None, price: float | None
     titled = 0
     plan = [(category_url, ["willhaben"])] if category_url else \
         [(q, comparable_sites(platform)) for q in dict.fromkeys([query, *more]) if q]
+    failed: set[str] = set()
     for q, sites in plan:
         if out["searches"] and titled >= MIN_COMPARABLES:     # the item's own ads, whatever their condition
             break
+        # a site that failed for an earlier term of this check is not asked again (it would wait SITE_WAIT_S again),
+        # nor one that did not answer in time a moment ago
+        sites = [x for x in sites if x not in failed]
+        for site in [x for x in sites if _skip_slow(x)]:
+            sites.remove(site)
+            failed.add(site)
+            err = TooSlow(t("{site}: did not answer a moment ago – left out", site=_site_name(site)))
+            errors.append((site, err))
+            out["searches"].append({"site": site, "query": q, "error": str(err), "skipped": True})
+        if not sites:
+            continue
         answers = await asyncio.gather(*(_in_time(search_category(q) if category_url else _search(site, q), site)
                                          for site in sites), return_exceptions=True)   # the sites at once, each at its own pace
         for site, data in zip(sites, answers, strict=True):
             if isinstance(data, (WillhabenError, InvalidSearchUrl, PlatformError)):
                 log.info("comparable search on %s failed for %r: %s", site, q, data)
                 errors.append((site, data))
+                failed.add(site)
+                _note_slow(site, data)
                 out["searches"].append({"site": site, "query": q, "error": str(data)})
                 continue
             if isinstance(data, BaseException):
@@ -1558,8 +1592,10 @@ def stored_claude(ad_id: str, price: float | None) -> dict[str, Any] | None:
 
 async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = False, use_claude: bool = False,
                   find_geizhals: bool = False, fallback_query: str | None = None,
-                  category_url: str | None = None, known_geizhals: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Price position of one ad. `query` overrides the comparable search; with `own_query` (the user typed it to
+                  category_url: str | None = None, known_geizhals: dict[str, Any] | None = None,
+                  quick: bool = False) -> dict[str, Any]:
+    """Price position of one ad. `quick`: without the comparable ads (comparables "loading": the ad viewer shows the
+    new-price bar at once and fetches the full result next); a cached full result is returned as it is. `query` overrides the comparable search; with `own_query` (the user typed it to
     compare with) it also says what the comparables must be (_reference). `fallback_query` (a search agent's
     keyword) is used only when the title gives none. Claude runs only with use_claude (verdict) or find_geizhals
     (looks for the product on Geizhals when the automatic lookup found none) – both explicit clicks.
@@ -1579,9 +1615,11 @@ async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = F
         qs = [(query or "").strip()] if (query or "").strip() else search_queries(ad.heading)
         qs = qs or [(fallback_query or "").strip()]
         q = qs[0]
-        comp = await comparables(q, ad.ad_id, ad.price, title=_reference(ad.heading, query, own, fallback_query),
-                                 category_url=category_url, condition=ad.item_condition, more=qs[1:],
-                                 platform=ad.platform)
+        comp = {"query": q, "rows_found": 0, "count": 0, "stats": None, "closest": [], "error": None,
+                "scope": "chosen" if category_url else None, "filtered": {}, "searches": [], "loading": True} if quick \
+            else await comparables(q, ad.ad_id, ad.price, title=_reference(ad.heading, query, own, fallback_query),
+                                   category_url=category_url, condition=ad.item_condition, more=qs[1:],
+                                   platform=ad.platform)
         # Claude's pick first, then the hit's product; the automatic lookup only for an ad Claude did not rule out
         gh = stored_geizhals(ad.ref) or known or (
             None if stored_geizhals_none(ad.ref) or ruled_out else await title_match(ad.heading, ad.category_path))
@@ -1592,7 +1630,7 @@ async def analyze(ad: AdDetail, *, query: str | None = None, own_query: bool = F
                "geizhals_none_at": None if gh else (stored_geizhals_none(ad.ref) or {}).get("at"),
                "position": position(ad.price, comp["stats"], gh["price_from"] if gh else None, ad.item_condition),
                "claude": stored_claude(ad.ref, ad.price), "checked_at": utcnow().isoformat()}
-        if not comp.get("error"):
+        if not comp.get("error") and not quick:
             _put(_results, _key(ad.ref, query, category_url, own), res, RESULT_TTL_S)
     if find_geizhals and not res.get("geizhals") and not res.get("geizhals_none"):
         found = await claude_geizhals(ad)

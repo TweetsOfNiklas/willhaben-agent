@@ -51,5 +51,9 @@
  "the purchase was cancelled – not paying": "der Kauf wurde abgebrochen – es wird nicht bezahlt",
  "Claude: the Geizhals product found automatically ({name}) is another one.": "Claude: Das automatisch gefundene Geizhals-Produkt ({name}) ist ein anderes.",
  "Claude: this Geizhals product was another one: {name}": "Claude: Dieses Geizhals-Produkt war ein anderes: {name}",
- "Geizhals": "Geizhals"
+ "Geizhals": "Geizhals",
+ "Loading comparable ads …": "Vergleichbare Anzeigen werden geladen …",
+ "The rating may still change.": "Die Einstufung kann sich noch ändern.",
+ "Left out: {sites}.": "Ausgelassen: {sites}.",
+ "{site}: did not answer a moment ago – left out": "{site}: hat gerade nicht geantwortet – ausgelassen"
 }

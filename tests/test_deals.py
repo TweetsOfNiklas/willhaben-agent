@@ -497,7 +497,7 @@ def app_client(wh, gh, monkeypatch):
 
 def test_viewer_has_lazy_price_section(app_client):
     page = app_client.get(f"/hits/ad/{AD_ID}").text
-    assert f'hx-get="/hits/ad/{AD_ID}/deal"' in page and 'hx-trigger="load delay:700ms"' in page
+    assert f'hx-get="/hits/ad/{AD_ID}/deal?quick=1"' in page and 'hx-trigger="load delay:700ms"' in page
     assert app_client.calls["search"] == 0                       # opening the ad does not search yet
     frag = app_client.get(f"/hits/ad/{AD_ID}/deal").text
     assert "deal-zones" in frag and "10 comparable ads" in frag and "fair" in frag
@@ -1871,3 +1871,37 @@ async def test_price_check_drops_a_lookup_of_another_product_and_keeps_the_agent
     asked.clear()
     res = await deals.analyze(_ad(55, "Kingston NV3 1TB M.2", ad_id="1234567"), known_geizhals={"checked": True})
     assert asked == [] and res["geizhals"] is None                       # the agent's check said: none fits
+
+
+async def test_quick_analysis_shows_the_new_price_and_loads_the_comparables_next(monkeypatch):
+    """The ad viewer's first request: the Geizhals bar without waiting for the sites' searches; the section then
+    fetches itself in full (cached afterwards: no second quick step)."""
+    from app.deals_web import _analysis
+    searched = []
+
+    async def search_ads(q):
+        searched.append(q)
+        return {"rows_found": 5, "ads": [_summ(n, "Bosch GSR 18V-55", p) for n, p in enumerate([90, 95, 100, 105, 110])]}
+    monkeypatch.setattr(deals, "search_ads", search_ads)
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben"])
+
+    async def match(q, raise_errors=False):
+        return {"name": "Bosch Professional GSR 18V-55", "url": "https://geizhals.at/a1.html", "price_from": 150.0}
+    monkeypatch.setattr(deals, "geizhals_match", match)
+    ad = _ad(100)
+
+    async def detail(ad_id, url=None):
+        return ad
+    from app import platforms
+    monkeypatch.setattr(platforms.get("willhaben"), "detail", detail)
+    res, err = await _analysis("willhaben", AD_ID, None, quick=True)
+    assert err is None and searched == [] and res["comparables"]["loading"] and res["position"]["basis"] == "geizhals"
+    html = _plain(_render_deal(res, lang="en"))
+    assert "data-comparables-loading" in html and f'hx-get="/hits/ad/willhaben/{AD_ID}/deal"' in html
+    assert "Loading comparable ads … The rating may still change." in html and "Compared across" not in html
+    res, err = await _analysis("willhaben", AD_ID, None)
+    assert searched and res["comparables"]["count"] == 5 and "loading" not in res["comparables"]
+    assert "data-comparables-loading" not in _render_deal(res, lang="en")
+    searched.clear()
+    res, err = await _analysis("willhaben", AD_ID, None, quick=True)            # cached: the full result at once
+    assert searched == [] and res["comparables"]["count"] == 5

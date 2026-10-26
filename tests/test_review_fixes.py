@@ -191,6 +191,7 @@ async def test_a_slow_site_is_left_out_of_the_price_check(monkeypatch):
     from app.platforms import ratelimit
     from app.services import deals
     monkeypatch.setattr(deals, "SITE_WAIT_S", 0.05)
+    monkeypatch.setattr(deals, "_slow_until", {})
     monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben", "ebay"])
 
     async def search(site, query):
@@ -206,3 +207,36 @@ async def test_a_slow_site_is_left_out_of_the_price_check(monkeypatch):
     assert asyncio.get_running_loop().time() - t0 < 1
     assert out["count"] == 3 and out["error"] is None
     assert [s.get("error", "")[:4] for s in out["searches"]] == ["", "eBay"] and "left out" in out["searches"][1]["error"]
+
+
+async def test_a_failed_site_is_not_asked_again_and_a_slow_one_rests(monkeypatch):
+    """10-26: eBay (its VPN server just blocked) was waited for 8 s for the title's term and again 8 s for the broader
+    one. A site that failed is not asked for the next term of the same check, and a site that did not answer in time
+    is left out of the price checks of the next SLOW_SKIP_S (willhaben always asked)."""
+    from app.platforms import ratelimit
+    from app.services import deals
+    monkeypatch.setattr(deals, "SITE_WAIT_S", 0.05)
+    monkeypatch.setattr(deals, "_slow_until", {})
+    monkeypatch.setattr(deals, "comparable_sites", lambda platform: ["willhaben", "ebay"])
+    asked = []
+
+    async def search(site, query):
+        asked.append((site, query))
+        if site == "ebay":
+            await asyncio.sleep(5)
+        return {"rows_found": 1, "ads": [{"platform": site, "ad_id": query, "title": "Bosch GSR 18V-55", "price": 100.0}]}
+
+    monkeypatch.setattr(deals, "_search", search)
+    with ratelimit.urgent():
+        out = await deals.comparables("GSR 18V-55", None, 100.0, title="Bosch GSR 18V-55", more=["Bosch GSR"])
+    assert asked == [("willhaben", "GSR 18V-55"), ("ebay", "GSR 18V-55"), ("willhaben", "Bosch GSR")]
+    assert out["count"] == 2 and out["error"] is None
+    asked.clear()
+    with ratelimit.urgent():                                         # the next check: eBay rests
+        out = await deals.comparables("GSR 18V-55", None, 100.0, title="Bosch GSR 18V-55")
+    assert asked == [("willhaben", "GSR 18V-55")]
+    ebay = next(x for x in out["searches"] if x["site"] == "ebay")
+    assert ebay["skipped"] and "left out" in ebay["error"]
+    asked.clear()
+    await deals.comparables("GSR 18V-55 X", None, 100.0, title="Bosch GSR 18V-55")   # nobody waits: every site
+    assert ("ebay", "GSR 18V-55 X") in asked
