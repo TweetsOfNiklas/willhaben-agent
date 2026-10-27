@@ -182,5 +182,8 @@
  "Goes out right away together with the PayLivery step – neither can be taken back.": "Geht sofort zusammen mit dem PayLivery-Schritt raus – beides lässt sich nicht zurücknehmen.",
  "Answer sent, but the PayLivery step did not start: {error}": "Antwort gesendet, aber der PayLivery-Schritt ist nicht gestartet: {error}",
  "Vinted · {title}": "Vinted · {title}",
- "order": "Bestellung"
+ "order": "Bestellung",
+ "Translated": "Übersetzt",
+ "Translate foreign messages": "Fremdsprachige Nachrichten übersetzen",
+ "A message in another language shows Claude's translation under the original, in the same bubble.": "Eine Nachricht in einer anderen Sprache zeigt Claudes Übersetzung unter dem Original, in derselben Sprechblase."
 }

@@ -751,7 +751,8 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
         conv = db.get(Conversation, conversation_id) if conversation_id else None
         if conv is not None:
             msgs = db.exec(select(func.count(), func.max(Message.id), func.sum(case((col(Message.read).is_(True), 1), else_=0)),
-                                  func.max(Message.read_at)).where(Message.conversation_id == conv.id)).one()   # seen ticks too
+                                  func.max(Message.read_at), func.count(Message.translation))
+                           .where(Message.conversation_id == conv.id)).one()   # seen ticks and translations too
             drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent)
                              .where(Draft.conversation_id == conv.id)).all()
             ad = current_ad(db, conv.ad_id) if conv.ad_id else None      # the sale status lives on the live copy

@@ -279,11 +279,12 @@ async def tg_chats(request: Request, show: str = "", role: str = ""):
 
 @router.get("/tg/chats/{conversation_id}", response_class=HTMLResponse)
 async def tg_chat(request: Request, conversation_id: str):
-    from app.services import chats, selling
+    from app.services import chats, selling, translate
     with session() as db:
         conv = db.get(Conversation, conversation_id)
     if conv is None:
         raise HTTPException(404)
+    translate.schedule(conversation_id)          # foreign messages: the 8-s reload of the thread brings the translation
     chats.seen_in_app(conversation_id)
     _later(chats.ask_presence(conv))
     drafts = chats.drafts_of(conversation_id)

@@ -169,6 +169,8 @@ class Message(SQLModel, table=True):
     # the newest message, or a live read event (chats.mark_seen). None = not known yet; a sent message never unsees.
     read: bool | None = None
     read_at: datetime | None = None   # when they saw it, if a live read event told (the history's flag has no time)
+    lang: str | None = None           # its language (services/translate; "-" none), None = not asked yet
+    translation: str | None = None    # into the app's language, when it is another
 
 
 class Draft(SQLModel, table=True):
@@ -700,7 +702,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     ),
     "auto_draft": "0",
     "notify_messages": "1",
-    "weekly_digest": "1",        # Mondays 8:00: the week in a few lines (services/digest)
+    "weekly_digest": "1",
+    "chat_translate": "1",       # foreign chat messages: the translation under the original (services/translate)        # Mondays 8:00: the week in a few lines (services/digest)
     "chat_sync_limit": "10",    # sync only the N latest conversations
     "chat_sync_days": "",       # whole days: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",
