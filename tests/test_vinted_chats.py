@@ -463,3 +463,63 @@ async def test_a_message_the_live_event_brings_is_pushed_once(monkeypatch):
     await vinted_inbox._on_live_response(Resp())                          # the reloaded inbox: the same message
     await vinted_inbox.sync(force=True)
     assert len(pushes) == 1
+
+
+async def test_an_orders_shipping_update_is_read_and_pushed(monkeypatch):
+    """10-27: the shipping updates of an order were missing – they do not change the inbox's last message, and the
+    chat's page did not answer several times in a row. An order's chat is read again every 30 min, a page that does
+    not answer gets a second try, and a new order event is pushed once."""
+    import copy
+    from datetime import timedelta
+
+    from app.db import set_setting, utcnow
+    set_setting("notify_messages", "1")
+    pushes = []
+
+    async def notify(kind, title, message, **kw):
+        pushes.append((title, message))
+    monkeypatch.setattr("app.services.notify.notify", notify)
+
+    class Sess:
+        started = True
+    monkeypatch.setattr("app.willhaben.session.get_session", lambda: Sess())
+    monkeypatch.setattr(vinted_inbox, "LOAD_RETRY_S", 0)
+    conv = copy.deepcopy(CONV)
+    asked = {"conv": 0, "fail": 0}
+
+    async def catch(url, part, timeout_ms=0, extra=None):
+        if url.endswith("/inbox"):
+            return copy.deepcopy(INBOX)
+        asked["conv"] += 1
+        if asked["fail"]:
+            asked["fail"] -= 1
+            return None                                                  # the page did not answer
+        return copy.deepcopy(conv)
+    monkeypatch.setattr(vinted_inbox, "_catch", catch)
+
+    async def card(cid):
+        return None
+    monkeypatch.setattr(chats, "ensure_ad_context", card)
+    await vinted_inbox.sync(force=True)                                  # known now; no news
+    n = asked["conv"]
+    await vinted_inbox.sync(force=True)
+    assert asked["conv"] == n                                            # just read: not again
+    with session() as db:                                                # half an hour later
+        row = db.get(Conversation, "01a1-uuid")
+        row.messages_synced_at = utcnow() - timedelta(minutes=31)
+        row.last_message_at = utcnow() - timedelta(days=1)
+        db.add(row)
+        db.commit()
+    conv["messages"].append({"id": "e9", "created_at": "2026-10-22T09:00:00+02:00", "sender_id": "1",
+                             "message_type": "legacy_action", "data": {"entity": {"title": "Versendet",
+                                                                                   "subtitle": "Das Paket ist unterwegs."}}})
+    asked["fail"] = 1                                                    # the first try fails, the second answers
+    await vinted_inbox.sync(force=True)
+    assert pushes == [("Vinted · HomePod mini", "Versendet – Das Paket ist unterwegs.")]
+    with session() as db:
+        row = db.get(Conversation, "01a1-uuid")
+        row.messages_synced_at = utcnow() - timedelta(minutes=31)
+        db.add(row)
+        db.commit()
+    await vinted_inbox.sync(force=True)                                  # read again: the same event, no 2nd push
+    assert len(pushes) == 1

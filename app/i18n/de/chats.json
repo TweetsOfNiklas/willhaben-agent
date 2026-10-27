@@ -180,5 +180,7 @@
  "Interrupted – it is unclear whether it went out: reload the history before sending again": "Unterbrochen – unklar, ob sie rausging: lade den Verlauf neu, bevor du nochmal sendest",
  "Draft interrupted": "Entwurf abgebrochen",
  "Goes out right away together with the PayLivery step – neither can be taken back.": "Geht sofort zusammen mit dem PayLivery-Schritt raus – beides lässt sich nicht zurücknehmen.",
- "Answer sent, but the PayLivery step did not start: {error}": "Antwort gesendet, aber der PayLivery-Schritt ist nicht gestartet: {error}"
+ "Answer sent, but the PayLivery step did not start: {error}": "Antwort gesendet, aber der PayLivery-Schritt ist nicht gestartet: {error}",
+ "Vinted · {title}": "Vinted · {title}",
+ "order": "Bestellung"
 }

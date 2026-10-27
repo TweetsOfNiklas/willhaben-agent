@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import time
+from datetime import timedelta, timezone
 from typing import Any
 
 from app.db import utcnow
@@ -117,6 +118,8 @@ def summary(res: dict[str, Any] | None) -> str:
 # ------------------------------------------------------------------ sync into the chat list
 SYNC_EVERY_S = 600            # a hidden tab of Vinted's inbox at most every 10 minutes (bot protection, not a poller)
 MAX_DETAILS = 5               # conversations opened per sync (those with something new)
+ORDER_RECHECK_S = 30 * 60     # an order's chat is read again this often: its shipping updates do not change the
+ORDER_DAYS = 21               # inbox's last message (10-27 missed); for orders active within these days
 _last_sync = [0.0]
 
 
@@ -328,15 +331,62 @@ async def _catch(url: str, part: str, timeout_ms: int = 30000, extra: dict[str, 
         await page.close()
 
 
-async def sync_one(cid: str) -> int:
-    """One conversation again (the chat's Reload, a live event): its page in a short-lived tab."""
+def _orders_due(inbox: dict[str, Any]) -> list[str]:
+    """The inbox's order chats active within ORDER_DAYS whose messages were read more than ORDER_RECHECK_S ago."""
+    from app.db import Conversation, session
+
+    now, out = utcnow(), []
+    with session() as db:
+        for c in inbox.get("conversations") or []:
+            cid = str(c.get("id") or "")
+            row = db.get(Conversation, cid) if cid else None
+            if row is None or c.get("conversation_type") != "order" or row.removed:
+                continue
+            active = row.last_message_at or row.synced_at
+            synced = row.messages_synced_at
+            if active is not None and now - _aware(active) < timedelta(days=ORDER_DAYS) and (
+                    synced is None or (now - _aware(synced)).total_seconds() > ORDER_RECHECK_S):
+                out.append(cid)
+    return out
+
+
+def _aware(at: Any) -> Any:
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+async def _load(cid: str, push: bool = True) -> int:
+    """One conversation's page in a short-lived tab (a second try after a few seconds when its answer does not come:
+    10-27 several in a row did not), its messages stored; with `push`, a new message of the other person and a new
+    order event (shipped, delivered …) pushed, each once. How many messages it holds."""
+    extra: dict[str, Any] = {}
+    before_in, before_ev = _newest_in(cid), _newest_event(cid)
+    conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}", extra=extra)
+    if conv is None:
+        await asyncio.sleep(LOAD_RETRY_S)
+        conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}", extra=extra)
+    if conv is None:
+        return 0
+    n = apply_conversation(cid, conv, extra.get("escrow"))
+    if push:
+        after_in, after_ev = _newest_in(cid), _newest_event(cid)
+        if after_in is not None and (before_in is None or after_in > before_in):
+            await _push_incoming([cid])
+        if after_ev is not None and (before_ev is None or after_ev > before_ev):
+            await _push_events(cid, before_ev)
+    return n
+
+
+LOAD_RETRY_S = 5
+
+
+async def sync_one(cid: str, push: bool = True) -> int:
+    """One conversation again (the chat's Reload, a live event): its page in a short-lived tab, new messages and
+    order events pushed."""
     from app.willhaben.session import get_session
 
     if not get_session().started:
         return 0
-    extra: dict[str, Any] = {}
-    conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}", extra=extra)
-    n = apply_conversation(cid, conv, extra.get("escrow")) if conv is not None else 0
+    n = await _load(cid, push=push and _known_any())
     from app.services import chats
     await chats.ensure_ad_context(cid)            # the item's card (photo, price) like a willhaben ad's
     return n
@@ -437,6 +487,50 @@ def _newest_in(cid: str) -> Any:
         return db.exec(select(func.max(Message.created_at)).where(Message.conversation_id == cid,
                                                                   Message.direction == "in",
                                                                   col(Message.kind).is_(None))).one()
+
+
+def _newest_event(cid: str) -> Any:
+    """The time of the newest stored order event (a notice: shipped, delivered …) of this chat, or None."""
+    from sqlalchemy import func
+    from sqlmodel import select
+
+    from app.db import Message, session
+    with session() as db:
+        return db.exec(select(func.max(Message.created_at)).where(Message.conversation_id == cid,
+                                                                  Message.kind == "integration")).one()
+
+
+_pushed_events: dict[str, Any] = {}    # conversation id -> the time of the order event last pushed
+
+
+async def _push_events(cid: str, since: Any) -> None:
+    """Vinted's order events newer than `since` (shipped, delivered, money released …): one push each, once
+    (Settings → Chats, like new messages)."""
+    from sqlmodel import select
+
+    from app.config import get_settings
+    from app.db import Conversation, Message, get_setting, session
+    from app.i18n import t
+    from app.services.notify import notify
+
+    if get_setting("notify_messages") != "1":
+        return
+    with session() as db:
+        row = db.get(Conversation, cid)
+        q = select(Message).where(Message.conversation_id == cid, Message.kind == "integration")
+        if since is not None:
+            q = q.where(Message.created_at > since)
+        events = list(db.exec(q.order_by(Message.created_at)))
+    for ev in events:
+        if cid in _pushed_events and ev.created_at <= _pushed_events[cid]:
+            continue
+        _pushed_events[cid] = ev.created_at
+        try:
+            await notify("message", t("Vinted · {title}", title=(row.ad_title if row else None) or t("order")),
+                         ev.text[:200], url=f"{get_settings().public_url.rstrip('/')}/chats/{cid}",
+                         data={"conversation_id": cid, "platform": "vinted"}, tag=f"wh-vev-{cid}")
+        except Exception as e:  # noqa: BLE001 - a failed push never stops the sync
+            log.warning("vinted order event push failed: %s", e)
 
 
 async def _push_incoming(cids: list[str]) -> None:
@@ -543,12 +637,8 @@ async def _on_live(payload: str) -> None:
     live["last_event"], live["events"] = utcnow(), live["events"] + 1
     if ev.get("message_type") == "refresh_conversation":
         cid = str((ev.get("data") or {}).get("conversation_id") or "")
-        if cid:
-            known, before = _known_any(), _newest_in(cid)
-            await sync_one(cid)                    # its messages; the inbox the page reloads brings the list
-            after = _newest_in(cid)
-            if known and after is not None and (before is None or after > before):
-                await _push_incoming([cid])        # a new message from them: pushed here, the inbox finds it stored
+        if cid:          # its messages and events, new ones pushed here; the inbox the page reloads brings the list
+            await sync_one(cid)
 
 
 async def _on_live_response(resp) -> None:
@@ -654,13 +744,11 @@ async def sync(force: bool = False) -> dict[str, Any]:
     first = not _known_any()
     incoming: list[str] = []
     changed = apply_inbox(inbox, incoming)
+    changed += [cid for cid in _orders_due(inbox) if cid not in changed]
     read = 0
     from app.services import chats
     for cid in changed[:MAX_DETAILS]:
-        extra: dict[str, Any] = {}
-        conv = await _catch(f"{ORIGIN}/inbox/{cid}", f"/messaging/main/conversations/{cid}", extra=extra)
-        if conv is not None:
-            read += apply_conversation(cid, conv, extra.get("escrow"))
+        read += await _load(cid, push=not first)
 
     for c in (inbox.get("conversations") or [])[:MAX_DETAILS * 2]:   # the item cards (photo, price); kept fresh a while
         if c.get("id"):
