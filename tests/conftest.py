@@ -106,6 +106,21 @@ def no_paylivery_advice(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_translation(monkeypatch):
+    """A new draft or an opened chat is translated in the background: never by the real Claude in tests (the task
+    waited on it at the end of the test's event loop and hung the suite); tests/test_translate.py brings its fake."""
+    from app.llm.base import LLMError
+    from app.services import translate
+
+    class Refuse:
+        async def complete(self, **kw):
+            raise LLMError("no Claude in tests")
+    monkeypatch.setattr(translate, "get_backend", lambda *a, **kw: Refuse())
+    translate._running.clear()
+    translate._drafts_running.clear()
+
+
+@pytest.fixture(autouse=True)
 def fresh_db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     dbmod.set_engine(engine)
