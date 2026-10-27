@@ -2043,6 +2043,8 @@ async def test_the_status_sweep_reads_recent_hits_quietly(monkeypatch):
         db.add(Hit(agent_id=1, ad_id="603", heading="c", url="x", price=10.0, first_seen_at=utcnow(),
                    screen_relevant=False))                                         # ruled out: not read
         db.add(Hit(agent_id=1, ad_id="604", heading="d", url="x", price=10.0, first_seen_at=utcnow() - timedelta(days=60)))
+        db.add(Hit(agent_id=1, ad_id="605", heading="e", url="x", price=10.0, first_seen_at=utcnow(),
+                   platform="facebook"))                                       # its login block: never swept
         db.commit()
     await search_agents.status_sweep_job()
     assert sorted(read) == ["601", "602"]

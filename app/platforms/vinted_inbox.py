@@ -688,6 +688,15 @@ async def _on_live_response(resp) -> None:
             await _push_incoming(incoming)
 
 
+# ad and tracking hosts the live tab never needs (10-27: amazon-adsystem and criteo frames, each a renderer process of
+# its own); Vinted's bot protection (DataDome) is not among them
+_AD_HOSTS = re.compile(r"^https?://([a-z0-9-]+\.)*(amazon-adsystem\.com|criteo\.(com|net)|doubleclick\.net|"
+                       r"googlesyndication\.com|googletagservices\.com|googleadservices\.com|adnxs\.com|"
+                       r"adsrvr\.org|rubiconproject\.com|pubmatic\.com|casalemedia\.com|taboola\.com|"
+                       r"outbrain\.com|smartadserver\.com|teads\.tv|yieldlab\.net|3lift\.com|openx\.net|"
+                       r"bidswitch\.net|adform\.net)(/|:|$)", re.I)
+
+
 async def start_live() -> bool:
     """Open (or reopen) the live tab: Vinted's inbox with the stream wrapper. False when the browser does not run or
     Vinted is logged out."""
@@ -699,6 +708,7 @@ async def start_live() -> bool:
         return False
     old = live.get("page")
     if old is not None and not old.is_closed():
+        sess.working_pages.discard(old)
         await old.close()
     ui = sess.ui_page
     sess._creating_internal = True
@@ -707,6 +717,9 @@ async def start_live() -> bool:
     finally:
         sess._creating_internal = False
         sess.ui_page = ui
+    sess.working_pages.add(page)                   # a working page: the idle parking keeps it
+    page.on("close", lambda p: sess.working_pages.discard(p))
+    await page.route(_AD_HOSTS, lambda route: route.abort())   # its ads: a renderer each, nothing to listen to
     await page.expose_function("__whVintedLiveApp", lambda payload: _live_spawn(_on_live(payload)))
     await page.add_init_script(_LIVE_JS)
     page.on("response", lambda r: _live_spawn(_on_live_response(r)))

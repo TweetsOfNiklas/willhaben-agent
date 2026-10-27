@@ -1559,6 +1559,7 @@ async def _watch_one(h: Hit) -> None:
 SWEEP_PER_RUN = 20             # recent hits whose ad page is read per hourly run (sold prices for the price check)
 SWEEP_DAYS = 30                # first seen within this many days
 SWEEP_EVERY = timedelta(days=2)
+SWEEP_SKIP = {"facebook"}      # its ad pages trip its login block (10-27): the agents' own checks only
 
 
 async def status_sweep_job() -> None:
@@ -1578,7 +1579,7 @@ async def status_sweep_job() -> None:
     seen: set[tuple[str, str]] = set()
     for h in rows:
         key = (h.platform or "willhaben", h.ad_id)
-        if key in seen or not _site(h.platform).can("detail"):
+        if key in seen or key[0] in SWEEP_SKIP or not _site(h.platform).can("detail"):
             continue
         seen.add(key)
         if len(seen) > SWEEP_PER_RUN:

@@ -94,6 +94,7 @@ class BrowserSession:
         self._capture_tasks: set[asyncio.Task] = set()
         self._input_lock = asyncio.Lock()
         self._ui_used_at = time.monotonic()   # last use of the visible page (see park_idle_ui)
+        self.working_pages: set[Any] = set()   # pages other parts keep open (Vinted's live tab): never parked or closed
         self._ui_holds = 0
         # live chat: own page holding the chat WebSocket (see start_chat_listener)
         self.chat_page = None
@@ -468,6 +469,7 @@ class BrowserSession:
         if not self.context:
             return "no browser"
         role = {id(self.api_page): "api", id(self.chat_page): "chat", id(self.home_page): "home"}
+        role.update({id(p): "working" for p in self.working_pages})
         role.update({id(p): f"site:{k}" for k, p in self.site_pages.items()})
         parts = []
         for p in self.context.pages:
@@ -498,8 +500,10 @@ class BrowserSession:
         for page in pages:
             with suppress(Exception):          # a page closing meanwhile: nothing to park
                 await page.goto("about:blank")
-        # tabs no part of the app holds (a popup, a link opened in the remote view): closed
-        known = {self.ui_page, self.home_page, self.api_page, self.chat_page, *self.site_pages.values()}
+        # tabs no part of the app holds (a popup, a link opened in the remote view): closed; working pages other parts
+        # registered (Vinted's live tab: closing it ended the live connection, 10-27) stay
+        known = {self.ui_page, self.home_page, self.api_page, self.chat_page, *self.site_pages.values(),
+                 *self.working_pages}
         stray = [p for p in (self.context.pages if self.context else []) if p not in known and not p.is_closed()]
         for page in stray:
             with suppress(Exception):
