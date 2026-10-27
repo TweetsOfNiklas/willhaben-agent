@@ -412,3 +412,54 @@ def test_the_willhaben_partners_place_from_their_profile():
         db.commit()
         conv = db.get(Conversation, "w1")
     assert chats.partner_place(conv) == "8530 Deutschlandsberg"
+
+
+async def test_a_message_the_live_event_brings_is_pushed_once(monkeypatch):
+    """10-27: no Vinted push at all – the live event stored a new message first (sync_one, no push), and the inbox
+    read right after found nothing newer. The live event pushes it now; the inbox does not push it a second time."""
+    import copy
+    import json
+
+    from app.db import set_setting
+    set_setting("notify_messages", "1")
+    pushes = []
+
+    async def notify(kind, title, message, **kw):
+        pushes.append(message)
+    monkeypatch.setattr("app.services.notify.notify", notify)
+
+    class Sess:
+        started = True
+    monkeypatch.setattr("app.willhaben.session.get_session", lambda: Sess())
+    conv = copy.deepcopy(CONV)
+
+    async def catch(url, part, timeout_ms=0, extra=None):
+        return copy.deepcopy(INBOX if url.endswith("/inbox") else conv)
+    monkeypatch.setattr(vinted_inbox, "_catch", catch)
+
+    async def card(cid):
+        return None
+    monkeypatch.setattr(chats, "ensure_ad_context", card)
+    await vinted_inbox.sync(force=True)                                    # known, no news
+    assert pushes == []
+    conv["messages"].append({"id": "m3", "created_at": "2026-10-21T23:00:00+02:00", "sender_id": "77",
+                             "message_type": "message", "data": {"body": "Noch Fragen?"}})
+    await vinted_inbox._on_live(json.dumps({"message_type": "refresh_conversation",
+                                            "data": {"conversation_id": "01a1-uuid"}}))
+    assert len(pushes) == 1                                                # the live event pushed it
+
+    inbox = copy.deepcopy(INBOX)
+    inbox["conversations"][0]["last_message"] = {"id": "m3", "created_at": "2026-10-21T23:00:00+02:00",
+                                                 "sender_id": "77", "message_type": "legacy_last_message",
+                                                 "data": {"content": "Noch Fragen?"}}
+
+    class Resp:
+        url = "https://api.vinted.at/messaging/main/inbox?page=1"
+        status = 200
+        request = type("Q", (), {"method": "GET"})()
+
+        async def text(self):
+            return json.dumps(inbox)
+    await vinted_inbox._on_live_response(Resp())                          # the reloaded inbox: the same message
+    await vinted_inbox.sync(force=True)
+    assert len(pushes) == 1

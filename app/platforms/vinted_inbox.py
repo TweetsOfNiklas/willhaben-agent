@@ -424,8 +424,25 @@ def _known_any() -> bool:
         return db.exec(select(Conversation).where(Conversation.platform == "vinted").limit(1)).first() is not None
 
 
+_pushed: dict[str, Any] = {}     # conversation id -> the time of the message last pushed (the live and the inbox way)
+
+
+def _newest_in(cid: str) -> Any:
+    """The time of the newest stored message the other person wrote in this chat, or None."""
+    from sqlalchemy import func
+    from sqlmodel import col, select
+
+    from app.db import Message, session
+    with session() as db:
+        return db.exec(select(func.max(Message.created_at)).where(Message.conversation_id == cid,
+                                                                  Message.direction == "in",
+                                                                  col(Message.kind).is_(None))).one()
+
+
 async def _push_incoming(cids: list[str]) -> None:
-    """A message the other person wrote on Vinted: the same push as willhaben's new messages (Settings → Chats)."""
+    """A message the other person wrote on Vinted: the same push as willhaben's new messages (Settings → Chats).
+    Once per message: the live event and the inbox both find it (10-27 only the inbox pushed, and the live event,
+    which stores the message first, left it nothing new – no Vinted push at all)."""
     from app.config import get_settings
     from app.db import Conversation, get_setting, session
     from app.i18n import t
@@ -438,6 +455,10 @@ async def _push_incoming(cids: list[str]) -> None:
             row = db.get(Conversation, cid)
         if row is None:
             continue
+        at = _newest_in(cid) or row.last_message_at
+        if at is not None and cid in _pushed and at <= _pushed[cid]:
+            continue                                   # this message was pushed already
+        _pushed[cid] = at
         try:
             await notify("message", t("Vinted: message from {name}", name=row.partner_name or t("unknown")),
                          f"{row.ad_title or ''}: {(row.last_message_text or '')[:140]}",
@@ -523,7 +544,11 @@ async def _on_live(payload: str) -> None:
     if ev.get("message_type") == "refresh_conversation":
         cid = str((ev.get("data") or {}).get("conversation_id") or "")
         if cid:
+            known, before = _known_any(), _newest_in(cid)
             await sync_one(cid)                    # its messages; the inbox the page reloads brings the list
+            after = _newest_in(cid)
+            if known and after is not None and (before is None or after > before):
+                await _push_incoming([cid])        # a new message from them: pushed here, the inbox finds it stored
 
 
 async def _on_live_response(resp) -> None:

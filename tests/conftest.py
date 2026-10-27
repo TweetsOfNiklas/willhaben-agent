@@ -130,6 +130,8 @@ def fresh_db():
     product_search._backfill_tried.clear()
     deals._slow_until.clear()
     deals._identities.clear()
+    from app.platforms import vinted_inbox
+    vinted_inbox._pushed.clear()             # the Vinted message last pushed, per chat
     recorder.sync_writes = True  # one in-memory connection: willhaben recordings are written right away
     yield
     recorder.reset()
