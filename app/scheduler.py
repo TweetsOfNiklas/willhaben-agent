@@ -180,6 +180,10 @@ def start() -> None:
     scheduler.add_job(watch_saved_job, IntervalTrigger(hours=2, jitter=600), id="hits-watch-saved",
                       replace_existing=True, max_instances=1, coalesce=True,   # saved hits: price drops, sold, gone
                       next_run_time=datetime.now().astimezone() + timedelta(minutes=30))
+    from app.services import chat_done
+    scheduler.add_job(chat_done.check_job, IntervalTrigger(minutes=30, jitter=300), id="chat-done",
+                      replace_existing=True, max_instances=1, coalesce=True,   # chats Claude judges over
+                      next_run_time=datetime.now().astimezone() + timedelta(minutes=20))
     from app.services import digest
     scheduler.add_job(digest.weekly_job, CronTrigger(day_of_week="mon", hour=8, minute=0), id="weekly-digest",
                       replace_existing=True, max_instances=1, coalesce=True)    # the week in a few lines

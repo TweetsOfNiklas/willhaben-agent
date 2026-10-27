@@ -1381,7 +1381,7 @@ def _chat_list(show_hidden: bool) -> dict[str, Any]:
     wh_on = "willhaben" in have or bool(get_session().logged_in)
     vinted_on = platforms.enabled("vinted") and ("vinted" in have or bool(site_accounts.state("vinted")["logged_in"]))
     return {"convs": convs, "open_drafts": open_drafts, "hidden_count": hidden_count, "show_hidden": show_hidden,
-            "waiting": waiting, "finished": o["finished"], "unread_by_chat": o["unread"], "thumbs": o["thumbs"], "wh_on": wh_on, "vinted_on": vinted_on}
+            "waiting": waiting, "finished": o["finished"], "finished_why": o["finished_why"], "unread_by_chat": o["unread"], "thumbs": o["thumbs"], "wh_on": wh_on, "vinted_on": vinted_on}
 
 
 @app.get("/chats", response_class=HTMLResponse)
@@ -3294,7 +3294,7 @@ async def settings_section(request: Request, section: str, msg: str | None = Non
     sites = _site_sections()
     if section not in SETTINGS_SECTIONS and section not in sites:
         raise HTTPException(404)
-    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "weekly_digest", "chat_translate", "chat_sync_limit", "chat_sync_days", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
+    keys = ["platform_willhaben_product_search", "reply_rules", "auto_draft", "notify_messages", "weekly_digest", "chat_translate", "chat_auto_finish", "chat_sync_limit", "chat_sync_days", "push_channel", "expiry_warn_days", "myads_expired_days", "auto_reply_rules", "send_verified",
             "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"]
     if section == "claude":
         await llm_models.refresh()                 # the selectable models, fresh from the API
@@ -3647,7 +3647,7 @@ async def settings_save(request: Request):
     saves nothing (it once wrote every key, wiping the fields the form did not send)."""
     form = await request.form()
     groups = {"rules": ("reply_rules", "reply_style"), "selling": selling.KEYS,
-              "chats": ("auto_draft", "notify_messages", "weekly_digest", "chat_translate", "chat_sync_limit", "chat_sync_days", "push_channel", "auto_reply_rules",
+              "chats": ("auto_draft", "notify_messages", "weekly_digest", "chat_translate", "chat_auto_finish", "chat_sync_limit", "chat_sync_days", "push_channel", "auto_reply_rules",
                         "reply_humanize", "reply_delay_min_s", "reply_delay_max_s", "reply_fast_min_s", "reply_fast_max_s"),
               "myads": ("expiry_warn_days", "myads_expired_days")}
     section = str(form.get("section") or "")
@@ -3673,6 +3673,7 @@ async def settings_save(request: Request):
         set_setting("notify_messages", "1" if form.get("notify_messages") else "0")
         set_setting("weekly_digest", "1" if form.get("weekly_digest") else "0")
         set_setting("chat_translate", "1" if form.get("chat_translate") else "0")
+        set_setting("chat_auto_finish", "1" if form.get("chat_auto_finish") else "0")
         set_setting("chat_sync_limit", str(min(max(1, num("chat_sync_limit", 10)), 50)))
         days = str(form.get("chat_sync_days", "")).strip()
         if days == "" or days.isdigit():          # empty: no cutoff; anything else keeps the old value

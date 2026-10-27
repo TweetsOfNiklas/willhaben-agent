@@ -186,5 +186,10 @@
  "Translated": "Übersetzt",
  "Translate foreign messages": "Fremdsprachige Nachrichten übersetzen",
  "A message in another language shows Claude's translation under the original, in the same bubble.": "Eine Nachricht in einer anderen Sprache zeigt Claudes Übersetzung unter dem Original, in derselben Sprechblase.",
- "Translation of the draft": "Übersetzung des Entwurfs"
+ "Translation of the draft": "Übersetzung des Entwurfs",
+ "Open chats": "Offen",
+ "Marked finished by Claude": "Von Claude als erledigt markiert",
+ "Package delivered": "Paket zugestellt",
+ "Mark finished chats automatically": "Erledigte Chats automatisch markieren",
+ "Claude looks at chats with something new every half hour: a deal done, cancelled, or a goodbye with nothing open is marked finished. A delivered package does it too. A new message opens the chat again.": "Claude sieht sich jede halbe Stunde Chats mit Neuem an: ein erledigter oder abgesagter Handel oder ein Abschied ohne Offenes wird als erledigt markiert. Ein zugestelltes Paket ebenso. Eine neue Nachricht öffnet den Chat wieder."
 }

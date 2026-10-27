@@ -274,6 +274,10 @@ async def tg_chats(request: Request, show: str = "", role: str = ""):
         convs = [c for c in convs if c.id in o["waiting"] or c.id in o["open_drafts"]]
     elif show == "unread":
         convs = [c for c in convs if o["unread"].get(c.id)]
+    elif show == "finished":
+        convs = [c for c in convs if c.id in o["finished"]]
+    elif show != "all":                  # the default: the open chats, the finished ones behind their own filter
+        convs = [c for c in convs if c.id not in o["finished"]]
     return _render(request, "chats.html", convs=convs, o=o, show=show, role=role)
 
 

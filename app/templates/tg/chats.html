@@ -12,9 +12,11 @@
     {% endfor %}
   </nav>
   <nav class="seg" style="margin-top: 6px" aria-label="{{ _('Chats') }}">
-    <a href="/tg/chats?role={{ role }}"{% if not show %} aria-current="page"{% endif %}>{{ _("All") }}</a>
+    <a href="/tg/chats?role={{ role }}"{% if not show %} aria-current="page"{% endif %}>{{ _("Open chats") }}</a>
     <a href="/tg/chats?show=unread&role={{ role }}"{% if show == 'unread' %} aria-current="page"{% endif %}>{{ _("Unread") }}{% if o.unread %} · {{ o.unread|length }}{% endif %}</a>
     <a href="/tg/chats?show=action&role={{ role }}"{% if show == 'action' %} aria-current="page"{% endif %}>{{ _("Awaiting my reply") }}</a>
+    <a href="/tg/chats?show=finished&role={{ role }}"{% if show == 'finished' %} aria-current="page"{% endif %}>{{ _("Finished") }}</a>
+    <a href="/tg/chats?show=all&role={{ role }}"{% if show == 'all' %} aria-current="page"{% endif %}>{{ _("All") }}</a>
   </nav>
   {# sync with the sites; several chats at once: read or hidden (the dashboard's bulk actions) #}
   <div class="btnrow" style="margin-top: 8px">

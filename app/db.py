@@ -143,6 +143,8 @@ class Conversation(SQLModel, table=True):
     app_seen_at: datetime | None = None
     # marked finished by me ("Mark as finished"): no answer due any more; a newer message from them opens it again
     finished_at: datetime | None = None
+    finished_by: str | None = None      # "claude" when Claude judged it over (services/chat_done), else me
+    done_checked_at: datetime | None = None   # the last message Claude judged "over or not" for (asked once each)
     marked_unread: bool | None = None   # "Mark as unread": counts as unread here until I open it again
     partner_uuid: str | None = None     # the other person's willhaben user uuid: their online state (presence)
     ad_uuid: str | None = None          # willhaben's internal ad uuid (ad_info.uuid): with partner_uuid, their profile page
@@ -705,7 +707,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "auto_draft": "0",
     "notify_messages": "1",
     "weekly_digest": "1",
-    "chat_translate": "1",       # foreign chat messages: the translation under the original (services/translate)        # Mondays 8:00: the week in a few lines (services/digest)
+    "chat_translate": "1",
+    "chat_auto_finish": "1",     # Claude marks chats it judges over as finished (services/chat_done)       # foreign chat messages: the translation under the original (services/translate)        # Mondays 8:00: the week in a few lines (services/digest)
     "chat_sync_limit": "10",    # sync only the N latest conversations
     "chat_sync_days": "",       # whole days: skip conversations whose last message is older; empty = no cutoff
     "expiry_warn_days": "3",

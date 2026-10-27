@@ -518,6 +518,13 @@ _CLOSING_FILLER = {"und", "auch", "nochmal", "nochmals", "vielmals", "echt", "se
 _NOT_WORD = re.compile(r"[^\w\s]", re.U)
 
 
+# a site's notice that the item arrived or the deal is complete: the chat is over unless they write again
+DELIVERED_RE = re.compile(r"zugestellt|wurde (?:erfolgreich )?(?:geliefert|abgeholt)|Bestellung (?:ist )?abgeschlossen|"
+                          r"Transaktion (?:ist )?abgeschlossen|Kauf (?:ist )?abgeschlossen|hat (?:den Artikel|das Paket) "
+                          r"erhalten|Geld wurde (?:dir )?(?:überwiesen|ausgezahlt)|delivered|order (?:is )?completed",
+                          re.I)
+
+
 def closes_chat(text: str | None) -> bool:
     """The other person's message ends the conversation (thanks, agreed, goodbye – nothing to answer)."""
     s = (text or "").strip().lower()
@@ -618,6 +625,7 @@ def set_finished(conversation_id: str, on: bool = True) -> None:
         conv = db.get(Conversation, conversation_id)
         if conv is not None:
             conv.finished_at = utcnow() if on else None
+            conv.finished_by = None                  # mine now, not Claude's
             db.add(conv)
             db.commit()
 
@@ -683,12 +691,29 @@ def overview(db) -> dict[str, Any]:
     shown = [c for c in convs if not c.hidden_at and c.id not in old]
     by_id = {c.id: c for c in convs}
 
+    # the newest notice of each chat (Vinted's order events, willhaben's PayLivery ones): "delivered" ends a sale
+    notices: dict[str, tuple[datetime | None, str]] = {}
+    for cid, at, text in db.exec(select(Message.conversation_id, Message.created_at, Message.text).where(
+            col(Message.kind).is_not(None)).order_by(col(Message.created_at).asc().nulls_first())):
+        notices[cid] = (_aware(at) if at is not None else None, text or "")
+    why: dict[str, str] = {}
+
     def finished(cid: str) -> bool:      # marked finished since their last message, or that message ends it
         at, text = last_in.get(cid, (None, None))
         mark = by_id[cid].finished_at if cid in by_id else None
-        return bool(mark and (at is None or _aware(mark) >= at)) or closes_chat(text)
+        if mark and (at is None or _aware(mark) >= at):
+            why[cid] = "marked"
+            return True
+        if closes_chat(text):
+            why[cid] = "closing"
+            return True
+        n_at, n_text = notices.get(cid, (None, ""))
+        if DELIVERED_RE.search(n_text) and n_at is not None and (at is None or n_at >= at):
+            why[cid] = "delivered"          # the package arrived and they have not written since
+            return True
+        return False
     done = {cid for cid in by_id if finished(cid)}
-    return {"convs": convs, "shown": shown, "old": old, "open_drafts": open_drafts, "finished": done,
+    return {"convs": convs, "shown": shown, "old": old, "open_drafts": open_drafts, "finished": done, "finished_why": why,
             "thumbs": _thumbs(db, convs),
             "waiting": {cid for cid, d in last_dir.items() if d == "in" and cid not in done}, "unread": unread}
 

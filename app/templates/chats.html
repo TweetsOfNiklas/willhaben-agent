@@ -8,7 +8,7 @@
 {% set live = session_status.chat_live or {} %}
 {% set role_filter = request.query_params.get('role') if request is defined else none %}
 {% set show_filter = request.query_params.get('show') if request is defined else none %}
-{% set show_filter = show_filter if show_filter in ('unread', 'reply', 'draft') else none %}
+{% set show_filter = show_filter if show_filter in ('unread', 'reply', 'draft', 'finished', 'all') else none %}
 {% set site_filter = request.query_params.get('site') if request is defined else none %}
 {% set site_filter = site_filter if site_filter in ('willhaben', 'vinted') else none %}
 {% set has_vinted = vinted_on %}
@@ -58,7 +58,7 @@
     {# which chats: every one, unread ones, those where the other person wrote last, those with an answer drafted #}
     <div class="mt-2 flex flex-wrap gap-1.5 text-[12.5px]" data-chat-show>
       {# "awaiting my reply": my move – they wrote last, or my answer waits as a draft (the sidebar's yellow count) #}
-      {% for v, label in [(none, _("All")), ('unread', _("Unread")), ('reply', _("Awaiting my reply")), ('draft', _("Draft ready"))] %}
+      {% for v, label in [(none, _("Open chats")), ('unread', _("Unread")), ('reply', _("Awaiting my reply")), ('draft', _("Draft ready")), ('finished', _("Finished")), ('all', _("All"))] %}
       <a href="{{ chats_url(show=v) }}" class="rounded-full border px-2.5 py-0.5 no-underline {{ 'border-primary bg-brand-soft text-primary' if v == show_filter else 'border-base-300 text-muted hover:text-base-content' }}">{{ label }}</a>
       {% endfor %}
     </div>
@@ -81,7 +81,9 @@
   <div id="chat-list-items" class="flex flex-col gap-0.5 px-2.5 pb-4">
     {% for c in convs if (not site_filter or (c.platform or 'willhaben') == site_filter)
                          and (not role_filter or c.role == role_filter)
-                         and (not show_filter or (show_filter == 'unread' and unread_by_chat.get(c.id)) or (show_filter == 'reply' and (c.id in waiting or c.id in open_drafts))
+                         and ((not show_filter and c.id not in finished) or show_filter == 'all'
+                              or (show_filter == 'finished' and c.id in finished)
+                              or (show_filter == 'unread' and unread_by_chat.get(c.id)) or (show_filter == 'reply' and (c.id in waiting or c.id in open_drafts))
                               or (show_filter == 'draft' and c.id in open_drafts)) %}
     <a href="/chats/{{ c.id }}{{ filter_q }}" @click="rowClick($event)"
        hx-get="/chats/{{ c.id }}{{ filter_q }}" hx-target="#chat-pane" hx-select="#chat-pane" hx-swap="outerHTML" hx-select-oob="#chat-list-items,#chat-live" hx-push-url="true" hx-trigger="open-row"
@@ -105,6 +107,7 @@
         {% if c.id in waiting %}<span class="size-2.5 rounded-full bg-warning" data-awaiting title="{{ _('Awaiting my reply') }}"><span class="sr-only">{{ _("Awaiting my reply") }}</span></span>{% endif %}
         {% if c.id in open_drafts %}{{ ui.pill(_("Draft"), 'ok', dot=false) }}{% endif %}
         {% if c.hidden_at %}{{ ui.pill(_("hidden"), '', dot=false) }}{% endif %}
+        {% if c.id in finished %}<span data-finished>{{ ui.pill(_("Finished"), '', false, '', _("Marked finished by Claude") if c.finished_by == 'claude' else (_("Package delivered") if finished_why.get(c.id) == 'delivered' else '')) }}</span>{% endif %}
       </span>
     </a>
     {% else %}
