@@ -273,6 +273,11 @@ def _upsert_message(db, conversation_id: str, ext_id: str, direction: str, text:
         if direction != exists.direction and (authoritative or exists.direction == "unknown"):
             exists.direction = direction
             db.add(exists)
+        if authoritative and text and exists.text != text:
+            # the full history says it differently (Vinted's original instead of its machine translation, 10-27):
+            # its text, and its language and translation asked again
+            exists.text, exists.lang, exists.translation = text, None, None
+            db.add(exists)
         if kind is not None and exists.kind != kind:
             exists.kind = kind
             db.add(exists)

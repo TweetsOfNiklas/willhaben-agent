@@ -151,8 +151,9 @@ def message_text(m: dict[str, Any]) -> tuple[str, str | None]:
     e = d.get("entity") or {}
     if d.get("entity_type") == "message" or m.get("message_type") in ("legacy_reply", "reply_plain"):
         # a written message: legacy_reply carries it in data.entity.body (entity_type "message", seen 2026-10-21),
-        # reply_plain (the answer to a send) in data.content
-        text = e.get("body") or d.get("content") or d.get("body") or ""
+        # reply_plain (the answer to a send) in data.content. Vinted may hand its own machine translation in the
+        # body (10-27 "Paket wurde versendet" for an Italian seller): the original, where it gives one, wins
+        text = _original(e) or _original(d) or e.get("body") or d.get("content") or d.get("body") or ""
         return (text.strip() if isinstance(text, str) else ""), None
     if m.get("message_type") == "legacy_action" or "entity" in d:
         text = " – ".join(x for x in (e.get("title"), e.get("subtitle")) if x) or str(d.get("event_type") or "")
@@ -161,6 +162,34 @@ def message_text(m: dict[str, Any]) -> tuple[str, str | None]:
         if isinstance(d.get(key), str) and d[key].strip():
             return d[key].strip(), None
     return "", None
+
+
+_ORIGINAL_KEYS = ("original_body", "body_original", "original_text", "original_content", "untranslated_body",
+                  "source_body", "original")
+_logged_shapes: set[str] = set()
+
+
+def _original(d: dict[str, Any]) -> str | None:
+    """The untranslated text of a message, when Vinted carries it beside its translation (field names guessed:
+    log_shape names what really comes)."""
+    for k in _ORIGINAL_KEYS:
+        v = d.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+        if isinstance(v, dict) and isinstance(v.get("body"), str) and v["body"].strip():
+            return v["body"]
+    return None
+
+
+def log_shape(m: dict[str, Any]) -> None:
+    """Once per kind of message: the field names Vinted sends (names only, no content) – where a translation and
+    its original live."""
+    d = m.get("data") or {}
+    e = d.get("entity") or {}
+    shape = f"{m.get('message_type')}: {sorted(m)} data={sorted(d)} entity={sorted(e) if isinstance(e, dict) else '-'}"
+    if shape not in _logged_shapes and len(_logged_shapes) < 30:
+        _logged_shapes.add(shape)
+        log.info("vinted message fields: %s", shape)
 
 
 def message_key(m: dict[str, Any]) -> str:
@@ -262,6 +291,7 @@ def apply_conversation(cid: str, data: dict[str, Any], escrow: dict[str, Any] | 
             db.delete(old)
         db.flush()
         for m in msgs:
+            log_shape(m)
             text, kind = message_text(m)
             if not text:
                 continue

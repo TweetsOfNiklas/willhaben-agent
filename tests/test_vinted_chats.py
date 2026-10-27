@@ -523,3 +523,37 @@ async def test_an_orders_shipping_update_is_read_and_pushed(monkeypatch):
         db.commit()
     await vinted_inbox.sync(force=True)                                  # read again: the same event, no 2nd push
     assert len(pushes) == 1
+
+
+def test_vinteds_own_translation_gives_way_to_the_original(caplog):
+    """10-27: an Italian seller's message came as Vinted's German machine translation. Where Vinted carries the
+    original beside it, the original is stored; the field names are logged once (no content)."""
+    import logging
+    m = {"id": "m5", "message_type": "legacy_reply", "sender_id": "77",
+         "data": {"entity_type": "message", "entity": {"id": 5, "body": "Paket wurde versendet",
+                                                        "original_body": "Pacco spedito"}}}
+    with caplog.at_level(logging.INFO):
+        assert vinted_inbox.message_text(m) == ("Pacco spedito", None)
+        vinted_inbox.log_shape(m)
+    assert "original_body" in caplog.text and "Pacco" not in caplog.text
+    plain = {"id": "m6", "message_type": "legacy_reply", "data": {"entity_type": "message", "entity": {"body": "Ciao"}}}
+    assert vinted_inbox.message_text(plain) == ("Ciao", None)
+
+
+def test_a_stored_translation_is_replaced_by_the_original():
+    from app.db import Message
+    first = {"id": "01a1-uuid", "opposite_users": CONV["opposite_users"], "messages": [
+        {"id": "m7", "created_at": "2026-10-27T13:22:00+01:00", "sender_id": "77", "message_type": "legacy_reply",
+         "data": {"entity_type": "message", "entity": {"id": 7, "body": "Paket wurde versendet"}}}]}
+    vinted_inbox.apply_conversation("01a1-uuid", first)
+    from sqlmodel import select
+    with session() as db:
+        m = db.exec(select(Message).where(Message.conversation_id == "01a1-uuid")).one()
+        m.lang, m.translation = "de", None
+        db.add(m)
+        db.commit()
+    first["messages"][0]["data"]["entity"]["original_body"] = "Pacco spedito"
+    vinted_inbox.apply_conversation("01a1-uuid", first)
+    with session() as db:
+        m = db.exec(select(Message).where(Message.conversation_id == "01a1-uuid")).one()
+    assert m.text == "Pacco spedito" and m.lang is None                    # asked again for its translation
