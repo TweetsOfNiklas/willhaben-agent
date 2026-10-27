@@ -6,10 +6,13 @@ from app.willhaben.session import BrowserSession
 
 class _Page:
     def __init__(self, url="https://www.willhaben.at/"):
-        self.url, self.visits = url, []
+        self.url, self.visits, self.closed = url, [], False
 
     def is_closed(self):
-        return False
+        return self.closed
+
+    async def close(self):
+        self.closed = True
 
     async def goto(self, url, **kw):
         self.visits.append(url)
@@ -69,3 +72,16 @@ async def test_the_pages_behind_the_visible_one_are_parked_too(monkeypatch):
     s.home_page, s.site_pages, s.api_page, s.chat_page = home, {"kleinanzeigen": ka, "vinted": vinted}, api, chat
     assert await s.park_idle_ui()
     assert home.visits == ka.visits == vinted.visits == ["about:blank"] and api.visits == chat.visits == []
+
+
+async def test_stray_tabs_are_closed_when_idle(monkeypatch):
+    """A popup or a link opened in the remote view stayed open for good; idle, it goes – the app's pages stay."""
+    monkeypatch.setattr(session_mod, "vnc_viewer_connected", lambda: False)
+    ui, api, stray = _Page(), _Page("https://www.willhaben.at/robots.txt"), _Page("https://example.com/")
+
+    class Ctx:
+        pages = [ui, api, stray]
+    s = _sess(ui, session_mod.UI_IDLE_S + 1)
+    s.api_page, s.context = api, Ctx()
+    assert await s.park_idle_ui()
+    assert stray.closed and not ui.closed and not api.closed

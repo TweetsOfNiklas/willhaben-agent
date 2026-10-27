@@ -157,6 +157,14 @@ class BrowserSession:
                 await site_accounts.restore_cookies(self.context)
             from app.willhaben import record_all
             record_all.attach(self.context)          # everything the browser does, while switched on (session page)
+            # Chrome reopens the tabs of the last session from the persistent profile (login flows, the remote
+            # view, site tabs): the app uses one, the rest stayed open unseen – 20 renderers, ~1.2 GB (10-27)
+            restored = self.context.pages[1:]
+            for page in restored:
+                with suppress(Exception):
+                    await page.close()
+            if restored:
+                log.info("browser: %d tab(s) of the last session closed", len(restored))
             self.ui_page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             self.home_page = self.ui_page
             self.api_page = await self.context.new_page()
@@ -468,7 +476,13 @@ class BrowserSession:
         for page in pages:
             with suppress(Exception):          # a page closing meanwhile: nothing to park
                 await page.goto("about:blank")
-        log.info("browser idle: %d page(s) parked on about:blank", len(pages))
+        # tabs no part of the app holds (a popup, a link opened in the remote view): closed
+        known = {self.ui_page, self.home_page, self.api_page, self.chat_page, *self.site_pages.values()}
+        stray = [p for p in (self.context.pages if self.context else []) if p not in known and not p.is_closed()]
+        for page in stray:
+            with suppress(Exception):
+                await page.close()
+        log.info("browser idle: %d page(s) parked on about:blank, %d stray tab(s) closed", len(pages), len(stray))
         return True
 
     def show_home(self) -> None:
