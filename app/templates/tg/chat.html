@@ -3,8 +3,7 @@
 {% block title %}{{ conv.partner_name or _('Chat') }}{% endblock %}
 {% block page %}
 {% set ad = conv.ad_context or {} %}
-<main data-back="/tg/chats" style="min-height: 100vh; display: flex; flex-direction: column; background: var(--chat-bg)"
-      {% if not conv.drafting and not sending %}data-main="{{ _('Send') }}" data-main-form="tg-send"{% endif %}>
+<main data-back="/tg/chats" style="min-height: 100vh; display: flex; flex-direction: column; background: var(--chat-bg)">
 {{ m.head(conv.partner_name or _('Chat'), '/tg/chats') }}
 {# who and where: their online state and place, from their site #}
 <div style="background: var(--section); border-bottom: 1px solid var(--sep); padding: 8px 14px; display: flex; align-items: center; gap: 10px">
@@ -37,7 +36,10 @@
 </div>
 
 {# the composer: Claude's draft to edit, or my own text; Telegram's main button sends (the dashboard's endpoints) #}
+{# Telegram's Send button is declared here, not on <main>: while Claude writes, only this part is reloaded – declared
+   on <main> it stayed off once the draft came, and "Sent manually" was the only button (10-27) #}
 <div id="tg-composer" style="background: var(--section); border-top: 1px solid var(--sep); padding: 10px 14px calc(12px + env(safe-area-inset-bottom))"
+     {% if not conv.drafting and not sending %}data-main="{{ _('Send') }}" data-main-form="tg-send"{% endif %}
      {% if conv.drafting %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
   <div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px">
   {% if conv.drafting %}
@@ -73,7 +75,6 @@
       {% for a in draft.alternatives or [] %}
       <form method="post" action="/drafts/{{ draft.id }}/revise" style="margin: 0"><input type="hidden" name="instruction" value="{{ a.instruction }}"><button class="chip" title="{{ a.instruction }}">{{ a.label }}</button></form>
       {% endfor %}
-      <form method="post" action="/drafts/{{ draft.id }}/mark-sent" style="margin: 0"><button class="chip" title="{{ _('Sent it yourself elsewhere: stored as sent, nothing goes out') }}">{{ ui.icon('check', 12, 2) }} {{ _("Sent manually") }}</button></form>
       <form method="post" action="/drafts/{{ draft.id }}/discard" style="margin: 0"><button class="chip danger">{{ _("Discard") }}</button></form>
       {% if step and not step.busy %}<form method="post" action="/chats/{{ conv.id }}/paylivery/{{ step.action }}" style="margin: 0" hx-confirm="{{ _('Run only the PayLivery step on willhaben now, without sending the answer?') }}"><button class="chip">{{ _("Only PayLivery: {step}", step=step.label) }}</button></form>{% endif %}
     </div>

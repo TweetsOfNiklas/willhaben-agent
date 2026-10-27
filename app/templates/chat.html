@@ -138,7 +138,6 @@
       {% endif %}
       <div class="flex flex-wrap items-center gap-1" data-draft-actions>
         <button type="button" class="btn btn-ghost btn-sm max-sm:px-2" title="{{ _('Copy') }}" onclick="navigator.clipboard.writeText(document.getElementById('t{{ d.id }}').value)">{{ ui.icon('copy', 15) }}<span class="max-sm:sr-only">{{ _("Copy") }}</span></button>
-        <button class="btn btn-ghost btn-sm" formaction="/drafts/{{ d.id }}/mark-sent" hx-post="/drafts/{{ d.id }}/mark-sent">{{ ui.icon('check', 15) }}{{ _("Sent manually") }}</button>
         <button class="btn btn-ghost btn-sm hover:bg-bad-soft hover:text-error max-sm:px-2" title="{{ _('Discard') }}" formaction="/drafts/{{ d.id }}/discard" hx-post="/drafts/{{ d.id }}/discard">{{ ui.icon('trash', 15) }}<span class="max-sm:sr-only">{{ _("Discard") }}</span></button>
         <span class="flex-1"></span>
         {% if step %}<button class="btn" formaction="/chats/{{ conv.id }}/paylivery/{{ step.action }}" formnovalidate hx-post="/chats/{{ conv.id }}/paylivery/{{ step.action }}" hx-confirm="{{ _('Run only the PayLivery step on willhaben now, without sending the answer?') }}" data-paylivery-only>{{ _("Only PayLivery: {step}", step=step.label) }}</button>{% endif %}

@@ -116,7 +116,8 @@ def test_the_mini_app_shows_what_the_site_shows(client, monkeypatch):
         assert db.get(Hit, hit_id).state == "ignored"
     chat = client.get("/tg/chats/c1").text
     assert "data-notes" in chat and "Abholzeit fehlt" in chat and 'name="hint"' in chat and "data-info" in chat
-    assert "/mark-sent" in chat and 'action="/drafts/' in chat                  # the dashboard's own endpoints
+    assert "/discard" in chat and 'action="/drafts/' in chat                    # the dashboard's own endpoints
+    assert "/mark-sent" not in chat                                         # no "Sent manually": it sent nothing
     info = client.get("/tg/chats/c1/info").text
     assert 'action="/chats/c1/remove"' in info and 'action="/chats/c1/finished"' in info
     lst = client.get("/tg/chats?role=buyer").text
@@ -321,3 +322,28 @@ def test_chats_are_removed_from_the_list_several_at_once(client, monkeypatch):
     with session() as db:
         assert db.get(Conversation, "c1").removed and not db.exec(select(Message).where(Message.conversation_id == "c1")).all()
     assert deleted == [["c1"]]
+
+
+def test_the_send_button_comes_with_the_draft_that_was_being_written(client):
+    """10-27: while Claude wrote, only the composer reloaded; Telegram's Send button was declared on <main>, so once
+    the draft came there was none – only "Sent manually", which sends nothing. The composer declares it now."""
+    import re
+
+    from app.db import Conversation
+    _data()
+    with session() as db:
+        conv = db.get(Conversation, "c1")
+        conv.drafting = True
+        db.add(conv)
+        db.commit()
+    page = client.get("/tg/chats/c1").text
+    assert "data-main=" not in page                                       # writing: no Send yet
+    with session() as db:
+        conv = db.get(Conversation, "c1")
+        conv.drafting = False
+        db.add(conv)
+        db.commit()
+    page = client.get("/tg/chats/c1").text
+    composer = re.search(r'<div id="tg-composer"[^>]*>', page).group(0)    # what the reload swaps in
+    assert 'data-main="Send"' in composer and 'data-main-form="tg-send"' in composer
+    assert "mark-sent" not in page                                        # "Sent manually" is gone

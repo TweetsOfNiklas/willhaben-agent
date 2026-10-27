@@ -178,8 +178,10 @@
     const main = document.querySelector('main');
     if (!inTg || !main) return;
     post('web_app_setup_back_button', {is_visible: location.pathname !== '/tg'});
-    const text = main.dataset.main;
-    mainForm = main.dataset.mainForm ? document.getElementById(main.dataset.mainForm) : null;
+    // the page's main button: on <main>, or on a part of it that reloads by itself (the chat's composer)
+    const holder = main.dataset.main ? main : main.querySelector('[data-main][data-main-form]');
+    const text = holder ? holder.dataset.main : '';
+    mainForm = holder && holder.dataset.mainForm ? document.getElementById(holder.dataset.mainForm) : null;
     post('web_app_setup_main_button', text && mainForm
       ? {is_visible: true, is_active: true, is_progress_visible: false, text,
          color: (theme && theme.button_color) || '#1F74BA', text_color: (theme && theme.button_text_color) || '#FFFFFF'}
@@ -191,8 +193,10 @@
   });
   on('main_button_pressed', () => {
     if (!mainForm) return;
+    const main = document.querySelector('main');
+    const holder = main.dataset.main ? main : main.querySelector('[data-main][data-main-form]');
     post('web_app_setup_main_button', {is_visible: true, is_active: false, is_progress_visible: true,
-                                       text: document.querySelector('main').dataset.main});
+                                       text: holder ? holder.dataset.main : ''});
     post('web_app_trigger_haptic_feedback', {type: 'impact', impact_style: 'medium'});
     mainForm.requestSubmit();
   });
