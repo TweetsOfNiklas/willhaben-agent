@@ -107,9 +107,15 @@ async def _session_check() -> None:
             log.warning("session check failed: %s", e)
 
 
+_described = [False]
+
+
 async def _park_idle_ui() -> None:
     sess = get_session()
     if sess.started:
+        if not _described[0] and hasattr(sess, "describe"):     # once after the start: where the processes come from
+            _described[0] = True
+            log.info("browser after start: %s", sess.describe())
         try:
             await sess.park_idle_ui()
         except Exception as e:  # noqa: BLE001

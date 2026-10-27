@@ -85,3 +85,26 @@ async def test_stray_tabs_are_closed_when_idle(monkeypatch):
     s.api_page, s.context = api, Ctx()
     assert await s.park_idle_ui()
     assert stray.closed and not ui.closed and not api.closed
+
+
+def test_describe_names_hosts_and_frames_only():
+    class F:
+        def __init__(self, url):
+            self.url = url
+
+    class P(_Page):
+        def __init__(self, url, frames):
+            super().__init__(url)
+            self.frames = [F(u) for u in frames]
+
+    class Ctx:
+        service_workers = []
+    s = BrowserSession()
+    s.api_page = P("https://www.willhaben.at/robots.txt", ["https://www.willhaben.at/robots.txt"])
+    s.ui_page = P("https://www.willhaben.at/iad/x?secret=1", ["https://www.willhaben.at/iad/x?secret=1",
+                                                              "https://ads.example.com/frame"])
+    Ctx.pages = [s.api_page, s.ui_page]
+    s.context = Ctx()
+    text = s.describe()
+    assert text.startswith("2 page(s): api=www.willhaben.at[1 frames: www.willhaben.at]")
+    assert "ui=www.willhaben.at[2 frames: ads.example.com, www.willhaben.at]" in text and "secret" not in text

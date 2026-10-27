@@ -460,6 +460,28 @@ class BrowserSession:
             self._ui_holds -= 1
             self.touch_ui()
 
+    def describe(self) -> str:
+        """What the browser holds, for the memory log: each page's host and frame count (hosts only: no paths, no
+        queries), the service workers and background pages – where its renderer processes come from."""
+        from urllib.parse import urlsplit
+
+        if not self.context:
+            return "no browser"
+        role = {id(self.api_page): "api", id(self.chat_page): "chat", id(self.home_page): "home"}
+        role.update({id(p): f"site:{k}" for k, p in self.site_pages.items()})
+        parts = []
+        for p in self.context.pages:
+            if p.is_closed():
+                continue
+            frames = getattr(p, "frames", None) or []
+            hosts = sorted({urlsplit(f.url).hostname or "?" for f in frames if f.url.startswith("http")})
+            name = role.get(id(p), "ui" if p is self.ui_page else "other")
+            parts.append(f"{name}={urlsplit(p.url).hostname or p.url[:20]}[{len(frames)} frames: "
+                         f"{', '.join(hosts[:8])}{' …' if len(hosts) > 8 else ''}]")
+        workers = [urlsplit(w.url).hostname or w.url[:30] for w in getattr(self.context, "service_workers", [])]
+        bg = len(getattr(self.context, "background_pages", []) or [])
+        return f"{len(parts)} page(s): {'; '.join(parts)} | service workers: {', '.join(workers) or '-'} | background: {bg}"
+
     async def park_idle_ui(self, idle_s: float = UI_IDLE_S) -> bool:
         """The remote view unused for idle_s: every page it shows goes to about:blank – the visible one, and the
         willhaben window and the Kleinanzeigen and Vinted tabs behind it (once a site's tab had been shown, the
@@ -483,6 +505,7 @@ class BrowserSession:
             with suppress(Exception):
                 await page.close()
         log.info("browser idle: %d page(s) parked on about:blank, %d stray tab(s) closed", len(pages), len(stray))
+        log.info("browser now: %s", self.describe())
         return True
 
     def show_home(self) -> None:
