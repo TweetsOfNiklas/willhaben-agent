@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlmodel import col, select
@@ -34,8 +34,9 @@ def is_expired(ad: MyAd, cutoff_days: int | None = None) -> bool:
 
 def is_sold(ad: MyAd) -> bool:
     """Sold on willhaben, given away ("Verschenkt") or marked sold in the app. An ad with a quantity is marked sold
-    only with its last piece (sold.finish), so this stays false while stock is left."""
-    return ad.status in ("sold", "Verschenkt") or ad.sale_status == "sold"
+    only with its last piece (sold.finish), so this stays false while stock is left – also while willhaben shows a
+    piece sold with PayLivery as "sold" and the ad waits to go online again (relist)."""
+    return (ad.status in ("sold", "Verschenkt") and not ad.relist) or ad.sale_status == "sold"
 
 
 def add(ref: str, auto_renew: bool = False) -> MyAd:
@@ -96,6 +97,7 @@ async def deactivate(ad_id: str) -> MyAd | None:
         row = db.get(MyAd, ad_id)
         if row:
             row.auto_renew, row.last_action = False, t("deactivated on willhaben {when}", when=f"{utcnow():%d.%m. %H:%M}")
+            row.relist = None                 # offline on purpose: not put online again after a PayLivery sale
             db.add(row)
             db.commit()
     await import_from_account()            # status as willhaben shows it now
@@ -182,6 +184,7 @@ async def bulk(action: str, ad_ids: list[str], job: jobs.Job | None = None) -> d
                     when = f"{utcnow():%d.%m. %H:%M}"
                     if action == "deactivate":
                         row.auto_renew = False    # offline on purpose: auto-renew must not undo it
+                        row.relist = None         # nor the relisting after a PayLivery sale
                         row.last_action = t("deactivated on willhaben {when}", when=when)
                     else:
                         row.last_action = t("activated on willhaben {when}", when=when)
@@ -685,8 +688,9 @@ _ENDED_WORDS = ("verkauft", "verschenkt", "reserviert", "deaktiviert", "passiv",
 def _follow_sale_status(row: MyAd, previous: str) -> None:
     """The sale status here follows what willhaben shows (the sold workflow writes both; this covers marks made on
     willhaben itself): sold there = sold here; reserved there = reserved here (buyer unknown) unless a sale is
-    recorded; a reservation lifted on willhaben (reserved → active) lifts the local one too."""
-    if row.status == "sold" and row.sale_status != "sold":
+    recorded; a reservation lifted on willhaben (reserved → active) lifts the local one too. A piece sold with
+    PayLivery while more are left is no sell-out: the ad waits to go online again (relist)."""
+    if row.status == "sold" and row.sale_status != "sold" and not row.relist:
         row.sale_status, row.sale_at = "sold", utcnow()
         row.auto_reply, row.auto_renew = False, False
     elif row.status == "reserved" and row.sale_status is None:
@@ -714,7 +718,7 @@ async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
     ids.complete = getattr(ads, "complete", False)
     if not ids.complete:    # then nothing is concluded from a missing ad: sold ads deleted on willhaben stay listed here
         log.info("account list incomplete: %d ads of %s", len(ads), getattr(ads, "total", None))
-    newly_expired = []
+    newly_expired, relist = [], []
     with session() as db:
         for ad in ads:
             row = db.get(MyAd, ad.ad_id) or MyAd(ad_id=ad.ad_id)
@@ -737,10 +741,14 @@ async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
                     else ad.status_label or ad.status
             row.published_at, row.end_date = ad.start or row.published_at, ad.end or row.end_date
             row.last_checked_at, row.last_error = utcnow(), None
+            if row.relist and not relist_recent(row.relist):
+                row.relist = None                # too old: going offline now is not that sale's doing
             _follow_sale_status(row, previous)
             db.add(row)
             if previous == "active" and row.status == "expired":
                 newly_expired.append(row)
+            if row.relist and not row.replaced_by and offline(ad) and not row.pending_action:
+                relist.append(row.ad_id)         # taken offline after a PayLivery sale: online again as a new ad
         if ids.complete:
             for row in db.exec(select(MyAd).where(col(MyAd.ad_id).not_in(ids), MyAd.status != "deleted",
                                                   col(MyAd.replaced_by).is_(None))):
@@ -753,6 +761,8 @@ async def import_from_account(ads: AdvertList | None = None) -> AccountIds:
     for row in newly_expired:
         await notify("ad_expired", t("Ad expired"), row.heading or row.ad_id, url=MYADVERTS_URL,
                      image=row.image_url, data={"ad_id": row.ad_id})
+    for ad_id in relist:
+        enqueue_relist(ad_id)
     return ids
 
 
@@ -847,6 +857,197 @@ def _move_to_new_id(old_id: str, new_id: str) -> MyAd:
         db.refresh(new)
     log.info("ad %s republished as %s", old_id, new_id)
     return new
+
+
+# ------------------------------------------------------------------ online again after a PayLivery sale
+# willhaben takes an ad offline once a piece is bought with PayLivery. An ad with pieces left goes online again: in
+# place when willhaben offers "Aktivieren" / "Neu veröffentlichen", otherwise (an ad marked sold offers neither) as a
+# new ad copied from it (insert.copy_plan). The marker (MyAd.relist) is set by sold.on_paylivery_stage; the account
+# import queues the job once willhaben shows the ad offline.
+RELIST_CHECKS = 3       # still online after this many looks: willhaben kept it online, nothing to do
+RELIST_TRIES = 3        # failed copies before the owner is asked to do it by hand
+RELIST_CHECK_S = 600    # the next look while willhaben still shows the ad online, or after a failed try
+# a marker older than this is dropped: an ad that goes offline later (expired, deactivated on willhaben's own site)
+# is not this sale's doing. Covers the seller's 24 h to accept a paid purchase (each later stage arms it again).
+RELIST_WINDOW = timedelta(hours=48)
+
+
+def offline(ad: Any) -> bool:
+    """willhaben shows the ad offline. A reserved ad is still listed publicly: a copy would be a second live ad."""
+    label = (getattr(ad, "status_label", None) or "").lower()
+    return (ended(ad) or has_ended(ad)) and ad.status != "reserved" and "reserv" not in label
+
+
+def relist_recent(plan: dict[str, Any] | None) -> bool:
+    """The marker is recent enough to act on (an older one is dropped by its readers)."""
+    try:
+        since = datetime.fromisoformat((plan or {}).get("since") or "")
+    except ValueError:
+        return False
+    return (since if since.tzinfo else since.replace(tzinfo=timezone.utc)) >= utcnow() - RELIST_WINDOW
+
+
+def _set_relist(ad_id: str, plan: dict[str, Any] | None) -> None:
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row is not None:
+            row.relist = plan
+            db.add(row)
+            db.commit()
+
+
+def mark_relist(ad_id: str) -> None:
+    """A piece was sold with PayLivery and more are left: put the ad online again once willhaben took it offline.
+    Again for a later stage of the purchase (willhaben may take it offline only then): the looks start over, the
+    failed tries and a willhaben draft of the copy are kept."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row is None or row.replaced_by:
+            return
+        old = row.relist or {}
+    _set_relist(ad_id, {**old, "since": utcnow().isoformat(), "checks": 0, "tries": int(old.get("tries") or 0)})
+
+
+def _schedule_relist_check(ad_id: str) -> None:
+    from app import scheduler as sched
+
+    if not sched.scheduler.running:
+        return
+    sched.scheduler.add_job(_relist_check_job, "date", run_date=utcnow() + timedelta(seconds=RELIST_CHECK_S),
+                            args=[ad_id], id=f"relist-{ad_id}", replace_existing=True)
+
+
+async def _relist_check_job(ad_id: str) -> None:
+    enqueue_relist(ad_id)
+
+
+def enqueue_relist(ad_id: str) -> bool:
+    """"Online again" as a background job (lane ads). False: no marker, or the ad already waits for another action."""
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        if row is None or not row.relist:
+            return False
+    row = _mark(ad_id, "relist")
+    if row is None:
+        return False
+
+    async def run(job: jobs.Job) -> str:
+        try:
+            msg = await relist(ad_id, job)
+        except Exception as e:
+            _unmark(ad_id, t("Not online again yet: {error}", error=e))
+            raise
+        _unmark(ad_id)
+        return msg
+
+    jobs.submit("myads-relist", t("Put „{title}“ online again", title=(row.heading or ad_id)[:60]), run,
+                current=f"ad:{ad_id}", on_cancel=lambda: _unmark(ad_id), quiet=True)
+    return True
+
+
+async def relist(ad_id: str, job: jobs.Job | None = None) -> str:
+    """Put an ad with pieces left online again after a PayLivery sale (marker MyAd.relist). Waits while willhaben
+    still shows it online (a later look is scheduled); never makes a second live copy. Returns the result line."""
+    from app.willhaben.account import ACTION_ACTIVATE, ACTION_FINALIZE, ACTION_REPUBLISH, REPUBLISHABLE
+
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+    plan = dict(row.relist or {}) if row is not None and not row.replaced_by else {}
+    if not relist_recent(plan):
+        if plan:
+            _set_relist(ad_id, None)
+        return t("Nothing to put online again")
+    title, left = row.heading or ad_id, stock.remaining(ad_id) or 0
+    if left <= 0:
+        _set_relist(ad_id, None)
+        return t("No pieces left – not put online again")
+    sess = get_session()
+    acct = AccountClient(sess)
+    ads = await acct.my_adverts()
+    own = next((a for a in ads if a.ad_id == str(ad_id)), None)
+    if own is None and getattr(ads, "complete", False):
+        _set_relist(ad_id, None)         # deleted on willhaben: gone on purpose
+        return t("„{title}“ was deleted on willhaben – not put online again", title=title)
+    # missing from an incomplete list: its status is unknown, so it may still be online
+    if own is None or not offline(own):
+        plan["checks"] = int(plan.get("checks") or 0) + 1
+        if plan["checks"] >= RELIST_CHECKS:
+            _set_relist(ad_id, None)
+            return t("„{title}“ is still online on willhaben – nothing to do", title=title)
+        _set_relist(ad_id, plan)
+        _schedule_relist_check(ad_id)
+        return t("„{title}“ is still online on willhaben – looked at again later", title=title)
+    links = (own.actions or {}) if own is not None else {}
+    plan["tries"] = int(plan.get("tries") or 0) + 1
+    _set_relist(ad_id, plan)
+    try:
+        if ACTION_ACTIVATE in links or ACTION_FINALIZE in links or (ACTION_REPUBLISH in links and own.status in REPUBLISHABLE):
+            new_id = await acct.reactivate(ad_id, ads)
+        else:
+            new_id = await _copy_as_new(sess, ad_id, plan, job)
+    except Exception as e:
+        if plan["tries"] >= RELIST_TRIES:
+            _set_relist(ad_id, None)
+            await notify("ad_expired", t("Please put the ad online again"),
+                         t("{title}: {left} pieces left, willhaben took it offline after the PayLivery sale ({error})",
+                           title=title, left=left, error=e), url=MYADVERTS_URL, image=row.image_url,
+                         data={"ad_id": ad_id})
+        else:
+            _schedule_relist_check(ad_id)
+        raise
+    _set_relist(ad_id, None)
+    if new_id != str(ad_id):
+        new = _move_to_new_id(ad_id, new_id)
+    else:
+        with session() as db:
+            new = db.get(MyAd, ad_id)
+            new.last_action = t("online again after the PayLivery sale")
+            if new.sale_status == "reserved" and not new.sale_conversation_id:
+                new.sale_status = new.sale_at = None     # willhaben's reservation for this purchase (_follow_sale_status)
+            db.add(new)
+            db.commit()
+            db.refresh(new)
+    await notify("ad_renewed", t("Ad online again"),
+                 t("{title}: {left} pieces left", title=title, left=left), url=new.url, image=new.image_url,
+                 data={"ad_id": new.ad_id})
+    try:    # the account list: a just placed ad is not public yet
+        await import_from_account()
+    except (NotLoggedIn, SessionUnavailable, ValueError) as e:
+        log.info("status refresh after relisting skipped: %s", e)
+    log.info("ad %s online again as %s after a PayLivery sale (%d left)", ad_id, new_id, left)
+    return t("„{title}“ online again ({left} pieces left)", title=title, left=left)
+
+
+async def _copy_as_new(sess, ad_id: str, plan: dict[str, Any], job: jobs.Job | None) -> str:
+    """The ad placed again as a new ad: text, category, attributes, photos and shipping from the old one. A draft a
+    former try left on willhaben (plan["draft"]) is finished instead of starting another one."""
+    import tempfile
+    from pathlib import Path
+
+    from app.services import ad_images
+    from app.willhaben import insert
+
+    copy = await insert.copy_plan(sess, ad_id)        # read-only: nothing is created when this fails
+    photos = []
+    with tempfile.TemporaryDirectory(prefix="wh-relist-") as tmp:
+        for i, url in enumerate(copy["photos"], 1):
+            p = await ad_images.download(url, Path(tmp), f"foto{i}")
+            if p is None:
+                raise insert.InsertError(t("Photo {i} of the ad could not be loaded", i=i))
+            photos.append((p.name, p.read_bytes(), PHOTO_MIMES.get(p.suffix.lower(), "image/jpeg")))
+
+    def remember(wh_id: str) -> None:                 # a later try continues this willhaben draft
+        _set_relist(ad_id, {**plan, "draft": wh_id})
+
+    def on_step(step: str, i: int = 0, n: int = 0) -> None:
+        if job is not None:
+            job.progress(0, t("Uploading photo {i}/{n}", i=i, n=n) if step == "photo" else t("Saving the ad"),
+                         f"ad:{ad_id}")
+
+    ship = copy["shipping"] if copy["shipping"]["handover"] != "pickup" else None
+    res = await insert.publish(sess, copy["ad"], photos, existing_ad_id=plan.get("draft"), on_presaved=remember,
+                               shipping=ship, on_step=on_step)
+    return str(res["ad_id"])
 
 
 def start_update(label: str | None = None) -> jobs.Job:

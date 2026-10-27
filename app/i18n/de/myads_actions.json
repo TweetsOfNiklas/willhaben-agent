@@ -79,5 +79,19 @@
  "none in the text": "keins im Text",
  "Put into the text": "In den Text einfügen",
  "Replace in the text": "Im Text ersetzen",
- "Spec sheet of {name} is in the text – check it, then save on willhaben.": "Datenblatt von {name} steht im Text – prüfen, dann auf willhaben speichern."
+ "Spec sheet of {name} is in the text – check it, then save on willhaben.": "Datenblatt von {name} steht im Text – prüfen, dann auf willhaben speichern.",
+ "Not online again yet: {error}": "Noch nicht wieder online: {error}",
+ "Put „{title}“ online again": "„{title}“ wieder online stellen",
+ "Nothing to put online again": "Nichts wieder online zu stellen",
+ "No pieces left – not put online again": "Keine Stück mehr übrig – nicht wieder online gestellt",
+ "„{title}“ is still online on willhaben – nothing to do": "„{title}“ ist auf willhaben noch online – nichts zu tun",
+ "„{title}“ is still online on willhaben – looked at again later": "„{title}“ ist auf willhaben noch online – wird später noch einmal geprüft",
+ "Please put the ad online again": "Bitte die Anzeige wieder online stellen",
+ "{title}: {left} pieces left, willhaben took it offline after the PayLivery sale ({error})": "{title}: noch {left} Stück übrig, willhaben hat sie nach dem PayLivery-Verkauf deaktiviert ({error})",
+ "online again after the PayLivery sale": "nach dem PayLivery-Verkauf wieder online",
+ "Ad online again": "Anzeige wieder online",
+ "{title}: {left} pieces left": "{title}: noch {left} Stück übrig",
+ "„{title}“ online again ({left} pieces left)": "„{title}“ wieder online (noch {left} Stück)",
+ "Photo {i} of the ad could not be loaded": "Foto {i} der Anzeige konnte nicht geladen werden",
+ "„{title}“ was deleted on willhaben – not put online again": "„{title}“ wurde auf willhaben gelöscht – nicht wieder online gestellt"
 }

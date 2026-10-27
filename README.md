@@ -113,6 +113,11 @@ It runs on your own server, from your home internet connection, and you control 
   field: a new ad's text says "N Stück verfügbar, Preis pro Stück", but when the count changes you edit the live text
   yourself. A reservation stays ad-wide. Undoing the sale that sold an ad out lifts only the local sold status (willhaben
   cannot undo "sold"). A renewed ad keeps its stock, minimum price and parcel size, and sales on any of its copies count.
+  A piece bought with PayLivery is recorded by itself once the buyer has paid (a cancelled purchase gives it back).
+  willhaben takes the ad offline after a PayLivery sale; with pieces left the app puts it online again in the
+  background – in place when willhaben offers that, otherwise as a new ad copied from it (title, text, price, category,
+  photos, shipping and PayLivery option) – and sends a push. A reserved ad is left alone (it is still listed), and an
+  ad you deactivate or delete in the app is never put back; after 48 h without the ad going offline nothing happens.
 - **Selling preferences** (Settings → Selling → Selling preferences): your usual handover (pickup, shipping or both),
   who pays the shipping (the buyer, or included in the price), preferred delivery (parcel shop or locker, front door)
   and carrier, the payment ways you accept (bank transfer, PayLivery, cash) and free notes. Claude gets them as lines in
@@ -400,6 +405,7 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 | Ad drafts with Claude, comparable prices, Geizhals specs, batch upload | done |
 | Publishing ads directly | done for free private ads with pickup (batch cards and single draft page, category picker); shipping/PayLivery built from the bundle but **not yet live-tested** (also when Selling preferences preset it) |
 | Stock per ad: pieces on My ads and new ads, sales ledger with undo, selling piece by piece, stock in Claude's answers | built and tested with fakes; the stock is local to the app, so only the existing sold step on willhaben ("sold / reserved" above) is unverified |
+| Stock per ad: PayLivery sales counted, the ad put online again (as a new ad) while pieces are left | built and tested with fakes; **not yet live-tested** (which status willhaben shows after a PayLivery sale, and copying a sold ad) |
 | Selling preferences (handover, shipping costs, carrier, payment, notes) and the e-mail/link rule | done |
 | Price check and product search (Produktsuche) | done (comparables of the same item by title, category selectable; Geizhals new price per offer, sums of parts) |
 | Home Assistant events, pushes with action buttons | done |

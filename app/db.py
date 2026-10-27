@@ -229,6 +229,9 @@ class MyAd(SQLModel, table=True):
     pending_action: str | None = None              # activate | deactivate | delete | edit | photos | sold | reserved |
     #                                                unreserve: queued as a background job
     pending_payload: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # what the job needs / left behind
+    relist: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))  # a piece sold with PayLivery, more are
+    #   left: willhaben takes the ad offline, the app puts it online again as a new ad (my_ads.relist). {since, checks,
+    #   tries, draft: the willhaben draft of the copy once presaved}
 
 
 class Sale(SQLModel, table=True):

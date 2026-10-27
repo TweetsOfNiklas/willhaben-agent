@@ -11,11 +11,15 @@ Every sale is a row in the ledger (db.Sale, app/services/stock.py). An ad with a
 stays online and keeps answering while pieces are left, and only the last piece runs the steps above.
 A renewed ad keeps its chats on the old id: the workflow acts on the live copy (db.current_ad) and finds the
 chats of every copy (stock.ad_chain).
+
+A purchase paid with PayLivery is recorded by itself for an ad with a quantity (on_paylivery_stage): willhaben takes
+the ad offline after it, and with pieces left the app puts it online again (my_ads.relist).
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlmodel import Session, col, select
@@ -344,7 +348,7 @@ def discard_notices(ad_id: str, draft_ids: list[int]) -> int:
 
 # ------------------------------------------------------------------ step 3: local state
 def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, pieces: int = 1,
-           price: float | None = None) -> MyAd:
+           price: float | None = None, note: str | None = None) -> MyAd:
     """"sold" records the sale in the ledger (`price`: its total, optional). An ad with a quantity stays as it is
     while pieces are left: online, automatic answers and auto-renew unchanged. The last piece, a single item and
     "reserved" (ad-wide) set the sale status: automatic answers off (instructions kept), sold never auto-renewed.
@@ -367,7 +371,7 @@ def finish(ad_id: str, kind: str, buyer: str | None, *, auto_off: bool = True, p
                 if not 1 <= pieces <= left:
                     raise ValueError(t("Pieces: a number from 1 to {max}", max=left))
         if kind == "sold":
-            db.add(Sale(ad_id=row.ad_id, conversation_id=buyer or None, pieces=pieces, price=price))
+            db.add(Sale(ad_id=row.ad_id, conversation_id=buyer or None, pieces=pieces, price=price, note=note))
         if left is not None and left > pieces:
             row.last_action = (t("{n} piece sold ({left} left)", n=pieces, left=left - pieces) if pieces == 1 else
                                t("{n} pieces sold ({left} left)", n=pieces, left=left - pieces))
@@ -477,3 +481,59 @@ def panel(ad_id: str, buyer_id: str | None = None) -> dict[str, Any]:
     return {"ad": ad, "buyer": buyer, "wh": willhaben_state(ad), "stock": n,
             "others": others_to_tell(ad_id, buyer.id if buyer else None) if ad is not None else 0,
             "agreed": agreed_price(buyer.id if buyer else None) if n else None}
+
+
+# ------------------------------------------------------------------ PayLivery: a buyer paid for a piece
+PAID_STAGES = ("paid", "released", "label_ready", "shipped", "delivered", "received", "paid_out")
+PAYLIVERY_NOTE = "paylivery"          # Sale.note of a sale this hook recorded (a cancellation undoes only those)
+
+
+async def on_paylivery_stage(conv: Conversation, stage: str, state: dict[str, Any]) -> None:
+    """PayLivery stage of a seller chat changed (registered by app/main.py). For an ad with a quantity, the paid
+    purchase is one piece sold here, once per chat (a sale already recorded for the chat, e.g. by hand, counts). With
+    pieces left the ad is marked to go online again, which willhaben prevents after a PayLivery sale (my_ads.relist,
+    a background job); the last piece sells the ad out here as by hand. A cancelled purchase gives its piece back.
+    A single item is left to the account import: it follows willhaben's own "sold"."""
+    if conv.role != "seller" or not conv.ad_id:
+        return
+    ad = ad_row(conv.ad_id)
+    if ad is None or ad.quantity is None:
+        return
+    if stage == "cancelled":
+        for s in stock.sales_to(conv.id):
+            if s.note == PAYLIVERY_NOTE and undo_sale(ad.ad_id, s.id):
+                log.info("PayLivery purchase in chat %s cancelled: sale %s of ad %s undone", conv.id, s.id, ad.ad_id)
+        return
+    if stage not in PAID_STAGES or state.get("corrected_from") or not _recent(state, stage):
+        return
+    if stock.sales_to(conv.id):           # recorded already (a former stage, or by hand)
+        row = ad
+    else:
+        amount = state.get("amount")
+        try:
+            row = finish(ad.ad_id, "sold", conv.id, pieces=1, price=float(amount) if amount else None,
+                         note=PAYLIVERY_NOTE)
+        except ValueError as e:           # sold out here already
+            log.info("PayLivery purchase in chat %s not recorded for ad %s: %s", conv.id, ad.ad_id, e)
+            return
+        log.info("PayLivery purchase in chat %s: 1 piece of ad %s sold (%s)", conv.id, row.ad_id,
+                 row.sale_status or "pieces left")
+    # every later stage arms it again: willhaben may take the ad offline only when the seller accepts the purchase
+    if row.sale_status != "sold" and (stock.remaining(row.ad_id) or 0) > 0:
+        from app.services import my_ads
+
+        my_ads.mark_relist(row.ad_id)
+        my_ads.enqueue_relist(row.ad_id)
+
+
+def _recent(state: dict[str, Any], stage: str) -> bool:
+    """The stage was reached lately: a first sync or a recheck of an old chat applies weeks-old notices too, which
+    must not record a sale or put an ad online again (like the shipment, paylivery.MAX_AGE)."""
+    from app.services.paylivery import MAX_AGE
+
+    at = next((h.get("at") for h in reversed(state.get("history") or []) if h.get("stage") == stage), None)
+    try:
+        when = datetime.fromisoformat(at) if at else None
+    except ValueError:
+        when = None
+    return when is None or (when if when.tzinfo else when.replace(tzinfo=timezone.utc)) >= utcnow() - MAX_AGE
