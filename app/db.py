@@ -182,6 +182,8 @@ class Draft(SQLModel, table=True):
     suggested_price: float | None = None
     model: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
+    lang: str | None = None            # its language (services/translate), None = not asked yet
+    translation: str | None = None     # into the app's language, when the draft is in another (the partner's own)
     status: str = "draft"  # draft | pending (auto reply "typing") | sending (queued send job) | sent | discarded
     dismissed: bool | None = None     # discarded by the owner (not by the app): the buyer's message counts as handled
     sent_at: datetime | None = None

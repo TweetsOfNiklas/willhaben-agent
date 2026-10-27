@@ -410,6 +410,17 @@ async def _vinted_ad_context(conv: Conversation) -> Conversation:
     return row
 
 
+def partner_language(conversation_id: str) -> str | None:
+    """The language the other person writes in: the most frequent among their last messages whose language is known
+    (services/translate), None when none is known yet."""
+    from collections import Counter
+    with session() as db:
+        langs = list(db.exec(select(Message.lang).where(
+            Message.conversation_id == conversation_id, Message.direction == "in", col(Message.kind).is_(None),
+            col(Message.lang).is_not(None), Message.lang != "-").order_by(col(Message.created_at).desc()).limit(5)))
+    return Counter(langs).most_common(1)[0][0] if langs else None
+
+
 async def _vinted_partner_country(conv: Conversation) -> str | None:
     """The other person's country on Vinted (their public profile, read once and kept with the chat): which language
     the answers are in. None when unknown or not loadable (then the conversation decides)."""
@@ -758,7 +769,7 @@ def live_state(conversation_id: str | None = None) -> dict[str, str]:
             msgs = db.exec(select(func.count(), func.max(Message.id), func.sum(case((col(Message.read).is_(True), 1), else_=0)),
                                   func.max(Message.read_at), func.count(Message.translation))
                            .where(Message.conversation_id == conv.id)).one()   # seen ticks and translations too
-            drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent)
+            drafts = db.exec(select(Draft.id, Draft.status, Draft.text, Draft.error, Draft.intent, Draft.translation)
                              .where(Draft.conversation_id == conv.id)).all()
             ad = current_ad(db, conv.ad_id) if conv.ad_id else None      # the sale status lives on the live copy
             ships = [r.model_dump(mode="json") for r in db.exec(select(Shipment).where(Shipment.conversation_id == conv.id))]
@@ -921,6 +932,8 @@ async def draft_reply(conversation_id: str, hint: str | None = None, auto: bool 
         db.add(draft)
         db.commit()
         db.refresh(draft)
+    from app.services import translate
+    translate.schedule_draft(draft.id)          # in the other person's language: its translation for me
     return draft
 
 
@@ -974,7 +987,8 @@ async def compose(conv: Conversation, msgs_t: list[tuple[str, datetime | None, s
         from app.platforms import ad_ref
         if advice := deals.buyer_advice(ad_ref(platform, conv.ad_id)):
             rules = f"{rules}\n\n{advice}"
-    if platform == "vinted" and (line := language_rule(await _vinted_partner_country(conv))):
+    country = await _vinted_partner_country(conv) if platform == "vinted" else None
+    if line := language_rule(country, partner_language(conv.id) if conv.id else None):
         rules = f"{rules}\n\n{line}"
     pl, pl_asking, pl_floor = paylivery_advice.for_draft(conv, ad)
     if pl:                                        # an open PayLivery offer: the draft suggests the step on willhaben too

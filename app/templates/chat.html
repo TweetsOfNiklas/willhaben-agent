@@ -122,6 +122,7 @@
     <form method="post" action="/drafts/{{ d.id }}/send" id="f{{ d.id }}" class="flex flex-col gap-2.5"
           hx-target="#chat-composer" hx-select="#chat-composer" hx-swap="outerHTML" hx-select-oob="#chat-messages">
       <textarea name="text" rows="3" id="t{{ d.id }}" class="textarea min-h-20 max-h-[35dvh] w-full rounded-[10px] bg-base-200 px-3.5 py-3 text-[14.5px] leading-relaxed field-sizing-content md:min-h-24">{{ d.text }}</textarea>
+      {% if d.translation %}<div class="rounded-[10px] border border-dashed border-base-300 px-3.5 py-2 text-[13px] text-muted" data-draft-translation><span class="mr-1 text-[11px] font-semibold uppercase">{{ _("Translation of the draft") }}</span>{{ d.translation }}</div>{% endif %}
       {% if d.error %}<div class="flex items-start gap-2 text-[12.5px] text-error">{{ ui.icon('alert', 14, 2, 'mt-px') }}<span class="min-w-0 break-words">{{ d.error }}</span></div>{% endif %}
       {% set step = paylivery_step(d, conv) %}
       {% if step and step.busy %}{# running on willhaben: a spinner that checks every 2 s; gone once willhaben confirmed #}

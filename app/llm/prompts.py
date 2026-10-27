@@ -506,16 +506,29 @@ PLATFORM_RULES = {
 GERMAN_COUNTRIES = {"AT": "Österreich", "DE": "Deutschland"}
 
 
-def language_rule(country: str | None) -> str:
-    """Vinted reaches all of Europe: a rules line for the language by the other person's country (their profile);
-    "" when it is unknown (then the conversation decides, as everywhere)."""
-    if not country:
-        return ""
-    if country.upper() in GERMAN_COUNTRIES:
+LANGUAGE_NAMES = {"de": "Deutsch", "en": "Englisch", "it": "Italienisch", "fr": "Französisch", "es": "Spanisch",
+                  "pt": "Portugiesisch", "nl": "Niederländisch", "pl": "Polnisch", "cs": "Tschechisch",
+                  "sk": "Slowakisch", "hu": "Ungarisch", "ro": "Rumänisch", "hr": "Kroatisch", "sl": "Slowenisch",
+                  "lt": "Litauisch", "lv": "Lettisch", "et": "Estnisch", "fi": "Finnisch", "sv": "Schwedisch",
+                  "da": "Dänisch", "el": "Griechisch", "bg": "Bulgarisch", "tr": "Türkisch", "uk": "Ukrainisch"}
+
+
+def language_rule(country: str | None, partner_lang: str | None = None) -> str:
+    """The language of the answer: always the other person's own (10-27: an Italian seller got German drafts) – the
+    language their messages are in (services/translate found it), else their country's (Vinted profile), else the
+    one they wrote in last; never the language of the site's own notices or of a machine translation."""
+    if partner_lang:
+        name = LANGUAGE_NAMES.get(partner_lang, f"die Sprache mit dem Code {partner_lang}")
+        return (f"Sprache: Der Gesprächspartner schreibt {name}: schreib deine Antwort auf {name}, kurz und in "
+                "einfachen Worten – auch wenn frühere Nachrichten, Hinweise der Plattform oder Übersetzungen in einer "
+                "anderen Sprache sind.")
+    if country and country.upper() in GERMAN_COUNTRIES:
         return f"Sprache: Der Gesprächspartner ist aus {GERMAN_COUNTRIES[country.upper()]}: schreib auf Deutsch."
-    return (f"Sprache: Der Gesprächspartner ist aus dem Ausland (Land {country.upper()}), nicht aus Österreich oder "
-            "Deutschland: schreib auf Englisch, kurz und in einfachen Worten. Schreibt er selbst auf Deutsch, antworte "
-            "auf Deutsch.")
+    if country:
+        return (f"Sprache: Der Gesprächspartner ist aus dem Ausland (Land {country.upper()}): schreib in der Sprache, in "
+                "der er schreibt, sonst in der Landessprache seines Landes – kurz und in einfachen Worten.")
+    return ("Sprache: Antworte in der Sprache, in der der Gesprächspartner selbst schreibt (nicht in der der "
+            "Plattform-Hinweise).")
 
 
 def platform_rule(platform: str | None) -> str:

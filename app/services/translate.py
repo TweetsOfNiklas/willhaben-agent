@@ -86,9 +86,74 @@ async def translate_chat(conversation_id: str) -> int:
     return done
 
 
+async def translate_draft(draft_id: int) -> str | None:
+    """A draft written in the other person's language: its translation into the app's, stored with it (its language
+    is stored either way, so it is asked once)."""
+    from app.db import Draft
+    with session() as db:
+        d = db.get(Draft, draft_id)
+    if d is None or d.lang is not None or not (d.text or "").strip():
+        return None
+    target = LANGS.get(background_lang(), "Deutsch")
+    try:
+        out = await get_backend("chat").complete(system=SYSTEM, schema=SCHEMA, prompt="\n".join(
+            [f"Zielsprache: {target}", "", "Nachrichten:", f"1. {d.text[:1500]}", "",
+             "Aufgabe: Sprache und Übersetzung je Nachricht."]))
+    except LLMError as e:
+        log.info("translation of draft %s failed: %s", draft_id, e)
+        return None
+    it = next((x for x in out.data.get("items") or [] if isinstance(x, dict) and x.get("n") == 1), None)
+    if it is None:
+        return None
+    with session() as db:
+        row = db.get(Draft, draft_id)
+        if row is None:
+            return None
+        row.lang = (it.get("lang") or "").strip()[:8] or "-"
+        text = (it.get("translation") or "").strip()
+        row.translation = text[:2000] if text and text != row.text.strip() else None
+        db.add(row)
+        db.commit()
+        return row.translation
+
+
+_drafts_running: set[int] = set()
+
+
+def schedule_draft(draft_id: int) -> None:
+    """Translate a new draft in the background (the composer shows it when it comes); once at a time per draft."""
+    if not on() or draft_id in _drafts_running:
+        return
+    _drafts_running.add(draft_id)
+
+    async def run() -> None:
+        try:
+            await translate_draft(draft_id)
+        except Exception as e:  # noqa: BLE001 - a translation is a nicety
+            log.warning("translation of draft %s failed: %s", draft_id, e)
+        finally:
+            _drafts_running.discard(draft_id)
+    try:
+        task = asyncio.get_running_loop().create_task(run())
+    except RuntimeError:
+        _drafts_running.discard(draft_id)
+        return
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
 def schedule(conversation_id: str) -> None:
-    """Translate in the background (the chat page shows it when it comes); once at a time per chat."""
-    if not on() or conversation_id in _running or not _todo(conversation_id):
+    """Translate in the background (the chat page shows it when it comes); once at a time per chat. The chat's open
+    draft too, when its language was not asked yet (written before, or its translation failed)."""
+    if not on():
+        return
+    from app.db import Draft
+    with session() as db:
+        draft = db.exec(select(Draft.id).where(Draft.conversation_id == conversation_id, Draft.status == "draft",
+                                               col(Draft.lang).is_(None))).first()
+    if draft is not None:
+        schedule_draft(draft)
+    if conversation_id in _running or not _todo(conversation_id):
         return
     _running.add(conversation_id)
 

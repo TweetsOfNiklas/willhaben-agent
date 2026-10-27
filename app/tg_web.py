@@ -290,8 +290,9 @@ async def tg_chat(request: Request, conversation_id: str):
     drafts = chats.drafts_of(conversation_id)
     with session() as db:
         o = chats.overview(db)
+    open_draft = next((d for d in drafts if d.status == "draft"), None)
     return _render(request, "chat.html", conv=conv, messages=chats.messages_of(conversation_id),
-                   draft=next((d for d in drafts if d.status == "draft"), None),
+                   draft=open_draft, translating=bool(open_draft and open_draft.lang is None and translate.on()),
                    sending=next((d for d in drafts if d.status == "sending"), None),
                    presence=chats.presence_of(conv), place=chats.partner_place(conv),
                    finished=conv.id in o["finished"], notes=_notes(conv, drafts),

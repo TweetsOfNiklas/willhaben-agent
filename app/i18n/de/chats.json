@@ -185,5 +185,6 @@
  "order": "Bestellung",
  "Translated": "Übersetzt",
  "Translate foreign messages": "Fremdsprachige Nachrichten übersetzen",
- "A message in another language shows Claude's translation under the original, in the same bubble.": "Eine Nachricht in einer anderen Sprache zeigt Claudes Übersetzung unter dem Original, in derselben Sprechblase."
+ "A message in another language shows Claude's translation under the original, in the same bubble.": "Eine Nachricht in einer anderen Sprache zeigt Claudes Übersetzung unter dem Original, in derselben Sprechblase.",
+ "Translation of the draft": "Übersetzung des Entwurfs"
 }

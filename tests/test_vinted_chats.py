@@ -340,9 +340,10 @@ def test_a_members_country_comes_from_their_profile_page():
     assert parse_member_country(page) == "DE" and parse_member_country("no user") is None
 
 
-@pytest.mark.parametrize("country,says", [("AT", "auf Deutsch"), ("DE", "auf Deutsch"), ("IT", "auf Englisch"),
-                                          (None, None)])
-async def test_answers_on_vinted_are_in_german_or_english_by_the_partners_country(monkeypatch, country, says):
+@pytest.mark.parametrize("country,says", [("AT", "auf Deutsch"), ("DE", "auf Deutsch"),
+                                          ("IT", "Landessprache seines Landes"),
+                                          (None, "in der der Gesprächspartner selbst schreibt")])
+async def test_answers_on_vinted_follow_the_partners_language(monkeypatch, country, says):
     from app.platforms import vinted
     vinted_inbox.apply_inbox(INBOX)
     with session() as db:
@@ -359,10 +360,7 @@ async def test_answers_on_vinted_are_in_german_or_english_by_the_partners_countr
     out = await chats.compose(conv, [("in", None, "Hi, still available?")], auto=True, ad=None)   # as real drafts do
     assert "Vinted" in out["prompt"]                          # the chat's own site, without being told
     rules = out["prompt"].split("Meine Regeln:")[1]
-    if says:
-        assert "Sprache:" in rules and says in rules
-    else:
-        assert "Sprache:" not in rules
+    assert "Sprache:" in rules and says in rules
     with session() as db:
         conv = db.get(Conversation, "01a1-uuid")
     await chats.compose(conv, [("in", None, "Hi")], auto=False, ad=None, platform="vinted")
@@ -557,3 +555,23 @@ def test_a_stored_translation_is_replaced_by_the_original():
     with session() as db:
         m = db.exec(select(Message).where(Message.conversation_id == "01a1-uuid")).one()
     assert m.text == "Pacco spedito" and m.lang is None                    # asked again for its translation
+
+
+async def test_the_language_they_write_in_decides(monkeypatch):
+    """10-27: an Italian seller got German drafts. The language their messages are in (services/translate) wins."""
+    from app.db import Message
+    from app.platforms import vinted
+    vinted_inbox.apply_inbox(INBOX)
+
+    class Client:
+        async def member(self, user_id, cache_s=None):
+            return {"country": "DE", "country_title": None, "city": None, "online": None, "last_seen": None}
+    monkeypatch.setattr(vinted, "get_client", lambda: Client())
+    with session() as db:
+        db.add(Message(conversation_id="01a1-uuid", ext_id="i1", direction="in", text="Oggi penso proprio di sì.",
+                       lang="it"))
+        db.commit()
+        conv = db.get(Conversation, "01a1-uuid")
+    out = await chats.compose(conv, [("in", None, "Oggi penso proprio di sì.")], auto=False, ad=None)
+    rules = out["prompt"].split("Meine Regeln:")[1]
+    assert "schreibt Italienisch: schreib deine Antwort auf Italienisch" in rules and "auf Deutsch." not in rules

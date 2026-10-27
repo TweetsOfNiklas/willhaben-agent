@@ -40,7 +40,7 @@
    on <main> it stayed off once the draft came, and "Sent manually" was the only button (10-27) #}
 <div id="tg-composer" style="background: var(--section); border-top: 1px solid var(--sep); padding: 10px 14px calc(12px + env(safe-area-inset-bottom))"
      {% if not conv.drafting and not sending %}data-main="{{ _('Send') }}" data-main-form="tg-send"{% endif %}
-     {% if conv.drafting %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
+     {% if conv.drafting or translating %}hx-get="/tg/chats/{{ conv.id }}" hx-trigger="every 4s" hx-select="#tg-composer" hx-swap="outerHTML" hx-disinherit="*"{% endif %}>
   <div style="max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px">
   {% if conv.drafting %}
     <span style="display: flex; align-items: center; gap: 8px; color: var(--link); font-size: 14px">{{ ui.icon('sparkle', 14, 2) }}{{ _("Claude is writing an answer…") }}</span>
@@ -61,6 +61,7 @@
       {% if draft %}<input type="hidden" name="now" value="1">{% endif %}
       <label for="tg-text" style="position: absolute; width: 1px; height: 1px; overflow: hidden">{{ _("Answer") }}</label>
       <textarea id="tg-text" name="{{ 'text' if draft else 'hint' }}" rows="2" placeholder="{{ _('Message') }}" style="width: 100%; border: 1px solid var(--sep); border-radius: 12px; background: var(--chip); padding: 9px 12px; font-size: 15px; resize: none; field-sizing: content; max-height: 40vh">{{ draft.text if draft else '' }}</textarea>
+      {% if draft and draft.translation %}<span class="sub" style="border: 1px dashed var(--sep); border-radius: 10px; padding: 6px 10px" data-draft-translation><b style="font-size: 11px; text-transform: uppercase">{{ _("Translation of the draft") }}</b> {{ draft.translation }}</span>{% endif %}
       {% if draft and draft.error %}<span style="font-size: 13px; color: var(--destructive)">{{ draft.error }}</span>{% endif %}
       {# Claude's PayLivery step for the open offer: runs on willhaben together with Send #}
       {% set step = paylivery_step(draft, conv) if draft else none %}

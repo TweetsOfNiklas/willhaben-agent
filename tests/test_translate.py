@@ -56,3 +56,30 @@ def test_the_bubble_shows_original_and_translation(client):  # noqa: F811
     tg = client.get("/tg/chats/t1").text
     i = tg.index("Oggi penso proprio di sì.")
     assert "Heute denke ich schon." in tg[i:i + 700]
+
+
+async def test_a_draft_in_their_language_gets_a_translation(monkeypatch):
+    """The draft is written in the other person's language now: I read what it says, under it."""
+    from app.db import Draft
+    _chat()
+    with session() as db:
+        d = Draft(conversation_id="t1", text="Perfetto, grazie mille!", status="draft")
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+    fake = FakeClaude({"items": [{"n": 1, "lang": "it", "translation": "Perfekt, vielen Dank!"}]})
+    monkeypatch.setattr(translate, "get_backend", lambda *a: fake)
+    assert await translate.translate_draft(d.id) == "Perfekt, vielen Dank!"
+    assert await translate.translate_draft(d.id) is None and len(fake.calls) == 1      # asked once
+
+
+def test_the_composer_shows_the_drafts_translation(client):  # noqa: F811
+    from app.db import Draft
+    _chat()
+    with session() as db:
+        db.add(Draft(conversation_id="t1", text="Perfetto, grazie mille!", status="draft", lang="it",
+                     translation="Perfekt, vielen Dank!"))
+        db.commit()
+    for path in ("/chats/t1", "/tg/chats/t1"):
+        page = client.get(path).text
+        assert "data-draft-translation" in page and "Perfekt, vielen Dank!" in page, path
