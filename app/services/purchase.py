@@ -511,12 +511,24 @@ def _change(pid: int, fn) -> Purchase | None:
         row = db.get(Purchase, pid)
         if row is None:
             return None
+        prev = row.status
         fn(row)
         row.updated_at = utcnow()
         db.add(row)
         db.commit()
         db.refresh(row)
-        return row
+    if row.status != prev:
+        _status_event(row, prev)
+    return row
+
+
+def _status_event(row: Purchase, prev: str) -> None:
+    """Every status change as a quiet event for the AI agent channel (stage "status", docs/agent-api.md): the feed
+    and the webhook see paid / shipped / done too, which push nothing to the phone."""
+    from app.services.notify import notify_later
+
+    notify_later("purchase", t("Purchase: {status}", status=status_label(row.status)), row.ad_title or row.ad_id,
+                 url=_chat_url(row), data=event_data(row, "status", **{"from": prev}), push=False)
 
 
 def _move(row: Purchase, status: str, text: str = "", note: Any = ...) -> None:
@@ -542,10 +554,39 @@ def _chat_url(row: Purchase) -> str:
     return f"{_base()}/chats/{row.conversation_id}#purchase" if row.conversation_id else f"{_base()}/purchases/{row.id}"
 
 
-async def _push(row: Purchase, title: str, message: str) -> None:
+# stage of a purchase event (docs/agent-api.md) by the order's status, where the push does not name one itself
+STAGE_OF_STATUS = {"pay_now": "pay_now", "done": "bought", "failed": "failed", "cancelled": "cancelled"}
+
+
+def category_text(path: Any) -> str | None:
+    """The site's category path as one readable string ("Elektronik > Audio"), None when unknown."""
+    text = " > ".join(str(c) for c in path if c) if isinstance(path, (list, tuple)) else str(path or "").strip()
+    return text or None
+
+
+def event_data(row: Purchase, stage: str | None = None, **extra: Any) -> dict[str, Any]:
+    """The structured fields of a purchase notification (docs/agent-api.md, data of kind "purchase"): the order, the
+    ad, the prices in euro (shipping, fee and total as the order's own sums, costs_of) and the stage. Keys that are not
+    known are left out. `extra` wins over the computed values."""
+    from app.services.auto_buy import BUY_CHAT_PREFIX     # lazy: auto_buy imports this module
+    item = row.agreed_price or row.asking_price
+    costs = costs_of(row, item) if item else {}
+    cid = row.conversation_id if not (row.conversation_id or "").startswith(BUY_CHAT_PREFIX) else None   # hidden placeholder chat
+    total = row.agreed_total if row.agreed_total is not None and row.agreed_price is not None else costs.get("total")
+    data: dict[str, Any] = {
+        "stage": stage or STAGE_OF_STATUS.get(row.status, "update"), "purchase_id": row.id, "status": row.status,
+        "conversation_id": cid, "ad_id": row.ad_id, "platform": "willhaben", "ad_title": row.ad_title,
+        "ad_url": row.ad_url, "category": row.category, "mode": row.mode, "asking_price": row.asking_price,
+        "max_price": row.max_price, "agreed_price": row.agreed_price, "shipping": costs.get("shipping"),
+        "fee": costs.get("fee"), "total": round(float(total), 2) if total is not None else None,
+        "agent_id": row.agent_id}
+    data.update(extra)
+    return {k: v for k, v in data.items() if v is not None}
+
+
+async def _push(row: Purchase, title: str, message: str, stage: str | None = None) -> None:
     try:
-        await notify("purchase", title, message, url=_chat_url(row),
-                     data={"purchase_id": row.id, "conversation_id": row.conversation_id})
+        await notify("purchase", title, message, url=_chat_url(row), data=event_data(row, stage))
     except Exception as e:  # noqa: BLE001 - a failed push never breaks the purchase
         log.warning("purchase push failed: %s", e)
 
@@ -702,7 +743,8 @@ async def _begin_inner(pid: int) -> None:
                                   setattr(r, "max_price", max_price), setattr(r, "market", market),
                                   setattr(r, "shipping_cost", ad_ship),
                                   setattr(r, "shipping_source", "ad" if ad_ship is not None else None),
-                                  setattr(r, "fee", rule.as_dict()), info and _line(r, info)))
+                                  setattr(r, "fee", rule.as_dict()), setattr(r, "category", category_text(detail.category_path)),
+                                  info and _line(r, info)))
     target = target_price(row)
     cost, src = shipping_of(row)
     refused: tuple[str, list[str]] | None = None
@@ -1288,9 +1330,11 @@ async def on_paylivery_action(conv: Conversation, action: str, ok: bool, text: s
 def recover() -> None:
     """After a restart no purchase task is running any more: unfinished starts are marked failed, or paused when the
     opener may already have gone out (Resume then looks for its chat instead of writing again)."""
+    moved: list[tuple[Purchase, str]] = []
     with session() as db:
         for row in db.exec(select(Purchase).where(col(Purchase.status).in_(("new", "contacting")),
                                                   Purchase.conversation_id.is_(None))):
+            moved.append((row, row.status))
             if row.opener_text:
                 note = t("Interrupted by a restart while the opening message was sent – Resume looks for the chat; it does not write to the seller a second time.")  # noqa: E501
                 _move(row, "paused", note, note=note)
@@ -1299,6 +1343,9 @@ def recover() -> None:
             row.updated_at = utcnow()
             db.add(row)
         db.commit()
+        for row, prev in moved:
+            db.refresh(row)
+            _status_event(row, prev)
 
 
 # ------------------------------------------------------------------ texts
