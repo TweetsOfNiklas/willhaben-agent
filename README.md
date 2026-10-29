@@ -361,8 +361,37 @@ actions:
 
 ## MCP (Claude Desktop / Claude Code)
 
-The MCP server is a thin client of the agent's JSON API and can run on your PC. Log in with the API token from
-Settings → AI agent (`WH_AGENT_TOKEN`) or, as before, with the dashboard password (`WH_AGENT_PASSWORD`):
+### Remote: the app itself is the MCP server
+
+The running app serves its MCP server over HTTP at `/mcp` (Streamable HTTP). Nothing to install or run on your PC,
+no repo needed. Create the API token under Settings → AI agent, then:
+
+```bash
+claude mcp add --transport http secondhandler https://<your-host>/mcp --header "Authorization: Bearer <token>"
+```
+
+Other MCP clients that take a server URL and headers (Claude Desktop's connector config, Cursor, …):
+
+```json
+{
+  "mcpServers": {
+    "secondhandler": {
+      "type": "http",
+      "url": "https://<your-host>/mcp",
+      "headers": {"Authorization": "Bearer <token>"}
+    }
+  }
+}
+```
+
+`/mcp` is protected like the JSON API: with `DASHBOARD_PASSWORD` set it needs the bearer token (or HTTP Basic auth with the
+password), without one the home-network rule of the API applies. A wrong or missing token gets `401`. From outside the home
+network use HTTPS only (reverse proxy), the token is sent with every request; inside it `http://<server>:8000/mcp` works.
+
+### Local: stdio
+
+The same tools can also run as a local process on your PC, a thin client of the agent's JSON API. Log in with the API
+token from Settings → AI agent (`WH_AGENT_TOKEN`) or, as before, with the dashboard password (`WH_AGENT_PASSWORD`):
 
 ```bash
 claude mcp add willhaben -e WH_AGENT_URL=http://<your-server>:8000 -e WH_AGENT_TOKEN=... \
@@ -387,7 +416,8 @@ Tools: `status`, `list_platforms`, `search_willhaben`, `search_listings` (any pl
 `create_search_agent` (a link of any supported site, or a keyword on one platform), `list_hits`,
 `list_conversations`, `get_conversation`, `draft_reply`, `save_reply_draft`, `send_reply`, `list_my_ads`,
 `track_my_ad`, `get_events` (every notification, structured), `list_purchases` / `get_purchase` (your purchase orders
-with category, prices and status), `cancel_purchase`, `list_sales` (your own items sold).
+with category, prices and status; also purchases made directly in a buyer chat with PayLivery), `cancel_purchase`,
+`list_sales` (your own items sold), `get_settings` / `update_settings` (read and change the app's settings).
 
 ## AI agent interface
 

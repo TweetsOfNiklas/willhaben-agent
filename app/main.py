@@ -48,7 +48,7 @@ from app.services import style as style_svc
 from app.services import stock, system_prompts
 from app.services.notify import PUSH_CHANNELS, notify
 from app import backup_routes, label_buy_routes, paylivery_routes, platforms, printing_routes, purchase_routes
-from app import agent_api_routes, agent_settings_routes, style_routes
+from app import agent_api_routes, agent_settings_routes, mcp_http, settings_api_routes, style_routes
 from app.services import search_agents as search_agents_svc
 from app.services.search_agents import refile_screened
 from app.platforms import vinted_inbox as vinted_inbox_mod
@@ -118,7 +118,8 @@ async def lifespan(app: FastAPI):
             log.warning("vinted live not started: %s", e)
         tasks.append(asyncio.create_task(vinted_inbox.live_watchdog()))
     app.state.listener_tasks = tasks             # Settings → Backup stops them before a restore
-    yield
+    async with mcp_http.running():               # the MCP server at /mcp lives as long as the app
+        yield
     for task in tasks:
         task.cancel()
         with suppress(asyncio.CancelledError):
@@ -150,6 +151,8 @@ app.include_router(purchase_routes.router)    # Kaufauftrag: buy dialog, order p
 app.include_router(style_routes.router)       # Settings → My rules → Writing style
 app.include_router(agent_api_routes.router)   # AI agent: /api/events, /api/purchases, /api/sales (docs/agent-api.md)
 app.include_router(agent_settings_routes.router)   # Settings → AI agent: token, webhook
+app.include_router(settings_api_routes.router)   # AI agent: /api/settings (read and change settings)
+mcp_http.install(app)                           # AI agent: the MCP server over HTTP at /mcp (app/mcp_http.py)
 paylivery_routes.paylivery.on_stage(purchase_svc.on_paylivery_stage)      # purchase orders follow PayLivery stages
 paylivery_routes.paylivery.on_action(purchase_svc.on_paylivery_action)
 from app.services import paylivery_advice  # noqa: E402
@@ -167,11 +170,15 @@ class DashboardAuth(BaseHTTPMiddleware):
         if not auth.login_needed(request.headers) or request.url.path in auth.PUBLIC_PATHS \
                 or request.url.path.startswith(auth.PUBLIC_PREFIXES):
             return await call_next(request)
+        mcp_path = request.url.path == "/mcp" or request.url.path.startswith("/mcp/")
+        agent_path = mcp_path or request.url.path.startswith("/api/")
         if auth.valid_token(request.cookies.get(auth.COOKIE)) or auth.valid_basic(request.headers.get("authorization", "")) \
-                or (request.url.path.startswith("/api/") and auth.valid_bearer(request.headers.get("authorization", ""))):
-            return await call_next(request)           # the AI agent's bearer token opens the JSON API only
+                or (agent_path and auth.valid_bearer(request.headers.get("authorization", ""))):
+            return await call_next(request)           # the AI agent's bearer token opens the JSON API and /mcp only
         target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
         login = f"/login?next={quote(target, safe='')}"
+        if mcp_path:                                                # an MCP client: 401 JSON, never a redirect to the login page
+            return JSONResponse({"detail": "login required"}, status_code=401)
         if request.headers.get("hx-request"):                       # htmx fragment: reload the whole page to the login
             return Response(status_code=401, headers={"HX-Redirect": login})
         if request.method == "GET" and "text/html" in request.headers.get("accept", ""):

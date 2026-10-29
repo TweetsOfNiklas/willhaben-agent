@@ -7,6 +7,10 @@ It is a thin client of the agent's JSON API, so it can run on any machine:
 With the API token of Settings → AI agent (docs/agent-api.md) instead of the dashboard password, WH_AGENT_TOKEN=... is
 sent as `Authorization: Bearer` (it opens the JSON API only, which is all this server uses).
 
+The same tools are also served by the running app itself over HTTP at /mcp (app/mcp_http.py), no local process needed:
+
+  claude mcp add --transport http secondhandler https://<host>/mcp --header "Authorization: Bearer <token>"
+
 Claude Code:   claude mcp add willhaben -e WH_AGENT_URL=http://homeserver:8010 -- uv --directory <repo> run python -m app.mcp_server
 Claude Desktop: see README (claude_desktop_config.json).
 """
@@ -18,6 +22,8 @@ from typing import Any
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+
+from app import mcp_http
 
 # WH_HELPER_* are the pre-rename names; still accepted so existing MCP configs keep working.
 BASE = (os.environ.get("WH_AGENT_URL") or os.environ.get("WH_HELPER_URL") or "http://127.0.0.1:8000").rstrip("/")
@@ -35,7 +41,9 @@ mcp = MCPServer(
         "To follow what happens: the notifications of the app are events (purchases, sales, messages, hits, …); "
         "call get_events with the `since` of the last call's next_since to see only what is new. Purchases and sales "
         "come with item, category and price: list_purchases / get_purchase for what is bought through a purchase "
-        "order, list_sales for your own items sold."
+        "order (and those made directly in a buyer chat with PayLivery), list_sales for your own items sold. "
+        "get_settings / update_settings read and change the app's settings; ask the user before changing one unless "
+        "they told you to."
     ),
 )
 
@@ -43,7 +51,15 @@ READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 
 
 async def _call(method: str, path: str, **kw: Any) -> Any:
-    async with httpx.AsyncClient(base_url=BASE, auth=None if _TOKEN else AUTH, timeout=300, headers=HEADERS) as c:
+    """One request to the JSON API. Served from the app (/mcp) it goes straight into the app in-process, with the
+    credentials the /mcp request brought; as stdio server it is an HTTP client of WH_AGENT_URL."""
+    local = mcp_http.current.get()
+    if local:
+        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=local.app), base_url="http://app", timeout=300,
+                                   headers={**local.headers, "x-wh-client-kind": "mcp"})   # timeline: actor "mcp"
+    else:
+        client = httpx.AsyncClient(base_url=BASE, auth=None if _TOKEN else AUTH, timeout=300, headers=HEADERS)
+    async with client as c:
         r = await c.request(method, path, **kw)
     try:
         body = r.json()
@@ -180,17 +196,22 @@ async def get_events(since: int | None = None, limit: int = 50, kind: str | None
 
 
 @mcp.tool(annotations=READ)
-async def list_purchases(status: str | None = None, active: bool | None = None, limit: int = 20) -> list:
+async def list_purchases(status: str | None = None, active: bool | None = None, limit: int = 20,
+                         source: str | None = None) -> list:
     """Your purchase orders (Kaufauftrag) of this app, the latest change first: what was bought or is being bought,
     with ad title and link, category, status, mode (paylivery, direct, pickup), asking/maximum/agreed price, shipping,
     fee and total in euro. status: new, contacting, negotiating, agreed, meetup, pay_now, paid, shipped, done, paused,
-    failed, cancelled. active=true: only open orders, false: only finished ones. Purchases you made directly on a
-    site, outside a purchase order of this app, are not included."""
+    failed, cancelled. active=true: only open orders, false: only finished ones. Also included are
+    purchases you made directly on willhaben with PayLivery in a buyer chat (source "chat", id null, status = the
+    PayLivery stage); purchases without PayLivery are not. source: "order" lists only purchase orders, "chat" only
+    those from a chat."""
     params: dict[str, Any] = {"limit": limit}
     if status:
         params["status"] = status
     if active is not None:
         params["active"] = int(active)
+    if source:
+        params["source"] = source
     return await _call("GET", "/api/purchases", params=params)
 
 
@@ -215,6 +236,23 @@ async def list_sales(limit: int = 20) -> list:
     created with this app, else null), pieces, price in euro, buyer name, conversation id, the parcel's status and
     payment (shipment) and the pieces still for sale. Sales you took back are left out."""
     return await _call("GET", "/api/sales", params={"limit": limit})
+
+
+@mcp.tool(annotations=READ)
+async def get_settings(section: str | None = None) -> Any:
+    """Every setting of the app that the API exposes, with key, section, type, value, default, description and
+    choices / min / max where they apply. `section` narrows it to one section of the settings page."""
+    params = {"section": section} if section else None
+    return await _call("GET", "/api/settings", params=params)
+
+
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True,
+                                      open_world_hint=False))
+async def update_settings(values: dict[str, Any]) -> Any:
+    """Change settings: {key: new value} with the keys of get_settings. All values are validated first; if any is
+    wrong nothing at all is stored and the errors say which. Ask the user before changing settings unless they told
+    you to."""
+    return await _call("PATCH", "/api/settings", json={"values": values})
 
 
 @mcp.tool()

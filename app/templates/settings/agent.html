@@ -26,6 +26,9 @@
     <span class="text-muted">{{ _("Any HTTP client:") }}</span>
     <pre class="m-0 overflow-x-auto whitespace-pre font-mono text-[12.5px]">curl -H "Authorization: Bearer {{ tok or '<token>' }}" \
   {{ agent.base }}/api/events</pre>
+    <span class="text-muted">{{ _("Claude Code with the app as MCP server (nothing to install):") }}</span>
+    <pre class="m-0 overflow-x-auto whitespace-pre font-mono text-[12.5px]">claude mcp add --transport http secondhandler {{ agent.base }}/mcp \
+  --header "Authorization: Bearer {{ tok or '<token>' }}"</pre>
     <span class="text-muted">{{ _("Claude Code or Claude Desktop (MCP server on your PC, see the README):") }}</span>
     <pre class="m-0 overflow-x-auto whitespace-pre font-mono text-[12.5px]">claude mcp add willhaben \
   -e WH_AGENT_URL={{ agent.base }} -e WH_AGENT_TOKEN={{ tok or '<token>' }} \

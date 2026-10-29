@@ -1,5 +1,6 @@
 """The AI agent's JSON API (docs/agent-api.md): the notification feed (polled or as a Server-Sent Events stream),
-purchase orders and sales of own items; stopping a purchase is the one action. Opened by the bearer token
+purchase orders (and purchases made on willhaben directly, seen in their PayLivery chat) and sales of own items;
+stopping a purchase is the one action. Opened by the bearer token
 (auth.valid_bearer) or the dashboard login like every /api/ route."""
 from __future__ import annotations
 
@@ -116,27 +117,90 @@ def _purchase_item(db: Any, row: Purchase) -> dict[str, Any]:
         "category": row.category or purchase.rule_of(row).category,    # orders from before the column: the fee rule's
         "status": row.status, "mode": row.mode, "asking_price": row.asking_price, "max_price": row.max_price,
         "wish_price": row.wish_price, "agreed_price": row.agreed_price, **_costs(row),
+        "conversation_id": row.conversation_id,
         "created_at": _iso(row.created_at), "updated_at": _iso(row.updated_at), "note": row.note,
         "app_path": f"/purchases/{row.id}", "app_url": _app_url(f"/purchases/{row.id}"),
     }
 
 
+def _chat_purchase_item(conv: Conversation, stage: str) -> dict[str, Any]:
+    """A purchase made on willhaben directly, seen in its PayLivery chat (purchase.chat_facts for the values)."""
+    st = conv.paylivery or {}
+    facts = purchase.chat_facts(conv, st)
+    steps = [d for h in st.get("history") or [] if (d := _parse_iso(h.get("at")))]   # when the notices / own actions came
+    first = min(steps, default=None)
+    last = max(steps, default=None) or _parse_iso(st.get("updated_at"))
+    path = f"/chats/{conv.id}"
+    return {
+        "source": "chat", "id": None, "conversation_id": conv.id, "ad_id": conv.ad_id, "platform": "willhaben",
+        "ad_title": facts["ad_title"], "ad_url": facts["ad_url"], "image_url": facts["image_url"],
+        "category": facts["category"], "status": stage, "mode": "paylivery", "agreed_price": facts["agreed_price"],
+        "shipping": facts["shipping"], "shipping_source": facts["shipping_source"], "fee": facts["fee"],
+        "total": facts["total"], "created_at": _iso(first or conv.last_message_at),
+        "updated_at": _iso(last or conv.last_message_at), "app_path": path, "app_url": _app_url(path)}
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    """A time stored in the PayLivery state (ISO text, with or without a zone) as a naive UTC database time."""
+    try:
+        when = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return when.astimezone(timezone.utc).replace(tzinfo=None) if when.tzinfo else when
+
+
+def _chat_purchases(db: Any) -> list[dict[str, Any]]:
+    """Purchases made on willhaben directly: buyer chats whose PayLivery stage counts as a purchase
+    (purchase.chat_purchase_stage) and that have no Purchase row (nor wait as the real chat of an auto-buy order)."""
+    chats, ads = purchase.orders_of_chats(db)
+    q = select(Conversation).where(Conversation.role == "buyer",
+                                   col(Conversation.platform).is_(None) | (Conversation.platform == "willhaben"))
+    items = []
+    for conv in db.exec(q):
+        stage = purchase.chat_purchase_stage(conv.paylivery)
+        if stage and not purchase.chat_has_order(conv, chats, ads):
+            items.append(_chat_purchase_item(conv, stage))
+    return items
+
+
 @router.get("/api/purchases")
-async def api_purchases(status: str | None = None, active: int | None = None, limit: int = 20):
-    """Purchase orders (Kaufauftrag), newest change first. `status`: one of purchase.STATUSES; `active=1`: only open
-    ones (not done, failed or cancelled), `active=0`: only finished ones. Purchases made on a site directly are not
-    among them."""
-    if status and status not in purchase.STATUSES:
-        raise HTTPException(400, f"unknown status {status!r}; one of {', '.join(purchase.STATUSES)}")
-    q = select(Purchase).order_by(col(Purchase.updated_at).desc(), col(Purchase.id).desc())
-    if status:
-        q = q.where(Purchase.status == status)
-    if active == 1:
-        q = q.where(col(Purchase.status).in_(purchase.OPEN))
-    elif active == 0:
-        q = q.where(col(Purchase.status).notin_(purchase.OPEN))
+async def api_purchases(status: str | None = None, active: int | None = None, limit: int = 20,
+                        source: str | None = None):
+    """Your purchases, newest change first, of two kinds (`source` on every item): "order" = purchase orders
+    (Kaufauftrag) of this app, "chat" = purchases made on willhaben directly, seen in their PayLivery chat: a buyer chat
+    whose PayLivery stage is offer_accepted, paid, released, label_ready, shipped, delivered or received (a reported
+    problem or a cancellation only after one of these) and that has no order. Without PayLivery (cash, bank transfer)
+    nothing shows up. `source=order|chat` lists one kind only (default both). `status` is one of purchase.STATUSES
+    for orders and one of those PayLivery stages (or problem / cancelled) for chat purchases; with it only the kind it
+    belongs to is listed. `active=1`: open orders (not done, failed or cancelled) and chat purchases that are not yet
+    delivered (offer_accepted, paid, released, label_ready, shipped, problem), `active=0`: the rest. `limit` applies
+    to the merged list. Chat items have `id` null and are opened with `conversation_id` (`GET /api/chats/{id}`); their
+    amounts come from the PayLivery state and the stored ad, unknown ones are null."""
+    if source not in (None, "order", "chat"):
+        raise HTTPException(400, "source is order or chat")
+    if status and status not in purchase.STATUSES and status not in purchase.CHAT_DEAL_STAGES \
+            and status not in purchase.CHAT_AFTER_DEAL:
+        raise HTTPException(400, f"unknown status {status!r}; one of {', '.join(purchase.STATUSES)} (orders) or "
+                                 f"{', '.join((*purchase.CHAT_DEAL_STAGES, *purchase.CHAT_AFTER_DEAL))} (chats)")
+    n = _clamp(limit, 1, 100)
+    items: list[dict[str, Any]] = []
     with session() as db:
-        return [_purchase_item(db, r) for r in db.exec(q.limit(_clamp(limit, 1, 100)))]
+        if source != "chat" and (not status or status in purchase.STATUSES):
+            q = select(Purchase).order_by(col(Purchase.updated_at).desc(), col(Purchase.id).desc())
+            if status:
+                q = q.where(Purchase.status == status)
+            if active == 1:
+                q = q.where(col(Purchase.status).in_(purchase.OPEN))
+            elif active == 0:
+                q = q.where(col(Purchase.status).notin_(purchase.OPEN))
+            items += [{"source": "order", **_purchase_item(db, r)} for r in db.exec(q.limit(n))]
+        if source != "order" and (not status or status in (*purchase.CHAT_DEAL_STAGES, *purchase.CHAT_AFTER_DEAL)):
+            chat = [i for i in _chat_purchases(db) if not status or i["status"] == status]
+            if active is not None:
+                chat = [i for i in chat if (i["status"] in purchase.CHAT_OPEN_STAGES) == (active == 1)]
+            items += chat
+    items.sort(key=lambda i: (i["updated_at"] or "", i["id"] or 0), reverse=True)
+    return items[:n]
 
 
 @router.get("/api/purchases/{purchase_id}")
