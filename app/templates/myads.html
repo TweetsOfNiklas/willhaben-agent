@@ -149,7 +149,7 @@
       <div class="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1">
       {% if wh %}
       {% set wstate = _("Sold") if (a.sale_status == 'sold' or a.status == 'sold') else _("Reserved") if (a.sale_status == 'reserved' or a.status == 'reserved')
-                       else {'active': _("Online"), 'Passiv': _("In review"), 'expired': _("Expired"), 'draft': _("Draft")}.get(a.status, _("Deactivated")) %}
+                       else {'active': _("Online"), 'Passiv': _("In review") if a.ad_id in (reviewing or ()) else _("Passive"), 'expired': _("Expired"), 'draft': _("Draft")}.get(a.status, _("Deactivated")) %}
       <span>{{ wstate }}</span>
       <a class="link link-primary inline-flex items-center gap-1 no-underline" href="{{ a.url }}" target="_blank" rel="noopener">{{ _("Open") }}{{ ui.icon('external', 13) }}</a>
       {% else %}

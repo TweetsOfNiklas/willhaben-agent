@@ -2126,7 +2126,8 @@ async def myads_page(request: Request, msg: str | None = None, show_hidden: bool
                   hidden_count=len(hidden), show_hidden=show_hidden, sold_count=len(sold), show_sold=show_sold,
                   inactive_count=len(inactive), show_inactive=show_inactive, sections=sections,
                   vinted_ok=site_accounts.state("vinted")["logged_in"] is not False,   # unknown: try it
-                  ka_ok=crosspost_kleinanzeigen.available())
+                  ka_ok=crosspost_kleinanzeigen.available(),
+                  reviewing=set(my_ads.in_review()))   # "Passiv" + fresh: in review; older: willhaben took it offline
 
 
 def _hx(request: Request) -> bool:

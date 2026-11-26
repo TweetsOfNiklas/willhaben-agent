@@ -200,6 +200,95 @@ async def test_bulk_activate_never_republishes_sold_ads(account):
     assert not any(m == "POST" for m, _ in account.calls)
 
 
+def _make_rejected(acct, ad_id):
+    """"Passiv" without any button to bring it back (willhaben took it offline itself, e.g. for wrong details)."""
+    for ad in acct._ads():
+        if ad["id"] == ad_id:
+            ad["advertStatus"] = {"id": "passive", "description": "Passiv", "statusId": 60}
+            ad["advertEditStatusActionsList"] = {"contextLinkList": {"contextLink": [
+                {"id": "3", "description": "Löschen", "relativePath": f"/bap/{ad_id}", "serviceName": "myatz"}]}}
+
+
+@pytest.fixture
+def copier(monkeypatch):
+    """The copy as a new ad, faked: copy_plan, the photo download and publish (a first try fails after presaving)."""
+    from app.services import ad_images
+    from app.willhaben import insert
+    calls = {"published": [], "fail": False}
+
+    async def copy_plan(s, ad_id):
+        return {"ad": {"heading": "Lampe"}, "photos": ["https://cache.willhaben.at/mmo/1.jpg"],
+                "shipping": {"handover": "pickup"}}
+
+    async def download(url, folder, name, **kw):
+        p = folder / f"{name}.jpg"
+        p.write_bytes(b"jpeg")
+        return p
+
+    async def publish(s, ad, photos, existing_ad_id=None, on_presaved=None, **kw):
+        calls["published"].append(existing_ad_id)
+        on_presaved("1000000077")
+        if calls["fail"]:
+            raise RuntimeError("upload failed")
+        return {"ad_id": "1000000077"}
+    monkeypatch.setattr(insert, "copy_plan", copy_plan)
+    monkeypatch.setattr(insert, "publish", publish)
+    monkeypatch.setattr(ad_images, "download", download)
+    return calls
+
+
+async def test_bulk_activate_copies_a_passive_ad_willhaben_offers_nothing_for(account, copier):
+    from datetime import timedelta
+
+    from app.db import utcnow
+    _make_rejected(account, "1000000002")
+    await my_ads.import_from_account()
+    with session() as db:
+        row = db.get(MyAd, "1000000002")
+        row.published_at = utcnow() - timedelta(days=3)       # long past the review
+        db.add(row)
+        db.commit()
+    copier["fail"] = True
+    res = await my_ads.bulk("activate", ["1000000002"])
+    assert res["failed"] and copier["published"] == [None]
+    assert db_payload("1000000002") == {"copy_draft": "1000000077"}   # the next try finishes this draft
+    copier["fail"] = False
+    res = await my_ads.bulk("activate", ["1000000002"])
+    assert res["republished"] == ["Anzeige 1000000002"] and not res["failed"]
+    assert copier["published"] == [None, "1000000077"]                # no second copy on willhaben
+    with session() as db:
+        old = db.get(MyAd, "1000000002")
+    assert old.replaced_by == "1000000077" and not (old.pending_payload or {}).get("copy_draft")
+
+
+def db_payload(ad_id):
+    with session() as db:
+        return db.get(MyAd, ad_id).pending_payload
+
+
+async def test_bulk_activate_never_copies_an_ad_still_in_review(account, copier):
+    from app.db import utcnow
+    _make_rejected(account, "1000000002")
+    await my_ads.import_from_account()
+    with session() as db:
+        row = db.get(MyAd, "1000000002")
+        row.published_at = utcnow()                             # just published: willhaben is still checking it
+        db.add(row)
+        db.commit()
+    res = await my_ads.bulk("activate", ["1000000002"])
+    assert not res["done"] and "review" in res["failed"][0][1] and copier["published"] == []
+
+
+async def test_bulk_activate_never_copies_an_ad_sold_on_willhaben(account, copier):
+    for ad in account._ads():
+        if ad["id"] == "1000000002":
+            ad["advertStatus"] = {"id": "sold", "description": "Verkauft"}
+            ad["advertEditStatusActionsList"] = {"contextLinkList": {"contextLink": []}}
+    await my_ads.import_from_account()
+    res = await my_ads.bulk("activate", ["1000000002"])
+    assert not res["done"] and copier["published"] == []
+
+
 async def test_bulk_route_keeps_list_filters(account):
     from app.main import app
 

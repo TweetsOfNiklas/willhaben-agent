@@ -11,7 +11,7 @@ from app.db import MyAd, Sale, current_ad, get_setting, session, utcnow
 from app.i18n import t
 from app.services import jobs, selling, stock
 from app.services.notify import notify
-from app.willhaben.account import ACTION_DELETE, AccountClient, AdvertList, EndpointUnknown, has_ended
+from app.willhaben.account import ACTION_DELETE, REPUBLISHABLE, AccountClient, AdvertList, EndpointUnknown, has_ended
 from app.willhaben.parse import extract_ad_id
 from app.willhaben.public import Blocked, WillhabenError, get_public
 from app.willhaben.session import NotLoggedIn, SessionUnavailable, get_session
@@ -166,7 +166,7 @@ async def bulk(action: str, ad_ids: list[str], job: jobs.Job | None = None) -> d
                 if ad_id in sold_here:    # putting a sold ad online again would sell it twice
                     failed[ad_id] = t("sold – not put online again")
                     continue
-                if (new_id := await acct.reactivate(ad_id, ads)) != ad_id:
+                if (new_id := await _activate(acct, ad_id, ads, job)) != ad_id:
                     moved[ad_id] = new_id
                     _move_to_new_id(ad_id, new_id)    # at once: a later error must not leave it re-activatable
             else:
@@ -210,6 +210,37 @@ async def bulk(action: str, ad_ids: list[str], job: jobs.Job | None = None) -> d
     log.info("bulk %s: %d done (%d republished), %d failed", action, len(done), len(moved), len(failed))
     return {"done": [titles.get(i, i) for i in done], "republished": [titles.get(i, i) for i in moved],
             "failed": [(titles.get(i, i), e) for i, e in failed.items()]}
+
+
+async def _activate(acct: AccountClient, ad_id: str, ads: list, job: jobs.Job | None) -> str:
+    """"Activate": willhaben's own button, or – when willhaben offers none for an offline ad ("Passiv", e.g. taken
+    offline for wrong details) – the ad placed again as a new ad. Never while willhaben still reviews a fresh ad
+    (also "Passiv", no buttons): its copy would be a second live ad once the review is through."""
+    own = next((a for a in ads if a.ad_id == str(ad_id)), None)
+    if own is None or offers_reactivation(own) or own.status not in REPUBLISHABLE or not offline(own):
+        return await acct.reactivate(ad_id, ads)     # its own button, or willhaben's reason why there is none
+    #                                                  (never a copy of a sold or reserved ad)
+    if ad_id in in_review():
+        raise EndpointUnknown(t("willhaben is still reviewing this ad – activate it again once the review is over"))
+    with session() as db:
+        row = db.get(MyAd, ad_id)
+        draft = ((row.pending_payload or {}).get("copy_draft") if row else None)
+
+    def remember(wh_id: str) -> None:                 # a failed try leaves this draft: the next one finishes it
+        with session() as db:
+            r = db.get(MyAd, ad_id)
+            if r is not None:
+                r.pending_payload = {**(r.pending_payload or {}), "copy_draft": wh_id}
+                db.add(r)
+                db.commit()
+    new_id = await _copy_as_new(get_session(), ad_id, draft, remember, job)
+    with session() as db:
+        r = db.get(MyAd, ad_id)
+        if r is not None and r.pending_payload:
+            r.pending_payload = {k: v for k, v in r.pending_payload.items() if k != "copy_draft"} or None
+            db.add(r)
+            db.commit()
+    return new_id
 
 
 async def cleanup_candidates() -> list[dict[str, Any]]:
@@ -1041,8 +1072,6 @@ def reopen(ad_id: str, available: int) -> bool:
 async def relist(ad_id: str, job: jobs.Job | None = None) -> str:
     """Put an ad with pieces left online again after a PayLivery sale (marker MyAd.relist). Waits while willhaben
     still shows it online (a later look is scheduled); never makes a second live copy. Returns the result line."""
-    from app.willhaben.account import ACTION_ACTIVATE, ACTION_FINALIZE, ACTION_REPUBLISH, REPUBLISHABLE
-
     with session() as db:
         row = db.get(MyAd, ad_id)
     plan = dict(row.relist or {}) if row is not None and not row.replaced_by else {}
@@ -1071,14 +1100,11 @@ async def relist(ad_id: str, job: jobs.Job | None = None) -> str:
         _set_relist(ad_id, plan)
         _schedule_relist_check(ad_id)
         return t("„{title}“ is still online on willhaben – looked at again later", title=title)
-    links = (own.actions or {}) if own is not None else {}
     plan["tries"] = int(plan.get("tries") or 0) + 1
     _set_relist(ad_id, plan)
     try:
-        if ACTION_ACTIVATE in links or ACTION_FINALIZE in links or (ACTION_REPUBLISH in links and own.status in REPUBLISHABLE):
-            new_id = await acct.reactivate(ad_id, ads)
-        else:
-            new_id = await _copy_as_new(sess, ad_id, plan, job)
+        new_id = await _put_online(acct, sess, own, ads, job, draft=plan.get("draft"),
+                                   remember=lambda wh_id: _set_relist(ad_id, {**plan, "draft": wh_id}))
     except Exception as e:
         if plan["tries"] >= RELIST_TRIES:
             _set_relist(ad_id, None)
@@ -1112,9 +1138,28 @@ async def relist(ad_id: str, job: jobs.Job | None = None) -> str:
     return t("„{title}“ online again ({left} pieces left)", title=title, left=left)
 
 
-async def _copy_as_new(sess, ad_id: str, plan: dict[str, Any], job: jobs.Job | None) -> str:
+def offers_reactivation(own: Any) -> bool:
+    """willhaben itself can put the ad online again: Aktivieren, Fertigstellen or Neu veröffentlichen."""
+    from app.willhaben.account import ACTION_ACTIVATE, ACTION_FINALIZE, ACTION_REPUBLISH, REPUBLISHABLE
+
+    links = own.actions or {}
+    return ACTION_ACTIVATE in links or ACTION_FINALIZE in links or (ACTION_REPUBLISH in links
+                                                                     and own.status in REPUBLISHABLE)
+
+
+async def _put_online(acct: AccountClient, sess, own: Any, ads: list, job: jobs.Job | None, draft: str | None,
+                      remember) -> str:
+    """An offline ad online again: willhaben's own button when it offers one, else placed again as a new ad (a
+    "Passiv" ad willhaben took offline itself, e.g. for wrong details, has no button at all). Returns the ad id."""
+    if offers_reactivation(own):
+        return await acct.reactivate(own.ad_id, ads)
+    return await _copy_as_new(sess, own.ad_id, draft, remember, job)
+
+
+async def _copy_as_new(sess, ad_id: str, draft: str | None, remember, job: jobs.Job | None) -> str:
     """The ad placed again as a new ad: text, category, attributes, photos and shipping from the old one. A draft a
-    former try left on willhaben (plan["draft"]) is finished instead of starting another one."""
+    former try left on willhaben (`draft`) is finished instead of starting another one; `remember(wh_id)` keeps the
+    draft of this try for the next."""
     import tempfile
     from pathlib import Path
 
@@ -1130,16 +1175,13 @@ async def _copy_as_new(sess, ad_id: str, plan: dict[str, Any], job: jobs.Job | N
                 raise insert.InsertError(t("Photo {i} of the ad could not be loaded", i=i))
             photos.append((p.name, p.read_bytes(), PHOTO_MIMES.get(p.suffix.lower(), "image/jpeg")))
 
-    def remember(wh_id: str) -> None:                 # a later try continues this willhaben draft
-        _set_relist(ad_id, {**plan, "draft": wh_id})
-
     def on_step(step: str, i: int = 0, n: int = 0) -> None:
         if job is not None:
             job.progress(0, t("Uploading photo {i}/{n}", i=i, n=n) if step == "photo" else t("Saving the ad"),
                          f"ad:{ad_id}")
 
     ship = copy["shipping"] if copy["shipping"]["handover"] != "pickup" else None
-    res = await insert.publish(sess, copy["ad"], photos, existing_ad_id=plan.get("draft"), on_presaved=remember,
+    res = await insert.publish(sess, copy["ad"], photos, existing_ad_id=draft, on_presaved=remember,
                                shipping=ship, on_step=on_step)
     return str(res["ad_id"])
 
